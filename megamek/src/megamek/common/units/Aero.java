@@ -1791,7 +1791,12 @@ public abstract class Aero extends Entity implements IAero, IBomber {
 
     @Override
     public boolean doomedInAtmosphere() {
-        return false;
+        return hasQuirk(OptionsConstants.QUIRK_NEG_UNSTREAMLINED);
+    }
+
+    @Override
+    public boolean doomedOnGround() {
+        return hasQuirk(OptionsConstants.QUIRK_NEG_UNSTREAMLINED);
     }
 
     @Override
