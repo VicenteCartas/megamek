@@ -36,6 +36,7 @@
 package megamek.common.loaders;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -163,8 +164,17 @@ public class MekFileParser {
      */
     public static void initCanonUnitNames(File dir, String fileName) {
         Vector<String> unitNames = new Vector<>();
-        try (FileReader fr = new FileReader(new MegaMekFile(dir, fileName).getFile());
-              BufferedReader br = new BufferedReader(fr)) {
+        File file = new MegaMekFile(dir, fileName).getFile();
+        if (!file.exists()) {
+            LOGGER.warn(
+                  "Canon unit list '{}' was not found in '{}'. The 'Canon Units Only' filter will reject all units. "
+                        + "Run the Gradle 'officialUnitList' task (or 'java -jar MegaMek.jar -oul') to regenerate it.",
+                  fileName, dir);
+            setCanonUnitNames(unitNames);
+            return;
+        }
+        try (BufferedReader br = new BufferedReader(
+              new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
             String s;
             String name;
             while ((s = br.readLine()) != null) {
@@ -175,8 +185,8 @@ public class MekFileParser {
                 }
             }
             Collections.sort(unitNames);
-        } catch (Exception ignored) {
-
+        } catch (Exception ex) {
+            LOGGER.error(ex, "Failed to read canon unit list from '{}'.", file);
         }
 
         // Update names

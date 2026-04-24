@@ -189,6 +189,9 @@ tasks.register('copyFiles', Copy) {
 
     dependsOn copyLicenseFiles
     dependsOn generateDynamicFiles
+    // OfficialUnitList.txt lives under docs/ and is required at runtime for the
+    // 'Canon Units Only' filter to work; make sure it is generated before we copy.
+    dependsOn officialUnitList
 
     from projectDir
     include "data/**"

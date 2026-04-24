@@ -35,8 +35,10 @@ package megamek.common.commandLine;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileWriter;
+import java.io.FileOutputStream;
+import java.io.OutputStreamWriter;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.util.Vector;
 
 import megamek.MMConstants;
@@ -333,7 +335,8 @@ public class MegaMekCommandLineParser extends AbstractCommandLineParser {
             }
 
             File file = new File("./docs/" + filename);
-            try (Writer w = new FileWriter(file); BufferedWriter bw = new BufferedWriter(w)) {
+            try (Writer w = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
+                  BufferedWriter bw = new BufferedWriter(w)) {
                 bw.write("MegaMek Unit AlphaStrike Converter");
                 bw.newLine();
                 bw.write("This file can be regenerated with java -jar MegaMek.jar -asc filename");
@@ -436,7 +439,8 @@ public class MegaMekCommandLineParser extends AbstractCommandLineParser {
                 }
             }
             File file = new File("./docs/" + filename);
-            try (Writer w = new FileWriter(file); BufferedWriter bw = new BufferedWriter(w)) {
+            try (Writer w = new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8);
+                  BufferedWriter bw = new BufferedWriter(w)) {
                 if (officialUnitList) {
                     bw.write("MegaMek Official Unit List");
                     bw.newLine();
