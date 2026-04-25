@@ -203,11 +203,12 @@ public class MekFileParser {
     }
 
     /**
-     * @return the currently loaded canon unit names, or {@code null} if {@link #initCanonUnitNames()} has not yet been
-     *       called.
+     * @return an unmodifiable view of the currently loaded canon unit names, or an empty list if
+     *       {@link #initCanonUnitNames()} has not yet been called. The returned list reflects subsequent
+     *       reinitializations.
      */
-    public static Vector<String> getCanonUnitNames() {
-        return canonUnitNames;
+    public static List<String> getCanonUnitNames() {
+        return (canonUnitNames == null) ? Collections.emptyList() : Collections.unmodifiableList(canonUnitNames);
     }
 
     public Entity getEntity() {

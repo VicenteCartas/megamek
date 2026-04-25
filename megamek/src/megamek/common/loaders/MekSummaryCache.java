@@ -371,22 +371,29 @@ public class MekSummaryCache {
         }
 
         // Self-heal stale caches: a cache built while OfficialUnitList.txt was unreadable
-        // (mekhq#6165) contains zero canon entries. If we now have a populated canon list
-        // but no cached entry is flagged canon, force a full reparse so the canon flags
-        // are restored. Without this, users would have to manually delete units.cache
-        // after upgrading.
-        Vector<String> canonNames = MekFileParser.getCanonUnitNames();
+        // (mekhq#6165) contains zero canon entries even though some of the cached units
+        // are listed in the canon file. Detect that by checking whether *any* cached unit
+        // is named in the loaded canon list yet none are flagged canon, and force a full
+        // reparse to restore the flags. Without this, users would have to manually delete
+        // units.cache after upgrading. The name-membership check avoids triggering on
+        // legitimate custom-only installs (where no cached unit is canon-listed).
+        List<String> canonNames = MekFileParser.getCanonUnitNames();
         if (!vMeks.isEmpty()
-              && canonNames != null
               && !canonNames.isEmpty()
               && vMeks.stream().noneMatch(MekSummary::isCanon)) {
-            loadReport.append("  Cached units have no canon flags but a canon list is available; "
-                  + "rebuilding cache.\n");
-            logger.info("Detected stale unit cache (no canon entries); rebuilding from unit files.");
-            vMeks.clear();
-            sKnownFiles.clear();
-            cacheCount = 0;
-            lLastCheck = 0;
+            Set<String> canonNameSet = new HashSet<>(canonNames);
+            boolean cacheShouldHaveCanon = vMeks.stream()
+                  .anyMatch(ms -> canonNameSet.contains(ms.getName()));
+            if (cacheShouldHaveCanon) {
+                loadReport.append("  Cached units have no canon flags but match entries in the "
+                      + "canon list; rebuilding cache.\n");
+                logger.info("Detected stale unit cache (cached units match canon list but have "
+                      + "no canon flags); rebuilding from unit files.");
+                vMeks.clear();
+                sKnownFiles.clear();
+                cacheCount = 0;
+                lLastCheck = 0;
+            }
         }
 
         checkForChanges(ignoreUnofficial, vMeks, sKnownFiles, lLastCheck);
