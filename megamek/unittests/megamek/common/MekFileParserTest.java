@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2020-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -34,7 +34,16 @@ package megamek.common;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Vector;
 
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
@@ -43,9 +52,12 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.BipedMek;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class MekFileParserTest {
     @BeforeAll
@@ -215,6 +227,123 @@ class MekFileParserTest {
             assertTrue(proto.hasLinkedMGA(mg3));
             assertTrue(proto.hasLinkedMGA(mg4));
             assertTrue(proto.hasLinkedMGA(mg5));
+        }
+    }
+
+    /**
+     * Tests for the canon unit name list loading (mekhq#6165 / megamek#7286).
+     * Covers:
+     *  - Missing file -> empty list, no exception (the WARN side-effect is verified manually).
+     *  - UTF-8 file containing non-ASCII chassis names round-trips byte-for-byte.
+     *  - Malformed lines (no '|') are skipped without throwing.
+     *  - Returned list is unmodifiable (defensive against stale-cache scenarios).
+     */
+    @Nested
+    class CanonUnitListTests {
+
+        @TempDir
+        Path tempDir;
+
+        private Vector<String> originalCanonNames;
+
+        @BeforeEach
+        void saveCanonState() {
+            // Snapshot the global canon-list state so tests can mutate it freely.
+            List<String> snapshot = MekFileParser.getCanonUnitNames();
+            originalCanonNames = new Vector<>(snapshot);
+            // Force a known clean state for each test.
+            MekFileParser.setCanonUnitNames(new Vector<>());
+        }
+
+        @AfterEach
+        void restoreCanonState() {
+            MekFileParser.setCanonUnitNames(originalCanonNames);
+        }
+
+        @Test
+        void missingFileLeavesCanonListEmptyWithoutThrowing() {
+            File missing = new File(tempDir.toFile(), "does-not-exist.txt");
+            assertFalse(missing.exists(), "precondition: file must not exist");
+
+            // Should not throw and should leave the canon list empty.
+            MekFileParser.initCanonUnitNames(tempDir.toFile(), "does-not-exist.txt");
+
+            assertTrue(MekFileParser.getCanonUnitNames().isEmpty(),
+                  "missing canon file must result in an empty canon list");
+        }
+
+        @Test
+        void readsUtf8EncodedNonAsciiChassisNames() throws IOException {
+            // Write a file with names containing characters that round-trip differently
+            // under Cp1252 vs. UTF-8 (e.g. 'ë' is 0xEB in Cp1252 but 0xC3 0xAB in UTF-8).
+            // Using ISO-8859-1 / Cp1252 to read these UTF-8 bytes would corrupt the names
+            // and the binary search in the canon filter would silently drop them.
+            String fileName = "OfficialUnitList-utf8.txt";
+            File file = new File(tempDir.toFile(), fileName);
+            String contents = String.join("\n",
+                  "Schrëck PPC Carrier|9999",
+                  "Atlas AS7-D|3085",
+                  "Pöuncer|1234")
+                  + "\n";
+            Files.write(file.toPath(), contents.getBytes(StandardCharsets.UTF_8));
+
+            MekFileParser.initCanonUnitNames(tempDir.toFile(), fileName);
+
+            List<String> names = MekFileParser.getCanonUnitNames();
+            assertTrue(names.contains("Schrëck PPC Carrier"),
+                  "UTF-8 accented name must round-trip exactly: got " + names);
+            assertTrue(names.contains("Pöuncer"),
+                  "UTF-8 accented name must round-trip exactly: got " + names);
+            assertTrue(names.contains("Atlas AS7-D"));
+            assertEquals(3, names.size());
+        }
+
+        @Test
+        void skipsLinesWithoutSeparatorWithoutThrowing() throws IOException {
+            String fileName = "OfficialUnitList-malformed.txt";
+            File file = new File(tempDir.toFile(), fileName);
+            String contents = String.join("\n",
+                  "Atlas AS7-D|3085",
+                  "garbage line with no pipe",
+                  "",
+                  "Locust LCT-1V|3025")
+                  + "\n";
+            Files.write(file.toPath(), contents.getBytes(StandardCharsets.UTF_8));
+
+            MekFileParser.initCanonUnitNames(tempDir.toFile(), fileName);
+
+            List<String> names = MekFileParser.getCanonUnitNames();
+            assertEquals(2, names.size(), "malformed lines must be silently skipped");
+            assertTrue(names.contains("Atlas AS7-D"));
+            assertTrue(names.contains("Locust LCT-1V"));
+        }
+
+        @Test
+        void getCanonUnitNamesReturnsUnmodifiableView() throws IOException {
+            String fileName = "OfficialUnitList-immutable.txt";
+            File file = new File(tempDir.toFile(), fileName);
+            Files.write(file.toPath(),
+                  "Atlas AS7-D|3085\n".getBytes(StandardCharsets.UTF_8));
+
+            MekFileParser.initCanonUnitNames(tempDir.toFile(), fileName);
+            List<String> names = MekFileParser.getCanonUnitNames();
+
+            assertThrows(UnsupportedOperationException.class,
+                  () -> names.add("Tampered Name"),
+                  "external callers must not be able to mutate the canon list");
+            assertThrows(UnsupportedOperationException.class, names::clear,
+                  "external callers must not be able to clear the canon list");
+        }
+
+        @Test
+        void getCanonUnitNamesReturnsEmptyListBeforeInit() {
+            MekFileParser.setCanonUnitNames(null);
+            List<String> names = MekFileParser.getCanonUnitNames();
+            assertTrue(names.isEmpty(),
+                  "uninitialized canon list must be exposed as an empty list, not null");
+            assertThrows(UnsupportedOperationException.class,
+                  () -> names.add("x"),
+                  "the empty fallback must also be unmodifiable");
         }
     }
 }
