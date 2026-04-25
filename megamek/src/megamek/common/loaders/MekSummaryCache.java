@@ -322,6 +322,11 @@ public class MekSummaryCache {
 
         EquipmentType.initializeTypes(); // load master equipment lists
 
+        // Eagerly load the canon unit list. Cached units are restored without going through
+        // MekFileParser.parse(), so the lazy initialization there never runs and the
+        // 'OfficialUnitList.txt missing' warning would otherwise be silent.
+        MekFileParser.initCanonUnitNames();
+
         loadReport.append("\n");
         loadReport.append("Reading unit files:\n");
 
@@ -363,6 +368,25 @@ public class MekSummaryCache {
                 loadReport.append("  Unable to load unit cache: ").append(ex.getMessage()).append("\n");
                 logger.error(loadReport.toString(), ex);
             }
+        }
+
+        // Self-heal stale caches: a cache built while OfficialUnitList.txt was unreadable
+        // (mekhq#6165) contains zero canon entries. If we now have a populated canon list
+        // but no cached entry is flagged canon, force a full reparse so the canon flags
+        // are restored. Without this, users would have to manually delete units.cache
+        // after upgrading.
+        Vector<String> canonNames = MekFileParser.getCanonUnitNames();
+        if (!vMeks.isEmpty()
+              && canonNames != null
+              && !canonNames.isEmpty()
+              && vMeks.stream().noneMatch(MekSummary::isCanon)) {
+            loadReport.append("  Cached units have no canon flags but a canon list is available; "
+                  + "rebuilding cache.\n");
+            logger.info("Detected stale unit cache (no canon entries); rebuilding from unit files.");
+            vMeks.clear();
+            sKnownFiles.clear();
+            cacheCount = 0;
+            lLastCheck = 0;
         }
 
         checkForChanges(ignoreUnofficial, vMeks, sKnownFiles, lLastCheck);

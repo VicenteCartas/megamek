@@ -202,6 +202,14 @@ public class MekFileParser {
         canonUnitNames = unitNames;
     }
 
+    /**
+     * @return the currently loaded canon unit names, or {@code null} if {@link #initCanonUnitNames()} has not yet been
+     *       called.
+     */
+    public static Vector<String> getCanonUnitNames() {
+        return canonUnitNames;
+    }
+
     public Entity getEntity() {
         return m_entity;
     }
