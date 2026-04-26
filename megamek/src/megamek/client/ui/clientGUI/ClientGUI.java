@@ -561,7 +561,9 @@ public class ClientGUI extends AbstractClientGUI
     public void addToast(ToastLevel level, String text) {
         if (toastOverlay != null) {
             String normalized = normalizeToastText(text);
-            logger.info("Toast [{}] (no entity): {}", level, normalized);
+            if (logger.isDebugEnabled()) {
+                logger.debug("Toast [{}] (no entity): {}", level, normalized);
+            }
             toastOverlay.show(level, normalized);
         }
     }
@@ -576,8 +578,12 @@ public class ClientGUI extends AbstractClientGUI
     public void addToast(ToastLevel level, String text, @Nullable Entity entity) {
         if (toastOverlay != null) {
             String normalized = normalizeToastText(text);
-            String entityLabel = (entity != null) ? entity.getShortName() + " [" + entity.getId() + "]" : "no entity";
-            logger.info("Toast [{}] ({}): {}", level, entityLabel, normalized);
+            if (logger.isDebugEnabled()) {
+                String entityLabel = (entity != null) ?
+                      entity.getShortName() + " [" + entity.getId() + "]" :
+                      "no entity";
+                logger.debug("Toast [{}] ({}): {}", level, entityLabel, normalized);
+            }
             toastOverlay.show(level, normalized, entity);
         }
     }
@@ -594,17 +600,20 @@ public class ClientGUI extends AbstractClientGUI
      * Substrings that mark a report entry as routine round-summary "noise" (planetary conditions, end-of-round BV
      * snapshots, turn order). These show up in every initiative report alongside the actual events and would otherwise
      * dominate the kill-feed. Full content remains visible in the report panel.
+     *
+     * <p>Loaded from the {@code ClientGUI.toastNoisePrefixes} i18n key (pipe-separated). Translators can override the
+     * list per locale to match their localized report text; if the resource is missing or empty the filter no-ops
+     * (entries pass through as normal toasts) rather than crashing.</p>
      */
-    private static final String[] REPORT_NOISE_SUBSTRINGS = {
-          "Wind direction is",
-          "Wind strength is",
-          "The weather is",
-          "Visibility is",
-          "Fog level is",
-          "BV remaining",
-          "units remaining",
-          "The turn order for movement is"
-    };
+    private static final String[] REPORT_NOISE_SUBSTRINGS = loadNoisePrefixes();
+
+    private static String[] loadNoisePrefixes() {
+        String raw = Messages.getString("ClientGUI.toastNoisePrefixes");
+        if (raw == null || raw.isBlank()) {
+            return new String[0];
+        }
+        return raw.split("\\|");
+    }
 
     /**
      * Splits a server-side report HTML stream into one toast per individual {@code <span class='report-entry'>} block,
@@ -652,13 +661,15 @@ public class ClientGUI extends AbstractClientGUI
             if (REPORTING_ERROR_PREVIEW.matcher(preview).matches()) {
                 continue;
             }
-            // Capture the phase name from any entry that bolds a "Phase" string (movement, initiative, firing, etc.).
-            // For some phases the bold header and the dashed divider are in the same entry; for others (initiative)
-            // they are in separate entries. Either way, the bold "Phase" entry becomes the prefix and is skipped.
+            // Capture the phase name from header entries. A header entry is one whose only content is the bolded
+            // phase name plus (optionally) the dashed divider - e.g. "<B>Movement Phase</B><br>------" or
+            // "<B>Initiative Phase for Round #2</B>". Detection is structural rather than text-based so it works in
+            // any locale (e.g. German "Bewegungsphase") without hard-coding the word "phase".
             Matcher header = REPORT_PHASE_HEADER.matcher(entry);
             if (header.find()) {
                 String boldText = header.group(1).trim();
-                if (boldText.toLowerCase().contains("phase")) {
+                String remainder = preview.replace(boldText, "").replace("-", "").trim();
+                if (remainder.isEmpty()) {
                     phasePrefix = boldText;
                     continue;
                 }
