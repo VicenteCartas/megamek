@@ -56,8 +56,11 @@ import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.filechooser.FileFilter;
@@ -377,6 +380,10 @@ public class ClientGUI extends AbstractClientGUI
     private OffBoardTargetOverlay offBoardOverlay;
     private BoardToastOverlay toastOverlay;
 
+    private final ConcurrentLinkedQueue<Runnable> toastDripQueue = new ConcurrentLinkedQueue<>();
+    private javax.swing.Timer toastDripTimer;
+
+
     // some dialogs...
     private GameOptionsDialog gameOptionsDialog;
     private NetworkInformationDialog networkInformationDialog;
@@ -553,7 +560,9 @@ public class ClientGUI extends AbstractClientGUI
      */
     public void addToast(ToastLevel level, String text) {
         if (toastOverlay != null) {
-            toastOverlay.show(level, text);
+            String normalized = normalizeToastText(text);
+            logger.info("Toast [{}] (no entity): {}", level, normalized);
+            toastOverlay.show(level, normalized);
         }
     }
 
@@ -566,8 +575,191 @@ public class ClientGUI extends AbstractClientGUI
      */
     public void addToast(ToastLevel level, String text, @Nullable Entity entity) {
         if (toastOverlay != null) {
-            toastOverlay.show(level, text, entity);
+            String normalized = normalizeToastText(text);
+            String entityLabel = (entity != null) ? entity.getShortName() + " [" + entity.getId() + "]" : "no entity";
+            logger.info("Toast [{}] ({}): {}", level, entityLabel, normalized);
+            toastOverlay.show(level, normalized, entity);
         }
+    }
+
+    private static final Pattern REPORT_PHASE_HEADER = Pattern.compile("<[Bb]>([^<]+)</[Bb]>");
+    private static final Pattern REPORTING_ERROR_PREVIEW = Pattern.compile("\\[Reporting Error for message ID \\d+]");
+    /** Empty team/player summary "labels" that precede BV detail lines (which are themselves filtered as noise). */
+    private static final Pattern TEAM_SUMMARY_LABEL = Pattern.compile(".*Team \\d+\\)?:");
+
+    /** Maximum number of report-event toasts queued from a single {@code gameReport} burst before truncation. */
+    private static final int MAX_TOASTS_PER_BURST = 8;
+
+    /**
+     * Substrings that mark a report entry as routine round-summary "noise" (planetary conditions, end-of-round BV
+     * snapshots, turn order). These show up in every initiative report alongside the actual events and would otherwise
+     * dominate the kill-feed. Full content remains visible in the report panel.
+     */
+    private static final String[] REPORT_NOISE_SUBSTRINGS = {
+          "Wind direction is",
+          "Wind strength is",
+          "The weather is",
+          "Visibility is",
+          "Fog level is",
+          "BV remaining",
+          "units remaining",
+          "The turn order for movement is"
+    };
+
+    /**
+     * Splits a server-side report HTML stream into one toast per individual {@code <span class='report-entry'>} block,
+     * so each game event scrolls past the player as its own kill-feed-style notification. Toasts are drip-fed at the
+     * user-configurable cadence so the player has time to read each one before the next appears.
+     *
+     * <p>The drip cadence is the user-configurable {@link GUIPreferences#TOAST_DRIP_SECONDS} preference (Client
+     * Settings &rarr; Overlays).</p>
+     *
+     * <p>The first toast in a burst is prefixed with the phase name extracted from the report's own header (e.g.,
+     * "Movement Phase: Building #10010 collapses ..."). The phase-header entry itself - which would otherwise render as
+     * "Movement Phase --------------------" - is suppressed in favor of using its phase name as the prefix. If the
+     * report contains no extractable phase header, the supplied {@code defaultPrefix} (an i18n string such as "Movement
+     * Report") is used instead. Subsequent toasts in the burst are shown bare to avoid label repetition.</p>
+     *
+     * <p>Three additional filters trim the kill-feed to actual gameplay events:</p>
+     * <ul>
+     *   <li>Entries containing only a {@code [Reporting Error for message ID NNN]} marker (internal diagnostic output)
+     *       are suppressed.</li>
+     *   <li>Entries matching any {@link #REPORT_NOISE_SUBSTRINGS} pattern (planetary conditions, BV summaries, turn
+     *       order) are suppressed.</li>
+     *   <li>If a single burst would exceed {@link #MAX_TOASTS_PER_BURST}, the surplus entries are collapsed into one
+     *       final overflow toast like {@code "+N more events - see report panel"}.</li>
+     * </ul>
+     */
+    private void showReportAsToasts(String defaultPrefix, String report) {
+        if (report == null || report.isEmpty()) {
+            return;
+        }
+        String[] entries = report.split("<span class=['\"]report-entry['\"]>");
+        String phasePrefix = null;
+        boolean firstQueued = false;
+        int queuedCount = 0;
+        int suppressedOverflowCount = 0;
+        for (String entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            String preview = entry.replaceAll("<[^>]*>", "").replace("&nbsp;", " ").trim();
+            if (preview.isEmpty()) {
+                continue;
+            }
+            // Suppress diagnostic markers from the report layer (e.g., when a message ID is missing from
+            // report-messages.properties).
+            if (REPORTING_ERROR_PREVIEW.matcher(preview).matches()) {
+                continue;
+            }
+            // Capture the phase name from any entry that bolds a "Phase" string (movement, initiative, firing, etc.).
+            // For some phases the bold header and the dashed divider are in the same entry; for others (initiative)
+            // they are in separate entries. Either way, the bold "Phase" entry becomes the prefix and is skipped.
+            Matcher header = REPORT_PHASE_HEADER.matcher(entry);
+            if (header.find()) {
+                String boldText = header.group(1).trim();
+                if (boldText.toLowerCase().contains("phase")) {
+                    phasePrefix = boldText;
+                    continue;
+                }
+            }
+            // Pure-divider entries (just dashes) - skip.
+            if (preview.replace("-", "").trim().isEmpty()) {
+                continue;
+            }
+            // Drop routine round-summary entries (planetary conditions, BV snapshots, turn order). Players don't need
+            // these scrolling past as toasts; they remain in the report panel for reference.
+            if (matchesAny(preview, REPORT_NOISE_SUBSTRINGS)) {
+                continue;
+            }
+            // Drop empty "Team N:" / "Player (Team N):" labels - they precede BV detail lines that we already filter,
+            // so the label on its own conveys nothing.
+            if (TEAM_SUMMARY_LABEL.matcher(preview).matches()) {
+                continue;
+            }
+            // Cap toasts per burst. Once full, count remaining qualifying entries so we can summarize them in a single
+            // overflow toast rather than firing dozens of notifications for one event chain.
+            if (queuedCount >= MAX_TOASTS_PER_BURST) {
+                suppressedOverflowCount++;
+                continue;
+            }
+            String prefixForFirst = (phasePrefix != null) ? phasePrefix : defaultPrefix;
+            final String text = firstQueued ? entry : (prefixForFirst + ": " + entry);
+            toastDripQueue.offer(() -> addToast(ToastLevel.INFO, text));
+            firstQueued = true;
+            queuedCount++;
+        }
+        if (suppressedOverflowCount > 0) {
+            final String overflow = "+" + suppressedOverflowCount + " more events - see report panel";
+            toastDripQueue.offer(() -> addToast(ToastLevel.INFO, overflow));
+        }
+        startToastDripIfIdle();
+    }
+
+    private static boolean matchesAny(String haystack, String[] needles) {
+        for (String needle : needles) {
+            if (haystack.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Releases queued report toasts one at a time on the {@link GUIPreferences#TOAST_DRIP_SECONDS} cadence so the
+     * player can read each one before the next arrives. The first toast of a fresh burst fires immediately; subsequent
+     * toasts wait their turn. If a new burst arrives while the timer is already running, its entries are appended to
+     * the existing queue and picked up by the running timer (the cadence in effect when the timer was created continues
+     * to apply for the duration of that timer; preference changes take effect on the next fresh burst).
+     */
+    private void startToastDripIfIdle() {
+        if (toastDripTimer != null && toastDripTimer.isRunning()) {
+            return;
+        }
+        Runnable first = toastDripQueue.poll();
+        if (first != null) {
+            first.run();
+        }
+        if (toastDripQueue.isEmpty()) {
+            return;
+        }
+        int dripMs = Math.max(1, GUIPreferences.getInstance().getToastDripSeconds()) * 1000;
+        toastDripTimer = new javax.swing.Timer(dripMs, evt -> {
+            Runnable next = toastDripQueue.poll();
+            if (next != null) {
+                next.run();
+            }
+            if (toastDripQueue.isEmpty()) {
+                ((javax.swing.Timer) evt.getSource()).stop();
+                toastDripTimer = null;
+            }
+        });
+        toastDripTimer.start();
+    }
+
+    /**
+     * Flattens an arbitrary message to a single line of plain text suitable for the toast overlay. The overlay renders
+     * text via {@link megamek.client.ui.util.StringDrawer} which has no HTML support and no line-wrapping, so
+     * server-side report markup (such as {@code <span class='report-entry'>}, {@code <br>}, {@code <B>}, and
+     * base64-embedded portrait {@code <img>} tags) and embedded newlines would otherwise appear as literal glyphs.
+     * Plain-text inputs without markup or whitespace anomalies pass through unchanged.
+     */
+    private static String normalizeToastText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("(?i)<br\\s*/?>", " ")
+              .replaceAll("(?i)</?p\\s*[^>]*>", " ")
+              .replaceAll("<[^>]*>", "")
+              .replace("&nbsp;", " ")
+              .replace("&lt;", "<")
+              .replace("&gt;", ">")
+              .replace("&quot;", "\"")
+              .replace("&#39;", "'")
+              .replace("&apos;", "'")
+              .replace("&amp;", "&")
+              .replaceAll("\\s+", " ")
+              .trim();
     }
 
     @Override
@@ -2890,14 +3082,13 @@ public class ClientGUI extends AbstractClientGUI
                 reportDisplayResetRerollInitiative();
 
                 if (!(getClient() instanceof BotClient)) {
-                    addToast(ToastLevel.INFO,
-                          Messages.getString("ClientGUI.dialogTacticalGeniusReport") + ": " + e.getReport());
+                    showReportAsToasts(Messages.getString("ClientGUI.dialogTacticalGeniusReport"),
+                          e.getReport());
                 }
             } else {
                 // Continued movement after getting up
                 if (!(getClient() instanceof BotClient)) {
-                    addToast(ToastLevel.INFO,
-                          Messages.getString("ClientGUI.dialogMovementReport") + ": " + e.getReport());
+                    showReportAsToasts(Messages.getString("ClientGUI.dialogMovementReport"), e.getReport());
                 }
             }
         }
