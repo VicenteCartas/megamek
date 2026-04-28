@@ -394,6 +394,8 @@ class BLKFileTest {
     void multipleSourceBlockLinesLoadThroughBLK() throws Exception {
         BuildingBlock blk = new BuildingBlock();
         blk.writeBlockData("Name", "Test");
+        blk.writeBlockData("year", 3025);
+        blk.writeBlockData("type", "IS");
         blk.writeBlockData("source", new String[] { "TR:3039", "RG29", "Custom Source" });
         BLKFile loader = new BLKFile();
         loader.dataFile = blk;
