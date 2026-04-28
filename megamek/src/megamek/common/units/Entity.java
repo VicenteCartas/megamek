@@ -14051,12 +14051,20 @@ public abstract class Entity extends TurnOrdered
      */
     public void setSource(String source) {
         if (source != null) {
-            this.source = source;
+            this.source = SourceBooks.normalizeSourceList(source);
         }
     }
 
     public String getSource() {
         return (source != null) ? source : "";
+    }
+
+    public List<String> getSources() {
+        return SourceBooks.splitSourceList(getSource());
+    }
+
+    public void setSources(Collection<String> sources) {
+        source = SourceBooks.formatSourceList(sources);
     }
 
     /**
