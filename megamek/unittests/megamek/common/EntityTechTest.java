@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2025 The MegaMek Team. All Rights Reserved.
+ * Copyright (C) 2025-2026 The MegaMek Team. All Rights Reserved.
  *
  * This file is part of MegaMek.
  *
@@ -37,11 +37,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.util.List;
 
+import megamek.common.battleArmor.BattleArmor;
+import megamek.common.enums.AvailabilityValue;
+import megamek.common.enums.TechBase;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.eras.Eras;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.common.units.AeroSpaceFighter;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityWeightClass;
 import megamek.common.units.Mek;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -86,6 +91,36 @@ class EntityTechTest {
               entity.getCommonDateRange());
         Assertions.assertEquals("-",
               entity.getExtinctionRange());
+    }
+
+    @Test
+    public void mixedTechWithClanProgressionIsAvailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.ALL)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(3050, 3050, 3051)
+              .setClanAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.D, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void mixedTechWithoutClanProgressionIsUnavailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.ALL)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(3050, 3050, 3051);
+
+        Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void elementalBattleArmorComponentsAreAvailableToClansBefore3050() {
+        AmmoType baSrm2Ammo = (AmmoType) EquipmentType.get("BA-SRM2 Ammo");
+        assertNotNull(baSrm2Ammo, "BA SRM 2 ammo not found");
+
+        Assertions.assertEquals(AvailabilityValue.D,
+              BattleArmor.getConstructionTechAdvancement(EntityWeightClass.WEIGHT_MEDIUM)
+                    .calcYearAvailability(3032, true));
+        Assertions.assertEquals(AvailabilityValue.D, baSrm2Ammo.calcYearAvailability(3032, true));
     }
 
     private static void printEntity(Entity entity) {
