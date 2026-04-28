@@ -65,12 +65,11 @@ public class SourceChooserDialog {
     }
 
     /**
-     * Shows a dialog where the user can select a sourcebook from a combobox. When showManualTextfield is true, the user
-     * can also enter a manual value in a text field.
+     * Shows a dialog where the user can select a sourcebook from a combo box.
      *
-     * @param parent              a parent frame for this dialog
+     * @param parent a parent component for this dialog
      *
-     * @return the chosen value (either from combobox or text field), or null if canceled
+     * @return the selected sourcebook abbreviation from the list, or {@code null} if canceled
      */
     public static String showChoiceDialog(@Nullable Component parent) {
         loadBooks();
@@ -78,14 +77,6 @@ public class SourceChooserDialog {
         Vector<String> sortedBookList = BOOKS.keySet().stream().sorted().collect(Collectors.toCollection(Vector::new));
         JComboBox<String> comboBox = new JComboBox<>(sortedBookList);
         comboBox.setRenderer(titleRenderer);
-
-        JTextField manualField = new JTextField(15);
-        JRadioButton rbCombo = new JRadioButton(Messages.getString("SourceChooser.list"), true);
-        JRadioButton rbManual = new JRadioButton(Messages.getString("SourceChooser.manual"));
-
-        ButtonGroup group = new ButtonGroup();
-        group.add(rbCombo);
-        group.add(rbManual);
 
         JPanel mainPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -96,32 +87,19 @@ public class SourceChooserDialog {
         mainPanel.add(comboBox, gbc);
 
         comboBox.setEnabled(true);
-        manualField.setEnabled(false);
-
-        rbCombo.addActionListener(e -> {
-            comboBox.setEnabled(true);
-            manualField.setEnabled(false);
-        });
-        rbManual.addActionListener(e -> {
-            comboBox.setEnabled(false);
-            manualField.setEnabled(true);
-            manualField.requestFocusInWindow();
-        });
 
         JOptionPane optionPane = new JOptionPane(mainPanel, JOptionPane.PLAIN_MESSAGE, JOptionPane.OK_CANCEL_OPTION);
         JDialog dialog = optionPane.createDialog(parent, Messages.getString("SourceChooser.title"));
 
-        // Close dialog immediately when selecting from comboBox (if "Choose from list" is selected)
+        // Close dialog immediately when selecting from comboBox.
         comboBox.addPopupMenuListener(new PopupMenuListener() {
             @Override
             public void popupMenuWillBecomeVisible(PopupMenuEvent e) {}
 
             @Override
             public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
-                if (rbCombo.isSelected()) {
-                    optionPane.setValue(JOptionPane.OK_OPTION);
-                    dialog.setVisible(false);
-                }
+                optionPane.setValue(JOptionPane.OK_OPTION);
+                dialog.setVisible(false);
             }
 
             @Override
@@ -132,11 +110,7 @@ public class SourceChooserDialog {
 
         Object value = optionPane.getValue();
         if (value != null && (int) value == JOptionPane.OK_OPTION) {
-            if (rbCombo.isSelected()) {
-                return (String) comboBox.getSelectedItem();
-            } else {
-                return manualField.getText().trim();
-            }
+            return (String) comboBox.getSelectedItem();
         }
         return null;
     }
