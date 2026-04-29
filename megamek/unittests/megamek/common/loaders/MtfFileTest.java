@@ -180,6 +180,21 @@ class MtfFileTest {
         return new MtfFile(inputStream);
     }
 
+    @Test
+    void multipleSourcesRoundTrip() throws Exception {
+        Mek mek = new BipedMek();
+        mek.setSource("TR:3039, RG29,, Custom Source");
+
+        String mtf = mek.getMtf();
+        assertEquals("TR:3039,RG29,Custom Source", mek.getSource());
+        assertTrue(mtf.contains("source:TR:3039,RG29,Custom Source\n"));
+
+        MtfFile loader = toMtfFile(mek);
+        Entity loaded = loader.getEntity();
+
+        assertEquals("TR:3039,RG29,Custom Source", loaded.getSource());
+    }
+
     /**
      * Test that inverted Cockpit/Sensors in the head are corrected on load. Some MTF files have the head layout: LS,
      * Cockpit, Sensors (wrong) instead of the correct: LS, Sensors, Cockpit.

@@ -377,6 +377,36 @@ class BLKFileTest {
               "NONE faction should remain NONE after roundtrip");
     }
 
+    @Test
+    void multipleSourcesRoundtripThroughBLK() throws Exception {
+        Tank tank = createMinimalTank();
+        tank.setSource("TR:3039, RG29,, Custom Source");
+
+        BuildingBlock blk = BLKFile.getBlock(tank);
+        BLKTankFile loader = new BLKTankFile(blk);
+        Tank loaded = (Tank) loader.getEntity();
+
+        assertEquals("TR:3039,RG29,Custom Source", loaded.getSource(),
+              "Multiple sources should survive BLK roundtrip");
+    }
+
+    @Test
+    void multipleSourceBlockLinesLoadThroughBLK() throws Exception {
+        BuildingBlock blk = new BuildingBlock();
+        blk.writeBlockData("Name", "Test");
+        blk.writeBlockData("year", 3025);
+        blk.writeBlockData("type", "IS");
+        blk.writeBlockData("source", new String[] { "TR:3039", "RG29", "Custom Source" });
+        BLKFile loader = new BLKFile();
+        loader.dataFile = blk;
+        Tank tank = new Tank();
+
+        loader.setBasicEntityData(tank);
+
+        assertEquals("TR:3039,RG29,Custom Source", tank.getSource(),
+              "Multiple source lines should load as a source list");
+    }
+
     /**
      * Loads a BattleArmor entity from the test resources directory.
      */
