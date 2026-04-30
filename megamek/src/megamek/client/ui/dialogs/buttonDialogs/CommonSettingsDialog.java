@@ -521,7 +521,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
     private JSlider traceOverlayOriginXSlider;
     private JSlider traceOverlayOriginYSlider;
     private JTextField traceOverlayImageFile;
-    private JSpinner toastDripSecondsSpinner;
 
     /**
      * Maps command strings to a JTextField for updating the modifier for the command.
@@ -1838,20 +1837,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         row.add(Box.createHorizontalStrut(10));
         row.add(traceOverlayImageFileChooser);
         row.add(Box.createHorizontalStrut(10));
-        comps.add(row);
-
-        addLineSpacer(comps);
-
-        SpinnerNumberModel mToastDripSeconds = new SpinnerNumberModel(GUIP.getToastDripSeconds(), 1, 10, 1);
-        toastDripSecondsSpinner = new JSpinner(mToastDripSeconds);
-        toastDripSecondsSpinner.setMaximumSize(new Dimension(150, 40));
-        toastDripSecondsSpinner.setToolTipText(Messages.getString("CommonSettingsDialog.ToastDripSeconds.tooltip"));
-        toastDripSecondsSpinner.addChangeListener(this);
-        JLabel toastDripSecondsLabel = new JLabel(Messages.getString("CommonSettingsDialog.ToastDripSeconds"));
-        toastDripSecondsLabel.setToolTipText(Messages.getString("CommonSettingsDialog.ToastDripSeconds.tooltip"));
-        row = new ArrayList<>();
-        row.add(toastDripSecondsSpinner);
-        row.add(toastDripSecondsLabel);
         comps.add(row);
 
         addLineSpacer(comps);
@@ -3872,8 +3857,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             GUIP.setTraceOverlayOriginX(traceOverlayOriginXSlider.getValue());
         } else if (evt.getSource().equals(traceOverlayOriginYSlider)) {
             GUIP.setTraceOverlayOriginY(traceOverlayOriginYSlider.getValue());
-        } else if (evt.getSource().equals(toastDripSecondsSpinner)) {
-            GUIP.setToastDripSeconds((Integer) toastDripSecondsSpinner.getValue());
         }
     }
 
