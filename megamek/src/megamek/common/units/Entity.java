@@ -6969,17 +6969,11 @@ public abstract class Entity extends TurnOrdered
                     m = master;
                     master = m.getC3Master();
                 } else {
-                    // Somehow still failed; this should not be possible!
-                    throw new IllegalStateException(
-                          "C3 slave/master connection not affected by ECM/AECM but master is!" +
-                                String.format(
-                                      "\nSlave: %s @ %s\nMaster: %s @ %s",
-                                      m,
-                                      master,
-                                      m.getPosition(),
-                                      master.getPosition()
-                                )
-                    );
+                    // The slave's line to the master is clear (e.g. friendly Angel ECCM along the line cancels enemy
+                    // ECM), but the master's own hex is still inside an ECM bubble that the ECCM doesn't cover. The
+                    // master is unreachable - the network is severed at its end. Same handling as a jammed slave-side
+                    // line below: drop the master so the loop exits cleanly with `m` as the effective top.
+                    master = null;
                 }
             } else {
                 // Can no longer contact master
