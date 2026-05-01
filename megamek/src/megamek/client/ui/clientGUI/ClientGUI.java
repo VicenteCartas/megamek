@@ -559,9 +559,7 @@ public class ClientGUI extends AbstractClientGUI
     public void addToast(ToastLevel level, String text) {
         if (toastOverlay != null) {
             String normalized = ReportToastFormatter.normalizeToastText(text);
-            if (logger.isDebugEnabled()) {
-                logger.debug("Toast [{}] (no entity): {}", level, normalized);
-            }
+            logger.debug("Toast [{}] (no entity): {}", level, normalized);
             toastOverlay.show(level, normalized);
         }
     }
@@ -576,12 +574,10 @@ public class ClientGUI extends AbstractClientGUI
     public void addToast(ToastLevel level, String text, @Nullable Entity entity) {
         if (toastOverlay != null) {
             String normalized = ReportToastFormatter.normalizeToastText(text);
-            if (logger.isDebugEnabled()) {
-                String entityLabel = (entity != null) ?
-                      entity.getShortName() + " [" + entity.getId() + "]" :
-                      "no entity";
-                logger.debug("Toast [{}] ({}): {}", level, entityLabel, normalized);
-            }
+            String entityLabel = (entity != null) ?
+                  entity.getShortName() + " [" + entity.getId() + "]" :
+                  "no entity";
+            logger.debug("Toast [{}] ({}): {}", level, entityLabel, normalized);
             toastOverlay.show(level, normalized, entity);
         }
     }
