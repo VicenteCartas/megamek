@@ -1275,7 +1275,7 @@ public abstract class BotClient extends Client {
                                             // transport, etc.) - we can't measure distance to them, and including
                                             // them in the count/BV would skew the (known_range / known_count)
                                             // average. Mirrors the check_ent null-position guard above.
-                                            if (test_ent.isVisibleToEnemy() && (test_ent.getPosition() != null)) {
+                                            if ((test_ent.getPosition() != null) && test_ent.isVisibleToEnemy()) {
                                                 known_count++;
                                                 known_bv += test_ent.calculateBattleValue();
                                                 known_range += Compute.effectiveDistance(game, check_ent, test_ent);
