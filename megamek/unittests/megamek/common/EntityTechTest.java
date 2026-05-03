@@ -39,6 +39,7 @@ import java.util.List;
 
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.enums.AvailabilityValue;
+import megamek.common.enums.Faction;
 import megamek.common.enums.TechBase;
 import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.EquipmentType;
@@ -110,6 +111,84 @@ class EntityTechTest {
               .setISAdvancement(3050, 3050, 3051);
 
         Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void mixedTechWithClanEraProgressionIsUnavailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.ALL)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(3050, 3050, 3051)
+              .setClanAdvancement(3050, 3050, 3051);
+
+        Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void innerSphereTechWithoutClanProgressionIsUnavailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.IS)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void innerSphereTechWithSharedIntroductionDateIsUnavailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.IS) {
+            @Override
+            public int getIntroductionDate(boolean clan) {
+                return getIntroductionDate();
+            }
+        }.setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void compositeInnerSphereTechWithSharedIntroductionDateIsUnavailableToClansBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.IS)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(2865, 2868, 2870);
+        CompositeTechLevel techLevel = new CompositeTechLevel(advancement, false, true, 2865, Faction.NONE);
+
+        Assertions.assertEquals(AvailabilityValue.X, techLevel.calcYearAvailability(3032, true));
+    }
+
+    @Test
+    public void innerSphereTechIsAvailableToInnerSphereBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.IS)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.D, advancement.calcYearAvailability(3032, false));
+    }
+
+    @Test
+    public void innerSphereTechUsesBaseAvailabilityForClansAfter3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.IS)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setISAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.C, advancement.calcYearAvailability(3050, true));
+    }
+
+    @Test
+    public void clanTechIsUnavailableToInnerSphereBefore3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.CLAN)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setClanAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.X, advancement.calcYearAvailability(3032, false));
+    }
+
+    @Test
+    public void clanTechIsHarderForInnerSphereAfter3050() {
+        TechAdvancement advancement = new TechAdvancement(TechBase.CLAN)
+              .setAvailability(AvailabilityValue.X, AvailabilityValue.D, AvailabilityValue.C, AvailabilityValue.B)
+              .setClanAdvancement(2865, 2868, 2870);
+
+        Assertions.assertEquals(AvailabilityValue.D, advancement.calcYearAvailability(3050, false));
     }
 
     @Test

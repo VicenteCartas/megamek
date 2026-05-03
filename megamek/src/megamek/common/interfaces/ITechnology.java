@@ -294,7 +294,8 @@ public interface ITechnology {
             if (!isClan()
                   && era.getIndex() < Era.CLAN.getIndex()
                   && getPrototypeDate(false) >= 2780
-                  && (clanIntroductionDate == DATE_NONE
+                  && (getTechBase() != TechBase.ALL
+                            || clanIntroductionDate == DATE_NONE
                             || getTechEra(clanIntroductionDate).getIndex() >= Era.CLAN.getIndex())) {
                 return AvailabilityValue.X;
             } else {
