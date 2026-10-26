@@ -372,7 +372,8 @@ work for Swing, and item 11 is under investigation.
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
      startup path in Swing is going away): a full-window game screen over the battle art
-     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back" greeting and reveal on app launch (an
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back, Commander" greeting ("Welcome,
+     Commander" on the first launch; the player is always Commander, never named) and reveal on app launch (an
      instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom

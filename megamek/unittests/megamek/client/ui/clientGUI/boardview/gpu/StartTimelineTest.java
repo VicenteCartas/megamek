@@ -2,7 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -48,10 +48,10 @@ class StartTimelineTest {
     }
 
     @Test
-    void theGreetingUsesTheLastPlayerNameWhenThereIsOne() {
-        assertEquals("Natasha", StartTimeline.greetingName("  Natasha "));
-        assertNull(StartTimeline.greetingName(""));
-        assertNull(StartTimeline.greetingName("   "));
-        assertNull(StartTimeline.greetingName(null));
+    void theGreetingWelcomesBackOnlyAPlayerWhoHasPlayedBefore() {
+        assertTrue(StartTimeline.returning("  Natasha "));
+        assertFalse(StartTimeline.returning(""));
+        assertFalse(StartTimeline.returning("   "));
+        assertFalse(StartTimeline.returning(null));
     }
 }

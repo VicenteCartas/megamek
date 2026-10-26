@@ -967,10 +967,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         Font overline = TokenFonts.font("overline", true, true)
               .deriveFont(TokenFonts.font("overline").getSize2D() * 1.4f * scale);
         Font display = TokenFonts.font("display", true, true).deriveFont((float) Math.max(34, h * 0.055) * scale);
-        String name = StartTimeline.greetingName(PreferenceManager.getClientPreferences().getLastPlayerName());
+        boolean returning = StartTimeline.returning(PreferenceManager.getClientPreferences().getLastPlayerName());
         String first = Messages.getString("StartScreen.link", MMConstants.VERSION);
-        String second = name == null ? Messages.getString("StartScreen.welcome")
-              : Messages.getString("StartScreen.welcomeBack", name);
+        String second = Messages.getString(returning ? "StartScreen.welcomeBack" : "StartScreen.welcome");
         if (line1 != null) {
             line1.dispose();
             line2.dispose();
