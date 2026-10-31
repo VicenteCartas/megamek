@@ -193,26 +193,33 @@ final class GpuGlsl {
      * messages keep their line numbers. A block comment within a line becomes a space.
      */
     static String withoutComments(String source) {
-        StringBuilder result = new StringBuilder(source.length());
-        int length = source.length();
-        for (int i = 0; i < length; i++) {
-            char c = source.charAt(i);
-            if (c == '/' && i + 1 < length && source.charAt(i + 1) == '/') {
-                while (i + 1 < length && source.charAt(i + 1) != '\n' && source.charAt(i + 1) != '\r') { i++; }
-            } else if (c == '/' && i + 1 < length && source.charAt(i + 1) == '*') {
-                int end = source.indexOf("*/", i + 2);
+        // Whole runs between comments are copied at once: a load strips every program's sources while the JIT is cold.
+        int length = source.length(), from = 0, slash = source.indexOf('/');
+        StringBuilder result = new StringBuilder(length);
+        while (slash >= 0 && slash + 1 < length) {
+            char next = source.charAt(slash + 1);
+            if (next == '/') {
+                result.append(source, from, slash);
+                from = slash + 2;
+                while (from < length && source.charAt(from) != '\n' && source.charAt(from) != '\r') { from++; }
+            } else if (next == '*') {
+                result.append(source, from, slash);
+                int end = source.indexOf("*/", slash + 2);
                 if (end < 0) { end = length - 2; }
                 int lines = result.length();
-                for (int j = i + 2; j < end; j++) {
+                for (int j = slash + 2; j < end; j++) {
                     char inside = source.charAt(j);
                     if (inside == '\n' || inside == '\r') { result.append(inside); }
                 }
                 if (result.length() == lines) { result.append(' '); }
-                i = end + 1;
+                from = end + 2;
             } else {
-                result.append(c);
+                slash = source.indexOf('/', slash + 1);
+                continue;
             }
+            slash = from < length ? source.indexOf('/', from) : -1;
         }
+        if (from < length) { result.append(source, from, length); }
         return result.toString();
     }
 

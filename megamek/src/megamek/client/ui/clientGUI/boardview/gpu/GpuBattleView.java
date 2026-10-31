@@ -687,6 +687,7 @@ class GpuBattleView extends ApplicationAdapter {
                         BoardFungus.reload();
                         BoardScatter.reload();
                         BoardObstacles.reload();
+                        GpuShaderSource.forget();
                         BoardDecals.reload();
                         BoardBridgeFooting.reload();
                         createSceneRenderers();
