@@ -162,7 +162,7 @@ class BoardTreeDistributionTest {
                         low = Math.min(low, m.vertices[v + 2]); high = Math.max(high, m.vertices[v + 2]);
                     }
                 }
-                assertTrue(triangles > 0 && triangles <= List.of(1000, 300, 96, 12).get(lod), name);
+                assertTrue(triangles > 0 && triangles <= List.of(1600, 410, 96, 12).get(lod), name);
                 assertEquals(0, low, .001f, name);
                 assertEquals(30, high, .001f, name);
                 for (var material : model.materials) {

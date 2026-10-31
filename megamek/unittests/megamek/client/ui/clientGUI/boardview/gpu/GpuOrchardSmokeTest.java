@@ -71,24 +71,18 @@ class GpuOrchardSmokeTest {
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
                             int[] triangles = new int[TreeLod.LEVELS];
-                            Texture atlas = null;
-                            var cutouts = new HashMap<String, Texture>();
+                            var maps = new HashMap<String, Texture>();
                             for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
                                 var model = assets.lodModel(name, lod);
                                 for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                                 for (var material : model.materials) {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
-                                    if (material.id.endsWith("-cutout")) {
-                                        cutouts.putIfAbsent(material.id, map.textureDescription.texture);
-                                        assertSame(cutouts.get(material.id), map.textureDescription.texture,
-                                              "Orchard levels share one leaf cutout");
-                                        continue;
-                                    }
-                                    // Legacy snow has its own map, and the impostor cards their own rendered atlas.
-                                    if (material.id.equals("snow") || material.id.equals("impostor")) { continue; }
-                                    if (atlas == null) { atlas = map.textureDescription.texture; }
-                                    assertSame(atlas, map.textureDescription.texture, "LOD borrows the shared atlas");
+                                    // The impostor cards have their own rendered atlas.
+                                    if (material.id.equals("impostor")) { continue; }
+                                    maps.putIfAbsent(material.id, map.textureDescription.texture);
+                                    assertSame(maps.get(material.id), map.textureDescription.texture,
+                                          "Orchard levels share each material's maps: " + material.id);
                                 }
                             }
                             var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());

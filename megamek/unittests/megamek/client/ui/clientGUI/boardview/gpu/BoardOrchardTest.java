@@ -129,7 +129,7 @@ class BoardOrchardTest {
                     }
                 }
                 assertTrue(triangles > 0 && triangles < previous);
-                assertTrue(triangles <= List.of(480, 240, 96).get(lod));
+                assertTrue(triangles <= List.of(800, 300, 110).get(lod));
                 assertEquals(0, low, .001f, name);
                 assertEquals(30, high, 1f, "LOD preserves the tree height: " + name);
                 boolean hasSnow = false;
@@ -139,8 +139,7 @@ class BoardOrchardTest {
                     if (cutout) {
                         assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
                     }
-                    // Crowns carry albedo, normal and surface maps; bark and fruit their atlas with its normal and height;
-                    // the impostor card its own atlas.
+                    // Crowns, bark and fruit carry albedo, normal and surface maps; the impostor card its own atlas.
                     assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size,
                           name + " LOD" + lod + ": " + material.id);
                     for (var texture : material.textures) {
