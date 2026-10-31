@@ -279,6 +279,8 @@ class GpuBattleView extends ApplicationAdapter {
     GpuBattleView(BoardSource source) {
         this.source = source;
         fieldOfView = new GpuFieldOfView();
+        // Its terrain's water detail maps compute on the common pool while the window and GL context open.
+        GpuWaterShader.prepareDetail();
     }
 
     void setLoadingMessage(String message) {
