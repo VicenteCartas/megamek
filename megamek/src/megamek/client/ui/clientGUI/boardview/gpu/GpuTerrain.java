@@ -5590,6 +5590,11 @@ final class GpuTerrain implements Disposable {
     private void roads(GpuTerrainLayer overlay, List<RoadPatch> prepared, BoardSurface surface,
           GpuTextures<BoardScene.Pixels> masks, BoardScene scene, BoardScene.Tile tile,
           Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) {
+        // A hex without coats needs no road arrays: a board without any never builds them.
+        if (prepared.isEmpty()) {
+            overlay.route = false;
+            return;
+        }
         var roadMaps = assets.roadArray();
         for (var preparedPatch : prepared) {
             overlay.route = routeCoat(preparedPatch);
