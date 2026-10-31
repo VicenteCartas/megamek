@@ -226,19 +226,58 @@ final class GpuMaterialCache {
     static boolean isCached(Attributes material) { return material instanceof Material m && m.id.endsWith(CACHED); }
 
     /**
-     * A dry face of ground or of a natural bank (a cliff of up to two levels, whose low caprock stands over none of its
-     * own faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), untouched by water, in a hex
-     * that no biome cover reaches: the canonical material holds no biome layer, and its weathering follows the cover.
+     * A face of ground or of a natural bank (a cliff of up to two levels, whose low caprock stands over none of its own
+     * faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), in a hex that no biome cover
+     * reaches: the canonical material holds no biome layer, and its weathering follows the cover. Water over it stays
+     * live (absorption, the column's tint, caustics), its sediment and wet bank canonical: both follow the face's own
+     * water level and palette.
      */
-    static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
-          Map<Coords, BoardSurface> surfaces) {
+    static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene) {
         if (!uncovered(scene, surface.tile)) { return false; }
         for (Vector3 p : new Vector3[] { face.a(), face.b(), face.c() }) {
             var shade = surface.relief.shade(p);
             if (shade == null || shade.kind() != BoardRelief.Kind.GROUND && (shade.kind() != BoardRelief.Kind.CLIFF
                   || !Float.isNaN(shade.projection()) || shade.level() > 0)) { return false; }
         }
-        return normalZ(face) >= SLOPE_Z && GpuWaterCover.clippingWater(surface, face, scene, surfaces) == null;
+        return normalZ(face) >= SLOPE_Z;
+    }
+
+    /**
+     * An open water hex's bed face the cache can hold, as {@link #top}: level or sloping gently, and overlapped from
+     * above by none of the hex's bank tops ({@code banks}): an undercut bank would stand over it in the pages.
+     */
+    static boolean bed(BoardSurface surface, BoardSurface.Face face, BoardScene scene, List<BoardSurface.Face> banks) {
+        if (!uncovered(scene, surface.tile) || normalZ(face) < SLOPE_Z) { return false; }
+        float lowest = Math.min(face.a().z, Math.min(face.b().z, face.c().z)), clearance = BoardRelief.metres(.05f);
+        for (BoardSurface.Face bank : banks) {
+            if (Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance && overlap(face, bank)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Whether two faces overlap seen from above, by more than a touch along a shared edge (separating axes). */
+    private static boolean overlap(BoardSurface.Face f, BoardSurface.Face g) {
+        Vector3[] a = { f.a(), f.b(), f.c() }, b = { g.a(), g.b(), g.c() };
+        float touch = BoardRelief.metres(.01f);
+        for (Vector3[] edges : new Vector3[][] { a, b }) {
+            for (int i = 0; i < 3; i++) {
+                float nx = edges[(i + 1) % 3].y - edges[i].y, ny = edges[i].x - edges[(i + 1) % 3].x;
+                float length = (float) Math.hypot(nx, ny);
+                if (length == 0) { continue; }
+                float minA = Float.MAX_VALUE, maxA = -Float.MAX_VALUE, minB = Float.MAX_VALUE, maxB = -Float.MAX_VALUE;
+                for (int k = 0; k < 3; k++) {
+                    float pa = (a[k].x * nx + a[k].y * ny) / length, pb = (b[k].x * nx + b[k].y * ny) / length;
+                    minA = Math.min(minA, pa);
+                    maxA = Math.max(maxA, pa);
+                    minB = Math.min(minB, pb);
+                    maxB = Math.max(maxB, pb);
+                }
+                if (maxA <= minB + touch || maxB <= minA + touch) { return false; }
+            }
+        }
+        return true;
     }
 
     /** Whether a top lies level: the same at every detail. */
@@ -252,12 +291,11 @@ final class GpuMaterialCache {
     }
 
     /**
-     * Whether the biome stage leaves the hex as the material is: no liquid in it, no biome or deck mud in it or beside
-     * it (their cover reaches 14 m past a hex, less than a neighbour's width), and beside it no molten or frozen liquid
-     * and water of one palette at most (GpuBiomeSurface.aqueous: one palette changes nothing on dry ground).
+     * Whether the biome stage leaves the hex as the material is: no biome or deck mud in it or beside it (their cover
+     * reaches 14 m past a hex, less than a neighbour's width), and in it and beside it no molten or frozen liquid and
+     * water of one palette at most (GpuBiomeSurface.aqueous: the stage mixes nothing in for one palette).
      */
     private static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
-        if (tile.liquid().present()) { return false; }
         int palettes = 0;
         for (int direction = -1; direction < 6; direction++) {
             var near = direction < 0 ? tile : scene.neighbor(tile, direction);

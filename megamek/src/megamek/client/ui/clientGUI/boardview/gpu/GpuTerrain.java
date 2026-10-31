@@ -5210,7 +5210,7 @@ final class GpuTerrain implements Disposable {
             var waters = GpuWaterCover.coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
-                var target = GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : groups;
+                var target = GpuMaterialCache.top(surface, face, scene) ? tops : groups;
                 blendFace(target, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face, waters,
                       polygon -> GpuSurfaceBlend.appendPolygon(pieces, BoardSurfaceBlend.family(tile), polygon,
                             p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing)));
@@ -5234,14 +5234,22 @@ final class GpuTerrain implements Disposable {
                 return cover;
             });
             var waters = GpuWaterCover.coveringWaters(scene, surface, surfaces);
+            List<BoardSurface.Face> banks = new ArrayList<>();
             for (var face : blended) {
-                blendFace(groups, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face, waters,
-                      polygon -> GpuSurfaceBlend.appendPolygon(pieces, surface.family(face), polygon,
+                boolean top = GpuMaterialCache.top(surface, face, scene);
+                if (top) { banks.add(face); }
+                blendFace(top ? tops : groups, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face,
+                      waters, polygon -> GpuSurfaceBlend.appendPolygon(pieces, surface.family(face), polygon,
                             p -> sampler.sample(p.x, p.y, p.z), spacing)));
+            }
+            // The hex's other faces that are tops (sculptedTriangles) shelter its bed faces as well.
+            for (var face : formed) {
+                if (GpuMaterialCache.top(surface, face, scene)) { banks.add(face); }
             }
             float shore = surface.bedUnderLevelWater() ? GpuWaterShader.palette(tile.liquid()) : Float.NaN;
             Function<Vector3, MeshPartBuilder.VertexInfo> vertices = p -> bedVertex(p, surface, bedNormals, shore);
             for (var face : bed) {
+                var target = GpuMaterialCache.bed(surface, face, scene, banks) ? tops : groups;
                 Consumer<List<MeshPartBuilder.VertexInfo>> blend = polygon -> {
                     if (tile.waterDepth() == 0) {
                         // An exposed bar still belongs to this shallow pool. Keep its water reference across the
@@ -5254,7 +5262,7 @@ final class GpuTerrain implements Disposable {
                             vertex.uv.set(vertex.uv.y, shoreRim(vertex.uv.x, tile));
                         }
                     }
-                    GpuSurfaceBlend.appendPolygon(groups, surface.family(face), polygon,
+                    GpuSurfaceBlend.appendPolygon(target, surface.family(face), polygon,
                           p -> sampler.sample(p.x, p.y, p.z), spacing);
                 };
                 if (Float.isNaN(shore)) {
@@ -5372,12 +5380,12 @@ final class GpuTerrain implements Disposable {
         }
         List<BoardSurface.Face> rest = plain;
         boolean sloped = false;
-        // Dry tops in a material of their own, which the ground material cache can draw (GpuMaterialCache).
-        if (Float.isNaN(shore) && GpuMaterialCache.cacheable(material)) {
+        // Tops in a material of their own, which the ground material cache can draw (GpuMaterialCache).
+        if (GpuMaterialCache.cacheable(material)) {
             List<BoardSurface.Face> tops = new ArrayList<>();
             rest = new ArrayList<>();
             for (var face : plain) {
-                boolean top = GpuMaterialCache.top(surface, face, scene, surfaces);
+                boolean top = GpuMaterialCache.top(surface, face, scene);
                 (top ? tops : rest).add(face);
                 sloped |= top && !GpuMaterialCache.level(face);
             }
@@ -8089,7 +8097,17 @@ final class GpuTerrain implements Disposable {
      * airless lunar terrain ({@link BoardScene.Tile#lunar}) without editing game state: vacuum freezes the water,
      * zero gravity removes the liquids and what lies loose.
      */
-    void setGravity(float gravity) { this.gravity = gravity * BoardAtmosphere.STANDARD_GRAVITY; }
+    void setGravity(float gravity) {
+        float next = gravity * BoardAtmosphere.STANDARD_GRAVITY;
+        // Water needs gravity, and cached wet ground keeps its wear: every top waits for pages filled since.
+        if ((next > 0) != (this.gravity > 0)) {
+            BoundingBox board = new BoundingBox().inf();
+            for (Chunk chunk : chunks) { board.ext(chunk.topBounds); }
+            int since = materialCache.detailChanged(board);
+            for (Chunk chunk : chunks) { chunk.cacheSince = since; }
+        }
+        this.gravity = next;
+    }
 
     /** Whether the scenario or local preview air pressure is vacuum ({@code BoardAtmosphere.Settings#pressure}). */
     void setVacuum(boolean vacuum) { this.vacuum = vacuum; }
