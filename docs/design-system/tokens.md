@@ -1174,6 +1174,8 @@ for it.
 **libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
 error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip;
 `UiKit.edgeChip(text, edge)` is the status chip without an icon, edged in any `token-chip-*` frame (the lobby's sides).
+`UiKit.gameMasterChip(text)` is the Game Master's chip: the `shield-person` icon in `status.gamemaster` and the
+`token-chip-gamemaster` edge (the lobby's GM chip on a player card).
 `UiKit.actingChip(text, tone)` is the status chip as a button (`token-chip-button-<tone>`): `tint.hover` washes it
 under the pointer and `tint.pressed` fills it pressed or checked, so checking it for a moment lights it (the lobby's
 warning chips, which a blocked Ready lights for 700 ms). All three set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A

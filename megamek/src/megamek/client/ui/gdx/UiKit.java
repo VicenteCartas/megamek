@@ -889,6 +889,14 @@ public final class UiKit {
     }
 
     /**
+     * The Game Master's status chip: the status chip with a {@code status.gamemaster} edge and shield, as the Game
+     * Master's toast has, so the referee never reads as an ordinary status.
+     */
+    public Table gameMasterChip(String text) {
+        return tokenChip("gamemaster", "shield-person", "status.gamemaster", text, "text.primary");
+    }
+
+    /**
      * A status chip as {@link #chip(String, Tone, boolean)} that acts on a click: under the pointer its status color
      * washes it, pressed or checked it fills ({@link UiTheme#TOKEN_CHIP_BUTTON}). Check it for a moment to light it,
      * as when it asks to be seen.

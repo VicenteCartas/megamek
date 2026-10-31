@@ -70,6 +70,7 @@ import megamek.common.containers.MunitionTree;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
+import megamek.common.event.GamePollEvent;
 import megamek.common.event.GameSettingsChangeEvent;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
@@ -180,6 +181,11 @@ public final class GpuLobbyWindow {
 
         @Override
         public void gamePlayerChat(GamePlayerChatEvent event) {
+            queueRefresh();
+        }
+
+        @Override
+        public void gamePollChange(GamePollEvent event) {
             queueRefresh();
         }
 
@@ -607,6 +613,16 @@ public final class GpuLobbyWindow {
     /** Any thread: asks for the Game Master role, or gives it up. */
     void toggleGameMaster() {
         players(LobbyPlayerController::toggleGameMaster);
+    }
+
+    /** Any thread: votes in the running Game Master vote. */
+    void voteGameMaster(boolean allow) {
+        players(controller -> controller.voteGameMaster(allow));
+    }
+
+    /** Any thread: withdraws the local player's own Game Master request. */
+    void withdrawGameMaster() {
+        players(LobbyPlayerController::withdrawGameMaster);
     }
 
     /** Any thread: opens the setup of the local bot {@code id}. */

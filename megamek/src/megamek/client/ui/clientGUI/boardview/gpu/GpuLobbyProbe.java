@@ -40,6 +40,7 @@ import megamek.client.bot.AIType;
 import megamek.client.bot.BotClient;
 import megamek.client.bot.BotFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractNagDialog;
@@ -75,6 +76,12 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+overlap}: turns on double blind with exclusive deployment, so every player left on any edge
  *     overlaps and Ready is blocked.</li>
  *     <li>{@code lobby+blind}: turns on the real blind drop, so the other sides' Battle Value hides.</li>
+ *     <li>{@code lobby+gm}: allows the Game Master role and, {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, clicks the
+ *     top bar's Game Master seat and its Claim through the stage; alone, the seat is the player's at once.
+ *     {@code +step} then steps down. {@code +second} seats a second human player without a window on team 2, so the
+ *     claim becomes a vote they answer yes to {@value #SECOND_ACTS_AT} s in; with {@code +asked} the player claims
+ *     nothing and the second human asks instead, and the probe answers the card that opens with Allow, or with Deny
+ *     under {@code +deny}.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the lobby saves from its frame buffer, {@code MM_START_SHOT_AT} seconds
  *     after it shows (by default {@value #SHOT_AT}, once the bots and units have arrived).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>
@@ -154,6 +161,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final double FORM_WAIT = 20;
     /** When {@code lobby+fold}'s player and bots chat, in seconds: after the screen has folded the chat. */
     static final double FOLD_CHAT_AT = 3;
+    /** {@code lobby+gm+second}'s second human player, and when they act, in seconds. */
+    private static final String SECOND_NAME = "Second";
+    static final double SECOND_ACTS_AT = 4;
     private static final String DIALOG_OPTION = "dialog=";
     private static final String TAB_OPTION = "tab=";
     private static final String SCROLL_OPTION = "scroll=";
@@ -271,6 +281,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         boolean[] readied = { !starts && !options.contains("ready") };
         int[] formed = { options.contains("formations") ? 0 : FORMED };
         boolean[] foldChatted = { !options.contains("fold") };
+        // lobby+gm+second: a second human at the table, who asks for the seat (+asked) or votes yes on the player's ask
+        Client[] second = { null };
+        boolean[] secondDone = { !options.contains("second") };
         Timer timer = new Timer(POLL_MS, null);
         timer.addActionListener(event -> {
             // The bots join after the player, who gets the first player id as when they are added by hand
@@ -286,6 +299,10 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 loadUnits(client, local);
                 chat(client);
                 addBots(gui, waiting);
+                if (!secondDone[0]) {
+                    second[0] = connectSecond(client);
+                    secondDone[0] = second[0] == null;
+                }
             }
             waiting.removeIf(bot -> {
                 Player player = bot.getLocalPlayer();
@@ -302,6 +319,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 return true;
             });
             double elapsed = (System.nanoTime() - start) / 1e9;
+            if (second[0] != null && !secondDone[0]) {
+                secondDone[0] = secondStep(second[0], elapsed);
+            }
             if (joined[0] && formed[0] < FORMED) {
                 formed[0] = elapsed > FORM_WAIT ? FORMED : form(client, local, formed[0]);
             }
@@ -324,11 +344,42 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 LOGGER.info("The lobby probe's player and {} bots chat while the chat is folded",
                       gui.getLocalBots().size());
             }
-            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED && foldChatted[0]) {
+            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED && foldChatted[0]
+                  && secondDone[0]) {
                 timer.stop();
             }
         });
         timer.start();
+    }
+
+    /** Connects {@code lobby+gm+second}'s second human player, a client without a window; null when it fails. */
+    private static Client connectSecond(Client client) {
+        Client second = new Client(SECOND_NAME, client.getHost(), client.getPort());
+        if (second.connect()) {
+            LOGGER.info("The lobby probe's second human joins");
+            return second;
+        }
+        LOGGER.error("The lobby probe's second human failed to connect");
+        return null;
+    }
+
+    /**
+     * One step of the second human: on a team once they have joined, then {@value #SECOND_ACTS_AT} s in they ask for
+     * the seat ({@code +asked}) or vote yes on the player's ask; true once done.
+     */
+    private boolean secondStep(Client second, double elapsed) {
+        Player player = second.getLocalPlayer();
+        if (player == null || elapsed < SECOND_ACTS_AT) {
+            if (player != null && player.getTeam() != BOT_TEAM) {
+                player.setTeam(BOT_TEAM);
+                second.sendPlayerInfo();
+            }
+            return false;
+        }
+        boolean asks = options.contains("asked");
+        LOGGER.info("The lobby probe's second human {}", asks ? "asks for the Game Master seat" : "votes yes");
+        second.sendChat(asks ? LobbyCommands.GAME_MASTER_COMMAND : LobbyCommands.GAME_MASTER_ALLOW_COMMAND);
+        return true;
     }
 
     /** For a while, answers No to the questions the lobby asks and closes the nags, so the game starts unattended. */
@@ -371,9 +422,12 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         }
     }
 
-    /** Sends the game options {@code lobby+blocked}, {@code lobby+overlap} and {@code lobby+blind} ask for. */
+    /** Sends the game options {@code lobby+blocked}, {@code lobby+overlap}, {@code lobby+blind} and {@code lobby+gm} ask for. */
     private void sendOptions(Client client) {
         Vector<IBasicOption> changed = new Vector<>();
+        if (options.contains("gm")) {
+            changed.add(new BasicOption(OptionsConstants.GAME_MASTER_ALLOW, true));
+        }
         if (options.contains("blocked")) {
             changed.add(new BasicOption(OptionsConstants.VICTORY_COMMANDER_KILLED, true));
         }

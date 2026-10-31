@@ -868,9 +868,17 @@ public class ClientGUI extends AbstractClientGUI
     /**
      * Opens, follows and closes the Game Master vote dialog as the server shares the vote's state: the dialog opens
      * when a vote is called, follows the ballots as they come in, and closes when the vote resolves. The outcome itself
-     * is announced in the chat.
+     * is announced in the chat. While the libGDX lobby is up, its Game Master seat does all of this instead.
      */
     private void updateGameMasterVoteDialog(Poll poll) {
+        if (GpuLobbyWindow.isActiveFor(this)) {
+            // The lobby's Game Master seat shows the vote and the new Game Master itself
+            if (gameMasterVoteDialog != null) {
+                gameMasterVoteDialog.dispose();
+                gameMasterVoteDialog = null;
+            }
+            return;
+        }
         if (poll.getStatus().isResolved()) {
             if (gameMasterVoteDialog != null) {
                 gameMasterVoteDialog.dispose();

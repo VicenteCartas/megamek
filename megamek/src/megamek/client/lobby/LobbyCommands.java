@@ -73,6 +73,10 @@ public class LobbyCommands {
 
     /** The chat command that asks for the Game Master role, or gives it up. */
     public static final String GAME_MASTER_COMMAND = "/gm";
+    /** The chat commands that vote for or against a Game Master request, and withdraw one's own request. */
+    public static final String GAME_MASTER_ALLOW_COMMAND = "/allowGM";
+    public static final String GAME_MASTER_DENY_COMMAND = "/denyGM";
+    public static final String GAME_MASTER_WITHDRAW_COMMAND = "/cancelGM";
 
     public static final int MIN_MAP_SIZE = 1;
     public static final int MAX_MAP_SIZE = 20;
@@ -166,6 +170,16 @@ public class LobbyCommands {
      */
     public void toggleGameMaster() {
         client().sendChat(GAME_MASTER_COMMAND);
+    }
+
+    /** Votes in the running Game Master vote: for the request when {@code allow}, else against it. */
+    public void voteGameMaster(boolean allow) {
+        client().sendChat(allow ? GAME_MASTER_ALLOW_COMMAND : GAME_MASTER_DENY_COMMAND);
+    }
+
+    /** Withdraws the local player's own request for the Game Master role, which ends its vote. */
+    public void withdrawGameMaster() {
+        client().sendChat(GAME_MASTER_WITHDRAW_COMMAND);
     }
 
     /**

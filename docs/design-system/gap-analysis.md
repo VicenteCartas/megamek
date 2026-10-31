@@ -878,6 +878,25 @@ work for Swing, and item 11 is under investigation.
        (window titles and frames captured from MegaMek's window only), with no null-board warning; `lobby+start`
        still goes from the start screen to the lobby and on to the board. The lobby probe now readies only once the
        bots' units have reached the game, as a unit arriving later un-readied the player and left the game waiting.
+     - ~~The Game Master seat~~ (Hammer missed ChatLounge's GM buttons). The Game Master is a seat at the table,
+       not a form: the top bar's first control, a special button with the violet shield (`status.gamemaster`), says
+       what the seat is doing. Locked (the game options do not allow a Game Master), open ("Game Master"), a vote
+       ("GM vote" with a ballot pip for each voter: a violet check for yes, a red cross for no, an empty ring for
+       waiting), the player's own (lit, the shield in the lit face's ink), or someone else's ("GM · name"); it
+       flashes when the seat changes hands, unless reduce motion is on. Clicking opens the seat card: what the role
+       can do and Claim when open; the ballot, the threshold and Deny / Allow when the vote waits on the player (the
+       card then opens by itself, once per vote) or Withdraw when it is the player's ask; Step down when it is the
+       player's. The player card's GM chip is violet too (`UiKit.gameMasterChip`, the `gamemaster` chip frame), and
+       the Swing vote and appointed dialogs no longer open while the lobby shows. The model is toolkit-free
+       (`LobbyGameMaster`, read from the game and the client's running poll into `LobbySnapshot.gameMaster`); the
+       window sends `/gm`, `/allowGM`, `/denyGM` and `/cancelGM` (`LobbyCommands`) and refreshes on the client's
+       poll events. Checks: `LobbyGameMasterTest`, `LobbySnapshotTest` (a running vote), `LobbyCommandsTest`; the
+       on-demand `LobbyGameMasterSeatSmokeTest` clicks claim, the card opening by itself with Allow and Deny,
+       Withdraw, Step down, the locked and held faces, and the flash against reduce motion. Live, through the
+       stage with the probe's `lobby+gm` (and a windowless second human with `+second`): claiming alone takes the
+       seat at once; with the second human, the claim becomes a vote they pass; their own ask opens the card by
+       itself, and Allow gives them the seat (held, with their GM chip) while Deny leaves it open; Step down frees
+       it. The in-game Game Master controls stay as they are for now.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - L14 Settings check: the lobby's part of step 7. Every client and GUI preference the old Swing lobby read or
          wrote is honoured by the libGDX lobby, persists across restarts and appears in the settings dialog where it
@@ -891,7 +910,8 @@ work for Swing, and item 11 is under investigation.
        - L18 File choosers: game options, loadouts, unit lists and map setups open the system file dialog (as the
          start screen does) instead of a Swing chooser.
        - Live checks still to do: a real MekHQ game, a network reconnect, saving and loading game options and bot
-         presets through the real file chooser, a password-protected game and a second human player.
+         presets through the real file chooser and a password-protected game. A second human player was checked
+         for the Game Master seat (a windowless client); a second MegaMek window remains to try.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).

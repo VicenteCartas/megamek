@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -91,6 +92,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     static final double PROBE_CLICK_AT = 1.5;
     /** The stored behaviour the probe chooses in the bot setup. */
     private static final String PROBE_PRESET = "COWARDLY";
+    /** {@code lobby+gm}'s name for a click on the seat itself rather than on its card. */
+    private static final String GM_SEAT = "seat";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -106,6 +109,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private int bh;
 
     private LobbyTopBar topBar;
+    private LobbyGameMasterSeat gameMasterSeat;
     private LobbyPlayersPanel players;
     private LobbyForcesPanel forces;
     private LobbyBattlefieldPanel battlefield;
@@ -137,6 +141,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private int filterClicksPending;
     /** The {@code +setskills} clicks left: Set, then the gunnery's +. */
     private int skillClicksPending;
+    private Deque<ProbeClick> gmClicks = new ArrayDeque<>();
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -229,6 +234,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               : null;
         advancedStep = probe.options().contains("advanced") ? 0 : -1;
         skillClicksPending = probe.options().contains("setskills") ? 2 : 0;
+        gmClicks = gmClicks(probe);
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -268,7 +274,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     private void build() {
         boolean motion = !preferences.getReduceMotion();
-        topBar = new LobbyTopBar(kit, window::leave, window::ready, this::goTo);
+        gameMasterSeat = new LobbyGameMasterSeat(kit, new LobbyGameMasterSeat.SeatActions() {
+            @Override
+            public void claim() {
+                window.toggleGameMaster();
+            }
+
+            @Override
+            public void vote(boolean allow) {
+                window.voteGameMaster(allow);
+            }
+
+            @Override
+            public void withdraw() {
+                window.withdrawGameMaster();
+            }
+        }, motion);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, window::leave, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -1112,6 +1134,32 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         GpuLobbyProbeInput.click(stage, target);
     }
 
+    /** A click {@code lobby+gm} makes through the stage: the seat itself, or a control on its card by name. */
+    private record ProbeClick(double at, String name) {}
+
+    /**
+     * {@code lobby+gm}'s clicks: the seat and Claim, then with {@code +step} the seat and Step down once the claim has
+     * gone through; with {@code +asked} only Allow (or Deny) on the card the second human's ask opens.
+     */
+    private static Deque<ProbeClick> gmClicks(GpuLobbyProbe probe) {
+        Deque<ProbeClick> clicks = new ArrayDeque<>();
+        if (!probe.options().contains("gm")) {
+            return clicks;
+        }
+        double answerAt = GpuLobbyProbe.SECOND_ACTS_AT + 1;
+        if (probe.options().contains("asked")) {
+            clicks.add(new ProbeClick(answerAt, probe.options().contains("deny") ? "lobby-gm-deny" : "lobby-gm-allow"));
+            return clicks;
+        }
+        clicks.add(new ProbeClick(PROBE_CLICK_AT, GM_SEAT));
+        clicks.add(new ProbeClick(PROBE_CLICK_AT + .5, "lobby-gm-claim"));
+        if (probe.options().contains("step")) {
+            clicks.add(new ProbeClick(answerAt, GM_SEAT));
+            clicks.add(new ProbeClick(answerAt + .5, "lobby-gm-step-down"));
+        }
+        return clicks;
+    }
+
     /** Scrolls the dialog's body so that {@code target} shows in the middle. */
     private static void probeReveal(UiDialog dialog, @Nullable Actor target) {
         if (target == null) {
@@ -1179,6 +1227,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (advancedStep >= 0 && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT
               && elapsed > advancedAt) {
             probeAdvanced(probe, elapsed);
+        }
+        if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
+            ProbeClick click = gmClicks.removeFirst();
+            Actor target = click.name().equals(GM_SEAT) ? gameMasterSeat.button()
+                  : gameMasterSeat.card().findActor(click.name());
+            probeClick(target);
+            LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
+                  window.snapshot().gameMaster());
         }
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {

@@ -19,6 +19,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.lobby.ChatLine;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyForces;
+import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbySnapshot;
@@ -141,8 +142,8 @@ class LobbyFoldAndFiltersSmokeTest {
     }
 
     private static LobbySnapshot snapshot(List<ChatLine> chat) {
-        return new LobbySnapshot(1, false, false, false, List.of(), chat, List.of(), "", "", LobbyForces.EMPTY,
-              LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY, LobbyRequisition.EMPTY);
+        return new LobbySnapshot(1, false, false, LobbyGameMaster.OFF, List.of(), chat, List.of(), "", "",
+              LobbyForces.EMPTY, LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY, LobbyRequisition.EMPTY);
     }
 
     private static float stageX(Actor actor) {
