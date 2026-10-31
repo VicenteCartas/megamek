@@ -10,6 +10,7 @@ import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.function.UnaryOperator;
 
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
@@ -515,10 +516,22 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 if (terminal > 0) { runs.add(terminal); }
             }
             runs.add(climb);
-            // A wing beside a ramp up onto its bank that runs the whole landing takes over its side's rail and block.
-            boolean[] walled = ramp && curve == null ? wings(faces, ground, gate, along, across, lane, width,
+            // A wing beside a ramp up onto its bank that runs the whole landing takes over its side's rail and block. On a
+            // bent bank road it is built straight and bent with the rest, so it reads the bank where the bend puts it.
+            int direction = d;
+            UnaryOperator<Vector3> place = p -> curve == null ? p : bent(curve, tile.coords(), direction, p);
+            // The bend takes the wing past the gate's corners, over the hexes beside the bank and the deck.
+            var retained = ground;
+            if (ramp && curve != null) {
+                retained = new ArrayList<>(ground);
+                for (int turn : new int[] { 1, 5 }) {
+                    var beside = scene.tile(tile.coords().translated((d + turn) % 6));
+                    if (beside != null) { retained.addAll(ground(scene, beside, lod, surfaces, columns).foundation()); }
+                }
+            }
+            boolean[] walled = ramp ? wings(faces, retained, gate, along, across, lane, width,
                   (1 - BoardRoadGrade.BRIDGE_START) * half, reach, bottom,
-                  (lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 1 : 2) * scale) : new boolean[2];
+                  (lod == TerrainLod.FULL || lod == TerrainLod.MEDIUM ? 1 : 2) * scale, place) : new boolean[2];
             var previous = start;
             for (float t : runs) {
                 var row = row(start, end, t, !bare, climb);
@@ -561,92 +574,70 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
 
     /**
      * Concrete wing walls beside a ramp up onto its bank ({@code ground}): where the bank beside the road stands above
-     * it, a wall on the rail's line retains it, from {@code bottom} to a capped top seated on the bank's edge, from
-     * the abutment at the gate (never into the bridge hex, over the deck's own parapet) to where the road has climbed
-     * to the bank, at most {@code run} past the gate, and there slopes down into the road. Its top never falls toward
-     * the gate, so it holds its height over a corner whose ground falls away beside the abutment. A wing that runs
-     * from the abutment past the landing's {@code reach} is that side's parapet: at least a rail high, it takes over
-     * the rail and its block (by side, the result). A bank that rises above the road only further in gets its own
-     * stretch. Stations every {@code step}; {@code along} points into the bank.
+     * it, one straight wall on the rail's line retains that side, from {@code bottom} up, from the abutment at the gate
+     * (never into the bridge hex, over the deck's own parapet) to the end of the landing's {@code reach}, or on to where
+     * the bank still stands above the road, at most {@code run} past the gate. It is that side's parapet, taking over the
+     * rail and its block (by side, the result). Its top runs straight from the gate to its far end, at least a rail's
+     * height over the road at both, capping all of the bank it retains. Stations every {@code step}; {@code along} points
+     * into the bank, and {@code place} puts a point of that straight frame where the bank road's bend takes it.
      */
     private static boolean[] wings(List<BoardBridge.Facet> faces, List<BoardSurface.Face> ground, Vector3 gate,
-          Vector3 along, Vector3 across, float lane, float width, float run, float reach, float bottom, float step) {
-        float scale = BoardGeometry.hexScale(), rail = 2.5f * scale;
+          Vector3 along, Vector3 across, float lane, float width, float run, float reach, float bottom, float step,
+          UnaryOperator<Vector3> place) {
+        float rail = 2.5f * BoardGeometry.hexScale();
         // From just behind the rail's inner face to just past the slab's edge, where the bank's cut face stands.
         float inner = lane + BoardRelief.metres(.03f), outer = width + BoardRelief.metres(.1f);
         boolean[] walled = new boolean[2];
         for (int side : new int[] { -1, 1 }) {
-            // Stretches of stations {u, road, top} where the bank stands above the road, from where it starts to where it
-            // runs out.
-            List<List<float[]>> stretches = new ArrayList<>();
-            List<float[]> stretch = null;
-            float previous = Float.NaN;
+            // The stations {u, road, top} where the bank stands above the road.
+            List<float[]> retained = new ArrayList<>();
             for (float u = 0; u <= run + step / 2; u += step) {
-                float at = Math.min(u, run);
-                var station = station(ground, gate, along, across, side, inner, outer, at);
-                boolean stands = !Float.isNaN(station[2]), stood = stretch != null;
-                if (stands != stood && !Float.isNaN(previous)) {
-                    float low = previous, high = at;
-                    for (int i = 0; i < 12; i++) {
-                        float middle = (low + high) / 2;
-                        if (Float.isNaN(station(ground, gate, along, across, side, inner, outer, middle)[2]) != stood) {
-                            low = middle;
-                        } else { high = middle; }
-                    }
-                    if (!stood) { stretches.add(stretch = new ArrayList<>()); }
-                    stretch.add(station(ground, gate, along, across, side, inner, outer, stood ? low : high));
-                    if (stood) { stretch = null; }
-                }
-                if (stands) {
-                    if (stretch == null) { stretches.add(stretch = new ArrayList<>()); }
-                    stretch.add(station);
-                }
-                previous = at;
+                var station = station(ground, place, gate, along, across, side, inner, outer, Math.min(u, run));
+                if (!Float.isNaN(station[2])) { retained.add(station); }
             }
-            for (var wall : stretches) {
-                // A bank starting just in from the gate is retained from the abutment on.
-                var first = wall.getFirst();
-                if (wall == stretches.getFirst() && first[0] > 0 && first[0] <= PAST_GATE * scale) {
-                    wall.addFirst(new float[] { 0, station(ground, gate, along, across, side, inner, outer, 0)[1], first[2] });
-                }
-                boolean parapet = wall.getFirst()[0] <= 0 && wall.getLast()[0] >= reach;
-                walled[(side + 1) / 2] |= parapet;
-                float[] last = wall.getLast();
-                if (parapet && last[0] < run) {
-                    // Past the cut the parapet slopes down into the road over a rail's height.
-                    float u = Math.min(run, last[0] + rail);
-                    wall.add(new float[] { u, Float.NaN, station(ground, gate, along, across, side, inner, outer, u)[1] });
-                }
-                for (int i = wall.size() - 1; i >= 0; i--) {
-                    float[] station = wall.get(i);
-                    if (parapet && i < wall.size() - 1 && !Float.isNaN(station[1])) {
-                        station[2] = Math.max(station[2], station[1] + rail);
-                    }
-                    if (i < wall.size() - 1) { station[2] = Math.max(station[2], wall.get(i + 1)[2]); }
-                }
-                wing(faces, wall, gate, along, across, side, inner, outer, bottom);
+            if (retained.isEmpty()) { continue; }
+            walled[(side + 1) / 2] = true;
+            // A rail high over the road at both ends, and at the far end over the bank along its outer half; then the
+            // lowest top at the gate whose straight run to there clears every retained station.
+            float end = Math.max(reach, retained.getLast()[0]);
+            float far = station(ground, place, gate, along, across, side, inner, outer, end)[1] + rail;
+            float near = station(ground, place, gate, along, across, side, inner, outer, 0)[1] + rail;
+            for (float[] station : retained) {
+                if (station[0] >= end / 2) { far = Math.max(far, station[2]); }
             }
+            for (float[] station : retained) {
+                float share = station[0] / end;
+                if (share < 1) { near = Math.max(near, (station[2] - far * share) / (1 - share)); }
+            }
+            List<float[]> wall = new ArrayList<>();
+            for (float u = 0; u < end - step / 2; u += step) {
+                wall.add(new float[] { u, Float.NaN, near + (far - near) * u / end });
+            }
+            wall.add(new float[] { end, Float.NaN, far });
+            wing(faces, wall, gate, along, across, side, inner, outer, bottom);
         }
         return walled;
     }
 
-    /** How far in from the gate a bank may start beside the road and still be retained from the abutment, in model px. */
-    private static final float PAST_GATE = 8;
-
     /**
      * A wing's station {u, road, top} at {@code u} past the gate on {@code side}: the road beside it and its top, on the
      * bank's edge with a cap no deeper than the cut, so it meets the road where the cut ends; the top is NaN where the
-     * bank does not stand above the road.
+     * bank does not stand above the road. A bank reaching in over the wall's width, as beside a bent road whose cut runs
+     * nearer it, is retained to its top there too.
      */
-    private static float[] station(List<BoardSurface.Face> ground, Vector3 gate, Vector3 along, Vector3 across, int side,
-          float inner, float outer, float u) {
+    private static float[] station(List<BoardSurface.Face> ground, UnaryOperator<Vector3> place, Vector3 gate,
+          Vector3 along, Vector3 across, int side, float inner, float outer, float u) {
         var p = new Vector3(gate).mulAdd(along, u);
-        var road = new Vector3(p).mulAdd(across, side * (inner - BoardGeometry.hexScale()));
-        var beyond = new Vector3(p).mulAdd(across, side * (outer + BoardRelief.metres(.05f)));
+        var road = place.apply(new Vector3(p).mulAdd(across, side * (inner - BoardGeometry.hexScale())));
+        var beyond = place.apply(new Vector3(p).mulAdd(across, side * (outer + BoardRelief.metres(.05f))));
         // At the gate the deck carries the road at the gate's height.
         float base = BoardSurface.sampleHeight(ground, road.x, road.y, u <= 0 ? gate.z : Float.NaN);
-        float cut = BoardSurface.sampleHeight(ground, beyond.x, beyond.y, Float.NaN) - base;
-        float top = base + cut + BoardRelief.metres(.15f) * Math.min(1, cut / (2.5f * BoardGeometry.hexScale()));
+        float cut = BoardSurface.sampleHeight(ground, beyond.x, beyond.y, Float.NaN) - base, rise = cut;
+        for (float share : new float[] { 0, .5f, 1 }) {
+            var q = place.apply(new Vector3(p).mulAdd(across, side * (inner + (outer - inner) * share)));
+            rise = Math.max(rise, BoardSurface.sampleHeight(ground, q.x, q.y, Float.NEGATIVE_INFINITY) - base);
+        }
+        float top = base + rise + BoardRelief.metres(.15f) * Math.min(1, rise / (2.5f * BoardGeometry.hexScale()));
         return new float[] { u, base, cut > 0 ? top : Float.NaN };
     }
 
@@ -717,8 +708,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
     private static void bend(List<BoardBridge.Facet> faces, int first, Coords owner, int direction, BoardRoad road,
           Vector3 gate, Vector3 along) {
         if (road == null) { return; }
-        float scale = BoardGeometry.hexScale(), step = 2 * scale;
-        var center = BoardGeometry.center(owner, 0);
+        float step = 2 * BoardGeometry.hexScale();
         var across = new Vector3(-along.y, along.x, 0);
         var source = new ArrayList<>(faces.subList(first, faces.size()));
         faces.subList(first, faces.size()).clear();
@@ -728,11 +718,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 for (var polygon : face.part() == BoardBridge.Part.TOP ? slice(strip, gate, across, step) : List.of(strip)) {
                     List<Vector3> bent = new ArrayList<>();
                     for (var point : polygon) {
-                        bent.add(placed.computeIfAbsent(point, p -> {
-                            var xy = road.bendFrom(owner, (direction + 3) % 6,
-                                  (p.x - center.x) / scale, (p.y - center.y) / scale);
-                            return new Vector3(center.x + xy.x * scale, center.y + xy.y * scale, p.z);
-                        }));
+                        bent.add(placed.computeIfAbsent(point, p -> bent(road, owner, direction, p)));
                     }
                     for (int i = 1; i + 1 < bent.size(); i++) {
                         BoardBridge.triangle(faces, bent.getFirst(), bent.get(i), bent.get(i + 1), face.part(), face.colour());
@@ -740,6 +726,14 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                 }
             }
         }
+    }
+
+    /** A point of the deck's straight frame at its {@code direction} gate, where the bank road's bend takes it. */
+    private static Vector3 bent(BoardRoad road, Coords owner, int direction, Vector3 p) {
+        float scale = BoardGeometry.hexScale();
+        var center = BoardGeometry.center(owner, 0);
+        var xy = road.bendFrom(owner, (direction + 3) % 6, (p.x - center.x) / scale, (p.y - center.y) / scale);
+        return new Vector3(center.x + xy.x * scale, center.y + xy.y * scale, p.z);
     }
 
     /** A polygon's pieces between lines across {@code axis} (unit, XY) every {@code step} from {@code origin}. */

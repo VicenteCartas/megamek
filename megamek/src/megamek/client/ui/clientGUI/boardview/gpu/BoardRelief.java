@@ -237,7 +237,7 @@ final class BoardRelief {
     private final BoardConcrete coast;
     private final boolean sculpted;
     private final Map<Coords, Site> sites = new HashMap<>();
-    private final Map<Coords, BoardRoad> decks = new HashMap<>();
+    private final Map<Coords, Slab> decks = new HashMap<>();
     private final Map<Coords, BoardRoad> roads = new HashMap<>();
     /** How far each edge's band recedes from roads, by edge and canonical parameter; see {@link #roadPush}. */
     private final Map<Edge, Map<Float, float[]>> pushes = new HashMap<>();
@@ -2066,20 +2066,42 @@ final class BoardRelief {
                         for (Site other : edge.b.around) { reserve |= other == beside; }
                     }
                     if (reserve || higher) {
-                        var deck = decks.computeIfAbsent(site.coords(), key -> BoardBridge.deck(scene, source).slab(key));
+                        var deck = decks.computeIfAbsent(site.coords(), key -> slab(BoardBridge.deck(scene, source), key));
                         // The gate a deck's road lands across keeps its boundary: the bank's road
                         // reserves its mouth and the footing stands on it; moved out of the slab, it would run
-                        // across the bank's ramp.
-                        Site bank = site == edge.lower ? edge.upper : site == edge.upper ? edge.lower : null;
-                        boolean gate = bank != null && BoardBridge.road(source, scene.tile(bank.coords()),
-                              source.coords().direction(bank.coords()));
-                        // Wide decks can cross the nominal corner itself; reserve their full slab before
-                        // trimming natural relief against that same canonical boundary on both sides.
-                        if (reserve && (at != null || !gate)) {
-                            var clear = cutBoundary(deck, site, px, py, 0);
-                            if (clear != null) { px = clear.x; py = clear.y; }
+                        // across the bank's ramp. A corner is the gate's where the road lands on any hex round it.
+                        boolean gate = false;
+                        Edge gateEdge = null;
+                        for (Site bank : at != null ? at.around
+                              : new Site[] { site == edge.lower ? edge.upper : site == edge.upper ? edge.lower : null }) {
+                            if (bank == null || bank == site || !BoardBridge.road(source, scene.tile(bank.coords()),
+                                  source.coords().direction(bank.coords()))) { continue; }
+                            gate = true;
+                            for (int e = 0; at != null && e < 6; e++) {
+                                if (neighbor(site, e) == bank) { gateEdge = edge(site, e); }
+                            }
                         }
-                        keep = Math.min(keep, roadClearance(deck, site.x(), site.y(), px, py, point.x - px, point.y - py));
+                        // Wide decks can cross the nominal corner itself; reserve their full slab before
+                        // trimming natural relief against that same canonical boundary on both sides. A gate's corner
+                        // keeps that boundary on the gate's own line, so the gate runs on straight to it beside the
+                        // slab, not across it.
+                        if (reserve && (at != null || !gate)) {
+                            var clear = cutBoundary(deck, site, px, py);
+                            if (clear != null) {
+                                px = clear.x;
+                                py = clear.y;
+                                if (gateEdge != null) {
+                                    Corner from = gateEdge.a == at ? gateEdge.b : gateEdge.a;
+                                    float gx = at.x - from.x, gy = at.y - from.y;
+                                    float share = ((px - from.x) * gx + (py - from.y) * gy) / (gx * gx + gy * gy);
+                                    px = from.x + gx * share;
+                                    py = from.y + gy * share;
+                                    keep = 0;
+                                }
+                            }
+                        }
+                        keep = Math.min(keep, roadClearance(deck.road(), deck.clear(), site.x(), site.y(), px, py,
+                              point.x - px, point.y - py));
                     }
                 }
                 if (!site.road()) {
@@ -2110,9 +2132,22 @@ final class BoardRelief {
     /** Over how many tile pixels the rock round a tunnel portal eases back to its natural face, above and beside it. */
     private static final float PORTAL_RISE = 36, PORTAL_SIDE = 16;
 
-    /** Move a shared bank outside its actual road or deck, allowing a 1:1 cut above a descending curve. */
-    private static Vector3 cutBoundary(BoardRoad deck, Site site, float px, float py, float rise) {
-        float scale = BoardGeometry.hexScale(), clear = BoardRoad.SHOULDER + ROAD_MARGIN + rise;
+    /** A deck's carriageway and how far natural relief stands back from it. */
+    private record Slab(BoardRoad road, float clear) { }
+
+    /**
+     * A road and rail corridor is wider than its gates and runs out over their corners, so its curbs and rails take its
+     * whole shoulder and the relief stands back from them; a plain deck keeps a road's verge.
+     */
+    private static Slab slab(BoardBridge.Deck deck, Coords coords) {
+        return new Slab(deck.slab(coords),
+              (deck.corridor().sides() != 0 ? BoardBridge.SHOULDER : BoardRoad.SHOULDER) + ROAD_MARGIN);
+    }
+
+    /** Move a shared bank outside its deck's slab. */
+    private static Vector3 cutBoundary(Slab slab, Site site, float px, float py) {
+        BoardRoad deck = slab.road();
+        float scale = BoardGeometry.hexScale(), clear = slab.clear();
         float x = (px - site.x()) / scale, y = (py - site.y()) / scale;
         if (deck.distance(x, y) >= clear) { return null; }
         // Distance gradients also handle bent decks and their end planes; every incident edge obtains
@@ -2135,11 +2170,11 @@ final class BoardRelief {
     }
 
     /**
-     * Cut only material entering the shoulder and its verge (see {@link #ROAD_MARGIN}); slopes receding away from the
-     * road, and all rock clear of it, keep their full natural relief.
+     * Cut only material within {@code clear} of the road, its shoulder and verge (see {@link #ROAD_MARGIN}); slopes
+     * receding away from the road, and all rock clear of it, keep their full natural relief.
      */
-    static float roadClearance(BoardRoad road, float cx, float cy, float x, float y, float dx, float dy) {
-        float scale = BoardGeometry.hexScale(), clear = BoardRoad.SHOULDER + ROAD_MARGIN;
+    static float roadClearance(BoardRoad road, float clear, float cx, float cy, float x, float y, float dx, float dy) {
+        float scale = BoardGeometry.hexScale();
         float px = (x - cx) / scale, py = (y - cy) / scale;
         dx /= scale;
         dy /= scale;

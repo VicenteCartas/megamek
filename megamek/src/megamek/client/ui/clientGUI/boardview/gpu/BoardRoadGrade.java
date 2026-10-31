@@ -397,7 +397,14 @@ final class BoardRoadGrade {
 
     /** The carriageway's height at a world point, level across its width. */
     float height(float x, float y) {
-        if (course != null) { return courseHeight(x, y); }
+        // Past a bridge's edge, beside its deck, the approach runs on in the deck's plane down (or up) to the deck.
+        float past = 0;
+        for (int d = 0; planar != 0 && d < 6; d++) {
+            if ((planar & 1 << d) == 0 || edges[d] == level) { continue; }
+            float share = BoardGeometry.share(tile.coords(), d, x, y);
+            if (share > 1) { past += (edges[d] - level) * Math.min(share - 1, 1 - starts[d]) / (1 - starts[d]); }
+        }
+        if (course != null) { return past + courseHeight(x, y); }
         // Each arm ramps along its own run. Where two adjacent arms overlap, each weighs by its nearness to its own
         // edge, so every edge keeps exactly the height both hexes share there.
         float rise = 0, weights = 0;
@@ -410,7 +417,7 @@ final class BoardRoadGrade {
             rise += weight * profile(d, share);
             weights += weight;
         }
-        return weights == 0 ? level : level + rise / weights;
+        return past + (weights == 0 ? level : level + rise / weights);
     }
 
     /**
@@ -430,6 +437,13 @@ final class BoardRoadGrade {
     /** Lines the surface bends across, in world coordinates: the mesh keeps a vertex row on each. */
     List<float[]> creases() {
         List<float[]> result = new ArrayList<>();
+        // Where a bridge's edge runs on past its corners, beside the deck, a course's grade bends into the deck's plane.
+        for (int d = 0; course != null && planar != 0 && d < 6; d++) {
+            if ((planar & 1 << d) == 0 || edges[d] == level) { continue; }
+            float[] line = crossSection(d, 1), edge = crossSection(d, 1, 0);
+            result.add(new float[] { line[0], line[1], edge[0], edge[1] });
+            result.add(new float[] { edge[2], edge[3], line[2], line[3] });
+        }
         int rows = eased ? EASED_ROWS : 1;
         if (course != null) {
             // The course's cross-sections at the ramp's rows and at its own vertices, which keep a curved grade
@@ -467,13 +481,18 @@ final class BoardRoadGrade {
 
     /** A line parallel to this direction's edge at the given share of its run, across any carriageway. */
     private float[] crossSection(int direction, float run) {
+        return crossSection(direction, run, PAST_CORNER);
+    }
+
+    /** That line, reaching {@code past} tile pixels beyond the edge's corners. */
+    private float[] crossSection(int direction, float run, float past) {
         int edge = Math.floorMod(1 - direction, 6);
         float scale = BoardGeometry.hexScale();
         float ax = HexTile.cornerOffsetX(edge, BoardGeometry.TILE_WIDTH) * run;
         float ay = HexTile.cornerOffsetY(edge, BoardGeometry.TILE_HEIGHT) * run;
         float bx = HexTile.cornerOffsetX((edge + 1) % 6, BoardGeometry.TILE_WIDTH) * run;
         float by = HexTile.cornerOffsetY((edge + 1) % 6, BoardGeometry.TILE_HEIGHT) * run;
-        float dx = bx - ax, dy = by - ay, length = (float) Math.hypot(dx, dy), reach = PAST_CORNER / length;
+        float dx = bx - ax, dy = by - ay, length = (float) Math.hypot(dx, dy), reach = past / length;
         return new float[] { cx + (ax - dx * reach) * scale, cy + (ay - dy * reach) * scale,
               cx + (bx + dx * reach) * scale, cy + (by + dy * reach) * scale };
     }
@@ -514,6 +533,7 @@ final class BoardRoadGrade {
                 wedge.closePath();
                 local.add(new Area(wedge));
             }
+            float[] seals = new float[6];
             for (int d = 0; d < 6; d++) {
                 var next = scene.neighbor(tile, d);
                 if ((arms & 1 << d) == 0 || next == null || BoardSurface.connectingBridge(tile, next, d) == null) {
@@ -530,7 +550,7 @@ final class BoardRoadGrade {
                 // A ramp up onto this bank meets the deck below the bank's own wall on the edge: the mouth reserves a
                 // pixel either side of the edge, as the shore fit can move the wall off the lattice edge, so all of it
                 // gives way to the road.
-                float seal = edges[d] < level ? 1 / 36f : 0;
+                float seal = seals[d] = edges[d] < level ? 1 / 36f : 0;
                 Area mouth = new Area(lane(d, BoardSurface.roadMouth(tile, next, d), 1 - seal, 1 + PAST_MOUTH / 36));
                 float[] across = RailRoute.border(d);
                 mouth.subtract(new Area(hexagon(1)).createTransformedArea(
@@ -549,9 +569,12 @@ final class BoardRoadGrade {
                       && ground >= bottom - (eased ? FILL : .25f) * BoardGeometry.level()) {
                     continue;
                 }
+                // Over water a mouth keeps its seal past the edge, where the shore can move the bank's wall; dry ground
+                // under a deck keeps its shape.
+                float seal = next.liquid().present() ? seals[d] : 0;
                 float[] across = RailRoute.border(d);
                 local.subtract(new Area(hexagon(1)).createTransformedArea(
-                      AffineTransform.getTranslateInstance(2 * across[0], 2 * across[1])));
+                      AffineTransform.getTranslateInstance((2 + seal) * across[0], (2 + seal) * across[1])));
             }
         } else {
             // Each lane runs a pixel past its edge, which the hex then cuts: ending exactly on the edge, rounding would

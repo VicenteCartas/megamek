@@ -675,9 +675,20 @@ final class BoardRoadCut {
             for (Vector3 corner : new Vector3[] { a, b, c }) {
                 if (corner.dst2(v) <= grid * grid) { return corner; }
             }
-            var weld = List.of((long) Math.round(v.x / grid), (long) Math.round(v.y / grid), (long) Math.round(v.z / grid));
+            long x = Math.round(v.x / grid), y = Math.round(v.y / grid), z = Math.round(v.z / grid);
+            var weld = List.of(x, y, z);
             Vector3 same = welded.get(weld);
-            if (same != null) { return same; }
+            // Two copies of one point can fall either side of a cell's edge: the cells beside it on its nearer sides.
+            long dx = v.x / grid > x ? 1 : -1, dy = v.y / grid > y ? 1 : -1, dz = v.z / grid > z ? 1 : -1;
+            for (int k = 1; same == null && k < 8; k++) {
+                Vector3 near = welded.get(List.of(x + (k & 1) * dx, y + (k >> 1 & 1) * dy, z + (k >> 2) * dz));
+                if (near != null && near.dst2(v) <= epsilon * epsilon) { same = near; }
+            }
+            if (same != null) {
+                // Every later copy then finds the same point in its own cell.
+                welded.putIfAbsent(weld, same);
+                return same;
+            }
             relief.interpolateShade(a, b, c, 1 - s - t, s, t, v);
             welded.put(weld, v);
             return v;
