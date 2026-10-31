@@ -701,7 +701,7 @@ final class GpuMaterialCache {
         prewarmed = true;
         resized = settled = 0;
         reading = -1;
-        if (ENABLED && haveTops && usable && means == null) { createTile(); }
+        if (ENABLED && haveTops && usable && tileFramebuffer == 0) { createTile(); }
         if (!ENABLED || !haveTops || !usable) {
             pages.allocate(0);
             return;
@@ -1604,6 +1604,16 @@ final class GpuMaterialCache {
             LOGGER.warn("Ground material cache off: base tile framebuffer incomplete ({})", status);
         }
         mipVertices = org.lwjgl.opengl.GL30.glGenVertexArrays();
+        prepare();
+    }
+
+    /**
+     * Links the reduction and the sharpening, as the owning terrain is made: Intel holds a link on the render thread for
+     * the whole of the shader worker's current one, and the first fill comes while the terrain's programs link there (a
+     * 17 s frame of a cold load on Iris Xe).
+     */
+    void prepare() {
+        if (!ENABLED || means != null) { return; }
         means = program("ground material cache means", """
               void main() {
                   ivec2 p = ivec2(gl_FragCoord.xy) * 2;

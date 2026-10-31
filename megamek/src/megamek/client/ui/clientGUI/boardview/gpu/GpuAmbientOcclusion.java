@@ -99,18 +99,20 @@ final class GpuAmbientOcclusion implements Disposable {
         current = false;
         if (GpuEnvironmentLighting.ambientOcclusion(terrain.environment()) != this || !terrain.prepassed()) { return; }
         RenderContext context = terrain.renderContext();
-        int width = (depth.getWidth() + 1) / 2, height = (depth.getHeight() + 1) / 2;
-        if (horizons == null || horizons.getWidth() != width || horizons.getHeight() != height) {
-            disposeTargets();
-            horizons = createTarget(width, height);
-            blurred = createTarget(width, height);
-        }
+        // Before the targets: building one binds the window's framebuffer, and the colour pass after this one would then
+        // draw there (Intel also compiles each colour program again for it).
         query.clear();
         Gdx.gl.glGetIntegerv(GL20.GL_FRAMEBUFFER_BINDING, query);
         int previous = query.get(0);
         query.clear();
         Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, query);
         int viewportX = query.get(0), viewportY = query.get(1), viewportWidth = query.get(2), viewportHeight = query.get(3);
+        int width = (depth.getWidth() + 1) / 2, height = (depth.getHeight() + 1) / 2;
+        if (horizons == null || horizons.getWidth() != width || horizons.getHeight() != height) {
+            disposeTargets();
+            horizons = createTarget(width, height);
+            blurred = createTarget(width, height);
+        }
         context.setDepthTest(0);
         context.setDepthMask(false);
         context.setBlending(false, GL20.GL_ONE, GL20.GL_ZERO);
