@@ -61,6 +61,9 @@ final class UnitAnimator {
     private megamek.common.units.FallSide fallSide;
     /** How far a falling or fallen body is turned from its reported facing ({@link UnitMotion.Posture#turn}). */
     private float fallTurn;
+    /** The way a falling body's middle comes down beside its feet, in model space, and how far it has, 0 to 1. */
+    private final Vector3 fallDirection = new Vector3();
+    private float fallReach;
 
     UnitAnimator() { this(new BoardSurface.Cache()); }
 
@@ -561,10 +564,13 @@ final class UnitAnimator {
                     float scale = root.getParent() == null ? 1 : root.getParent().globalTransform.getScaleZ();
                     root.translation.z += (body.restFloor + formation.verticalOffset(body.rig.container()) - bounds.min.z) / scale;
                     if (body.rig.mek() && fallen > 0 && !dying) {
-                        // Rotate about the occupied hex, not about a hip pivot that sends the hull into another hex.
+                        // A fall topples the body over its feet, which keep their spot: its middle comes down beside them
+                        // toward the side it fell on, and lies from where it stood, inside its hex. A hip pivot would
+                        // throw it into another hex; one at its middle would dive like a goalkeeper.
                         var center = bounds.getCenter(new Vector3());
-                        root.translation.x += (body.restCenter.x - center.x) / scale;
-                        root.translation.y += (body.restCenter.y - center.y) / scale;
+                        var beside = new Vector3(fallDirection).scl(body.restHeight * .5f * fallReach);
+                        root.translation.x += (body.restCenter.x + beside.x - center.x) / scale;
+                        root.translation.y += (body.restCenter.y + beside.y - center.y) / scale;
                     }
                 }
             }
@@ -575,6 +581,11 @@ final class UnitAnimator {
     private void fallenPose(Body body, boolean rising, float progress) {
         if (fallen <= 0 || !body.joints.containsKey("root")) { return; }
         var side = fallSide == null ? megamek.common.units.FallSide.FRONT : fallSide;
+        float lead = UnitMotion.Posture.lead(side);
+        // Where its middle comes down beside its feet (settleContacts): as far as it has toppled, back as it gets up.
+        fallDirection.set(MathUtils.sinDeg(lead), MathUtils.cosDeg(lead), 0)
+              .rotate(Vector3.Z, rising ? UnitMotion.Posture.lyingTurn(side) : fallTurn);
+        fallReach = rising ? 1 - UnitMotion.Posture.rise(progress) : MathUtils.sinDeg(90 * fallen);
         if (rising) {
             // Roll onto the front or not (UnitMotion.Posture#rising), brace on the arms, draw the legs beneath the body,
             // then stand.
@@ -607,12 +618,20 @@ final class UnitAnimator {
             // The fall itself gathers speed (UnitMotion.fall); the body turns only as the posture says, never spins.
             body.joints.get("root").node().rotation.mul(new Quaternion(Vector3.Z, fallTurn))
                   .mul(UnitMotion.Posture.tip(side, 90 * fallen));
-            float brace = MathUtils.sin(fallen * MathUtils.PI);
-            legs(body, 0, 0, brace * .28f, 0, 0);
-            body.rotate("leftArm", Vector3.X, 55 * brace + 12 * fallen);
-            body.rotate("rightArm", Vector3.X, 65 * brace + 18 * fallen);
-            body.rotate("leftForearm", Vector3.X, 30 * brace);
-            body.rotate("rightForearm", Vector3.X, 35 * brace);
+            // It loses its balance before it goes down: the knees give, the torso leans back against the fall and the
+            // arms flail. Going down, the arms reach for the ground on the side it falls to; lying, they rest.
+            float buckle = smooth(fallen / .12f);
+            float struggle = MathUtils.sin(MathUtils.PI * MathUtils.clamp(fallen / .5f, 0, 1));
+            float brace = MathUtils.sin(MathUtils.PI * MathUtils.clamp((fallen - .45f) / .55f, 0, 1));
+            legs(body, 0, 0, .3f * buckle * (1 - .5f * fallen), 0, 0);
+            body.rotate("torso", new Vector3(-MathUtils.cosDeg(lead), MathUtils.sinDeg(lead), 0), -14 * struggle);
+            float forward = MathUtils.cosDeg(lead) * 60 * brace, out = MathUtils.sinDeg(lead) * 70 * brace;
+            body.rotate("leftArm", Vector3.X, 50 * struggle + forward + 12 * fallen);
+            body.rotate("rightArm", Vector3.X, -30 * struggle + forward + 18 * fallen);
+            body.rotate("leftArm", Vector3.Y, 35 * struggle + Math.max(0, -out));
+            body.rotate("rightArm", Vector3.Y, -45 * struggle - Math.max(0, out));
+            body.rotate("leftForearm", Vector3.X, 40 * struggle + 25 * brace);
+            body.rotate("rightForearm", Vector3.X, 30 * struggle + 25 * brace);
         }
     }
 

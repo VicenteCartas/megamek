@@ -123,7 +123,9 @@ class GpuPolishSmokeTest {
                 assertEquals(.5f, bounds.min.z, .02f);
                 var current = bounds.getCenter(new Vector3());
                 if (center == null) { center = current.cpy(); }
-                assertTrue(Math.hypot(current.x - center.x, current.y - center.y) < 1, "Fall stays centered in its hex");
+                // It topples over its feet, its middle coming down beside them, and lies inside its hex.
+                assertTrue(Math.hypot(current.x - center.x, current.y - center.y) < BoardGeometry.height() * .4f,
+                      "The fall stays inside its hex");
                 if (frame % 2 == 0) { renderer.frame(List.of(instance), origin, null, "polish-fall-" + side, frame); }
             }
         }
