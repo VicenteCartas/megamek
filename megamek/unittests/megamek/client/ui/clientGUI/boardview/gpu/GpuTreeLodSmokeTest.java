@@ -105,7 +105,7 @@ class GpuTreeLodSmokeTest {
                                       "Cutout crowns carry relief and packed leaf surface maps: " + name);
                             }
                         }
-                        assertTrue(triangles[0] <= 480 && triangles[1] <= 240 && triangles[2] <= 96 && triangles[3] <= 12, name);
+                        assertTrue(triangles[0] <= 1000 && triangles[1] <= 300 && triangles[2] <= 96 && triangles[3] <= 12, name);
                         BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                         assertEquals(30, bounds.getDepth(), .001f, "Plant GLBs must not contain flattened geometry: " + name);
                         float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();

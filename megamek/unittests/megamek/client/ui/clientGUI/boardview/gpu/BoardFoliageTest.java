@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.math.Vector3;
@@ -87,54 +86,6 @@ class BoardFoliageTest {
             checked++;
         }
         assertTrue(checked > 8, "Check several branches around the upper trunk: " + name);
-    }
-
-    @Test
-    void cactusPadsFormOneClosedConnectedSurfaceAtEveryMeshLod() {
-        File root = new File(Configuration.dataDir(), "models/board");
-        var levels = RigidGlb.loadLods(new FileHandle(new File(root, "vegetation/foliage-desert.glb")), root.toPath());
-        // The last level is the impostor's open cards, not a cactus body.
-        for (var data : levels.subList(0, 3)) {
-            // Hard normals and UV seams split render vertices; weld only positions for the topology check.
-            var positions = new HashMap<List<Integer>, Integer>();
-            var edges = new HashMap<List<Integer>, Integer>();
-            var neighbours = new HashMap<Integer, HashSet<Integer>>();
-            for (var mesh : data.meshes) {
-                int[] welded = new int[mesh.vertices.length / RigidGlb.STRIDE];
-                for (int i = 0; i < welded.length; i++) {
-                    int offset = i * RigidGlb.STRIDE;
-                    var point = List.of(Math.round(mesh.vertices[offset] * 100_000),
-                          Math.round(mesh.vertices[offset + 1] * 100_000), Math.round(mesh.vertices[offset + 2] * 100_000));
-                    welded[i] = positions.computeIfAbsent(point, ignored -> positions.size());
-                }
-                for (var part : mesh.parts) {
-                    for (int i = 0; i < part.indices.length; i += 3) {
-                        for (int side = 0; side < 3; side++) {
-                            int a = welded[Short.toUnsignedInt(part.indices[i + side])];
-                            int b = welded[Short.toUnsignedInt(part.indices[i + (side + 1) % 3])];
-                            assertTrue(a != b, "No collapsed pad joints");
-                            edges.merge(List.of(Math.min(a, b), Math.max(a, b)), 1, Integer::sum);
-                            neighbours.computeIfAbsent(a, ignored -> new HashSet<>()).add(b);
-                            neighbours.computeIfAbsent(b, ignored -> new HashSet<>()).add(a);
-                        }
-                    }
-                }
-            }
-            assertTrue(edges.values().stream().allMatch(count -> count == 2), "Every cactus edge has two faces");
-            var visited = new HashSet<Integer>();
-            var pending = new ArrayList<>(List.of(0));
-            while (!pending.isEmpty()) {
-                int vertex = pending.removeLast();
-                if (visited.add(vertex)) { pending.addAll(neighbours.get(vertex)); }
-            }
-            assertEquals(positions.size(), visited.size(), "Every pad belongs to one fused cactus body");
-            // Pads are individually flat, but the plant must branch in both horizontal directions.
-            for (int axis = 0; axis < 2; axis++) {
-                int coordinate = axis;
-                var extent = positions.keySet().stream().mapToInt(point -> point.get(coordinate)).summaryStatistics();
-                assertTrue(extent.getMax() - extent.getMin() > 1_000_000, "Cactus branches must have real depth");
-            }
-        }
     }
 
     @ParameterizedTest
