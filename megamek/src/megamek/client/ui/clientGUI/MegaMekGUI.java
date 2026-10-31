@@ -285,6 +285,11 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         }
 
         startClient(playerName, MMConstants.LOCALHOST, server.getPort());
+        if (client == null) {
+            // A game nobody could join; the next one may take its port
+            server.die();
+            server = null;
+        }
     }
 
     public boolean startServer(@Nullable String serverPassword, int port, boolean isRegister,
@@ -522,7 +527,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         Compute.d6();
         int port = request.port();
         if (!startServer(request.password(), port, false, null, null, null, scenario.getGameType())) {
-            GpuStartWindow.startFailed(false);
             return;
         }
         server.setGame(game);
@@ -532,7 +536,6 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             // The server has the briefing's game now; the briefing makes it again before it starts another
             server.die();
             server = null;
-            GpuStartWindow.startFailed(true);
             return;
         }
         gameManager.calculatePlayerInitialCounts();

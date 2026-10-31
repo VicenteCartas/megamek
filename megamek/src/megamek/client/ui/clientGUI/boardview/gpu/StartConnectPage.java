@@ -99,6 +99,9 @@ final class StartConnectPage {
 
     /** Checks the Connect page; shows what is wrong under the inputs, or asks MegaMek to join the game. */
     void submitConnect() {
+        if (connectButton.isDisabled()) {
+            return;
+        }
         String name = inputs.nameInput.getText().trim();
         String address = addressInput.getText().trim();
         int port = StartHostForm.port(inputs.portInput.getText());
@@ -112,6 +115,7 @@ final class StartConnectPage {
             return;
         }
         boolean bot = asBot();
+        screen.starting(connectButton, "StartScreen.connecting");
         screen.window.connect(new ConnectRequest(name, address, port, bot, !bot && sbfBox.isChecked()));
     }
 }

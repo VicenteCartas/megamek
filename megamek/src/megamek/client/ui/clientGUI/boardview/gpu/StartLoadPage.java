@@ -48,7 +48,7 @@ final class StartLoadPage {
               Messages.getString("MegaMek.SaveGameDialog.title"), new FileNameExtensionFilter(
                     Messages.getString("StartScreen.saveFiles"), "sav", "gz"), file -> {
                   if (screen.page == Page.LOAD) {
-                      readSave(file, false);
+                      readSave(file, null);
                   }
               }));
         List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
@@ -63,11 +63,11 @@ final class StartLoadPage {
         for (File save : saves) {
             UiButton row = screen.kit.button("button-quiet", null, StartSaves.title(save), savedAt(save));
             GpuStartScreen.leftAligned(row);
-            UiKit.onChange(row, () -> readSave(save, true));
+            UiKit.onChange(row, () -> readSave(save, row));
             // The way to the Resume page's choices for a save that would otherwise load at once
             UiButton options = screen.kit.button("button-quiet-compact", null,
                   Messages.getString("StartScreen.saveOptions"), null);
-            UiKit.onChange(options, () -> readSave(save, false));
+            UiKit.onChange(options, () -> readSave(save, null));
             Table line = new Table();
             line.add(row).growX().minWidth(0);
             line.add(options).padLeft(4);
@@ -99,23 +99,33 @@ final class StartLoadPage {
     }
 
     /**
-     * Reads {@code save} off the GPU thread, then, when {@code quick} and it is the last player's own game against
-     * bots, loads it at once; otherwise opens it on the Resume page, or says on the Load game page why it can't load.
+     * Reads {@code save} off the GPU thread, then, when {@code quick}, the button that asked, is given and it is the
+     * last player's own game against bots, loads it at once, the button saying so meanwhile; otherwise opens it on the
+     * Resume page, or says on the Load game page why it can't load.
      */
-    void readSave(File save, boolean quick) {
+    void readSave(File save, UiButton quick) {
+        if (quick != null && quick.isDisabled()) {
+            return;
+        }
         screen.generation++;
+        if (quick != null) {
+            screen.starting(quick, "StartScreen.starting");
+        }
         if (screen.page == Page.LOAD) {
             showLoadNote(Messages.getString("StartScreen.readingSave", StartSaves.title(save)), "text.muted");
         }
         screen.background("save", () -> StartSaves.read(save), summary -> {
             ClientPreferences client = PreferenceManager.getClientPreferences();
-            String player = quick ? summary.quickPlayer(client.getLastPlayerName()) : null;
+            String player = quick != null ? summary.quickPlayer(client.getLastPlayerName()) : null;
             if (player != null) {
                 String password = client.getLastServerPass();
                 screen.window.load(new LoadRequest(summary.file(), new HostRequest(player,
                       password == null ? "" : password, client.getLastServerPort(), false, ""), false,
                       summary.bots()));
-            } else if (summary.loadable()) {
+                return;
+            }
+            screen.startEnded();
+            if (summary.loadable()) {
                 screen.hostPage.resume = summary;
                 screen.showPage(Page.RESUME);
             } else {

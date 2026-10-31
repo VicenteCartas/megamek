@@ -283,6 +283,7 @@ public final class GpuStartWindow {
     public static void resume() {
         launched = null;
         inputChanged();
+        startEnded();
     }
 
     /** EDT: whether a launched window has the start screen suspended. */
@@ -460,22 +461,22 @@ public final class GpuStartWindow {
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the game the Host page describes. */
     void host(HostRequest request) {
-        request(hosts, request);
+        start(hosts, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to join the game the Connect page describes. */
     void connect(ConnectRequest request) {
-        request(connects, request);
+        start(connects, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the saved game the Load game page describes. */
     void load(LoadRequest request) {
-        request(loads, request);
+        start(loads, request);
     }
 
     /** Any thread: asks MegaMek, on the Swing thread, to host the scenario the briefing describes. */
     void scenario(ScenarioRequest request) {
-        request(scenarios, request);
+        start(scenarios, request);
     }
 
     /** Any thread: hands {@code request} to {@code handler} on the Swing thread, unless the screen is suspended. */
@@ -486,6 +487,32 @@ public final class GpuStartWindow {
                     handler.accept(request);
                 }
             });
+        }
+    }
+
+    /**
+     * Any thread: hands a start page's {@code request} to {@code handler} as {@link #request} does. Unless that
+     * launched a game's window, however it failed, the page's button that says the game is starting works again.
+     */
+    private static <T> void start(Consumer<T> handler, T request) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                if (launched == null && handler != null) {
+                    handler.accept(request);
+                }
+            } finally {
+                if (launched == null) {
+                    startEnded();
+                }
+            }
+        });
+    }
+
+    /** EDT: no game started, or the one that did has closed; the open screen's start button works again. */
+    private static void startEnded() {
+        GpuStartWindow window = open;
+        if (window != null) {
+            window.post(() -> window.screen.startEnded());
         }
     }
 
@@ -557,17 +584,6 @@ public final class GpuStartWindow {
             T result = work.apply(anchor);
             post(() -> done.accept(result));
         });
-    }
-
-    /**
-     * EDT: the scenario the briefing asked for didn't start; {@code gameUsed} when the server had taken its game by
-     * then, so the briefing has to make it again before it can start another.
-     */
-    public static void startFailed(boolean gameUsed) {
-        GpuStartWindow window = open;
-        if (window != null) {
-            window.post(() -> window.screen.startFailed(gameUsed));
-        }
     }
 
     /**
