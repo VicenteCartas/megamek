@@ -1842,8 +1842,13 @@ final class GpuTerrain implements Disposable {
         /** The ground material cache's tops (GpuMaterialCache.top), not in terrainRenderables, and their bounds. */
         final Array<Renderable> topRenderables = new Array<>();
         final BoundingBox topBounds = new BoundingBox();
-        /** Whether tops of theme-boundary hexes are among them: their covers follow this detail's sampling. */
-        boolean blendedTops;
+        /**
+         * Whether its tops follow this detail: a theme boundary's covers its sampling, a slope's coverage its triangles.
+         * Their pages rebuild after a detail change; until then they draw cached only from pages begun since their
+         * install, its generation (GpuMaterialCache#detailChanged).
+         */
+        boolean detailTops;
+        int cacheSince;
         GpuTerrainDepth depthTerrain;
         /** Packed and instanced cosmetic cover share one visibility decision in every pass. */
         final List<ModelInstance> scatter = new ArrayList<>();
@@ -3136,6 +3141,7 @@ final class GpuTerrain implements Disposable {
         UpdatePlan plan = rebuild.plan;
         // An edit's rebuilt chunks, old and new: the ground material cache refills only what they reach.
         BoundingBox rebuilt = new BoundingBox().inf();
+        List<Chunk> edited = new ArrayList<>();
         if (plan.all()) {
             propBatch.dispose();
             terrainPages.dispose();
@@ -3153,6 +3159,7 @@ final class GpuTerrain implements Disposable {
                     Chunk old = chunks.set(index, next);
                     rebuilt.ext(old.bounds).ext(next.bounds);
                     retiredChunks.add(old);
+                    if (next.detailTops) { edited.add(next); }
                 }
             });
         }
@@ -3190,7 +3197,8 @@ final class GpuTerrain implements Disposable {
         materialCache.retireTwins();
         BoundingBox board = new BoundingBox().inf();
         for (Chunk chunk : chunks) { board.ext(chunk.bounds); }
-        materialCache.rebuilt(board, plan.all() ? null : rebuilt, BoardRelief.metres(1));
+        int since = materialCache.rebuilt(board, plan.all() ? null : rebuilt, BoardRelief.metres(1));
+        for (Chunk chunk : edited) { chunk.cacheSince = since; }
         if (plan.all()) {
             materialCache.allocate(cachesGround() && chunks.stream().anyMatch(chunk -> !chunk.topRenderables.isEmpty()));
         }
@@ -3411,10 +3419,11 @@ final class GpuTerrain implements Disposable {
         scarSurfaceRevision++;
         Chunk old = chunks.set(index, next);
         // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
-        // materials. A theme boundary's covers follow each detail's sampling, so its tops' pages rebuild.
+        // materials. Tops that follow the detail (detailTops) rebuild theirs.
         materialCache.retireTwins();
-        if (old.blendedTops || next.blendedTops) {
-            materialCache.invalidate(new BoundingBox(old.topBounds).ext(next.topBounds));
+        if (old.detailTops || next.detailTops) {
+            int since = materialCache.detailChanged(new BoundingBox(old.topBounds).ext(next.topBounds));
+            if (next.detailTops) { next.cacheSince = since; }
         }
         editorPropsInstalled = true;
         Chunk evicted = detailCache.remove(index);
@@ -5201,7 +5210,7 @@ final class GpuTerrain implements Disposable {
             var waters = GpuWaterCover.coveringWaters(scene, surface, surfaces);
             for (var face : blended) {
                 boolean cliff = surface.relief.shade(face.a()).kind() != BoardRelief.Kind.GROUND;
-                var target = !cliff && GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : groups;
+                var target = GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : groups;
                 blendFace(target, supports, face, pieces -> GpuWaterCover.coveredPolygons(surface, face, waters,
                       polygon -> GpuSurfaceBlend.appendPolygon(pieces, BoardSurfaceBlend.family(tile), polygon,
                             p -> cliff ? sampler.sampleCliff(p.x, p.y, p.z) : sampler.sample(p.x, p.y, p.z), spacing)));
@@ -5309,7 +5318,7 @@ final class GpuTerrain implements Disposable {
         boolean split = chunk.tessellated && chunk.lod == TerrainLod.FULL && GpuTessellation.available();
         blended(solid, plan.blended(), scene, tile, chunk.lavaField, split, surface, false);
         blended(solid, plan.blendedTops(), scene, tile, chunk.lavaField, split, surface, true);
-        if (!plan.blendedTops().isEmpty()) { chunk.blendedTops = true; }
+        if (!plan.blendedTops().isEmpty()) { chunk.detailTops = true; }
         for (var group : byFamily(surface, formed).entrySet()) {
             Material formedMaterial = magma != null ? magma : sculptMaterial(group.getKey());
             // A frozen lake's banks below frozen land carry that land's ice, so one sheet spans the shore.
@@ -5319,11 +5328,11 @@ final class GpuTerrain implements Disposable {
             List<BoardSurface.Face> plain = iced.isEmpty() ? group.getValue()
                   : group.getValue().stream().filter(face -> !frozenLand(scene, tile, face)).toList();
             boolean curves = split && magma == null;
-            sculptedTriangles(solid, tile.liquid().present() ? formedMaterial
+            chunk.detailTops |= sculptedTriangles(solid, tile.liquid().present() ? formedMaterial
                   : GpuIceShader.ground(formedMaterial, scene, tile), curves, surface, plain, shore, scene, surfaces);
             if (!iced.isEmpty()) {
-                sculptedTriangles(solid, GpuIceShader.land(formedMaterial), curves, surface, iced, shore, scene,
-                      surfaces);
+                chunk.detailTops |= sculptedTriangles(solid, GpuIceShader.land(formedMaterial), curves, surface, iced,
+                      shore, scene, surfaces);
             }
         }
         for (var group : byFamily(surface, bed).entrySet()) {
@@ -5336,8 +5345,8 @@ final class GpuTerrain implements Disposable {
                 solid.addTriangles(magma, mesh -> sculptedFaces(mesh, surface, ground, shore, scene, surfaces));
             } else {
                 for (var group : byFamily(surface, ground).entrySet()) {
-                    sculptedTriangles(solid, sculptMaterial(group.getKey()), split, surface, group.getValue(), shore,
-                          scene, surfaces);
+                    chunk.detailTops |= sculptedTriangles(solid, sculptMaterial(group.getKey()), split, surface,
+                          group.getValue(), shore, scene, surfaces);
                 }
             }
         }
@@ -5348,9 +5357,11 @@ final class GpuTerrain implements Disposable {
     /**
      * Sculpted faces in {@code material}; with {@code split}, those that curve in a copy of their own
      * (GpuTessellation#curved), so only they pass through the tessellation stages, and flat ground draws as without.
+     * Whether sloping cache tops are among them (Chunk#detailTops).
      */
-    private static void sculptedTriangles(GpuTerrainLayer solid, Material material, boolean split, BoardSurface surface,
-          List<BoardSurface.Face> faces, float shore, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
+    private static boolean sculptedTriangles(GpuTerrainLayer solid, Material material, boolean split,
+          BoardSurface surface, List<BoardSurface.Face> faces, float shore, BoardScene scene,
+          Map<Coords, BoardSurface> surfaces) {
         List<BoardSurface.Face> curved = new ArrayList<>(), plain = split ? new ArrayList<>() : faces;
         if (split) {
             for (var face : faces) {
@@ -5360,11 +5371,16 @@ final class GpuTerrain implements Disposable {
             }
         }
         List<BoardSurface.Face> rest = plain;
-        // Dry level tops in a material of their own, which the ground material cache can draw (GpuMaterialCache).
+        boolean sloped = false;
+        // Dry tops in a material of their own, which the ground material cache can draw (GpuMaterialCache).
         if (Float.isNaN(shore) && GpuMaterialCache.cacheable(material)) {
             List<BoardSurface.Face> tops = new ArrayList<>();
             rest = new ArrayList<>();
-            for (var face : plain) { (GpuMaterialCache.top(surface, face, scene, surfaces) ? tops : rest).add(face); }
+            for (var face : plain) {
+                boolean top = GpuMaterialCache.top(surface, face, scene, surfaces);
+                (top ? tops : rest).add(face);
+                sloped |= top && !GpuMaterialCache.level(face);
+            }
             if (!tops.isEmpty()) {
                 solid.addTriangles(GpuMaterialCache.top(material),
                       mesh -> sculptedFaces(mesh, surface, tops, shore, scene, surfaces));
@@ -5378,6 +5394,7 @@ final class GpuTerrain implements Disposable {
             solid.addTriangles(GpuTessellation.curvedCopy(material),
                   mesh -> sculptedFaces(mesh, surface, curved, shore, scene, surfaces));
         }
+        return sloped;
     }
 
     /** The normal {@link #sculptVertex} gives a point. */
@@ -7608,7 +7625,7 @@ final class GpuTerrain implements Disposable {
             Chunk chunk = chunks.get(chunkIndex);
             if (!chunk.topRenderables.isEmpty()) {
                 materialCache.chunk(terrainPage(chunkIndex), chunk.topBounds,
-                      camera.frustum.boundsInFrustum(chunk.topBounds));
+                      camera.frustum.boundsInFrustum(chunk.topBounds), chunk.cacheSince);
             }
         }
     }

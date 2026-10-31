@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -119,8 +120,13 @@ final class GpuMaterialCache {
      * coverage and roughness stay exact means.
      */
     static final float SHARPEN = Float.parseFloat(System.getProperty("megamek.gpu.materialCacheSharpen", ".15"));
-    /** A face counts as level from this normal Z: a level top's material reads the same from above as in the view. */
+    /** A face counts as level from this normal Z: the same at every detail. */
     private static final float LEVEL_Z = .999f;
+    /**
+     * The steepest top, its normal's Z: the pages hold a slope from above, stretched by up to 1/Z along its fall line.
+     * Steeper banks and cliffs draw directly.
+     */
+    private static final float SLOPE_Z = .7f;
     /** The fill's GPU time a frame (a target), and its CPU time (a bound); a loading frame's prewarm takes more. */
     private static final long FILL_NANOS = 2_000_000, FILL_CPU_NANOS = 3_000_000, PREWARM_NANOS = 30_000_000;
 
@@ -129,8 +135,8 @@ final class GpuMaterialCache {
         void draw(Camera camera, float minX, float minY, float maxX, float maxY);
     }
 
-    /** A chunk's cache tops this frame: their terrain page and bounds (world units). */
-    private record Chunk(int page, BoundingBox bounds) { }
+    /** A chunk's cache tops this frame: their terrain page, bounds (world units) and generation (#chunk). */
+    private record Chunk(int page, BoundingBox bounds, int since) { }
 
     /** A page of any level. */
     private record PageKey(int at, int x, int y) { }
@@ -170,6 +176,10 @@ final class GpuMaterialCache {
     private final IntArray cachedPages = new IntArray();
     // Pages copied from their children: their mip 2 only approximates the next level, so none is copied from them.
     private final Set<PageKey> copied = new HashSet<>();
+    // Detail changes so far (detailChanged), and the one each page's build finished at: a change over a page in the
+    // middle of its build restarts it (GpuPageCache.invalidate), so its content is drawn from the geometry of then.
+    private int generation;
+    private final Map<PageKey, Integer> stamps = new HashMap<>();
     private Camera view;
     private Tops tops;
     // Whether this frame may build pages (the root at least): the fill's programs are ready.
@@ -216,21 +226,29 @@ final class GpuMaterialCache {
     static boolean isCached(Attributes material) { return material instanceof Material m && m.id.endsWith(CACHED); }
 
     /**
-     * A dry ground face of a cached top that lies level, untouched by water, in a hex that no biome cover reaches:
-     * the canonical material holds no biome layer, and its weathering follows the cover.
+     * A dry face of ground or of a natural bank (a cliff of up to two levels, whose low caprock stands over none of its
+     * own faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), untouched by water, in a hex
+     * that no biome cover reaches: the canonical material holds no biome layer, and its weathering follows the cover.
      */
     static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
           Map<Coords, BoardSurface> surfaces) {
         if (!uncovered(scene, surface.tile)) { return false; }
         for (Vector3 p : new Vector3[] { face.a(), face.b(), face.c() }) {
             var shade = surface.relief.shade(p);
-            if (shade == null || shade.kind() != BoardRelief.Kind.GROUND) { return false; }
+            if (shade == null || shade.kind() != BoardRelief.Kind.GROUND && (shade.kind() != BoardRelief.Kind.CLIFF
+                  || !Float.isNaN(shade.projection()) || shade.level() > 0)) { return false; }
         }
+        return normalZ(face) >= SLOPE_Z && GpuWaterCover.clippingWater(surface, face, scene, surfaces) == null;
+    }
+
+    /** Whether a top lies level: the same at every detail. */
+    static boolean level(BoardSurface.Face face) { return normalZ(face) >= LEVEL_Z; }
+
+    private static float normalZ(BoardSurface.Face face) {
         Vector3 a = face.a(), b = face.b(), c = face.c();
         Vector3 normal = new Vector3(b).sub(a).crs(c.x - a.x, c.y - a.y, c.z - a.z);
         float length = normal.len();
-        return length > 0 && normal.z / length >= LEVEL_Z
-              && GpuWaterCover.clippingWater(surface, face, scene, surfaces) == null;
+        return length > 0 ? normal.z / length : -1;
     }
 
     /**
@@ -286,10 +304,11 @@ final class GpuMaterialCache {
 
     /**
      * A build installed the board, now spanning {@code bounds} (world units, {@code worldMetre} a metre): after an
-     * edit, the pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile;
-     * after a load ({@code changed} null) every page is lost.
+     * edit, the pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile,
+     * and the generation its new tops are installed at is returned (#detailChanged); after a load ({@code changed} null)
+     * every page is lost.
      */
-    void rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
+    int rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
         board.set(bounds);
         metre = worldMetre;
         root = TOP_LEVEL;
@@ -303,9 +322,19 @@ final class GpuMaterialCache {
         if (changed == null) {
             pages.invalidateAll();
             copied.clear();
-            return;
+            stamps.clear();
+            return generation;
         }
+        return detailChanged(changed);
+    }
+
+    /**
+     * A chunk whose tops follow its detail changed detail over {@code changed} (world units): its pages rebuild, serving
+     * their old content meanwhile where it still fits (#chunk). The generation its new tops are installed at.
+     */
+    int detailChanged(BoundingBox changed) {
         invalidate(changed);
+        return ++generation;
     }
 
     /** The pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile. */
@@ -511,11 +540,16 @@ final class GpuMaterialCache {
         return new float[] { Math.min(across, upward), Math.max(across, upward) };
     }
 
-    /** A chunk's cache tops ({@code bounds}, world units) on terrain page {@code page}, and whether it is in view. */
-    void chunk(int page, BoundingBox bounds, boolean inView) {
+    /**
+     * A chunk's cache tops ({@code bounds}, world units) on terrain page {@code page}, and whether it is in view. Tops
+     * that follow its detail were installed at generation {@code since} (#detailChanged), else 0: a page built before
+     * may lack their coverage, so they draw cached only from a page (their own or a coarser one standing in) whose build
+     * began since.
+     */
+    void chunk(int page, BoundingBox bounds, boolean inView, int since) {
         if (!filling || !bounds.isValid()) { return; }
         topBounds.add(bounds);
-        if (active && inView) { visible.add(new Chunk(page, bounds)); }
+        if (active && inView) { visible.add(new Chunk(page, bounds, since)); }
     }
 
     /** {@link #end(long, long)} within a view frame's share of the fill. */
@@ -605,8 +639,24 @@ final class GpuMaterialCache {
                 }
             }
         }
+        // A stale page the frame reads under tops installed since its build serves them nothing (#chunk): it builds
+        // first, as does a stale root, which stands in for every page while they build.
+        int newest = 0;
+        for (var page : since(reading).entrySet()) {
+            int x = unpackX(page.getKey()), y = unpackY(page.getKey());
+            newest = Math.max(newest, page.getValue());
+            if (stamps.getOrDefault(new PageKey(reading, x, y), 0) < page.getValue()) { pages.urgent(reading, x, y); }
+        }
+        for (int x = rootX0; x <= rootX1; x++) {
+            for (int y = rootY0; y <= rootY1; y++) {
+                if (stamps.getOrDefault(new PageKey(root, x, y), 0) < newest) { pages.urgent(root, x, y); }
+            }
+        }
         boolean done = build(budget, deadline);
         if (copied.size() > 2 * pages.capacity()) { copied.removeIf(page -> pages.layer(page.at(), page.x(), page.y()) < 0); }
+        if (stamps.size() > 2 * pages.capacity()) {
+            stamps.keySet().removeIf(page -> pages.layer(page.at(), page.x(), page.y()) < 0);
+        }
         // The finer level once every page of it the storage holds is built.
         if (reading != level) {
             boolean built = true;
@@ -619,8 +669,16 @@ final class GpuMaterialCache {
         for (long page : read) { extend(table, unpackX(page), unpackY(page)); }
         float metres = pageMetres(reading);
         // A page the storage holds reads a coarser one up to the root while it builds; one it cannot hold draws
-        // directly (never a coarser level for lack of room).
-        GpuPageCache.StandIns standIns = (x, y) -> reading == level && held.contains(pack(x, y));
+        // directly (never a coarser level for lack of room). Under tops that follow their chunk's detail, a page serves
+        // only if its build began since they were installed (#chunk).
+        Map<Long, Integer> since = since(reading);
+        GpuPageCache.StandIns standIns = new GpuPageCache.StandIns() {
+            @Override public boolean allowed(int x, int y) { return reading == level && held.contains(pack(x, y)); }
+
+            @Override public boolean serves(int at, int x, int y, int wx, int wy) {
+                return stamps.getOrDefault(new PageKey(at, x, y), 0) >= since.getOrDefault(pack(wx, wy), 0);
+            }
+        };
         if (!pages.upload(reading, root, table[0], table[1], table[2] - table[0] + 1, table[3] - table[1] + 1,
               table[0] * metres, table[1] * metres, metres, standIns)) {
             active = false;
@@ -637,7 +695,7 @@ final class GpuMaterialCache {
             under(chunk.bounds(), reading, chunkPages);
             for (long page : chunkPages) {
                 int x = unpackX(page), y = unpackY(page);
-                int entry = standIns.allowed(x, y) ? pages.entry(reading, root, x, y) : pages.layer(reading, x, y);
+                int entry = pages.entry(reading, root, x, y, standIns);
                 if (entry < 0) { direct.add(chunk.page()); }
                 exact &= entry >= 0 && entry < GpuPageCache.FALLBACK && pages.current(reading, unpackX(page), unpackY(page));
             }
@@ -646,6 +704,19 @@ final class GpuMaterialCache {
             if (!direct.contains(chunk.page()) && !cachedPages.contains(chunk.page())) { cachedPages.add(chunk.page()); }
         }
         return done;
+    }
+
+    /** The pages of {@code at} under visible tops that follow their detail, each with the latest install among them. */
+    private Map<Long, Integer> since(int at) {
+        Map<Long, Integer> since = new HashMap<>();
+        Set<Long> below = new HashSet<>();
+        for (Chunk chunk : visible) {
+            if (chunk.since() == 0) { continue; }
+            below.clear();
+            under(chunk.bounds(), at, below);
+            for (long page : below) { since.merge(page, chunk.since(), Math::max); }
+        }
+        return since;
     }
 
     /** The pages of {@code at} under the visible tops that the view's frustum meets. */
@@ -760,6 +831,8 @@ final class GpuMaterialCache {
     private int fill(int at, int x, int y, int layer, int step) {
         if (step == 0 && copiable(at, x, y)) {
             copyChildren(at, x, y, layer);
+            // Its children are current: drawn from the geometry of now.
+            stamps.put(new PageKey(at, x, y), generation);
             copied.add(new PageKey(at, x, y));
             return GpuPageCache.DONE;
         }
@@ -787,6 +860,7 @@ final class GpuMaterialCache {
         if (step < side * side - 1) { return GpuPageCache.MORE; }
         sharpen(layer);
         copied.remove(new PageKey(at, x, y));
+        stamps.put(new PageKey(at, x, y), generation);
         return GpuPageCache.DONE;
     }
 

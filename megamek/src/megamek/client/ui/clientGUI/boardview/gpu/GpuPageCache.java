@@ -48,9 +48,12 @@ final class GpuPageCache implements Disposable {
 
     static final int MORE = 0, DONE = 1, AGAIN = 2;
 
-    /** Which pages of a table's window a coarser ready page may stand in for while they build. */
+    /** Which pages of a table's window a coarser ready page may stand in for while they build, and which may serve. */
     interface StandIns {
         boolean allowed(int x, int y);
+
+        /** Whether ready page (x, y) of {@code level} may serve window page (wx, wy), itself or standing in. */
+        default boolean serves(int level, int x, int y, int wx, int wy) { return true; }
     }
 
     /**
@@ -91,7 +94,7 @@ final class GpuPageCache implements Disposable {
         final int level, x, y;
         int layer = -1, spare = -1, step;
         long revision = -1, needed;
-        boolean pinned, stale;
+        boolean pinned, stale, urgent;
 
         Page(int level, int x, int y) {
             this.level = level;
@@ -249,7 +252,14 @@ final class GpuPageCache implements Disposable {
         }
         page.needed = frame;
         page.pinned = pinned;
+        page.urgent = false;
         needed.add(page);
+    }
+
+    /** Page (x, y) of {@code level}, stale and needed this frame, no longer serves: it builds with those not built. */
+    void urgent(int level, int x, int y) {
+        Page page = pages.get(pack(level, x, y));
+        if (page != null && page.needed == frame) { page.urgent = true; }
     }
 
     private boolean ready(Page page) { return page.layer >= 0 && page.revision == revision; }
@@ -268,10 +278,11 @@ final class GpuPageCache implements Disposable {
 
     /**
      * Builds the needed pages a step at a time, within this frame's share of {@code budget} nanoseconds of GPU time a
-     * frame, and before {@code cpuDeadline} (System.nanoTime): first those not ready, in their order, then the stale
-     * ones, which serve meanwhile. The budget is a target: the cost of a step is an estimate from earlier steps, a frame
-     * may take none, and credit carries over by up to one step so a step dearer than the budget still runs every few
-     * frames. True when it stopped for no budget: every needed page that could take a layer is built.
+     * frame, and before {@code cpuDeadline} (System.nanoTime): first those not ready and the urgent ones, in their
+     * order, then the other stale ones, which serve meanwhile. The budget is a target: the cost of a step is an
+     * estimate from earlier steps, a frame may take none, and credit carries over by up to one step so a step dearer
+     * than the budget still runs every few frames. True when it stopped for no budget: every needed page that could take
+     * a layer is built.
      */
     boolean fill(long budget, long cpuDeadline, Filler filler) {
         readTimings();
@@ -282,7 +293,7 @@ final class GpuPageCache implements Disposable {
         try {
             for (boolean staleOnes : new boolean[] { false, true }) {
                 for (Page page : needed) {
-                    if (staleOnes != page.stale) { continue; }
+                    if (staleOnes != (page.stale && !page.urgent)) { continue; }
                     while (!ready(page) || page.stale) {
                         long estimate = estimate(page.level);
                         if (credit < estimate || System.nanoTime() >= cpuDeadline) { return false; }
@@ -334,8 +345,7 @@ final class GpuPageCache implements Disposable {
     /**
      * Writes the page table for the window of {@code columns} x {@code rows} pages of pyramid level {@code level} from
      * (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and pages
-     * {@code pageSize} of them: each page's layer, or for those {@code standIns} allows its {@link #entry}. False if the
-     * window holds more pages than the table.
+     * {@code pageSize} of them: each page's {@link #entry}. False if the window holds more pages than the table.
      */
     boolean upload(int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
           float pageSize, StandIns standIns) {
@@ -345,8 +355,7 @@ final class GpuPageCache implements Disposable {
         table.putFloat(columns).putFloat(rows).putFloat(gutter).putFloat(0);
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < columns; x++) {
-                table.putInt(standIns.allowed(x0 + x, y0 + y) ? entry(level, top, x0 + x, y0 + y)
-                      : layer(level, x0 + x, y0 + y));
+                table.putInt(entry(level, top, x0 + x, y0 + y, standIns));
             }
         }
         int used = table.position();
@@ -358,13 +367,15 @@ final class GpuPageCache implements Disposable {
     }
 
     /**
-     * Page (x, y) of {@code level}'s table entry: its layer while it can be read, else its nearest ready coarser page's
-     * up to {@code top} (that layer plus {@link #FALLBACK} times the levels up), else -1.
+     * Page (x, y) of {@code level}'s table entry: its layer while it can be read and serves, else, where
+     * {@code standIns} allows, its nearest coarser such page's up to {@code top} (that layer plus {@link #FALLBACK}
+     * times the levels up), else -1.
      */
-    int entry(int level, int top, int x, int y) {
-        for (int up = 0; level + up <= top; up++) {
+    int entry(int level, int top, int x, int y, StandIns standIns) {
+        int last = standIns.allowed(x, y) ? top : level;
+        for (int up = 0; level + up <= last; up++) {
             int layer = layer(level + up, x >> up, y >> up);
-            if (layer >= 0) { return layer + up * FALLBACK; }
+            if (layer >= 0 && standIns.serves(level + up, x >> up, y >> up, x, y)) { return layer + up * FALLBACK; }
         }
         return -1;
     }
