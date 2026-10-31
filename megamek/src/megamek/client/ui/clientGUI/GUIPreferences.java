@@ -368,14 +368,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     /** Whether the lobby's chat dock is folded. */
     public static final String LOBBY_CHAT_FOLDED = "LobbyChatFolded";
     public static final String MAP_ZOOM_INDEX = "MapZoomIndex";
-    public static final String MEK_SELECTOR_INCLUDE_MODEL = "MekSelectorIncludeModel";
-    public static final String MEK_SELECTOR_INCLUDE_NAME = "MekSelectorIncludeName";
-    public static final String MEK_SELECTOR_INCLUDE_TONS = "MekSelectorIncludeTons";
-    public static final String MEK_SELECTOR_INCLUDE_BV = "MekSelectorIncludeBV";
-    public static final String MEK_SELECTOR_INCLUDE_YEAR = "MekSelectorIncludeYear";
-    public static final String MEK_SELECTOR_INCLUDE_LEVEL = "MekSelectorIncludeLevel";
-    public static final String MEK_SELECTOR_INCLUDE_COST = "MekSelectorIncludeCost";
-    public static final String MEK_SELECTOR_SHOW_ADVANCED = "MekSelectorShowAdvanced";
     public static final String MEK_SELECTOR_UNIT_TYPE = "MekSelectorUnitType";
     public static final String MEK_SELECTOR_WEIGHT_CLASS = "MekSelectorWeightClass";
     public static final String MEK_SELECTOR_RULES_LEVELS = "MekSelectorRuleType";
@@ -938,19 +930,11 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(REQUISITION_FILTERS, "");
         store.setDefault(LOBBY_CHAT_FOLDED, false);
         store.setDefault(MAP_ZOOM_INDEX, 7);
-        store.setDefault(MEK_SELECTOR_INCLUDE_MODEL, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_NAME, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_TONS, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_BV, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_YEAR, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_LEVEL, true);
-        store.setDefault(MEK_SELECTOR_INCLUDE_COST, true);
         store.setDefault(MEK_SELECTOR_UNIT_TYPE, 0);
         store.setDefault(MEK_SELECTOR_WEIGHT_CLASS, 15);
         store.setDefault(MEK_SELECTOR_RULES_LEVELS, "[0]");
         store.setDefault(MEK_SELECTOR_SORT_COLUMN, 0);
         store.setDefault(MEK_SELECTOR_SORT_ORDER, "ASCENDING");
-        store.setDefault(MEK_SELECTOR_SHOW_ADVANCED, false);
         store.setDefault(MEK_SELECTOR_SIZE_HEIGHT, 600);
         store.setDefault(MEK_SELECTOR_SIZE_WIDTH, 800);
         store.setDefault(MEK_SELECTOR_POS_X, 200);
@@ -1518,46 +1502,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     @Deprecated(since = "0.51.0", forRemoval = true)
     public int getMapZoomIndex() {
         return store.getInt(MAP_ZOOM_INDEX);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeModel() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_MODEL);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeName() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_NAME);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeTons() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_TONS);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeBV() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_BV);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeYear() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_YEAR);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeLevel() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_LEVEL);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorIncludeCost() {
-        return store.getBoolean(MEK_SELECTOR_INCLUDE_COST);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public boolean getMekSelectorShowAdvanced() {
-        return store.getBoolean(MEK_SELECTOR_SHOW_ADVANCED);
     }
 
     public int getMekSelectorUnitType() {
@@ -2732,46 +2676,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setMapZoomIndex(int zoomIndex) {
         store.setValue(MAP_ZOOM_INDEX, zoomIndex);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeModel(boolean includeModel) {
-        store.setValue(MEK_SELECTOR_INCLUDE_MODEL, includeModel);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeName(boolean includeName) {
-        store.setValue(MEK_SELECTOR_INCLUDE_NAME, includeName);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeTons(boolean includeTons) {
-        store.setValue(MEK_SELECTOR_INCLUDE_TONS, includeTons);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeBV(boolean includeBV) {
-        store.setValue(MEK_SELECTOR_INCLUDE_BV, includeBV);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeYear(boolean includeYear) {
-        store.setValue(MEK_SELECTOR_INCLUDE_YEAR, includeYear);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeLevel(boolean includeLevel) {
-        store.setValue(MEK_SELECTOR_INCLUDE_LEVEL, includeLevel);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorIncludeCost(boolean includeCost) {
-        store.setValue(MEK_SELECTOR_INCLUDE_COST, includeCost);
-    }
-
-    @Deprecated(since = "0.51.0", forRemoval = true)
-    public void setMekSelectorShowAdvanced(boolean showAdvanced) {
-        store.setValue(MEK_SELECTOR_SHOW_ADVANCED, showAdvanced);
     }
 
     public void setMekSelectorUnitType(int unitType) {

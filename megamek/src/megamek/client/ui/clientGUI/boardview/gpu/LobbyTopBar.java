@@ -28,12 +28,13 @@ import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * The lobby's top bar, over the art without a panel, as the reference's ready bar: the BRIEFING title with where the
  * game runs and its map under it at the start; the ready count and a Battle Value chip per side in the middle, centred
  * on the whole bar, more sides folding into one chip that lists them; at the end the Game Master's seat, the warnings
- * to heed before Ready, then Leave and Ready, Ready last so it holds the edge. Ready turns green with a check once the player is ready, and
+ * to heed before Ready, the Client Settings gear, then Leave and Ready, Ready last so it holds the edge. Ready turns green with a check once the player is ready, and
  * a click on it while a red warning stands lights the red warnings instead.
  */
 final class LobbyTopBar extends WidgetGroup {
@@ -66,8 +67,8 @@ final class LobbyTopBar extends WidgetGroup {
     private String shortcut = "";
     private boolean narrow;
 
-    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable leaveAction, Runnable readyAction,
-          Consumer<Warning> warningAction) {
+    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable settingsAction, Runnable leaveAction,
+          Runnable readyAction, Consumer<Warning> warningAction) {
         this.kit = kit;
         this.seat = seat;
         this.warningAction = warningAction;
@@ -81,6 +82,11 @@ final class LobbyTopBar extends WidgetGroup {
         subtitle.setEllipsis(true);
         heading.add(subtitle).left().minWidth(0).padTop(space("xxs"));
 
+        UiButton settings = kit.button("button-icon", "settings", null, null);
+        settings.setName("lobby-settings");
+        kit.tip(settings, true).getActor().setText(Messages.getString("Lobby.settingsTip",
+              KeyCommandBind.getDesc(KeyCommandBind.CLIENT_SETTINGS)));
+        UiKit.onChange(settings, settingsAction);
         UiButton leave = kit.button("button-secondary", null, Messages.getString("Lobby.leave"), null);
         UiKit.onChange(leave, leaveAction);
         ready = kit.button("button-primary", null, Messages.getString("Lobby.ready"), null);
@@ -97,6 +103,7 @@ final class LobbyTopBar extends WidgetGroup {
         Stack readyFaces = new Stack(ready, done);
         trailing.add(seat).padRight(space("sm"));
         trailing.add(warnings).padRight(space("sm"));
+        trailing.add(settings).padRight(space("sm"));
         trailing.add(leave).minWidth(width).padRight(space("sm"));
         trailing.add(readyFaces).minWidth(width);
 

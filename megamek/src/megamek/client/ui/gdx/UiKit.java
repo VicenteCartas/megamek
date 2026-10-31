@@ -9,6 +9,7 @@ import java.util.Set;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -29,6 +30,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -182,6 +184,9 @@ public final class UiKit {
     /** A tooltip as {@link #tip(Actor)}; with {@code token}, the Token v0 tooltip card ({@link UiTheme#TOKEN}). */
     public TextTooltip tip(Actor actor, boolean token) {
         TextTooltip tip = new TextTooltip("", skin, token ? UiTheme.TOKEN : "hud");
+        if (token) {
+            fitTokenTip(tip);
+        }
         actor.addListener(tip);
         tip.getActor().addAction(Actions.forever(Actions.run(() -> {
             if (!actor.ascendantsVisible()) {
@@ -189,6 +194,26 @@ public final class UiKit {
             }
         })));
         return tip;
+    }
+
+    /**
+     * A wrapping tooltip's card takes its style's whole wrap width; this one fits a short text and wraps a long one at
+     * that width.
+     */
+    private void fitTokenTip(TextTooltip tip) {
+        float wrapWidth = skin.get(UiTheme.TOKEN, TextTooltip.TextTooltipStyle.class).wrapWidth;
+        if (wrapWidth <= 0) {
+            return;
+        }
+        Label label = tip.getActor();
+        GlyphLayout measure = new GlyphLayout();
+        tip.getContainer().width(new Value() {
+            @Override
+            public float get(Actor context) {
+                measure.setText(label.getStyle().font, label.getText());
+                return Math.min(wrapWidth, (float) Math.ceil(measure.width * label.getFontScaleX()));
+            }
+        });
     }
 
     /**

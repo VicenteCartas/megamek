@@ -178,7 +178,7 @@ public final class UiTheme implements Disposable {
           Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("error", 0xE000), Map.entry("walk", 0xF87D),
           Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
           // unfold_more and unfold_less: a tree's Expand all and Collapse all, as the Client Settings sidebar draws them.
-          Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6),
+          Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6), Map.entry("tag", 0xE9EF),
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),

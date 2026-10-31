@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -55,6 +56,53 @@ class LobbyTogglesSmokeTest {
             assertFalse(forces.compact(), "a second click turns them off");
             assertFalse(forces.compactToggle().isChecked());
             panel.remove();
+        });
+    }
+
+    @Test
+    void theIdsToggleHidesTheUnitIdsAsksForTheSettingAndFollowsTheSnapshots() {
+        UiTestStage.run(ui -> {
+            NoForcesActions actions = new NoForcesActions();
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, actions, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            forces.show(ownedForces(true));
+            ui.draw();
+            assertTrue(forces.idsToggle().isChecked(), "the toggle starts as the setting has it: on");
+            assertTrue(panel.findActor("lobby-unit-id") != null, "the cards show their ids");
+
+            click(ui, forces.idsToggle());
+            assertEquals(List.of(false), actions.idsAsked, "a click asks to hide them");
+            assertFalse(forces.idsToggle().isChecked());
+            assertEquals(null, panel.findActor("lobby-unit-id"), "the cards drop their ids at once");
+
+            forces.show(ownedForces(false));
+            ui.draw();
+            assertEquals(null, panel.findActor("lobby-unit-id"), "the snapshot that echoes the setting keeps them out");
+            forces.compact(true);
+            assertEquals(null, panel.findActor("lobby-unit-id"), "and so do the compact rows");
+
+            click(ui, forces.idsToggle());
+            assertEquals(List.of(false, true), actions.idsAsked, "a second click asks to show them");
+            assertTrue(panel.findActor("lobby-unit-id") != null);
+            panel.remove();
+        });
+    }
+
+    @Test
+    void theSettingsGearInTheTopBarOpensTheSettings() {
+        UiTestStage.run(ui -> {
+            int[] opened = new int[1];
+            LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
+                  () -> opened[0]++, () -> { }, () -> { }, warning -> { });
+            bar.attach(ui.stage.getRoot());
+            ui.window.addActor(bar);
+            bar.setBounds(100, 600, 1200, 80);
+            bar.validate();
+            ui.draw();
+            click(ui, bar.findActor("lobby-settings"));
+            assertEquals(1, opened[0], "a click on the gear opens Client Settings");
+            bar.remove();
         });
     }
 
@@ -168,7 +216,31 @@ class LobbyTogglesSmokeTest {
         return new LobbyForces(List.of(units), List.of(), List.of(), List.of(), List.of(), -1);
     }
 
+    /** Units 1 and 2 under their owner, so the units view draws their cards. */
+    private static LobbyForces ownedForces(boolean showIds) {
+        LobbyForces.Owner owner = new LobbyForces.Owner(1, "Player", true, true, false, false, 2000, 100,
+              List.of(1, 2));
+        return new LobbyForces(List.of(unit(1), unit(2)), List.of(owner), List.of(), List.of(), List.of(), -1,
+              showIds);
+    }
+
+    private static final class NoSeatActions implements LobbyGameMasterSeat.SeatActions {
+        @Override
+        public void claim() {
+        }
+
+        @Override
+        public void vote(boolean allow) {
+        }
+
+        @Override
+        public void withdraw() {
+        }
+    }
+
     private static final class NoForcesActions implements LobbyForcesPanel.Actions {
+        private final List<Boolean> idsAsked = new ArrayList<>();
+
         @Override
         public void command(LobbyForcesPanel.Command command) {
         }
@@ -191,6 +263,11 @@ class LobbyTogglesSmokeTest {
 
         @Override
         public void choose(List<Integer> path) {
+        }
+
+        @Override
+        public void showIds(boolean on) {
+            idsAsked.add(on);
         }
     }
 

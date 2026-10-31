@@ -1250,6 +1250,11 @@ public class ClientGUI extends AbstractClientGUI
         commonSettingsDialog.setVisible(true);
     }
 
+    /** Opens Client Settings, as View &gt; Client Settings does; for the lobby, whose window hides the menu bar. */
+    public void openClientSettings() {
+        showSettings();
+    }
+
     private void showSettingsSubPage(String subpage) {
         // Do we need to create the "settings" dialog?
         if (commonSettingsDialog == null) {

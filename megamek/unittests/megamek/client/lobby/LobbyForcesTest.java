@@ -25,6 +25,8 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.units.BipedMek;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.BeforeAll;
@@ -96,6 +98,22 @@ class LobbyForcesTest {
         assertEquals(2, owners.getFirst().unitIds().size());
         assertEquals(105, owners.getFirst().tons());
         assertTrue(owners.get(2).enemy());
+    }
+
+    @Test
+    void theCardsShowTheUnitIdsAsTheLobbySettingAsks() {
+        mek(local, "Hunchback", 50);
+        ClientPreferences preferences = PreferenceManager.getClientPreferences();
+        boolean before = preferences.getLobbyShowUnitId();
+        try {
+            preferences.setLobbyShowUnitId(false);
+            assertFalse(forces().showIds());
+            preferences.setLobbyShowUnitId(true);
+            assertTrue(forces().showIds());
+            assertTrue(LobbyForces.EMPTY.showIds(), "forces made without the setting show the ids");
+        } finally {
+            preferences.setLobbyShowUnitId(before);
+        }
     }
 
     @Test

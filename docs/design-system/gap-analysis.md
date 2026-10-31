@@ -897,10 +897,36 @@ work for Swing, and item 11 is under investigation.
        seat at once; with the second human, the claim becomes a vote they pass; their own ask opens the card by
        itself, and Allow gives them the seat (held, with their GM chip) while Deny leaves it open; Step down frees
        it. The in-game Game Master controls stay as they are for now.
+     - ~~L14 Settings check~~. What the Swing lobby read, and where it stands now:
+       - Client Settings opens from the lobby: a gear in the top bar, before Leave, and the client settings key
+         (Alt+C), as from the old lobby's menu. It opens over the lobby through `LobbyDialogs`, centred and modal,
+         and the lobby takes no input until it closes.
+       - The settings take effect at once, as the Swing lobby's listeners did. Unit ids on the cards
+         (`LobbyShowUnitId`) and the auto resolve panel refresh the lobby; the camo overlay redraws the unit sprites;
+         the GUI scale rescales the stage.
+       - Unit ids: the forces panel has a `#` toggle that shows or hides each card's `#id`. It sets the client
+         setting, which is also a new checkbox in Client Settings › Game Board › General (next to the board's own unit
+         id setting), so either changes the other; it
+         holds across restarts (`LobbyForces.showIds`).
+       - Still read and kept: save the lobby on start, the GUI scale, the camo overlay, the auto resolve panel, the
+         ruler colours, the custom unit dialog's size (L15) and the odd-sized board nag (L16). The lobby draws the
+         warning and my, ally and enemy colours from the tokens now, but the game still reads those settings, so they
+         stay. The Swing lobby's unit table columns had already gone with it.
+       - Removed: the unit selector's column toggles (`MekSelectorInclude*` and `MekSelectorShowAdvanced`), which
+         nothing read since the Requisition replaced the selector. MekHQ and MegaMekLab do not read them either.
+       - Other settings no code reads, outside the lobby and left for the step 7 check: the game summary minimap,
+         the entity owner label colour, the minimap colours, scroll sensitivity, the GPU report panel width, the board
+         editor's load sizes, the bot commands size, and in the client settings the data and unit directories, the
+         unit hit location log, the goal player count and the GUI name.
+       - Token tooltips (`UiKit.tip(actor, true)`) now fit their text and wrap at the style's width, instead of
+         always taking that whole width. A lobby that a Swing dialog blocks hides its tooltips.
+       Checks: `LobbyForcesTest` (the cards follow the setting); the on-demand `LobbyTogglesSmokeTest` clicks the ids
+       toggle (the cards drop and regain their ids, a snapshot that echoes the setting keeps them out, compact rows
+       too) and the top bar's gear. Live, through the stage: the probe's `lobby+clickids` flips the setting, and with
+       the new `+saveprefs` (it saves the settings on quit, as quitting MegaMek does) a second run starts from the
+       saved value and a plain restart shows the ids hidden; `lobby+dialog=settings` clicks the gear and gets Client
+       Settings, centred and modal, with lobby input blocked until it closes.
      - Still open after #34, for a later round once #33 and #34 are merged:
-       - L14 Settings check: the lobby's part of step 7. Every client and GUI preference the old Swing lobby read or
-         wrote is honoured by the libGDX lobby, persists across restarts and appears in the settings dialog where it
-         did before; preferences with no remaining reader are removed.
        - L15 Unit dialogs in libGDX: unit customization (`CustomMekDialog`, including the multi-unit edit) and the
          C3 network setup.
        - L16 Map setup in libGDX: board selection, map size, random map settings, and loading and saving a map

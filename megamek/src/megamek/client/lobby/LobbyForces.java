@@ -18,6 +18,7 @@ import megamek.common.game.Game;
 import megamek.common.interfaces.ForceAssignable;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 
 /**
@@ -32,9 +33,10 @@ import megamek.common.units.Entity;
  *                   formation followed by its units and then its sub-formations
  * @param sorts      the unit orders the local player may choose from, as the Swing lobby's unit table names them
  * @param sort       the index of the chosen order in {@code sorts}, or -1
+ * @param showIds    whether the cards show each unit's id, as the client's lobby setting asks
  */
 public record LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Formation> formations, List<Row> tree,
-      List<String> sorts, int sort) {
+      List<String> sorts, int sort, boolean showIds) {
 
     /** No units and no formations. */
     public static final LobbyForces EMPTY = new LobbyForces(List.of(), List.of(), List.of(), List.of(), List.of(), -1);
@@ -45,6 +47,12 @@ public record LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Format
         formations = List.copyOf(formations);
         tree = List.copyOf(tree);
         sorts = List.copyOf(sorts);
+    }
+
+    /** Forces whose cards show the unit ids. */
+    public LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Formation> formations, List<Row> tree,
+          List<String> sorts, int sort) {
+        this(units, owners, formations, tree, sorts, sort, true);
     }
 
     /**
@@ -176,7 +184,8 @@ public record LobbyForces(List<LobbyUnit> units, List<Owner> owners, List<Format
         if (forces != null) {
             tree(game, forces, local, commands, bots, formations, tree);
         }
-        return new LobbyForces(units, owners, formations, tree, order.sorts(), order.sort());
+        return new LobbyForces(units, owners, formations, tree, order.sorts(), order.sort(),
+              PreferenceManager.getClientPreferences().getLobbyShowUnitId());
     }
 
     /** Whether {@code local} sees units of {@code owner} at all: not when a real blind drop hides an enemy's. */

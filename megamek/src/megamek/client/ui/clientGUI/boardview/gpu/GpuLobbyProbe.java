@@ -108,6 +108,10 @@ import org.lwjgl.glfw.GLFW;
  *     dossier.</li>
  *     <li>{@code lobby+clickcompact}: clicks the forces' compact rows toggle through the stage, as a pointer would,
  *     {@value GpuLobbyScreen#PROBE_CLICK_AT} s in; with {@code +formations} it does so in the formations view.</li>
+ *     <li>{@code lobby+clickids}: clicks the forces' unit ids toggle through the stage at the same time, which flips
+ *     the client's lobby setting for unit ids; a second run shows whether it held.</li>
+ *     <li>{@code lobby+saveprefs}: saves the client settings when {@code MM_START_QUIT} quits, as quitting MegaMek
+ *     does; without it the probe leaves them as they were.</li>
  *     <li>{@code lobby+requisition+clickfilters}: clicks the Requisition's Filters button through the stage at the same
  *     time, opening the drawer; {@code +closefilters} clicks it again a second later, shutting it.</li>
  *     <li>{@code lobby+requisition+advanced}: through the stage, opens the Filters drawer, clicks Advanced search,
@@ -130,7 +134,8 @@ import org.lwjgl.glfw.GLFW;
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
  *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
- *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
+ *     {@code names}, {@code loadlist}, {@code alert} and {@code settings} (Client Settings, through a click on the top
+ *     bar's gear). The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
  *     {@code playersettings}, {@code botconfig}, {@code addbot}, {@code conditions} and {@code gameoptions}) open on
  *     the stage instead, where the probe clicks through them: a colour camo for {@code camo}, the SE start and an
  *     offset of 2 for {@code playersettings}, the COWARDLY preset, the pirate switch and the bravery slider's top for
@@ -613,6 +618,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             case "loadlist" -> window.forcesCommand(LobbyForcesPanel.Command.LOAD_LIST);
             case "alert" -> SwingUtilities.invokeLater(() -> gui.doAlertDialog(
                   Messages.getString("ChatLounge.AlertBot.title"), Messages.getString("ChatLounge.AlertBot.message")));
+            case "settings" -> window.probeClick("lobby-settings");
             default -> LOGGER.error("The lobby probe has no dialog called {}", name);
         }
     }

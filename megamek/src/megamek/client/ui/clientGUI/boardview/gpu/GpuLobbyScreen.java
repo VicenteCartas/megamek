@@ -69,6 +69,7 @@ import megamek.common.alphaStrike.cardDrawer.ASCard;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
 
 /**
@@ -94,6 +95,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private static final String PROBE_PRESET = "COWARDLY";
     /** {@code lobby+gm}'s name for a click on the seat itself rather than on its card. */
     private static final String GM_SEAT = "seat";
+    private static final String IDS_TOGGLE = "ids";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -195,6 +197,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         if (blocked) {
             stage.cancelTouchFocus();
+            TooltipManager.getInstance().hideAll();
         }
         Gdx.input.setInputProcessor(blocked ? null : stage);
     }
@@ -290,7 +293,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, window::leave, window::ready, this::goTo);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, window::leave, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -364,13 +367,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         });
     }
 
-    /** The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, unless a text field has the keys. */
+    /**
+     * The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, and the Client Settings key
+     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, unless a text field has the keys.
+     */
     private boolean readyKey(int keycode) {
         if (stage.getKeyboardFocus() instanceof TextField) {
             return false;
         }
+        int key = GpuBattleView.awtKey(keycode);
+        int modifiers = GpuBattleView.modifiers();
+        KeyCommandBind settings = KeyCommandBind.CLIENT_SETTINGS;
+        if (key == settings.key && modifiers == settings.modifiers) {
+            window.openSettings();
+            return true;
+        }
         KeyCommandBind bind = KeyCommandBind.DONE;
-        if (GpuBattleView.awtKey(keycode) != bind.key || GpuBattleView.modifiers() != bind.modifiers) {
+        if (key != bind.key || modifiers != bind.modifiers) {
             return false;
         }
         window.ready();
@@ -512,6 +525,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void choose(List<Integer> path) {
                 window.chooseMenu(path);
+            }
+
+            @Override
+            public void showIds(boolean on) {
+                window.showUnitIds(on);
             }
         };
     }
@@ -863,6 +881,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     // ---- Size and scale ----
 
+    /** Applies a changed GUI scale setting at once, as a resize would. */
+    void rescale() {
+        if (stage != null) {
+            resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        }
+    }
+
     @Override
     public void resize(int width, int height) {
         if (width == 0 || height == 0) {
@@ -1134,15 +1159,29 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         GpuLobbyProbeInput.click(stage, target);
     }
 
-    /** A click {@code lobby+gm} makes through the stage: the seat itself, or a control on its card by name. */
+    /** For the developer switch: clicks the actor called {@code name} through the stage, as a pointer would. */
+    void probeClick(String name) {
+        if (stage != null) {
+            probeClick(stage.getRoot().findActor(name));
+        }
+    }
+
+    /**
+     * A click {@code lobby+gm} or {@code lobby+clickids} makes through the stage: the seat itself, the forces' unit
+     * ids toggle, or a control on the seat's card by name.
+     */
     private record ProbeClick(double at, String name) {}
 
     /**
-     * {@code lobby+gm}'s clicks: the seat and Claim, then with {@code +step} the seat and Step down once the claim has
+     * {@code lobby+clickids}'s click on the unit ids toggle, then {@code lobby+gm}'s clicks: the seat and Claim, then
+     * with {@code +step} the seat and Step down once the claim has
      * gone through; with {@code +asked} only Allow (or Deny) on the card the second human's ask opens.
      */
     private static Deque<ProbeClick> gmClicks(GpuLobbyProbe probe) {
         Deque<ProbeClick> clicks = new ArrayDeque<>();
+        if (probe.options().contains("clickids")) {
+            clicks.add(new ProbeClick(PROBE_CLICK_AT, IDS_TOGGLE));
+        }
         if (!probe.options().contains("gm")) {
             return clicks;
         }
@@ -1231,10 +1270,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
             ProbeClick click = gmClicks.removeFirst();
             Actor target = click.name().equals(GM_SEAT) ? gameMasterSeat.button()
+                  : click.name().equals(IDS_TOGGLE) ? forces.idsToggle()
                   : gameMasterSeat.card().findActor(click.name());
             probeClick(target);
-            LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
-                  window.snapshot().gameMaster());
+            if (click.name().equals(IDS_TOGGLE)) {
+                LOGGER.info("The lobby probe's unit ids click: ids {}", forces.showIds() ? "shown" : "hidden");
+            } else {
+                LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
+                      window.snapshot().gameMaster());
+            }
         }
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {
@@ -1373,8 +1417,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             LOGGER.info("Lobby shot saved to {}", probe.shot().getAbsoluteFile());
         }
         if (probe.quit()) {
+            boolean save = probe.options().contains("saveprefs");
             // After the window report, which waits its turn on the same thread
-            SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() -> System.exit(0)));
+            SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() -> {
+                if (save) {
+                    PreferenceManager.getInstance().save();
+                    LOGGER.info("The lobby probe saved the client settings");
+                }
+                System.exit(0);
+            }));
         }
     }
 

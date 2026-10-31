@@ -89,6 +89,8 @@ import megamek.common.loaders.MekSummary;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
@@ -227,6 +229,23 @@ public final class GpuLobbyWindow {
             boardReplaced();
         }
     };
+    /** Any thread: the client and GUI settings the lobby shows take effect at once, as the Swing lobby's did. */
+    private final IPreferenceChangeListener preferenceListener = event -> {
+        switch (event.getName()) {
+            case ClientPreferences.LOBBY_SHOW_UNIT_ID, ClientPreferences.SHOW_AUTO_RESOLVE_PANEL -> queueRefresh();
+            case GUIPreferences.USE_CAMO_OVERLAY -> {
+                spritesStale = true;
+                queueRefresh();
+            }
+            case GUIPreferences.GUI_SCALE -> GpuHost.post(() -> {
+                GpuLobbyScreen shown = GpuLobbyWindow.this.screen;
+                if (shown != null) {
+                    shown.rescale();
+                }
+            });
+            default -> { }
+        }
+    };
     private final GpuHost.Scene scene = new GpuHost.Scene() {
         @Override
         public ApplicationListener listener() {
@@ -333,6 +352,8 @@ public final class GpuLobbyWindow {
         GpuLobbyWindow window = new GpuLobbyWindow(gui);
         active = window;
         gui.getClient().getGame().addGameListener(window.gameListener);
+        PreferenceManager.getClientPreferences().addPreferenceChangeListener(window.preferenceListener);
+        GUIPreferences.getInstance().addPreferenceChangeListener(window.preferenceListener);
         window.swingDialogs.install();
         gui.lobbyCommands().camoPicker(window.camoPicker);
         window.refresh();
@@ -410,6 +431,16 @@ public final class GpuLobbyWindow {
     /** Whether a modal Swing dialog over the lobby is open. */
     boolean modalOpen() {
         return swingDialogs.blocked();
+    }
+
+    /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
+    void probeClick(String name) {
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.probeClick(name);
+            }
+        });
     }
 
     /** EDT, for the developer switch's {@code lobby+dialog=name}: opens that dialog and photographs the screen. */
@@ -906,6 +937,24 @@ public final class GpuLobbyWindow {
             if (!closing) {
                 SwingLobbyServices.of(gui).unitOrder().select(index);
                 queueRefresh();
+            }
+        });
+    }
+
+    /** Any thread: shows or hides the unit ids on the lobby's cards; the client setting holds across restarts. */
+    void showUnitIds(boolean on) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                PreferenceManager.getClientPreferences().setLobbyShowUnitId(on);
+            }
+        });
+    }
+
+    /** Any thread: opens Client Settings over the lobby, whose window hides the menu bar that holds them. */
+    void openSettings() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && !swingDialogs.blocked()) {
+                gui.openClientSettings();
             }
         });
     }
@@ -1578,6 +1627,8 @@ public final class GpuLobbyWindow {
             gui.lobbyCommands().camoPicker(null);
         }
         gui.getClient().getGame().removeGameListener(gameListener);
+        PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);
+        GUIPreferences.getInstance().removePreferenceChangeListener(preferenceListener);
         boolean replaced = closing;
         closing = true;
         sprites.stop();

@@ -86,6 +86,9 @@ final class LobbyForcesPanel {
 
         /** Chooses the item at {@code path} of the unit menu that last came back. */
         void choose(List<Integer> path);
+
+        /** Shows or hides the unit ids on the cards: the client's lobby setting, which holds across restarts. */
+        void showIds(boolean on);
     }
 
     /** What a drag carries: units or formations. */
@@ -101,6 +104,7 @@ final class LobbyForcesPanel {
     private final Label unitCount;
     private final UiSegmented views;
     private final UiButton compactToggle;
+    private final UiButton idsToggle;
     private final UiButton collapseAll;
     private final UiButton expandAll;
     private final Table sortRow = new Table();
@@ -114,6 +118,8 @@ final class LobbyForcesPanel {
 
     private LobbyForces shown = LobbyForces.EMPTY;
     private boolean compact;
+    /** Whether the cards show the unit ids: the last snapshot's setting, or a click's until the next one echoes it. */
+    private boolean showIds = true;
     private final Set<Integer> collapsed = new HashSet<>();
     private final Set<Integer> selectedUnits = new LinkedHashSet<>();
     private final Set<Integer> selectedFormations = new LinkedHashSet<>();
@@ -159,6 +165,14 @@ final class LobbyForcesPanel {
         kit.tip(compactToggle, true).getActor().setText(Messages.getString("Lobby.forces.compact"));
         // A UiButton never toggles itself, so the click flips the panel's own state and shows it on the button
         UiKit.onChange(compactToggle, () -> compact(!compact));
+        idsToggle = kit.button("button-toggle" + UiTheme.COMPACT, "tag", null, null);
+        idsToggle.setName("lobby-ids-toggle");
+        idsToggle.setChecked(showIds);
+        kit.tip(idsToggle, true).getActor().setText(Messages.getString("Lobby.forces.showIds"));
+        UiKit.onChange(idsToggle, () -> {
+            showIds(!showIds);
+            actions.showIds(showIds);
+        });
         collapseAll = kit.button("button-icon" + UiTheme.COMPACT, "unfold-less", null, null);
         kit.tip(collapseAll, true).getActor().setText(Messages.getString("Lobby.forces.collapse"));
         UiKit.onChange(collapseAll, () -> {
@@ -175,6 +189,7 @@ final class LobbyForcesPanel {
         viewRow.left();
         viewRow.add(views).left();
         viewRow.add(compactToggle).padLeft(space("sm"));
+        viewRow.add(idsToggle).padLeft(space("xs"));
         viewRow.add(collapseAll).padLeft(space("sm"));
         viewRow.add(expandAll).padLeft(space("xs"));
         viewRow.add().growX();
@@ -232,6 +247,22 @@ final class LobbyForcesPanel {
         return compactToggle;
     }
 
+    /** Shows or hides the unit ids on the cards, until a snapshot brings the setting. */
+    void showIds(boolean on) {
+        showIds = on;
+        idsToggle.setChecked(on);
+        fill();
+    }
+
+    boolean showIds() {
+        return showIds;
+    }
+
+    /** The unit ids toggle, for the developer switch's clicks. */
+    UiButton idsToggle() {
+        return idsToggle;
+    }
+
     /** For the developer switch: shows the formations. */
     void showFormations() {
         views.select(FORMATIONS);
@@ -241,6 +272,8 @@ final class LobbyForcesPanel {
     /** Shows {@code forces}, keeping the selection of what is still there. */
     void show(LobbyForces forces) {
         shown = forces;
+        showIds = forces.showIds();
+        idsToggle.setChecked(showIds);
         selectedUnits.removeIf(id -> forces.unit(id) == null);
         selectedFormations.removeIf(id -> forces.formation(id) == null);
         if (unitCount != null) {
@@ -697,7 +730,11 @@ final class LobbyForcesPanel {
         Label name = kit.roleTypeLabel("name", unit.name(), role);
         name.setEllipsis(true);
         row.add(name).minWidth(0).growX();
-        row.add(kit.typeLabel("#" + unit.id(), "small", "text.muted")).padLeft(space("xs"));
+        if (showIds) {
+            Label id = kit.typeLabel("#" + unit.id(), "small", "text.muted");
+            id.setName("lobby-unit-id");
+            row.add(id).padLeft(space("xs"));
+        }
         return row;
     }
 
