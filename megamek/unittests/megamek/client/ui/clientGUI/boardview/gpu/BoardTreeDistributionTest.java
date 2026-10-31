@@ -88,8 +88,8 @@ class BoardTreeDistributionTest {
             var hex = new Hex(0, "woods:" + density + ";foliage_elev:2", "", coords);
             var trees = capture(hex, coords, true);
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, trees.size());
-            assertTrue(trees.stream().allMatch(t -> t.height() >= 2 && t.height() <= 2.2f
-                  && Math.hypot(t.x(), t.y()) <= 29), "Keep authoritative cover and the existing trunk footprint");
+            BoardFeaturesTest.assertWoodsHeights(trees, 2, density);
+            assertTrue(trees.stream().allMatch(t -> Math.hypot(t.x(), t.y()) <= 29), "Keep the existing trunk footprint");
         }
         var clear = new Hex(0, "", "", coords);
         assertTrue(capture(clear, coords, true).isEmpty());

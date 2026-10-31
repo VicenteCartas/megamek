@@ -38,8 +38,8 @@ class BoardOrchardTest {
                 assertTrue(tree.asset().startsWith("vegetation/orchard-"));
                 assertEquals(theme.equals("snow"), tree.asset().endsWith("-snow"));
                 assertEquals(BoardScene.FeatureKind.TREE, tree.kind());
-                assertTrue(tree.height() >= height && tree.height() <= height * 1.1f);
             }
+            BoardFeaturesTest.assertWoodsHeights(trees, height, 1);
             assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
             assertEquals(trees, BoardFeatures.capture(hex, coords, Map.of()));
         }

@@ -29,12 +29,18 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFoliageTest {
+    /** Loading a glowing fungal material decodes its emission map with libGDX. */
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
     @ParameterizedTest
     @ValueSource(strings = { "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-snow", "vegetation/pine-tall-snow", "vegetation/pine-broad-snow",
           "vegetation/pine-slender", "vegetation/pine-layered", "vegetation/pine-slender-snow", "vegetation/pine-layered-snow" })
@@ -102,7 +108,8 @@ class BoardFoliageTest {
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, features.size());
             assertTrue(features.stream().allMatch(feature -> shrub(feature, family)
-                  && feature.kind() == BoardScene.FeatureKind.TREE && feature.height() >= 1 && feature.height() <= 1.1f));
+                  && feature.kind() == BoardScene.FeatureKind.TREE));
+            BoardFeaturesTest.assertWoodsHeights(features, 1, density);
             if (density > 1) {
                 assertTrue(features.stream().map(BoardScene.Feature::asset).distinct().count() > 1,
                       "A dense hex mixes the family's shrub shapes");
@@ -198,12 +205,17 @@ class BoardFoliageTest {
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
-            String plant = "vegetation/" + atlas.getName().replace(".png", "");
+            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/).
+            String name = atlas.getName().replace(".png", "");
+            String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/").map(folder -> folder + name)
+                  .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
             var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
             for (var material : near.materials) {
+                // The glowing mycelium is its vertex colour alone.
+                if (material.textures == null) { continue; }
                 var image = near.images.get(material.textures.first().fileName);
                 byte[] encoded = image.file() != null ? Files.readAllBytes(Path.of(image.file())) : image.encoded();
                 textures.put(material.id, ImageIO.read(new ByteArrayInputStream(encoded)));
@@ -234,6 +246,7 @@ class BoardFoliageTest {
             double weight = 0;
             for (var part : mesh.parts) {
                 BufferedImage texture = textures.get(partMaterials.get(part.id));
+                if (texture == null) { continue; }
                 double[] mean = cutoutMeans.get(partMaterials.get(part.id));
                 for (int i = 0; i < part.indices.length; i += 3) {
                     int a = corner(part.indices, i), b = corner(part.indices, i + 1), c = corner(part.indices, i + 2);

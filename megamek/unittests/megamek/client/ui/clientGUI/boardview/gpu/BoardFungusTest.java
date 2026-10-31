@@ -24,9 +24,15 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class BoardFungusTest {
+    /** Loading a glowing fungal material decodes its emission map with libGDX. */
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
     @Test
     void referenceBoardUsesFungalColoniesAndPreservesItsWoodsRules() {
         Board board = new Board();

@@ -313,21 +313,20 @@ final class BoardFeatures {
                 if (BoardRoad.distance(roads, roadX + x * roadScale, roadY + y * roadScale) < BoardRoad.SHOULDER + 2) {
                     continue;
                 }
-                // Every biome uses the same distribution. Eligibility and size still describe its vegetation:
-                // fungal and Mars woods may grow one shorter specimen in light woods and two in heavier woods, the
-                // rest (mature fungal cups) reaching cover height, so a hex never reads lower than its woods;
-                // tropical understory uses its low plant model.
-                boolean shorter = (fungus || mars) && index >= 1 && index <= (density == 1 ? 1 : 2);
+                // Every biome uses the same distribution. Eligibility and size still describe its vegetation.
+                // Height is the woods' rule: every woods may grow one shorter plant in light woods and two in
+                // heavier woods, the rest (mature fungal cups among them) reaching cover height, so a hex never reads
+                // lower than its woods. Tropical understory adds its low plants between the trees.
+                int speciesIndex = understory ? index / 2 : index;
+                boolean shorter = !low && speciesIndex >= 1 && speciesIndex <= (density == 1 ? 1 : 2);
                 List<String> choices = low ? shrubVariants("vegetation/foliage-jungle")
                       : fungus && !shorter ? BoardFungus.CUPS : species;
-                int speciesIndex = understory ? index / 2 : index;
                 String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
                       : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
-                float foliageHeight = low ? .4f + (index % 3) * .06f : height * (1f + (index % 3) * .05f);
-                if (fungus || mars) {
-                    foliageHeight = !shorter ? height : height * (tree.startsWith("fungus/spore-")
-                          ? .46f + (index % 3) * .08f : .7f + (index % 3) * .1f);
-                }
+                float foliageHeight = low ? .4f + (index % 3) * .06f
+                      : shorter ? height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
+                            : .7f + (index % 3) * .1f)
+                      : fungus || mars ? height : height * (1f + (index % 3) * .05f);
                 result.add(new BoardScene.Feature(tree, x,
                       y, natural ? treeRandom.nextFloat() * 360
                             : index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
