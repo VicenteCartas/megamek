@@ -639,7 +639,8 @@ final class BoardFeatures {
             int[] next = { 0 };
             layout.decorations(coords, hex, () -> prefix + layout.components().get(next[0]).asset() + "#" + next[0]++,
                         null, false).stream()
-                  .filter(object -> object.kind().equals("decal")).map(object -> feature(hex, object)).forEach(result::add);
+                  .filter(object -> object.kind().equals("decal"))
+                  .map(object -> feature(hex, object.withAsset(geyserLook(object.asset(), coords)))).forEach(result::add);
         }
         return List.copyOf(result);
     }
@@ -652,9 +653,12 @@ final class BoardFeatures {
      */
     static final String FORTIFICATION = "scenery/military/fortification", SANDBAGS = "scenery/military/sandbags";
 
-    /** A geyser's look on its hex: each geyser asset has a second look, {@code <asset>-b}, one or the other per hex. */
+    /**
+     * A geyser's look on its hex: each geyser asset, and the decal of its apron under it, has a second look,
+     * {@code <asset>-b}, one or the other per hex.
+     */
     static String geyserLook(String asset, Coords coords) {
-        if (!asset.startsWith(GpuGeysers.GEYSERS)) { return asset; }
+        if (!asset.startsWith(GpuGeysers.GEYSERS) && !asset.startsWith("decal/geysers/")) { return asset; }
         Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x67657973L);
         return random.nextBoolean() ? asset + "-b" : asset;
     }

@@ -375,7 +375,7 @@ class BoardObstaclesTest {
             assertTrue(roots.size / 4 > 1500, "The surrounding meadow must remain planted: " + state);
             float scale = BoardGeometry.hexScale();
             float x = BoardGeometry.centerX(CENTER) + 7 * scale, y = BoardGeometry.centerY(CENTER) - 3 * scale;
-            // Every look's solid sinter or spatter reaches at least 10.6 model units from its vent (magma-b's, the
+            // Every look's solid sinter or spatter reaches at least 10.1 model units from its vent (magma-b's, the
             // smallest); each outline follows its photograph, so grass meets it unevenly beyond.
             float basin = 10 * .8f * scale;
             int outside = 0;

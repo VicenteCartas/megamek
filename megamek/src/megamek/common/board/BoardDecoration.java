@@ -315,6 +315,11 @@ public record BoardDecoration(String id, String kind, String asset, String name,
               clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
     }
 
+    public BoardDecoration withAsset(String asset) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
+    }
+
     public BoardDecoration withColours(Colours colours) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
               clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars);
