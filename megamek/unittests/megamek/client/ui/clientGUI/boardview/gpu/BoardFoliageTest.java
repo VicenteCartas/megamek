@@ -101,8 +101,12 @@ class BoardFoliageTest {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, features.size());
-            assertTrue(features.stream().allMatch(feature -> feature.asset().equals("vegetation/foliage-" + family)
+            assertTrue(features.stream().allMatch(feature -> shrub(feature, family)
                   && feature.kind() == BoardScene.FeatureKind.TREE && feature.height() >= 1 && feature.height() <= 1.1f));
+            if (density > 1) {
+                assertTrue(features.stream().map(BoardScene.Feature::asset).distinct().count() > 1,
+                      "A dense hex mixes the family's shrub shapes");
+            }
             assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()), "Roots remain deterministic");
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
             assertFalse(BoardFeatures.capture(hex, coords, Map.of()).stream()
@@ -123,17 +127,17 @@ class BoardFoliageTest {
               Terrains.SNOW, "snow").entrySet()) {
             hex.addTerrain(new Terrain(entry.getKey(), 1));
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-                  .allMatch(feature -> feature.asset().equals("vegetation/foliage-" + entry.getValue())));
+                  .allMatch(feature -> shrub(feature, entry.getValue())));
             hex.removeTerrain(entry.getKey());
         }
         hex.removeTerrain(Terrains.WOODS);
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 2));
         hex.setTheme("desert");
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("vegetation/foliage-jungle")));
+              .allMatch(feature -> shrub(feature, "jungle")));
         hex.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("vegetation/foliage-snow")));
+              .allMatch(feature -> shrub(feature, "snow")));
         hex.removeTerrain(Terrains.JUNGLE);
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).isEmpty());
     }
@@ -291,6 +295,11 @@ class BoardFoliageTest {
     }
 
     /** The area a mesh turns toward the views, the plant's outline as the board camera sees it. */
+    /** A low-woods feature is one of its family's three shrub shapes. */
+    private static boolean shrub(BoardScene.Feature feature, String family) {
+        return feature.asset().matches("vegetation/foliage-" + family + "(-[23])?");
+    }
+
     private static double outline(ModelData data, float[][] views) {
         double total = 0;
         for (var mesh : data.meshes) {

@@ -244,7 +244,7 @@ class GpuTreeLodSmokeTest {
             var lods = entry.get("lods");
             if (lods != null && lods.size == 4) { names.add(entry.name); }
         }
-        assertEquals(62, names.size(), "Review the complete effective four-LOD catalog, including snow variants");
+        assertEquals(81, names.size(), "Review the complete effective four-LOD catalog, including snow and shrub variants");
         names.sort(String::compareTo);
         String selected = System.getProperty("megamek.gpu.impostorNames");
         if (selected != null) {

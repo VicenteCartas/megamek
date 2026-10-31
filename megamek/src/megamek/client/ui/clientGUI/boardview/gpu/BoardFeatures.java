@@ -274,9 +274,9 @@ final class BoardFeatures {
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
             List<String> species = mars ? MARS_CORALS
-                  : volcano ? (height == 1 ? List.of("vegetation/foliage-volcano") : VOLCANO_TREES)
+                  : volcano ? (height == 1 ? shrubVariants("vegetation/foliage-volcano") : VOLCANO_TREES)
                   : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(vegetation)
-                  : height == 1 ? List.of(shrub(vegetation, jungle)) : species(vegetation, jungle);
+                  : height == 1 ? shrubVariants(shrub(vegetation, jungle)) : species(vegetation, jungle);
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
             boolean understory = surface(vegetation) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
             if (understory) { count *= 2; }
@@ -314,7 +314,7 @@ final class BoardFeatures {
                 }
                 // Every biome uses the same distribution. Eligibility and size still describe its vegetation:
                 // one mature fungal cup reaches cover height; tropical understory uses its low plant model.
-                List<String> choices = low ? List.of("vegetation/foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
+                List<String> choices = low ? shrubVariants("vegetation/foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
                 int speciesIndex = understory ? index / 2 : index;
                 String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
                       : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
@@ -1137,6 +1137,11 @@ final class BoardFeatures {
     private static List<String> orchardSpecies(Hex hex) {
         return surface(hex) == BoardScene.Surface.SNOW
               ? ORCHARD.stream().map(tree -> tree + "-snow").toList() : ORCHARD;
+    }
+
+    /** A shrub family grows three shapes, so level-one cover never repeats one bush across a hex. */
+    private static List<String> shrubVariants(String shrub) {
+        return List.of(shrub, shrub + "-2", shrub + "-3");
     }
 
     /** Level-one woods and jungle are understory, with their own low-growing geometry. */
