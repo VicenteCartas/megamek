@@ -142,7 +142,7 @@ final class GpuMarkers implements Disposable {
         var sides = builder.part("edge", GL20.GL_TRIANGLES, VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal,
               new Material(ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),
                     IntAttribute.createCullFace(GL20.GL_NONE)));
-        GpuCutout.extrude(pixels, region, Vector3.Zero, 1, 1, true, caps, sides);
+        GpuCutout.extrude(pixels, region, Vector3.Zero, 1, 1, caps, sides, caps);
         return builder.end();
     }
 

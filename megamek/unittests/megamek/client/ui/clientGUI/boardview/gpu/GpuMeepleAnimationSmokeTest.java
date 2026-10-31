@@ -29,7 +29,10 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.client.ui.tileset.MekTileset;
 import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
+import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
+import megamek.common.rules.core.CoreRulesManager;
+import megamek.common.rules.totalwarfare.TWRulesManager;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.FallSide;
@@ -112,30 +115,13 @@ class GpuMeepleAnimationSmokeTest {
         var shortened = instance.transform.cpy();
         MeepleAnimator.place(model, instance, unit.at(unit.location().withHullDown(true)), UnitMotion.Sample.STILL, renderer.camera, ground, 0);
         assertArrayEquals(shortened.val, instance.transform.val, .001f, "Hull-down shares the voluntary-prone pose");
-        for (var side : FallSide.values()) {
-            for (int facing = 0; facing < 6; facing++) {
-                var point = new BoardScene.Waypoint(unit.location().coords(), 0, facing, ProneCause.FORCED).withFallSide(side);
-                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60);
-                assertEquals(volume, instance.transform.det(), .001f, "A fall rotates the entire solid without squashing it");
-                var upper = new Vector3(Vector3.Z).rot(instance.transform).nor();
-                var heading = new Vector3(Vector3.Y).rotate(Vector3.Z, -facing * 60);
-                assertEquals(1, upper.dot(heading), .001f, "Upper end points in the engine's resolved heading");
-                assertEquals(.5f, UnitBounds.world(instance).min.z, .001f);
-                if (facing == 0) { renderer.frame(List.of(instance), ground, null, "meeple-fall-" + side, 0); }
-                var toppled = instance.transform.cpy();
-                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60, null, true);
-                assertEquals(1, new Vector3(Vector3.Z).rot(instance.transform).nor().z, .001f,
-                      "Top view presents a readable upright token for either fall outcome");
-                assertEquals(1, new Vector3(Vector3.Y).rot(instance.transform).nor().dot(heading), .001f,
-                      "Top-view artwork follows the resolved facing, without the face-up pose's extra half turn");
-                assertEquals(standing / 2, UnitBounds.world(instance).getDepth(), .001f, "Prone weapons retain their lowered origin");
-                renderer.topView = true;
-                renderer.frame(List.of(instance), ground, null, "meeple-prone-top-" + side, facing);
-                renderer.topView = false;
-                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60);
-                assertArrayEquals(toppled.val, instance.transform.val, .001f, "Switching back restores the same toppled pose");
+        var rules = Game.rulesManager;
+        try {
+            for (var system : List.of(new TWRulesManager(), new CoreRulesManager())) {
+                Game.rulesManager = system;
+                verifyFalls(model, instance, unit, renderer, ground, standing, volume, system instanceof TWRulesManager);
             }
-        }
+        } finally { Game.rulesManager = rules; }
         var motion = new UnitMotion(unit.location());
         motion.append(List.of(unit.location(), new BoardScene.Waypoint(unit.location().coords().translated(0), 0, 0)),
               EntityMovementType.MOVE_RUN, 0);
@@ -151,6 +137,47 @@ class GpuMeepleAnimationSmokeTest {
         assertTrue(bounced);
         assertEquals(0, MeepleAnimator.bounce(new UnitMotion.Sample(true, EntityMovementType.MOVE_NONE,
               .5f, .2f, 0, 1, 0, 0, ProneCause.NONE)), "A displacement slides instead of walking");
+    }
+
+    /**
+     * Total Warfare turns a fallen unit's facing to where it fell: the token's top points along it. Core keeps the
+     * facing: the top comes down on the side the unit fell on.
+     */
+    private static void verifyFalls(GpuUnitModel model, ModelInstance instance, BoardScene.Unit unit,
+          GpuPlaybackReview.ReviewRenderer renderer, Vector3 ground, float standing, float volume, boolean totalWarfare) {
+        for (var side : FallSide.values()) {
+            float fell = totalWarfare ? 0 : switch (side) {
+                case FRONT -> 0;
+                case RIGHT -> 90;
+                case REAR -> 180;
+                case LEFT -> -90;
+            };
+            for (int facing = 0; facing < 6; facing++) {
+                var point = new BoardScene.Waypoint(unit.location().coords(), 0, facing, ProneCause.FORCED).withFallSide(side);
+                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60);
+                assertEquals(volume, instance.transform.det(), .001f, "A fall rotates the entire solid without squashing it");
+                var upper = new Vector3(Vector3.Z).rot(instance.transform).nor();
+                var heading = new Vector3(Vector3.Y).rotate(Vector3.Z, -facing * 60);
+                assertEquals(1, upper.dot(new Vector3(Vector3.Y).rotate(Vector3.Z, -facing * 60 - fell)), .001f,
+                      "Upper end points where the unit fell: " + side + (totalWarfare ? ", Total Warfare" : ", Core"));
+                assertEquals(.5f, UnitBounds.world(instance).min.z, .001f);
+                if (facing == 0) {
+                    renderer.frame(List.of(instance), ground, null, "meeple-fall-" + side + (totalWarfare ? "-tw" : "-core"), 0);
+                }
+                var toppled = instance.transform.cpy();
+                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60, null, true);
+                assertEquals(1, new Vector3(Vector3.Z).rot(instance.transform).nor().z, .001f,
+                      "Top view presents a readable upright token for either fall outcome");
+                assertEquals(1, new Vector3(Vector3.Y).rot(instance.transform).nor().dot(heading), .001f,
+                      "Top-view artwork follows the resolved facing, without the face-up pose's extra half turn");
+                assertEquals(standing / 2, UnitBounds.world(instance).getDepth(), .001f, "Prone weapons retain their lowered origin");
+                renderer.topView = true;
+                renderer.frame(List.of(instance), ground, null, "meeple-prone-top-" + side, facing);
+                renderer.topView = false;
+                MeepleAnimator.place(model, instance, unit.at(point), UnitMotion.Sample.STILL, renderer.camera, ground, facing * 60);
+                assertArrayEquals(toppled.val, instance.transform.val, .001f, "Switching back restores the same toppled pose");
+            }
+        }
     }
 
     private static BoardScene.Unit form(BoardScene.Unit unit, EntityMovementMode mode, int conversion, boolean airborne) {

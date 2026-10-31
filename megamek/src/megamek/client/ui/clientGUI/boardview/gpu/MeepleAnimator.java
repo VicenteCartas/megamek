@@ -12,7 +12,6 @@ import com.badlogic.gdx.math.Vector3;
 import megamek.common.ResolvedAttack;
 import megamek.common.units.EntityMovementMode;
 import megamek.common.units.EntityMovementType;
-import megamek.common.units.FallSide;
 
 /** Rigid token animation only. Samples the existing movement/combat clocks; never advances a second timeline. */
 final class MeepleAnimator {
@@ -107,11 +106,13 @@ final class MeepleAnimator {
         horizontal *= family.meepleScale();
         float vertical = height * BoardGeometry.level() * BoardGeometry.unitHeightScale() / MeepleVisual.HEIGHT
               * family.meepleScale() * meepleHeightScale(unit, family);
-        boolean rear = posture.side() == FallSide.REAR;
-        float fall = posture.fallen();
-        float pitch = topView ? 0 : (rear ? 90 : -90) * fall * fall;
-        // The engine has already resolved final facing (Core keeps it, TW can change it). Do not add the fall roll again.
-        float yaw = rear && !topView ? 180 * fall : 0;
+        // A fall tips the token over onto the side it fell on, turned only as the posture says (UnitMotion.Posture#turn):
+        // it never spins. It gets up as an articulated body does. Overhead it stands, readable.
+        float fall = topView ? 0 : posture.fallen();
+        var orientation = fall == 0 ? new Quaternion(Vector3.Z, -facing)
+              : posture.rising() ? new Quaternion(Vector3.Z, -facing).mul(UnitMotion.Posture.rising(posture.side(), posture.progress()))
+              : new Quaternion(Vector3.Z, -facing + posture.turn()).mul(UnitMotion.Posture.tip(posture.side(), 90 * fall));
+        float pitch = 0;
         float upright = (1 - fall) * (1 - crouch);
         float lift = motion.airborne(unit) || !walker(unit) ? 0 : bounce(motion) * BoardGeometry.level() * .13f * upright;
         float bank = 0;
@@ -122,7 +123,7 @@ final class MeepleAnimator {
         }
         if (motion.jets() != null) { pitch -= motion.jets().tilt() * .35f; }
         if (converting) { pitch -= conversion.fold() * 12; }
-        instance.transform.set(position, new Quaternion(Vector3.Z, -facing + yaw))
+        instance.transform.set(position, orientation)
               .rotate(Vector3.X, pitch).rotate(Vector3.Y, bank).scale(horizontal, horizontal, vertical);
         support(instance, position.z + .5f + lift);
         return model.anchor(instance, camera);
@@ -135,9 +136,15 @@ final class MeepleAnimator {
         var posture = posture(unit, UnitMotion.Sample.STILL);
         boolean prone = posture.crouch() > 0 || posture.fallen() > 0 || posture.kneel() > 0;
         float death = unit.model() != null && unit.model().state() != null && unit.model().state().pose().dead() ? 1 : 0;
+        var middle = UnitBounds.world(instance).getCenter(new Vector3());
+        // Horizontal, away from the attackers of the hits landing now, each by how hard it lands.
+        var away = new Vector3();
         for (var attack : attacks) {
             if (attack.event.target() != null && attack.event.target().id() == unit.id()) {
                 impact = Math.max(impact, attack.impact());
+                var attacker = attack.event.attacker();
+                var from = UnitAttack.center(instances.get(attacker.id() + ":" + attacker.part()), attacker.location(), new Vector3());
+                away.mulAdd(new Vector3(middle.x - from.x, middle.y - from.y, 0).nor(), attack.impact());
                 instance.transform.trn(attack.dodgeOffset(new Vector3()));
             }
             if (attack.event.entityId() != unit.id()) { continue; }
@@ -180,7 +187,12 @@ final class MeepleAnimator {
             }
             instance.transform.trn(0, 0, hop);
         }
-        if (!prone) { tilt(instance, 3 * recoil + 5 * impact, 0, .3f); }
+        if (!prone) {
+            tilt(instance, 3 * recoil, 0, .3f);
+            // A hit rocks the token away from where it came from; one from overhead, back.
+            if (away.isZero(1e-4f)) { tilt(instance, 5 * impact, 0, .3f); }
+            else { tilt(instance, new Vector3(-away.y, away.x, 0).nor(), 5 * impact, 0, .3f); }
+        }
         if (death > 0 && posture(unit, UnitMotion.Sample.STILL).fallen() == 0) { tilt(instance, -80 * death, 0, 0); }
     }
 
@@ -191,15 +203,20 @@ final class MeepleAnimator {
         instance.transform.trn(position);
     }
 
-    /** Rotate the solid in world units, avoiding shear from its different horizontal/vertical scales. */
+    /** Rotate the solid in world units, avoiding shear from its different horizontal/vertical scales; pitch tips it back. */
     private static void tilt(ModelInstance instance, float pitch, float swing, float pivotFraction) {
+        if (pitch == 0 && swing == 0) { return; }
+        var forward = new Vector3(0, 1, 0).rot(instance.transform); forward.z = 0; forward.nor();
+        tilt(instance, new Vector3(forward.y, -forward.x, 0), pitch, swing, pivotFraction);
+    }
+
+    /** {@link #tilt(ModelInstance, float, float, float)} about a horizontal world axis: pitch tips the top to its right. */
+    private static void tilt(ModelInstance instance, Vector3 axis, float pitch, float swing, float pivotFraction) {
         if (pitch == 0 && swing == 0) { return; }
         var bounds = UnitBounds.world(instance);
         float floor = bounds.min.z;
         var pivot = bounds.getCenter(new Vector3());
         pivot.z = bounds.min.z + bounds.getDepth() * pivotFraction;
-        var forward = new Vector3(0, 1, 0).rot(instance.transform); forward.z = 0; forward.nor();
-        var axis = new Vector3(forward.y, -forward.x, 0);
         var change = new com.badlogic.gdx.math.Matrix4().setToTranslation(pivot)
               .rotate(Vector3.Z, swing).rotate(axis, pitch).translate(-pivot.x, -pivot.y, -pivot.z);
         instance.transform.mulLeft(change);

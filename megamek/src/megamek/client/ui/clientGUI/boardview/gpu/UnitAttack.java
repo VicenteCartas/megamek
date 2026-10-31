@@ -75,6 +75,8 @@ final class UnitAttack {
     float jitter;
     UnitVolley.Group group;
     UnitAttack incoming;
+    /** The hit that caused this death, when the death directly follows it: the death plays from its landing. */
+    UnitAttack cause;
 
     UnitAttack(BoardScene.Combat event) {
         this.event = event;
@@ -138,6 +140,12 @@ final class UnitAttack {
     }
 
     float deathProgress() { return death() ? smooth(seconds / DEATH_SECONDS) : 0; }
+
+    /** Whether this is a shot that hits, from {@code lead} seconds before its first round lands until its last does. */
+    boolean landing(float lead) {
+        return shot() && event.result().hit() && !defensive()
+              && seconds >= ANTICIPATION_SECONDS + flightSeconds - lead && seconds < contactSeconds;
+    }
 
     boolean fires(UnitEquipmentAssembly.Binding binding) {
         int owner = binding.memberId() < 0 ? event.attacker().id() : binding.memberId();

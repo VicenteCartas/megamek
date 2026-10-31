@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.ProneCause;
@@ -30,6 +31,9 @@ final class UnitMotion {
     private static final double REFERENCE_JUMP_MP = 3;
     static final double TURN_SECONDS_PER_FACING = .25;
     static final double POSTURE_SECONDS = .4;
+    /** After a fall lands, the body rebounds off the ground and settles: for how long, and how far back up it tips. */
+    static final double REBOUND_SECONDS = .16;
+    private static final float REBOUND = .08f;
     static final float FORMATION_SETTLE_SECONDS = .3f;
     static final float JUMP_DESTINATION_CLEARANCE = 3;
     private static final float JUMP_ARC_LIFT = 1;
@@ -232,14 +236,80 @@ final class UnitMotion {
     }
     private record GearPause(int waypoint, boolean retract, double start, double end) { }
     private record PosturePause(BoardScene.Waypoint from, BoardScene.Waypoint to, double start, double end) { }
-    record Posture(float crouch, float fallen, megamek.common.units.FallSide side, boolean rising, float progress, float kneel) {
+    /**
+     * How a unit stands or lies. While it falls or gets up, {@code upright} and {@code lying} are its facings standing
+     * and lying, in degrees; NaN otherwise.
+     */
+    record Posture(float crouch, float fallen, megamek.common.units.FallSide side, boolean rising, float progress, float kneel,
+          float upright, float lying) {
         static Posture of(ProneCause cause, megamek.common.units.FallSide side, boolean hullDown) {
             return new Posture(cause == ProneCause.VOLUNTARY ? 1 : 0,
                   cause == ProneCause.FORCED || cause == ProneCause.UNKNOWN ? 1 : 0, side, false, 1,
-                  hullDown && (cause == null || cause == ProneCause.NONE) ? 1 : 0);
+                  hullDown && (cause == null || cause == ProneCause.NONE) ? 1 : 0, Float.NaN, Float.NaN);
         }
         static Posture of(BoardScene.Waypoint point) {
             return of(point.proneCause(), point.fallSide(), Boolean.TRUE.equals(point.hullDown()));
+        }
+
+        /**
+         * How far the body is turned from the facing the unit reports, in degrees counterclockwise, while it falls, lies
+         * or gets up ({@link #lyingTurn}); it turns only by the least that takes as it goes down, and never spins.
+         */
+        float turn() {
+            if (fallen == 0) { return 0; }
+            float turned = lyingTurn(side);
+            if (Float.isNaN(lying)) { return turned; }
+            // The reported facing turns from upright to lying with the fall (facing); the body, to lying less that turn.
+            return (shortest(upright, lying) - shortest(upright, lying - turned)) * fallen;
+        }
+
+        /**
+         * How far a fallen body lies turned from its facing, in degrees counterclockwise. It falls onto the side it fell
+         * on, which leads it down. Total Warfare turns the facing to where the unit fell, so the body lies with its head
+         * along its facing; Core keeps the facing, and so does the body.
+         */
+        static float lyingTurn(megamek.common.units.FallSide side) {
+            return megamek.common.game.Game.rulesManager instanceof megamek.common.rules.totalwarfare.TWRulesManager
+                  ? lead(side) : 0;
+        }
+
+        /** Tipped {@code degrees} over onto the side the unit falls on, in the body's own frame. */
+        static Quaternion tip(megamek.common.units.FallSide side, float degrees) {
+            float lead = lead(side);
+            return new Quaternion(new Vector3(-MathUtils.cosDeg(lead), MathUtils.sinDeg(lead), 0), degrees);
+        }
+
+        /**
+         * Getting up, {@code progress} of the way, in the body's own frame. Lying turned as it fell ({@link #lyingTurn}),
+         * with its head along its facing it first rolls onto its front about its length, then stands; otherwise it gets
+         * up the way it fell.
+         */
+        static Quaternion rising(megamek.common.units.FallSide side, float progress) {
+            float turned = lyingTurn(side);
+            float roll = turned == lead(side) ? MathUtils.clamp(progress / .25f, 0, 1) : 0;
+            return new Quaternion(Vector3.Z, turned).mul(tip(side, 90))
+                  .slerp(tip(megamek.common.units.FallSide.FRONT, 90), roll).slerp(new Quaternion(), rise(progress));
+        }
+
+        /** How far up a body getting up {@code progress} of the way stands: it starts after its roll. */
+        static float rise(float progress) {
+            float rise = MathUtils.clamp((progress - .2f) / .8f, 0, 1);
+            return rise * rise * (3 - 2 * rise);
+        }
+
+        /** Where the side the unit falls on faces, in degrees clockwise from its front. */
+        static float lead(megamek.common.units.FallSide side) {
+            return side == null ? 0 : switch (side) {
+                case FRONT -> 0;
+                case RIGHT -> 90;
+                case REAR -> 180;
+                case LEFT -> -90;
+            };
+        }
+
+        /** The turn from one heading to another the short way, in degrees, as {@link MathUtils#lerpAngleDeg} turns. */
+        static float shortest(float from, float to) {
+            return ((to - from) % 360 + 540) % 360 - 180;
         }
     }
     record LandingGear(float deployment, BoardScene.Waypoint ground) { }
@@ -569,8 +639,9 @@ final class UnitMotion {
         }
         double turn = Math.abs(UpperBodyTurn.shortestTurn((to.facing() - from.facing()) * 60))
               / 60 * TURN_SECONDS_PER_FACING / unitSpeed;
-        // Moving turns are timed by their speed cap. Only a standalone pivot needs a stationary interval.
-        return distance > 0 ? distance * pace : turn;
+        // Moving turns are timed by their speed cap. Only a standalone pivot needs a stationary interval; a fall turns
+        // the unit as it goes down, not before.
+        return distance > 0 ? distance * pace : falls(from, to) ? 0 : turn;
     }
 
     private static JumpArc jumpArc(List<BoardScene.Waypoint> points, int jumpMP, double gravity) {
@@ -648,6 +719,15 @@ final class UnitMotion {
     }
 
     private static float facing(Playback playback, double seconds) {
+        var posture = posture(playback, seconds);
+        if (posture != null && !posture.rising() && !Float.isNaN(posture.lying())) {
+            // A fall turns the unit to its resolved facing as it goes down, from the way it faced as it began.
+            return (posture.upright() + Posture.shortest(posture.upright(), posture.lying()) * posture.fallen() + 360) % 360;
+        }
+        return travelFacing(playback, seconds);
+    }
+
+    private static float travelFacing(Playback playback, double seconds) {
         float progress = progress(playback, seconds);
         if (playback.jump() != null) {
             return MathUtils.lerpAngleDeg(playback.path().getFirst().facing() * 60,
@@ -657,9 +737,11 @@ final class UnitMotion {
         int index = Math.min((int) step, playback.path().size() - 2);
         var from = playback.path().get(index);
         var to = playback.path().get(index + 1);
+        // A fall's change of facing is no turn on the way there: the fall makes it (facing).
+        float toFacing = falls(from, to) ? from.facing() : to.facing();
         var tangent = curve(playback.path(), index, step - index, true);
         if (tangent.x == 0 && tangent.y == 0) {
-            return MathUtils.lerpAngleDeg(from.facing() * 60, to.facing() * 60, step - index);
+            return MathUtils.lerpAngleDeg(from.facing() * 60, toFacing * 60, step - index);
         }
         float direction = MathUtils.atan2(tangent.x, tangent.y) * MathUtils.radiansToDegrees;
         float entry = heading(from, to);
@@ -667,7 +749,18 @@ final class UnitMotion {
               ? heading(to, playback.path().get(index + 2)) : entry;
         // Heading offsets preserve reverse/lateral movement while the body follows the shared curve tangent.
         return (direction + MathUtils.lerpAngleDeg(from.facing() * 60 - entry,
-              to.facing() * 60 - exit, step - index) + 360) % 360;
+              toFacing * 60 - exit, step - index) + 360) % 360;
+    }
+
+    /** Whether the unit falls over between the two waypoints. */
+    static boolean falls(BoardScene.Waypoint from, BoardScene.Waypoint to) {
+        return from != null && Posture.of(to).fallen() > Posture.of(from).fallen();
+    }
+
+    /** How far down a fall is at {@code t} of its time: it topples, gathering speed until it hits the ground. */
+    static float fall(float t) {
+        t = MathUtils.clamp(t, 0, 1);
+        return t * t * (.4f + .6f * t);
     }
 
     private static Vector3 position(Playback playback, double seconds) {
@@ -821,13 +914,29 @@ final class UnitMotion {
     Sample sample() {
         if (!isMoving()) {
             return new Sample(false, EntityMovementType.MOVE_NONE, 1, 0, 0, 1, arrivalHeading, settledSeconds, arrivedProne, arrival, null, null, null, sequence,
-                  arrivedGroup == null ? null : new Group(arrivedGroup, arrivedGroup.duration() + arrivedGroup.stagger() + settledSeconds));
+                  arrivedGroup == null ? null : new Group(arrivedGroup, arrivedGroup.duration() + arrivedGroup.stagger() + settledSeconds),
+                  rebound(), 0);
         }
         Playback playback = remaining.getFirst();
         Sample pose = sample(playback, elapsed);
         return new Sample(pose.moving(), pose.type(), pose.progress(), pose.steps(), pose.turn(), pose.forward(), pose.heading(),
               pose.settledSeconds(), pose.proneCause(), pose.boarding(), pose.jets(), pose.aeroState(), pose.gear(), pose.sequence(),
               playback.stagger() == 0 ? null : new Group(playback, elapsed), pose.posture(), pose.lateral());
+    }
+
+    /**
+     * Just after the fall that ended the movement hit the ground: the body bouncing back up off it, a second time a third
+     * as high, as a dropped ball does; null otherwise.
+     */
+    private Posture rebound() {
+        var last = arrivedPlayback == null || arrivedPlayback.postures().isEmpty() ? null : arrivedPlayback.postures().getLast();
+        if (last == null || !falls(last.from(), last.to())) { return null; }
+        double since = settledSeconds + arrivedPlayback.duration() - last.end();
+        if (since < 0 || since >= REBOUND_SECONDS) { return null; }
+        float t = (float) (since / REBOUND_SECONDS);
+        float lift = t < .63f ? MathUtils.sin(MathUtils.PI * t / .63f) : MathUtils.sin(MathUtils.PI * (t - .63f) / .37f) / 3;
+        var down = Posture.of(last.to());
+        return new Posture(down.crouch(), 1 - REBOUND * lift, down.side(), false, 1, down.kneel(), Float.NaN, Float.NaN);
     }
 
     private static Sample sample(Playback playback, double seconds) {
@@ -888,12 +997,20 @@ final class UnitMotion {
             }
             if (seconds < pause.end()) {
                 float t = (float) ((seconds - pause.start()) / POSTURE_SECONDS);
-                t = t * t * (3 - 2 * t);
+                // A fall gathers speed until it hits the ground; any other change of posture eases in and out.
+                t = falls(pause.from(), pause.to()) ? fall(t) : t * t * (3 - 2 * t);
                 var from = Posture.of(pause.from());
                 var to = Posture.of(pause.to());
+                boolean rising = from.fallen() > to.fallen();
+                // Falling or getting up, from the way the unit faced as it began (a jump's, as it landed) to the facing it
+                // ends with.
+                boolean turns = from.fallen() != to.fallen();
+                float before = !turns ? Float.NaN : playback.jump() != null ? travelFacing(playback, pause.start())
+                      : pause.from().facing() * 60;
+                float after = turns ? pause.to().facing() * 60 : Float.NaN;
                 return new Posture(MathUtils.lerp(from.crouch(), to.crouch(), t), MathUtils.lerp(from.fallen(), to.fallen(), t),
-                      to.side() == null ? from.side() : to.side(), from.fallen() > to.fallen(), t,
-                      MathUtils.lerp(from.kneel(), to.kneel(), t));
+                      to.side() == null ? from.side() : to.side(), rising, t, MathUtils.lerp(from.kneel(), to.kneel(), t),
+                      rising ? after : before, rising ? before : after);
             }
             point = pause.to();
             if (point.fallSide() != null) { side = point.fallSide(); }

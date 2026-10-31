@@ -19,6 +19,8 @@ import megamek.common.units.EntityMovementType;
 /** One GL-owned event queue for both cameras. The game remains free to receive updates while it plays. */
 final class UnitPlayback {
     static final double COMPLETION_HOLD_SECONDS = 1;
+    /** How much longer the playback holds on an action in which a unit died, while its destruction plays out. */
+    static final double DEATH_HOLD_SECONDS = 1;
     static final int MAX_PENDING_EVENTS = 512;
     /** Maximum spread between a unit's weapon launches, in shared animation seconds. */
     static final float VOLLEY_JITTER_SECONDS = .12f;
@@ -250,12 +252,15 @@ final class UnitPlayback {
                     settleConversion(change);
                 }
                 applySceneUpdates();
-                hold = pending.peekFirst() instanceof BoardScene.AttachmentChange
+                hold = (pending.peekFirst() instanceof BoardScene.AttachmentChange
                       || active instanceof BoardScene.AttachmentChange && pending.peekFirst() instanceof BoardScene.Movement
                       || pending.peekFirst() instanceof BoardScene.Combat next
                             && (next.result().kind() == megamek.common.ResolvedAttack.Kind.BRUSH_OFF
                                   || next.result().kind() == megamek.common.ResolvedAttack.Kind.SHAKE_OFF)
-                      ? 0 : COMPLETION_HOLD_SECONDS;
+                      // A unit that died in its own movement, as a fall, dies as it lands.
+                      || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.Combat death
+                            && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == move.entityId()
+                      ? 0 : COMPLETION_HOLD_SECONDS) + (attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS : 0);
                 if (stepping && active != stepFrom) {
                     // stepOnce(): one more action has played; the queue waits again.
                     stepping = false;
@@ -388,18 +393,27 @@ final class UnitPlayback {
         position.set(origin.lerp(position, progress));
     }
 
-    /** Adjacent confirmed shots from the same pose form one volley; movement and physical actions are barriers. */
+    /**
+     * Adjacent confirmed shots from the same pose form one volley; movement and physical actions are barriers. A death
+     * that directly follows the hit that caused it joins that hit's action and plays from its landing.
+     */
     private void collectVolley() {
-        if (attack == null || !attack.shot()) { return; }
+        if (attack == null || attack.death()) { return; }
         while (attacks.size() < MAX_PENDING_EVENTS) {
             BoardScene.Combat next = null;
+            boolean following = true;
             for (var event : pending) {
                 if (event instanceof BoardScene.SceneUpdate) { continue; }
                 if (event instanceof BoardScene.Combat casualty && casualty.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH) {
-                    continue; // Finish the firing unit's volley before playing its resulting casualties.
+                    if (following && killer(casualty) != null) {
+                        next = casualty;
+                        break;
+                    }
+                    following = false;
+                    continue; // Finish the firing unit's volley before playing its other casualties.
                 }
-                if (event instanceof BoardScene.Combat combat && combat.result().kind() == megamek.common.ResolvedAttack.Kind.SHOT
-                      && sameVolley(combat)) { next = combat; }
+                if (attack.shot() && event instanceof BoardScene.Combat combat
+                      && combat.result().kind() == megamek.common.ResolvedAttack.Kind.SHOT && sameVolley(combat)) { next = combat; }
                 break;
             }
             if (next == null) { return; }
@@ -411,15 +425,31 @@ final class UnitPlayback {
                     iterator.remove();
                 }
             }
-            var shot = new UnitAttack(next);
-            attacks.add(shot);
-            volley.add(shot, (float) combatSeconds);
+            var added = new UnitAttack(next);
+            if (added.death()) { added.cause = killer(next); }
+            attacks.add(added);
+            if (added.cause == null) { volley.add(added, (float) combatSeconds); }
+            for (var death : attacks) {
+                if (death.cause == null) { continue; }
+                // The volley may move a hit's landing while it schedules more shots.
+                death.delay = death.cause.delay + death.cause.contactSeconds;
+                death.seconds = Math.min(death.duration, (float) combatSeconds - death.delay);
+            }
             combatDuration = attacks.stream().mapToDouble(item -> item.delay + item.duration).max().orElseThrow();
-            combatContact = attacks.stream().mapToDouble(item -> item.delay + item.contactSeconds).max().orElseThrow();
+            // A death that joined shows the checkpoint at the hits' landing, as a fallen unit; its fall does not hold it.
+            combatContact = attacks.stream().filter(item -> item.cause == null)
+                  .mapToDouble(item -> item.delay + item.contactSeconds).max().orElseThrow();
             combatTerrainRelease = terrainRelease();
             completed = false;
             hold = 0;
         }
+    }
+
+    /** The hit that killed the casualty, when the casualty directly follows it: the last attack collected. */
+    private UnitAttack killer(BoardScene.Combat casualty) {
+        var last = attacks.getLast();
+        return !last.death() && !last.defensive() && last.event.result().hit() && last.event.target() != null
+              && last.event.target().id() == casualty.entityId() ? last : null;
     }
 
     private boolean beforeImpact() {
@@ -428,7 +458,7 @@ final class UnitPlayback {
 
     /** The latest moment a shot in the volley changes the terrain, never after the volley ends. */
     private double terrainRelease() {
-        double release = attacks.stream()
+        double release = attacks.stream().filter(item -> item.cause == null)
               .mapToDouble(item -> item.delay + item.contactSeconds + item.terrainDelaySeconds()).max().orElseThrow();
         return Math.min(release, combatDuration);
     }

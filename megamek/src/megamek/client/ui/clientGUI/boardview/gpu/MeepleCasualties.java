@@ -68,14 +68,14 @@ final class MeepleCasualties implements Disposable {
      * Blows up a destroyed unit's meeple.
      *
      * @param standing the meeple as the view last drew it, which it no longer draws
-     * @param away     horizontal, away from the hits; null to burst out evenly
+     * @param hit      horizontal, away from the hits, as long as the damage they dealt; null to burst out evenly
      */
-    void exploded(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 away) {
+    void exploded(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 hit) {
         Node meeple = standing.getNode(MeepleVisual.ROOT);
         if (meeple == null) { return; }
         var casualty = new Casualty(standing, unit);
         standing.nodes.clear();
-        shatter(casualty, meeple, TOKEN_CUTS, unit.id(), away);
+        shatter(casualty, meeple, TOKEN_CUTS, unit.id(), hit);
         casualties.add(casualty);
     }
 
@@ -84,10 +84,10 @@ final class MeepleCasualties implements Disposable {
      * it lost none.
      *
      * @param previous the instance the view drew for the unit until now, which it replaces
-     * @param away     horizontal, away from the hits; null when unknown: they then fall out of their formation, clear
-     *                 of the survivors
+     * @param hit      horizontal, away from the hits, as long as the damage they dealt; null when unknown: soldiers
+     *                 then fall out of their formation, clear of the survivors, and vehicles burst out evenly
      */
-    void lost(GpuUnitInstance previous, GpuUnitModel next, BoardScene.Unit unit, Vector3 away) {
+    void lost(GpuUnitInstance previous, GpuUnitModel next, BoardScene.Unit unit, Vector3 hit) {
         var was = previous.visual();
         Set<String> kept = new HashSet<>();
         next.instance.nodes.forEach(node -> kept.add(node.id));
@@ -103,13 +103,13 @@ final class MeepleCasualties implements Disposable {
             var rig = was.rigs().stream().filter(candidate -> node.id.equals(candidate.container())).findFirst().orElseThrow();
             var outward = UnitBounds.subtree(node).mul(previous.transform).getCenter(new Vector3()).sub(middle);
             outward.z = 0;
-            var driven = away != null ? away : outward.len2() < 1e-4f ? null : outward.nor();
+            var away = hit != null ? new Vector3(hit).nor() : outward.len2() < 1e-4f ? null : outward.nor();
             Node drawn = rig.transport() ? drawn(node) : null;
             if (drawn == null) {
                 previous.nodes.add(node);
-                casualty.soldiers.add(soldier(previous, node, driven));
+                casualty.soldiers.add(soldier(previous, node, away));
             } else {
-                shatter(casualty, drawn, VEHICLE_CUTS, unit.id() * 31 + node.id.hashCode(), driven);
+                shatter(casualty, drawn, VEHICLE_CUTS, unit.id() * 31 + node.id.hashCode(), hit);
             }
         }
         previous.calculateTransforms();
@@ -117,7 +117,7 @@ final class MeepleCasualties implements Disposable {
     }
 
     /** Breaks {@code drawn}, a node of the casualty's instance, into pieces in its place and throws them. */
-    private static void shatter(Casualty casualty, Node drawn, int cuts, int seed, Vector3 away) {
+    private static void shatter(Casualty casualty, Node drawn, int cuts, int seed, Vector3 hit) {
         // Cut in the mesh's own coordinates, where its camouflage was projected, about the board's up there.
         var frame = new Matrix4(casualty.instance.transform).mul(drawn.globalTransform);
         var up = new Vector3(Vector3.Z).rot(new Matrix4(frame).inv());
@@ -126,7 +126,7 @@ final class MeepleCasualties implements Disposable {
         pieces.isAnimated = true;
         pieces.localTransform.set(drawn.globalTransform);
         casualty.instance.nodes.add(pieces);
-        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, away, seed)));
+        casualty.debris.add(new Debris(model, new MeepleDebris(casualty.instance, pieces, hit, seed)));
     }
 
     /** The first node of the subtree that draws anything: a meeple vehicle's single mesh. */
@@ -163,16 +163,16 @@ final class MeepleCasualties implements Disposable {
     }
 
     /**
-     * Advances every casualty by {@code seconds} and poses it, thrown pieces bouncing on {@code ground}. Once everything
-     * of it is still, it lies, sinks and goes.
+     * Advances every casualty by {@code seconds} and poses it, thrown pieces bouncing on {@code ground} under {@code
+     * gravity} standard gravities. Once everything of it is still, it lies, sinks and goes.
      */
-    void advance(float seconds, MeepleDebris.Ground ground) {
+    void advance(float seconds, MeepleDebris.Ground ground, float gravity) {
         for (var iterator = casualties.iterator(); iterator.hasNext();) {
             var casualty = iterator.next();
             float time = casualty.seconds += seconds;
             float still = casualty.soldiers.isEmpty() ? 0 : FALL_SECONDS;
             for (Debris debris : casualty.debris) {
-                debris.pieces().advance(seconds, ground);
+                debris.pieces().advance(seconds, ground, gravity);
                 // NaN while any piece still moves.
                 still = Math.max(still, debris.pieces().settled());
             }

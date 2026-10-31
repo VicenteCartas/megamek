@@ -136,6 +136,11 @@ final class GpuBoardSource implements BoardSource {
     /** EDT-owned: the board's terrain tiles, the one capture the preview and the editor share; the markings are ours. */
     private final BoardTiles terrain = new BoardTiles(terrainImages);
     private final List<BoardScene.Animation> pendingEvents = new ArrayList<>();
+    /**
+     * Deaths received since the last checkpoint. The server reports a death as it happens, before the movement or fall
+     * it happened in: the next checkpoint queues them after that, where it left the unit.
+     */
+    private final List<BoardScene.Combat> deaths = new ArrayList<>();
     private final Timer timer;
     private final GameListenerAdapter gameListener;
     private final BoardListenerAdapter boardListener;
@@ -599,12 +604,45 @@ final class GpuBoardSource implements BoardSource {
         Frame before = capture();
         synchronized (this) {
             publishScene(before, true);
-            queueAnimation(new BoardScene.Combat(result, firing, receiving, destination,
-                  target != null && target.isConventionalInfantry(), attacker.isOffBoard(), attacker.isClan()));
+            // No death plays after an attack resolved after it.
+            queueDeaths(true);
+            var combat = new BoardScene.Combat(result, firing, receiving, destination,
+                  target != null && target.isConventionalInfantry(), attacker.isOffBoard(), attacker.isClan());
+            if (result.kind() == megamek.common.ResolvedAttack.Kind.DEATH) { deaths.add(combat); }
+            else { queueAnimation(combat); }
+        }
+    }
+
+    /**
+     * Queues the deaths received since: all of them, or those whose unit the game now has destroyed. One that its unit's
+     * own movement or fall led to plays right after it, where it left the unit.
+     */
+    private void queueDeaths(boolean all) {
+        for (var iterator = deaths.iterator(); iterator.hasNext();) {
+            var death = iterator.next();
+            int id = death.attacker().id();
+            Entity entity = view.game.getEntity(id);
+            if (!all && entity != null && !entity.isDoomed() && !entity.isDestroyed()) { continue; }
+            iterator.remove();
+            int moved = -1;
+            for (int index = 0; index < pendingEvents.size(); index++) {
+                if (pendingEvents.get(index) instanceof BoardScene.Movement move && move.entityId() == id) { moved = index; }
+            }
+            if (moved < 0 || nuclearCapture != null) {
+                queueAnimation(death);
+                continue;
+            }
+            var end = ((BoardScene.Movement) pendingEvents.get(moved)).path().getLast();
+            pendingEvents.add(moved + 1, new BoardScene.Combat(death.result(), death.attacker().at(end),
+                  death.target() == null ? null : death.target().at(end), end, death.conventionalInfantryTarget(),
+                  death.attackerOffBoard(), death.attackerClan()));
+            animationsQueued++;
         }
     }
 
     private synchronized void queueAnimation(BoardScene.Animation animation) {
+        // A concealment drops what it follows: the deaths received before it go first.
+        if (animation instanceof BoardScene.Concealed) { queueDeaths(true); }
         if (nuclearCapture != null) {
             // One final checkpoint follows the flash. Deaths keep their captured victims and play afterwards.
             if (!(animation instanceof BoardScene.SceneUpdate)) { nuclearCapture.consequences().add(animation); }
@@ -626,7 +664,7 @@ final class GpuBoardSource implements BoardSource {
 
     /** Consecutive captures share one checkpoint; animation boundaries are never coalesced. Swing owns capture. */
     private synchronized void publishScene(Frame next, boolean detectGear) {
-        if (next.scene() == null) { pendingEvents.clear(); frame = next; return; }
+        if (next.scene() == null) { pendingEvents.clear(); deaths.clear(); frame = next; return; }
         if (frame != null && frame.scene() == null) { frame = null; }
         var lifts = frame != null && frame.boardGeneration() == next.boardGeneration()
               ? BoardScene.TileTransition.of(frame.scene(), next.scene()) : null;
@@ -666,6 +704,7 @@ final class GpuBoardSource implements BoardSource {
             queueAttachments(frame.scene(), next.scene());
         }
         if (lifts != null) { queueAnimation(lifts); }
+        queueDeaths(false);
         if (frame == null || frame.boardGeneration() != next.boardGeneration() || !next.scene().samePlaybackState(frame.scene())
               || (!pendingEvents.isEmpty() && !(pendingEvents.getLast() instanceof BoardScene.SceneUpdate))) {
             queueAnimation(new BoardScene.SceneUpdate(next.scene()));
@@ -842,6 +881,7 @@ final class GpuBoardSource implements BoardSource {
                 terrain.changed(null);
                 synchronized (this) {
                     pendingEvents.clear();
+                    deaths.clear();
                     nuclearCapture = null;
                 }
             }
@@ -863,6 +903,7 @@ final class GpuBoardSource implements BoardSource {
             atmosphere.reset();
             synchronized (this) {
                 pendingEvents.clear();
+                deaths.clear();
                 nuclearCapture = null;
                 receivedAttacks.clear();
                 removalAttempts.clear();
@@ -1869,6 +1910,7 @@ final class GpuBoardSource implements BoardSource {
         terrain.close();
         synchronized (this) {
             pendingEvents.clear();
+            deaths.clear();
             nuclearCapture = null;
         }
     }

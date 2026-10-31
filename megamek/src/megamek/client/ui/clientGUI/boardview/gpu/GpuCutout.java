@@ -35,15 +35,17 @@ final class GpuCutout {
 
     /**
      * Positions are in artwork pixels, centred on the image, from origin.z to origin.z + height. Caps and
-     * walls use the same simplified loops, including holes and disconnected islands. Returns vertices written.
+     * walls use the same simplified loops, including holes and disconnected islands. The top cap goes to {@code caps},
+     * the bottom one to {@code bottom}: the caps' own builder to show the artwork underneath too, the walls' to paint
+     * it. Returns vertices written.
      */
     static int extrude(BoardScene.Pixels pixels, TextureRegion region, Vector3 origin, float scale, float height,
-          boolean bottomCap, MeshPartBuilder caps, MeshPartBuilder sides) {
+          MeshPartBuilder caps, MeshPartBuilder sides, MeshPartBuilder bottom) {
         var outlines = contours(pixels);
         var panels = outlines.stream().map(GpuCutout::simplify).toList();
         // A subpixel feature can be narrower than the tolerance. Keep its topology rather than crossing walls.
         if (intersects(panels) || !sameNesting(outlines, panels)) { panels = outlines; }
-        int vertices = caps(panels, pixels, region, origin, scale, height, bottomCap, caps);
+        int vertices = caps(panels, pixels, region, origin, scale, height, caps, bottom);
         Color color = averageColor(pixels);
         for (var loop : panels) {
             var normals = new ArrayList<Vector3>();
@@ -218,11 +220,11 @@ final class GpuCutout {
 
     /** Every cap boundary lies on the exact same panel as its wall. */
     private static int caps(List<List<Vector3>> loops, BoardScene.Pixels pixels, TextureRegion region, Vector3 origin,
-          float scale, float height, boolean bottomCap, MeshPartBuilder caps) {
+          float scale, float height, MeshPartBuilder caps, MeshPartBuilder bottom) {
         int vertices = 0;
         for (Vector3[] span : fill(edges(loops))) {
-            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[1], span[2], bottomCap, caps);
-            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[2], span[3], bottomCap, caps);
+            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[1], span[2], caps, bottom);
+            vertices += capTriangle(pixels, region, origin, scale, height, span[0], span[2], span[3], caps, bottom);
         }
         return vertices;
     }
@@ -258,18 +260,16 @@ final class GpuCutout {
     }
 
     private static int capTriangle(BoardScene.Pixels pixels, TextureRegion region, Vector3 origin, float scale,
-          float height, Vector3 a, Vector3 b, Vector3 c, boolean bottomCap, MeshPartBuilder caps) {
+          float height, Vector3 a, Vector3 b, Vector3 c, MeshPartBuilder caps, MeshPartBuilder bottom) {
         if (Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) < .000001f) { return 0; }
         // Image Y points down; reverse the top face so its geometric normal points up in world space.
         caps.triangle(vertex(pixels, region, origin, scale, height, c.x, c.y, 1),
               vertex(pixels, region, origin, scale, height, b.x, b.y, 1),
               vertex(pixels, region, origin, scale, height, a.x, a.y, 1));
-        if (bottomCap) {
-            caps.triangle(vertex(pixels, region, origin, scale, height, a.x, a.y, 0),
-                  vertex(pixels, region, origin, scale, height, b.x, b.y, 0),
-                  vertex(pixels, region, origin, scale, height, c.x, c.y, 0));
-        }
-        return bottomCap ? 6 : 3;
+        bottom.triangle(vertex(pixels, region, origin, scale, height, a.x, a.y, 0),
+              vertex(pixels, region, origin, scale, height, b.x, b.y, 0),
+              vertex(pixels, region, origin, scale, height, c.x, c.y, 0));
+        return 6;
     }
 
     /** Alpha-weighted linear pigment, for scene geometry and material factors. */

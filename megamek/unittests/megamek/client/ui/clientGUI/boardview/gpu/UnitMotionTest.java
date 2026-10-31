@@ -11,6 +11,7 @@ import java.util.List;
 
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.FallSide;
 import megamek.common.units.ProneCause;
 import org.junit.jupiter.api.Test;
 
@@ -464,9 +465,40 @@ class UnitMotionTest {
         assertTrue(motion.isMoving(), "The landing fall still owns the playback clock");
         assertNull(motion.sample().jets());
         assertEquals(BoardGeometry.center(landing.coords(), landing.elevation()), motion.position());
-        assertEquals(.5f, motion.sample().posture().fallen(), .001f);
+        float fallen = motion.sample().posture().fallen();
+        assertTrue(fallen > 0 && fallen < 1);
         motion.advance(UnitMotion.POSTURE_SECONDS / 2, 1);
         assertFalse(motion.isMoving());
+    }
+
+    @Test
+    void aFallTurnsTheUnitAsItGoesDownGatheringSpeedAndReboundsOffTheGround() {
+        var standing = START.withProneCause(ProneCause.NONE);
+        // A fall onto the rear turns the unit about (Total Warfare): the fall does, there is no turn before it.
+        var fallen = new BoardScene.Waypoint(START.coords(), 0, 3, ProneCause.FORCED).withFallSide(FallSide.REAR);
+        var motion = new UnitMotion(standing);
+        motion.append(List.of(standing, fallen), EntityMovementType.MOVE_NONE, 0);
+        assertEquals(UnitMotion.POSTURE_SECONDS, motion.remainingSeconds(), 1e-6);
+        motion.advance(UnitMotion.POSTURE_SECONDS / 2, 1);
+        assertTrue(motion.sample().posture().fallen() < .5f, "Halfway through its time a fall is not yet halfway down");
+        float turned = Math.abs(UpperBodyTurn.shortestTurn(motion.facing()));
+        assertTrue(turned > 0 && turned < 90, "It turns as it falls: " + turned);
+        motion.advance(UnitMotion.POSTURE_SECONDS / 2, 1);
+        assertFalse(motion.isMoving());
+        float lowest = 1;
+        for (int step = 0; step < 10; step++) {
+            motion.advance(UnitMotion.REBOUND_SECONDS / 10, 1);
+            var posture = motion.sample().posture();
+            if (posture != null) { lowest = Math.min(lowest, posture.fallen()); }
+        }
+        assertTrue(lowest < .95f, "It rebounds off the ground: " + lowest);
+        motion.advance(.01, 1);
+        assertNull(motion.sample().posture(), "and lies still");
+        var rising = new UnitMotion(standing);
+        rising.append(List.of(standing, fallen, fallen.withProneCause(ProneCause.NONE)), EntityMovementType.MOVE_WALK, 0);
+        rising.advance(UnitMotion.POSTURE_SECONDS / 2, 1);
+        turned = Math.abs(UpperBodyTurn.shortestTurn(rising.facing()));
+        assertTrue(turned > 0 && turned < 90, "Getting up after it, it still turns as it falls: " + turned);
     }
 
     @Test
