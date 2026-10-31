@@ -112,11 +112,18 @@ class BoardMarsCoralTest {
                 previous = triangles;
                 assertEquals(0, low, .001f, name + " roots stay grounded");
                 assertEquals(30, high, .001f, name + " keeps its height");
-                assertEquals(1, level.materials.size);
-                var material = level.materials.first();
-                assertEquals("coral", material.id, "Mineral coral uses solid foliage lighting");
-                assertEquals(1, material.opacity);
-                assertFalse(material.textures.isEmpty());
+                // Mineral coral uses solid foliage lighting; a sea fan's lattice is a cutout of its own; the farthest
+                // level is the baked impostor.
+                for (var material : level.materials) {
+                    assertTrue(List.of("coral", "bark-fan", "impostor").contains(material.id), name + ": " + material.id);
+                    assertEquals(1, material.opacity);
+                    assertFalse(material.textures.isEmpty());
+                }
+                boolean impostor = false;
+                for (var node : level.nodes) {
+                    for (var part : node.parts) { impostor |= part.materialId.equals("impostor"); }
+                }
+                assertEquals(level == levels.getLast(), impostor, name);
             }
         }
     }
