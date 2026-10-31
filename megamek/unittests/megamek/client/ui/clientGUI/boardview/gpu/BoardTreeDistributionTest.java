@@ -31,7 +31,8 @@ class BoardTreeDistributionTest {
     static final List<String> IMPORTED_TREES = java.util.stream.Stream.concat(
           BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
           java.util.stream.Stream.of("vegetation/tree-dead", "vegetation/tree-dead-snow", "vegetation/palm", "vegetation/palm-bent",
-                "vegetation/cactus", "vegetation/cactus-flowers")).toList();
+                "vegetation/cactus", "vegetation/cactus-flowers", "vegetation/cactus-old", "vegetation/cactus-young",
+                "vegetation/cactus-organ")).toList();
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, boolean natural) {
         return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)

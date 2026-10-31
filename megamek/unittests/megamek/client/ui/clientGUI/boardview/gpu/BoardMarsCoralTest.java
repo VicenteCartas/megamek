@@ -34,6 +34,8 @@ class BoardMarsCoralTest {
                         var cover = cover(hex, at);
                         assertEquals(2 * density, cover.size());
                         assertEquals(height, cover.getFirst().height());
+                        // Woods keep their height: one shorter colony in light woods, two in heavier woods.
+                        assertEquals(density == 1 ? 1 : 2, cover.stream().filter(f -> f.height() < height).count());
                         for (var feature : cover) {
                             assertTrue(BoardFeatures.MARS_CORALS.contains(feature.asset()), feature.asset());
                             assertTrue(feature.height() > 0 && feature.height() <= height);

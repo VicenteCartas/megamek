@@ -82,7 +82,10 @@ class BoardFungusTest {
                       .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
                 assertEquals(2 * density, cover.size());
                 assertEquals(height, cover.getFirst().height());
-                assertTrue(cover.stream().skip(1).allMatch(f -> f.height() < height));
+                // At most one shorter colony in light woods and two in heavier woods; the rest reach the woods' height.
+                long shorter = cover.stream().filter(f -> f.height() < height).count();
+                assertEquals(density == 1 ? 1 : 2, shorter);
+                assertEquals(cover.size() - shorter, cover.stream().filter(f -> f.height() == height).count());
                 assertEquals(density, hex.terrainLevel(Terrains.WOODS));
                 // Ordinary forests keep their existing representation.
                 hex.setTheme("grass");
