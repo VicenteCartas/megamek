@@ -865,6 +865,19 @@ work for Swing, and item 11 is under investigation.
         `search=<text>` (underscores for spaces) to pick a given unit. Not seen on screen: an era hidden between two
         shown (the units photographed had none), and a capture of the factions reveal mid-way (its data arrives at a
         varying time).
+     - ~~No lobby flash before a scenario~~ (reported by exeea after #34). Every client used to open the lobby scene
+       as it initialised, before the server had sent a phase, and the board replaced it once the phase arrived; a
+       scenario, which starts in `STARTING_SCENARIO` and never enters the lounge, showed the lobby for about 0.7 s
+       between the briefing and the board (and its battlefield logged a null-board warning, as no map had arrived).
+       Now `ClientGUI` opens no scene until the server's first phase: the window keeps what it shows (the
+       briefing's "Starting…", or nothing yet for MekHQ), the lounge then opens the lobby and any other phase the
+       board, and between the lounge and the first board phase the lobby stays as before. Checks:
+       `ClientGUIBoardLifecycleTest` (a scenario goes straight to the board, and nothing opens before the first
+       phase). Live: the start screen's `briefing+play` probe (it presses the briefing's Start once the scenario has
+       loaded) on Final Exam goes from the start screen to the board's own loading card with no lobby frame between
+       (window titles and frames captured from MegaMek's window only), with no null-board warning; `lobby+start`
+       still goes from the start screen to the lobby and on to the board. The lobby probe now readies only once the
+       bots' units have reached the game, as a unit arriving later un-readied the player and left the game waiting.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - L14 Settings check: the lobby's part of step 7. Every client and GUI preference the old Swing lobby read or
          wrote is honoured by the libGDX lobby, persists across restarts and appears in the settings dialog where it

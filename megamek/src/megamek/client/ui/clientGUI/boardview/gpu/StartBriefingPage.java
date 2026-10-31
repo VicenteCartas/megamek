@@ -463,9 +463,14 @@ final class StartBriefingPage {
         return roles;
     }
 
+    /** Whether the briefing has loaded and its Start button may be pressed. */
+    boolean canStart() {
+        return startButton != null && !startButton.isDisabled();
+    }
+
     /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
     void submitBriefing() {
-        if (startButton.isDisabled()) {
+        if (!canStart()) {
             return;
         }
         List<Role> roles = roles();

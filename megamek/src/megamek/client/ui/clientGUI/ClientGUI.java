@@ -1095,12 +1095,12 @@ public class ClientGUI extends AbstractClientGUI
             controller.registerCommandAction(KeyCommandBind.BOT_COMMANDS.cmd, GUIP::toggleBotCommandsEnabled);
         }
 
-        // A joining client lands in the lounge; the phase the server sends next replaces the lobby when it is not
-        showDefaultBoard(CG_CHAT_LOUNGE);
+        // The scene follows the server's first phase: the lobby for the lounge, the board for a scenario or a running
+        // game. Until then whatever holds the window stays, so a scenario never flashes the lobby on its way in
         client.changePhase(GamePhase.UNKNOWN);
         // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
         new UnitLoadingDialog(frame).showForBackgroundLoad();
-        frame.setVisible(!GpuBoardWindow.isActiveFor(this) && !GpuLobbyWindow.isActiveFor(this));
+        frame.setVisible(getClient() instanceof BotClient);
         GUIP.addPreferenceChangeListener(this);
     }
 
@@ -1946,7 +1946,10 @@ public class ClientGUI extends AbstractClientGUI
 
     /**
      * The lounge shows the native lobby scene, and every later phase the native board, each replacing the other in the
-     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start.
+     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start. Before the
+     * server sends its first phase the window keeps what it shows (the start screen, or nothing yet for MekHQ), so a
+     * scenario or a running game goes straight to the board; between the lounge and the first board phase the lobby
+     * stays.
      */
     void showDefaultBoard(String mainPanel) {
         if (getClient() instanceof BotClient) {
@@ -1956,8 +1959,8 @@ public class ClientGUI extends AbstractClientGUI
             boardViewChosen = false;
             GpuLobbyWindow.open(this);
             GpuBoardWindow.closeFor(this);
-        } else if (!boardViewChosen && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
-            // While waiting for the server (joining, or between the lounge and the first board phase) the lobby stays
+        } else if (client.getGame().getPhase() != GamePhase.UNKNOWN && !boardViewChosen
+              && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
             openGpuBoard();
             GpuLobbyWindow.closeFor(this);
         }

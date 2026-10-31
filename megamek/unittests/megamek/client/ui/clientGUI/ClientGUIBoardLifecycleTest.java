@@ -394,6 +394,30 @@ class ClientGUIBoardLifecycleTest {
         });
     }
 
+    /**
+     * Before the server sends its first phase the window keeps what it shows; a scenario, which never enters the
+     * lounge, then goes straight to the board without the lobby showing first.
+     */
+    @Test
+    void aScenarioGoesStraightToTheBoardWithoutTheLobby() throws Exception {
+        onClient(() -> {
+            try (var lobby = mockStatic(GpuLobbyWindow.class);
+                  var board = mockStatic(GpuBoardWindow.class)) {
+                try (var waiting = Session.create(GamePhase.UNKNOWN)) {
+                    waiting.gui().showDefaultBoard(ClientGUI.CG_DEFAULT);
+                    board.verify(() -> GpuBoardWindow.open(any(ClientGUI.class), any()), never());
+                }
+                try (var scenario = Session.create(GamePhase.STARTING_SCENARIO)) {
+                    ClientGUI gui = scenario.gui();
+                    gui.showDefaultBoard(ClientGUI.CG_STARTING_SCENARIO);
+                    board.verify(() -> GpuBoardWindow.open(same(gui), any()));
+                }
+                lobby.verify(() -> GpuLobbyWindow.open(any()), never());
+            }
+            return null;
+        });
+    }
+
     private record Session(Game game, ClientGUI gui, Set<CloseClientListener> closeListeners) implements AutoCloseable {
         static Session create() throws Exception {
             return create(GamePhase.LOUNGE);

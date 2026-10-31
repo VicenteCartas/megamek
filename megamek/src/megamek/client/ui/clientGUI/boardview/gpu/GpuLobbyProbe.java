@@ -305,7 +305,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             if (joined[0] && formed[0] < FORMED) {
                 formed[0] = elapsed > FORM_WAIT ? FORMED : form(client, local, formed[0]);
             }
-            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt) {
+            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && botsArmed(gui)) {
                 readied[0] = true;
                 if (starts) {
                     LOGGER.info("The lobby probe presses Ready");
@@ -425,6 +425,23 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     }
 
     /** Loads every unit list for {@code player}, sent by its own client. */
+    /**
+     * Whether every bot's units have reached the game, so readying waits for them: a unit that arrives later un-readies
+     * the player.
+     */
+    private boolean botsArmed(ClientGUI gui) {
+        if (units.isEmpty()) {
+            return true;
+        }
+        for (AbstractClient bot : gui.getLocalBots().values()) {
+            Player player = bot.getLocalPlayer();
+            if (player == null || gui.getClient().getGame().getPlayerEntities(player, false).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void loadUnits(AbstractClient client, Player player) {
         for (File file : units) {
             try {

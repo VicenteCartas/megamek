@@ -134,6 +134,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
     private final StartScreenProbe probe;
     private boolean shotSaved;
+    /** Whether the developer switch's {@code briefing+play} has pressed the briefing's Start. */
+    private boolean playPressed;
 
     private BufferedImage art;
     GpuBoardSkin boardSkin;
@@ -1058,6 +1060,11 @@ final class GpuStartScreen extends ApplicationAdapter {
         stage.draw();
         if (probe != null && probe.shot() != null && !probe.lobby() && !shotSaved && clock() >= probe.shotAt()) {
             saveShot();
+        }
+        if (probe != null && probe.has("play") && page == Page.BRIEFING && !playPressed && clock() >= probe.shotAt()
+              && briefingPage.canStart()) {
+            playPressed = true;
+            briefingPage.submitBriefing();
         }
         if (!settledRate && t >= StartTimeline.INTRO_END) {
             // The settled screen has only slow embers: 30 frames a second is plenty

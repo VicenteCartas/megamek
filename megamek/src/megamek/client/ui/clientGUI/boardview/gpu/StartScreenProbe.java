@@ -17,7 +17,8 @@ import megamek.MMConstants;
  *     <li>{@code MM_START_PAGE}: the page to open at once, without the greeting, such as {@code host}, with options
  *     after a plus: {@code host+online+reveal} opens the Host page's online options and shows its password;
  *     {@code resume} reads the newest save and {@code briefing} opens the scenario file {@code MM_START_SCENARIO}
- *     names, or the last one played; {@code lobby} hosts a game at once with the Host page's saved values (on the next
+ *     names, or the last one played, and {@code briefing+play} presses its Start {@code MM_START_SHOT_AT} seconds in,
+ *     once the scenario has loaded; {@code lobby} hosts a game at once with the Host page's saved values (on the next
  *     free port when the saved one is taken), and the lobby's own probe ({@link GpuLobbyProbe}) takes over from there,
  *     taking the shot itself.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the screen saves from its own frame buffer, {@code MM_START_SHOT_AT}
