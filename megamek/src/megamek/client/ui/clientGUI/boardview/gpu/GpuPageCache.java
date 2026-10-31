@@ -29,9 +29,8 @@ import org.lwjgl.opengl.GL33;
  * it changes. A page at pyramid level v covers 2^v times the ground of a level-0 page in the owner's plane, and builds in
  * as many steps as its owner needs (one a budget unit). The owner names the pages it needs each frame and builds a page
  * when {@link #fill} asks; this class keeps the layers (the pages needed this frame pinned, the others out least
- * recently needed first), readiness, the shaders' page table (one std140 uniform block over one level, where a page
- * not ready stands in with its nearest ready coarser one) and the fill
- * budget.
+ * recently needed first), readiness, the shaders' page tables (each a std140 uniform block over a window of one
+ * level, where a page not ready stands in with its nearest ready coarser one) and the fill budget.
  * <p>
  * A page is ready once its last step has been issued for the current revision, in the layer it holds now; a layer handed
  * to another page never answers for the one before. A page marked {@link #invalidate stale} stays ready, serving its
@@ -64,6 +63,8 @@ final class GpuPageCache implements Disposable {
     static final int TABLE_HEADER_BYTES = 32;
     static final int TABLE_BYTES = TABLE_HEADER_BYTES + TABLE_ENTRIES * 4;
     static final int FALLBACK = 4096;
+    /** Page tables: one for each window the owner's shaders read (GpuMaterialCache: the tops' and the walls'). */
+    static final int TABLES = 2;
     /** The anisotropy a read may take: its footprint stays within the gutter at the levels it reads. */
     static final float MAX_ANISOTROPY = 4;
     /** The first fill's cost guess in nanoseconds of GPU time; measured fills replace it. */
@@ -78,7 +79,7 @@ final class GpuPageCache implements Disposable {
     private final ArrayDeque<Integer> free = new ArrayDeque<>();
     private final ByteBuffer table = BufferUtils.newByteBuffer(TABLE_BYTES);
     private final IntBuffer binding = BufferUtils.newIntBuffer(16);
-    private int buffer;
+    private final int[] buffers = new int[TABLES];
     private long frame, revision;
     // The fill budget: credit in nanoseconds of GPU time; per pyramid level, the cost one step is expected to take and
     // the last steps' costs, of which the estimate is the second largest (one stall does not throttle the fills that
@@ -188,9 +189,11 @@ final class GpuPageCache implements Disposable {
             Gdx.gl.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
             Gdx.gl.glClearColor(clear.get(0), clear.get(1), clear.get(2), clear.get(3));
         }
-        buffer = Gdx.gl.glGenBuffer();
-        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffer);
-        Gdx.gl.glBufferData(GL31.GL_UNIFORM_BUFFER, TABLE_BYTES, null, GL20.GL_DYNAMIC_DRAW);
+        for (int i = 0; i < TABLES; i++) {
+            buffers[i] = Gdx.gl.glGenBuffer();
+            Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffers[i]);
+            Gdx.gl.glBufferData(GL31.GL_UNIFORM_BUFFER, TABLE_BYTES, null, GL20.GL_DYNAMIC_DRAW);
+        }
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
     }
 
@@ -343,13 +346,13 @@ final class GpuPageCache implements Disposable {
     }
 
     /**
-     * Writes the page table for the window of {@code columns} x {@code rows} pages of pyramid level {@code level} from
-     * (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and pages
-     * {@code pageSize} of them: each page's {@link #entry}. False if the window holds more pages than the table.
+     * Writes page table {@code index} for the window of {@code columns} x {@code rows} pages of pyramid level
+     * {@code level} from (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and
+     * pages {@code pageSize} of them: each page's {@link #entry}. False if the window holds more pages than the table.
      */
-    boolean upload(int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
+    boolean upload(int index, int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
           float pageSize, StandIns standIns) {
-        if (buffer == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
+        if (buffers[index] == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
         table.clear();
         table.putFloat(originX).putFloat(originY).putFloat(pageSize).putFloat(texels);
         table.putFloat(columns).putFloat(rows).putFloat(gutter).putFloat(0);
@@ -360,7 +363,7 @@ final class GpuPageCache implements Disposable {
         }
         int used = table.position();
         table.flip();
-        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffer);
+        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffers[index]);
         Gdx.gl.glBufferSubData(GL31.GL_UNIFORM_BUFFER, 0, used, table);
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
         return true;
@@ -380,9 +383,9 @@ final class GpuPageCache implements Disposable {
         return -1;
     }
 
-    /** Binds the page table to uniform block binding {@code binding}. */
-    void bindTable(int binding) {
-        if (buffer != 0) { Gdx.gl30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, binding, buffer); }
+    /** Binds page table {@code index} to uniform block binding {@code binding}. */
+    void bindTable(int index, int binding) {
+        if (buffers[index] != 0) { Gdx.gl30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, binding, buffers[index]); }
     }
 
     /**
@@ -458,7 +461,9 @@ final class GpuPageCache implements Disposable {
         for (int i = 0; i < arrays.length; i++) {
             if (arrays[i] != null) { arrays[i].dispose(); arrays[i] = null; }
         }
-        if (buffer != 0) { Gdx.gl.glDeleteBuffer(buffer); buffer = 0; }
+        for (int i = 0; i < TABLES; i++) {
+            if (buffers[i] != 0) { Gdx.gl.glDeleteBuffer(buffers[i]); buffers[i] = 0; }
+        }
         for (int[] query : queries) { GL15.glDeleteQueries(query[0]); }
         queries.clear();
         pages.clear();

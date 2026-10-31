@@ -128,20 +128,30 @@ final class GpuSurfaceBlend extends Attribute {
 
     record Triangle(Point a, Point b, Point c) {
         /** {@code surface}: what keeps a vertex fixed in a curved layout (GpuTessellation.contacts); null in a plain one. */
-        void write(MeshPartBuilder mesh, Palette palette, BoardSurface surface) {
-            mesh.triangle(write(mesh, a, palette, surface), write(mesh, b, palette, surface), write(mesh, c, palette, surface));
+        void write(MeshPartBuilder mesh, Palette palette, BoardSurface surface) { write(mesh, palette, surface, null); }
+
+        /** As write; a charted wall's with {@code chart}, its corners' chart positions (GpuMaterialCache.charted). */
+        void write(MeshPartBuilder mesh, Palette palette, BoardSurface surface, float[] chart) {
+            mesh.triangle(write(mesh, a, palette, surface, chart, 0), write(mesh, b, palette, surface, chart, 1),
+                  write(mesh, c, palette, surface, chart, 2));
         }
 
-        private static short write(MeshPartBuilder mesh, Point point, Palette palette, BoardSurface surface) {
+        private static short write(MeshPartBuilder mesh, Point point, Palette palette, BoardSurface surface,
+              float[] chart, int corner) {
             var v = point.vertex();
             var cover = point.cover();
             var foot = point.foot();
-            return GpuTessellation.vertex(mesh, surface != null && surface.fixedTessellation(v.position),
-                  v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
+            float[] values = { v.position.x, v.position.y, v.position.z, v.normal.x, v.normal.y, v.normal.z,
                   v.color.toFloatBits(), v.uv.x, v.uv.y, cover.weight(palette.base()), slot(cover, palette.first(), palette),
                   slot(cover, palette.second(), palette), slot(cover, palette.third(), palette), cover.interpolation(),
                   foot.weight(palette.base()), slot(foot, palette.first(), palette), slot(foot, palette.second(), palette),
-                  slot(foot, palette.third(), palette));
+                  slot(foot, palette.third(), palette) };
+            if (chart != null) {
+                values = Arrays.copyOf(values, values.length + 2);
+                values[values.length - 2] = chart[2 * corner];
+                values[values.length - 1] = chart[2 * corner + 1];
+            }
+            return GpuTessellation.vertex(mesh, surface != null && surface.fixedTessellation(v.position), values);
         }
 
         /** Unused slots repeat the base family and carry nothing. */
