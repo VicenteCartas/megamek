@@ -816,6 +816,11 @@ final class GpuBoardSource implements BoardSource {
         refresh();
     }
 
+    @Override
+    public synchronized BoardAtmosphere.Settings scenarioAtmosphere() {
+        return frame == null ? BoardAtmosphere.DEFAULTS : frame.scenarioAtmosphere();
+    }
+
     public synchronized Frame takeFrame() {
         Frame result = (nuclearCapture == null ? frame : nuclearCapture.before()).withTimeline(List.copyOf(pendingEvents));
         pendingEvents.clear();

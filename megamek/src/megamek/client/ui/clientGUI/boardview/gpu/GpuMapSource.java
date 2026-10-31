@@ -483,6 +483,12 @@ final class GpuMapSource implements BoardSource {
         if (SwingUtilities.isEventDispatchThread()) { action.run(); } else { SwingUtilities.invokeLater(action); }
     }
     public Frame takeFrame() { rendering = publication; return rendering.frame(); }
+
+    @Override
+    public BoardAtmosphere.Settings scenarioAtmosphere() {
+        var latest = publication;
+        return latest == null ? BoardAtmosphere.DEFAULTS : latest.frame().scenarioAtmosphere();
+    }
     public UiPreferences uiPreferences() { return uiPreferences; }
     @Override public GpuTraceOverlay.Settings trace() { return trace; }
     public PhaseStatus phaseStatus() { return phaseStatus; }

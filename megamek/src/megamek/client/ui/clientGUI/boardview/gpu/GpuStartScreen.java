@@ -222,7 +222,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     @Override
     public void create() {
         window.started();
-        boardSkin = new GpuBoardSkin();
+        boardSkin = GpuBoardSkin.forScene();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
@@ -1253,7 +1253,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             hud.dispose();
         }
         if (boardSkin != null) {
-            boardSkin.dispose();
+            boardSkin.release();
         }
         briefingPage.disposeSwatches();
     }

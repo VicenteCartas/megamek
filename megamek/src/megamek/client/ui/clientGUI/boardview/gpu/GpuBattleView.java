@@ -367,7 +367,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void createLoadingStage() {
         GpuGlsl.presenting(false);
         if (loadingStage != null) { return; }
-        if (theme == null && loadingTheme == null) { loadingTheme = new GpuBoardSkin(); }
+        if (theme == null && loadingTheme == null) { loadingTheme = GpuBoardSkin.forScene(); }
         var skin = theme != null ? theme.skin : loadingTheme.skin;
         loadingStage = new Stage(new ScreenViewport(), new SpriteBatch(1000, sprites()));
         Table content = new Table();
@@ -443,6 +443,15 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void createBoard() {
         boardCamera.setIsometric(true);
+        // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
+        // screen borrows it again while the terrain builds.
+        theme = loadingTheme == null ? GpuBoardSkin.forScene() : loadingTheme;
+        loadingTheme = null;
+        tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
+        // The switch resizes and redraws the window: after the HUD's event, not inside it.
+        tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
+        // Before the scene renderers: the atmosphere starts with the board's conditions, as the first frame sets them.
+        tuning.useScenario(source.scenarioAtmosphere(), true);
         createSceneRenderers();
         boardCamera.flightCollision = (eye, movement) -> {
             if (terrain != null) { terrain.moveCamera(eye, movement, boardCamera.collisionRadius()); }
@@ -453,14 +462,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (source.isGameplay()) { markers.prepareModels(); }
         unitTextures = new GpuTextures<>(false, true);
         overlay = new GpuBoardOverlay(shapes());
-        // One skin for the window: the loading screen's, when it showed, becomes the HUD's (M1 row 1). The loading
-        // screen borrows it again while the terrain builds.
-        theme = loadingTheme == null ? new GpuBoardSkin() : loadingTheme;
-        loadingTheme = null;
         unitBases = new GpuUnitBases(theme.skin);
-        tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
-        // The switch resizes and redraws the window: after the HUD's event, not inside it.
-        tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
         // The HUD draws with the view's batch, which it does not own: the battle HUD over a game, the map tools over
         // the board editor and the map preview. The batch outlives an asset reload, which recreates the renderers.
         annotationBatch = new SpriteBatch(1000, sprites());
@@ -515,7 +517,9 @@ class GpuBattleView extends ApplicationAdapter {
         GpuGlsl.linkOffscreen(offscreenLinks);
         fireControl = new GpuFireControl(sprites());
         tactical = new GpuTactical(terrain::tacticalSurface, sprites(), shapes());
-        atmosphere = new GpuAtmosphere();
+        // As each frame configures it (renderFrame): its sky is generated once, for these settings.
+        atmosphere = new GpuAtmosphere(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : tuning.atmosphere(),
+              tuning.atmosphereOptions());
         unitVisibility = new GpuUnitVisibility();
         wireframe = new GpuWireframe();
         unitBatch = new ModelBatch(GpuShaderManager.provider("Units", GpuUnitShader::provider), new GpuOpaqueSorter());
@@ -857,7 +861,7 @@ class GpuBattleView extends ApplicationAdapter {
             loadingStage.dispose();
             loadingStage.getBatch().dispose();
             loadingStage = null;
-            if (loadingTheme != null) { loadingTheme.dispose(); }
+            if (loadingTheme != null) { loadingTheme.release(); }
             loadingTheme = null;
             // Models that could not load stand as marked boxes (GpuAssets#missing); the shown board names them.
             var missing = terrain.takeMissingAssets();
@@ -3519,7 +3523,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (loadingStage != null) {
             loadingStage.dispose();
             loadingStage.getBatch().dispose();
-            if (loadingTheme != null) { loadingTheme.dispose(); }
+            if (loadingTheme != null) { loadingTheme.release(); }
         }
         playback.clear();
         groundSurfaces.clear();
@@ -3529,7 +3533,7 @@ class GpuBattleView extends ApplicationAdapter {
             ui.dispose();
         }
         if (theme != null) {
-            theme.dispose();
+            theme.release();
         }
         if (source != null) {
             source.stopKeys();

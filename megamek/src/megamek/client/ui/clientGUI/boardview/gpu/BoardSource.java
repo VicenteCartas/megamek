@@ -131,6 +131,11 @@ interface BoardSource extends AutoCloseable {
 
     record PhaseStatus(String text, boolean blocking) { }
     Frame takeFrame();
+    /**
+     * The scenario atmosphere of its latest frame, without taking the frame (its events stay for the render thread): a
+     * board view's lighting starts from it.
+     */
+    default BoardAtmosphere.Settings scenarioAtmosphere() { return BoardAtmosphere.DEFAULTS; }
     /** A printable snapshot queued by the EDT, consumed once by the render thread; none for game views. */
     default GpuBoardPrint.Request takePrintRequest() { return null; }
     void refresh();

@@ -80,6 +80,8 @@ public final class GpuHost {
     private static volatile Scene current;
     // GPU thread only
     private static ApplicationListener listener;
+    /** The board skin every scene of the window shares ({@link #skin}); disposed with the window. */
+    private static GpuBoardSkin skin;
     private static GpuWindowBounds startBounds;
     private static GpuWindowBounds normalBounds;
     private static GpuWindowBounds publishedBounds;
@@ -95,6 +97,25 @@ public final class GpuHost {
      */
     static void keepSavedBounds() {
         boundsKept = true;
+    }
+
+    /**
+     * The window's board skin, which its start screen, lobby and board views share, so glyphs one of them rasterised
+     * stay for the next; made at first use and after a palette change. Null off the window's GPU thread (a test's own
+     * application), where a scene makes and owns its own ({@link GpuBoardSkin#forScene}).
+     */
+    static GpuBoardSkin skin() {
+        synchronized (LOCK) {
+            if (Thread.currentThread() != thread) { return null; }
+        }
+        // The palette changed since the last scene (Settings, the UI library): a new skin, as refreshing this one's
+        // tokens would leave the textures it replaces undisposed
+        if (skin != null && !skin.inPalette()) {
+            skin.dispose();
+            skin = null;
+        }
+        if (skin == null) { skin = new GpuBoardSkin(true); }
+        return skin;
     }
 
     /**
@@ -315,6 +336,8 @@ public final class GpuHost {
         windowHandle = 0;
         clientBounds = null;
         listener = null;
+        // Disposed by Root.dispose, unless the window failed: its textures then went with the OpenGL context
+        skin = null;
         Scene shown;
         Scene waiting;
         synchronized (LOCK) {
@@ -562,6 +585,11 @@ public final class GpuHost {
         public void dispose() {
             if (current != null) {
                 stop(null);
+            }
+            // The shared skin's textures go with the window's OpenGL context.
+            if (skin != null) {
+                skin.dispose();
+                skin = null;
             }
         }
 
