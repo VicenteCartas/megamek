@@ -233,15 +233,23 @@ final class GpuGlsl {
         Preparation preparation = PREPARING.get();
         Linked linked = preparation != null ? preparation.take(source)
               : offscreenLinks != null && offscreenLinks.worker != null && offscreen()
-                    ? offscreenLinks.submit(source).await(source) : new Linked(source);
+                    ? offscreenLinks.submit(source, key(source)).await(source) : new Linked(source);
         try { return linked.adopt(source); }
         finally { linked.dispose(); }
     }
 
+    /** The program cache's entry name for these stages; null without a cache. */
+    private static String key(GpuShaderManager.Sources source) {
+        return programCache == null ? null : programCache.key(source.vertex(), source.fragment());
+    }
+
     /** A provider construction can yield here before allocating its material shader or publishing any program. */
-    static final class Pending extends RuntimeException {
+    static class Pending extends RuntimeException {
         private Pending() { super(null, null, false, false); }
     }
+
+    /** A program with no cached binary, requested where only cached ones may start ({@link Preparation#run}). */
+    static final class Uncached extends Pending { }
 
     /**
      * Render-thread-owned startup links, polled once per loading frame. No link-status query, uniform lookup or
@@ -267,6 +275,9 @@ final class GpuGlsl {
         }
         private final Map<GpuShaderManager.Sources, Job> working = new HashMap<>();
         private final SharedCompiler worker;
+        /** Links started that the program cache had no binary for; while {@code fresh} is off none may start. */
+        private int freshLinks;
+        private boolean fresh = true;
         /**
          * Native tests set this to put every preparation on the shared-context path: its links finish on another thread,
          * so one stays pending for at least a step even where the driver's own program cache finishes a parallel link at
@@ -287,22 +298,35 @@ final class GpuGlsl {
             }
         }
 
-        boolean run(Runnable action) {
+        boolean run(Runnable action) { return run(action, true); }
+
+        /**
+         * Whether the programs {@code action} asks for are linked; false while a link runs. Without {@code fresh}, a
+         * program the cache has no binary for does not start: {@link Uncached} leaves {@code action} instead.
+         */
+        boolean run(Runnable action, boolean fresh) {
             Preparation previous = PREPARING.get();
+            boolean allowed = this.fresh;
             PREPARING.set(this);
+            this.fresh = fresh;
             try { action.run(); return true; }
+            catch (Uncached refused) { throw refused; }
             catch (Pending unfinished) { return false; }
             finally {
+                this.fresh = allowed;
                 if (previous == null) { PREPARING.remove(); }
                 else { PREPARING.set(previous); }
             }
         }
 
+        /** Links it started from source so far, which the program cache had no binary for. */
+        int freshLinks() { return freshLinks; }
+
         /** Whether the driver links in parallel off this thread; else one shared-context worker links one at a time. */
         boolean parallel() { return worker == null; }
 
-        private Job submit(GpuShaderManager.Sources source) {
-            Linked linked = new Linked(source, true);
+        private Job submit(GpuShaderManager.Sources source, String key) {
+            Linked linked = new Linked(source, true, key);
             Gdx.gl20.glFlush(); // Publish the newly allocated shared objects before the worker uses them.
             linked.timing("queued-shared");
             return new Job(linked, worker.compile(linked, source));
@@ -315,18 +339,39 @@ final class GpuGlsl {
             return false;
         }
 
+        /** Whether a link it started has finished and waits to be taken: until then, asking again finds it running. */
+        boolean finished() {
+            for (Job job : working.values()) { if (job.done().isDone()) { return true; } }
+            for (Linked linked : pending.values()) { if (linked.complete()) { return true; } }
+            return false;
+        }
+
         private Linked take(GpuShaderManager.Sources source) {
             if (worker != null) {
-                Job job = working.computeIfAbsent(source, this::submit);
+                Job job = working.computeIfAbsent(source, started -> submit(started, start(started)));
                 if (!job.done().isDone()) { throw new Pending(); }
                 working.remove(source);
                 return job.await(source);
             }
-            Linked linked = pending.computeIfAbsent(source, Linked::new);
+            Linked linked = pending.computeIfAbsent(source, started -> new Linked(started, false, start(started)));
             if (!linked.complete()) { throw new Pending(); }
             linked.timing("parallel-ready");
             pending.remove(source);
             return linked;
+        }
+
+        /**
+         * A new link's cache key; one the cache has no entry for, or every one without a cache, is a fresh link,
+         * refused while fresh ones are off. An entry that proves damaged or rejected compiles uncounted, once: the
+         * cache deletes it.
+         */
+        private String start(GpuShaderManager.Sources source) {
+            String key = key(source);
+            if (key == null || !programCache.has(key)) {
+                if (!fresh) { throw new Uncached(); }
+                freshLinks++;
+            }
+            return key;
         }
 
         @Override
@@ -453,9 +498,10 @@ final class GpuGlsl {
          */
         private final boolean afterLoading = presenting, offscreenRequest = OFFSCREEN.get(), stalls = PREPARING.get() == null;
 
-        Linked(GpuShaderManager.Sources source) { this(source, false); }
+        Linked(GpuShaderManager.Sources source) { this(source, false, key(source)); }
 
-        Linked(GpuShaderManager.Sources source, boolean deferred) {
+        /** {@code key}: the program cache's entry name for these stages, null without a cache. */
+        Linked(GpuShaderManager.Sources source, boolean deferred, String key) {
             timingId = Boolean.getBoolean(TIMING_PROPERTY) ? source.name() + " "
                   + sourceId(source.vertex(), source.fragment())
                   + " (vertex=" + source.vertex().length() + ", fragment=" + source.fragment().length() + ")" : null;
@@ -463,8 +509,8 @@ final class GpuGlsl {
             previousTiming = requestedAt;
             timing(deferred ? "requested-shared" : PREPARING.get() == null ? "requested-synchronous" : "requested-parallel");
             export(source.name(), source.vertex(), source.fragment());
-            cache = programCache;
-            cacheKey = cache == null ? null : cache.key(source.vertex(), source.fragment());
+            cache = key == null ? null : programCache;
+            cacheKey = key;
             GL20 gl = Gdx.gl20;
             try {
                 vertex = gl.glCreateShader(GL20.GL_VERTEX_SHADER);

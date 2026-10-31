@@ -51,6 +51,15 @@ final class GpuFamilyPrograms {
     static final int IN_FLIGHT = 6;
     /** The capacity in force; native checks lower it to reach it on a small board. */
     static int capacity = CAPACITY;
+    /**
+     * Family programs one load (a board, graphics or lighting change behind the loading stage) compiles from source,
+     * the most-drawn first; programs the program cache holds load beside them at no such cost. The other variants keep
+     * the generic program until a later load, which takes these from the cache and compiles the next ones; without a
+     * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one costs about 15 s on
+     * Iris Xe, its link and the driver's compile at its first draw: with nothing cached, Fire and Ice 2's first load
+     * took 693 s with all 28, 367 s with four (RTX 4070: 112 s and 45 s).
+     */
+    static final int FRESH = 4;
 
     /**
      * Marks a material drawn by its family program. It is part of the material's mask, so the comparisons that already
@@ -83,7 +92,8 @@ final class GpuFamilyPrograms {
         /** The warm-up renderable while its program compiles, and the lighting configuration it compiles for. */
         Renderable sample;
         List<Object> sampleConfiguration;
-        boolean ready, failed;
+        /** Deferred: no cached program, and this configuration compiled its {@link #FRESH} share already. */
+        boolean ready, failed, deferred;
 
         Variant(Key key, float[] families) {
             this.key = key;
@@ -136,6 +146,8 @@ final class GpuFamilyPrograms {
     private final List<Variant> compiling = new ArrayList<>();
     /** A request or a reset since the last search for the next program. */
     private boolean waiting;
+    /** Links this configuration started from source. */
+    private int freshLinks;
     private long environmentMask = -1;
     private int environmentFlags;
     private boolean shadows;
@@ -184,10 +196,11 @@ final class GpuFamilyPrograms {
         shadows = environment.shadowMap != null;
         for (Variant variant : variants.values()) {
             variant.mark(false);
-            variant.ready = variant.failed = false;
+            variant.ready = variant.failed = variant.deferred = false;
         }
         // A link still running finishes into the provider for its own configuration; nothing marks it (prepare).
         waiting = true;
+        freshLinks = 0;
         return true;
     }
 
@@ -224,18 +237,29 @@ final class GpuFamilyPrograms {
      */
     private Boolean finish(Variant variant, GpuGlsl.Preparation preparation, ShaderProvider provider) {
         boolean current = variant.sampleConfiguration.equals(configuration()), changed = false;
+        int started = preparation.freshLinks();
         try {
-            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample))) { return null; }
+            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample), freshLinks < FRESH)) {
+                return null;
+            }
             // A program of an earlier configuration stays in the provider for a return to it; it marks nothing.
             if (current) {
                 variant.ready = true;
                 changed = variant.mark(true);
             }
+        } catch (GpuGlsl.Uncached refused) {
+            // Nothing started: the provider holds no program of the variant for the configuration it was chosen in.
+            variant.deferred = current;
+            List<Object> program = new ArrayList<>(List.of(variant.key));
+            program.addAll(variant.sampleConfiguration);
+            built.remove(program);
         } catch (RuntimeException failure) {
             // Its draws keep the generic program, and a broken variant is not tried again in this configuration.
             variant.failed = current;
             LOGGER.warn(failure, "Terrain family program {} failed; its draws keep the generic program",
                   Arrays.toString(variant.families));
+        } finally {
+            freshLinks += preparation.freshLinks() - started;
         }
         variant.release();
         return changed;
@@ -251,7 +275,8 @@ final class GpuFamilyPrograms {
         // Variants whose chunks all went before their turn were stale edits.
         variants.values().removeIf(variant -> !variant.ready && !variant.failed && variant.live() == null);
         List<Variant> candidates = new ArrayList<>(variants.values().stream()
-              .filter(variant -> !variant.ready && !variant.failed && !compiling.contains(variant) && variant.weight() > 0)
+              .filter(variant -> !variant.ready && !variant.failed && !variant.deferred && !compiling.contains(variant)
+                    && variant.weight() > 0)
               .toList());
         // Equal weights fall back to the variant's description: the choice must not follow chunk install order.
         candidates.sort(Comparator.comparingInt(Variant::weight).reversed()
@@ -284,7 +309,8 @@ final class GpuFamilyPrograms {
     int pending() {
         int free = 0, others = 0;
         for (Variant variant : variants.values()) {
-            if (variant.ready || variant.failed || compiling.contains(variant) || variant.live() == null) { continue; }
+            if (variant.ready || variant.failed || variant.deferred || compiling.contains(variant)
+                  || variant.live() == null) { continue; }
             if (built.contains(List.of(variant.key, environmentMask, environmentFlags, shadows))) { free++; }
             else { others++; }
         }

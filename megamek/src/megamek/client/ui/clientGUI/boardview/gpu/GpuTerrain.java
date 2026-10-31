@@ -1271,6 +1271,8 @@ final class GpuTerrain implements Disposable {
      * how many of them it found linked: the loading stage's shader bar reads them (shaderProgress).
      */
     private int terrainPrograms, terrainProgramsLinked;
+    /** The samples and light of the last poll that asked every sample, none cut by the frame budget; null before one. */
+    private List<Object> terrainMaterialsAsked;
     private long terrainMaterialEnvironment = -1;
     private int terrainMaterialFlags;
     private boolean terrainMaterialShadows;
@@ -3343,6 +3345,17 @@ final class GpuTerrain implements Disposable {
             prepareTerrainMaterial(sculptMaterial(BoardScene.Surface.GRASS), MeshBatch.STANDARD);
         }
         if (terrainMaterialPreparation == null) { terrainMaterialPreparation = new GpuGlsl.Preparation(); }
+        // Asking for a program whose link runs assembles its sources again, each loading frame for minutes when nothing
+        // is cached: ask again once a link finished, or the samples or the light changed. A change this misses waits
+        // for the next link to finish.
+        List<Object> asked = List.of(terrainMaterialSamples.size(), environment.getMask(), environmentLighting.flags(),
+              environment.shadowMap != null, cacheTops);
+        if (asked.equals(terrainMaterialsAsked) && terrainMaterialPreparation.linking()
+              && !terrainMaterialPreparation.finished()) {
+            return;
+        }
+        terrainMaterialsAsked = null;
+        boolean everySample = true;
         terrainMaterialEnvironment = environment.getMask();
         terrainMaterialFlags = environmentLighting.flags();
         terrainMaterialShadows = environment.shadowMap != null;
@@ -3354,7 +3367,10 @@ final class GpuTerrain implements Disposable {
             boolean cacheable = cacheTops && GpuMaterialCache.cacheable(sample.material);
             programs += (twinned ? 2 : 1) + (editable ? 1 : 0) + (cacheable ? 2 : 0);
             // Beside interactive frames (an edit, the editor's samples) the rest wait once a frame spent its budget.
-            if (GpuGlsl.overBudget()) { continue; }
+            if (GpuGlsl.overBudget()) {
+                everySample = false;
+                continue;
+            }
             long start = System.nanoTime();
             boolean colour = terrainMaterialPreparation.run(() ->
                   sample.shader = batch.getShaderProvider().getShader(sample));
@@ -3375,6 +3391,7 @@ final class GpuTerrain implements Disposable {
             linked += (colour ? 1 : 0) + (twin ? 1 : 0) + (cast ? 1 : 0) + (cachedLit ? 1 : 0) + (fills ? 1 : 0);
         }
         if (linked < programs) { terrainMaterialsReady = false; }
+        if (everySample) { terrainMaterialsAsked = asked; }
         terrainPrograms = programs;
         terrainProgramsLinked = linked;
     }

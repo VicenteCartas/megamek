@@ -57,6 +57,10 @@ class GpuProgramCacheSmokeTest {
             @Override
             public void create() {
                 GpuProgramCache previous = GpuGlsl.programCache;
+                // A load compiles only a share of the family programs (GpuFamilyPrograms.FRESH): the generic programs
+                // alone show what the cache keeps.
+                String family = System.getProperty(GpuFamilyPrograms.PROPERTY);
+                System.setProperty(GpuFamilyPrograms.PROPERTY, "false");
                 try {
                     var cache = GpuProgramCache.open(entries);
                     unsupported.set(cache == null);
@@ -99,6 +103,8 @@ class GpuProgramCacheSmokeTest {
                     failure.set(error);
                 } finally {
                     GpuGlsl.programCache = previous;
+                    if (family == null) { System.clearProperty(GpuFamilyPrograms.PROPERTY); }
+                    else { System.setProperty(GpuFamilyPrograms.PROPERTY, family); }
                     Gdx.app.exit();
                 }
             }

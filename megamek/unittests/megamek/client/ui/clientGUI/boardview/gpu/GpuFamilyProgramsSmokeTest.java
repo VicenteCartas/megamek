@@ -111,12 +111,14 @@ class GpuFamilyProgramsSmokeTest {
                 report.append("No program binary format: the warm load is skipped.\n");
                 return;
             }
+            assertTrue(family.ready() <= GpuFamilyPrograms.FRESH, "A load compiles its share of family programs");
             int stored = cache.stored.get(), loaded = cache.loaded.get();
             Frame warm = load(scene, "calibration-warm", report);
+            int compiled = cache.stored.get() - stored;
             report.append(String.format(Locale.ROOT, "Warm load: %d programs loaded, %d compiled%n",
-                  cache.loaded.get() - loaded, cache.stored.get() - stored));
-            assertEquals(stored, cache.stored.get(), "A second load compiles no program");
-            assertEquals(family.ready(), warm.ready(), "and builds the same family programs");
+                  cache.loaded.get() - loaded, compiled));
+            assertTrue(compiled <= GpuFamilyPrograms.FRESH, "A second load compiles only its share of family programs");
+            assertEquals(family.ready() + compiled, warm.ready(), "and takes the first load's from the cache");
             assertTrue(difference(family.pixels(), warm.pixels()) <= 1, "Cached family programs draw the same");
         });
     }
