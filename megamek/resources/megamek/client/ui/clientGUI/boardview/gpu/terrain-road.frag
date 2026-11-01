@@ -414,8 +414,8 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
 // A dirt or gravel road is one track in one coat (GpuRoads#patches). Its mask carries a heading (RG) and its coverage
 // (A); B says where across it a point lies. The coat never paints grass: where it opens, the ground under it shows. Its
 // maps tell the kinds apart. Sizes are metres.
-// - Dirt (dirtTrack): a farm track, two pale packed wheel ruts either side of every course its traffic drives, grass
-//   between them and beside them. B is the signed distance from the nearest rut's centre line (BoardRoad#ruts).
+// - Dirt (dirtTrack): a farm track, pale packed wheel ruts along the courses its traffic drives, grass between them and
+//   beside them. B is the signed distance from the nearest rut's centre line (BoardRoad#ruts).
 // - Gravel (looseTrack): a graded road of crushed stone: two smoother wheel paths where its fines are packed and its
 //   stones pressed in, loose stone windrows along its crown and edges (the grader's berms), a firm edge with stray stones
 //   beyond it, and a hint of washboard and potholes in the wheel paths. B is where across the whole road the point lies

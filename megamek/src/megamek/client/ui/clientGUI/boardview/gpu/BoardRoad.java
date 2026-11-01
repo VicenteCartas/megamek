@@ -108,9 +108,11 @@ final class BoardRoad {
     private int tracked;
     /** The paved roads a loose one meets. */
     private List<BoardRoad> paved = List.of();
-    /** A loose road's wheel courses (#courses), derived once, and which of their ends run on (#pathEnds). */
+    /** A gravel road's courses (#courses), derived once, and which of their ends run on (#pathEnds). */
     private volatile List<List<Point>> courses;
     private volatile byte[] courseEnds;
+    /** A dirt track's wheel courses (#wheels), derived once. */
+    private volatile Wheels wheels;
 
     /** What a road's course needs of one hex, whether from a scene tile or a captured hex. */
     record Node(int exits, int elevation, boolean plain, boolean circulating) {
@@ -1389,48 +1391,140 @@ final class BoardRoad {
     /** How far from a rut's centre line a dirt track keeps its ground bare of grass (#rutted): the rut and its lip. */
     private static final float RUT_BARE = .65f * METRE;
 
+    /** Whether this road's arms meet in an open junction: not a roundabout, nor arms moved beside a rail's corridor. */
+    private boolean openJunction() {
+        return circle == null && borders.size() >= 3 && corridor == RailRoute.Corridor.NONE;
+    }
+
     /**
-     * A loose road's wheel courses (#track, #ruts): its paths, but at a junction (not a roundabout) traffic drives from
-     * every arm to every other, each pair on its own course: straight across, or along one arm and round a farm
-     * vehicle's turn into the other, wider where it turns less. Their ruts cross and part as real ones do, with grass
-     * between.
+     * A gravel road's courses (#track): its paths, but at an open junction traffic drives from every arm to every other,
+     * each pair on its own course (#turn), so its turns grade the junction's corners.
      */
     private List<List<Point>> courses() {
         var result = courses;
         if (result != null) { return result; }
-        // Arms moved beside a rail's corridor no longer run through the centre: they keep their paths.
-        if (circle != null || borders.size() < 3 || corridor != RailRoute.Corridor.NONE) {
+        if (!openJunction()) {
             result = paths;
         } else {
             result = new ArrayList<>();
             for (int a = 0; a < borders.size(); a++) {
-                for (int b = a + 1; b < borders.size(); b++) {
-                    Point from = borders.get(a), to = borders.get(b);
-                    Vector2 u = new Vector2(from.x, from.y).nor(), v = new Vector2(to.x, to.y).nor();
-                    float cos = u.dot(v);
-                    List<Point> course = new ArrayList<>();
-                    line(course, beyond(from), from);
-                    if (cos > -.9f) {
-                        // A circular fillet tangent to both arms, whose turn is the angle between them taken from a
-                        // straight crossing: a broad one round 9 m, a sharp one round 5 m.
-                        float radius = (cos < 0 ? 9 : 5) * METRE, between = (float) Math.acos(cos);
-                        float tangent = radius / (float) Math.tan(between / 2);
-                        float control = 4f / 3 * (float) Math.tan((Math.PI - between) / 4) * radius;
-                        Point start = new Point(u.x * tangent, u.y * tangent, from.width);
-                        Point end = new Point(v.x * tangent, v.y * tangent, to.width);
-                        line(course, from, start);
-                        curve(course, start, new Point(u.x * (tangent - control), u.y * (tangent - control), from.width),
-                              new Point(v.x * (tangent - control), v.y * (tangent - control), to.width), end);
-                    }
-                    line(course, course.getLast(), to);
-                    line(course, to, beyond(to));
-                    result.add(List.copyOf(course));
-                }
+                for (int b = a + 1; b < borders.size(); b++) { result.add(turn(borders.get(a), borders.get(b))); }
             }
             result = List.copyOf(result);
         }
         courses = result;
         return result;
+    }
+
+    /**
+     * A course from one arm to another, from past one border to past the other: straight across, or along one arm and
+     * round a farm vehicle's turn into the other, wider where it turns less.
+     */
+    private List<Point> turn(Point from, Point to) {
+        Vector2 u = new Vector2(from.x, from.y).nor(), v = new Vector2(to.x, to.y).nor();
+        float cos = u.dot(v);
+        List<Point> course = new ArrayList<>();
+        line(course, beyond(from), from);
+        if (cos > -.9f) {
+            // A circular fillet tangent to both arms, whose turn is the angle between them taken from a straight
+            // crossing: a broad one round 9 m, a sharp one round 5 m.
+            float radius = (cos < 0 ? 9 : 5) * METRE, between = (float) Math.acos(cos);
+            float tangent = radius / (float) Math.tan(between / 2);
+            float control = 4f / 3 * (float) Math.tan((Math.PI - between) / 4) * radius;
+            Point start = new Point(u.x * tangent, u.y * tangent, from.width);
+            Point end = new Point(v.x * tangent, v.y * tangent, to.width);
+            line(course, from, start);
+            curve(course, start, new Point(u.x * (tangent - control), u.y * (tangent - control), from.width),
+                  new Point(v.x * (tangent - control), v.y * (tangent - control), to.width), end);
+        }
+        line(course, course.getLast(), to);
+        line(course, to, beyond(to));
+        return List.copyOf(course);
+    }
+
+    /** A dirt track's wheel courses (#wheels): the first {@code pairs} each a pair of ruts, the rest lone ruts. */
+    private record Wheels(List<List<Point>> courses, int pairs, byte[] ends) { }
+
+    /**
+     * A dirt track's wheel courses (#ruts): its paths, each a pair of ruts. At an open junction its tracks run straight
+     * on across it, or bend through it where all its other arms lie to one side; an arm that does neither runs into its
+     * scuffed middle (#scuff). Between neighbouring arms the inner wheels round the corner in one rut. Other turns cross
+     * the middle, as on a real farm track, rather than each wearing a track of its own.
+     */
+    private Wheels wheels() {
+        var result = wheels;
+        if (result != null) { return result; }
+        if (!openJunction()) {
+            result = new Wheels(paths, paths.size(), pathEnds());
+        } else {
+            List<Point> arms = new ArrayList<>(borders);
+            arms.sort(Comparator.comparingDouble(p -> Math.atan2(p.y, p.x)));
+            List<List<Point>> pairs = new ArrayList<>(), corners = new ArrayList<>();
+            boolean[] carried = new boolean[arms.size()];
+            for (int a = 0; a < arms.size(); a++) {
+                for (int b = a + 1; b < arms.size(); b++) {
+                    Point from = arms.get(a), to = arms.get(b);
+                    if (new Vector2(from.x, from.y).nor().dot(new Vector2(to.x, to.y).nor()) < -.9f) {
+                        pairs.add(turn(from, to));
+                        carried[a] = carried[b] = true;
+                    }
+                }
+            }
+            for (int a = 0; a < arms.size(); a++) {
+                int b = (a + 1) % arms.size();
+                Point from = arms.get(a), to = arms.get(b);
+                // Counterclockwise from this arm to the next: the corner between them, or the open side of a bend.
+                double gap = Math.atan2(to.y, to.x) - Math.atan2(from.y, from.x);
+                if (gap <= 0) { gap += 2 * Math.PI; }
+                if (gap < Math.PI - .45) {
+                    corners.add(corner(from, to));
+                } else if (gap > Math.PI + .45) {
+                    pairs.add(turn(from, to));
+                    carried[a] = carried[b] = true;
+                }
+            }
+            for (int a = 0; a < arms.size(); a++) {
+                if (carried[a]) { continue; }
+                List<Point> stub = new ArrayList<>();
+                line(stub, beyond(arms.get(a)), arms.get(a));
+                line(stub, arms.get(a), new Point(0, 0, arms.get(a).width));
+                pairs.add(List.copyOf(stub));
+            }
+            List<List<Point>> courses = new ArrayList<>(pairs);
+            courses.addAll(corners);
+            result = new Wheels(List.copyOf(courses), pairs.size(), openEnds(courses));
+        }
+        wheels = result;
+        return result;
+    }
+
+    /** How sharply the inner wheels round a dirt junction's corner (#corner): the radius of their rut. */
+    private static final float CORNER = 3.5f * METRE;
+
+    /**
+     * The inner wheels' rut round the corner from one arm counterclockwise to the next: along each arm RUT_OFFSET inside
+     * its course, from past its border, and round a circular fillet of CORNER between them.
+     */
+    private List<Point> corner(Point from, Point to) {
+        Vector2 u = new Vector2(from.x, from.y).nor(), v = new Vector2(to.x, to.y).nor();
+        float half = (float) Math.acos(Math.clamp(u.dot(v), -1, 1)) / 2;
+        // Where the two arms' inner ruts meet, on the corner's bisector, and how far each lies from its arm.
+        Vector2 meet = new Vector2(u).add(v).nor().scl(RUT_OFFSET / (float) Math.sin(half));
+        Vector2 inA = new Vector2(meet).mulAdd(u, -meet.dot(u)), inB = new Vector2(meet).mulAdd(v, -meet.dot(v));
+        float tangent = CORNER / (float) Math.tan(half);
+        float control = 4f / 3 * (float) Math.tan((Math.PI - 2 * half) / 4) * CORNER;
+        Point pastFrom = beyond(from), pastTo = beyond(to);
+        List<Point> rut = new ArrayList<>();
+        line(rut, new Point(pastFrom.x + inA.x, pastFrom.y + inA.y, from.width),
+              new Point(from.x + inA.x, from.y + inA.y, from.width));
+        Point start = new Point(meet.x + u.x * tangent, meet.y + u.y * tangent, from.width);
+        Point end = new Point(meet.x + v.x * tangent, meet.y + v.y * tangent, to.width);
+        line(rut, rut.getLast(), start);
+        curve(rut, start, new Point(start.x - u.x * control, start.y - u.y * control, from.width),
+              new Point(end.x - v.x * control, end.y - v.y * control, to.width), end);
+        line(rut, end, new Point(to.x + inB.x, to.y + inB.y, to.width));
+        line(rut, rut.getLast(), new Point(pastTo.x + inB.x, pastTo.y + inB.y, to.width));
+        return List.copyOf(rut);
     }
 
     /** Where this road's paths end past the border at {@code border}: as far as an extension (#extended) carries them. */
@@ -1453,23 +1547,46 @@ final class BoardRoad {
     }
 
     /**
-     * A dirt track's ruts at a point (terrain-road.frag): the heading of the course whose rut lies nearest, and B, the
+     * A dirt track's ruts at a point (terrain-road.frag): the heading of the rut that lies nearest (#wheels), and B, the
      * signed distance from that rut's centre line, negative between a course's two ruts: 0 at RUT_OFFSET inside it, 1 at
-     * RUT_REACH outside. Every course's ruts count, so where courses cross or part, their ruts do too. Past a border a
-     * course runs on straight, as the neighbour measures it up to there.
+     * RUT_REACH outside. Every rut counts, so where they cross or part, so do their ruts' soil and grass. In a junction's
+     * scuffed middle the distance shrinks, so its ruts run together into one worn patch (#scuff). Past a border a course
+     * runs on straight, as the neighbour measures it up to there.
      */
     Track ruts(float x, float y) {
-        var courses = courses();
-        byte[] ends = courseEnds();
+        var wheels = wheels();
         float nearest = Float.POSITIVE_INFINITY, inside = Float.POSITIVE_INFINITY, dx = 0, dy = 1;
-        for (int p = 0; p < courses.size(); p++) {
-            PathSample sample = pathSample(x, y, courses, ends, BORDER_ENDS, p);
-            float rut = sample.distance() - RUT_OFFSET;
+        for (int p = 0; p < wheels.courses().size(); p++) {
+            PathSample sample = pathSample(x, y, wheels.courses(), wheels.ends(), BORDER_ENDS, p);
+            float rut = sample.distance() - (p < wheels.pairs() ? RUT_OFFSET : 0);
             inside = Math.min(inside, rut);
-            if (Math.abs(rut) < nearest) { nearest = Math.abs(rut); dx = sample.dx(); dy = sample.dy(); }
+            // A corner's lone rut runs along a course's rut, maybe the other way: the course, listed first, keeps the
+            // heading there, so that neighbouring texels do not filter it away.
+            if (Math.abs(rut) < nearest - .01f) { nearest = Math.abs(rut); dx = sample.dx(); dy = sample.dy(); }
         }
-        float rut = inside < 0 ? -nearest : nearest;
+        float rut = (inside < 0 ? -nearest : nearest) * (1 - scuff(x, y));
         return new Track(new Vector2(dx, dy).nor(), Math.clamp((rut + RUT_OFFSET) / (RUT_OFFSET + RUT_REACH), 0, 1));
+    }
+
+    /** A dirt junction's middle is scuffed most within SCUFF_CORE of its centre, fading out by SCUFF_EDGE. */
+    private static final float SCUFF_CORE = 1.2f * METRE, SCUFF_EDGE = 3.9f * METRE;
+    /** How far both wander, either way: no scuff lies farther out than SCUFF_EDGE + SCUFF_RAGGED. */
+    private static final float SCUFF_RAGGED = .9f * METRE;
+    /** How much of a rut's distance the most scuffed ground loses: enough to wear them together, not to erase them. */
+    private static final float SCUFF_WEAR = .8f;
+
+    /**
+     * How far turning wheels have scuffed a dirt junction's middle at a point (#ruts): SCUFF_WEAR where they have worn
+     * its ruts together, fading out over a ragged edge; 0 off open junctions.
+     */
+    private float scuff(float x, float y) {
+        float centre = (float) Math.sqrt(x * x + y * y);
+        if (centre > SCUFF_EDGE + SCUFF_RAGGED || !openJunction()) { return 0; }
+        float wx = (x + BoardGeometry.centerX(coords) / BoardGeometry.hexScale()) / (1.5f * METRE);
+        float wy = (y + BoardGeometry.centerY(coords) / BoardGeometry.hexScale()) / (1.5f * METRE);
+        float edge = centre + (2 * BoardRelief.noise(wx, wy) - 1) * SCUFF_RAGGED;
+        float t = Math.clamp((edge - SCUFF_CORE) / (SCUFF_EDGE - SCUFF_CORE), 0, 1);
+        return SCUFF_WEAR * (1 - t * t * (3 - 2 * t));
     }
 
     /**
@@ -1490,11 +1607,18 @@ final class BoardRoad {
         return Math.abs(ruts(x, y).across() * (RUT_OFFSET + RUT_REACH) - RUT_OFFSET) < RUT_BARE;
     }
 
-    /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of its courses. */
+    /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of them, and its scuffed middle. */
     Area rutReach() {
         Area result = new Area();
-        var stroke = new BasicStroke(2 * (RUT_OFFSET + RUT_REACH), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
-        for (var course : courses()) {
+        if (openJunction()) {
+            float reach = SCUFF_EDGE + SCUFF_RAGGED;
+            result.add(new Area(new Ellipse2D.Float(-reach, -reach, 2 * reach, 2 * reach)));
+        }
+        var wheels = wheels();
+        for (int p = 0; p < wheels.courses().size(); p++) {
+            var course = wheels.courses().get(p);
+            float width = 2 * (p < wheels.pairs() ? RUT_OFFSET + RUT_REACH : RUT_REACH);
+            var stroke = new BasicStroke(width, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
             Path2D.Float line = new Path2D.Float();
             line.moveTo(course.getFirst().x, course.getFirst().y);
             for (int i = 1; i < course.size(); i++) { line.lineTo(course.get(i).x, course.get(i).y); }
