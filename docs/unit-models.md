@@ -184,7 +184,14 @@ and equipment effects are derived from the captured state and animation sequence
 A descriptor's `upperBodyNode` lets `UpperBodyTurn` twist the torso while legs
 retain the unit's facing; without it the body turns as one piece. Walking gait
 follows distance traveled, including acceleration/braking. Hull-down, prone,
-forced falls and jump posture use the shared timeline, including pause/skip.
+forced falls and jump posture use the shared timeline, including pause/skip. A
+falling Mek loses its balance: its knees give, it flails, then topples over its
+planted feet and braces before it lands (`UnitAnimator.fallenPose`), lying inside
+its hex. A fallen body lies on the side it fell on, turned as a meeple is
+(`UnitMotion.Posture.turn`): under Total Warfare its head lies along its facing,
+under Core its body keeps the facing. Getting up, a body whose head lies along
+its facing rolls onto its front about its length, braces and stands; one that
+fell the other way gets up the way it fell.
 Troops share articulated base meshes, with stable member identities for idle
 variation and casualties. Each member rises and settles around its own movement.
 

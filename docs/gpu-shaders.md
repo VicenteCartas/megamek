@@ -80,7 +80,9 @@ once they start (`GpuTerrain.shaderProgress`). It shows only while a program is 
 the total grows as chunks find new variants, so the share can fall back as well as rise.
 `GpuGlsl.Preparation` polls the driver's parallel shader
 compiler when available; otherwise a worker compiles in a private hidden shared
-context. The render thread adopts each completed program into libGDX without a
+context. While links run, the warm-up asks for its programs again only once one finished or
+its samples or light changed: asking assembles a program's sources again, which on Iris Xe
+with nothing cached took 83 s of render-thread time on Fire and Ice 2. The render thread adopts each completed program into libGDX without a
 second compilation and retains resource ownership. Lighting and shadow changes
 recheck the required variants. Closing a renderer during a native compiler call may
 wait for that call before releasing the shared context. One worker is enough: Intel's
@@ -177,7 +179,13 @@ family program sorts with it, so draw order and depth-tie winners do not change.
 programs build behind the loading stage, after the generic ones: when a board opens, the
 graphics switch or the lighting changes, the most-drawn variants compile six at a time with
 the driver's parallel compiler (NVIDIA), one at a time on the worker otherwise. Variants that appear later, such as a newly painted combination, keep the
-generic program until the next load. Crust and bank draws and volcanic palettes with at most
+generic program until the next load. A load compiles at most four family programs from source
+(`GpuFamilyPrograms.FRESH`), the most-drawn first, beside every one the program cache holds; the
+other variants keep the generic program, and each later load compiles the next four (without a
+program cache, every load the first four). A lighting change behind the loading stage counts as a load. Uncached, a
+family program costs about 15 s on Iris Xe, most of it Intel's compile at its first draw: with
+nothing cached, Fire and Ice 2's first load took 693 s with all 28 and 367 s with four (RTX 4070:
+112 s and 45 s). Crust and bank draws and volcanic palettes with at most
 one ordinary family keep the generic program, which already compiles one family's path; so
 do scarred surfaces, scatter, water, editor previews and board prints. A terrain keeps at
 most 32 family programs for each lighting configuration and 64 in all. A board without clouds has four

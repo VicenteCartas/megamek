@@ -40,6 +40,8 @@ textures folder. The game reads these `StandardMaterial3D` properties and ignore
 | `heightmap_scale`, `heightmap_deep_parallax`, `heightmap_min_layers`, `heightmap_max_layers`, `heightmap_flip_tangent`, `heightmap_flip_binormal` | Parallax ([below](#parallax)); for magma the relief range too. |
 | `emission_enabled`, `emission`, `emission_operator`, `emission_texture`, `emission_energy` (or `emission_energy_multiplier`) | Emission. |
 | `subsurf_scatter_enabled`, `subsurf_scatter_texture`, `subsurf_scatter_strength` | Subsurface scattering. |
+| `transparency` | ALPHA (1) or ALPHA_DEPTH_PRE_PASS (4): alpha blended, the colour map's alpha (times `albedo_color`'s) the opacity, drawn after everything opaque without depth writes or shadows. Generated geometry takes it (the multi-hex buildings' dome glass); a GLB's own alpha mode decides its materials (`MASK` cutouts). |
+| `blend_mode` | With `transparency`: MIX (0) fades the whole lit colour by the opacity; PREMULT_ALPHA (4) fades only the diffuse share, so a reflection stays whole (glass). |
 
 ## Finish: one meaning on every surface
 

@@ -95,6 +95,45 @@ are currently displayed. Terrain changes go through `GpuTerrain`; unchanged chun
 shared assets can stay installed. Camera movement changes the view and visible detail
 without asking the game to construct another scene.
 
+The battle clock (the playback, unit animation, meeple debris and artillery blasts) can
+run in slow motion while the camera and the HUD keep real time. `GpuBattleView.BULLET_TIME`
+(off) slows it to a quarter from just before a shot that hits lands until it has landed,
+easing in and out. `DRAMATIC_DEATH` (on) cuts it to a quarter as a killing blow lands,
+then ramps it back to speed over the `DEATH` event while the pieces fly; an infantry unit
+gets it only with its last trooper.
+A `DEATH` that directly follows the hit that caused it joins that hit's action and plays
+from its landing; one no hit caused plays as its own action. The server reports a death
+before the movement or fall it happened in: `GpuBoardSource` queues it once the game shows
+the unit destroyed, after that movement, and the playback plays it as the movement ends,
+when the fall lands. An action in which a unit died holds
+`UnitPlayback.DEATH_HOLD_SECONDS` (0.8 s) instead of the usual second while its pieces
+settle: the next action begins about two seconds after the explosion. Attacks resolve together: one a destroyed
+meeple still fires or takes after its death plays on its ghost (`GpuBattleView.ghost`), a faint pale copy that fades in
+and out with that attack.
+
+A confirmed attack (`ResolvedAttack`) arrives before its damage and displacement packets, so the checkpoint captured
+with it shows the board before it, and what follows plays from its contact. Charges, deaths from above and rams send
+`CHARGE`, `DFA` and `RAM` events like the other physical attacks, from any unit (the others only from a Mek); a ram's
+log card is a physical entry (report 9030), so it links to its event. These three carry on (`UnitAttack.carriesOn`):
+the attacker does not step back. A charger runs in leaning its whole body into the target; a death from above leaps in
+an arc (`UnitAttack.leap`) and lands on the target's top (`UnitAttack.landing`, from the attacker's own base, which
+its move may have raised), feet first, when it hits; a ram runs in. A push, a charge and
+a death from above are shoves (`UnitAttack.shoves`). A target they hit moves to its new hex as a forced
+move from the contact: it staggers there (a meeple hops and rocks the way it goes), or falls in the same motion when
+MegaMek knocks it down. A target shoved off the board, which MegaMek removes, stays as captured until its fall ends
+(`UnitAttack.posePushedOff`). It goes off where MegaMek shoved it (`UnitAttack.shoveHexes`): a push or a charge along
+the attacker's facing, a death from above into the first off-board hex in TWRulesMovement's order (the facing, then
+alternating sides), since the hexes before it on the board would have taken it. It slides to the edge and over it, topples outward about its leading foot, drops at
+tabletop gravity and fades out as it falls, gone 1.5 playback seconds (3 s at 1x) after the contact. The fade is the unit
+program's `u_unitOpacity` (`GpuUnitShader.Shown`, the instance's userData), 1 for every other draw: no blended program
+variant, so nothing compiles after loading. A fading unit blends over the scene without writing depth and draws after
+the other units, the farthest first, which show through it; below half its opacity it casts no shadow. A log card's Replay re-presents its attack over the live
+board; after the impact a participant the game has removed since stays as captured until the replay ends, one moved
+since stays where it was, and a shove's own displacement plays (a unit matched by its id and drawn part; a displacement
+only into a hex the shove could put it). A replay tips a target off the board only when its live playback did, or would
+have: skipping to the results (`UnitPlayback.finish`) records each skipped shove whose checkpoint lost its target off
+the board.
+
 ## Enhanced terrain coverage
 
 Legacy `.board` loading ignores explicit `none` markers: they are absent terrain,
@@ -116,6 +155,40 @@ stack. Tall bodies repeat floors without stretching their textures. Connecting a
 meet the neighboring wall's roof in world space, with narrower civilian junction offsets.
 Two authored mesh levels use the existing screen-size LOD rule; distant slots reuse LOD1, and picking keeps
 the nearest mesh.
+
+Connected building kits come in two footprints (mm-data `data/models/buildings/README.md`), chosen per connected
+building in the editor's Footprint row and stored as the hex appearance `footprint` (`HexAppearance.Footprint`;
+`TilesetScenery.footprint` maps a Square hex to a generated kit's Square footprint): Angled,
+the default and the classic exits art's (walls along the hex's directions; a lone hex and a hex with one link are
+whole-hex pieces), and Square, right-angled blocks. Their floors and roofs are textured from the board position (a
+material's `mmBoardUV`, the model vertex stage), so turned and neighbouring pieces join without seams. The lunar
+habitat (`buildings/lunar_habitat/`, generated from its JSON spec and pieces GLB by `HabitatKit`) is drawn Square on
+most of the Lunar Base board, as the printed lunar maps draw it: rounded blocks of dark ribbed steel with window strips, a battered skirt, piers at the joints rising past the
+roof's edge, which rounds down into the walls, riveted roof plating with low vents and hatches (six layouts). Each storey above the ground picks lit or
+dimmed windows per hex and level. Drawn Angled, its plating runs along the building, mitred where arms meet (behind
+a 60-degree bend through `ConnectedKit`'s `-bend` corner pieces), and its fittings are round.
+Multi-hex domes (`BoardMultiHexBuilding`) generate one design over a whole building: the glass dome and biodome looks
+(`buildings/multihex/<design>`). Each hex draws only its own share, so picking, clearance, chunking and a collapsed hex
+stay per hex, and neighbouring shares meet exactly on their hexsides. A domed building's heights shape its domes: one over each
+peak (hexes of one top that no neighbour of the building rises above), centred where the footprint leaves it most
+room; its apex is the peak's top, and the cap that best passes through the tops of the hexes nearest it sets where
+the glass meets its podium's roof, so raising a hex in the editor raises or adds a dome. Each dome stands on the
+plinth inside a podium on the largest circle the footprint holds round it (a collapsed hex its neighbours still
+name counts, so a collapse leaves a hole), podiums of neighbouring domes shrinking so they never meet: a ring
+building on a twelve-sided outline with pylon blocks at its six hexside-facing corners (heavier on a big dome),
+yellow buttress fins and a service unit over each side; the dome, a geodesic cap of struts and glass on a ring
+beam and a concrete collar; a biodome grows grown trees under its glass, where they clear it. Support pieces from
+`data/models/buildings/multihex/lunar-equipment.glb` stand where they fit: plant and tanks on a dome's plinth and under a glass dome, and an airlock at
+each closed hexside a corridor (a ground rail) reaches; on a dome's plinth an entrance wing joins it to the
+podium. A domed building's hex wholly outside every podium is an annex, rectangular blocks at its own height (the
+printed lunar map's level 1 and 2 structures round the biodome); towards a hex under the domes to its north or south,
+a wing as wide as its core runs straight on into the podium's ring, else it meets the plinth. The glass is a transparent board material: its `.tres`
+says so (Godot's `transparency`, and `blend_mode` 4, premultiplied alpha, so its reflections stay whole), and it
+draws after everything opaque, without depth writes or shadows; the Tactical View, which hides the buildings,
+hides it too. A
+legacy board's lunar-theme buildings take these designs at conversion (`BoardSceneryLayouts`): a building
+glazed over half its hexes (skylights, glass roofs) with a full ring of hexes holding most of it becomes a
+glass dome, two full rings a biodome, any other a habitat; a dome's own glazing objects go.
 Metal deposits use Blender-authored quartz and ore GLBs with embedded colour,
 normal and material maps, over a soft terrain-following soil splat. Each GLB has
 one detailed LOD0 and one 88-triangle LOD1; farther slots reuse LOD1. Deposit size
@@ -184,29 +257,43 @@ trooper and battle armour suit; they hop along their path instead of moving limb
 hover) and buggy (motorized) are the `Infantry/mechanized_apc.png` and `motorized_buggy.png` sprites extruded into
 GLBs; their grey pixels take the camouflage, like the 2D icon.
 
-Meeples leave no wreck in the 3D view (a wreck has no gameplay; the Tactical View keeps its crossed-out base). The
-first frame a unit shows destroyed, its meeple explodes (`MeepleCasualties`): `MeepleShatter` cuts it along four
-planes in different directions into closed pieces, and `MeepleDebris` throws them away from the hits playing against
-the unit, a third of them into the hexes around, under a fast tabletop gravity. They bounce off the ground, roofs and
-rocks, sampled lazily from the board's picking (foliage gives way, liquids give way to their bed), and come to rest;
-after four seconds every piece stops, whatever it is caught in. A formation's lost soldier turns to the hits, is
-knocked back onto its back, and a lost vehicle explodes like a meeple. Once everything is still it lies a moment,
-then sinks into the ground and is gone. The pieces do not collide with each other.
+Meeples leave no wreck in the 3D view (a wreck has no gameplay; the Tactical View keeps its crossed-out base). As a
+unit's death begins (or the first frame it shows destroyed), its meeple explodes instead of falling over
+(`MeepleCasualties`): `MeepleShatter` cuts it along four
+planes in different directions into closed pieces, and `MeepleDebris` throws them as rigid bodies. Each takes two
+pushes over its mass (its volume): a blast low in the body, outward, and the momentum of the hits of the last ten
+seconds, away from each attacker by the damage it dealt; shards fly farther than chunks. Under a fast tabletop
+gravity scaled by the board's, they bounce off the ground, roofs and rocks, sampled lazily from the board's picking
+(foliage gives way, liquids give way to their bed, a roof or deck over the meeple is looked past) with rays straight
+down, which test only the hexes under them and, through each finished surface's grid of face outlines
+(`BoardTacticalGeometry.Faces`), only the faces there; and skid to rest
+wherever the physics leaves them, under 1 g within the death's two-second beat but for a few slow stragglers.
+`MeepleCasualties.DEBRIS_SECONDS` (3 s) after the explosion the pieces fade away, at rest or still flying, through the
+unit program's opacity (`GpuUnitShader.Shown`), and are gone. A formation's lost soldier turns to the hits, is knocked
+back onto its back, lies a moment, then fades away, and a lost vehicle explodes like a meeple. The pieces do not collide with each other, small
+objects the zoom hides when they are sampled are not there for them, and the Tactical View does not draw them.
 
-`MeepleVisual` owns token geometry, wall paint and attachment sockets. `MeepleAnimator` supplies rigid token poses;
+`MeepleVisual` owns token geometry, wall paint and attachment sockets; the artwork shows on the token's top only, its
+underside is plain and darker than its walls. `MeepleAnimator` supplies rigid token poses;
 `UnitAnimator` retains articulated model poses. Both sample the existing movement/combat timeline. Walkers bounce,
-vehicles rock subtly and airborne craft bank through turns; displacement slides. Push/punch/kick and the stronger
-club swing or lance thrust approach and recover on the physical attack clock. Jumps reuse flame, smoke and landing
+vehicles rock subtly and airborne craft bank through turns; a displaced token staggers over, hopping. Push, charge,
+punch, kick and the stronger club swing or lance thrust approach and recover on the physical attack clock. Jumps reuse flame, smoke and landing
 timing with nozzles fixed to the token's local underside. Battle Armor uses the existing boarding/release
 trajectory and grips the token's actual contour, following its final pose. In the Tactical View, the BA token attaches as
 one piece; hostile tokens rock about their grip while friendly riders remain steady. Ranged effects retain every reported weapon, fire from the token center, and hit varied visible surfaces
 on the incoming side instead of anatomical locations.
 
 Voluntary prone and hull-down share the shortened standing pose. Prone shooting uses its lowered center without
-standing attack tilts or physical approaches. Forced prone rotates the full solid onto the ground without changing
-its scale. The captured facing is already resolved by the rules engine (Core preserves facing; Total Warfare may
-change it); the token does not apply a second facing change. Rear impacts use the face-up pose, other impacts the
-face-down pose, with the upper end pointing along the captured heading. Side impacts never create a side-resting pose.
+standing attack tilts or physical approaches. A hit rocks a standing token away from its attacker. Forced prone tips
+the full solid onto the ground without changing its scale, onto the side it fell on: face down for a front fall, face
+up for a rear one, on its side for a side fall. Total Warfare turns the facing to where the unit fell, so its upper
+end points along the captured heading; Core keeps the facing, and so does the body, its upper end on the side it fell
+on (`UnitMotion.Posture.lyingTurn`). The fall makes any facing change: the unit turns as it goes down, never before
+(`UnitMotion`), only by the least that lets the side it falls on lead (`UnitMotion.Posture.turn`, shared with the
+articulated models' fall in `UnitAnimator`), so it never spins. A fall gathers speed until it hits the ground, then
+rebounds once (`UnitMotion.REBOUND_SECONDS`). Getting up, a token or a model whose head lies along its facing rolls
+onto its front about its length first; one Core left lying the other way gets up the way it fell
+(`UnitMotion.Posture.rising`).
 In top view, fallen Meeples instead show their upright artwork at prone height, oriented along the resolved facing;
 the existing PRONE text indicates their state. Returning to an angled view restores the toppled pose.
 

@@ -151,6 +151,44 @@ using their existing rail courses and the chosen trees' model footprints.
 Markings follow the main paved route through unmarked branches. Wheel wear follows
 the lane centres through bends, endings and material changes.
 
+### Loose roads
+
+A dirt or gravel road is one coat per hex (`GpuRoads.patches`). Its mask carries a heading and its coverage, and B,
+which the shader reads by the road's maps:
+- Dirt (`terrain-road.frag#dirtTrack`): a farm track, two pale packed wheel ruts at ±0.9 m of every wheel course
+  (`BoardRoad.wheels`), each about 0.6 m wide with a crumbly lip, damp patches and faint tread up close, the ruts' walls
+  in the normal; between them a crown that grass has mostly taken back; outside them a ragged band of loose soil, then
+  grass. Its wheel courses are its paths. At a junction the tracks run straight on across it, or bend through it where
+  all its other arms lie to one side, and any other arm runs into the middle; between neighbouring arms one rut rounds
+  the corner (3.5 m radius). Turning traffic otherwise crosses a scuffed middle (`BoardRoad.scuff`, most worn within
+  about 1.2 m of the centre, gone by about 3.9 m, with a ragged edge), where the ruts run together without vanishing.
+  B is the signed distance from the nearest rut, negative between a course's two ruts and shrunk in the scuffed middle
+  (`BoardRoad.ruts`), so crossing and parting ruts cross and part with grass between them. The coat covers only their
+  reach and the middle (`BoardRoad.rutReach`). Past its soil's ragged edge the soil thins out into the grass over most
+  of a metre, bare between ever fewer tufts under a little dust, and grass blades thin out towards the ruts, over a
+  metre beside them and a quarter of one on the crown (`BoardRoad.grass`). Its soil is a photographic study
+  (`roads/dirt` sources), which the track lightens.
+- Gravel (`terrain-road.frag#looseTrack`): crushed stone with two smoother, paler wheel paths, loose stone windrows along
+  the crown and edges, a firm edge at about ±3.4 m of its nearest course with stray stones beyond it, and a hint of
+  washboard and potholes in the wheel paths. Its courses (`BoardRoad.courses`) are its paths, but at a junction one per
+  pair of arms, straight across or along one arm and round a circular fillet into the other (9 m radius for a
+  60-degree turn, 5 m for a 120-degree one). B is where across the road a point lies (`BoardRoad.track`, in the same
+  metres on every course); across a junction's hub (`BoardRoad.trackHub`) its wheel paths and crown fade into evenly
+  worn stone, and its turns grade the corners.
+
+The coat opens onto whatever ground lies under it; it never paints grass. A loose road's coat stops at the border with a
+loose neighbour at its level, whose own coat draws its hex (`BoardRoad.trackedHexes`). Where gravel meets dirt it spreads
+on over the dirt for a few metres and runs out in tongues and stray stones. Where a loose road meets a paved one (two
+arms into one paved road each meet it on their own, with the ground between them left as it is), the paved arm's lanes
+close in on its course over its last 12 m, so that its wheel paths reach the border as the loose road's one lane
+(`BoardRoad.merged`), and faint grit lies along them for 14 m (`GpuRoads.carry`, finish -7). Against gravel the asphalt
+ends square on the border under a short, broken spill of grit and dust, about a metre, most in the wheel bands
+(`GpuRoads.spill`, finish -7 with B 1). Against dirt it
+ends as a bridge landing does (`GpuRoads.painted`, `#bare`): it breaks up over its last 7 m above a little gravel, and
+the dirt track's ruts alone run on over it, crumbling out (`GpuRoads.runOn`). Landings and end clips keep to their own
+arm (`BoardRoad.arm`), so a junction's other arms stay whole. Gravel grass grows up to its graded edge and thins in over
+a metre (`BoardRoad.grass`), as along a dirt track's ruts.
+
 ### Paved wear
 
 A paved carriageway's core coat carries its traffic: its mask holds the wheel direction and where across its lane a point
@@ -272,7 +310,7 @@ middle of a gap, seen from both hexes, and a road between two borders fits whole
 A junction arm fits the period of the straight road through it. The line therefore
 continues across hex borders, through bends and onto bridge decks.
 
-At mixed-material joins, the same priority and coordinates must be used on both hexes:
+At mixed-material joins across a bridge's deck, the same priority and coordinates must be used on both sides:
 dirt covers asphalt, and gravel covers either. Dust and aggregate deposits lead into
 the seam without changing carriageway width. World-space variation keeps borders and
 wear continuous when adjacent paths run in opposite directions.

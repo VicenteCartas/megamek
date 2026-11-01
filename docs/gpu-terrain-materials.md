@@ -636,6 +636,10 @@ The ground material does not change its look with zoom: medium and far views sho
 close view averaged into their pixels. Nothing fades with distance; texture filtering
 (trilinear and anisotropic) does the averaging.
 
+- **Cache.** The ground material cache (`GpuMaterialCache`) draws a top from its pages only at
+  the level the view needs, once every page under it is built; until then the top draws
+  directly, which looks the same. No coarser page stands in, so a zoom never shows blurred
+  pages sharpening one by one.
 - **Reference.** The close view at `GpuMaterialCache.CLOSE_PIXEL` (0.1 m per pixel) is the
   look every zoom averages. Detail finer than it shades as the close
   view always has: the normals' mean direction and the plain mean roughness.
