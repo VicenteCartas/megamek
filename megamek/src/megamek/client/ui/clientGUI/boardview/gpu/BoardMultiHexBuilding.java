@@ -107,10 +107,12 @@ final class BoardMultiHexBuilding {
     /**
      * A dome over this hex: its centre relative to the hex centre, its glass's foot radius, the heights of its plinth,
      * of the podium roof its glass rises from and of its apex over the hex's ground, its geodesic frequency (even, so
-     * the base is a vertex ring), and its building's airlocks' backs relative to its centre, x and y in turn, which
-     * entrance wings join to its podium, the ring building round its foot whose twelve-sided outline has its corners
-     * {@code podium} from the centre; {@code modules}, four numbers each: an annex's module ({@link #module}), its
-     * direction from the centre, how far its outer end lies from it and its rise above the foot.
+     * the base is a vertex ring), and its building's airlocks, five numbers each: the back's x and y relative to its
+     * centre, the way the airlock faces and its floor above the foot, whose tubes ({@link #bellows}) join the podium, the
+     * ring building
+     * round its foot whose twelve-sided outline has its corners {@code podium} from the centre; {@code modules}, four
+     * numbers each: an annex's module ({@link #module}), its direction from the centre, how far its outer end lies from
+     * it and its rise above the foot.
      */
     record Dome(float x, float y, float radius, float foot, float ring, float apex, int frequency, float podium,
           List<Float> entrances, List<Float> modules) {
@@ -139,7 +141,8 @@ final class BoardMultiHexBuilding {
          * annex's module: fins and pylons keep clear of them.
          */
         boolean joined(double angle, double margin) {
-            for (int at = 0; at < entrances.size(); at += 2) {
+            for (int at = 0; at < entrances.size(); at += 5) {
+                // Its tube enters the podium square to it, towards the airlock.
                 double toward = Math.atan2(entrances.get(at + 1), entrances.get(at));
                 if (Math.abs(Math.IEEEremainder(toward - angle, 2 * Math.PI)) < Math.toRadians(12) + margin) { return true; }
             }
@@ -282,7 +285,8 @@ final class BoardMultiHexBuilding {
     /**
      * An annex's module ({@link #module}): on the line from the centre of the dome nearest it through its own, out of
      * the ring over the annex's centre, where units stand, its gatehouse end drawn in as far as it must to keep inside
-     * the annex's facades and clear of the airlocks before it. That dome's index and the module as {@link Dome#modules}
+     * the annex's facades and clear of the airlocks before it, with room for their tubes where it can. That dome's index
+     * and the module as {@link Dome#modules}
      * gives it; null where the annex rises no higher than the plinth.
      */
     private static float[] annexModule(BoardScene scene, BoardScene.Tile annex, List<Fit> fits, int base, String asset) {
@@ -307,19 +311,23 @@ final class BoardMultiHexBuilding {
         }
         List<float[]> facades = outline(63, SETBACK);
         float inner = ringMiddle(fit.radius(), fit.podium());
-        for (float outer = apart + GATEHOUSE / 2; outer > apart + MODULE_CHAMFER; outer -= .5f) {
-            var shape = moduleOutline(-dx, -dy, ux, uy, Math.max(inner, outer - GATEHOUSE), outer, MODULE_HALF + HEAD,
-                  MODULE_CHAMFER);
-            boolean clear = true;
-            // Its outer end's corners (#moduleOutline).
-            for (int corner = 1; corner <= 4 && clear; corner++) {
-                clear = inside(facades, shape.get(corner)[0], shape.get(corner)[1]);
+        // Room for the airlocks' tubes to bend to the door (#bellows), else only clear of them.
+        for (float room : new float[] { AIRLOCK_ROOM, 0 }) {
+            for (float outer = apart + GATEHOUSE / 2; outer > apart + MODULE_CHAMFER; outer -= .5f) {
+                var shape = moduleOutline(-dx, -dy, ux, uy, Math.max(inner, outer - GATEHOUSE), outer, MODULE_HALF + HEAD,
+                      MODULE_CHAMFER);
+                boolean clear = true;
+                // Its outer end's corners (#moduleOutline).
+                for (int corner = 1; corner <= 4 && clear; corner++) {
+                    clear = inside(facades, shape.get(corner)[0], shape.get(corner)[1]);
+                }
+                for (var airlock : airlocks) {
+                    var kept = grown(airlock, room);
+                    for (float[] corner : kept) { clear &= !inside(shape, corner[0], corner[1]); }
+                    for (float[] corner : shape) { clear &= !inside(kept, corner[0], corner[1]); }
+                }
+                if (clear) { return new float[] { nearest, ux, uy, outer, rise }; }
             }
-            for (var airlock : airlocks) {
-                for (float[] corner : airlock) { clear &= !inside(shape, corner[0], corner[1]); }
-                for (float[] corner : shape) { clear &= !inside(airlock, corner[0], corner[1]); }
-            }
-            if (clear) { return new float[] { nearest, ux, uy, outer, rise }; }
         }
         return null;
     }
@@ -389,8 +397,8 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * The backs of a domed building's airlocks relative to its dome's centre, x and y in turn, in a stable order: the
-     * airlocks the hexes under its domes place ({@link #airlocks}), which entrance wings join to the nearest podium.
+     * The airlocks of a domed building as {@link Dome#entrances} gives them, in a stable order: those the hexes under
+     * its domes place ({@link #airlocks}), whose tubes join the nearest podium.
      */
     private static List<List<Float>> entrances(BoardScene scene, List<Member> group, List<Fit> fits, int base,
           String asset) {
@@ -408,8 +416,11 @@ final class BoardMultiHexBuilding {
             plinth(connected, PLINTH + shift);
             for (Gear airlock : airlocks(kit, scene, tile, PLINTH + shift, connected,
                   domes(fits, member.coords(), shift, none, none), false, false)) {
+                // Turned clockwise from +y (#frame).
+                double facing = Math.toRadians(airlock.angle());
                 points.add(new float[] { HexTile.centerX(member.coords(), WIDTH) + airlock.x(),
-                      HexTile.centerY(member.coords(), HEIGHT) + airlock.y() });
+                      HexTile.centerY(member.coords(), HEIGHT) + airlock.y(), (float) Math.sin(facing),
+                      (float) Math.cos(facing), airlock.z() - PLINTH - shift });
             }
         }
         points.sort(Comparator.<float[]>comparingDouble(point -> point[0]).thenComparingDouble(point -> point[1]));
@@ -419,8 +430,8 @@ final class BoardMultiHexBuilding {
                 if (Math.hypot(point[0] - fits.get(index).x(), point[1] - fits.get(index).y())
                       < Math.hypot(point[0] - fits.get(nearest).x(), point[1] - fits.get(nearest).y())) { nearest = index; }
             }
-            result.get(nearest).add(point[0] - fits.get(nearest).x());
-            result.get(nearest).add(point[1] - fits.get(nearest).y());
+            result.get(nearest).addAll(List.of(point[0] - fits.get(nearest).x(), point[1] - fits.get(nearest).y(), point[2],
+                  point[3], point[4]));
         }
         return result;
     }
@@ -599,8 +610,8 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * Whether the piece's footprint lies within {@code area} (convex, counter-clockwise) and clear of every dome's
-     * podium and its pylons, or ({@code inside}) wholly under the one dome's glass with room to spare.
+     * Whether the piece's footprint lies within {@code area} (convex, counter-clockwise) and outside every dome's
+     * podium, against it at most, or ({@code inside}) wholly under the one dome's glass with room to spare.
      */
     private static boolean fits(Equipment kit, Gear gear, List<float[]> area, List<Dome> domes, boolean inside) {
         BoundingBox box = kit.bounds().get(gear.piece());
@@ -609,7 +620,7 @@ final class BoardMultiHexBuilding {
             if (!inside(area, corner[0], corner[1])) { return false; }
             for (Dome dome : domes) {
                 float from = (float) Math.hypot(corner[0] - dome.x(), corner[1] - dome.y());
-                if (!inside && from < dome.podium() + 12) { return false; }
+                if (!inside && from < dome.podium() * (float) Math.cos(Math.PI / 12) - 2) { return false; }
                 if (inside && (from > dome.radius() - 3 || dome.glass(from) < gear.z() + box.max.z + 4)) { return false; }
             }
         }
@@ -886,7 +897,7 @@ final class BoardMultiHexBuilding {
             // A footprint too narrow for any dome, or an annex without a module of its own, stands at its own height.
             shell(mesh, layout.top(), reach);
         }
-        if (!layout.domes().isEmpty() || layout.annex()) { skirt(mesh, layout); }
+        if (!layout.domes().isEmpty() || layout.annex()) { skirt(mesh, layout, lod); }
         for (Dome dome : layout.domes()) {
             if (layout.annex()) {
                 for (int at = 0; at < dome.modules().size(); at += 4) { module(mesh, hex(), dome, at); }
@@ -919,10 +930,10 @@ final class BoardMultiHexBuilding {
 
     /**
      * The domes' plinth under what stands on it alone, cut to the hex, so the regolith shows between, as round a real
-     * colony's buildings: a foundation round each podium, pads under its annexes' modules, and under each airlock and
-     * its entrance's way to the podium or its module.
+     * colony's buildings: a foundation round each podium, pads under its annexes' modules and under each airlock; and
+     * the flexible tubes joining the airlocks to the podium or to their annex's gatehouse.
      */
-    private static void skirt(Mesh mesh, Layout layout) {
+    private static void skirt(Mesh mesh, Layout layout, int lod) {
         List<float[]> hex = hex();
         var kit = equipment();
         for (Dome dome : layout.domes()) {
@@ -946,32 +957,167 @@ final class BoardMultiHexBuilding {
                       Math.min(outer, flat + ROOT_REACH) + 2, MODULE_HALF + ROOT + 2, MODULE_CHAMFER);
                 prism(mesh, hex, PLINTH_MATERIAL, root, 0, top, root.size());
             }
-            for (int at = 0; at < dome.entrances().size(); at += 2) {
-                float x = dome.entrances().get(at), y = dome.entrances().get(at + 1), from = (float) Math.hypot(x, y);
-                if (from > flat) { way(mesh, hex, dome.x(), dome.y(), x / from, y / from, flat, from, 7, top); }
+            // Each airlock's tube, out of the podium square to it and bending round to the airlock's back.
+            var entrances = dome.entrances();
+            for (int at = 0; at < entrances.size(); at += 5) {
+                float x = entrances.get(at), y = entrances.get(at + 1), from = (float) Math.hypot(x, y), start = flat - 1;
+                if (from <= start) { continue; }
+                bellows(mesh, hex, new float[] { dome.x() + x / from * start, dome.y() + y / from * start, x / from, y / from,
+                      top }, new float[] { dome.x() + x, dome.y() + y, entrances.get(at + 2), entrances.get(at + 3),
+                      top + entrances.get(at + 4) }, lod);
             }
         }
-        // Under each raised airlock, and on an annex from its back to the module over the annex's centre.
+        // Under each raised airlock; on an annex its tube bends from its gatehouse's door to it, where it stands ahead of
+        // the door, else runs in from it to the gatehouse over the annex's centre.
         for (Gear gear : layout.gear()) {
-            if (!gear.piece().equals("airlock") || gear.z() <= EPSILON) { continue; }
+            if (!gear.piece().equals("airlock")) { continue; }
             List<float[]> pad = grown(footprint(kit, gear), 2);
-            if (pad.isEmpty()) { continue; }
-            prism(mesh, hex, PLINTH_MATERIAL, pad, 0, gear.z(), pad.size());
+            if (gear.z() > EPSILON && !pad.isEmpty()) { prism(mesh, hex, PLINTH_MATERIAL, pad, 0, gear.z(), pad.size()); }
             float from = (float) Math.hypot(gear.x(), gear.y());
-            if (layout.annex() && !layout.domes().isEmpty() && from > EPSILON) {
-                way(mesh, hex, 0, 0, gear.x() / from, gear.y() / from, 0, from, 7, gear.z());
+            if (!layout.annex() || from <= EPSILON) { continue; }
+            double facing = Math.toRadians(gear.angle());
+            float[] airlock = { gear.x(), gear.y(), (float) Math.sin(facing), (float) Math.cos(facing), gear.z() };
+            float[] door = door(layout);
+            if (door != null && (gear.x() - door[0]) * door[2] + (gear.y() - door[1]) * door[3] > 3) {
+                bellows(mesh, hex, door, airlock, lod);
+            } else if (door != null) {
+                bellows(mesh, hex, new float[] { 0, 0, airlock[2], airlock[3], gear.z() }, airlock, lod);
             }
         }
     }
 
-    /** A plinth way from {@code from} to {@code to} along (ux, uy) about (cx, cy), {@code half} either side, cut to the hex. */
-    private static void way(Mesh mesh, List<float[]> hex, float cx, float cy, float ux, float uy, float from, float to,
-          float half, float top) {
-        float px = -uy * half, py = ux * half;
-        List<float[]> pad = List.of(new float[] { cx + ux * from + px, cy + uy * from + py },
-              new float[] { cx + ux * from - px, cy + uy * from - py }, new float[] { cx + ux * to - px, cy + uy * to - py },
-              new float[] { cx + ux * to + px, cy + uy * to + py });
-        prism(mesh, hex, PLINTH_MATERIAL, pad, 0, top, 4);
+    /**
+     * The blast door of the annex's own gatehouse ({@link #module}), its tube's start in front of it as {@link #bellows}
+     * takes it; null where the annex has no module.
+     */
+    private static float[] door(Layout layout) {
+        for (Dome dome : layout.domes()) {
+            var modules = dome.modules();
+            for (int at = 0; at < modules.size(); at += 4) {
+                float ux = modules.get(at), uy = modules.get(at + 1), outer = modules.get(at + 2) + 1;
+                // Its own: the module's line runs through the annex's centre, its gatehouse over it.
+                float apart = -(dome.x() * ux + dome.y() * uy);
+                if (Math.abs(dome.x() * uy - dome.y() * ux) < 1 && apart > 0 && outer - apart <= GATEHOUSE / 2 + 2) {
+                    return new float[] { dome.x() + ux * outer, dome.y() + uy * outer, ux, uy, dome.foot() };
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A connecting tube's radius and its ribs' depth and pitch: a flexible duct a little narrower than an airlock; the
+     * room a gatehouse keeps from an annex's airlocks for it.
+     */
+    private static final float TUBE = 5, RIB = .5f, PITCH = 2, AIRLOCK_ROOM = 9;
+
+    /**
+     * A flexible pressurised tube, cut to the hex: a ribbed duct on a curve from {@code from} to {@code to} (each x, y,
+     * the way the tube runs there, and its floor), heavy collars at its ends, saddles under it down to the ground.
+     */
+    private static void bellows(Mesh mesh, List<float[]> hex, float[] from, float[] to, int lod) {
+        float chord = (float) Math.hypot(to[0] - from[0], to[1] - from[1]), reach = chord * .4f;
+        if (chord < 3) { return; }
+        // A cubic curve leaving and arriving along the given ways, measured finely for even ribs.
+        float[][] curve = { { from[0], from[1] }, { from[0] + from[2] * reach, from[1] + from[3] * reach },
+              { to[0] - to[2] * reach, to[1] - to[3] * reach }, { to[0], to[1] } };
+        int samples = 64;
+        float[] lengths = new float[samples + 1];
+        float[] last = point(curve, 0);
+        for (int sample = 1; sample <= samples; sample++) {
+            float[] next = point(curve, (float) sample / samples);
+            lengths[sample] = lengths[sample - 1] + (float) Math.hypot(next[0] - last[0], next[1] - last[1]);
+            last = next;
+        }
+        float total = lengths[samples];
+        int stations = Math.max(6, Math.round(total / (PITCH / 2)) + 1), sides = lod == 0 ? 14 : 8;
+        float[][] centres = new float[stations][], along = new float[stations][], across = new float[stations][];
+        float[][] ups = new float[stations][];
+        float[] radii = new float[stations], distances = new float[stations];
+        float climb = (to[4] - from[4]) / total;
+        for (int station = 0; station < stations; station++) {
+            float distance = total * station / (stations - 1), t = 1;
+            for (int sample = 1; sample <= samples; sample++) {
+                if (lengths[sample] >= distance) {
+                    float share = (distance - lengths[sample - 1]) / Math.max(1e-6f, lengths[sample] - lengths[sample - 1]);
+                    t = (sample - 1 + share) / samples;
+                    break;
+                }
+            }
+            float[] at = point(curve, t), slope = tangent(curve, t);
+            float flat = (float) Math.hypot(slope[0], slope[1]), tx = slope[0] / flat, ty = slope[1] / flat;
+            float floor = from[4] + (to[4] - from[4]) * distance / total, length = (float) Math.sqrt(1 + climb * climb);
+            centres[station] = new float[] { at[0], at[1], floor + TUBE + .4f };
+            along[station] = new float[] { tx / length, ty / length, climb / length };
+            across[station] = new float[] { ty, -tx, 0 };
+            // Up, square to the tube: across x along.
+            float[] a = along[station];
+            ups[station] = new float[] { -tx * a[2], -ty * a[2], ty * a[1] + tx * a[0] };
+            distances[station] = distance;
+            // Collars at the ends, ribs between.
+            radii[station] = station <= 1 || station >= stations - 2 ? TUBE + 1.1f : station % 2 == 0 ? TUBE : TUBE + RIB;
+        }
+        for (int band = 0; band < stations - 1; band++) {
+            String material = band == 0 || band == stations - 2 ? PIER : FRAME;
+            float flare = (radii[band + 1] - radii[band]) / Math.max(1e-4f, distances[band + 1] - distances[band]);
+            for (int side = 0; side < sides; side++) {
+                float[] a = ring(centres, along, across, ups, radii, distances, band, side, sides, flare);
+                float[] b = ring(centres, along, across, ups, radii, distances, band, side + 1, sides, flare);
+                float[] c = ring(centres, along, across, ups, radii, distances, band + 1, side + 1, sides, flare);
+                float[] d = ring(centres, along, across, ups, radii, distances, band + 1, side, sides, flare);
+                outward(mesh, material, hex, a, b, c);
+                outward(mesh, material, hex, a, c, d);
+            }
+        }
+        // Saddles every few metres, clear of the collars.
+        for (int station = 3; station < stations - 3; station += 3) {
+            float[] centre = centres[station], x = across[station];
+            float bottom = centre[2] - TUBE;
+            if (bottom > .3f) {
+                // Square to the tube on the ground: across turned back a quarter.
+                clippedBlock(mesh, hex, PIER, centre[0], centre[1], -x[1], x[0], .5f, TUBE * .8f, 0, bottom + .4f);
+            }
+        }
+    }
+
+    /** A vertex of the tube's ring at {@code station}, {@code side} of {@code sides} round it, its normal leaning with the rib. */
+    private static float[] ring(float[][] centres, float[][] along, float[][] across, float[][] ups, float[] radii,
+          float[] distances, int station, int side, int sides, float flare) {
+        double angle = 2 * Math.PI * side / sides;
+        float c = (float) Math.cos(angle), s = (float) Math.sin(angle), r = radii[station];
+        float[] centre = centres[station], a = along[station], x = across[station], u = ups[station];
+        float rx = x[0] * c + u[0] * s, ry = x[1] * c + u[1] * s, rz = x[2] * c + u[2] * s;
+        float z = centre[2] + rz * r;
+        return vertex(centre[0] + rx * r, centre[1] + ry * r, z, rx - a[0] * flare, ry - a[1] * flare, rz - a[2] * flare,
+              contact(z), distances[station] / 8, (float) side / sides * 2);
+    }
+
+    /** A triangle of a tube's wall, wound to face along its vertices' normals. */
+    private static void outward(Mesh mesh, String material, List<float[]> hex, float[] a, float[] b, float[] c) {
+        float ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2], fx = c[0] - a[0], fy = c[1] - a[1], fz = c[2] - a[2];
+        float nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+        if (nx * (a[3] + b[3] + c[3]) + ny * (a[4] + b[4] + c[4]) + nz * (a[5] + b[5] + c[5]) < 0) {
+            mesh.clipped(material, hex, a, c, b);
+        } else {
+            mesh.clipped(material, hex, a, b, c);
+        }
+    }
+
+    /** The cubic curve through {@code curve}'s four points at {@code t}. */
+    private static float[] point(float[][] curve, float t) {
+        float s = 1 - t, a = s * s * s, b = 3 * s * s * t, c = 3 * s * t * t, d = t * t * t;
+        return new float[] { a * curve[0][0] + b * curve[1][0] + c * curve[2][0] + d * curve[3][0],
+              a * curve[0][1] + b * curve[1][1] + c * curve[2][1] + d * curve[3][1] };
+    }
+
+    /** The cubic curve's direction at {@code t}. */
+    private static float[] tangent(float[][] curve, float t) {
+        float s = 1 - t, a = 3 * s * s, b = 6 * s * t, c = 3 * t * t;
+        float x = a * (curve[1][0] - curve[0][0]) + b * (curve[2][0] - curve[1][0]) + c * (curve[3][0] - curve[2][0]);
+        float y = a * (curve[1][1] - curve[0][1]) + b * (curve[2][1] - curve[1][1]) + c * (curve[3][1] - curve[2][1]);
+        // A curve folded on itself at an end: its chord's way.
+        return Math.hypot(x, y) > 1e-5 ? new float[] { x, y }
+              : new float[] { curve[3][0] - curve[0][0], curve[3][1] - curve[0][1] };
     }
 
     /** A convex, counter-clockwise outline grown by {@code by} on every edge (corners stay sharp). */
@@ -1243,9 +1389,6 @@ final class BoardMultiHexBuilding {
             // The sphere's own normals: a reflection runs across the panels as over one curved shell.
             mesh.clipped(GLASS, hex, panel(a, centre, dome), panel(b, centre, dome), panel(c, centre, dome));
         }
-        for (int entrance = 0; entrance < dome.entrances().size(); entrance += 2) {
-            vestibule(mesh, hex, dome, dome.entrances().get(entrance), dome.entrances().get(entrance + 1));
-        }
         for (int at = 0; at < dome.modules().size(); at += 4) { module(mesh, hex, dome, at); }
         podium(mesh, hex, dome);
         for (int[] edge : geodesic.edges()) { strut(mesh, hex, points.get(edge[0]), points.get(edge[1]), centre, lod); }
@@ -1386,41 +1529,6 @@ final class BoardMultiHexBuilding {
         float[] d = vertex(at[0][0] + ux * foot, at[0][1] + uy * foot, bottom, ux * nr, uy * nr, nz, 1, 0, .5f);
         mesh.clipped(FIN_MATERIAL, hex, a, b, c);
         mesh.clipped(FIN_MATERIAL, hex, a, c, d);
-    }
-
-    /** An entrance wing: an enclosed walkway from an airlock's back (x, y about the dome's centre) to its podium. */
-    private static void vestibule(Mesh mesh, List<float[]> hex, Dome dome, float x, float y) {
-        float distance = (float) Math.hypot(x, y), end = dome.podium() * (float) Math.cos(Math.PI / 12) - 1;
-        if (distance <= end + 1) { return; }
-        float ux = -x / distance, uy = -y / distance, cx = -uy, cy = ux, half = 4.6f;
-        float bottom = dome.foot(), top = dome.foot() + Math.min(9, dome.height());
-        float[][] start = { { dome.x() + x + cx * half, dome.y() + y + cy * half },
-              { dome.x() + x - cx * half, dome.y() + y - cy * half } };
-        float reach = distance - end;
-        float[][] stop = { { start[0][0] + ux * reach, start[0][1] + uy * reach },
-              { start[1][0] + ux * reach, start[1][1] + uy * reach } };
-        float length = reach / 12;
-        // Its two sides and its roof, faced outward.
-        for (int side = 0; side < 2; side++) {
-            float sign = side == 0 ? 1 : -1, nx = cx * sign, ny = cy * sign;
-            float[] a0 = vertex(start[side][0], start[side][1], bottom, nx, ny, 0, .8f, 0, 0);
-            float[] b0 = vertex(stop[side][0], stop[side][1], bottom, nx, ny, 0, .8f, length, 0);
-            float[] b1 = vertex(stop[side][0], stop[side][1], top, nx, ny, 0, 1, length, .58f);
-            float[] a1 = vertex(start[side][0], start[side][1], top, nx, ny, 0, 1, 0, .58f);
-            if (side == 0) {
-                mesh.clipped(FRAME, hex, a0, b1, b0);
-                mesh.clipped(FRAME, hex, a0, a1, b1);
-            } else {
-                mesh.clipped(FRAME, hex, a0, b0, b1);
-                mesh.clipped(FRAME, hex, a0, b1, a1);
-            }
-        }
-        float[] r0 = vertex(start[0][0], start[0][1], top, 0, 0, 1, 1, 0, 0);
-        float[] r1 = vertex(start[1][0], start[1][1], top, 0, 0, 1, 1, 0, .53f);
-        float[] r2 = vertex(stop[1][0], stop[1][1], top, 0, 0, 1, 1, length, .53f);
-        float[] r3 = vertex(stop[0][0], stop[0][1], top, 0, 0, 1, 1, length, 0);
-        mesh.clipped(FRAME, hex, r0, r1, r2);
-        mesh.clipped(FRAME, hex, r0, r2, r3);
     }
 
     /**
