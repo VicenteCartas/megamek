@@ -7752,14 +7752,26 @@ final class GpuTerrain implements Disposable {
     private boolean hitProp(Prop prop, Ray ray, Vector3 hit) {
         if (!Intersector.intersectRayBoundsFast(ray, prop.bounds())) { return false; }
         Matrix4 inverse = new Matrix4(prop.instance().transform).inv();
-        // Transform the direction directly: Ray.mul subtracts distant points and loses picking precision.
-        Ray local = new Ray(new Vector3(ray.origin).mul(inverse), new Vector3(ray.direction).rot(inverse));
-        boolean found = prop.building != null ? prop.building.hit(local, hit)
-              : Intersector.intersectRayTriangles(local, prop.pickingTriangles != null ? prop.pickingTriangles
-                    : featureTriangles.computeIfAbsent(prop.pickingModel, GpuTerrain::triangles), hit);
-        if (found) { hit.mul(prop.instance().transform); }
-        return found;
+        // A ray down the very seam where pieces meet (a building hex's centre, where its roof pieces' corners lie) can
+        // slip between their triangles: a hair aside, it lands.
+        float aside = .3f * BoardGeometry.hexScale();
+        for (float[] offset : SEAM_ASIDE) {
+            // Transform the direction directly: Ray.mul subtracts distant points and loses picking precision.
+            Ray local = new Ray(new Vector3(ray.origin).add(offset[0] * aside, offset[1] * aside, 0).mul(inverse),
+                  new Vector3(ray.direction).rot(inverse));
+            boolean found = prop.building != null ? prop.building.hit(local, hit)
+                  : Intersector.intersectRayTriangles(local, prop.pickingTriangles != null ? prop.pickingTriangles
+                        : featureTriangles.computeIfAbsent(prop.pickingModel, GpuTerrain::triangles), hit);
+            if (found) {
+                hit.mul(prop.instance().transform);
+                return true;
+            }
+        }
+        return false;
     }
+
+    /** Where {@link #hitProp} casts again, in turn, when its ray finds nothing: the ray itself first. */
+    private static final float[][] SEAM_ASIDE = { { 0, 0 }, { .6f, .8f }, { -.8f, .6f }, { -.6f, -.8f }, { .8f, -.6f } };
 
     static List<Vector3> triangles(Model model) { return triangles(model.nodes, part -> true); }
 
@@ -7788,9 +7800,20 @@ final class GpuTerrain implements Disposable {
                 key.getIndices(values);
                 return values;
             });
-            for (int index = part.meshPart.offset; index < part.meshPart.offset + part.meshPart.size; index++) {
-                int at = (indices.length == 0 ? index : Short.toUnsignedInt(indices[index])) * stride + offset;
-                result.add(new Vector3(vertices[at], vertices[at + 1], vertices[at + 2]).mul(node.globalTransform));
+            Vector3[] corners = new Vector3[3];
+            for (int index = part.meshPart.offset; index + 2 < part.meshPart.offset + part.meshPart.size; index += 3) {
+                for (int k = 0; k < 3; k++) {
+                    int at = (indices.length == 0 ? index + k : Short.toUnsignedInt(indices[index + k])) * stride + offset;
+                    corners[k] = new Vector3(vertices[at], vertices[at + 1], vertices[at + 2]).mul(node.globalTransform);
+                }
+                // A zero-area triangle (a repeated corner) has no plane: Intersector reads it as holding every point and
+                // returns the ray's origin, which would beat every real hit.
+                if (new Vector3(corners[1]).sub(corners[0]).crs(new Vector3(corners[2]).sub(corners[0])).len2() < 1e-6f) {
+                    continue;
+                }
+                result.add(corners[0]);
+                result.add(corners[1]);
+                result.add(corners[2]);
             }
         }
         for (Node child : node.getChildren()) { triangles(child, parts, result, vertexCache, indexCache); }

@@ -603,6 +603,37 @@ class BoardEditorSessionTest {
         assertEquals(longer, longSnap.stretch());
     }
 
+    @Test void aPavedRoadOnLunarGroundIsLaidInColonySlabsUnlessAnotherFinishIsChosen() {
+        var session = session();
+        session.board().getHex(at).setTheme("lunar");
+        send(session, Action.TERRAIN, "road", "1");
+        assertEquals(megamek.common.board.BoardSceneryLayouts.COLONY_SLABS,
+              session.board().getHex(at).getAppearance().get("road").material());
+        // Any finish stays the map's choice, asphalt too, through later changes of the road.
+        send(session, Action.VARIANT, "road", "road/material/asphalt");
+        assertEquals("asphalt", session.board().getHex(at).getAppearance().get("road").material());
+        send(session, Action.TERRAIN, "road", "2");
+        assertEquals("asphalt", session.board().getHex(at).getAppearance().get("road").material());
+        // The road brush lays the ground's finish where it paints.
+        Coords other = new Coords(3, 3);
+        session.board().getHex(other).setTheme("lunar");
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        send(session, Action.BRUSH_VALUE, "terrain:road", "1");
+        session.pointer(other, 0, 0, false); session.finishStroke();
+        assertEquals(megamek.common.board.BoardSceneryLayouts.COLONY_SLABS,
+              session.board().getHex(other).getAppearance().get("road").material());
+        // The slabs card lays them on any ground, and a paved road keeps them through a change of its level.
+        Coords earth = new Coords(5, 5);
+        send(session, Action.CHOOSE_BRUSH, "road", "road/material/colony-slabs");
+        session.pointer(earth, 0, 0, false); session.finishStroke();
+        assertEquals(megamek.common.board.BoardSceneryLayouts.COLONY_SLABS,
+              session.board().getHex(earth).getAppearance().get("road").material());
+        session.pointer(earth, 0, 0, false);
+        send(session, Action.TERRAIN, "road", "2");
+        assertEquals(megamek.common.board.BoardSceneryLayouts.COLONY_SLABS,
+              session.board().getHex(earth).getAppearance().get("road").material());
+    }
+
     @Test void roadChoicesAlwaysCarryTheirDefinedFinishAndRemovingAnotherObjectKeepsSelection() {
         var session = session();
         for (var choice : BoardEditorBlueprint.get().component("road").fields().getFirst().choices()) {

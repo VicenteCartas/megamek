@@ -1458,7 +1458,7 @@ public final class BoardEditorSession {
         int exits = sides | (old == null ? 0 : old.getExits());
         if (road) {
             hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), deck || old != null && old.hasExitsSpecified(), exits));
-            HexAppearance look = paintTemplate.getAppearance().get("road");
+            HexAppearance look = colonyFinish(hex, paintTemplate.getAppearance().get("road"));
             // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
             appearance(hex, deck ? "bridgeRoad" : "road", deck ? roadSurface(look) : look);
         } else {
@@ -1782,6 +1782,7 @@ public final class BoardEditorSession {
                         if (tool != Tool.ERASE && paintTemplate.getAppearance().containsKey(brushComponent)) {
                             // A Built or Truss bridge card keeps the hex's piers.
                             var style = paintTemplate.getAppearance().get(brushComponent);
+                            if (brushComponent.equals("road")) { style = colonyFinish(hex, style); }
                             styles.put(brushComponent, brushComponent.equals("bridge") ? retype(style).apply(styles.get("bridge")) : style);
                         } else { styles.remove(brushComponent); }
                         hex.setAppearance(styles);
@@ -2896,7 +2897,8 @@ public final class BoardEditorSession {
         Hex next = new Hex(0, preset != null ? preset.terrain() : variant != null && variant.skin() != null
               ? variant.skin().terrain() : definition.defaults(), paintTemplate.getTheme());
         if (variant != null) { setVariant(next, owner, key); }
-        applyChoiceMaterials(next, definition);
+        // The template's own theme is not the board's: a colony's roads take their finish where they are painted.
+        applyChoiceMaterials(next, definition, false);
         paintTemplate = next; sampledHex = null; brushComponent = owner; brushElevation = false; brushTheme = false;
         brushKey = variant == null ? owner + "/" + key : key;
         brushLabel = preset != null ? preset.label() : variant != null ? variant.label() : definition.label();
@@ -2909,7 +2911,7 @@ public final class BoardEditorSession {
         Hex next = paintTemplate.duplicate();
         // An empty value removes an optional field the card offers (Water's Current: None).
         if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
-        else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value)); }
+        else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value), false); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
         else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
         else if (target.equals("edges")) { setEdges(next, value); }
@@ -3343,10 +3345,13 @@ public final class BoardEditorSession {
             hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, 0));
             appearance(hex, "bridge", HexAppearance.BUILT_BRIDGE);
         }
-        applyChoiceMaterials(hex, definition);
+        applyChoiceMaterials(hex, definition, true);
     }
 
-    private void setTerrain(Hex hex, String name, int value) {
+    private void setTerrain(Hex hex, String name, int value) { setTerrain(hex, name, value, true); }
+
+    /** {@code colony}: a board hex, whose ground decides a new road's finish; false for a brush's template. */
+    private void setTerrain(Hex hex, String name, int value, boolean colony) {
         int type = Terrains.getType(name); require(type > 0, "Unknown terrain " + name);
         Terrain old = hex.getTerrain(type);
         // A new industrial elevator's shaft reaches at least the surface and carries 100 t, the old editor's default. A new
@@ -3372,18 +3377,39 @@ public final class BoardEditorSession {
             }
         }
         blueprint.components().stream().filter(owner -> owner.fields().stream().anyMatch(field -> field.terrain().equals(name)))
-              .findFirst().ifPresent(owner -> applyChoiceMaterials(hex, owner));
+              .findFirst().ifPresent(owner -> applyChoiceMaterials(hex, owner, colony));
     }
 
-    private static void applyChoiceMaterials(Hex hex, BoardEditorBlueprint.Component owner) {
+    /**
+     * A road brush's look as {@code hex} takes it: without a finish card chosen (a card of a shape only counts as
+     * none), its ground's finish (BoardSceneryLayouts#roadFinish); a chosen finish stays.
+     */
+    private HexAppearance colonyFinish(Hex hex, HexAppearance look) {
+        var chosen = blueprint.variant(brushKey);
+        if (look == null || chosen != null && !chosen.material().isEmpty()) { return look; }
+        return new HexAppearance(look.variant(), look.asset(), BoardSceneryLayouts.roadFinish(hex, look.material()),
+              look.strength(), look.colours(), look.rotation(), look.tracks(), look.beside(), look.trafficControl());
+    }
+
+    /**
+     * The finishes the terrain's choices define on {@code hex}; on a {@code colony} board hex a road without a finish
+     * of its own is laid as its ground has it (BoardSceneryLayouts#roadFinish).
+     */
+    private static void applyChoiceMaterials(Hex hex, BoardEditorBlueprint.Component owner, boolean colony) {
         for (var field : owner.fields()) {
             for (var choice : field.choices()) {
                 if (choice.material().isEmpty() || hex.terrainLevel(Terrains.getType(field.terrain())) != choice.value()) { continue; }
                 var styles = new LinkedHashMap<>(hex.getAppearance());
                 String key = field.terrain().equals("bridge_road") ? "bridgeRoad" : owner.id();
                 var old = styles.get(key);
+                boolean fresh = old == null || old.material() == null || old.material().isBlank();
+                // A colony's slabs are a paved finish: a paved choice keeps them.
+                boolean slabs = !fresh && old.material().equals(BoardSceneryLayouts.COLONY_SLABS)
+                      && choice.material().equals("asphalt");
+                String material = slabs ? old.material() : colony && fresh && (key.equals("road") || key.equals("bridgeRoad"))
+                      ? BoardSceneryLayouts.roadFinish(hex, choice.material()) : choice.material();
                 styles.put(key, HexAppearance.withTrafficControl(new HexAppearance(old == null ? null : old.variant(), old == null ? null : old.asset(),
-                      choice.material(), old == null ? null : old.strength()), old == null ? null : old.trafficControl()));
+                      material, old == null ? null : old.strength()), old == null ? null : old.trafficControl()));
                 hex.setAppearance(styles);
             }
         }

@@ -515,7 +515,17 @@ public final class BoardSceneryLayouts {
     }
 
     /** The road finish of a colony's precast slabs (the 3D board's roads/colony-slabs), a choice on any map. */
-    static final String COLONY_SLABS = "colony-slabs";
+    public static final String COLONY_SLABS = "colony-slabs";
+
+    /**
+     * A paved road's finish on {@code hex}: on lunar or Martian ground a colony's slabs where it would be asphalt or
+     * have none, else {@code material} as it is. Legacy conversion (#colonyRoads) and the editor's new roads share it.
+     */
+    public static String roadFinish(Hex hex, String material) {
+        String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
+        boolean colony = theme.contains("lunar") || theme.contains("mars");
+        return colony && (material == null || material.isBlank() || material.equals("asphalt")) ? COLONY_SLABS : material;
+    }
 
     /**
      * Colony roads: a paved road, or a bridge deck's, on lunar or Martian ground, asphalt or without a finish of its own,
@@ -528,8 +538,6 @@ public final class BoardSceneryLayouts {
             for (int x = 0; x < board.getWidth(); x++) {
                 Coords at = new Coords(x, y);
                 Hex hex = board.getHex(at);
-                String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-                if (!(theme.contains("lunar") || theme.contains("mars"))) { continue; }
                 var styles = new LinkedHashMap<>(hex.getAppearance());
                 for (var layer : Map.of(Terrains.ROAD, "road", Terrains.BRIDGE_ROAD, "bridgeRoad").entrySet()) {
                     int level = hex.terrainLevel(layer.getKey());
@@ -539,7 +547,7 @@ public final class BoardSceneryLayouts {
                     }
                     var old = styles.get(layer.getValue());
                     String material = old == null || old.material() == null ? "" : old.material();
-                    if (!material.isBlank() && !material.equals("asphalt")) { continue; }
+                    if (roadFinish(hex, material).equals(material)) { continue; }
                     styles.put(layer.getValue(), old == null ? new HexAppearance(null, null, COLONY_SLABS, null)
                           : new HexAppearance(old.variant(), old.asset(), COLONY_SLABS, old.strength(), old.colours(),
                                 old.rotation(), old.tracks(), old.beside(), old.trafficControl()));

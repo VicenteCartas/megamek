@@ -37,8 +37,11 @@ class GpuMultiHexBuildingSmokeTest {
           new View("glass-dome", new Coords(18, 13), .32f, true, -30),
           new View("habitat", new Coords(5, 10), .4f, true, 35),
           new View("habitats-north", new Coords(5, 3), .45f, true, 0),
-          new View("radar", new Coords(27, 3), .45f, true, 0),
-          new View("tank-halls", new Coords(10, 13), .45f, true, 0),
+          new View("radar", new Coords(27, 2), .22f, true, 0),
+          new View("tank-halls", new Coords(10, 13), .32f, true, 0),
+          new View("capsule-hall", new Coords(20, 2), .25f, true, 0),
+          new View("light-well", new Coords(12, 3), .25f, true, 0),
+          new View("solar-halls", new Coords(5, 10), .3f, true, 0),
           new View("colony-road", new Coords(20, 5), .2f, true, 25),
           new View("road-gates", new Coords(23, 12), .3f, true, -20));
 

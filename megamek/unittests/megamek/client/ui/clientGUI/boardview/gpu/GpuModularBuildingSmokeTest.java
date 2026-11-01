@@ -61,7 +61,7 @@ class GpuModularBuildingSmokeTest {
     private static void checkKit() {
         var textures = new HashMap<String, Texture>();
         var authoredBounds = new java.util.ArrayList<Map<String, BoundingBox>>();
-        var lods = RigidGlb.loadLods(GpuBuildingTest.file());
+        var lods = GpuBuildingTest.lods(GpuBuildingTest.file());
         // Preserve both baked and node XY offsets, including the modules' asymmetric details.
         for (var data : lods.stream().distinct().toList()) {
             for (var mesh : data.meshes) {
@@ -77,8 +77,9 @@ class GpuModularBuildingSmokeTest {
             Model model = ModelTextures.create(data, textures,
                   (path, color) -> { throw new AssertionError("Expected embedded textures"); });
             Map<String, BoundingBox> bounds = new HashMap<>();
+            // By node: a role can have several pieces (a whole-hex piece beside its core one).
             ConnectedKit.parts(data).forEach(piece ->
-                  bounds.put(piece.role(), model.getNode(piece.node()).calculateBoundingBox(new BoundingBox())));
+                  bounds.put(piece.node(), model.getNode(piece.node()).calculateBoundingBox(new BoundingBox())));
             authoredBounds.add(bounds);
             return model;
         });
@@ -103,8 +104,7 @@ class GpuModularBuildingSmokeTest {
                     for (int level = 0; level <= count; level++) {
                         var node = instance.nodes.get(level);
                         var bounds = node.calculateBoundingBox(new BoundingBox());
-                        var authored = authoredBounds.get(lod).get(node.id.substring(node.id.indexOf('/') + 1,
-                              node.id.indexOf("-at-")));
+                        var authored = authoredBounds.get(lod).get(node.id.substring(0, node.id.indexOf('@')));
                         assertEquals(level * 18, bounds.min.z, .001f, "Saved vertical offsets must be discarded");
                         assertEquals(authored.min.x, bounds.min.x, .001f);
                         assertEquals(authored.max.x, bounds.max.x, .001f);
@@ -123,8 +123,9 @@ class GpuModularBuildingSmokeTest {
                 var struts = new ModelInstance(assembly.interior(), "struts").calculateBoundingBox(new BoundingBox());
                 assertEquals(count * 18, struts.getDepth(), .001f);
                 var triangles = GpuTerrain.triangles(assembly.interior());
-                assertFalse(Intersector.intersectRayTriangles(new Ray(new Vector3(972, -456, 250), new Vector3(0, 0, -1)),
-                      triangles, new Vector3()), "The front notch remains empty at every floor");
+                // A lone hex stands on its whole-hex pieces (ConnectedKit.Piece#whole): its front is built out too.
+                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(972, -456, 250), new Vector3(0, 0, -1)),
+                      triangles, new Vector3()), "A lone hex fills its front at every floor");
                 assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(959, -423, 250), new Vector3(0, 0, -1)),
                       triangles, new Vector3()));
                 Vector3 hit = new Vector3();
@@ -154,8 +155,10 @@ class GpuModularBuildingSmokeTest {
             var building = assets.building("buildings/saxarba/building_light/building_light_00", 5, new int[6], 0, true);
             assertNotNull(building);
             var floors = new ModelInstance(building.interior(), "floors").calculateBoundingBox(new BoundingBox());
-            assertEquals(26, floors.getWidth(), .01f, "Floors stop at the external walls, before the roof border");
-            assertEquals(50, floors.getHeight(), .01f);
+            // A lone hex stands on its whole-hex pieces: its floors fill it inside the walls.
+            var whole = building.instance(0).calculateBoundingBox(new BoundingBox());
+            assertTrue(floors.getWidth() < whole.getWidth() && floors.getHeight() < whole.getHeight(),
+                  "Floors stop at the external walls, before the roof border");
             var struts = new ModelInstance(building.interior(), "struts").calculateBoundingBox(new BoundingBox());
             assertTrue(floors.min.x <= struts.min.x && floors.max.x >= struts.max.x);
             assertTrue(floors.min.y <= struts.min.y && floors.max.y >= struts.max.y);
@@ -181,7 +184,8 @@ class GpuModularBuildingSmokeTest {
     }
 
     private static void checkTerrain() throws Exception {
-        String fallback = "buildings/saxarba/building_light/building_light_42";
+        // A family without a kit of its own (building_light now has one, data/models/buildings).
+        String fallback = "buildings/saxarba/hangar_light/hangar_light_42";
         GpuAssets assets = new GpuAssets();
         try {
             assertNull(assets.building(fallback, 5, new int[6], 4, true));

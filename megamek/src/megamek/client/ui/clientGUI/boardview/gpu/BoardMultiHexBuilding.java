@@ -1100,8 +1100,10 @@ final class BoardMultiHexBuilding {
             // Its own: the module's line runs through the annex's centre, its gatehouse over it.
             float apart = cx * ux + cy * uy;
             if (Math.abs(cx * uy - cy * ux) < 1 && apart > 0 && outer - apart <= GATEHOUSE / 2 + 2) {
-                float lintel = dome.foot() + Math.min(15, modules.get(at + 3) - 3) + 1.3f;
-                return new float[] { dome.x() + ux * outer, dome.y() + uy * outer, ux, uy, dome.foot(), lintel + 2 };
+                // Over the lintel, but under the gatehouse's cap (#moduleBlock) however low it is.
+                float rise = modules.get(at + 3), lintel = dome.foot() + Math.min(15, rise - 3) + 1.3f;
+                float reach = Math.min(lintel + 2, dome.foot() + rise - BEVEL_RISE);
+                return new float[] { dome.x() + ux * outer, dome.y() + uy * outer, ux, uy, dome.foot(), reach };
             }
         }
         return null;
@@ -1145,10 +1147,11 @@ final class BoardMultiHexBuilding {
         boolean straight = from[2] * to[2] + from[3] * to[3] > Math.cos(Math.toRadians(8))
               && Math.abs(dx * from[3] - dy * from[2]) < 2.5f;
         if (straight) {
-            corridor(mesh, hex, from, to);
+            // Its roof meets the gate's wall top, under its bevelled cap.
+            corridor(mesh, hex, from, new float[] { to[0], to[1], to[2], to[3], to[4], to[5] - BEVEL_RISE });
         } else {
-            // Its open ends in the building and in the gate, its collars within the gate's walls (#moduleBlock's bevel).
-            float[] start = { from[0] - from[2] * 2, from[1] - from[3] * 2, from[2], from[3], from[4], from[5] };
+            // Its open ends in the building and in the gate, its collars within both caps (#moduleBlock's bevel).
+            float[] start = { from[0] - from[2] * 2, from[1] - from[3] * 2, from[2], from[3], from[4], from[5] - 1.1f };
             float[] end = { to[0] + to[2] * 2, to[1] + to[3] * 2, to[2], to[3], to[4], to[5] - BEVEL_RISE - 1.6f };
             bellows(mesh, hex, start, end, lod, GATE_HALF - 1.5f, true);
         }
@@ -1254,18 +1257,30 @@ final class BoardMultiHexBuilding {
             radii[station] = station <= 1 || station >= stations - 2 ? radius + 1.1f : station % 2 == 0 ? radius
                   : radius + rib;
         }
+        // Where it bends tighter than it is wide, its inner side draws in towards the bend's centre, so it does not fold
+        // over itself: how far each side reaches (left of its way, then right) as a share of its radius.
+        float[][] reaches = new float[stations][];
+        for (int station = 0; station < stations; station++) {
+            int before = Math.max(0, station - 1), after = Math.min(stations - 1, station + 1);
+            float[] a = along[before], b = along[after];
+            float turn = (float) Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]);
+            float bend = Math.abs(turn) / Math.max(1e-4f, distances[after] - distances[before]);
+            float inner = bend > 0 ? Math.min(1, .8f / (bend * radii[station])) : 1;
+            // Turning left, the bend's centre lies left of the way (`across` points right).
+            reaches[station] = turn > 0 ? new float[] { inner, 1 } : new float[] { 1, inner };
+        }
         for (int band = 0; band < stations - 1; band++) {
             String material = band == 0 || band == stations - 2 ? PIER : FRAME;
             float flare = (radii[band + 1] - radii[band]) / Math.max(1e-4f, distances[band + 1] - distances[band]);
             for (int side = 0; side < sides; side++) {
-                float[] a = tunnel ? arch(centres, along, across, radii, rises, distances, band, side, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, distances, band, side, sides, flare);
-                float[] b = tunnel ? arch(centres, along, across, radii, rises, distances, band, side + 1, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, distances, band, side + 1, sides, flare);
-                float[] c = tunnel ? arch(centres, along, across, radii, rises, distances, band + 1, side + 1, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, distances, band + 1, side + 1, sides, flare);
-                float[] d = tunnel ? arch(centres, along, across, radii, rises, distances, band + 1, side, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, distances, band + 1, side, sides, flare);
+                float[] a = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band, side, sides, radius, flare)
+                      : ring(centres, along, across, ups, radii, reaches, distances, band, side, sides, flare);
+                float[] b = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band, side + 1, sides, radius, flare)
+                      : ring(centres, along, across, ups, radii, reaches, distances, band, side + 1, sides, flare);
+                float[] c = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band + 1, side + 1, sides, radius, flare)
+                      : ring(centres, along, across, ups, radii, reaches, distances, band + 1, side + 1, sides, flare);
+                float[] d = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band + 1, side, sides, radius, flare)
+                      : ring(centres, along, across, ups, radii, reaches, distances, band + 1, side, sides, flare);
                 outward(mesh, material, hex, a, b, c);
                 outward(mesh, material, hex, a, c, d);
             }
@@ -1284,11 +1299,11 @@ final class BoardMultiHexBuilding {
     /**
      * A vertex of a tunnel's arch at {@code station}, {@code point} of {@code points}: its left foot on the ground, the
      * half ellipse of its roof, {@code radii} either side and {@code rises} high over the springing (its centre's
-     * height), over to the right, and its right foot; ribs ({@code radii} past {@code radius}) stand out of both; its
-     * normal leaning with the rib.
+     * height), over to the right, and its right foot; ribs ({@code radii} past {@code radius}) stand out of both, each
+     * side drawn in by its {@code reaches}; its normal leaning with the rib.
      */
     private static float[] arch(float[][] centres, float[][] along, float[][] across, float[] radii, float[] rises,
-          float[] distances, int station, int point, int points, float radius, float flare) {
+          float[][] reaches, float[] distances, int station, int point, int points, float radius, float flare) {
         float r = radii[station], rise = rises[station] + r - radius, spring = centres[station][2];
         float[] centre = centres[station], a = along[station], x = across[station];
         float out, z, side, up;
@@ -1306,20 +1321,23 @@ final class BoardMultiHexBuilding {
             side = (float) Math.cos(angle) * rise / length;
             up = (float) Math.sin(angle) * r / length;
         }
-        return vertex(centre[0] + x[0] * out * r, centre[1] + x[1] * out * r, z, x[0] * side - a[0] * flare,
+        float reach = out * r * reaches[station][out < 0 ? 0 : 1];
+        return vertex(centre[0] + x[0] * reach, centre[1] + x[1] * reach, z, x[0] * side - a[0] * flare,
               x[1] * side - a[1] * flare, up - a[2] * flare, contact(z), distances[station] / 8, (float) point / points * 2);
     }
 
     /** A vertex of the tube's ring at {@code station}, {@code side} of {@code sides} round it, its normal leaning with the rib. */
     private static float[] ring(float[][] centres, float[][] along, float[][] across, float[][] ups, float[] radii,
-          float[] distances, int station, int side, int sides, float flare) {
+          float[][] reaches, float[] distances, int station, int side, int sides, float flare) {
         double angle = 2 * Math.PI * side / sides;
         float c = (float) Math.cos(angle), s = (float) Math.sin(angle), r = radii[station];
         float[] centre = centres[station], a = along[station], x = across[station], u = ups[station];
         float rx = x[0] * c + u[0] * s, ry = x[1] * c + u[1] * s, rz = x[2] * c + u[2] * s;
+        // Its across part drawn in on the bend's inner side (#bellows' reaches).
+        float drawn = c * (reaches[station][c < 0 ? 0 : 1] - 1);
         float z = centre[2] + rz * r;
-        return vertex(centre[0] + rx * r, centre[1] + ry * r, z, rx - a[0] * flare, ry - a[1] * flare, rz - a[2] * flare,
-              contact(z), distances[station] / 8, (float) side / sides * 2);
+        return vertex(centre[0] + (rx + x[0] * drawn) * r, centre[1] + (ry + x[1] * drawn) * r, z, rx - a[0] * flare,
+              ry - a[1] * flare, rz - a[2] * flare, contact(z), distances[station] / 8, (float) side / sides * 2);
     }
 
     /** A triangle of a tube's wall, wound to face along its vertices' normals. */
