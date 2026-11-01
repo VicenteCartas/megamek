@@ -394,6 +394,12 @@ final class BoardRoad {
         return result;
     }
 
+    /** How far a point lies inside the carriageways of the paved roads a loose one meets; negative outside them. */
+    float pavedDepth(float x, float y) {
+        return -distance(paved, BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale(),
+              BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale());
+    }
+
     /**
      * How near a point lies to a wheel path of the paved roads a loose one meets (#meet), where their wear places them
      * (#wearLane, terrain-road.frag asphaltWear): 1 on one, fading out a third of a metre beside it.

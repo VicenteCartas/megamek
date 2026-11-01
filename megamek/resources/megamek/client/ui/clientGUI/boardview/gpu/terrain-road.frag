@@ -442,7 +442,8 @@ bool trackCoat(RoadMaps m) {
 #endif
 }
 
-// A loose road's grit carried on along the wheel paths of the paved road it meets (GpuRoads#finish, -7).
+// A loose road's grit carried on along the wheel paths of the paved road it meets, or a gravel road's spill onto it
+// (B 1) (GpuRoads#finish, -7).
 bool carriedCoat(RoadMaps m) {
 #if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
     return m.mapped && abs(m.transition + 7.0) < .5;
@@ -655,6 +656,8 @@ void main() {
     vec2 wearMetres = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_metre;
     float wearPixel = max(length(dFdx(wearMetres)), length(dFdy(wearMetres)));
     bool paved = pavedWear(m), track = trackCoat(m), carried = carriedCoat(m);
+    bool spill = carried && roadColor.b > .5;
+    carried = carried && !spill;
     // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
     vec2 materialUV = uv;
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
@@ -692,6 +695,10 @@ void main() {
             normalStrength = dirtTrack(wearMetres, wearPixel, unit, roadColor.b * RUT_RANGE - RUT_OFFSET, roadColor.a,
                   built, albedo, properties, trackAlpha, wearSlope, wearWater);
         }
+    } else if (spill) {
+        // Grit and dust carried onto a paved road: pale and grey.
+        albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .65) * 1.4;
+        properties.g = .95;
     } else if (carried) {
         // Grit and dust from the loose road: paler and greyer than its own ground.
         albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .5) * 1.3;
@@ -792,6 +799,16 @@ void main() {
         alpha = trackAlpha;
     } else if (slabs) {
         // A cast kerb: its edge is the coverage's own.
+    } else if (spill) {
+        // Sparse, broken grains over a thin film of dust, both thinning out over the spill's reach (A), most in the wheel
+        // bands: G runs across the nearest arm, as a transition's does (GpuRoads#color).
+        vec4 profile = roadProfile();
+        float lane = abs(abs((roadColor.g - .5) * 2.0 * profile.x) - profile.y);
+        float wheels = 1.0 - smoothstep(profile.z * .5, profile.z, lane);
+        float broken = wearNoise(wearMetres, 16.0, .29, wearPixel).r;
+        float grit = roadColor.a * mix(.55, .85, wheels) - (.6 * grain + .4 * broken);
+        float dust = roadColor.a * roadColor.a * mix(.15, .3, wheels) * smoothstep(.3, .7, broken);
+        alpha = max(clamp(grit / max(.03, fwidth(grit)) + .5, 0.0, 1.0) * .85, dust);
     } else if (carried) {
         // Faint: sparse grains over patchy dust on the paved road's wheel paths, thinning out away from the loose road
         // (A, GpuRoads#coverage).
