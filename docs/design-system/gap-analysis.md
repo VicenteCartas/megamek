@@ -1174,11 +1174,12 @@ work for Swing, and item 11 is under investigation.
        table, goes back, searches, picks a result and ends the search.
        Live: `lobby+randomarmy`. The probe's click list now takes a `type:text` step that types into the focused
        field.
-     - Still open after #34, for a later round once #33 and #34 are merged:
-       - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
-         loading game options, a loadout and a unit list through the real system file dialog was checked (L18);
-         bot presets have no file to save. A second human player was checked for the Game Master seat (a
-         windowless client); a second MegaMek window remains to try.
+     - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
+       above) is done. Still open:
+       - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
+         player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
+         unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
+         windowless client). Bot presets have no file to save.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).
