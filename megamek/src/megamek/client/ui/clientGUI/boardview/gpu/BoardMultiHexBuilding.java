@@ -72,6 +72,8 @@ final class BoardMultiHexBuilding {
     private static final float WIDTH = HexTile.MODEL_WIDTH, HEIGHT = HexTile.HEIGHT;
     /** Wall texture: one repeat per two storeys, as wide as high. */
     private static final float WALL_REPEAT = 2 * LEVEL;
+    /** A roof's texture, one square repeat laid along its building: as the habitats' roofs (HexTile#HEIGHT / 2). */
+    private static final float ROOF_REPEAT = HEIGHT / 2;
     private static final float EPSILON = 1e-3f;
 
     // Board materials (textures/<name>.tres); their .tres files give every finish, transparency included.
@@ -1181,8 +1183,11 @@ final class BoardMultiHexBuilding {
         float nx = -ux * rise / lean, ny = -uy * rise / lean, nz = 1 / lean;
         float[][] roof = new float[4][];
         for (int corner = 0; corner < 4; corner++) {
+            // Laid along the passage from its start, alike in every share.
             float[] c = foot[corner];
-            roof[corner] = vertex(c[0], c[1], c[2], nx, ny, nz, 1, c[0] / 24, c[1] / 24);
+            float ox = c[0] - sx, oy = c[1] - sy;
+            roof[corner] = vertex(c[0], c[1], c[2], nx, ny, nz, 1, (ox * ux + oy * uy) / ROOF_REPEAT,
+                  (ox * uy - oy * ux) / ROOF_REPEAT);
         }
         outward(mesh, ROOF, hex, roof[0], roof[1], roof[2]);
         outward(mesh, ROOF, hex, roof[0], roof[2], roof[3]);
@@ -1628,7 +1633,7 @@ final class BoardMultiHexBuilding {
 
     /**
      * The podium: a ring building between the dome's ring beam and a twelve-sided outline, faced with the annexes'
-     * panels inside and out, roofed in regolith concrete with a service unit over each side; yellow buttress fins at
+     * panels inside and out, roofed in regolith concrete laid round the ring; yellow buttress fins at
      * its six corners between the pylons and the middle of each side, where no entrance wing arrives.
      */
     private static void podium(Mesh mesh, List<float[]> hex, Dome dome) {
@@ -1653,10 +1658,12 @@ final class BoardMultiHexBuilding {
             float[] w2 = vertex(bx, by, top, nx, ny, 0, 1, u1, v1), w3 = vertex(ax, ay, top, nx, ny, 0, 1, u0, v1);
             mesh.clipped(WALL, hex, w0, w1, w2);
             mesh.clipped(WALL, hex, w0, w2, w3);
-            // Its roof, from the outline in to the ring beam, in the lattice's coordinates as the plinth's deck.
-            float[][] roof = { { ax, ay }, { bx, by }, { x + inner * cb, y + inner * sb }, { x + inner * ca, y + inner * sa } };
-            float[][] corners = new float[4][];
-            for (int i = 0; i < 4; i++) { corners[i] = deck(roof[i][0], roof[i][1], top, 1); }
+            // Its roof, from the outline in to the ring beam, laid round the ring: along it at its middle, across it in.
+            float middle = (inner + flat) / 2;
+            float[][] corners = { vertex(ax, ay, top, 0, 0, 1, 1, (float) a * middle / ROOF_REPEAT, oa / ROOF_REPEAT),
+                  vertex(bx, by, top, 0, 0, 1, 1, (float) b * middle / ROOF_REPEAT, ob / ROOF_REPEAT),
+                  vertex(x + inner * cb, y + inner * sb, top, 0, 0, 1, 1, (float) b * middle / ROOF_REPEAT, inner / ROOF_REPEAT),
+                  vertex(x + inner * ca, y + inner * sa, top, 0, 0, 1, 1, (float) a * middle / ROOF_REPEAT, inner / ROOF_REPEAT) };
             mesh.clipped(PLINTH_MATERIAL, hex, corners[0], corners[1], corners[2]);
             mesh.clipped(PLINTH_MATERIAL, hex, corners[0], corners[2], corners[3]);
             // Its inner wall faces the dome, under the glass.
@@ -1681,10 +1688,8 @@ final class BoardMultiHexBuilding {
             double angle = Math.toRadians(fin < 6 ? 60 * fin : 15 + 30 * (fin - 6));
             if (!dome.joined(angle, 0)) { fin(mesh, hex, dome, (float) angle, fin < 6 ? corner : flat, bottom, top); }
         }
-        // The ring roof in bays, one a side, as the colony's ring buildings are: steel ribs on the corners' radial lines
-        // and a steel rim along the outline, and in each bay its plant, two or three dark units and housings of
-        // different sizes along the ring, chosen per bay and stable for it.
-        float depth = flat - inner, middle = (inner + flat) / 2, rib = .45f, rim = .7f;
+        // The ring roof in bays, one a side: steel ribs on the corners' radial lines and a steel rim along the outline.
+        float rib = .45f, rim = .7f;
         for (int k = 0; k < sides; k++) {
             double angle = 2 * Math.PI * k / sides;
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle), reach = (corner - inner) / 2;
@@ -1697,21 +1702,6 @@ final class BoardMultiHexBuilding {
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle);
             clippedBlock(mesh, hex, PIER, x + ux * (flat - rim), y + uy * (flat - rim), -uy, ux, half - rim, rim, top,
                   top + .9f);
-            // Seeded alike in every share the bay crosses (dome.x/y are each share's own).
-            var random = new SplittableRandom(Float.floatToIntBits(dome.podium()) * 31L + Float.floatToIntBits(dome.radius()) * 17L + side);
-            int units = 2 + random.nextInt(2);
-            float room = (half - 2) * 2 * (inner + depth * .5f) / flat, span = room / units;
-            for (int unit = 0; unit < units; unit++) {
-                float along = Math.min(span * .5f - 1, Math.min(7, depth * .4f)) * (.55f + .4f * random.nextFloat());
-                float across = Math.min(depth * .5f - 1.2f, along * (.5f + .5f * random.nextFloat()));
-                float at = -room / 2 + span * (unit + .5f), out = (random.nextFloat() - .5f) * (depth * .5f - 1.2f - across);
-                float cx = x + ux * (middle + out) - uy * at, cy = y + uy * (middle + out) + ux * at;
-                boolean housing = random.nextFloat() < .35f;
-                float rise = housing ? 1.6f + random.nextFloat() : .8f + 1.4f * random.nextFloat();
-                if (along > .8f && across > .8f) {
-                    clippedBlock(mesh, hex, housing ? FRAME : PIER, cx, cy, -uy, ux, along, across, top, top + rise);
-                }
-            }
         }
     }
 
@@ -1839,7 +1829,17 @@ final class BoardMultiHexBuilding {
             mesh.clipped(FRAME, hex, va, vb, vd);
             mesh.clipped(FRAME, hex, va, vd, vc);
         }
-        clippedFlat(mesh, hex, ROOF, roof, top);
+        // Its roof laid along the block (#moduleOutline's first edge), from its first corner, alike in every share.
+        float[] origin = walls.getFirst(), next = walls.get(1);
+        float length = (float) Math.hypot(next[0] - origin[0], next[1] - origin[1]);
+        float ux = (next[0] - origin[0]) / length, uy = (next[1] - origin[1]) / length;
+        List<float[]> laid = new ArrayList<>(roof.size());
+        for (float[] corner : roof) {
+            float dx = corner[0] - origin[0], dy = corner[1] - origin[1];
+            laid.add(vertex(corner[0], corner[1], top, 0, 0, 1, 1, (dx * ux + dy * uy) / ROOF_REPEAT,
+                  (dx * uy - dy * ux) / ROOF_REPEAT));
+        }
+        for (int i = 1; i < laid.size() - 1; i++) { mesh.clipped(ROOF, hex, laid.getFirst(), laid.get(i), laid.get(i + 1)); }
     }
 
     /**
