@@ -290,22 +290,25 @@ final class GpuMaterialCache {
     static boolean bed(BoardSurface surface, BoardSurface.Face face, BoardScene scene, List<BoardSurface.Face> banks) {
         if (!uncovered(scene, surface.tile) || normalZ(face) < SLOPE_Z) { return false; }
         float lowest = Math.min(face.a().z, Math.min(face.b().z, face.c().z)), clearance = BoardRelief.metres(.05f);
+        float touch = BoardRelief.metres(TOUCH);
+        Vector3[] corners = { face.a(), face.b(), face.c() };
         for (BoardSurface.Face bank : banks) {
-            if (Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance && overlap(face, bank)) {
+            if (Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance
+                  && overlap(corners, new Vector3[] { bank.a(), bank.b(), bank.c() }, touch)) {
                 return false;
             }
         }
         return true;
     }
 
-    /** Whether two faces overlap seen from above, by more than a touch along a shared edge (separating axes). */
-    private static boolean overlap(BoardSurface.Face f, BoardSurface.Face g) {
-        return overlap(new Vector3[] { f.a(), f.b(), f.c() }, new Vector3[] { g.a(), g.b(), g.c() });
-    }
+    /** How far, in metres, two triangles may overlap along a shared edge and still count as only touching. */
+    private static final float TOUCH = .01f;
 
-    /** Whether two triangles overlap in XY by more than a touch along a shared edge (separating axes). */
-    private static boolean overlap(Vector3[] a, Vector3[] b) {
-        float touch = BoardRelief.metres(.01f);
+    /**
+     * Whether two triangles overlap in XY by more than {@code touch} (BoardRelief.metres of {@link #TOUCH}) along a
+     * shared edge (separating axes).
+     */
+    private static boolean overlap(Vector3[] a, Vector3[] b, float touch) {
         for (Vector3[] edges : new Vector3[][] { a, b }) {
             for (int i = 0; i < 3; i++) {
                 float nx = edges[(i + 1) % 3].y - edges[i].y, ny = edges[i].x - edges[(i + 1) % 3].x;
@@ -598,13 +601,25 @@ final class GpuMaterialCache {
             if ((chart[1].x - chart[0].x) * (chart[2].y - chart[0].y)
                   - (chart[1].y - chart[0].y) * (chart[2].x - chart[0].x) <= 0) { return null; }
             List<Vector3[]> held = placed.computeIfAbsent(slot, ignored -> new ArrayList<>());
+            // A slot holds many of its wall's triangles; each new one is tested against all of them.
+            float touch = BoardRelief.metres(TOUCH);
             for (Vector3[] other : held) {
-                if (overlap(chart, other)) { return null; }
+                // Apart in plan, two charts with area are apart along an edge of one of them too.
+                if (apart(chart, other)) { continue; }
+                if (overlap(chart, other, touch)) { return null; }
             }
             held.add(chart);
             used.add(key);
             return new float[] { slot.x() + chart[0].x, slot.y() + chart[0].y, slot.x() + chart[1].x,
                   slot.y() + chart[1].y, slot.x() + chart[2].x, slot.y() + chart[2].y };
+        }
+
+        /** Whether two triangles' bounds lie strictly apart in XY. */
+        private static boolean apart(Vector3[] a, Vector3[] b) {
+            return Math.max(a[0].x, Math.max(a[1].x, a[2].x)) < Math.min(b[0].x, Math.min(b[1].x, b[2].x))
+                  || Math.max(b[0].x, Math.max(b[1].x, b[2].x)) < Math.min(a[0].x, Math.min(a[1].x, a[2].x))
+                  || Math.max(a[0].y, Math.max(a[1].y, a[2].y)) < Math.min(b[0].y, Math.min(b[1].y, b[2].y))
+                  || Math.max(b[0].y, Math.max(b[1].y, b[2].y)) < Math.min(a[0].y, Math.min(a[1].y, a[2].y));
         }
 
         /** {@code reused}: hexes whose meshes come from {@code source}'s build (sameLayout), slots and all. */

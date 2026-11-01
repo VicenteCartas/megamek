@@ -1283,7 +1283,9 @@ final class BoardRoad {
                 float along = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
                 float t = Math.clamp(along, ends && i == 1 ? Float.NEGATIVE_INFINITY : 0,
                       ends && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
-                float near = (float) Math.hypot(x - a.x - t * dx, y - a.y - t * dy);
+                float ex = x - a.x - t * dx, ey = y - a.y - t * dy;
+                // Not Math.hypot, which runs in software: a road's paint samples this for every texel and segment.
+                float near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
                 t = Math.clamp(t, 0, 1);
                 edge = Math.min(edge, near - a.width - t * (b.width - a.width));
                 if (near < distance) { distance = near; alongX = dx; alongY = dy; width = a.width + t * (b.width - a.width); }

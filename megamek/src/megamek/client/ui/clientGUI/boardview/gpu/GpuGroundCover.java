@@ -335,9 +335,8 @@ final class GpuGroundCover implements Disposable {
             facing.nor();
             if (place < 0) {
                 root.mulAdd(facing, place * (2 - shoulder) * m);
-                var face = support.face(root.x, root.y);
-                if (face == null) { continue; }
-                root.z = face.height(root.x, root.y);
+                root.z = support.top(root.x, root.y);
+                if (Float.isNaN(root.z)) { continue; }
             }
             float lean = lean(support, root, facing, m);
             if (Float.isNaN(lean) || obstacles.obstructs(root, 2 * m, MAX_HEIGHT_FRACTION * BoardGeometry.width())) {
@@ -370,16 +369,15 @@ final class GpuGroundCover implements Disposable {
         for (int step = 0; step <= 48; step++) {
             float at = -reach + 2 * reach * step / 48;
             var sample = point.cpy().mulAdd(outward, at);
-            var face = support.face(sample.x, sample.y);
-            float height = face == null ? Float.NaN : face.height(sample.x, sample.y);
+            float height = support.top(sample.x, sample.y);
             if (previous >= z && height < z) {
                 float to = at;
                 for (int iteration = 0; iteration < 12; iteration++) {
                     float middle = (from + to) * .5f;
                     sample.set(point).mulAdd(outward, middle);
-                    face = support.face(sample.x, sample.y);
-                    if (face == null) { return null; }
-                    if (face.height(sample.x, sample.y) >= z) { from = middle; } else { to = middle; }
+                    float middleHeight = support.top(sample.x, sample.y);
+                    if (Float.isNaN(middleHeight)) { return null; }
+                    if (middleHeight >= z) { from = middle; } else { to = middle; }
                 }
                 sample.set(point).mulAdd(outward, (from + to) * .5f);
                 sample.z = z;
@@ -401,12 +399,12 @@ final class GpuGroundCover implements Disposable {
         float lean = 1;
         for (float metres : RIM_REACH) {
             float x = root.x + facing.x * metres * m, y = root.y + facing.y * metres * m;
-            var face = support.face(x, y);
-            if (face == null) {
+            float ground = support.top(x, y);
+            if (Float.isNaN(ground)) {
                 if (metres <= 1) { return Float.NaN; }
                 continue;
             }
-            float fall = root.z - face.height(x, y);
+            float fall = root.z - ground;
             if (fall < -.1f * m) { return Float.NaN; }
             if (metres >= 1) { lean = Math.min(lean, fall / (.45f * metres * m)); }
         }

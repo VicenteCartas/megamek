@@ -65,6 +65,11 @@ final class BoardRoadCut {
     private final Area reserved = new Area();
     /** The outline of all the ground the grades reserve: the road's edge, where natural ground meets it. */
     private final List<Segment> edge = new ArrayList<>();
+    /**
+     * Each edge segment's bounds, side by side: least and greatest x, then y. Every face of a hex near a road scans the
+     * whole edge, which runs on through the neighbours' hexes.
+     */
+    private final float[] edgeBounds;
     private final List<BoardRoadGrade> grades;
     /** Snapping and probing tolerance: well above the float spacing of the board's coordinates here. */
     private final float epsilon;
@@ -105,6 +110,14 @@ final class BoardRoadCut {
         }
         // A hex owning no reserved piece still meets the road's edge, where its slopes reach into the neighbours'.
         outline(reserved, edge, epsilon);
+        edgeBounds = new float[edge.size() * 4];
+        for (int i = 0; i < edge.size(); i++) {
+            Segment s = edge.get(i);
+            edgeBounds[4 * i] = Math.min(s.ax(), s.bx());
+            edgeBounds[4 * i + 1] = Math.max(s.ax(), s.bx());
+            edgeBounds[4 * i + 2] = s.low();
+            edgeBounds[4 * i + 3] = s.high();
+        }
         if (pieces.isEmpty()) { return; }
         outline(top, segments, epsilon);
         for (Piece piece : pieces) {
@@ -163,8 +176,13 @@ final class BoardRoadCut {
 
     /** Whether a point lies on the road's edge. */
     private boolean onEdge(float x, float y) {
-        float tolerance = 2 * epsilon;
-        for (Segment s : edge) {
+        float tolerance = 2 * epsilon, reach = 2 * tolerance;
+        for (int i = 0; i < edge.size(); i++) {
+            // Twice the tolerance beyond a segment's bounds, it lies farther than the tolerance, whatever the rounding.
+            int b = 4 * i;
+            if (x < edgeBounds[b] - reach || x > edgeBounds[b + 1] + reach || y < edgeBounds[b + 2] - reach
+                  || y > edgeBounds[b + 3] + reach) { continue; }
+            Segment s = edge.get(i);
             if (BoardRelief.distance(x, y, s.ax(), s.ay(), s.bx(), s.by()) < tolerance) { return true; }
         }
         return false;
@@ -442,10 +460,11 @@ final class BoardRoadCut {
                 continue;
             }
             List<Segment> chords = new ArrayList<>();
-            for (Segment s : edge) {
-                if (Math.max(s.ax(), s.bx()) < minX - epsilon || Math.min(s.ax(), s.bx()) > maxX + epsilon
-                      || s.high() < minY - epsilon || s.low() > maxY + epsilon) { continue; }
-                Segment chord = chord(face, s, nudge);
+            for (int i = 0; i < edge.size(); i++) {
+                int e = 4 * i;
+                if (edgeBounds[e + 1] < minX - epsilon || edgeBounds[e] > maxX + epsilon
+                      || edgeBounds[e + 3] < minY - epsilon || edgeBounds[e + 2] > maxY + epsilon) { continue; }
+                Segment chord = chord(face, edge.get(i), nudge);
                 if (chord != null) { chords.add(chord); }
             }
             if (!chords.isEmpty() || region.contains(mx + ox, my + oy)) {

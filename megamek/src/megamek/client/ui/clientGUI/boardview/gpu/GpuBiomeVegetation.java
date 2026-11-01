@@ -354,11 +354,19 @@ final class GpuBiomeVegetation implements Disposable {
         }
     }
 
-    /** Small CPU index of the published triangles, not a second height field. No per-root whole-mesh scan. */
+    /**
+     * Small CPU index of the published triangles, not a second height field. No per-root whole-mesh scan: a grid of
+     * about two faces per cell, each cell's faces stored with the bounds their own height test rejects by. A rim's
+     * contour asks it some sixty times per blade, so a query reads no settings and touches only the faces it might hit.
+     */
     static final class Support {
-        private static final int SIDE = 8;
-        final List<List<BoardSurface.Face>> cells = new ArrayList<>(SIDE * SIDE);
-        final float minX, minY, scaleX, scaleY;
+        private final int side;
+        private final float minX, minY, scaleX, scaleY, tolerance;
+        /** Cell {@code c}'s entries are {@code start[c]} up to {@code start[c + 1]}, in the faces' order. */
+        private final int[] start;
+        private final BoardSurface.Face[] entries;
+        /** Each entry's face bounds widened by the tolerance: left, right, bottom, top. */
+        private final float[] bounds;
 
         Support(List<BoardSurface.Face> faces) {
             float left = Float.POSITIVE_INFINITY, bottom = left, right = Float.NEGATIVE_INFINITY, top = right;
@@ -369,33 +377,66 @@ final class GpuBiomeVegetation implements Disposable {
                 top = Math.max(top, Math.max(face.a().y, Math.max(face.b().y, face.c().y)));
             }
             minX = left; minY = bottom;
-            scaleX = SIDE / Math.max(right - left, .001f); scaleY = SIDE / Math.max(top - bottom, .001f);
-            for (int i = 0; i < SIDE * SIDE; i++) { cells.add(new ArrayList<>()); }
-            float tolerance = .001f * BoardGeometry.hexScale();
-            for (var face : faces) {
-                int x0 = column(Math.min(face.a().x, Math.min(face.b().x, face.c().x)) - tolerance);
-                int x1 = column(Math.max(face.a().x, Math.max(face.b().x, face.c().x)) + tolerance);
-                int y0 = row(Math.min(face.a().y, Math.min(face.b().y, face.c().y)) - tolerance);
-                int y1 = row(Math.max(face.a().y, Math.max(face.b().y, face.c().y)) + tolerance);
-                for (int y = y0; y <= y1; y++) {
-                    for (int x = x0; x <= x1; x++) { cells.get(y * SIDE + x).add(face); }
+            side = Math.clamp((int) Math.ceil(Math.sqrt(faces.size() / 2.0)), 8, 64);
+            scaleX = side / Math.max(right - left, .001f); scaleY = side / Math.max(top - bottom, .001f);
+            tolerance = .001f * BoardGeometry.hexScale();
+            float[] box = new float[faces.size() * 4];
+            start = new int[side * side + 1];
+            for (int i = 0; i < faces.size(); i++) {
+                var face = faces.get(i);
+                // As BoardSurface.Face.height bounds its test, so a skipped face is one it would reject.
+                box[4 * i] = Math.min(face.a().x, Math.min(face.b().x, face.c().x)) - tolerance;
+                box[4 * i + 1] = Math.max(face.a().x, Math.max(face.b().x, face.c().x)) + tolerance;
+                box[4 * i + 2] = Math.min(face.a().y, Math.min(face.b().y, face.c().y)) - tolerance;
+                box[4 * i + 3] = Math.max(face.a().y, Math.max(face.b().y, face.c().y)) + tolerance;
+                for (int y = row(box[4 * i + 2]); y <= row(box[4 * i + 3]); y++) {
+                    for (int x = column(box[4 * i]); x <= column(box[4 * i + 1]); x++) { start[y * side + x + 1]++; }
+                }
+            }
+            for (int cell = 0; cell < side * side; cell++) { start[cell + 1] += start[cell]; }
+            entries = new BoardSurface.Face[start[side * side]];
+            bounds = new float[entries.length * 4];
+            int[] next = Arrays.copyOf(start, side * side);
+            for (int i = 0; i < faces.size(); i++) {
+                for (int y = row(box[4 * i + 2]); y <= row(box[4 * i + 3]); y++) {
+                    for (int x = column(box[4 * i]); x <= column(box[4 * i + 1]); x++) {
+                        int entry = next[y * side + x]++;
+                        entries[entry] = faces.get(i);
+                        System.arraycopy(box, 4 * i, bounds, 4 * entry, 4);
+                    }
                 }
             }
         }
 
-        private int column(float x) { return Math.clamp((int) ((x - minX) * scaleX), 0, SIDE - 1); }
-        private int row(float y) { return Math.clamp((int) ((y - minY) * scaleY), 0, SIDE - 1); }
+        private int column(float x) { return Math.clamp((int) ((x - minX) * scaleX), 0, side - 1); }
+        private int row(float y) { return Math.clamp((int) ((y - minY) * scaleY), 0, side - 1); }
+        private int cell(float x, float y) { return row(y) * side + column(x); }
+
         float height(float x, float y) {
-            return BoardSurface.sampleHeight(cells.get(row(y) * SIDE + column(x)), x, y, Float.NaN);
+            int cell = cell(x, y);
+            return BoardSurface.sampleHeight(Arrays.asList(entries).subList(start[cell], start[cell + 1]), x, y, Float.NaN);
         }
 
         /** The highest indexed face holding (x, y), or null where none does. */
         BoardSurface.Face face(float x, float y) {
-            BoardSurface.Face highest = null;
+            int entry = highest(x, y);
+            return entry < 0 ? null : entries[entry];
+        }
+
+        /** {@link #face}'s height at (x, y), or NaN where no face holds it. */
+        float top(float x, float y) {
+            int entry = highest(x, y);
+            return entry < 0 ? Float.NaN : entries[entry].height(x, y, tolerance);
+        }
+
+        private int highest(float x, float y) {
+            int cell = cell(x, y), highest = -1;
             float top = Float.NEGATIVE_INFINITY;
-            for (var face : cells.get(row(y) * SIDE + column(x))) {
-                float height = face.height(x, y);
-                if (height > top) { top = height; highest = face; }
+            for (int entry = start[cell]; entry < start[cell + 1]; entry++) {
+                int b = 4 * entry;
+                if (x < bounds[b] || x > bounds[b + 1] || y < bounds[b + 2] || y > bounds[b + 3]) { continue; }
+                float height = entries[entry].height(x, y, tolerance);
+                if (height > top) { top = height; highest = entry; }
             }
             return highest;
         }

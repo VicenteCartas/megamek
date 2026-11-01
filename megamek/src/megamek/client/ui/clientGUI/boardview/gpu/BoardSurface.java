@@ -236,7 +236,8 @@ final class BoardSurface {
             return height(x, y, .001f * BoardGeometry.hexScale());
         }
 
-        private float height(float x, float y, float tolerance) {
+        /** {@link #height(float, float)} with the tolerance its caller read once from the settings. */
+        float height(float x, float y, float tolerance) {
             if (x < Math.min(a.x, Math.min(b.x, c.x)) - tolerance
                   || x > Math.max(a.x, Math.max(b.x, c.x)) + tolerance
                   || y < Math.min(a.y, Math.min(b.y, c.y)) - tolerance
