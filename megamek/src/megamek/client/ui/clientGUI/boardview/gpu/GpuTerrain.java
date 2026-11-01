@@ -594,7 +594,7 @@ final class GpuTerrain implements Disposable {
                             Floor floor = FLOORS[family];
                             floors[3 * family] = floor == null ? -1 : 2f * SCULPT_LAYERS.indexOf(floor.material());
                             floors[3 * family + 1] = floor == null ? 0 : assets.sculptTile(floor.material());
-                            floors[3 * family + 2] = floor == null ? 0 : floor.cover();
+                            floors[3 * family + 2] = floor != null && floor.edges() ? 1 : 0;
                         }
                         program.setUniform3fv("u_floorMaterials[0]", floors, 0, floors.length);
                     }
@@ -1781,19 +1781,20 @@ final class GpuTerrain implements Disposable {
     /** Whether sunken ground (level -1 and below) takes its family's floor material from {@link #FLOORS}. */
     static final boolean SUBLEVEL_FLOORS = true;
 
-    /** A family's floor: its material and the share of its sunken ground it covers, in world-space patches. */
-    private record Floor(String material, float cover) { }
+    /** A family's floor: its material, and whether it shows only where the ground thins out first (a hollow's edges). */
+    private record Floor(String material, boolean edges) { }
 
     /**
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
-     * (terrain-materials.glsl floorShare). Snow stays snow but for scattered patches of thin snow over frozen ground.
+     * (terrain-materials.glsl floorShare). Snow stays snow but where it melts first: thin snow over frozen ground in
+     * broken tongues along the banks' feet.
      * Null keeps the ground: concrete stays paved.
      */
     private static final Floor[] FLOORS = {
-          new Floor("grassland-floor", 1), new Floor("dirt-floor", 1), new Floor("sand-floor", 1),
-          new Floor("rock-floor", 1), null, new Floor("snow-floor", .25f), new Floor("lunar-floor", 1),
-          new Floor("fungus-floor", 1), new Floor("desert-floor", 1), new Floor("mars-floor", 1),
-          new Floor("volcano-floor", 1), new Floor("tropical-floor", 1),
+          new Floor("grassland-floor", false), new Floor("dirt-floor", false), new Floor("sand-floor", false),
+          new Floor("rock-floor", false), null, new Floor("snow-floor", true), new Floor("lunar-floor", false),
+          new Floor("fungus-floor", false), new Floor("desert-floor", false), new Floor("mars-floor", false),
+          new Floor("volcano-floor", false), new Floor("tropical-floor", false),
     };
 
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.of(

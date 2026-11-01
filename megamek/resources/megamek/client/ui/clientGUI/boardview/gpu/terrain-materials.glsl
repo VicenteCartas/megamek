@@ -21,27 +21,42 @@ struct TerrainMaterial {
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
 #ifdef sublevelFloorFlag
-// Each family's floor from level -1 down (GpuTerrain.SUBLEVEL_FLOORS): its colour layer, metres per repeat and the
-// share of the sunken ground it covers (1 all of it); a negative layer where the family keeps its ground.
+// Each family's floor from level -1 down (GpuTerrain.SUBLEVEL_FLOORS): its colour layer, metres per repeat and 1
+// where it shows only where its ground thins out first; a negative layer where the family keeps its ground.
 uniform vec3 u_floorMaterials[FLOOR_FAMILIES];
 
-// How far the family's floor replaces its ground cover at a point (world in metres): none above level -.3, all from
-// about -.72 down, along a contour 23 m and 8 m fields break by up to .28 of a level (level 0 never, level -1 always);
-// level ground and gentle lower slopes only, so banks and walls keep their own materials.
-float floorShare(vec3 world, vec3 face, float familyId, float broad, float fine, out vec3 floorMaterial) {
+// How far the family's floor replaces its ground cover at a point (world in metres, aboveFoot its metres from the
+// foot of the nearest rise): none above level -.3, all from about -.72 down, along a contour that 6 m and 2 m patches
+// break by up to .28 of a level (level 0 never, level -1 always); level ground and gentle lower slopes only, so banks
+// and walls keep their own materials. u_rainNoise is 64 texels of white noise: a field of features F metres wide reads
+// it at world / (64 F).
+float floorShare(vec3 world, vec3 face, float aboveFoot, float familyId, out vec3 floorMaterial) {
     int family = int(familyId + .5);
     floorMaterial = family >= 0 && family < FLOOR_FAMILIES ? u_floorMaterials[family] : vec3(-1.0);
     if (floorMaterial.x < 0.0) return 0.0;
-    float contour = .36 * (textureLod(u_rainNoise, world.xy / 23.0 + .63, 0.0).b - .5)
-          + .2 * (textureLod(u_rainNoise, world.xy / 8.0 + .29, 0.0).g - .5);
-    float share = smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight) * smoothstep(.55, .85, face.z);
-    // A partial floor lies in patches of the ground's own broad and fine fields (metres to tens of metres), which
-    // never line up as a grid.
-    if (share > 0.0 && floorMaterial.z < 1.0) {
-        float edge = mix(.68, .32, floorMaterial.z);
-        share *= smoothstep(edge - .05, edge + .05, broad * .5 + fine * .5);
+    float contour = .36 * (textureLod(u_rainNoise, world.xy / 384.0 + .63, 0.0).b - .5)
+          + .2 * (textureLod(u_rainNoise, world.xy / 128.0 + .29, 0.0).g - .5);
+    float sunken = smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight);
+    if (floorMaterial.z < .5) return sunken * smoothstep(.55, .85, face.z);
+    // Snow melts first where a hollow's banks meet its floor: broken tongues strongest within a few metres of the
+    // foot, gone by 5-8 m, reaching up the lower slopes, along about a third of the edge, in stretches of some 30 m;
+    // the sheltered middle stays snowed.
+    float stretch = smoothstep(.52, .64, textureLod(u_rainNoise, world.xy / 1920.0 + .37, 0.0).r);
+    float reach = mix(5.0, 8.0, textureLod(u_rainNoise, world.xy / 960.0 + .13, 0.0).b);
+    float feather = 3.0 * (textureLod(u_rainNoise, world.xy / 96.0 + .71, 0.0).g - .5);
+    float tongue = 1.0 - smoothstep(.3 * reach, reach, max(aboveFoot, 0.0) + feather);
+    return sunken * tongue * stretch * smoothstep(.3, .6, face.z);
+}
+
+// The floor takes the ground's role, and the mantle's where the family mantles its banks in its own ground (snow).
+void floorLayers(vec3 floorMaterial, inout vec4 layers, inout vec4 tiles) {
+    bool mantle = abs(layers.w - layers.x) < .5;
+    layers.x = floorMaterial.x;
+    tiles.x = floorMaterial.y;
+    if (mantle) {
+        layers.w = floorMaterial.x;
+        tiles.w = floorMaterial.y;
     }
-    return share;
 }
 
 // Ground and floor meet by height, as materialWeights blends roles, but feathered wider: a fringe, not a stipple.
@@ -709,15 +724,16 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
       float familyId, vec4 tiles, vec4 layers, float sediment) {
 #ifdef sublevelFloorFlag
     vec3 floorMaterial;
-    float share = floorShare(world, face, familyId, broad, fine, floorMaterial);
+    float share = floorShare(world, face, aboveFoot, familyId, floorMaterial);
     TerrainMaterial ground, sunken;
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
         bool floored = share >= 1.0 || pass == 1;
         sunkenCover = floored ? 1.0 : 0.0;
+        vec4 l = layers, s = tiles;
+        if (floored) floorLayers(floorMaterial, l, s);
         TerrainMaterial m = naturalMaterialOf(projection, noise, world, face, aboveFoot, belowRim, rock, hardness,
-              broad, fine, region, familyId, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
-              floored ? vec4(floorMaterial.x, layers.yzw) : layers, sediment);
+              broad, fine, region, familyId, s, l, sediment);
         if (pass == 0) ground = m; else sunken = m;
     }
     sunkenCover = 0.0;
@@ -1487,16 +1503,17 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
       vec4 tiles, vec4 layers, bool sides, bool single) {
 #ifdef sublevelFloorFlag
     vec3 floorMaterial;
-    float share = floorShare(world, face, dot(palette, vec4(equal(ivec4(0, 1, 2, 3), ivec4(slot)))), broad, fine,
+    float share = floorShare(world, face, aboveFoot, dot(palette, vec4(equal(ivec4(0, 1, 2, 3), ivec4(slot)))),
           floorMaterial);
     TerrainMaterial ground, sunken;
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
         bool floored = share >= 1.0 || pass == 1;
         sunkenCover = floored ? 1.0 : 0.0;
+        vec4 l = layers, s = tiles;
+        if (floored) floorLayers(floorMaterial, l, s);
         TerrainMaterial m = cliffMaterialOf(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
-              sediment, palette, slot, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
-              floored ? vec4(floorMaterial.x, layers.yzw) : layers, sides, single);
+              sediment, palette, slot, s, l, sides, single);
         if (pass == 0) ground = m; else sunken = m;
     }
     sunkenCover = 0.0;
