@@ -1049,11 +1049,13 @@ final class BoardRelief {
          * concrete, roads, cliffs and three-level corners keep their places.
          */
         private void smoothStep() {
-            if (move != null || waterfall || !banded || low == high || mid != low && mid != high || high - low > 2) {
-                return;
-            }
-            for (Site site : around) {
-                if (site.liquid() || site.road() || site.family() == CONCRETE) { return; }
+            if (move != null || waterfall || !banded || low == high || mid != low && mid != high) { return; }
+            for (int i = 0; i < 3; i++) {
+                Site site = around[i], next = around[(i + 1) % 3];
+                if (site.liquid() || site.road() || site.family() == CONCRETE
+                      || site.level() > next.level() && wall(site, next) || next.level() > site.level() && wall(next, site)) {
+                    return;
+                }
             }
             Site lone = null;
             int highs = 0;
