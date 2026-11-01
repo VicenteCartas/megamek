@@ -362,25 +362,26 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
 }
 
 // ---- Loose tracks ---------------------------------------------------------------------------------------------------
-// A dirt or gravel road is one track in one coat (GpuRoads#patches). Its mask carries the heading (RG; its length falls to
-// a half across a junction's hub, BoardRoad#trackHub), where across the whole road a point lies (B, BoardRoad#track: 0 on
-// a centre line, 1 at the footprint's edge) and its coverage (A). The coat never paints grass: where it opens, the ground
-// under it shows. Its maps tell the kinds apart. Sizes are metres.
-// - Dirt: a farm track's two pale, compacted wheel tracks, a trampled crown of tufts between them, a little loose soil
-//   beside them, and a wide verge where grass takes the ground back.
-// - Gravel: a graded road of crushed stone: two smoother wheel paths where its fines are packed and its stones pressed
-//   in, loose stone windrows along its crown and edges (the grader's berms), a firm edge with stray stones beyond it, and
-//   a hint of washboard and potholes in the wheel paths.
-const float TRACK_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: B's full range
+// A dirt or gravel road is one track in one coat (GpuRoads#patches). Its mask carries a heading (RG) and its coverage
+// (A); B says where across it a point lies. The coat never paints grass: where it opens, the ground under it shows. Its
+// maps tell the kinds apart. Sizes are metres.
+// - Dirt (dirtTrack): a farm track, two pale packed wheel ruts either side of every course its traffic drives, grass
+//   between them and beside them. B is the signed distance from the nearest rut's centre line (BoardRoad#ruts).
+// - Gravel (looseTrack): a graded road of crushed stone: two smoother wheel paths where its fines are packed and its
+//   stones pressed in, loose stone windrows along its crown and edges (the grader's berms), a firm edge with stray stones
+//   beyond it, and a hint of washboard and potholes in the wheel paths. B is where across the whole road the point lies
+//   (BoardRoad#track: 0 on a centre line, 1 at the footprint's edge); RG's length falls to a half across a junction's hub
+//   (BoardRoad#trackHub).
+const float TRACK_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: gravel's B range
 const float TRACK_WHEEL = 1.08; // BoardRoad.WHEEL_OFFSET in metres: the wheel tracks' centres, where joins carry their ruts
-const float DIRT_LOOSE = 2.2;   // a dirt track's loose soil reaches this far
-const float DIRT_VERGE = 3.5;   // and the verge's grass has taken the ground back by here
 const float GRAVEL_EDGE = 2.9;  // a gravel road's graded edge
 const float GRAVEL_STRAY = .5;  // and how far beyond it stray stones run into the grass
-// The grey-brown soil maps, tinted and lightened to dry tan loose soil.
-const vec3 DIRT_TAN = vec3(1.11, 1.06, .93);
-// The maps' mean albedo, linear: packed ground shows less of their grain, loose stone more.
-const vec3 DIRT_MEAN = vec3(.26, .21, .155);
+const float RUT_OFFSET = .9;    // BoardRoad.RUT_OFFSET in metres: a dirt track's ruts either side of its course
+const float RUT_RANGE = 2.9;    // BoardRoad.RUT_OFFSET + RUT_REACH in metres: dirt's B range
+const float RUT_HALF = .3;      // a rut's half width
+// The dirt maps hold the photographed soil at the old grey-brown maps' brightness (other dirt patches keep theirs):
+// a track's own ground is the photograph's.
+const float DIRT_LIGHT = 1.85;
 const vec3 GRAVEL_MEAN = vec3(.31, .286, .252);
 
 bool trackCoat(RoadMaps m) {
@@ -415,13 +416,11 @@ float tread(float along, float off, float pixel) {
     return wearLine((fract((along + off * .7) / .26) - .5) * .26, .035, pixel);
 }
 
-// The track at m (metres, Y flipped as the road UVs) over a pixel of `pixel` metres, `across` metres from its centre line:
-// its albedo and surface (R height, G roughness, B cavity), its alpha, which opens onto the ground under it through a
-// dirt track's crown and verge, past a gravel road's edge and where a road ends, never on a built deck; the slope its
-// washboard gives the normal (in m's frame); and how much water it holds: a dirt track's wheel tracks, which its mud
-// basins follow, or a gravel road's potholes. Returns its normal maps' strength. Takes derivatives: call it in uniform
-// control flow.
-float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, float coverage, bool built, bool gravel,
+// A gravel road at m (metres, Y flipped as the road UVs) over a pixel of `pixel` metres, `across` metres from its centre
+// line: its albedo and surface (R height, G roughness, B cavity), its alpha, which opens onto the ground under it past
+// its edge and where it ends, never on a built deck; the slope its washboard gives the normal (in m's frame); and how
+// much water its potholes hold. Returns its normal maps' strength. Takes derivatives: call it in uniform control flow.
+float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, float coverage, bool built,
       inout vec3 albedo, inout vec4 surface, out float alpha, out vec2 slope, out float water) {
     float grain = surface.r;
     // Edges wander slowly along the road (2 m cells) and break up at the size of a tuft or a stone heap (0.3 to 1 m).
@@ -441,67 +440,91 @@ float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, flo
     // The ragged break-up of its outline, and its end, where it thins out.
     float ragged = .5 * slow.b + .3 * clump.r + .2 * tuft.g + (grain - .5) * .1;
     float ends = 2.0 * coverage - ragged;
-    float kept, strength;
-    if (gravel) {
-        // Loose stone lies where no wheel runs: heaped along the crown and in berms along both edges. Packed wheel
-        // paths show little of the stone's grain and its dust lies pale on them; the windrows show more grain, as bright
-        // on the crown, darker in the edge berms' stone. A junction's hub is graded out to its corners.
-        float outside = across - GRAVEL_EDGE - 3.0 * hub + (slow.r - .5) * .3 + (tuft.g - .5) * .12;
-        float berm = smoothstep(-.9, -.35, outside);
-        float loose = max(crown, berm) * (1.0 - track);
-        albedo = GRAVEL_MEAN + (albedo - GRAVEL_MEAN) * mix(mix(1.0, .6, track), 1.4, loose);
-        albedo *= mix(.94, 1.06, broad) * mix(mix(1.12, .98, berm), 1.16, track);
-        surface.g = mix(surface.g, mix(.82, .96, loose), .7);
-        surface.b = mix(surface.b, 1.0, .4 * track);
-        // A few shallow potholes in the wheel paths, which hold the rain.
-        float pit = smoothstep(.84, .9, wearNoise(m, 2.6, .41, pixel).b) * smoothstep(.4, .8, track);
-        albedo *= 1.0 - .2 * pit;
-        surface.b *= 1.0 - .35 * pit;
-        water = pit;
-        // Washboard: shallow ripples across the wheel paths, in stretches, where a pixel resolves them. Even in the
-        // heading, so neighbouring hexes agree whichever way their courses run.
-        float board = smoothstep(.55, .75, wearNoise(m, 40.0, .13, pixel).g) * track * (1.0 - worn)
-              * (1.0 - smoothstep(.08, .15, pixel));
-        float phase = 6.2832 * along / .7;
-        albedo *= 1.0 + .06 * cos(phase) * board;
-        slope = -heading * sin(phase) * .25 * board;
-        // A firm edge; where the stone ends, spread on over dirt or at a road's end, it runs out in tongues. Past both,
-        // stray stones run on into the ground, the high grains of the stone's own map.
-        float firm = -outside / .06;
-        float tongues = ends - (clump.g - .5) * .9 - (tuft.b - .5) * .3;
-        float stray = clamp(max(outside / GRAVEL_STRAY, -tongues / .4), 0.0, 1.0);
-        float stones = grain + (tuft.r - .5) * .3 - mix(.5, 1.1, stray);
-        kept = max(min(firm, tongues), stones);
-        alpha = built ? coverage : clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
-        strength = mix(mix(1.0, 1.35, loose), .45, track);
-    } else {
-        float verge = smoothstep(DIRT_LOOSE, DIRT_VERGE, across);
-        // Pale, smooth tracks; tan loose soil, darker where the crown is trampled.
-        albedo = mix(albedo, DIRT_MEAN, .45 * track);
-        albedo *= DIRT_TAN * mix(.9, 1.1, broad) * mix(mix(1.0, .8, crown), 1.45, track);
-        surface.g = mix(min(.98, surface.g + .05), .74, track);
-        surface.b = mix(surface.b, 1.0, .6 * track);
-        // Tread lugs where a pixel resolves them, each way printed in its own patches: the same whichever way the heading
-        // runs.
-        if (pixel < .05) {
-            float off = abs(across - TRACK_WHEEL);
-            vec2 passes = smoothstep(.35, .55, vec2(wearNoise(m + heading * .7, 14.0, .37, pixel).g,
-                  wearNoise(m - heading * .7, 14.0, .37, pixel).g));
-            float lugs = max(tread(along, off, pixel) * passes.x, tread(-along, off, pixel) * passes.y);
-            lugs *= track * (1.0 - worn) * (1.0 - smoothstep(.03, .05, pixel));
-            albedo *= 1.0 - .4 * lugs;
-            surface.b *= 1.0 - .4 * lugs;
-        }
-        // The coat opens through the crown's tufts (about 60 % of it), and raggedly through the verge, which grass has
-        // mostly taken back by its outer reach. Soft edges, never a line.
-        float tufts = .62 * crown - (.55 * clump.g + .45 * tuft.r + (grain - .5) * .15);
-        kept = min(1.0 - verge, 2.0 * coverage) - ragged;
-        tufts = clamp(tufts / max(.04, 1.5 * fwidth(tufts)) + .5, 0.0, 1.0);
-        kept = clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
-        alpha = built ? coverage : kept * (1.0 - tufts);
-        strength = mix(1.2, .3, track);
+    // Loose stone lies where no wheel runs: heaped along the crown and in berms along both edges. Packed wheel
+    // paths show little of the stone's grain and its dust lies pale on them; the windrows show more grain, as bright
+    // on the crown, darker in the edge berms' stone. A junction's turns grade its corners (BoardRoad#track).
+    float outside = across - GRAVEL_EDGE + (slow.r - .5) * .3 + (tuft.g - .5) * .12;
+    float berm = smoothstep(-.9, -.35, outside);
+    float loose = max(crown, berm) * (1.0 - track);
+    albedo = GRAVEL_MEAN + (albedo - GRAVEL_MEAN) * mix(mix(1.0, .6, track), 1.4, loose);
+    albedo *= mix(.94, 1.06, broad) * mix(mix(1.12, .98, berm), 1.16, track);
+    surface.g = mix(surface.g, mix(.82, .96, loose), .7);
+    surface.b = mix(surface.b, 1.0, .4 * track);
+    // A few shallow potholes in the wheel paths, which hold the rain.
+    float pit = smoothstep(.84, .9, wearNoise(m, 2.6, .41, pixel).b) * smoothstep(.4, .8, track);
+    albedo *= 1.0 - .2 * pit;
+    surface.b *= 1.0 - .35 * pit;
+    water = pit;
+    // Washboard: shallow ripples across the wheel paths, in stretches, where a pixel resolves them. Even in the
+    // heading, so neighbouring hexes agree whichever way their courses run.
+    float board = smoothstep(.55, .75, wearNoise(m, 40.0, .13, pixel).g) * track * (1.0 - worn)
+          * (1.0 - smoothstep(.08, .15, pixel));
+    float phase = 6.2832 * along / .7;
+    albedo *= 1.0 + .06 * cos(phase) * board;
+    slope = -heading * sin(phase) * .25 * board;
+    // A firm edge; where the stone ends, spread on over dirt or at a road's end, it runs out in tongues. Past both,
+    // stray stones run on into the ground, the high grains of the stone's own map.
+    float firm = -outside / .06;
+    float tongues = ends - (clump.g - .5) * .9 - (tuft.b - .5) * .3;
+    float stray = clamp(max(outside / GRAVEL_STRAY, -tongues / .4), 0.0, 1.0);
+    float stones = grain + (tuft.r - .5) * .3 - mix(.5, 1.1, stray);
+    float kept = max(min(firm, tongues), stones);
+    alpha = built ? coverage : clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
+    return mix(mix(1.0, 1.35, loose), .45, track);
+}
+
+// A dirt track at m, as looseTrack, `rut` metres from the nearest wheel rut's centre line, negative between a course's
+// two ruts (BoardRoad#ruts). Pale packed ruts a few centimetres deep, each with a crumbly lip; between them the crown,
+// which grass has mostly taken back but for patches of bare soil beside the ruts; outside them a ragged band of loose
+// soil, dust and straw, then grass. Water stands in the ruts. Takes derivatives: call it in uniform control flow.
+float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bool built,
+      inout vec3 albedo, inout vec4 surface, out float alpha, out vec2 slope, out float water) {
+    float grain = surface.r;
+    // Edges wander slowly along the track (2 m cells) and break up at the size of a clod or a tuft (0.3 to 1 m).
+    vec4 slow = wearNoise(m, 128.0, .23, pixel), clump = wearNoise(m, 64.0, .17, pixel), tuft = wearNoise(m, 20.0, .61, pixel);
+    float broad = wearNoise(m, 400.0, .57, pixel).r;
+    // Grass and crumbs nibble at a rut's edges, at the size of a tuft and of the soil's own clods.
+    float off = abs(rut) + (slow.g - .5) * .1 + (tuft.b - .5) * .14 + (grain - .5) * .08;
+    float pressed = 1.0 - smoothstep(RUT_HALF - .08, RUT_HALF + .02, off);
+    // Loose soil outside the ruts, in a ragged band; inside them the crown's bare patches, most beside the ruts.
+    float band = rut - RUT_HALF - .2 - .5 * clump.r - (tuft.g - .5) * .25 - (grain - .5) * .1;
+    float crown = -rut - RUT_HALF;
+    float bare = .55 * clump.g + .3 * tuft.r + .15 * grain - .62 - 1.1 * crown;
+    float soil = rut > 0.0 ? -band : bare;
+    float kept = max(soil, pressed - .5);
+    float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g);
+    kept = min(kept, ends - .5);
+    alpha = built ? coverage : clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
+    // Packed ruts: pale and dusty, a little less of the soil's grain; loose soil darker and crumbly.
+    vec3 mean = vec3(.277, .213, .154);
+    albedo = mix(albedo, mean + (albedo - mean) * .8, pressed) * DIRT_LIGHT * mix(.8, 1.06, pressed) * mix(.93, 1.06, broad);
+    // A darker lip of crumbs along each rut's edge, and damp patches where water stood.
+    float lip = 1.0 - smoothstep(0.0, .09, abs(off - RUT_HALF - .03));
+    float damp = smoothstep(.62, .82, wearNoise(m, 9.0, .29, pixel).g) * pressed;
+    albedo *= (1.0 - .16 * lip * (.5 + .5 * clump.b)) * (1.0 - .2 * damp);
+    surface.g = mix(min(.98, surface.g + .05), .76, pressed);
+    surface.b = mix(surface.b, 1.0, .5 * pressed) * (1.0 - .25 * lip);
+    // Tread lugs where a pixel resolves them, each way printed in its own patches: the same whichever way the heading runs.
+    float along = dot(m, heading);
+    if (pixel < .05) {
+        // Faint and broken: most passes have been driven over and blown smooth.
+        vec2 passes = smoothstep(.5, .7, vec2(wearNoise(m + heading * .7, 14.0, .37, pixel).g,
+              wearNoise(m - heading * .7, 14.0, .37, pixel).g)) * (.4 + .6 * grain);
+        float lugs = max(tread(along, abs(rut), pixel) * passes.x, tread(-along, abs(rut), pixel) * passes.y);
+        lugs *= pressed * (1.0 - smoothstep(.03, .05, pixel));
+        albedo *= 1.0 - .16 * lugs;
+        surface.b *= 1.0 - .2 * lugs;
     }
-    return strength;
+    // The ruts' walls: their depth's slope across the course, where a pixel resolves it. B's gradient in m gives the
+    // direction (from the mask's smooth field, not the steep profile).
+    vec2 mx = dFdx(m), my = dFdy(m);
+    float rx = dFdx(rut), ry = dFdy(rut), det = mx.x * my.y - mx.y * my.x;
+    vec2 across = vec2(my.y * rx - mx.y * ry, mx.x * ry - my.x * rx) / (abs(det) < 1e-12 ? 1e-12 : det);
+    float wall = RUT_HALF + .06 - (RUT_HALF - .12), t = clamp((abs(rut) - RUT_HALF + .12) / wall, 0.0, 1.0);
+    float steep = .05 * 6.0 * t * (1.0 - t) / wall;
+    slope = -across / max(length(across), 1e-4) * steep * sign(rut) * (1.0 - smoothstep(.02, .06, pixel));
+    water = pressed * (.6 + .4 * damp);
+    return mix(1.15, .5, pressed);
 }
 
 // Road paint wears with its road, most on weathered stretches (asphaltWear's age): how much has flaked off (x), and
@@ -574,9 +597,16 @@ void main() {
     } else if (track) {
         // Opposing headings filter to nothing at a hub's centre, where it wears flat anyway.
         vec2 heading = (roadColor.rg * 255.0 - 128.0) / 127.0;
-        float hub = smoothstep(.04, .46, 1.0 - length(heading));
-        normalStrength = looseTrack(wearMetres, wearPixel, heading / max(length(heading), 1e-3), roadColor.b * TRACK_HALF,
-              hub, roadColor.a, m.transition < -5.5, gravelMaps(m), albedo, properties, trackAlpha, wearSlope, wearWater);
+        vec2 unit = heading / max(length(heading), 1e-3);
+        bool built = m.transition < -5.5;
+        if (gravelMaps(m)) {
+            float hub = smoothstep(.04, .46, 1.0 - length(heading));
+            normalStrength = looseTrack(wearMetres, wearPixel, unit, roadColor.b * TRACK_HALF, hub, roadColor.a, built,
+                  albedo, properties, trackAlpha, wearSlope, wearWater);
+        } else {
+            normalStrength = dirtTrack(wearMetres, wearPixel, unit, roadColor.b * RUT_RANGE - RUT_OFFSET, roadColor.a,
+                  built, albedo, properties, trackAlpha, wearSlope, wearWater);
+        }
     } else if (spill) {
         // Grit and dust carried onto a paved road: pale and grey.
         albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .65) * 1.4;
@@ -601,8 +631,8 @@ void main() {
         if (m.transition > 1.5) {
             // Soil dragged by tyres continues onto asphalt at the same axle spacing; no central blotch.
             float tracked = rut * (.4 + .6 * grain) * pow(carry, 1.3);
-            // The same dusty soil as a dirt track's (looseTrack).
-            albedo *= DIRT_TAN;
+            // The same dusty soil as a dirt track's (dirtTrack).
+            albedo *= DIRT_LIGHT * .8;
             roadCoverage = max(body, dust + .8 * tracked);
             albedo *= mix(1.0, profile.w, rut * body);
         } else {

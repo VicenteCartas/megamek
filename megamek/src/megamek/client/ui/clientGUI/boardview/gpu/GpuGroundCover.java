@@ -115,6 +115,18 @@ final class GpuGroundCover implements Disposable {
         return result;
     }
 
+    /**
+     * Whether a road keeps a root's ground (world x, y) bare: its way, shoulder and {@code margin} tile pixels, or of a
+     * dirt track only its ruts (BoardRoad#rutted), the grass growing beside and between them.
+     */
+    private static boolean bare(BoardScene scene, BoardRoad road, float x, float y, float margin) {
+        float rx = (x - BoardGeometry.centerX(road.coords())) / BoardGeometry.hexScale();
+        float ry = (y - BoardGeometry.centerY(road.coords())) / BoardGeometry.hexScale();
+        var tile = scene.tile(road.coords());
+        return tile != null && tile.road() == BoardRoad.Kind.DIRT ? road.rutted(rx, ry)
+              : road.distance(rx, ry) < BoardRoad.SHOULDER + margin;
+    }
+
     /** Only exposed ordinary depth-zero banks can extend the adjoining meadow into a water hex. */
     static boolean shallowShore(BoardScene.Tile tile) {
         return tile != null && tile.waterDepth() == 0 && tile.liquid().present() && !tile.liquid().volcanic()
@@ -208,7 +220,9 @@ final class GpuGroundCover implements Disposable {
             // scenery leave the surrounding grass and empty gaps untouched.
             if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
                   MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
-            if (BoardRoad.distance(roads, x, y) < BoardRoad.SHOULDER + 1) { continue; }
+            boolean bare = false;
+            for (int r = 0; r < roads.size() && !bare; r++) { bare = bare(scene, roads.get(r), x, y, 1); }
+            if (bare) { continue; }
             boolean iced = false;
             for (Vector3[] edge : iceEdges) {
                 float ex = edge[1].x - edge[0].x, ey = edge[1].y - edge[0].y;
@@ -342,8 +356,7 @@ final class GpuGroundCover implements Disposable {
             if (Float.isNaN(lean) || obstacles.obstructs(root, 2 * m, MAX_HEIGHT_FRACTION * BoardGeometry.width())) {
                 continue;
             }
-            if (road != null && road.distance((root.x - center.x) / BoardGeometry.hexScale(),
-                  (root.y - center.y) / BoardGeometry.hexScale()) < BoardRoad.SHOULDER + 2) { continue; }
+            if (road != null && bare(scene, road, root.x, root.y, 2)) { continue; }
             var cover = boundary ? sampler.sampleCliff(root.x, root.y, root.z)
                   : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
             float grass = cover.grass();

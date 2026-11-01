@@ -485,6 +485,11 @@ final class GpuRoads {
         Area core = road.footprint(track ? outer : -feather);
         // A neighbouring loose road's own coat draws the track over its hex.
         if (track) { core.subtract(road.trackedHexes()); }
+        // A gravel road's whole width, which its stone keeps where it spreads on over a dirt track (below).
+        Area loose = new Area(core);
+        // A dirt track shows nothing beyond its ruts' loose soil, but on a built deck, whose top its coat keeps closed.
+        boolean dirt = kind == BoardRoad.Kind.DIRT && !deck;
+        if (dirt) { core.intersect(road.rutReach()); }
         Area tail = new Area(core);
         tail.intersect(road.endZone(track ? 0 : endFade));
         core.subtract(tail);
@@ -516,7 +521,7 @@ final class GpuRoads {
                 // Two loose roads on one ground each draw their own track up to their border; the gravel spreads on
                 // over the dirt beyond it, thinning out, as graded stone is carried on.
                 if (kind == BoardRoad.Kind.DIRT) {
-                    Area spread = new Area(core);
+                    Area spread = new Area(loose);
                     spread.intersect(join.area());
                     patches.add(new Patch(spread, next, tint, repeat, .075f, Fade.spread(join)));
                 }
@@ -579,6 +584,7 @@ final class GpuRoads {
             for (var patch : patches) { patch.shape().subtract(meeting); }
             // A short, broken spill of grit and dust onto the paved road, most where wheels carry it (#coverage, #color).
             Area spill = road.footprint(outer);
+            if (dirt) { spill.intersect(road.rutReach()); }
             spill.intersect(meeting);
             spill.subtract(road.pavedCarriageway(-spill()));
             patches.add(new Patch(spill, texture, tint, repeat, SPILL_LIFT, Fade.spilled()));
@@ -975,10 +981,12 @@ final class GpuRoads {
             tint.a = coverage(road, patch, x, y);
         }
         if (track(patch)) {
-            var sample = road.track(x, y);
-            // Road UVs point down in Y. RG carries the heading, not an albedo tint; its length falls to a half across a
-            // junction's hub. B is where across the whole road the point lies (BoardRoad#trackHub, #track).
-            float length = 1 - .5f * road.trackHub(x, y);
+            // A dirt track's B is its ruts (BoardRoad#ruts); a gravel road's, where across the whole road the point lies.
+            boolean dirt = patch.texture().equals(texture(BoardRoad.Kind.DIRT));
+            var sample = dirt ? road.ruts(x, y) : road.track(x, y);
+            // Road UVs point down in Y. RG carries the heading, not an albedo tint; on gravel its length falls to a half
+            // across a junction's hub (BoardRoad#trackHub, #track).
+            float length = dirt ? 1 : 1 - .5f * road.trackHub(x, y);
             tint.r = Math.round(128 + sample.heading().x * 127 * length) / 255f;
             tint.g = Math.round(128 - sample.heading().y * 127 * length) / 255f;
             tint.b = sample.across();

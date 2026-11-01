@@ -176,7 +176,10 @@ class BoardRoadTest {
             assertEquals(1, patches.size(), "The shader builds the wheel tracks, crown and shoulder of one coat");
             var coat = patches.getFirst();
             assertEquals(-5, GpuRoads.attribute(coat).value);
-            float edge = kind.halfWidth + BoardRoad.SHOULDER;
+            // A dirt track's coat ends where its ruts' loose soil can reach; its B measures its ruts (BoardRoad#ruts), which
+            // for one course runs as a gravel road's does across its whole width.
+            float edge = kind == BoardRoad.Kind.DIRT ? BoardRoad.RUT_OFFSET + BoardRoad.RUT_REACH
+                  : kind.halfWidth + BoardRoad.SHOULDER;
             assertTrue(coat.shape().contains(edge - .2f, 0) && !coat.shape().contains(edge + .2f, 0));
             var mask = GpuRoads.mask(road, coat);
             int heading = maskTexel(mask, 0, 0) & 0xFFFF0000;
@@ -207,15 +210,21 @@ class BoardRoadTest {
                 var there = BoardRoad.of(scene, scene.tile(next));
                 var mine = track(GpuRoads.patches(scene.tile(CENTER), here));
                 var theirs = track(GpuRoads.patches(scene.tile(next), there));
+                // A dirt coat's mask carries its ruts, a gravel coat's where across the road a point lies; a dirt coat
+                // reaches only as far as its ruts' loose soil.
+                float reach = kind == BoardRoad.Kind.DIRT || onwardKind == BoardRoad.Kind.DIRT
+                      ? BoardRoad.RUT_OFFSET + BoardRoad.RUT_REACH - 1 : 14;
                 float dx = (BoardGeometry.centerX(CENTER) - BoardGeometry.centerX(next)) / BoardGeometry.hexScale();
                 float dy = (BoardGeometry.centerY(CENTER) - BoardGeometry.centerY(next)) / BoardGeometry.hexScale();
                 Vector3 gate = gate(CENTER, d), along = new Vector3(gate).nor(), across = new Vector3(-along.y, along.x, 0);
                 for (float offset = -16; offset <= 16; offset += 2) {
                     Vector3 inside = new Vector3(gate).mulAdd(along, -.25f).mulAdd(across, offset);
                     Vector3 beyond = new Vector3(gate).mulAdd(along, .25f).mulAdd(across, offset);
-                    assertEquals(there.track(beyond.x + dx, beyond.y + dy).across(), here.track(inside.x, inside.y).across(),
-                          .02f, "Both coats measure one track, crown and verge where they meet: turn " + turn);
-                    if (Math.abs(offset) < 14) {
+                    if (kind == onwardKind) {
+                        assertEquals(measure(there, kind, beyond.x + dx, beyond.y + dy), measure(here, kind, inside.x, inside.y),
+                              .02f, "Both coats measure one track where they meet: turn " + turn);
+                    }
+                    if (Math.abs(offset) < reach) {
                         assertTrue(mine.contains(inside.x, inside.y) && theirs.contains(beyond.x + dx, beyond.y + dy),
                               "Each coat reaches the border");
                     }
@@ -230,12 +239,16 @@ class BoardRoadTest {
         }
     }
 
+    private static float measure(BoardRoad road, BoardRoad.Kind kind, float x, float y) {
+        return (kind == BoardRoad.Kind.DIRT ? road.ruts(x, y) : road.track(x, y)).across();
+    }
+
     private static Area track(List<GpuRoads.Patch> patches) {
         return patches.stream().filter(p -> GpuRoads.attribute(p).value == -5).findFirst().orElseThrow().shape();
     }
 
     @Test
-    void aLooseRoadStopsAtThePavedRoadItMeetsAndFillsTheGoreBetweenItsArms() {
+    void aLooseRoadStopsAtThePavedRoadItMeetsAndLeavesTheGroundBetweenItsArms() {
         Coords north = CENTER.translated(0), northEast = CENTER.translated(1);
         for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
             // Hex 1303 of Nebraska Farmhouse: two arms into one paved road, which runs on past them.
@@ -268,10 +281,11 @@ class BoardRoadTest {
                 assertTrue(shape.isEmpty(), "Only a short spill reaches onto the paved road: " + patch.texture());
                 paint.add(patch.shape());
             }
+            // The gore between the arms, out to the corner the three hexes share, stays ground.
             Vector3 corner = new Vector3(gate(CENTER, 0)).add(gate(CENTER, 1)).scl(.5f);
-            for (float t = .55f; t <= 1.3f; t += .05f) {
+            for (float t = 1.15f; t <= 1.3f; t += .05f) {
                 Vector3 p = new Vector3(corner).scl(t);
-                assertTrue(paint.contains(p.x, p.y) || way.contains(p.x, p.y), "No ground left in the gore at " + t);
+                assertFalse(paint.contains(p.x, p.y) && !way.contains(p.x, p.y), "Loose paint in the gore at " + t);
             }
         }
     }
@@ -448,8 +462,9 @@ class BoardRoadTest {
                 assertTrue(GpuRoads.drape(tile, surface, patch).size() <= surface.faces.size(),
                       "A dash, shoulder or tyre mark must not split terrain triangles");
                 var mask = GpuRoads.mask(road, patch);
-                inside = Math.max(inside, maskAlpha(mask, kind.halfWidth - 1.5f, 8));
-                outside = Math.max(outside, maskAlpha(mask, kind.halfWidth + 3.5f, 8));
+                float half = kind == BoardRoad.Kind.DIRT ? BoardRoad.RUT_OFFSET + BoardRoad.RUT_REACH : kind.halfWidth;
+                inside = Math.max(inside, maskAlpha(mask, half - 1.5f, 8));
+                outside = Math.max(outside, maskAlpha(mask, half + 3.5f, 8));
             }
             assertTrue(inside > .4f, "The mask preserves the road's width for " + kind);
             assertEquals(0, outside, "Borrowing terrain faces must not paint the surrounding hex");
