@@ -302,9 +302,9 @@ final class GpuRoads {
     }
 
     /**
-     * The authored material of this road layer's own paint; verges and neighbouring transition coats keep theirs. On the
-     * Moon or Mars a paved road is laid in a colony's precast slabs, unless another finish than asphalt is authored: the
-     * editor writes asphalt with every paved road (BoardEditorSession#applyChoiceMaterials).
+     * The authored material of this road layer's own paint; verges and neighbouring transition coats keep theirs. A
+     * colony's precast slabs are one such finish, on any map; legacy lunar and Martian paved roads are given it when
+     * converted (BoardSceneryLayouts#colonyRoads).
      */
     static String material(BoardScene.Tile tile, boolean deck, String texture) {
         if (!texture.startsWith("roads/")) { return null; }
@@ -312,11 +312,9 @@ final class GpuRoads {
         BoardRoad.Kind kind = deck ? tile.deckRoad() : tile.road();
         if (!texture.equals(texture(kind))) { return base; }
         var style = tile.appearance().get(deck ? "bridgeRoad" : "road");
-        var variant = style == null ? null : BoardEditorBlueprint.get().variant(style.variant());
-        String authored = style == null ? "" : style.material() != null ? style.material()
-              : variant == null ? "" : variant.material();
-        boolean colony = tile.surface() == BoardScene.Surface.LUNAR || tile.surface() == BoardScene.Surface.MARS;
-        if (paved(kind) && colony && (authored.isBlank() || authored.equals(base))) { return SLABS.substring("roads/".length()); }
+        if (style == null) { return base; }
+        var variant = BoardEditorBlueprint.get().variant(style.variant());
+        String authored = style.material() != null ? style.material() : variant == null ? "" : variant.material();
         return authored.isBlank() ? base : authored;
     }
 

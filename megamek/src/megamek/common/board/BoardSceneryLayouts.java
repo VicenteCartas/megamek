@@ -514,6 +514,45 @@ public final class BoardSceneryLayouts {
         if (!fixed.isEmpty()) { board.setHexes(fixed); }
     }
 
+    /** The road finish of a colony's precast slabs (the 3D board's roads/colony-slabs), a choice on any map. */
+    static final String COLONY_SLABS = "colony-slabs";
+
+    /**
+     * Colony roads: a paved road, or a bridge deck's, on lunar or Martian ground, asphalt or without a finish of its own,
+     * is laid in a colony's precast slabs ({@link #COLONY_SLABS}), written as its finish so the editor shows and changes
+     * it.
+     */
+    private static void colonyRoads(Board board) {
+        Map<BoardLocation, Hex> fixed = new HashMap<>();
+        for (int y = 0; y < board.getHeight(); y++) {
+            for (int x = 0; x < board.getWidth(); x++) {
+                Coords at = new Coords(x, y);
+                Hex hex = board.getHex(at);
+                String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
+                if (!(theme.contains("lunar") || theme.contains("mars"))) { continue; }
+                var styles = new LinkedHashMap<>(hex.getAppearance());
+                for (var layer : Map.of(Terrains.ROAD, "road", Terrains.BRIDGE_ROAD, "bridgeRoad").entrySet()) {
+                    int level = hex.terrainLevel(layer.getKey());
+                    if (!hex.containsTerrain(layer.getKey()) || level == Terrains.ROAD_LVL_DIRT
+                          || level == Terrains.ROAD_LVL_GRAVEL) {
+                        continue;
+                    }
+                    var old = styles.get(layer.getValue());
+                    String material = old == null || old.material() == null ? "" : old.material();
+                    if (!material.isBlank() && !material.equals("asphalt")) { continue; }
+                    styles.put(layer.getValue(), old == null ? new HexAppearance(null, null, COLONY_SLABS, null)
+                          : new HexAppearance(old.variant(), old.asset(), COLONY_SLABS, old.strength(), old.colours(),
+                                old.rotation(), old.tracks(), old.beside(), old.trafficControl()));
+                }
+                if (styles.equals(hex.getAppearance())) { continue; }
+                Hex result = replacement(hex);
+                result.setAppearance(styles);
+                fixed.put(BoardLocation.of(at, board.getBoardId()), result);
+            }
+        }
+        if (!fixed.isEmpty()) { board.setHexes(fixed); }
+    }
+
     /**
      * Whether the road of {@code next}, across {@code direction} from the bridge hex {@code bridge}, meets its deck: a
      * road on road ground ({@link #roadGround}) and on no deck of its own, within a level of the deck, which the
@@ -760,7 +799,10 @@ public final class BoardSceneryLayouts {
         }
         design(board, scanned);
         typeBridges(board, bridges);
-        if (!nativeBoard) { deckRoads(board); }
+        if (!nativeBoard) {
+            deckRoads(board);
+            colonyRoads(board);
+        }
         maglevTerrain(board, maglevs, issues, !nativeBoard);
         board.setNativeFormat(true);
         return List.copyOf(issues);

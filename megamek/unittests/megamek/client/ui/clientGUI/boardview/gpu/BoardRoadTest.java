@@ -39,6 +39,16 @@ class BoardRoadTest {
               List.of(), List.of(), BoardLiquid.NONE, null, true, road);
     }
 
+    /** {@code t} with its road's finish authored as the colony's slabs. */
+    private static BoardScene.Tile slabs(BoardScene.Tile t) {
+        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
+              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(), t.detailedGround(),
+              t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(), t.groundCover(),
+              t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
+              Map.of("road", new megamek.common.board.HexAppearance(null, null, "colony-slabs", null)), t.cover(), t.barren(),
+              t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(), t.deckCorridor(), t.backdrop());
+    }
+
     @Test
     void fiveAndSixExitsCirculateAroundAnIslandAndKeepEveryApproachFullWidth() {
         for (int x : new int[] { 3, 4 }) {
@@ -248,20 +258,21 @@ class BoardRoadTest {
     }
 
     @Test
-    void lunarPavedRoadsAreColonySlabsWhoseHexesMeetOnOnePhase() {
-        // A straight road into a straight neighbour, a broad bend and a tight one.
+    void colonySlabRoadsMeetOnOnePhaseOnAnyGround() {
+        // A straight road into a straight neighbour, a broad bend and a tight one; the finish authored on Earth's ground.
         for (int turn = 0; turn < 3; turn++) {
             for (int d = 0; d < 6; d++) {
                 int direction = d, reverse = (d + 3) % 6, onward = (d + turn) % 6;
                 Coords next = CENTER.translated(d);
-                var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED,
+                var scene = BoardSurfaceBlendTest.scene(c -> slabs(tile(c, BoardRoad.Kind.PAVED,
                       c.equals(CENTER) ? 1 << direction | 1 << reverse : c.equals(next) ? 1 << onward | 1 << reverse : 0,
-                      0, BoardScene.Surface.LUNAR));
+                      0, BoardScene.Surface.GRASS)));
                 var here = BoardRoad.of(scene, scene.tile(CENTER));
                 var there = BoardRoad.of(scene, scene.tile(next));
                 var patches = GpuRoads.patches(scene.tile(CENTER), here);
                 assertTrue(patches.stream().allMatch(p -> p.texture().equals(GpuRoads.SLABS)),
-                      "The slabs' own maps carry kerbs, joints and lamps: no verge or paint");
+                      () -> "The slabs' own maps carry kerbs, joints and lamps: no verge or paint: "
+                            + patches.stream().map(GpuRoads.Patch::texture).toList());
                 assertTrue(patches.stream().allMatch(p -> GpuRoads.attribute(p).value == -8));
                 // Its mask carries the phase along the road (RG, a unit vector), not a heading.
                 int texel = maskTexel(GpuRoads.mask(here, patches.getFirst()), 0, 0);
@@ -282,11 +293,10 @@ class BoardRoadTest {
                 }
             }
         }
-        // Martian roads too; elsewhere a paved road stays asphalt.
-        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.MARS));
-        assertTrue(GpuRoads.slabs(scene.tile(CENTER), false));
-        var grass = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
-        assertFalse(GpuRoads.slabs(grass.tile(CENTER), false));
+        // The finish is the map's choice (a legacy lunar or Martian road is given it when converted): unauthored, a paved
+        // road is asphalt on any ground.
+        var mars = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.MARS));
+        assertFalse(GpuRoads.slabs(mars.tile(CENTER), false));
     }
 
     @Test

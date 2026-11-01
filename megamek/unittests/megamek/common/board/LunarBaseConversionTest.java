@@ -36,6 +36,21 @@ class LunarBaseConversionTest {
               "The skylight token stays for the 2D board");
     }
 
+    @Test
+    void pavedRoadsAreLaidInColonySlabs(@TempDir Path folder) throws IOException {
+        // A paved road and a dirt track across the base's ground.
+        Map<Coords, String> terrain = new HashMap<>();
+        for (int x = 0; x < 6; x++) {
+            terrain.put(new Coords(x, 1), "road:1:18");
+            terrain.put(new Coords(x, 3), "road:3:18");
+        }
+        Board board = legacy(folder, terrain, 6, 5);
+        var paved = board.getHex(2, 1).getAppearance().get("road");
+        assertEquals(BoardSceneryLayouts.COLONY_SLABS, paved == null ? null : paved.material(),
+              "Written as the road's finish, so the editor shows and changes it");
+        assertNull(board.getHex(2, 3).getAppearance().get("road"), "A dirt track stays a track");
+    }
+
     private static void disc(Map<Coords, String> terrain, Coords centre, int rings, String hex) {
         for (int x = centre.getX() - rings; x <= centre.getX() + rings; x++) {
             for (int y = centre.getY() - rings - 1; y <= centre.getY() + rings + 1; y++) {
