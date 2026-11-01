@@ -2845,7 +2845,9 @@ final class GpuTerrain implements Disposable {
         }
         do {
             if (advanceBuild(camera, deadline)) { return true; }
-            if (detailJob != null && !detailJob.ready()
+            // While one chunk's meshes prepare on a worker, another chunk that is ready takes its render-thread turn in
+            // this frame (advanceBuild swaps it in), so a rebuild's chunks build side by side, not one a frame.
+            if (detailJob != null && !detailJob.ready() && pending.stream().noneMatch(DetailJob::ready)
                   || rebuild != null && !rebuild.preparation.isDone() || !busy() || awaitingLinks()) { break; }
         } while (System.nanoTime() < deadline);
         return false;
