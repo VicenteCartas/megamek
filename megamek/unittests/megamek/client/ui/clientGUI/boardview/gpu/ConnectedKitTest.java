@@ -132,6 +132,31 @@ class ConnectedKitTest {
         assertTrue(stacked.stream().noneMatch(node -> node.endsWith("-at-0") && !node.contains(BAND)));
     }
 
+    /** Corner pieces between north and north-east in every state, and the linkless one's bend roof. */
+    private static List<Box> corners() {
+        List<Box> result = new ArrayList<>();
+        for (String role : List.of("base0", "floor0", "roof0")) {
+            for (String tags : List.of("-end-n-end-ne", "-link-n-end-ne", "-end-n-link-ne", "-link-n-link-ne")) {
+                result.add(new Box("kit-lod0-" + role + tags, 0, 0, 0, 20, 30, role.equals("roof0") ? 2 : 18));
+            }
+        }
+        result.add(new Box("kit-lod0-roof0-end-n-end-ne-bend", 0, 0, 0, 20, 30, 2));
+        return result;
+    }
+
+    @Test
+    void aLinklessCornersBendRoofStandsOnlyBehindASixtyDegreeBend() {
+        var kit = ConnectedKit.load(List.of(kit(corners())));
+        // Connected south and south-west only: the corner opposite them takes its bend roof over its plain storeys.
+        var bend = prefixes(kit, 1, new int[] { 0, 0, 0, 1, 1, 0 });
+        assertTrue(bend.contains("kit-lod0-roof0-end-n-end-ne-bend@0/roof0-at-1"));
+        assertFalse(bend.contains("kit-lod0-roof0-end-n-end-ne@0/roof0-at-1"));
+        assertTrue(bend.contains("kit-lod0-base0-end-n-end-ne@0/base0-at-0"));
+        assertTrue(bend.contains("kit-lod0-roof0-end-n-end-ne@1/roof0-at-1"), "The other linkless corners stay plain");
+        assertTrue(prefixes(kit, 1, new int[] { 0, 0, 1, 1, 1, 0 }).stream().noneMatch(node -> node.contains("-bend")),
+              "A third connection is no bend");
+    }
+
     private static Set<String> prefixes(ConnectedKit.Kit kit, int height, int[] reach) {
         return ConnectedKit.placements(kit, 0, height, reach, 0, 0).stream().map(ConnectedKit.Placement::prefix)
               .map(prefix -> prefix.substring(0, prefix.length() - 1)).collect(java.util.stream.Collectors.toSet());
@@ -194,6 +219,8 @@ class ConnectedKitTest {
                   role.equals("roof0") ? 2 : 18));
         }
         kits.add(twice);
+        // A bend piece for a linked corner.
+        kits.add(renamed(corners(), "kit-lod0-roof0-end-n-end-ne-bend", "kit-lod0-roof0-link-n-end-ne-bend"));
         for (var boxes : kits) {
             assertThrows(IllegalArgumentException.class, () -> ConnectedKit.load(List.of(kit(boxes))), boxes.toString());
         }

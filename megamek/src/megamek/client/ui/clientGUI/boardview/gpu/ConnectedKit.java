@@ -37,14 +37,16 @@ import megamek.common.board.HexTile;
  * pieces that hold for a hex's connections, the single source of drawing (merged into one model by {@link #model} for
  * walls, placed from the kit's shared meshes by {@link GpuBuilding}), picking and ground-cover clearance. A symmetric
  * kit authors only the north (and north-east) pieces; the others are those turned. A whole-hex piece, tagged in all six
- * directions, stands alone for exactly those connections, in place of its module's other pieces.
+ * directions, stands alone for exactly those connections, in place of its module's other pieces. A linkless corner
+ * piece may have a {@code -bend} variant, which stands in for it behind a 60-degree bend (the hex connects across just
+ * the two hexsides opposite it): a roof whose plating mitres along the bend's two arms.
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
     static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
     private static final String DIRECTION = "(?:ne|nw|se|sw|n|s)";
     private static final Pattern NODE = Pattern.compile(
-          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)");
+          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
     private static final float REACH_TOLERANCE = 1;
@@ -52,18 +54,24 @@ final class ConnectedKit {
 
     private ConnectedKit() { }
 
-    /** One mesh node: its module role ({@code base0}, {@code floor1}, ...) and the directions that must (not) connect. */
-    record Piece(String node, String role, int links, int ends) {
+    /**
+     * One mesh node: its module role ({@code base0}, {@code floor1}, ...), the directions that must (not) connect, and
+     * whether it is a linkless corner's {@code -bend} variant.
+     */
+    record Piece(String node, String role, int links, int ends, boolean bend) {
         boolean core() { return links == 0 && ends == 0; }
 
         boolean whole() { return (links | ends) == 63; }
 
         boolean holds(int connected) { return (connected & links) == links && (connected & ends) == 0; }
 
-        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps)); }
+        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps), bend); }
 
-        /** The same tags, as an identity shared by every module role. */
+        /** The same tags, as an identity shared by every module role; a bend shares its plain piece's. */
         long tags() { return (long) links << 6 | ends; }
+
+        /** The tags and the bend: what a kit holds once per role. */
+        long identity() { return tags() | (bend ? 1L << 12 : 0); }
     }
 
     /**
@@ -94,8 +102,11 @@ final class ConnectedKit {
             }
             require(Integer.bitCount(links | ends) <= 2 || (links | ends) == 63,
                   "One or two tags, or all six for a whole hex: " + node.id);
-            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends);
-            require(seen.add(piece.role() + "/" + piece.tags()), "Duplicate building module: " + node.id);
+            boolean bend = match.group(4) != null;
+            require(!bend || match.group(1).equals("roof") && links == 0 && Integer.bitCount(ends) == 2,
+                  "A bend piece is a linkless corner's roof: " + node.id);
+            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend);
+            require(seen.add(piece.role() + "/" + piece.identity()), "Duplicate building module: " + node.id);
             result.add(piece);
         }
         for (String role : List.of("base", "floor", "roof")) {
@@ -127,8 +138,8 @@ final class ConnectedKit {
         Map<String, Set<Long>> typeTags = new HashMap<>();
         for (String role : roles.keySet()) {
             String type = role.replaceFirst("[0-9]+$", "");
-            Set<Long> tags = pieces.stream().filter(piece -> piece.role().equals(role) && !piece.core()).map(Piece::tags)
-                  .collect(Collectors.toSet());
+            Set<Long> tags = pieces.stream().filter(piece -> piece.role().equals(role) && !piece.core())
+                  .map(Piece::identity).collect(Collectors.toSet());
             require(typeTags.computeIfAbsent(type, ignored -> tags).equals(tags),
                   "Every " + type + " variant needs the same tagged pieces: " + role);
             require(!cores || pieces.stream().anyMatch(piece -> piece.role().equals(role) && piece.core()),
@@ -143,6 +154,8 @@ final class ConnectedKit {
             require(!piece.whole() || roles.keySet().stream().allMatch(role -> pieces.stream()
                   .anyMatch(other -> other.role().equals(role) && other.tags() == piece.tags())),
                   "Every module needs the kit's whole-hex pieces: " + piece.node());
+            require(!piece.bend() || pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && !other.bend()
+                  && other.tags() == piece.tags()), "A bend piece stands in for its plain corner piece: " + piece.node());
             for (int steps = 1; steps < 6 && symmetric && piece.whole(); steps++) {
                 long turned = piece.turned(steps).tags();
                 require(turned == piece.tags() || !wholes.contains(turned),
@@ -154,7 +167,8 @@ final class ConnectedKit {
                 for (int steps = 1; steps < 6 && !piece.core(); steps++) {
                     int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps);
                     require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == links
-                          && other.ends() == ends), "A kit tags north only, or every direction: " + piece.node());
+                          && other.ends() == ends && other.bend() == piece.bend()),
+                          "A kit tags north only, or every direction: " + piece.node());
                 }
             }
         }
@@ -188,7 +202,7 @@ final class ConnectedKit {
 
     private static Set<String> signature(List<Piece> pieces) {
         Set<String> result = new HashSet<>();
-        pieces.forEach(piece -> result.add(piece.role() + "/" + piece.tags()));
+        pieces.forEach(piece -> result.add(piece.role() + "/" + piece.identity()));
         return result;
     }
 
@@ -335,8 +349,10 @@ final class ConnectedKit {
         var source = kit.lods().get(lod);
         var ground = kit.grounds().get(lod);
         int height = selected.size() - 1;
-        Map<String, Map<Long, Piece>> byRole = new HashMap<>();
-        for (var piece : parts(source)) { byRole.computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece); }
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>();
+        for (var piece : parts(source)) {
+            (piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece);
+        }
         int[] connected = new int[height];
         for (int level = 0; level < height; level++) {
             for (int direction = 0; direction < 6; direction++) {
@@ -371,6 +387,9 @@ final class ConnectedKit {
                     // A run's modules, then its own roof where it stops: below the top, or at the top.
                     String role = holds ? selected.get(level) : before ? selected.getLast() : null;
                     Piece piece = role == null ? null : byRole.get(role).get(tags);
+                    // Where it stops behind a 60-degree bend (connected across just the two hexsides opposite it).
+                    Piece bend = holds || role == null ? null : bends.getOrDefault(role, Map.of()).get(tags);
+                    if (bend != null && connected[level - 1] == turn(turned.ends(), 3)) { piece = bend; }
                     if (piece != null) {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
                               - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
