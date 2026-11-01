@@ -1594,7 +1594,47 @@ final class BoardRoad {
     }
 
     /** A dirt track's wheel courses (#wheels): the first {@code pairs} each a pair of ruts, the rest lone ruts. */
-    private record Wheels(List<List<Point>> courses, int pairs, byte[] ends) { }
+    private record Wheels(List<List<Point>> courses, int pairs, byte[] ends, float[] boxes) {
+        Wheels(List<List<Point>> courses, int pairs, byte[] ends) { this(courses, pairs, ends, boxes(courses)); }
+
+        /** Each course's bounding box: min x, min y, max x, max y. */
+        private static float[] boxes(List<List<Point>> courses) {
+            float[] result = new float[4 * courses.size()];
+            for (int p = 0; p < courses.size(); p++) {
+                float minX = Float.POSITIVE_INFINITY, minY = minX, maxX = Float.NEGATIVE_INFINITY, maxY = maxX;
+                for (Point point : courses.get(p)) {
+                    minX = Math.min(minX, point.x); minY = Math.min(minY, point.y);
+                    maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
+                }
+                result[4 * p] = minX; result[4 * p + 1] = minY; result[4 * p + 2] = maxX; result[4 * p + 3] = maxY;
+            }
+            return result;
+        }
+
+        /**
+         * No point of course {@code p} lies nearer (x, y) than this: its bounding box, or a border end's straight run on
+         * past it (#pathSample).
+         */
+        float nearest(int p, float x, float y) {
+            float dx = Math.max(0, Math.max(boxes[4 * p] - x, x - boxes[4 * p + 2]));
+            float dy = Math.max(0, Math.max(boxes[4 * p + 1] - y, y - boxes[4 * p + 3]));
+            float result = (float) Math.sqrt(dx * dx + dy * dy);
+            var course = courses.get(p);
+            if ((ends[p] & BORDER_ENDS) != 0) { result = Math.min(result, ray(course.get(0), course.get(1), x, y)); }
+            if ((ends[p] & BORDER_ENDS << 1) != 0) {
+                result = Math.min(result, ray(course.getLast(), course.get(course.size() - 2), x, y));
+            }
+            return result;
+        }
+
+        /** How far (x, y) lies from the ray from {@code from} away from {@code toward}. */
+        private static float ray(Point from, Point toward, float x, float y) {
+            float ux = from.x - toward.x, uy = from.y - toward.y, length = ux * ux + uy * uy;
+            float t = length == 0 ? 0 : Math.max(0, ((x - from.x) * ux + (y - from.y) * uy) / length);
+            float ex = x - from.x - t * ux, ey = y - from.y - t * uy;
+            return (float) Math.sqrt(ex * ex + ey * ey);
+        }
+    }
 
     /**
      * A dirt track's wheel courses (#ruts): its paths, each a pair of ruts. At an open junction its tracks run straight
@@ -1708,8 +1748,11 @@ final class BoardRoad {
         var wheels = wheels();
         float nearest = Float.POSITIVE_INFINITY, inside = Float.POSITIVE_INFINITY, dx = 0, dy = 1;
         for (int p = 0; p < wheels.courses().size(); p++) {
+            float offset = p < wheels.pairs() ? RUT_OFFSET : 0;
+            // A course whose ruts all lie farther than the nearest so far, and outside it, changes nothing.
+            if (wheels.nearest(p, x, y) - offset >= Math.max(0, nearest - .01f)) { continue; }
             PathSample sample = pathSample(x, y, wheels.courses(), wheels.ends(), BORDER_ENDS, p);
-            float rut = sample.distance() - (p < wheels.pairs() ? RUT_OFFSET : 0);
+            float rut = sample.distance() - offset;
             inside = Math.min(inside, rut);
             // A corner's lone rut runs along a course's rut, maybe the other way: the course, listed first, keeps the
             // heading there, so that neighbouring texels do not filter it away.

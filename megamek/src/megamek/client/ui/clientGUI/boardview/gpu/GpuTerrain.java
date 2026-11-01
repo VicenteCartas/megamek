@@ -2474,12 +2474,19 @@ final class GpuTerrain implements Disposable {
         Map<DecalSlot, BoardScene.Pixels> decalPixels = new ConcurrentHashMap<>(scene.tiles().size() * 2);
         float nextFloor = BoardGeometry.floor(scene);
         boolean rebuildAll = changedTuning || beforeScene == null || !sameBoard(beforeScene, scene);
+        // The recent road masks' keys hold their roads' tiles, not the settings a full rebuild may bring.
+        if (rebuildAll) { roadMaskData.forget(); }
         boolean changedFlow = rebuildAll;
         Map<Coords, BoardFlow.Current> nextCurrents = previousCurrents;
         // The fitted concrete outline reads ground, water, levels, roads and features. An edit that changes none
         // of them keeps the previous fit, and the corner comparison below then has nothing to find.
         boolean refit = rebuildAll || previousCoast == null || concreteInputsChanged(beforeScene, scene);
         BoardConcrete nextCoast = refit ? BoardConcrete.of(scene) : BoardConcrete.adopt(scene, previousCoast);
+        // A road entering concrete reads its fitted corners, which hexes farther out than its mask's key can move.
+        if (refit && previousCoast != null
+              && scene.tiles().stream().anyMatch(tile -> !nextCoast.sameCorners(previousCoast, tile.coords()))) {
+            roadMaskData.forget();
+        }
         progress.advance();
         progress.begin("changes", scene.tiles().size());
         Set<Coords> changedTiles = new HashSet<>();
@@ -3731,6 +3738,27 @@ final class GpuTerrain implements Disposable {
         return result;
     }
 
+    /**
+     * What a road's paint mask depends on (GpuRoads.Masks#mask): its hex, the tiles its road and paint read
+     * ({@link #roadInputs}), the graphics and its place among the hex's patches.
+     */
+    private record RoadMaskKey(Coords source, List<BoardScene.Tile> inputs, boolean columns, int patch) { }
+
+    /**
+     * The tiles a road's paint can read: its own hex's and those within three hexes, which take in its neighbours' roads,
+     * a shared roundabout's members and a bridge's banks.
+     */
+    private static List<BoardScene.Tile> roadInputs(BoardScene scene, Coords at) {
+        List<BoardScene.Tile> result = new ArrayList<>();
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dy = -3; dy <= 3; dy++) {
+                Coords coords = new Coords(at.getX() + dx, at.getY() + dy);
+                if (coords.distance(at) <= 3) { result.add(scene.tile(coords)); }
+            }
+        }
+        return result;
+    }
+
     /** Shared carriageways, paint and rail supports; Classic natural decks use a full hex cap. */
     private record Infrastructure(Map<Coords, List<RoadPatch>> roads, Map<Coords, BoardBridge.Deck> bridges,
           Map<Coords, BoardBridge.Shape> bridgeShapes) { }
@@ -3755,12 +3783,15 @@ final class GpuTerrain implements Disposable {
                 var source = scene.tile(shared.coords());
                 // A road ending on a cliff's top wears out to gravel at the rim (Enhanced).
                 BoardRoad road = columns ? shared : GpuRoads.painted(scene, source, shared);
+                List<BoardScene.Tile> inputs = roadInputs(scene, source.coords());
+                int index = 0;
                 for (var patch : GpuRoads.patches(scene, source, road, shared)) {
                     check.run();
                     road.clipPaint(patch.shape());
                     var triangles = GpuRoads.drape(source, surface, patch);
+                    var key = new RoadMaskKey(source.coords(), inputs, columns, index++);
                     if (!triangles.isEmpty() && !patch.shape().isEmpty()) {
-                        var mask = GpuRoads.mask(road, patch);
+                        var mask = masks.mask(key, () -> GpuRoads.mask(road, patch), check);
                         float scale = BoardGeometry.hexScale();
                         mask = new GpuRoads.MaskData(mask.pixels(),
                               mask.x() + (BoardGeometry.centerX(source.coords()) - BoardGeometry.centerX(tile.coords())) / scale,

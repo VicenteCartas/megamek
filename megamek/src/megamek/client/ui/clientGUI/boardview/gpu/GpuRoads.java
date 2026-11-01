@@ -12,6 +12,7 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -59,6 +60,51 @@ final class GpuRoads {
     /** Renderer-owned exact sharing across chunks/workers; only live materials keep masks in memory. */
     static final class Masks {
         private final Map<MaskData, WeakReference<MaskData>> masks = new WeakHashMap<>();
+        /**
+         * Recently built masks by everything they depend on ({@link #mask}): a road's mask is wanted by every hex it
+         * drapes over, and an edit rebuilds a whole chunk, most of whose roads it did not touch. Least recently used go
+         * first, past {@link #RECENT_TEXELS} or {@link #RECENT_MASKS} (each key holds its scene's tiles).
+         */
+        private final LinkedHashMap<Object, MaskData> recent = new LinkedHashMap<>(64, .75f, true);
+        private long recentTexels;
+        private static final long RECENT_TEXELS = 16L << 20;
+        private static final int RECENT_MASKS = 1024;
+        /** Counts {@link #forget}s: a mask built across one is never kept. */
+        private int epoch;
+
+        /**
+         * The mask {@code key} names, built once: the key must hold all its mask depends on. Two workers may both build
+         * one the first time; either result is the same. A build its job's {@code check} finds stale, or one that
+         * outlived a {@link #forget}, is not kept.
+         */
+        MaskData mask(Object key, Supplier<MaskData> build, Runnable check) {
+            int started;
+            synchronized (this) {
+                MaskData hit = recent.get(key);
+                if (hit != null) { return hit; }
+                started = epoch;
+            }
+            MaskData built = share(build.get());
+            check.run();
+            synchronized (this) {
+                if (epoch == started && recent.putIfAbsent(key, built) == null) { recentTexels += texels(built); }
+                for (var masks = recent.values().iterator(); (recentTexels > RECENT_TEXELS || recent.size() > RECENT_MASKS)
+                      && masks.hasNext(); ) {
+                    recentTexels -= texels(masks.next());
+                    masks.remove();
+                }
+            }
+            return built;
+        }
+
+        /** Forgets the recent masks: something outside their keys that they depend on changed. */
+        synchronized void forget() {
+            recent.clear();
+            recentTexels = 0;
+            epoch++;
+        }
+
+        private static long texels(MaskData mask) { return (long) mask.pixels().width() * mask.pixels().height(); }
 
         synchronized MaskData share(MaskData mask) {
             WeakReference<MaskData> reference = masks.get(mask);
