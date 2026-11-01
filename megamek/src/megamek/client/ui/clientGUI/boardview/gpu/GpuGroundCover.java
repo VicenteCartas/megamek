@@ -116,15 +116,15 @@ final class GpuGroundCover implements Disposable {
     }
 
     /**
-     * Whether a road keeps a root's ground (world x, y) bare: its way, shoulder and {@code margin} tile pixels, or of a
-     * dirt track only its ruts (BoardRoad#rutted), the grass growing beside and between them.
+     * How much grass a road leaves a root (world x, y), 0 to 1: none on its way, shoulder and {@code margin} tile pixels;
+     * of a dirt track none on its ruts, thinning in beside and between them (BoardRoad#grass).
      */
-    private static boolean bare(BoardScene scene, BoardRoad road, float x, float y, float margin) {
+    private static float roadside(BoardScene scene, BoardRoad road, float x, float y, float margin) {
         float rx = (x - BoardGeometry.centerX(road.coords())) / BoardGeometry.hexScale();
         float ry = (y - BoardGeometry.centerY(road.coords())) / BoardGeometry.hexScale();
         var tile = scene.tile(road.coords());
-        return tile != null && tile.road() == BoardRoad.Kind.DIRT ? road.rutted(rx, ry)
-              : road.distance(rx, ry) < BoardRoad.SHOULDER + margin;
+        if (tile != null && tile.road() == BoardRoad.Kind.DIRT) { return road.grass(rx, ry); }
+        return road.distance(rx, ry) < BoardRoad.SHOULDER + margin ? 0 : 1;
     }
 
     /** Only exposed ordinary depth-zero banks can extend the adjoining meadow into a water hex. */
@@ -220,9 +220,9 @@ final class GpuGroundCover implements Disposable {
             // scenery leave the surrounding grass and empty gaps untouched.
             if (!obstacles.isEmpty() && obstacles.obstructs(root.set(x, y, z), 2 * BoardGeometry.hexScale(),
                   MAX_HEIGHT_FRACTION * BoardGeometry.width())) { continue; }
-            boolean bare = false;
-            for (int r = 0; r < roads.size() && !bare; r++) { bare = bare(scene, roads.get(r), x, y, 1); }
-            if (bare) { continue; }
+            float verge = 1;
+            for (int r = 0; r < roads.size() && verge > 0; r++) { verge = Math.min(verge, roadside(scene, roads.get(r), x, y, 1)); }
+            if (verge <= 0) { continue; }
             boolean iced = false;
             for (Vector3[] edge : iceEdges) {
                 float ex = edge[1].x - edge[0].x, ey = edge[1].y - edge[0].y;
@@ -254,6 +254,8 @@ final class GpuGroundCover implements Disposable {
                 // Thin the accepted roots, not the cover input: its grass threshold would turn this fade into a cut.
                 growth *= BoardRelief.smooth(distance / shoreReach);
             }
+            // Beside a dirt track the meadow thins out towards its ruts.
+            growth *= verge;
             if (!landings.isEmpty()) {
                 // None on a landing's solid asphalt; the meadow thickens again across its fading apron.
                 growth *= BoardRelief.smooth((BoardRoad.distance(landings, x, y) - BoardRoad.SHOULDER - 1) / landingFade);
@@ -356,13 +358,14 @@ final class GpuGroundCover implements Disposable {
             if (Float.isNaN(lean) || obstacles.obstructs(root, 2 * m, MAX_HEIGHT_FRACTION * BoardGeometry.width())) {
                 continue;
             }
-            if (road != null && bare(scene, road, root.x, root.y, 2)) { continue; }
+            float verge = road == null ? 1 : roadside(scene, road, root.x, root.y, 2);
+            if (verge <= 0) { continue; }
             var cover = boundary ? sampler.sampleCliff(root.x, root.y, root.z)
                   : BoardSurfaceBlend.solid(BoardScene.Surface.GRASS);
             float grass = cover.grass();
             if (paint != null && grass > 0) { grass *= 1 - paint.at(root.x, root.y); }
             // Behind the lip the rim's blades thin into the meadow's.
-            if (chance > grass * BoardRelief.smooth((grass - .55f) / .35f) * (1 + Math.min(place, 0))) { continue; }
+            if (chance > grass * BoardRelief.smooth((grass - .55f) / .35f) * (1 + Math.min(place, 0)) * verge) { continue; }
             float heading = (float) (Math.atan2(facing.y, facing.x) / (2 * Math.PI));
             heading -= (float) Math.floor(heading);
             // The contour, eight lean steps and 256 headings: twelve bits, which a rank below 4096 keeps exactly.

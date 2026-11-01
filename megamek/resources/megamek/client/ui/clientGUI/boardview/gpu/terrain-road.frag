@@ -543,7 +543,13 @@ float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bo
     float kept = max(soil, pressed - .5);
     float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g);
     kept = min(kept, ends - .5);
-    alpha = built ? coverage : clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
+    // Past that edge the soil thins out into the grass over most of a metre: bare between ever fewer tufts, under a
+    // film of dust nearest the track. The blades thin out there too (BoardRoad#grass). Where the coat ends, RUT_REACH
+    // past the ruts (BoardRoad#rutReach), the soil field lies below -.8, and where the track ends so does its end term.
+    float gaps = smoothstep(-.8, 0.0, min(soil, ends - 1.0));
+    float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
+    float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
+    alpha = built ? coverage : max(clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
     // Packed ruts: pale and dusty, a little less of the soil's grain; loose soil darker and crumbly.
     vec3 mean = vec3(.277, .213, .154);
     albedo = mix(albedo, mean + (albedo - mean) * .8, pressed) * DIRT_LIGHT * mix(.8, 1.06, pressed) * mix(.93, 1.06, broad);

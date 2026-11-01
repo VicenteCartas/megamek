@@ -1388,8 +1388,10 @@ final class BoardRoad {
     static final float RUT_OFFSET = .9f * METRE;
     /** How far past a rut's centre line {@link #ruts} still measures: its loose soil lies within it. */
     static final float RUT_REACH = 2 * METRE;
-    /** How far from a rut's centre line a dirt track keeps its ground bare of grass (#rutted): the rut and its lip. */
+    /** How far from a rut's centre line a dirt track keeps its ground bare of grass (#grass): the rut and its lip. */
     private static final float RUT_BARE = .65f * METRE;
+    /** Over how much farther its grass thickens back to the meadow's (#grass): beside the ruts, and on their crown. */
+    private static final float RUT_THIN = METRE, CROWN_THIN = .25f * METRE;
 
     /** Whether this road's arms meet in an open junction: not a roundabout, nor arms moved beside a rail's corridor. */
     private boolean openJunction() {
@@ -1590,21 +1592,23 @@ final class BoardRoad {
     }
 
     /**
-     * Whether a dirt track keeps a point bare of grass where it paints: on a rut or its lip (#ruts), and over the whole
-     * road where gravel spreads on over it towards a gravel neighbour (GpuRoads#patches). Grass grows up to its ruts,
-     * beside them and between them. A neighbour whose own track draws its hex (#trackedHexes) decides there.
+     * How much of the meadow's grass a dirt track leaves at a point, 0 to 1: none on a rut or its lip (#ruts), thickening
+     * back beside them over RUT_THIN and on their crown over CROWN_THIN, as its soil thins out into the grass
+     * (terrain-road.frag#dirtTrack); none over the whole road where gravel spreads on over it towards a gravel neighbour
+     * (GpuRoads#patches). A neighbour whose own track draws its hex (#trackedHexes) decides there.
      */
-    boolean rutted(float x, float y) {
+    float grass(float x, float y) {
         float wx = BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale();
         float wy = BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale();
         for (int d = 0; d < 6; d++) {
-            if ((tracked & 1 << d) != 0 && BoardGeometry.contains(coords.translated(d), wx, wy)) { return false; }
+            if ((tracked & 1 << d) != 0 && BoardGeometry.contains(coords.translated(d), wx, wy)) { return 1; }
         }
-        if (distance(x, y) >= SHOULDER) { return false; }
+        if (distance(x, y) >= SHOULDER) { return 1; }
         for (Join join : joins) {
-            if (tracked(join) && join.kind() == Kind.GRAVEL && join.edge().distance(x, y) > -JOIN_REACH) { return true; }
+            if (tracked(join) && join.kind() == Kind.GRAVEL && join.edge().distance(x, y) > -JOIN_REACH) { return 0; }
         }
-        return Math.abs(ruts(x, y).across() * (RUT_OFFSET + RUT_REACH) - RUT_OFFSET) < RUT_BARE;
+        float rut = ruts(x, y).across() * (RUT_OFFSET + RUT_REACH) - RUT_OFFSET;
+        return BoardRelief.smooth((Math.abs(rut) - RUT_BARE) / (rut < 0 ? CROWN_THIN : RUT_THIN));
     }
 
     /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of them, and its scuffed middle. */
