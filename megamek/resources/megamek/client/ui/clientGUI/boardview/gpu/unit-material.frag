@@ -10,6 +10,8 @@ uniform float u_paintPlateEnabled;
 uniform sampler2D u_damageTexture;
 uniform float u_damageEnabled;
 uniform float u_damageOpacity;
+// How much of the unit shows (GpuUnitShader.Shown): 1 but while it fades out.
+uniform float u_unitOpacity;
 in vec2 v_damageUV;
 in float v_damageMask;
 

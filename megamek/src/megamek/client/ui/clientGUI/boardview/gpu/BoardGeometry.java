@@ -331,8 +331,21 @@ final class BoardGeometry {
         Vector3 hit = new Vector3();
         var ordered = new ArrayList<PickCandidate>();
         var bounds = new BoundingBox();
+        // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.
+        float reach = 2 * BoardRelief.overhang();
+        float halfWidth = (width() + reach) / 2, halfHeight = (height() + reach) / 2;
         int order = 0, nearestOrder = Integer.MAX_VALUE;
+        boolean vertical = ray.direction.x == 0 && ray.direction.y == 0;
         for (BoardScene.Tile tile : candidates) {
+            float x = centerX(tile.coords()), y = centerY(tile.coords());
+            // Whether the ray passes over the footprint at all before its top, which takes the neighbours: a ray straight
+            // down passes over a hex and its neighbours only.
+            bounds.set(new Vector3(x - halfWidth, y - halfHeight, floor - .005f),
+                  new Vector3(x + halfWidth, y + halfHeight, 1e9f));
+            if (!Intersector.intersectRayBounds(ray, bounds, hit)) {
+                order++;
+                continue;
+            }
             float high = tile.elevation() * level();
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
@@ -343,12 +356,8 @@ final class BoardGeometry {
                 }
             }
             high += BoardRelief.decoration(tile);
-            // Sculpted cliffs, talus and rim lips can reach slightly beyond the logical footprint.
-            float reach = 2 * BoardRelief.overhang();
-            bounds.set(new Vector3(centerX(tile.coords()) - (width() + reach) / 2,
-                        centerY(tile.coords()) - (height() + reach) / 2, floor - .005f),
-                  new Vector3(centerX(tile.coords()) + (width() + reach) / 2,
-                        centerY(tile.coords()) + (height() + reach) / 2, high + .005f));
+            bounds.max.z = high + .005f;
+            bounds.update();
             if (Intersector.intersectRayBounds(ray, bounds, hit)) {
                 ordered.add(new PickCandidate(tile, ray.origin.dst2(hit), order));
             }
@@ -362,8 +371,8 @@ final class BoardGeometry {
             BoardSurface surface = surfaces != null ? null
                   : cache == null ? new BoardSurface(scene, tile) : cache.get(scene, tile);
             BoardTacticalGeometry.Surface finished = surfaces == null ? null : surfaces.apply(tile.coords());
-            for (BoardSurface.Face face : finished == null ? surface.faces : finished.faces()) {
-                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+            for (BoardSurface.Face face : under(finished == null ? surface.faces : finished.faces(), ray, vertical)) {
+                if (crosses(ray, vertical, face, hit)
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
                     nearestOrder = candidate.order();
@@ -376,8 +385,8 @@ final class BoardGeometry {
                 }
             }
             for (BoardSurface.Face face : throughWater && !tile.liquid().molten() ? List.<BoardSurface.Face>of()
-                  : finished == null ? surface.waterFaces : finished.water()) {
-                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                  : under(finished == null ? surface.waterFaces : finished.water(), ray, vertical)) {
+                if (crosses(ray, vertical, face, hit)
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
                     nearestOrder = candidate.order();
@@ -386,8 +395,8 @@ final class BoardGeometry {
                     struck = null;
                 }
             }
-            for (BoardSurface.Face face : finished == null ? surface.walls(scene, floor) : finished.walls()) {
-                if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+            for (BoardSurface.Face face : under(finished == null ? surface.walls(scene, floor) : finished.walls(), ray, vertical)) {
+                if (crosses(ray, vertical, face, hit)
                       && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                     nearest = ray.origin.dst2(hit);
                     nearestOrder = candidate.order();
@@ -402,7 +411,7 @@ final class BoardGeometry {
                 // Installed pointer queries borrow the completed draw groups.
                 for (var fall : finished == null ? surface.frozenFalls() : finished.frozenFalls()) {
                     for (BoardSurface.Face face : fall.faces()) {
-                        if (Intersector.intersectRayTriangle(ray, face.a(), face.b(), face.c(), hit)
+                        if (crosses(ray, vertical, face, hit)
                               && nearer(ray.origin.dst2(hit), nearest, candidate.order(), nearestOrder)) {
                             nearest = ray.origin.dst2(hit);
                             nearestOrder = candidate.order();
@@ -434,6 +443,23 @@ final class BoardGeometry {
             }
         }
         return result == null ? null : new Hit(result, nearest, hardSurface, "ground", struck);
+    }
+
+    /** The faces a ray may cross: of a {@code vertical} one only those under it, where the list keeps their outlines. */
+    private static List<BoardSurface.Face> under(List<BoardSurface.Face> faces, Ray ray, boolean vertical) {
+        return vertical && faces instanceof BoardTacticalGeometry.Faces indexed ? indexed.under(ray.origin.x, ray.origin.y)
+              : faces;
+    }
+
+    /** Whether the ray crosses the face: a {@code vertical} ray, straight up or down, only where the face lies under it. */
+    private static boolean crosses(Ray ray, boolean vertical, BoardSurface.Face face, Vector3 hit) {
+        Vector3 a = face.a(), b = face.b(), c = face.c();
+        float x = ray.origin.x, y = ray.origin.y;
+        if (vertical && (x < Math.min(a.x, Math.min(b.x, c.x)) || x > Math.max(a.x, Math.max(b.x, c.x))
+              || y < Math.min(a.y, Math.min(b.y, c.y)) || y > Math.max(a.y, Math.max(b.y, c.y)))) {
+            return false;
+        }
+        return Intersector.intersectRayTriangle(ray, a, b, c, hit);
     }
 
     /** Preserve the original candidate order when shared-edge triangles have exactly the same hit distance. */

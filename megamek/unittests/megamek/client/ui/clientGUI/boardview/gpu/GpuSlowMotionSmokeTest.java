@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Wall-clock playback: with the defaults a hit plays at speed (no bullet time); the meeple it kills explodes as it
- * lands, its death plays in slow motion and the playback returns to speed after it.
+ * lands, the playback cuts to slow motion there and ramps back to speed while the pieces fly.
  */
 @Tag("on-demand")
 class GpuSlowMotionSmokeTest {
@@ -56,7 +56,7 @@ class GpuSlowMotionSmokeTest {
                 private final long deadline = System.nanoTime() + 60_000_000_000L;
                 private boolean queued;
                 private long started, ended;
-                private float from, slowest = 1;
+                private float from, late, slowest = 1;
 
                 @Override
                 public void render() {
@@ -87,17 +87,20 @@ class GpuSlowMotionSmokeTest {
                                 assertEquals(1, casualties.size(), "The meeple explodes as its killing hit lands");
                             }
                             slowest = Math.min(slowest, scale);
-                            // Timed from a quarter in: past the frame that breaks the meeple and the ease into slow motion.
+                            // Timed from a quarter in: past the frame that breaks the meeple.
                             if (from == 0 && death.seconds >= death.duration / 4) {
                                 started = System.nanoTime();
                                 from = death.seconds;
                             }
+                            if (late == 0 && death.seconds >= death.duration * .75f) { late = scale; }
                             if (death.seconds >= death.duration) {
                                 ended = System.nanoTime();
                                 double atSpeed = (death.duration - from) / UnitMotion.Speed.QUADRUPLE.rate;
-                                assertTrue((ended - started) / 1e9 > 1.5 * atSpeed, "The death plays slower than its speed: "
+                                assertTrue((ended - started) / 1e9 > 1.2 * atSpeed, "The death plays slower than its speed: "
                                       + (ended - started) / 1e9 + " s, " + atSpeed + " s at speed, slowest " + slowest);
-                                assertTrue(slowest < .6f, "The death slows the playback: " + slowest);
+                                assertTrue(slowest < .35f, "The killing blow cuts to slow motion: " + slowest);
+                                assertTrue(late > slowest + .3f, "The playback ramps back to speed while the pieces fly: "
+                                      + slowest + " to " + late);
                             }
                         } else if (System.nanoTime() - ended > 1_500_000_000L) {
                             assertTrue(scale > .99f, "The playback returns to speed after the death: " + scale);

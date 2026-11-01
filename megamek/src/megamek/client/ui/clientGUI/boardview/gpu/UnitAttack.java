@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -36,18 +37,36 @@ final class UnitAttack {
     /** Rotary barrels run at about this speed through a burst; slow enough that a turn never reads as backwards. */
     static final float SPIN_TURNS_PER_SECOND = 1.5f;
     static final float PPC_RECOIL_SCALE = 1.5f;
-    static final float DEATH_SECONDS = 1.2f;
+    /** In playback seconds: a death's slow motion ({@link GpuBattleView#DRAMATIC_DEATH}) shows it twice as long. */
+    static final float DEATH_SECONDS = .6f;
     static final float MELEE_WALK_SECONDS = 1.05f;
     static final float MELEE_RUN_SECONDS = .65f;
     static final float MELEE_SWING_SECONDS = .4f;
+    /** A death from above's jump onto its target, which lands as it touches down, and its arc's height in levels. */
+    static final float DFA_LEAP_SECONDS = .8f;
+    private static final float DFA_LEAP_LEVELS = 1.5f;
     static final float MELEE_DODGE_HEXES = .14f;
     static final float PHYSICAL_APPROACH_HEXES = .9f;
+    /**
+     * A target a shove pushes off the board ({@link #pushOff}) slides this long after the contact to the board's edge,
+     * leaving it at {@link #EDGE_SPEED} of its mean speed, then falls this long, toppling outward and fading out over
+     * the last {@link #FADE_SECONDS}.
+     */
+    static final float SHOVE_SECONDS = .4f, PUSHED_OFF_FALL_SECONDS = 1.1f;
+    private static final float EDGE_SPEED = .4f, TOPPLE_DEGREES = 100, TOPPLE_SECONDS = .55f;
+    /** How long what leaves the board fades out: a unit pushed off it, or a casualty ({@link MeepleCasualties}). */
+    static final float FADE_SECONDS = .8f;
+    /** The fall's acceleration in levels per second squared: a miniature's, as fast as thrown meeple pieces fall. */
+    private static final float FALL_LEVELS_PER_SECOND_SQUARED = 25;
     static final int MACHINE_GUN_ROUNDS = 6;
     static final float MACHINE_GUN_FIRE_SECONDS = .55f;
     final BoardScene.Combat event;
     final float flightSeconds;
     final float contactSeconds;
-    final float duration;
+    /** Its whole clock; a shove that pushes its target off the board lasts until the target's fall ends. */
+    float duration;
+    /** The hex off the board this shove pushed its target into ({@link #pushOff}), or null. */
+    private megamek.common.board.Coords pushedTo;
     private final float firingEndSeconds;
     private final Map<Integer, Set<Integer>> firingMounts = new HashMap<>();
     private final Map<Long, ResolvedAttack.Shot> profiles = new HashMap<>();
@@ -87,7 +106,7 @@ final class UnitAttack {
         });
         float distance = BoardGeometry.center(event.attacker().location().coords(), event.attacker().location().elevation())
               .dst(BoardGeometry.center(event.destination().coords(), event.destination().elevation())) / BoardGeometry.height();
-        approachSeconds = event.result().kind() == ResolvedAttack.Kind.PUSH ? MELEE_RUN_SECONDS : MELEE_WALK_SECONDS;
+        approachSeconds = dfa() ? DFA_LEAP_SECONDS : shoves() || ram() ? MELEE_RUN_SECONDS : MELEE_WALK_SECONDS;
         flightSeconds = firesArrowIV(event.result())
               ? MathUtils.clamp(distance * ARROW_IV_SECONDS_PER_HEX, ARROW_IV_MIN_FLIGHT_SECONDS,
                     ARROW_IV_MAX_FLIGHT_SECONDS)
@@ -95,8 +114,9 @@ final class UnitAttack {
         float firingSeconds = machineGunFireSeconds(event.result().shot());
         for (var profile : profiles.values()) { firingSeconds = Math.max(firingSeconds, machineGunFireSeconds(profile)); }
         contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
-              : approachSeconds + MELEE_SWING_SECONDS;
-        duration = removal() ? 1.4f : death() ? DEATH_SECONDS : contactSeconds + RECOVERY_SECONDS + (shot() ? 0 : MELEE_RUN_SECONDS)
+              : approachSeconds + (dfa() ? 0 : MELEE_SWING_SECONDS);
+        duration = removal() ? 1.4f : death() ? DEATH_SECONDS
+              : contactSeconds + RECOVERY_SECONDS + (shot() || carriesOn() ? 0 : MELEE_RUN_SECONDS)
               + (designatorHolds() ? DESIGNATOR_HOLD_SECONDS : 0) + fuelAirIgnitionHold();
         firingEndSeconds = event.result().mounts().stream()
               .anyMatch(mount -> "flame".equals(effect(mount.entityId(), mount.equipmentIndex())))
@@ -128,6 +148,91 @@ final class UnitAttack {
     }
 
     boolean death() { return event.result().kind() == ResolvedAttack.Kind.DEATH; }
+
+    boolean charge() { return event.result().kind() == ResolvedAttack.Kind.CHARGE; }
+
+    boolean dfa() { return event.result().kind() == ResolvedAttack.Kind.DFA; }
+
+    boolean ram() { return event.result().kind() == ResolvedAttack.Kind.RAM; }
+
+    /**
+     * A charge, a death from above and a ram do not step back: MegaMek moves a charger or a jumper on into its target's
+     * hex (aside, or down, when it misses), and a ram ends its flight there.
+     */
+    boolean carriesOn() { return charge() || dfa() || ram(); }
+
+    /**
+     * A push, a charge or a death from above: one that hits displaces its target a hex along the attacker's facing, as
+     * MegaMek does.
+     */
+    boolean shoves() { return event.result().kind() == ResolvedAttack.Kind.PUSH || charge() || dfa(); }
+
+    /**
+     * A death from above's height over the ground: an arc that comes down on its target's top {@code landing}, and then
+     * down to the ground with the target pushed out from under it. Zero for any other attack.
+     */
+    float leap(float landing) {
+        if (!dfa()) { return 0; }
+        if (seconds > contactSeconds) { return landing * (1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS)); }
+        float flight = MathUtils.clamp(seconds / contactSeconds, 0, 1);
+        return landing * flight * flight + DFA_LEAP_LEVELS * BoardGeometry.level() * 4 * flight * (1 - flight);
+    }
+
+    /**
+     * Where a death from above lands ({@link #leap}), over its attacker's own base {@code base}, which its move may
+     * already have raised: its victim's top when it hits.
+     */
+    float landing(float base, ModelInstance victim) {
+        return victim == null || !event.result().hit() ? 0 : UnitBounds.world(victim).max.z - base;
+    }
+
+    /**
+     * The hexes this shove may displace its target into, in MegaMek's order: a push and a charge only along the
+     * attacker's facing; a death from above takes the first valid one from there, alternating sides
+     * (TWRulesMovement.getAccidentalFallDisplacement).
+     */
+    List<megamek.common.board.Coords> shoveHexes() {
+        int facing = Math.round(event.attacker().location().facing()) % 6;
+        var from = event.target().location().coords();
+        return (dfa() ? List.of(0, 1, 5, 2, 4, 3) : List.of(0)).stream().map(offset -> from.translated((facing + offset) % 6))
+              .toList();
+    }
+
+    boolean pushedOff() { return pushedTo != null; }
+
+    /**
+     * Marks this shove as having pushed its target into {@code to}, off the board, which MegaMek then removed: the attack
+     * lasts until the target's fall ends, and the playback holds the target as captured until then.
+     */
+    void pushOff(megamek.common.board.Coords to) {
+        if (pushedTo != null) { return; }
+        pushedTo = to;
+        duration = Math.max(duration, contactSeconds + SHOVE_SECONDS + PUSHED_OFF_FALL_SECONDS);
+    }
+
+    /**
+     * Poses the target this shove pushed off the board, placed in its hex: shoved off it towards the hex it was pushed
+     * into, it slides to the edge and on over it, toppling outward about its leading foot as it drops. Returns how much of
+     * it shows: it fades out as it falls.
+     */
+    float posePushedOff(ModelInstance instance) {
+        var origin = BoardGeometry.center(event.target().location().coords(), 0);
+        var away = BoardGeometry.center(pushedTo, 0).sub(origin);
+        float half = away.len() * .5f;
+        away.nor();
+        float since = Math.max(0, seconds - contactSeconds), shove = Math.min(since / SHOVE_SECONDS, 1);
+        float falling = Math.max(0, since - SHOVE_SECONDS);
+        float slide = half * (shove * (2 - shove) * (1 - EDGE_SPEED) + shove * EDGE_SPEED + falling * EDGE_SPEED / SHOVE_SECONDS);
+        float drop = .5f * FALL_LEVELS_PER_SECOND_SQUARED * BoardGeometry.level() * falling * falling;
+        float topple = TOPPLE_DEGREES * smooth((since - SHOVE_SECONDS * .7f) / TOPPLE_SECONDS);
+        var bounds = UnitBounds.world(instance);
+        var foot = bounds.getCenter(new Vector3()).mulAdd(away, Math.min(bounds.getWidth(), bounds.getHeight()) * .5f);
+        foot.z = bounds.min.z;
+        instance.transform.mulLeft(new com.badlogic.gdx.math.Matrix4()
+              .setToTranslation(foot.x + away.x * slide, foot.y + away.y * slide, foot.z - drop)
+              .rotate(new Vector3(-away.y, away.x, 0), topple).translate(-foot.x, -foot.y, -foot.z));
+        return 1 - smooth((falling - PUSHED_OFF_FALL_SECONDS + FADE_SECONDS) / FADE_SECONDS);
+    }
 
     boolean removal() {
         return event.result().kind() == ResolvedAttack.Kind.BRUSH_OFF || event.result().kind() == ResolvedAttack.Kind.SHAKE_OFF;
@@ -181,7 +286,7 @@ final class UnitAttack {
     Vector3 contact(ModelInstance target, Vector3 origin, UnitPicking picking, Vector3 result) {
         if (physicalContact != null) {
             result.set(physicalContact);
-            if (event.result().kind() == ResolvedAttack.Kind.PUSH && event.result().hit() && contactCenter != null && target != null) {
+            if (shoves() && event.result().hit() && contactCenter != null && target != null) {
                 result.add(UnitBounds.world(target).getCenter(new Vector3()).sub(contactCenter));
             }
             return result;
@@ -603,19 +708,23 @@ final class UnitAttack {
         return ANTICIPATION_SECONDS + flightSeconds + (profile != null && profile.machineGun() ? delay : 0);
     }
 
-    /** Approach, stationary strike, recovery, then a faster return share this event's one clock. */
+    /**
+     * Approach, stationary strike, recovery, then a faster return share this event's one clock. One that carries on has
+     * no return: its approach gives way over the recovery to the move into the target's hex that follows it.
+     */
     float approachWeight() {
+        if (carriesOn() && seconds > contactSeconds) { return 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS); }
         return seconds <= contactSeconds + RECOVERY_SECONDS ? smooth(seconds / approachSeconds)
               : 1 - smooth((seconds - contactSeconds - RECOVERY_SECONDS) / MELEE_RUN_SECONDS);
     }
 
     float approachFacingWeight() {
-        return returning() ? approachWeight() : smooth(seconds / (approachSeconds * .35f));
+        return returning() || carriesOn() && seconds > contactSeconds ? approachWeight() : smooth(seconds / (approachSeconds * .35f));
     }
 
     float dodgeWeight() {
         if (shot() || death() || removal() || event.result().hit() || event.target() == null) { return 0; }
-        return seconds <= contactSeconds ? smooth((seconds - approachSeconds) / MELEE_SWING_SECONDS)
+        return seconds <= contactSeconds ? smooth((seconds - contactSeconds + MELEE_SWING_SECONDS) / MELEE_SWING_SECONDS)
               : 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
     }
 
@@ -627,10 +736,10 @@ final class UnitAttack {
 
     float travelProgress() {
         return seconds < approachSeconds ? seconds / approachSeconds
-              : seconds > contactSeconds + RECOVERY_SECONDS ? (seconds - contactSeconds - RECOVERY_SECONDS) / MELEE_RUN_SECONDS : 0;
+              : returning() ? (seconds - contactSeconds - RECOVERY_SECONDS) / MELEE_RUN_SECONDS : 0;
     }
 
-    boolean returning() { return seconds > contactSeconds + RECOVERY_SECONDS; }
+    boolean returning() { return !carriesOn() && seconds > contactSeconds + RECOVERY_SECONDS; }
 
     float contactWeight() {
         return seconds <= contactSeconds ? smooth((seconds - contactSeconds + .16f) / .16f)
@@ -645,7 +754,7 @@ final class UnitAttack {
     float strike() {
         if (shot() || death()) { return 0; }
         if (seconds < contactSeconds) {
-            return smooth((seconds - approachSeconds) / MELEE_SWING_SECONDS);
+            return smooth((seconds - contactSeconds + MELEE_SWING_SECONDS) / MELEE_SWING_SECONDS);
         }
         return 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
     }

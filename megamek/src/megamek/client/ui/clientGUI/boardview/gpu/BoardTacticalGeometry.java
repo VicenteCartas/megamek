@@ -7,12 +7,15 @@ import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
+import java.util.AbstractList;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.RandomAccess;
 import java.util.TreeSet;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -97,13 +100,74 @@ final class BoardTacticalGeometry {
                 }
             }
             if (!surface.tile.frozen()) { top.addAll(surface.waterFaces); }
-            List<BoardSurface.Face> walls = List.copyOf(surface.walls(scene, floor, sources));
+            List<BoardSurface.Face> walls = new Faces(surface.walls(scene, floor, sources));
             return new Surface(List.copyOf(top), BoardGeometry.tuning().stepsBetweenTops() ? lying(walls) : List.of(),
-                  List.copyOf(surface.faces), List.copyOf(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
+                  new Faces(surface.faces), new Faces(surface.waterFaces), walls, List.copyOf(surface.waterfalls),
                   surface.frozenFalls(), highest(top),
                   cover ? BoardVegetation.ground(scene, surface, floor, sources) : null);
         }
     }
+    /**
+     * Faces with a grid of their outlines seen from above, built the first time a ray straight down or up asks
+     * ({@link #under}): a pick at a point of a sculpted hex tests its few faces there instead of its thousands.
+     */
+    static final class Faces extends AbstractList<BoardSurface.Face> implements RandomAccess {
+        private static final int CELLS = 8;
+        private final List<BoardSurface.Face> faces;
+        private volatile Grid grid;
+
+        /** The faces' extent seen from above, and in each of its cells the faces whose outline reaches it, in order. */
+        private record Grid(float x, float y, float right, float top, float width, float height,
+              List<List<BoardSurface.Face>> cells) {
+            int column(float at) { return Math.min(CELLS - 1, Math.max(0, (int) ((at - x) / width * CELLS))); }
+            int row(float at) { return Math.min(CELLS - 1, Math.max(0, (int) ((at - y) / height * CELLS))); }
+        }
+
+        Faces(Collection<BoardSurface.Face> faces) { this.faces = List.copyOf(faces); }
+
+        @Override
+        public BoardSurface.Face get(int index) { return faces.get(index); }
+
+        @Override
+        public int size() { return faces.size(); }
+
+        /** The faces whose outline seen from above may hold (x, y). */
+        List<BoardSurface.Face> under(float x, float y) {
+            Grid built = grid;
+            if (built == null) { grid = built = grid(); }
+            if (x < built.x || x > built.right || y < built.y || y > built.top) { return List.of(); }
+            return built.cells.get(built.row(y) * CELLS + built.column(x));
+        }
+
+        private Grid grid() {
+            float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+            float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+            for (BoardSurface.Face face : faces) {
+                for (Vector3 corner : List.of(face.a(), face.b(), face.c())) {
+                    minX = Math.min(minX, corner.x);
+                    minY = Math.min(minY, corner.y);
+                    maxX = Math.max(maxX, corner.x);
+                    maxY = Math.max(maxY, corner.y);
+                }
+            }
+            var extent = new Grid(minX, minY, maxX, maxY, Math.max(maxX - minX, 1e-4f), Math.max(maxY - minY, 1e-4f),
+                  List.of());
+            List<List<BoardSurface.Face>> cells = new ArrayList<>();
+            for (int cell = 0; cell < CELLS * CELLS; cell++) { cells.add(new ArrayList<>()); }
+            for (BoardSurface.Face face : faces) {
+                Vector3 a = face.a(), b = face.b(), c = face.c();
+                int left = extent.column(Math.min(a.x, Math.min(b.x, c.x)));
+                int right = extent.column(Math.max(a.x, Math.max(b.x, c.x)));
+                int bottom = extent.row(Math.min(a.y, Math.min(b.y, c.y)));
+                int top = extent.row(Math.max(a.y, Math.max(b.y, c.y)));
+                for (int row = bottom; row <= top; row++) {
+                    for (int column = left; column <= right; column++) { cells.get(row * CELLS + column).add(face); }
+                }
+            }
+            return new Grid(minX, minY, maxX, maxY, extent.width, extent.height, cells.stream().map(List::copyOf).toList());
+        }
+    }
+
     private record Edge(float x1, float y1, float x2, float y2) {
         float x(float y) {
             return x1 + (x2 - x1) * (y - y1) / (y2 - y1);

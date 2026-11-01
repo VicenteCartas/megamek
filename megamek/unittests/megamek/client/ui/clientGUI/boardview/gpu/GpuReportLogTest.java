@@ -485,6 +485,53 @@ class GpuReportLogTest {
               reversed, "Events link in their arrival order, which the server keeps equal to the report order");
     }
 
+    /**
+     * The physical attacks a unit makes with its body, as TWGameManager reports them: a punch, then a charge, a death
+     * from above and a ram, which MegaMek resolves after it. Each links to its event, so its log card offers Replay.
+     */
+    @Test
+    void chargesDeathsFromAboveAndRamsLinkToTheirEvents() {
+        Entity crab = unit(7, "King Crab KGC-009C");
+        Entity commando = unit(44, "Commando COM-2D");
+        Entity griffin = unit(45, "Griffin GRF-1N");
+        Entity lightning = unit(46, "Lightning LTN-G15");
+        Entity shilone = unit(47, "Shilone SL-17");
+        Report steel = new Report(9020).add(dice(12));
+        steel.choose(true);
+        List<Report> reports = new ArrayList<>(List.of(new Report(4000)));
+        reports.addAll(body(crab, new Report(4010).add("Left Arm").add("Commando COM-2D"), commando));
+        reports.addAll(body(commando, new Report(4210).add("King Crab KGC-009C"), crab));
+        reports.addAll(body(griffin, new Report(4246).add("Commando COM-2D"), commando));
+        List<Report> ram = body(lightning, new Report(9030).add("Shilone SL-17"), shilone);
+        ram.add(1, steel);
+        reports.addAll(ram);
+        var punch = attack(ResolvedAttack.Kind.PUNCH, crab, commando, -1, Mek.LOC_LEFT_ARM, true, List.of(), null);
+        var charge = attack(ResolvedAttack.Kind.CHARGE, commando, crab, -1, Entity.LOC_NONE, true, List.of(), null);
+        var dfa = attack(ResolvedAttack.Kind.DFA, griffin, commando, -1, Entity.LOC_NONE, true, List.of(), null);
+        var collision = attack(ResolvedAttack.Kind.RAM, lightning, shilone, -1, Entity.LOC_NONE, true, List.of(), null);
+        Map<Integer, Entity> units = Map.of(7, crab, 44, commando, 45, griffin, 46, lightning, 47, shilone);
+        GpuReportLog log = new GpuReportLog();
+        for (var event : List.of(punch, charge, dfa, collision)) {
+            log.combat(event, units.get(event.attacker().entityId()), units.get(event.target().entityId()), 2,
+                  GamePhase.PHYSICAL);
+        }
+        var physical = log.capture(List.of(new ArrayList<>(List.of(new Report(2000))), reports), 2,
+              GamePhase.PHYSICAL_REPORT).entries().stream().filter(entry -> entry.kind() == GpuReportLog.Kind.PHYSICAL)
+              .toList();
+        assertEquals(List.of("7 44 " + punch.id(), "44 7 " + charge.id(), "45 44 " + dfa.id(), "46 47 " + collision.id()),
+              physical.stream().map(entry -> entry.attackerId() + " " + entry.targetId() + " " + entry.attack()).toList());
+    }
+
+    /** One unit's physical attack as TWGameManager reports it: its header, the attack, the roll, a hit and damage. */
+    private static List<Report> body(Entity attacker, Report attack, Entity target) {
+        attack.indent();
+        attack.newlines = 0;
+        Report roll = new Report(4025).addDataWithTooltip("5", "5 (piloting skill)").add(dice(10));
+        roll.newlines = 0;
+        return new ArrayList<>(List.of(new Report(4005).addDesc(attacker), attack, roll, new Report(4040),
+              new Report(6065).addDesc(target).add(10).add("Center Torso")));
+    }
+
     @Test
     void myForceKeepsEntriesThatNameAnOwnUnitAsAttackerTargetOrSubject() throws Exception {
         Entity atlas = atlas();

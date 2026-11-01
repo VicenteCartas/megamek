@@ -822,7 +822,7 @@ final class UnitAnimator {
         if (attack.shot()) {
             aimShots(model, unit, List.of(attack), ignored -> victim);
         } else if (fallen < .01f && crouch < .01f && kneel < .01f && unit.model().state().structure().anatomy() != null) {
-            physicalContact(model, attack, target);
+            physicalContact(model, attack, target, victim);
         }
     }
 
@@ -1054,12 +1054,16 @@ final class UnitAnimator {
         return new StrikePart(upper, lower, tip, point);
     }
 
-    private void physicalContact(GpuUnitModel model, UnitAttack attack, Vector3 target) {
+    private void physicalContact(GpuUnitModel model, UnitAttack attack, Vector3 target, ModelInstance victim) {
         boolean left = attack.event.result().limb() == megamek.common.units.Mek.LOC_LEFT_ARM
               || attack.event.result().limb() == megamek.common.units.Mek.LOC_LEFT_LEG;
+        // A death from above comes down on its target's top when it hits, from the base the move left it on.
+        float landing = attack.landing(UnitBounds.world(instance).min.z, victim);
         for (Body body : bodies) {
             var part = strikePart(model, body, attack, left);
-            if (part == null) { continue; }
+            // A charge, a ram and a death from above throw the whole body: without the arm it reaches with, it still
+            // comes on.
+            if (part == null && !attack.carriesOn()) { continue; }
             if (attack.approach == null) {
                 // Measure the stance facing the target, before the swing. This remains a visual offset only.
                 var direction = BoardGeometry.center(attack.event.destination().coords(), 0)
@@ -1068,12 +1072,15 @@ final class UnitAnimator {
                 attack.approachTurn = MathUtils.atan2(direction.x, direction.y) * MathUtils.radiansToDegrees;
                 var facing = instance.transform.cpy().rotate(Vector3.Z, -attack.approachTurn);
                 var inverse = facing.cpy().inv();
-                var pivot = part.upper.node().globalTransform.getTranslation(new Vector3());
-                var tip = part.world(instance).mul(instance.transform.cpy().inv());
-                float reach = pivot.dst(tip);
-                if (part.lower != null) {
-                    var elbow = part.lower.node().globalTransform.getTranslation(new Vector3());
-                    reach = pivot.dst(elbow) + elbow.dst(tip);
+                var pivot = part == null ? new Vector3() : part.upper.node().globalTransform.getTranslation(new Vector3());
+                float reach = 0;
+                if (part != null) {
+                    var tip = part.world(instance).mul(instance.transform.cpy().inv());
+                    reach = pivot.dst(tip);
+                    if (part.lower != null) {
+                        var elbow = part.lower.node().globalTransform.getTranslation(new Vector3());
+                        reach = pivot.dst(elbow) + elbow.dst(tip);
+                    }
                 }
                 var approach = target.cpy().mul(inverse).sub(pivot);
                 float vertical = approach.z;
@@ -1097,10 +1104,10 @@ final class UnitAnimator {
             body.rotate("rightArm", Vector3.X, MathUtils.sin(phase) * 16 * gait);
             meleePose(body, attack, left);
             settleContacts();
-            instance.transform.trn(attack.approach.x * travel, attack.approach.y * travel, 0);
+            instance.transform.trn(attack.approach.x * travel, attack.approach.y * travel, attack.leap(landing));
             float weight = attack.contactWeight();
-            if (weight > 0) { reach(part, target, weight); }
-            if (attack.event.result().kind() == megamek.common.ResolvedAttack.Kind.PUSH) {
+            if (weight > 0 && part != null) { reach(part, target, weight); }
+            if (attack.shoves()) {
                 var other = strikePart(model, body, attack, !left);
                 if (other != null && weight > 0) { reach(other, target, weight); }
             }
@@ -1125,12 +1132,13 @@ final class UnitAnimator {
                 body.rotate("leftLeg".equals(leg) ? "leftShin" : "rightLeg".equals(leg) ? "rightShin" : leg + "Shin",
                       Vector3.X, bend * (-65 * windup + 55 * swing));
             }
-            case PUSH -> {
+            case PUSH, CHARGE, DFA -> {
                 body.rotate("leftArm", Vector3.X, 65 * windup + 15 * swing);
                 body.rotate("rightArm", Vector3.X, 65 * windup + 15 * swing);
                 body.rotate("leftForearm", Vector3.X, 35 * windup * (1 - swing));
                 body.rotate("rightForearm", Vector3.X, 35 * windup * (1 - swing));
-                body.rotate("torso", Vector3.X, 12 * swing);
+                // A charge throws its whole weight into the shove.
+                body.rotate("torso", Vector3.X, (attack.charge() ? 28 : 12) * swing);
             }
             case CLUB -> {
                 body.rotate(arm, Vector3.X, attack.thrust() ? 65 * windup + 20 * swing : 155 * windup - 85 * swing);

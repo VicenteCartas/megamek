@@ -37,6 +37,9 @@ final class GpuUnitShader extends DefaultShader {
     private final int damageEnabled = register("u_damageEnabled");
     private final int damageOpacity = register("u_damageOpacity");
     private final int damageTransform = register("u_damageTransform");
+    private final int opacity = register("u_unitOpacity");
+    /** The renderable being drawn shows translucent ({@link Shown#opacity}): it blends over the scene. */
+    private boolean translucent;
     private final boolean displayOutput;
     /** The features of the environment lighting this program was built for (GpuCloudShadow.prefix). */
     private final int environmentFlags;
@@ -151,7 +154,10 @@ final class GpuUnitShader extends DefaultShader {
     static String fragmentSource(String source) {
         String declarations = GpuShaderSource.read("unit-material.frag");
         source = replaceOnce(source, MAIN, declarations + "\n" + MAIN, "fragment");
-        return replaceOnce(source, "// unit-overlays", "diffuse.rgb = unitOverlays(diffuse.rgb);", "fragment");
+        source = replaceOnce(source, "// unit-overlays", "diffuse.rgb = unitOverlays(diffuse.rgb);", "fragment");
+        // One uniform rather than a blended program variant: a unit fades without a program compiled after loading.
+        return replaceOnce(source, "    // Tactical draws after the scene composite", "    fragColor.a *= u_unitOpacity;\n"
+              + "    // Tactical draws after the scene composite", "fragment");
     }
 
     /**
@@ -223,6 +229,19 @@ final class GpuUnitShader extends DefaultShader {
     protected void bindMaterial(Attributes attributes) {
         super.bindMaterial(attributes);
         if (!displayOutput) { bindSceneBlending(context, attributes); }
+        if (translucent) {
+            // What fades hides nothing behind it, neither another fading unit nor the smoke drawn after the units.
+            context.setBlending(true, GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA, GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA);
+            context.setDepthMask(false);
+        }
+    }
+
+    /**
+     * A unit instance's userData: its outline colour and its own hex's visibility (the alpha, GpuUnitVisibility), and how
+     * much of it shows. Below 1 it draws translucent, after the other units ({@code GpuBattleView.renderUnits}).
+     */
+    static final class Shown extends com.badlogic.gdx.graphics.Color {
+        float opacity = 1;
     }
 
     /** Scene alpha is coverage for uncovered sky and transparent exports, not another color channel. */
@@ -267,6 +286,9 @@ final class GpuUnitShader extends DefaultShader {
         if (plate) {
             set(paintPlate, context.textureBinder.bind(paint.plate));
         }
+        float shown = part.userData instanceof Shown unit ? unit.opacity : 1;
+        set(opacity, shown);
+        translucent = shown < 1;
         super.render(part, attributes);
     }
 }

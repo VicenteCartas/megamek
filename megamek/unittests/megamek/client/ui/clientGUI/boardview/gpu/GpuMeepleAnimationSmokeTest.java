@@ -409,13 +409,14 @@ class GpuMeepleAnimationSmokeTest {
         MeepleAnimator.place(model, target, victim, UnitMotion.Sample.STILL, renderer.camera,
               BoardGeometry.center(victim.location().coords(), 0), 180);
         Map<String, ModelInstance> instances = Map.of(unit.id() + ":-1", source, "3:-1", target);
-        for (var kind : List.of(ResolvedAttack.Kind.PUSH, ResolvedAttack.Kind.PUNCH, ResolvedAttack.Kind.KICK, ResolvedAttack.Kind.CLUB)) {
+        for (var kind : List.of(ResolvedAttack.Kind.PUSH, ResolvedAttack.Kind.CHARGE, ResolvedAttack.Kind.DFA,
+              ResolvedAttack.Kind.RAM, ResolvedAttack.Kind.PUNCH, ResolvedAttack.Kind.KICK, ResolvedAttack.Kind.CLUB)) {
             var attack = new UnitAttack(UnitPlaybackTest.attack(unit, victim, kind, true));
             for (float seconds : new float[] { 0, attack.approachSeconds * .5f, attack.contactSeconds, attack.duration }) {
                 attack.seconds = seconds;
                 MeepleAnimator.place(model, source, unit, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
                 var rest = source.transform.cpy();
-                MeepleAnimator.attacks(unit, source, List.of(attack), instances);
+                MeepleAnimator.attacks(unit, source, List.of(attack), instances, false);
                 if (seconds == 0 || seconds == attack.duration) { assertArrayEquals(rest.val, source.transform.val, .002f); }
                 else { assertTrue(source.transform.getTranslation(new Vector3()).dst(rest.getTranslation(new Vector3())) > .1f); }
                 renderer.frame(List.of(source, target), origin, null, "meeple-" + kind, (int) (seconds * 100));
@@ -430,10 +431,10 @@ class GpuMeepleAnimationSmokeTest {
         lance.seconds = lance.contactSeconds;
         club.seconds = club.contactSeconds;
         MeepleAnimator.place(model, source, unit, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
-        MeepleAnimator.attacks(unit, source, List.of(club), instances);
+        MeepleAnimator.attacks(unit, source, List.of(club), instances, false);
         var swing = source.transform.cpy();
         MeepleAnimator.place(model, source, unit, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
-        MeepleAnimator.attacks(unit, source, List.of(lance), instances);
+        MeepleAnimator.attacks(unit, source, List.of(lance), instances, false);
         assertTrue(source.transform.getTranslation(new Vector3()).dst(swing.getTranslation(new Vector3())) > .1f,
               "A lance thrust uses forward reach instead of the club's sideways swing");
         renderer.frame(List.of(source, target), origin, null, "meeple-lance", 0);
@@ -441,7 +442,7 @@ class GpuMeepleAnimationSmokeTest {
         var lowered = source.transform.cpy();
         var physical = new UnitAttack(UnitPlaybackTest.attack(prone, victim, ResolvedAttack.Kind.PUNCH, true));
         physical.seconds = physical.contactSeconds;
-        MeepleAnimator.attacks(prone, source, List.of(physical), instances);
+        MeepleAnimator.attacks(prone, source, List.of(physical), instances, false);
         assertArrayEquals(lowered.val, source.transform.val, .001f, "Prone tokens cannot approach or swing for physical attacks");
         var volley = new ArrayList<UnitAttack>();
         for (var weapon : fixture.entity.getWeaponList()) {
@@ -456,7 +457,7 @@ class GpuMeepleAnimationSmokeTest {
             volley.add(attack);
         }
         effects.update(volley, library, instances);
-        MeepleAnimator.attacks(prone, source, volley, instances);
+        MeepleAnimator.attacks(prone, source, volley, instances, false);
         assertArrayEquals(lowered.val, source.transform.val, .001f, "Prone shooting retains its supported pose");
         renderer.camera.viewportWidth = 320;
         renderer.camera.viewportHeight = 240;

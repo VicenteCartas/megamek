@@ -78,6 +78,10 @@ final class GpuBoardOverlay implements Disposable {
     private static final Color GHOST = new Color(.25f, .72f, .95f, 1);
     private static final Color GHOST_GLOW = new Color(.15f, .43f, .57f, 1);
     private static final float GHOST_OPACITY = .75f;
+    /** A destroyed unit's ghost ({@link #renderGhosts}): pale and fainter, not the plan's cyan. */
+    private static final Color DEAD = new Color(.78f, .8f, .84f, 1);
+    private static final Color DEAD_GLOW = new Color(.25f, .26f, .28f, 1);
+    private static final float DEAD_OPACITY = .3f;
     /** The marks the board hides show at this opacity (occluded selection outlines). */
     private static final float HIDDEN_OPACITY = .5f;
     // overlay.js:20-31 and 56-57: the bands of a contact, a wreck, another target and the hovered unit.
@@ -525,6 +529,27 @@ final class GpuBoardOverlay implements Disposable {
         try {
             ghostBatch.begin(camera);
             ghostBatch.render(ghost, ghostLight);
+            ghostBatch.end();
+        } finally { ghostBlend.end(); }
+    }
+
+    /**
+     * Destroyed units in the playback of what they still fired or took (GpuBattleView#ghost): pale copies of the
+     * instances the view placed for them, each at its share of {@link #DEAD_OPACITY}, drawn as the route's ghost is.
+     */
+    void renderGhosts(Camera camera, Map<ModelInstance, Float> shown) {
+        if (shown.isEmpty()) { return; }
+        ghostBlend.begin();
+        try {
+            ghostBatch.begin(camera);
+            shown.forEach((source, opacity) -> {
+                var ghost = new ModelInstance(source);
+                for (Material material : ghost.materials) {
+                    ghostly(material, DEAD, DEAD_GLOW);
+                    ((BlendingAttribute) material.get(BlendingAttribute.Type)).opacity = DEAD_OPACITY * opacity;
+                }
+                ghostBatch.render(ghost, ghostLight);
+            });
             ghostBatch.end();
         } finally { ghostBlend.end(); }
     }

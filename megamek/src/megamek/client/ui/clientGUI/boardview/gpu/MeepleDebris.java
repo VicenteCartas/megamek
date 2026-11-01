@@ -2,9 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.model.Node;
@@ -13,6 +11,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
+import com.badlogic.gdx.utils.LongMap;
 
 /**
  * A broken meeple's pieces as rigid bodies thrown by its explosion: away from the hits and out from its middle, under
@@ -21,20 +20,21 @@ import com.badlogic.gdx.math.collision.BoundingBox;
  */
 final class MeepleDebris {
     /** World units per second squared under standard gravity: faster than life, as a miniature's fall reads on the table. */
-    private static final float GRAVITY = 260;
+    private static final float GRAVITY = 450;
     private static final float STEP = 1 / 120f;
     /** Steps one frame may take: after a hitch the pieces slow down instead of passing through the ground. */
     private static final int MAX_STEPS = 12;
-    /** However the pieces bounce or catch, they have come to rest this long after the explosion. */
-    static final float MAX_SECONDS = 4;
-    private static final float RESTITUTION = .3f, FRICTION = .8f;
+    private static final float RESTITUTION = .2f, FRICTION = .8f;
     /**
      * How fast a piece touching the ground loses its speed and its spin, per second: rubble skids rather than rolls on,
      * but a slab on its edge still topples.
      */
-    private static final float GROUND_DRAG = 4, GROUND_SPIN_DRAG = 3;
-    /** A piece touching the ground this slowly, in world units and radians per second, for this long settles. */
-    private static final float SLEEP_SPEED = 4, SLEEP_SPIN = .8f, SLEEP_SECONDS = .35f;
+    private static final float GROUND_DRAG = 12, GROUND_SPIN_DRAG = 7;
+    /**
+     * A piece touching the ground this slowly, in world units and radians per second, for this long settles; besides
+     * the step of gravity the ground takes back from a resting piece, and the rocking of a piece on its corners.
+     */
+    private static final float SLEEP_SPEED = 4, SLEEP_SPIN = 2, SLEEP_SECONDS = .35f;
     /**
      * The explosion's push on a piece of average size, in world units per second: an internal blast low in the body,
      * outward from there, and the hits' momentum away from them, by each point of damage they dealt, at most
@@ -90,17 +90,14 @@ final class MeepleDebris {
     private final List<Body> bodies = new ArrayList<>();
     /** The ground the meeple stood on, where the board gives none. */
     private final float floor;
-    /** How far the pieces sink to disappear. */
-    final float depth;
     /**
      * The meeple's own ground, out to {@code reach} from its {@code middle}, and the height just above the ground it stood
      * on, from which the pieces look for what they land on ({@link Ground}).
      */
     private final Vector3 middle;
     private final float reach, from;
-    private final Map<Long, Float> heights = new HashMap<>(), steps = new HashMap<>();
-    private float seconds, pending;
-    private float settled = Float.NaN;
+    private final LongMap<Float> heights = new LongMap<>(), steps = new LongMap<>();
+    private float pending;
 
     /**
      * Throws the pieces under {@code pieces} from where they stand in {@code instance}.
@@ -123,7 +120,6 @@ final class MeepleDebris {
             bodies.add(new Body(piece, box, points.stream().map(point -> point.sub(center)).toArray(Vector3[]::new)));
         }
         floor = all.isValid() ? all.min.z : 0;
-        depth = all.isValid() ? all.getDepth() + 1 : 1;
         middle = all.isValid() ? all.getCenter(new Vector3()) : new Vector3();
         reach = all.isValid() ? Math.max(all.getWidth(), all.getHeight()) * .5f + CELL : 0;
         from = floor + CELL;
@@ -156,19 +152,9 @@ final class MeepleDebris {
         }
     }
 
-    /** The seconds after the explosion at which every piece had come to rest, or NaN while some still move. */
-    float settled() { return settled; }
-
     private void step(Ground ground, float gravity) {
-        if (!Float.isNaN(settled)) { return; }
-        seconds += STEP;
-        boolean moving = false;
         for (Body body : bodies) {
-            // The safeguard: whatever a piece is caught in, or however it drifts, it stops.
-            if (body.asleep || seconds >= MAX_SECONDS) {
-                body.asleep = true;
-                continue;
-            }
+            if (body.asleep) { continue; }
             body.velocity.z -= GRAVITY * gravity * STEP;
             body.position.mulAdd(body.velocity, STEP);
             float angle = body.spin.len() * STEP;
@@ -180,11 +166,11 @@ final class MeepleDebris {
                 body.velocity.scl(1 - GROUND_DRAG * STEP);
                 body.spin.scl(1 - GROUND_SPIN_DRAG * STEP);
             }
-            body.still = contact && body.velocity.len() < SLEEP_SPEED && body.spin.len() < SLEEP_SPIN ? body.still + STEP : 0;
+            // A slow piece rocking on its corners leaves the ground for a step now and then: that keeps its count.
+            boolean slow = body.velocity.len() < SLEEP_SPEED + GRAVITY * gravity * STEP && body.spin.len() < SLEEP_SPIN;
+            body.still = !slow ? 0 : contact ? body.still + STEP : body.still;
             body.asleep = body.still >= SLEEP_SECONDS;
-            moving |= !body.asleep;
         }
-        if (!moving) { settled = seconds; }
     }
 
     /** The deepest point below the ground pushes the piece out along the ground's normal there, and bounces it. */
@@ -243,7 +229,7 @@ final class MeepleDebris {
         return MathUtils.lerp(MathUtils.lerp(lowLeft, lowRight, across), MathUtils.lerp(highLeft, highRight, across), up);
     }
 
-    private float sample(Map<Long, Float> cache, float spacing, int column, int row, Ground ground) {
+    private float sample(LongMap<Float> cache, float spacing, int column, int row, Ground ground) {
         long key = ((long) column << 32) ^ (row & 0xffffffffL);
         Float cached = cache.get(key);
         if (cached != null) { return cached; }
@@ -260,11 +246,11 @@ final class MeepleDebris {
               height(x, y - half, ground) - height(x, y + half, ground), CELL).nor();
     }
 
-    /** Draws the pieces where they are, {@code sink} world units down into the ground. */
-    void pose(float sink) {
+    /** Draws the pieces where they are. */
+    void pose() {
         var motion = new Matrix4();
         for (Body body : bodies) {
-            motion.setToTranslation(body.position.x, body.position.y, body.position.z - sink).rotate(body.orientation)
+            motion.setToTranslation(body.position).rotate(body.orientation)
                   .translate(-body.rest.x, -body.rest.y, -body.rest.z);
             body.node.localTransform.set(inverse).mul(motion).mul(frame);
         }

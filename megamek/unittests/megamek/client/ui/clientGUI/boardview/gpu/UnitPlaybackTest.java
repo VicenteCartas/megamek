@@ -293,6 +293,67 @@ class UnitPlaybackTest {
     }
 
     @Test
+    void aTargetChargedOffTheBoardShowsUntilItsFallEndsLiveAndInItsReplay() {
+        // Facing north from (0, 1), the charge shoves its target at (0, 0) off the one-hex board; MegaMek removes it.
+        var charger = unit(1, 1);
+        var target = unit(2, 0);
+        var after = scene(charger);
+        var charge = attack(charger, target, ResolvedAttack.Kind.CHARGE, true);
+        var clock = new UnitAttack(charge);
+        float fall = clock.contactSeconds + UnitAttack.SHOVE_SECONDS + UnitAttack.PUSHED_OFF_FALL_SECONDS;
+        var speed = UnitMotion.Speed.NORMAL;
+        var playback = new UnitPlayback();
+        playback.accept(List.of(new BoardScene.SceneUpdate(scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
+              after, ignored -> false);
+        playback.advance((clock.contactSeconds + .05) / speed.rate, speed);
+        assertTrue(playback.present(after).units().contains(target), "The target goes over the edge after the contact");
+        playback.advance((fall - clock.contactSeconds - .1) / speed.rate, speed);
+        assertTrue(playback.present(after).units().contains(target), "It shows until its fall ends");
+        playback.advance(.1 / speed.rate, speed);
+        assertFalse(playback.present(after).units().contains(target));
+        playback.advance(100, speed);
+        assertFalse(playback.busy());
+        playback.review(charge);
+        playback.advance((clock.contactSeconds + .05) / speed.rate, speed);
+        assertTrue(playback.present(after).units().contains(target), "Its replay pushes it off again");
+        playback.advance(fall / speed.rate, speed);
+        assertFalse(playback.reviewing());
+        assertEquals(after.units(), playback.present(after).units());
+
+        // Skipped to the results, the push off never played: its replay tips the target off all the same.
+        var skipped = new UnitPlayback();
+        skipped.accept(List.of(new BoardScene.SceneUpdate(scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
+              after, ignored -> false);
+        skipped.advance(0, UnitMotion.Speed.INSTANT);
+        assertFalse(skipped.busy());
+        skipped.review(charge);
+        skipped.advance((clock.contactSeconds + .05) / speed.rate, speed);
+        assertTrue(skipped.present(after).units().contains(target));
+        assertTrue(skipped.attack().pushedOff(), "The replay after skipping goes over the edge, as the live one would have");
+    }
+
+    @Test
+    void aDeathFromAboveShovesOffTheBoardAsMegamekDisplacesIt() {
+        // From (0, 2) facing north, the shove's own hex (0, 0) is on the two-hex board. MegaMek removed the target, so a
+        // death from above took the next hex in its order, off the board; a charge shoves only along its facing.
+        var attacker = unit(1, 2);
+        var target = unit(2, 1);
+        var tiles = List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of()),
+              new BoardScene.Tile(new Coords(0, 1), 0, -1, false, 0, null, null, List.of(), List.of()));
+        var before = new BoardScene(0, 1, 2, tiles, List.of(attacker, target), List.of(), -1, "PHYSICAL", List.of());
+        var after = before.withUnits(List.of(attacker));
+        var speed = UnitMotion.Speed.NORMAL;
+        for (var kind : List.of(ResolvedAttack.Kind.DFA, ResolvedAttack.Kind.CHARGE)) {
+            var event = attack(attacker, target, kind, true);
+            var playback = new UnitPlayback();
+            playback.accept(List.of(new BoardScene.SceneUpdate(before), event, new BoardScene.SceneUpdate(after)), after,
+                  ignored -> false);
+            playback.advance((new UnitAttack(event).contactSeconds + .05) / speed.rate, speed);
+            assertEquals(kind == ResolvedAttack.Kind.DFA, playback.attack().pushedOff(), kind.name());
+        }
+    }
+
+    @Test
     void destructionFinishesBeforeRemovalAtEverySpeedAndCanBePausedOrSkipped() {
         var victim = unit(2, 5);
         var removed = scene();
@@ -312,7 +373,7 @@ class UnitPlaybackTest {
                 playback.togglePaused();
                 playback.advance(.001 / speed.rate, speed);
                 assertTrue(playback.present(removed).units().isEmpty());
-                double hold = UnitPlayback.COMPLETION_HOLD_SECONDS + UnitPlayback.DEATH_HOLD_SECONDS;
+                double hold = UnitPlayback.DEATH_HOLD_SECONDS;
                 assertEquals(hold, playback.holdSeconds(), 1e-5);
                 playback.advance(hold + .001, speed);
             }

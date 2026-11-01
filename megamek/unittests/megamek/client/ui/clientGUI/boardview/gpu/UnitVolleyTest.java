@@ -98,8 +98,8 @@ class UnitVolleyTest {
         assertFalse(playback.present(finalScene).units().contains(victim), "The volley's hits show while the death plays on");
         playback.advance((duration - contact - .01) / speed.rate, speed);
         assertEquals(death.duration, death.seconds, 1e-5);
-        double hold = UnitPlayback.COMPLETION_HOLD_SECONDS + UnitPlayback.DEATH_HOLD_SECONDS;
-        assertEquals(hold, playback.holdSeconds(), 1e-4, "A destruction holds a moment longer");
+        double hold = UnitPlayback.DEATH_HOLD_SECONDS;
+        assertEquals(hold, playback.holdSeconds(), 1e-4, "A destruction holds while its pieces settle");
         playback.advance(hold + .001, speed);
         assertFalse(playback.busy());
         assertEquals(finalScene.units(), playback.present(finalScene).units());

@@ -15487,6 +15487,9 @@ public class TWGameManager extends AbstractGameManager {
                 addReport(r);
             }
         }
+        // Before its damage and displacements, which the playback shows from the charge's contact.
+        sendAttackAnimation(ae, target, megamek.common.ResolvedAttack.Kind.CHARGE, -1, Entity.LOC_NONE,
+              rollValue >= toHit.getValue());
 
         // do we hit?
         if (rollValue < toHit.getValue()) {
@@ -15964,6 +15967,9 @@ public class TWGameManager extends AbstractGameManager {
             r.newlines = 0;
         }
         addReport(r);
+        // Before its damage, which the playback shows from the collision.
+        sendAttackAnimation(ae, target, megamek.common.ResolvedAttack.Kind.RAM, -1, Entity.LOC_NONE,
+              rollValue >= toHit.getValue());
 
         // do we hit?
         if (rollValue < toHit.getValue()) {
@@ -17045,6 +17051,9 @@ public class TWGameManager extends AbstractGameManager {
             }
 
         }
+        // Before its damage, displacements and fall, which the playback shows from the attacker's landing.
+        sendAttackAnimation(ae, target, megamek.common.ResolvedAttack.Kind.DFA, -1, Entity.LOC_NONE,
+              rollValue >= toHit.getValue());
 
         // if the DFA misses do the effects and exit
         if (targetEntity != null && rollValue < toHit.getValue()) {
@@ -28331,11 +28340,14 @@ public class TWGameManager extends AbstractGameManager {
     public void sendAttackAnimation(Entity attacker, Targetable target, megamek.common.ResolvedAttack.Kind kind,
           int equipmentIndex, int limb, boolean hit, megamek.common.ResolvedAttack.Shot shot,
           List<megamek.common.ResolvedAttack.Mount> firingMounts) {
+        // A Mek's limbs make the other physical attacks; any unit that charges, jumps on or rams another displaces or
+        // damages both, which plays from the attack's contact.
         if (attacker == null || target == null || attacker.getPosition() == null || target.getPosition() == null
               || attacker.getBoardId() != target.getBoardId()
               || kind != megamek.common.ResolvedAttack.Kind.SHOT && kind != megamek.common.ResolvedAttack.Kind.DEATH
                     && kind != megamek.common.ResolvedAttack.Kind.SHAKE_OFF && kind != megamek.common.ResolvedAttack.Kind.STOP_SWARM
-                    && !(attacker instanceof Mek)) {
+                    && kind != megamek.common.ResolvedAttack.Kind.CHARGE && kind != megamek.common.ResolvedAttack.Kind.DFA
+                    && kind != megamek.common.ResolvedAttack.Kind.RAM && !(attacker instanceof Mek)) {
             return;
         }
         var equipment = equipmentIndex < 0 ? null : attacker.getEquipment(equipmentIndex);

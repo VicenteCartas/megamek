@@ -121,6 +121,13 @@ final class MeepleAnimator {
             bank = motion.airborne(unit) ? -MathUtils.clamp(motion.turn(), -12, 12) * envelope
                   : MathUtils.sin(motion.steps() * MathUtils.PI2) * 1.5f * envelope;
         }
+        if (motion.moving() && motion.type() == EntityMovementType.MOVE_NONE && motion.steps() > 0) {
+            // Shoved into another hex, the token staggers there: it rocks over the way it goes and bounces on its base.
+            float stagger = MathUtils.sin(motion.progress() * MathUtils.PI) * upright;
+            pitch -= motion.forward() * 14 * stagger;
+            bank += motion.lateral() * 14 * stagger;
+            lift += stagger * BoardGeometry.level() * .15f;
+        }
         if (motion.jets() != null) { pitch -= motion.jets().tilt() * .35f; }
         if (converting) { pitch -= conversion.fold() * 12; }
         instance.transform.set(position, orientation)
@@ -129,14 +136,18 @@ final class MeepleAnimator {
         return model.anchor(instance, camera);
     }
 
-    /** Apply once after all units have their base pose, so contacts see the current target in either camera. */
+    /**
+     * Apply once after all units have their base pose, so contacts see the current target in either camera. A {@code
+     * ghost} of a destroyed unit stands.
+     */
     static void attacks(BoardScene.Unit unit, ModelInstance instance, List<UnitAttack> attacks,
-          Map<String, ModelInstance> instances) {
+          Map<String, ModelInstance> instances, boolean ghost) {
         float recoil = 0, impact = 0;
         var posture = posture(unit, UnitMotion.Sample.STILL);
         boolean prone = posture.crouch() > 0 || posture.fallen() > 0 || posture.kneel() > 0;
         float death = unit.model() != null && unit.model().state() != null && unit.model().state().pose().dead() ? 1 : 0;
-        var middle = UnitBounds.world(instance).getCenter(new Vector3());
+        var rest = UnitBounds.world(instance);
+        var middle = rest.getCenter(new Vector3());
         // Horizontal, away from the attackers of the hits landing now, each by how hard it lands.
         var away = new Vector3();
         for (var attack : attacks) {
@@ -163,7 +174,8 @@ final class MeepleAnimator {
                 var direction = endpoint.cpy().sub(center); direction.z = 0;
                 float radius = Math.max(UnitBounds.world(instance).getWidth(), UnitBounds.world(instance).getHeight()) * .5f;
                 float other = victim == null ? 0 : Math.max(UnitBounds.world(victim).getWidth(), UnitBounds.world(victim).getHeight()) * .5f;
-                attack.approach = direction.cpy().nor().scl(Math.max(0, direction.len() - radius - other))
+                // A death from above comes down on its target; the other attacks stop at its side.
+                attack.approach = direction.cpy().nor().scl(attack.dfa() ? direction.len() : Math.max(0, direction.len() - radius - other))
                       .limit(BoardGeometry.height() * UnitAttack.PHYSICAL_APPROACH_HEXES);
                 float heading = MathUtils.atan2(direction.x, direction.y) * MathUtils.radiansToDegrees;
                 attack.approachTurn = ((heading - unit.location().facing() * 60 + 540) % 360) - 180;
@@ -180,12 +192,16 @@ final class MeepleAnimator {
             float swing = punch ? (attack.event.result().limb() == megamek.common.units.Mek.LOC_LEFT_ARM ? 1 : -1)
                   * 18 * (attack.windup() - 1.7f * attack.strike()) : 0;
             if (club && !attack.thrust()) { swing = 38 * (attack.windup() - 1.7f * attack.strike()); }
-            tilt(instance, (kick ? 24 : club ? -25 : -16) * attack.strike(), swing, kick ? 0 : .5f);
+            // A charge or a ram slams in leaning from its feet, its whole body behind the blow; a death from above leaps
+            // and comes down feet first, on the target's top when it hits.
+            boolean slam = attack.charge() || attack.ram();
+            float lean = attack.dfa() ? 20 * attack.windup() : (kick ? 24 : club ? -25 : slam ? -24 : -16) * attack.strike();
+            tilt(instance, lean, swing, kick || slam ? 0 : .5f);
             if (club && attack.thrust()) {
                 var forward = new Vector3(0, 1, 0).rot(instance.transform); forward.z = 0;
                 instance.transform.trn(forward.nor().scl(BoardGeometry.level() * .2f * attack.strike()));
             }
-            instance.transform.trn(0, 0, hop);
+            instance.transform.trn(0, 0, attack.dfa() ? attack.leap(attack.landing(rest.min.z, victim)) : hop);
         }
         if (!prone) {
             tilt(instance, 3 * recoil, 0, .3f);
@@ -193,7 +209,7 @@ final class MeepleAnimator {
             if (away.isZero(1e-4f)) { tilt(instance, 5 * impact, 0, .3f); }
             else { tilt(instance, new Vector3(-away.y, away.x, 0).nor(), 5 * impact, 0, .3f); }
         }
-        if (death > 0 && posture(unit, UnitMotion.Sample.STILL).fallen() == 0) { tilt(instance, -80 * death, 0, 0); }
+        if (!ghost && death > 0 && posture(unit, UnitMotion.Sample.STILL).fallen() == 0) { tilt(instance, -80 * death, 0, 0); }
     }
 
     private static void turn(ModelInstance instance, float degrees) {

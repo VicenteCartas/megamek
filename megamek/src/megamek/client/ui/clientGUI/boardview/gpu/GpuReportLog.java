@@ -708,7 +708,7 @@ final class GpuReportLog {
         PSR_SUBJECTS.forEach(id -> kinds.put(id, Kind.PSR));
         Set.of(3115, 3116, 3117, 3119, 3120, 3124, 3126).forEach(id -> kinds.put(id, Kind.WEAPON));
         Set.of(4010, 4055, 4070, 4085, 4110, 4145, 4146, 4155, 4210, 4212, 4246, 4280, 4290, 4295, 4305, 4550, 4560,
-              4580).forEach(id -> kinds.put(id, Kind.PHYSICAL));
+              4580, 9030).forEach(id -> kinds.put(id, Kind.PHYSICAL));
         return Map.copyOf(kinds);
     }
 

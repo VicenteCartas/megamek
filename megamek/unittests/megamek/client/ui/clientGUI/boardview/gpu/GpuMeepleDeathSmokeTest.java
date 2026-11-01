@@ -102,7 +102,7 @@ class GpuMeepleDeathSmokeTest {
                                 capture(String.format("%.2fs-%d%d", seconds, close.getX(), close.getY()));
                             }
                         }
-                        for (; elapsed < MeepleDebris.MAX_SECONDS; elapsed += FRAME) { casualties.advance(FRAME, ground, 1); }
+                        for (; elapsed < MeepleCasualties.DEBRIS_SECONDS - FRAME; elapsed += FRAME) { casualties.advance(FRAME, ground, 1); }
                         view.boardCamera.center(atlas);
                         view.render();
                         capture("settled-iso");
@@ -112,9 +112,15 @@ class GpuMeepleDeathSmokeTest {
                         view.render();
                         capture("settled-top");
                         view.boardCamera.setIsometric(true);
-                        casualties.advance(MeepleCasualties.LIE_SECONDS + MeepleCasualties.SINK_SECONDS, ground, 1);
+                        // The pieces fade where they are, rather than sink.
+                        casualties.advance(FRAME + UnitAttack.FADE_SECONDS / 2, ground, 1);
                         view.render();
-                        assertTrue(casualties.casualties().isEmpty(), "Everything sinks away");
+                        capture("fading");
+                        var exploded = casualties.casualties().stream().filter(casualty -> casualty.unit.id() == 1).findFirst().orElseThrow();
+                        assertTrue(exploded.opacity() > 0 && exploded.opacity() < 1, "The pieces fade: " + exploded.opacity());
+                        casualties.advance(MeepleCasualties.LIE_SECONDS + UnitAttack.FADE_SECONDS, ground, 1);
+                        view.render();
+                        assertTrue(casualties.casualties().isEmpty(), "Everything fades away");
                         capture("gone");
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     } catch (Throwable error) { failure.set(error); }
@@ -180,7 +186,7 @@ class GpuMeepleDeathSmokeTest {
                             view.render();
                             capture(String.format("bridge-air-%.2fs", seconds));
                         }
-                        for (; elapsed < MeepleDebris.MAX_SECONDS; elapsed += FRAME) { casualties.advance(FRAME, ground, 1); }
+                        for (; elapsed < MeepleCasualties.DEBRIS_SECONDS - FRAME; elapsed += FRAME) { casualties.advance(FRAME, ground, 1); }
                         view.render();
                         capture("bridge-air-settled");
                         for (var casualty : casualties.casualties()) {

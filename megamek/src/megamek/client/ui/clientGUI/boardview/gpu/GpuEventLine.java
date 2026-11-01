@@ -116,6 +116,9 @@ final class GpuEventLine {
             case KICK -> text("PhysicalDisplay.kick");
             case PUSH -> text("PhysicalDisplay.push");
             case CLUB -> text("PhysicalDisplay.club");
+            case CHARGE -> text("MovementDisplay.butCharge");
+            case DFA -> text("MovementDisplay.butDfa");
+            case RAM -> text("MovementDisplay.butRam");
             default -> "";
         };
     }

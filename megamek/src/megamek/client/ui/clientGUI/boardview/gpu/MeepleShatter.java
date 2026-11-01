@@ -2,10 +2,11 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
@@ -117,34 +118,56 @@ final class MeepleShatter {
         if (length > 0) { for (int i = 0; i < 3; i++) { vertex[at + i] /= length; } }
     }
 
+    /** A meeple's pieces before they are meshes ({@link #model}), with the points each rests on. */
+    static final class Cut {
+        private final List<Channel> channels;
+        private final List<Piece> pieces;
+        private final List<List<Vector3>> supports;
+
+        private Cut(List<Channel> channels, List<Piece> pieces) {
+            this.channels = channels;
+            this.pieces = pieces;
+            supports = pieces.stream().map(piece -> supports(channels, piece)).toList();
+        }
+    }
+
     /**
      * Breaks the drawn parts of {@code source}, in its own coordinates (where camouflage was projected), along {@code
      * cuts} planes: one slanted across its extrusion axis {@code up}, the others steep or oblique around it. Every cut
      * is closed by its section, filled in the part that holds the source's painted walls ({@code "paint"}) or else its
-     * first. The source must be closed. The pieces share its materials; the model owns only the new meshes.
-     *
-     * @return a model whose node {@code rootId} has one child per piece, {@link #PIECE} and its number, at rest
+     * first. The source must be closed. Its parts are read here, on the thread that owns their meshes; the cut needs no
+     * GL context and can run ahead of the explosion on another thread.
      */
-    static Model build(Node source, Vector3 up, int cuts, int seed, String rootId) {
+    static Supplier<Cut> cutter(Node source, Vector3 up, int cuts, int seed) {
+        List<Channel> channels = channels(source);
+        FloatArray[] triangles = channels.stream().map(MeepleShatter::triangles).toArray(FloatArray[]::new);
+        return () -> cut(channels, triangles, up, cuts, seed);
+    }
+
+    private static List<Channel> channels(Node source) {
         List<Channel> channels = new ArrayList<>();
         for (NodePart part : source.parts) {
             if (part.enabled && part.meshPart.primitiveType == GL20.GL_TRIANGLES && part.meshPart.size > 0) {
                 channels.add(new Channel(part));
             }
         }
+        return channels;
+    }
+
+    private static Cut cut(List<Channel> channels, FloatArray[] triangles, Vector3 up, int cuts, int seed) {
         var axis = new Vector3(up).nor();
         var whole = Piece.empty(channels.size(), List.of(axis));
         var bounds = new BoundingBox().inf();
         var point = new Vector3();
         for (int index = 0; index < channels.size(); index++) {
             Channel channel = channels.get(index);
-            whole.triangles()[index] = triangles(channel);
+            whole.triangles()[index] = triangles[index];
             for (int at = 0; at < whole.triangles()[index].size; at += channel.stride) {
                 bounds.ext(channel.position(whole.triangles()[index].items, at, point));
             }
         }
         List<Piece> pieces = new ArrayList<>(List.of(whole));
-        if (!bounds.isValid()) { return model(rootId, channels, pieces); }
+        if (!bounds.isValid()) { return new Cut(channels, pieces); }
         Channel faces = channels.stream().filter(channel -> "paint".equals(channel.part.material.id)).findFirst()
               .orElse(channels.getFirst());
         var across = new Vector3(axis).crs(Math.abs(axis.x) < .9f ? Vector3.X : Vector3.Y).nor();
@@ -162,7 +185,7 @@ final class MeepleShatter {
             for (Piece piece : pieces) { split(channels, faces, piece, normal, offset, next); }
             pieces = next;
         }
-        return model(rootId, channels, pieces);
+        return new Cut(channels, pieces);
     }
 
     /** The part's triangles, unindexed, as vertex records. */
@@ -287,8 +310,21 @@ final class MeepleShatter {
         channel.add(result, corners[0], corners[1], corners[2]);
     }
 
-    /** One mesh per channel holds every piece's triangles; each piece draws its own range of it. */
-    private static Model model(String rootId, List<Channel> channels, List<Piece> pieces) {
+    /**
+     * The cut's pieces as a model, in the materials {@code source} draws now, which they share; the model owns only the
+     * new meshes. One mesh per channel holds every piece's triangles; each piece draws its own range of it.
+     *
+     * @return a model whose node {@code rootId} has one child per piece, {@link #PIECE} and its number, at rest; null
+     *       when the source no longer draws the meshes the cut was made of
+     */
+    static Model model(String rootId, Node source, Cut cut) {
+        List<Channel> channels = channels(source);
+        if (channels.size() != cut.channels.size()) { return null; }
+        for (int index = 0; index < channels.size(); index++) {
+            MeshPart now = channels.get(index).part.meshPart, then = cut.channels.get(index).part.meshPart;
+            if (now.mesh != then.mesh || now.offset != then.offset || now.size != then.size) { return null; }
+        }
+        List<Piece> pieces = cut.pieces;
         var model = new Model();
         var root = new Node();
         root.id = rootId;
@@ -299,7 +335,12 @@ final class MeepleShatter {
             node.id = PIECE + index;
             root.addChild(node);
             nodes.add(node);
-            markers(node, channels, pieces.get(index));
+            for (Vector3 support : cut.supports.get(index)) {
+                var marker = new Node();
+                marker.id = SUPPORT;
+                marker.translation.set(support);
+                node.addChild(marker);
+            }
         }
         for (int index = 0; index < channels.size(); index++) {
             Channel channel = channels.get(index);
@@ -332,30 +373,56 @@ final class MeepleShatter {
      * of a {@link #SURFACE_CELLS}-cubed grid over its bounds that the surface crosses: a rock under the middle of a face
      * holds the piece up rather than pass through it.
      */
-    private static void markers(Node node, List<Channel> channels, Piece piece) {
+    private static List<Vector3> supports(List<Channel> channels, Piece piece) {
         List<Vector3> directions = new ArrayList<>(AXES);
         directions.addAll(piece.cuts());
         Set<Vector3> supports = new LinkedHashSet<>();
         var point = new Vector3();
         var bounds = new BoundingBox().inf();
-        for (Vector3 direction : directions) {
-            float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-            Vector3 lowest = null, highest = null;
-            for (int index = 0; index < channels.size(); index++) {
-                FloatArray triangles = piece.triangles()[index];
-                for (int at = 0; at < triangles.size; at += channels.get(index).stride) {
-                    float along = channels.get(index).position(triangles.items, at, point).dot(direction);
-                    if (along < low) { low = along; lowest = new Vector3(point); }
-                    if (along > high) { high = along; highest = new Vector3(point); }
+        // One pass over the vertices for every direction: where each one's lowest and highest vertex lies.
+        int count = directions.size();
+        float[] x = new float[count], y = new float[count], z = new float[count];
+        for (int direction = 0; direction < count; direction++) {
+            x[direction] = directions.get(direction).x;
+            y[direction] = directions.get(direction).y;
+            z[direction] = directions.get(direction).z;
+        }
+        float[] low = new float[count], high = new float[count];
+        int[] lowChannel = new int[count], lowAt = new int[count], highChannel = new int[count], highAt = new int[count];
+        Arrays.fill(low, Float.POSITIVE_INFINITY);
+        Arrays.fill(high, Float.NEGATIVE_INFINITY);
+        for (int index = 0; index < channels.size(); index++) {
+            var channel = channels.get(index);
+            FloatArray triangles = piece.triangles()[index];
+            for (int at = 0; at < triangles.size; at += channel.stride) {
+                channel.position(triangles.items, at, point);
+                for (int direction = 0; direction < count; direction++) {
+                    float along = point.x * x[direction] + point.y * y[direction] + point.z * z[direction];
+                    if (along < low[direction]) {
+                        low[direction] = along;
+                        lowChannel[direction] = index;
+                        lowAt[direction] = at;
+                    }
+                    if (along > high[direction]) {
+                        high[direction] = along;
+                        highChannel[direction] = index;
+                        highAt[direction] = at;
+                    }
                 }
             }
-            if (lowest == null) { return; }
+        }
+        if (low[0] == Float.POSITIVE_INFINITY) { return List.of(); }
+        for (int direction = 0; direction < count; direction++) {
+            var lowest = channels.get(lowChannel[direction])
+                  .position(piece.triangles()[lowChannel[direction]].items, lowAt[direction], new Vector3());
+            var highest = channels.get(highChannel[direction])
+                  .position(piece.triangles()[highChannel[direction]].items, highAt[direction], new Vector3());
             supports.add(lowest);
             supports.add(highest);
             bounds.ext(lowest).ext(highest);
         }
         var size = bounds.getDimensions(new Vector3());
-        Set<Integer> cells = new HashSet<>();
+        boolean[] cells = new boolean[SURFACE_CELLS * SURFACE_CELLS * SURFACE_CELLS];
         var a = new Vector3();
         var b = new Vector3();
         var c = new Vector3();
@@ -374,17 +441,16 @@ final class MeepleShatter {
                 for (int i = 0; i <= steps; i++) {
                     for (int j = 0; i + j <= steps; j++) {
                         point.set(a).mulAdd(b, (float) i / steps).mulAdd(c, (float) j / steps);
-                        if (cells.add(cell(point, bounds.min, size))) { supports.add(new Vector3(point)); }
+                        int cell = cell(point, bounds.min, size);
+                        if (!cells[cell]) {
+                            cells[cell] = true;
+                            supports.add(new Vector3(point));
+                        }
                     }
                 }
             }
         }
-        for (Vector3 support : supports) {
-            var marker = new Node();
-            marker.id = SUPPORT;
-            marker.translation.set(support);
-            node.addChild(marker);
-        }
+        return List.copyOf(supports);
     }
 
     /** The largest share of the piece's bounds {@code size} that {@code edge} spans along any axis. */

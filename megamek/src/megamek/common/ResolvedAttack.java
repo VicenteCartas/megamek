@@ -220,5 +220,5 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
         return Stream.of(mount);
     }
 
-    public enum Kind { SHOT, PUNCH, KICK, PUSH, CLUB, DEATH, BRUSH_OFF, SHAKE_OFF, STOP_SWARM }
+    public enum Kind { SHOT, PUNCH, KICK, PUSH, CLUB, DEATH, BRUSH_OFF, SHAKE_OFF, STOP_SWARM, CHARGE, DFA, RAM }
 }

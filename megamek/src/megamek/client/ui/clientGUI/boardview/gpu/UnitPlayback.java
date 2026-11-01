@@ -19,8 +19,11 @@ import megamek.common.units.EntityMovementType;
 /** One GL-owned event queue for both cameras. The game remains free to receive updates while it plays. */
 final class UnitPlayback {
     static final double COMPLETION_HOLD_SECONDS = 1;
-    /** How much longer the playback holds on an action in which a unit died, while its destruction plays out. */
-    static final double DEATH_HOLD_SECONDS = 1;
+    /**
+     * How long the playback holds on an action in which a unit died, in place of {@link #COMPLETION_HOLD_SECONDS}, while
+     * its pieces settle: with the death's slow motion, the next action begins about two seconds after the explosion.
+     */
+    static final double DEATH_HOLD_SECONDS = .8;
     static final int MAX_PENDING_EVENTS = 512;
     /** Maximum spread between a unit's weapon launches, in shared animation seconds. */
     static final float VOLLEY_JITTER_SECONDS = .12f;
@@ -57,6 +60,8 @@ final class UnitPlayback {
     private BoardScene.Animation stepFrom;
     /** A retained attack that a review re-presents over the waiting live queue (A.10), or null. */
     private UnitAttack review;
+    /** The shoves that pushed their target off the board as they played live, which a review of them plays again. */
+    private final Set<UUID> pushedOffResults = new HashSet<>();
     private List<UnitAttack> reviewed = List.of();
     private Predicate<BoardScene.Unit> transports = ignored -> false;
     private final Consumer<BoardScene.Movement> completeMovement;
@@ -252,7 +257,8 @@ final class UnitPlayback {
                     settleConversion(change);
                 }
                 applySceneUpdates();
-                hold = (pending.peekFirst() instanceof BoardScene.AttachmentChange
+                hold = attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS
+                      : pending.peekFirst() instanceof BoardScene.AttachmentChange
                       || active instanceof BoardScene.AttachmentChange && pending.peekFirst() instanceof BoardScene.Movement
                       || pending.peekFirst() instanceof BoardScene.Combat next
                             && (next.result().kind() == megamek.common.ResolvedAttack.Kind.BRUSH_OFF
@@ -260,7 +266,7 @@ final class UnitPlayback {
                       // A unit that died in its own movement, as a fall, dies as it lands.
                       || active instanceof BoardScene.Movement move && pending.peekFirst() instanceof BoardScene.Combat death
                             && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == move.entityId()
-                      ? 0 : COMPLETION_HOLD_SECONDS) + (attacks.stream().anyMatch(UnitAttack::death) ? DEATH_HOLD_SECONDS : 0);
+                      ? 0 : COMPLETION_HOLD_SECONDS;
                 if (stepping && active != stepFrom) {
                     // stepOnce(): one more action has played; the queue waits again.
                     stepping = false;
@@ -378,19 +384,97 @@ final class UnitPlayback {
         return ids;
     }
 
-    /** Interpolate only a displacement actually present in the post-resolution checkpoint. */
+    /**
+     * Interpolate only a displacement actually present in the post-resolution checkpoint, or for a reviewed shove in
+     * the live scene.
+     */
     void placeDisplacement(BoardScene.Unit unit, com.badlogic.gdx.math.Vector3 position) {
         if (reactions.stream().anyMatch(reaction -> reaction.movement().entityId() == unit.id())) { return; }
-        if (attack == null || attack.event.result().kind() != megamek.common.ResolvedAttack.Kind.PUSH
-              || !attack.event.result().hit() || beforeImpact()) { return; }
-        var before = unit.id() == attack.event.entityId() ? attack.event.attacker()
-              : attack.event.target() != null && unit.id() == attack.event.target().id() ? attack.event.target() : null;
+        var shove = attack();
+        if (shove == null || !shove.shoves() || !shove.event.result().hit() || shove.seconds + 1e-7 < shove.contactSeconds) {
+            return;
+        }
+        var before = unit.id() == shove.event.entityId() ? shove.event.attacker()
+              : shove.event.target() != null && unit.id() == shove.event.target().id() ? shove.event.target() : null;
         if (before == null || before.location().coords().equals(unit.location().coords())) { return; }
-        float progress = com.badlogic.gdx.math.MathUtils.clamp((attack.seconds - attack.contactSeconds)
+        float progress = com.badlogic.gdx.math.MathUtils.clamp((shove.seconds - shove.contactSeconds)
               / UnitAttack.RECOVERY_SECONDS, 0, 1);
         progress *= progress * (3 - 2 * progress);
         var origin = BoardGeometry.center(before.location().coords(), before.location().elevation());
         position.set(origin.lerp(position, progress));
+    }
+
+    /**
+     * The shove under way, a reviewed one included, that pushed {@code unit} off the board, which poses it going over
+     * the edge ({@link UnitAttack#posePushedOff}); null for any other unit.
+     */
+    UnitAttack pushedOff(BoardScene.Unit unit) {
+        for (var shot : attacks()) {
+            var target = shot.event.target();
+            if (shot.pushedOff() && shot.seconds < shot.duration && target != null && target.id() == unit.id()) {
+                return shot;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Marks a shove that landed as having pushed its target off the board, when {@code scene} has lost the target and a
+     * hex it may have been shoved into is off the board: the first in MegaMek's order ({@link UnitAttack#shoveHexes}),
+     * as the ones before it on the board would have taken the target. MegaMek removes a unit pushed off. A target that
+     * dies where it stood is not off the board; a review plays again only a push off that played live, not a target the
+     * game has removed since for another reason.
+     */
+    private boolean pushOff(UnitAttack shot, BoardScene scene) {
+        if (shot.pushedOff() || shot.seconds < shot.contactSeconds
+              || shot == review && !pushedOffResults.contains(shot.event.result().id())) {
+            return false;
+        }
+        var hex = offBoard(shot, scene, shot != review);
+        if (hex == null) { return false; }
+        shot.pushOff(hex);
+        pushedOffResults.add(shot.event.result().id());
+        return true;
+    }
+
+    /**
+     * The hex off the board a shove that hit pushed its target into, when {@code scene}, the checkpoint after it, has
+     * lost the target; null otherwise, and while {@code live} also when the live playback holds the target's death.
+     */
+    private megamek.common.board.Coords offBoard(UnitAttack shot, BoardScene scene, boolean live) {
+        var target = shot.event.target();
+        if (scene == null || !shot.shoves() || !shot.event.result().hit() || target == null
+              || scene.units().stream().anyMatch(unit -> unit.id() == target.id()) || live && dies(target.id())) {
+            return null;
+        }
+        return shot.shoveHexes().stream().filter(hex -> scene.tile(hex) == null).findFirst().orElse(null);
+    }
+
+    /**
+     * Records the skipped shoves ({@link #finish}) that pushed their target off the board in {@code scene}, the
+     * checkpoint after them, as if they had played: a review of one tips its target off again.
+     */
+    private void recordPushedOff(List<UnitAttack> skipped, BoardScene scene) {
+        skipped.stream().filter(shot -> offBoard(shot, scene, true) != null)
+              .forEach(shot -> pushedOffResults.add(shot.event.result().id()));
+        skipped.clear();
+    }
+
+    /** Whether the live playback holds the unit's death, under way or queued. */
+    private boolean dies(int id) {
+        return attacks.stream().anyMatch(attack -> attack.death() && attack.event.entityId() == id)
+              || pending.stream().anyMatch(event -> event instanceof BoardScene.Combat death
+                    && death.result().kind() == megamek.common.ResolvedAttack.Kind.DEATH && death.entityId() == id);
+    }
+
+    /**
+     * Whether a shove that hit put {@code captured}, its target, into a hex it shoves to, or its attacker into the hex
+     * the target left: a review shows that move, and no later one.
+     */
+    private static boolean shoved(UnitAttack shove, BoardScene.Unit captured, megamek.common.board.Coords at) {
+        var target = shove.event.target();
+        return target != null && (captured.id() == target.id() ? shove.shoveHexes().contains(at)
+              : at.equals(target.location().coords()));
     }
 
     /**
@@ -530,6 +614,8 @@ final class UnitPlayback {
 
     void finish() {
         attacks.forEach(this::completeAttack);
+        // The shoves skipped before their checkpoint; one already past it pushed its target off as it played.
+        List<UnitAttack> skipped = new ArrayList<>(attacks.stream().filter(shot -> !shot.pushedOff()).toList());
         if (active instanceof BoardScene.Detonation event) { startDetonation(event); }
         motions.values().forEach(UnitMotion::finish);
         if (!completed) { reactions.forEach(reaction -> completeMovement.accept(reaction.movement())); }
@@ -538,22 +624,29 @@ final class UnitPlayback {
         } else if (active instanceof BoardScene.Conversion change) {
             settleConversion(change);
         }
-        if (volleyScene != null) { settledScene = volleyScene; }
+        if (volleyScene != null) {
+            settledScene = volleyScene;
+            recordPushedOff(skipped, settledScene);
+        }
         for (var event : pending) {
             if (event instanceof BoardScene.SceneUpdate update) {
                 settledScene = update.scene();
+                recordPushedOff(skipped, settledScene);
             } else if (event instanceof BoardScene.Movement movement) {
                 start(movement).finish();
                 completeMovement.accept(movement);
             } else if (event instanceof BoardScene.Conversion change) {
                 settleConversion(change);
             } else if (event instanceof BoardScene.Combat combat) {
-                completeAttack(new UnitAttack(combat));
+                var shot = new UnitAttack(combat);
+                completeAttack(shot);
+                skipped.add(shot);
             } else if (event instanceof BoardScene.Detonation detonation) {
                 detonationStarted = false;
                 startDetonation(detonation);
             }
         }
+        recordPushedOff(skipped, settledScene);
         resetQueue();
     }
 
@@ -638,20 +731,44 @@ final class UnitPlayback {
                 combatDuration = Math.max(combatDuration, attachmentStart + UnitAttachmentMotion.DURATION);
             } else { break; }
         }
+        // A target pushed off the board goes over the edge and falls before the action completes.
+        for (var shot : attacks) {
+            if (!completed && pushOff(shot, settledScene)) {
+                combatDuration = Math.max(combatDuration, shot.delay + shot.duration);
+            }
+        }
     }
 
     /**
      * Retain only captured, authorized appearance until its event plays; no later loadout or damage leaks forward. A
-     * reviewed attack shows its captured attacker and target until its impact, over the live tiles (A.10).
+     * reviewed attack shows its captured attacker and target until its impact, over the live tiles (A.10); after it,
+     * the live units. Until it ends, a participant the game has removed since (destroyed, pushed off the board) stays as
+     * captured, and one moved since stays where it was; a shove that hit moves its participants to their live hexes
+     * ({@link #placeDisplacement}).
      */
     BoardScene present(BoardScene scene) {
         BoardScene live = presentLive(scene);
-        if (review == null || review.seconds + 1e-7 >= review.contactSeconds) {
+        if (review == null) {
             return live;
         }
         Map<Drawn, BoardScene.Unit> shown = new LinkedHashMap<>();
-        holdUnits(review.event, shown, true);
-        return live.withUnits(replaced(live.units(), shown));
+        if (review.seconds + 1e-7 < review.contactSeconds) {
+            holdUnits(review.event, shown, true);
+        } else {
+            pushOff(review, live);
+            boolean displaces = review.shoves() && review.event.result().hit();
+            for (var captured : java.util.Arrays.asList(review.event.attacker(), review.event.target())) {
+                var now = captured == null ? null : live.units().stream()
+                      .filter(unit -> Drawn.of(unit).equals(Drawn.of(captured))).findFirst().orElse(null);
+                if (captured != null && now == null) {
+                    hold(shown, captured);
+                } else if (captured != null && !now.location().coords().equals(captured.location().coords())
+                      && !(displaces && shoved(review, captured, now.location().coords()))) {
+                    hold(shown, now.at(captured.location()));
+                }
+            }
+        }
+        return shown.isEmpty() ? live : live.withUnits(replaced(live.units(), shown));
     }
 
     private BoardScene presentLive(BoardScene scene) {
@@ -692,6 +809,8 @@ final class UnitPlayback {
         }
         pending.forEach(event -> holdUnits(event, shown, false));
         reactions.forEach(reaction -> holdUnits(reaction.movement(), shown, true));
+        attacks.stream().filter(shot -> shot.pushedOff() && shot.seconds < shot.duration)
+              .forEach(shot -> hold(shown, shot.event.target()));
         if (attachment != null && attachment.progress() < 1) {
             // Keep the released figures until they reach the resolved endpoint, even when damage removes them.
             var change = attachment.event;
