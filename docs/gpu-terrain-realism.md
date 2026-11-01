@@ -123,8 +123,8 @@ backgrounds. This does not change emission or lens effects in the live board vie
 | `GpuGroundDamage.COMBAT_SCARS` | `true` | Source constant for [combat scars](gpu-terrain-materials.md#combat-scars), independent of ambient wear. |
 
 Elevation grading leaves level zero unchanged. Uphill, one scalar exposure curve
-keeps RGB ratios and bright texture variation; valleys darken and warm, and fungus
-has a stronger cue down to level -6. The first level below 0 also steps 10% darker,
+keeps RGB ratios and bright texture variation; valleys darken and warm down to level -6 (beds under water to
+-1.5); fungus lifts more strongly uphill. Level -1 is 12.5% darker in all,
 so a recession reads at a glance (near-white snow, which barely lifts uphill, 5% in all);
 the step fades out on beds under water. It applies to the completed material colour of ground and Classic column
 artwork before lighting, and grass blades, crops, sedge and roads share its downhill

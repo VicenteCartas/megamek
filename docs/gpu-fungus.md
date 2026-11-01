@@ -36,15 +36,14 @@ Their Material Maker projects are `fungus-ground`, `fungus-debris`, `fungus-clif
 `python tools/materials/export.py`, run from the mm-data root, exports all projects as
 Godot 4 Standard materials ([board materials](gpu-board-materials.md)).
 
-The shared `levelGrade` helper starts fungus with a darker, richer pigment, then
-progressively lightens it uphill with a scalar linear-light gain and a small,
-bounded reduction in chroma; sublevels darken toward plum. It does not mix in white,
+The shared `levelGrade` helper lightens fungus uphill more strongly than other ground,
+with a scalar linear-light gain and a small, bounded reduction in chroma; downhill it
+darkens exactly as every other ground does. It does not mix in white,
 so the elevation cue retains the underlying pigment and texture contrast.
 Grading happens after the four roles combine, so the cyan crust receives the same
 elevation treatment as the underlying skin, slopes and cliffs. The curve follows
 continuous world height and eases at extreme elevations rather than bleaching to
-white. Captured contact weights blend the treatment at theme boundaries. Negative
-levels keep separate tones down to -6; other materials use the ordinary grade.
+white. Captured contact weights blend the treatment at theme boundaries.
 
 ## Bioluminescence and mist
 

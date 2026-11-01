@@ -51,9 +51,9 @@ class GpuElevationGradeSmokeTest {
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "elevation-grade");
                     assertTrue(output.isDirectory() || output.mkdirs());
                     double[] baseline = null;
-                    double[] shallow = null;
+                    double[] deepest = null;
                     double previousGround = Double.POSITIVE_INFINITY;
-                    for (int level : new int[] { 2, 0, -1, -2, -10, -30 }) {
+                    for (int level : new int[] { 2, 0, -1, -2, -6, -30 }) {
                         BoardScene scene = scene(level);
                         terrain.update(scene);
                         camera.center(BoardGeometry.center(CENTER, level));
@@ -64,15 +64,16 @@ class GpuElevationGradeSmokeTest {
                         double[] samples = samples(scene, camera);
                         assertTrue(samples[0] <= previousGround + 1, "Lower ground must not get lighter");
                         if (level == 0) { baseline = samples; }
-                        if (level == -2) { shallow = samples; }
+                        if (level == -6) { deepest = samples; }
                         if (level < 0) {
                             assertTrue(samples[0] < baseline[0], "Below-zero ground still darkens");
                             assertTrue(samples[1] > baseline[1] * .6, "Boulders retain visible texture at level " + level);
                         }
-                        if (level < -2) {
+                        if (level < -6) {
+                            // The grade eases to its deepest at level -6: ground and boulders keep it together below.
                             // Cross-multiplied: the unlit ground may read 0 at both levels.
-                            assertEquals(samples[0] * shallow[1], samples[1] * shallow[0], .05 * shallow[0] * shallow[1],
-                                  "Ground and boulders must darken together at level " + level);
+                            assertEquals(samples[0] * deepest[1], samples[1] * deepest[0], .05 * deepest[0] * deepest[1],
+                                  "Ground and boulders must keep the deepest grade together at level " + level);
                         }
                         previousGround = samples[0];
                     }

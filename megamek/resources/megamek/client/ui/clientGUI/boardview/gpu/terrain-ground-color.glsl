@@ -20,42 +20,34 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
-// The first level below 0 also steps down by a tenth, so a recession reads at a glance; deeper levels ease on as
-// before. dry fades that step out under water, whose depth already darkens its bed.
+// The first level below 0 also steps down, so a recession reads at a glance: 12.5% darker in all with the eased
+// grade at level -1; deeper levels ease on down to level -6. dry fades that step out under water, whose depth already darkens its bed, and there keeps the
+// grade above level -1.5.
 vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     if (level == 0.0) return c;
-    level = max(level, mix(-1.5, -6.0, fungus));
+    level = max(level, mix(-1.5, -6.0, dry));
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0));
     float down = 6.0 * (1.0 - exp(-max(-level, 0.0) / 6.0));
-    // Retain the original eased valley warmth, darkening and stronger fungal height cue.
-    c *= mix(vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down),
-          vec3(1.0, 1.0 - .025 * down, 1.0 - .006 * down), fungus);
-    float saturation = 1.0 + fungus * (-.04 * up + .02 * down);
+    // Every family darkens and warms alike downhill; fungus keeps its stronger, paler lift uphill.
+    c *= vec3(1.0, 1.0 - .01 * down, 1.0 - .04 * down);
     float luma = dot(c, vec3(.2126, .7152, .0722));
-    if (saturation > 1.0 && luma > 0.0 && luma < 1.0) {
-        // Normalize chroma to the nearer boundary of its constant-luminance RGB ray. The rational gain
-        // increases chroma without crossing that boundary; an already saturated endpoint stays unchanged.
-        float low = min(c.r, min(c.g, c.b)), high = max(c.r, max(c.g, c.b));
-        float extent = max((luma - low) / luma, (high - luma) / (1.0 - luma));
-        saturation /= 1.0 + (saturation - 1.0) * extent;
-    }
-    c = mix(vec3(luma), c, saturation);
+    c = mix(vec3(luma), c, 1.0 - fungus * .04 * up);
     float exposure = exp2(mix(.10, .16, fungus) * up);
     float peak = max(c.r, max(c.g, c.b));
     // Map peak p to e*p/(1+(e-1)*p), with positive derivative even at bright texture samples.
     // The one scalar preserves RGB ratios; it does not clamp separate channels or force a new white ceiling.
     c *= exposure / (1.0 + (exposure - 1.0) * peak);
-    return c * (1.0 - mix(.06, .07, fungus) * down) * (1.0 - .1 * dry * clamp(-level, 0.0, 1.0));
+    return c * (1.0 - .06 * down) * (1.0 - .065 * dry * clamp(-level, 0.0, 1.0));
 }
 
 vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0, 1.0); }
 
 // Near-white snow barely lifts uphill under the exposure curve, so the common downhill grade and step would mark a
-// snowfield's hollows far more than its hills: snow darkens 5% for the first level down instead, easing on and stopping
-// at level -1.5 as the common grade does.
+// snowfield's hollows far more than its hills: snow darkens 5% for the first level down instead, easing on down to
+// level -6 as the common grade does.
 vec3 snowLevelGrade(vec3 c, float level) {
     if (level >= 0.0) return levelGrade(c, level);
-    float down = (1.0 - exp(max(level, -1.5) / 6.0)) / (1.0 - exp(-1.0 / 6.0));
+    float down = (1.0 - exp(max(level, -6.0) / 6.0)) / (1.0 - exp(-1.0 / 6.0));
     return c * (1.0 - .05 * down);
 }
 
