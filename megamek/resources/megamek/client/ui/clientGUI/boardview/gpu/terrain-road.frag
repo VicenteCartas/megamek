@@ -48,6 +48,8 @@ uniform sampler2DArray u_sculptColors, u_sculptData;
 #define FINISH_LAYERS u_sculptData
 flat in vec4 v_roadCoat;
 #endif
+uniform float u_levelHeight;
+// terrain-ground-color-functions
 
 // ground-surface-functions
 // Those shared functions are inserted just before main, after the helpers below.
@@ -685,6 +687,8 @@ void main() {
         coverFinish(finish, soilMud);
     }
 #endif
+    // Roads share their ground's step down into a recession; the uphill lift stays the ground's alone.
+    albedo = levelGrade(materialReflectance(albedo), min(v_cloudPosition.z / u_levelHeight, 0.0));
 #if defined(roadMaskFlag) && __VERSION__ < 450
     // Without the quad vote, a hidden lane skips the lighting; the vote keeps whole quads, whose lanes all light so
     // that the shadow receiver's derivatives (sculptShadow) read live neighbours. The hidden ones go at the end.

@@ -22,6 +22,8 @@ uniform vec3 u_meadowFinish;
 // Sedge's finish (GpuBiomeVegetation.Kind): roughness, metallic and scattering; emission.
 uniform vec3 u_biomeFinish, u_biomeGlow;
 #endif
+uniform float u_levelHeight;
+// terrain-ground-color-functions
 
 void main() {
     // An upward-biased normal approximates the many sunlit leaves in a tuft without black card-like speckles.
@@ -61,6 +63,8 @@ void main() {
 #endif
     albedo = wetAlbedo(albedo, u_wetness * .25);
     albedo = materialReflectance(albedo);
+    // Plants share their ground's step down into a recession; the uphill lift stays the ground's alone.
+    albedo = levelGrade(albedo, min(v_cloudPosition.z / u_levelHeight, 0.0));
 #ifdef lightingFlag
 #ifdef biomeVegetationFlag
     // The cutout contains a whole clump. Its existing aggregate normal is the represented material frame.

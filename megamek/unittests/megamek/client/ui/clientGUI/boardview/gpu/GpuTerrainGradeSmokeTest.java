@@ -110,6 +110,10 @@ class GpuTerrainGradeSmokeTest {
         var ordinary = probe.grade(new float[] { .25f, .25f, .25f }, 3, 0);
         var fungal = probe.grade(new float[] { .25f, .25f, .25f }, 3, 1);
         assertTrue(fungal[0] > ordinary[0] + .005, "Fungus retains its intentionally stronger elevation cue");
+        for (float fungus : new float[] { 0, 1 }) {
+            var sunk = probe.grade(new float[] { .5f, .5f, .5f }, -1, fungus);
+            assertTrue(sunk[1] < .5f * .75f, "Level -1 reads a clear step darker than level 0 (fungus " + fungus + ")");
+        }
     }
 
     private static void review(GpuShaderManager manager) throws Exception {
@@ -352,7 +356,7 @@ class GpuTerrainGradeSmokeTest {
                   layout(location=0) out vec4 fragColor;
                   void main() {
                       fragColor=vec4(u_reviewGrade == 0 ? authoredPigmentGain(u_pigment)
-                            : levelGrade(u_pigment, u_level, u_fungus),1);
+                            : levelGrade(u_pigment, u_level, u_fungus, 1.0),1);
                   }
                   """;
             shader = GpuGlsl.compile("Authored pigment and elevation probe", GpuShaderSource.read("atmosphere.vert"), fragment);

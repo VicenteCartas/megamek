@@ -839,7 +839,7 @@ void main() {
         // The final material coverage includes height competition and sediment transfer at mixed contacts.
         fungusGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - FUNGUS_FAMILY)));
 #endif
-        albedo = mix(levelGrade(albedo, level, fungusGrade), albedo, volcanic);
+        albedo = mix(levelGrade(albedo, level, fungusGrade, 1.0 - smoothstep(0.0, .25, submerged)), albedo, volcanic);
     }
 #ifdef lightingFlag
     vec3 view = -viewDirection();

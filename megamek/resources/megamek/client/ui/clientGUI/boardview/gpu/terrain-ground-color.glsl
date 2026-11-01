@@ -20,7 +20,9 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
-vec3 levelGrade(vec3 c, float level, float fungus) {
+// The first level below 0 also steps down (fungus, busy and glowing, further), so a recession reads at a glance;
+// deeper levels ease on as before. dry fades that step out under water, whose depth already darkens its bed.
+vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     if (level == 0.0) return c;
     level = max(level, mix(-1.5, -6.0, fungus));
     float up = 6.0 * (1.0 - exp(-max(level, 0.0) / 6.0));
@@ -43,10 +45,10 @@ vec3 levelGrade(vec3 c, float level, float fungus) {
     // Map peak p to e*p/(1+(e-1)*p), with positive derivative even at bright texture samples.
     // The one scalar preserves RGB ratios; it does not clamp separate channels or force a new white ceiling.
     c *= exposure / (1.0 + (exposure - 1.0) * peak);
-    return c * (1.0 - mix(.06, .07, fungus) * down);
+    return c * (1.0 - mix(.06, .07, fungus) * down) * (1.0 - mix(.25, .3, fungus) * dry * clamp(-level, 0.0, 1.0));
 }
 
-vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0); }
+vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0, 1.0); }
 
 // Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
 // desert's compact ochre earth, loose sand's drifts, a meadow's dry and lush turf. rim and foot weigh the
