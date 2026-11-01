@@ -372,7 +372,7 @@ vec2 paintWear(vec2 m, float pixel) {
 void main() {
     vec4 roadColor = v_color;
     // Off its mask a fragment is discarded at the end: it keeps its neighbours' lanes through the material's filtering
-    // and fwidth, but skips the asphalt's wear and the lighting (whose derivatives are taken below, before them).
+    // and fwidth, but skips the asphalt's wear (and, without the quad vote below, the lighting).
     bool roadHidden = false;
 #ifdef roadMaskFlag
     vec2 maskUV = v_roadMaskUV;
@@ -517,10 +517,13 @@ void main() {
         coverFinish(finish, soilMud);
     }
 #endif
-    if (!roadHidden) {
-        albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
-              m.mapped ? mix(1.0, properties.b, .7) : 1.0);
-    }
+#if defined(roadMaskFlag) && __VERSION__ < 450
+    // Without the quad vote, a hidden lane skips the lighting; the vote keeps whole quads, whose lanes all light so
+    // that the shadow receiver's derivatives (sculptShadow) read live neighbours. The hidden ones go at the end.
+    if (!roadHidden)
+#endif
+    albedo = groundLighting(albedo, normal, geometric, wet, response, puddle, finish,
+          m.mapped ? mix(1.0, properties.b, .7) : 1.0);
 #ifdef roadFlag
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
     float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;
