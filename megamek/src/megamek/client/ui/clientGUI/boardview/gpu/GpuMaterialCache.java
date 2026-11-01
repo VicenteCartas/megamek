@@ -172,6 +172,10 @@ final class GpuMaterialCache {
      */
     private record Chunk(int page, List<BoundingBox> bounds, List<Vector3> centres, int since) { }
 
+    /** What end() leaves for the frame's draws and diagnostics. */
+    private record Result(boolean active, boolean exact, int under, int admitted, int walled, int wallsOutside,
+          int[] cachedPages, int[] cachedWalls) { }
+
     /** A page of any level, hashed as the page cache keys it: a record's own hash repeats along nearby rows. */
     private record PageKey(int at, int x, int y) {
         @Override
@@ -211,6 +215,13 @@ final class GpuMaterialCache {
     private final List<Chunk> visible = new ArrayList<>(), walls = new ArrayList<>();
     private final IntArray cachedPages = new IntArray(), cachedWalls = new IntArray();
     private int walled, wallsOutside;
+    // What the last end() worked from (the level, view, chunks and storage, as exact bits) and what it left, the pages'
+    // changes after it, whether its build finished and whether it changed nothing: a frame with the same inputs then
+    // takes its result (#end).
+    private final IntArray inputs = new IntArray(), lastInputs = new IntArray();
+    private Result last;
+    private long lastChanges;
+    private boolean built, still;
     // Pages copied from their children: their mip 2 only approximates the next level, so none is copied from them.
     private final Set<PageKey> copied = new HashSet<>();
     // Detail changes so far (detailChanged), and the one each page's build finished at: a change over a page in the
@@ -701,6 +712,7 @@ final class GpuMaterialCache {
     int rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
         board.set(bounds);
         metre = worldMetre;
+        still = false;
         if (changed == null) {
             pages.invalidateAll();
             copied.clear();
@@ -949,13 +961,69 @@ final class GpuMaterialCache {
     }
 
     /**
+     * {@link #plan}, or the last frame's result when nothing it works from changed: the same inputs, after a frame that
+     * tried no build step, with pages that did not change since (a still view whose pages are built).
+     */
+    private boolean end(long budget, long cpuNanos) {
+        if (!pages.allocated() || !filling) { return true; }
+        inputs.clear();
+        inputs.add(active ? level : -1, pages.capacity(), visible.size(), walls.size());
+        add(inputs, view.combined.val);
+        for (Chunk chunk : visible) { add(inputs, chunk); }
+        for (Chunk chunk : walls) { add(inputs, chunk); }
+        inputs.add(topBounds.size());
+        for (BoundingBox bounds : topBounds) { add(inputs, bounds); }
+        if (still && inputs.equals(lastInputs) && pages.changes() == lastChanges) {
+            active = last.active();
+            exact = last.exact();
+            under = last.under();
+            admitted = last.admitted();
+            walled = last.walled();
+            wallsOutside = last.wallsOutside();
+            cachedPages.addAll(last.cachedPages());
+            cachedWalls.addAll(last.cachedWalls());
+            // Another terrain's cache (an editor preview) may have bound its own tables since.
+            if (active) { pages.bindTable(0, BINDING); }
+            if (!cachedWalls.isEmpty()) { pages.bindTable(WALL_TABLE, WALL_BINDING); }
+            return true;
+        }
+        long changes = pages.changes();
+        built = false;
+        boolean done = plan(budget, cpuNanos);
+        // The build's own result: a plan whose table does not fit returns done whatever is left to build.
+        still = built && pages.changes() == changes;
+        lastChanges = pages.changes();
+        lastInputs.clear();
+        lastInputs.addAll(inputs);
+        last = new Result(active, exact, under, admitted, walled, wallsOutside, cachedPages.toArray(),
+              cachedWalls.toArray());
+        return done;
+    }
+
+    private static void add(IntArray into, Chunk chunk) {
+        into.add(chunk.page(), chunk.since(), chunk.bounds().size(), chunk.centres() == null ? -1 : chunk.centres().size());
+        for (BoundingBox bounds : chunk.bounds()) { add(into, bounds); }
+        if (chunk.centres() != null) {
+            for (Vector3 centre : chunk.centres()) { add(into, centre.x, centre.y, centre.z); }
+        }
+    }
+
+    private static void add(IntArray into, BoundingBox bounds) {
+        add(into, bounds.min.x, bounds.min.y, bounds.min.z, bounds.max.x, bounds.max.y, bounds.max.z);
+    }
+
+    /** Floats by their exact bits. */
+    private static void add(IntArray into, float... values) {
+        for (float value : values) { into.add(Float.floatToRawIntBits(value)); }
+    }
+
+    /**
      * Builds what this frame reads within {@code budget} nanoseconds of GPU time and {@code cpuNanos} of CPU time and
      * publishes it: the pages under the visible tops at the level the view needs, nearest its centre first and as many
      * as the storage holds; a ring of prefetched pages around them, and their parents one level up wherever those copy
      * from their children, ready for a zoom out. True once nothing is left to build.
      */
-    private boolean end(long budget, long cpuNanos) {
-        if (!pages.allocated() || !filling) { return true; }
+    private boolean plan(long budget, long cpuNanos) {
         if (FILL_AT_ONCE) { budget = cpuNanos = AT_ONCE_NANOS; }
         long deadline = System.nanoTime() + cpuNanos;
         Set<Long> wanted = active ? under(level) : new HashSet<>();
@@ -1211,7 +1279,7 @@ final class GpuMaterialCache {
         IntBuffer viewport = BufferUtils.newIntBuffer(16);
         Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
         try {
-            return pages.fill(budget, deadline, this::fill);
+            return built = pages.fill(budget, deadline, this::fill);
         } finally {
             if (srgb) { Gdx.gl.glEnable(GpuLinearOverlay.FRAMEBUFFER_SRGB); }
             else { Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB); }

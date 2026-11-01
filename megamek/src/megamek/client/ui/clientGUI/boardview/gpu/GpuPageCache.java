@@ -73,7 +73,8 @@ final class GpuPageCache implements Disposable {
     private final ByteBuffer table = BufferUtils.newByteBuffer(TABLE_BYTES);
     private final IntBuffer binding = BufferUtils.newIntBuffer(16);
     private final int[] buffers = new int[TABLES];
-    private long frame, revision;
+    // Frames begun, the pages' revision, and every change to what the pages hold or serve (#changes).
+    private long frame, revision, changes;
     // The fill budget: credit in nanoseconds of GPU time; per pyramid level, the cost one step is expected to take and
     // the last steps' costs, of which the estimate is the second largest (one stall does not throttle the fills that
     // follow); the timer queries (GL_TIME_ELAPSED, one a step) of earlier fills not yet read, with their levels.
@@ -135,6 +136,12 @@ final class GpuPageCache implements Disposable {
 
     /** Whether storage exists. */
     boolean allocated() { return layers.length > 0; }
+
+    /**
+     * Counts every change to what the pages hold or serve: an invalidation, storage lost, a build step tried (a fill
+     * that came back {@link #AGAIN} too). While it stands still, the pages and their tables read as they did.
+     */
+    long changes() { return changes; }
 
     /**
      * Storage for {@code capacity} pages, written once now so the driver commits it while the board loads; the bound
@@ -201,6 +208,7 @@ final class GpuPageCache implements Disposable {
     /** Every page is lost: none is ready until it builds again. */
     void invalidateAll() {
         revision++;
+        changes++;
         for (Page page : pages.values()) {
             page.revision = -1;
             page.step = 0;
@@ -221,6 +229,7 @@ final class GpuPageCache implements Disposable {
      * ready one keeps serving its content while it rebuilds, one in the middle of a build starts again.
      */
     void invalidate(int level, int x0, int y0, int x1, int y1) {
+        changes++;
         for (Page page : pages.values()) {
             if (page.level == level && page.x >= x0 && page.x <= x1 && page.y >= y0 && page.y <= y1) {
                 page.stale = ready(page);
@@ -297,6 +306,7 @@ final class GpuPageCache implements Disposable {
                         boolean aside = ready(page);
                         if (aside ? page.spare < 0 && (page.spare = take(page)) < 0
                               : page.layer < 0 && (page.layer = take(page)) < 0) { break; }
+                        changes++;
                         int query = GL15.glGenQueries();
                         GL15.glBeginQuery(GL33.GL_TIME_ELAPSED, query);
                         int result;
@@ -463,6 +473,7 @@ final class GpuPageCache implements Disposable {
         free.clear();
         layers = new Page[0];
         revision++;
+        changes++;
     }
 
     @Override
