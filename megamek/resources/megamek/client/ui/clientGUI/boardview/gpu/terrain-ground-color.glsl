@@ -50,13 +50,13 @@ vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
 
 vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0, 1.0); }
 
-// Near-white snow barely lifts uphill under the exposure curve. Downhill it takes the inverse of that lift instead of the
-// common step, so a snowfield changes by the same small amount between levels either way.
+// Near-white snow barely lifts uphill under the exposure curve, so the common downhill grade and step would mark a
+// snowfield's hollows far more than its hills: snow darkens 5% for the first level down instead, easing on and stopping
+// at level -1.5 as the common grade does.
 vec3 snowLevelGrade(vec3 c, float level) {
-    vec3 lifted = levelGrade(c, abs(level));
-    if (level >= 0.0) return lifted;
-    const vec3 LUMA = vec3(.2126, .7152, .0722);
-    return c * dot(c, LUMA) / max(dot(lifted, LUMA), 1e-4);
+    if (level >= 0.0) return levelGrade(c, level);
+    float down = (1.0 - exp(max(level, -1.5) / 6.0)) / (1.0 - exp(-1.0 / 6.0));
+    return c * (1.0 - .05 * down);
 }
 
 // Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the

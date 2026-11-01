@@ -589,14 +589,13 @@ final class GpuTerrain implements Disposable {
                         }
                     }
                     if (SUBLEVEL_FLOORS && program.hasUniform("u_floorMaterials[0]")) {
-                        float[] floors = new float[3 * FLOORS.length];
+                        float[] floors = new float[2 * FLOORS.length];
                         for (int family = 0; family < FLOORS.length; family++) {
-                            Floor floor = FLOORS[family];
-                            floors[3 * family] = floor == null ? -1 : 2f * SCULPT_LAYERS.indexOf(floor.material());
-                            floors[3 * family + 1] = floor == null ? 0 : assets.sculptTile(floor.material());
-                            floors[3 * family + 2] = floor != null && floor.edges() ? 1 : 0;
+                            String floor = FLOORS[family];
+                            floors[2 * family] = floor == null ? -1 : 2f * SCULPT_LAYERS.indexOf(floor);
+                            floors[2 * family + 1] = floor == null ? 0 : assets.sculptTile(floor);
                         }
-                        program.setUniform3fv("u_floorMaterials[0]", floors, 0, floors.length);
+                        program.setUniform2fv("u_floorMaterials[0]", floors, 0, floors.length);
                     }
                     if (program.hasUniform("u_roadRelief[0]")) {
                         float[] relief = assets.roadRelief();
@@ -1781,20 +1780,14 @@ final class GpuTerrain implements Disposable {
     /** Whether sunken ground (level -1 and below) takes its family's floor material from {@link #FLOORS}. */
     static final boolean SUBLEVEL_FLOORS = true;
 
-    /** A family's floor: its material, and whether it shows only where the ground thins out first (a hollow's edges). */
-    private record Floor(String material, boolean edges) { }
-
     /**
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
-     * (terrain-materials.glsl floorShare). Snow stays snow but where it melts first: thin snow over frozen ground in
-     * broken tongues along the banks' feet.
-     * Null keeps the ground: concrete stays paved, sand stays rippled sand (its level grade marks the hollow).
+     * (terrain-materials.glsl floorShare). Null keeps the ground: concrete stays paved, sand stays rippled sand and snow
+     * stays snow (their level grade marks the hollow).
      */
-    private static final Floor[] FLOORS = {
-          new Floor("grassland-floor", false), new Floor("dirt-floor", false), null,
-          new Floor("rock-floor", false), null, new Floor("snow-floor", true), new Floor("lunar-floor", false),
-          new Floor("fungus-floor", false), new Floor("desert-floor", false), new Floor("mars-floor", false),
-          new Floor("volcano-floor", false), new Floor("tropical-floor", false),
+    private static final String[] FLOORS = {
+          "grassland-floor", "dirt-floor", null, "rock-floor", null, null, "lunar-floor", "fungus-floor", "desert-floor",
+          "mars-floor", "volcano-floor", "tropical-floor",
     };
 
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.of(
@@ -1802,7 +1795,7 @@ final class GpuTerrain implements Disposable {
           java.util.stream.Stream.of("tundra-crust", "tundra-ground", "tundra-mat", "biome-soil",
                 "tundra-ground-variant",
                 "concrete-mulch", "ground-scorch", "biome-mud"),
-          Arrays.stream(FLOORS).filter(floor -> SUBLEVEL_FLOORS && floor != null).map(Floor::material))
+          Arrays.stream(FLOORS).filter(floor -> SUBLEVEL_FLOORS && floor != null))
           .flatMap(names -> names).distinct().toList();
     /**
      * The board materials whose finish the terrain reads from arrays (finish-arrays.glsl): the sculpt layers, at their
