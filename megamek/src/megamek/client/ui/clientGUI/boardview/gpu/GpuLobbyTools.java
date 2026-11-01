@@ -32,6 +32,7 @@ import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
+import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.TrainOrderForm;
@@ -317,6 +318,7 @@ final class GpuLobbyTools {
                   generator.setChosenRAT(table);
                   return generator.generate(count, table);
               });
+        RatBrowser browser = new RatBrowser(RatBrowser.of(generator.getRatTree()));
         LobbyRandomArmyView.Host host = new LobbyRandomArmyView.Host() {
             @Override
             public void edt(Runnable work, Runnable then) {
@@ -343,7 +345,7 @@ final class GpuLobbyTools {
                 window.requisitionSprites(units);
             }
         };
-        open(dialogs -> dialogs.randomArmy(form, key -> {
+        open(dialogs -> dialogs.randomArmy(form, browser, key -> {
             GpuLobbyScreen screen = window.screen();
             return screen == null ? null : screen.requisitionSprite(key);
         }, host));

@@ -23,7 +23,8 @@ import megamek.logging.MMLogger;
  * {@code settings-save-loadout} or {@code settings-load-loadout} asks the system file dialog), and {@code +savelist},
  * {@code +loadlist} and {@code +sprite} (the player's first unit) ask it at once. {@code +click=name,name} then clicks
  * its actors by name through the stage, one every {@value LobbyUnitBayProbe#CLICK_GAP} s and each once its actor shows
- * (up to {@value #WAIT} s after the opening), logging the tool after each.
+ * (up to {@value #WAIT} s after the opening), logging the tool after each; a step {@code type:text} types into the
+ * focused field.
  */
 final class LobbyToolsProbe {
     private static final MMLogger LOGGER = MMLogger.create(LobbyToolsProbe.class);
@@ -34,6 +35,8 @@ final class LobbyToolsProbe {
     /** {@code readout=tro}, {@code readout=bv} or {@code readout=cost}: the readout, opened on that page. */
     private static final String READOUT_OPTION = "readout=";
     private static final String CLICK_OPTION = "click=";
+    /** A click step {@code type:text} types its text into the field with the keyboard focus instead. */
+    private static final String TYPE_STEP = "type:";
     /** How long a click waits for its actor, as the random army waits for the unit tables, in seconds. */
     private static final double WAIT = 40;
 
@@ -87,6 +90,15 @@ final class LobbyToolsProbe {
             return;
         }
         String name = clicks.peekFirst();
+        if (name.startsWith(TYPE_STEP)) {
+            clicks.removeFirst();
+            nextAt = elapsed + LobbyUnitBayProbe.CLICK_GAP;
+            for (char character : name.substring(TYPE_STEP.length()).toCharArray()) {
+                stage.keyTyped(character);
+            }
+            log("typed " + name.substring(TYPE_STEP.length()), dialogs);
+            return;
+        }
         Actor target = stage.getRoot().findActor(name);
         if ((target == null || !target.isVisible()) && elapsed < openedAt + WAIT) {
             return;
@@ -113,7 +125,8 @@ final class LobbyToolsProbe {
             RandomArmyForm form = dialogs.randomArmyView().form();
             List<String> units = form.cards().stream()
                   .map(card -> card.unit().getName() + (card.kept() ? " (kept)" : "")).toList();
-            return "army " + units + ", BV " + form.battleValue() + ", table " + form.table();
+            return "army " + units + ", BV " + form.battleValue() + ", table " + form.table() + ", browsing "
+                  + dialogs.randomArmyView().browser().path();
         }
         if (dialogs.readoutView() != null) {
             LobbyReadoutView view = dialogs.readoutView();

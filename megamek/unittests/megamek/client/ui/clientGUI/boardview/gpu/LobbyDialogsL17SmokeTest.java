@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.Client;
@@ -23,9 +24,12 @@ import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomSkillsForm;
+import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.entityreadout.EntityReadout;
+import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Player;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
@@ -93,7 +97,8 @@ class LobbyDialogsL17SmokeTest {
     void theRandomArmyRollsKeepsAndAdds() {
         UiTestStage.run(ui -> {
             int[] serial = {0};
-            RandomArmyForm form = new RandomArmyForm(List.of("Table"), null, List.of("Me"), (count, table) -> {
+            RandomArmyForm form = new RandomArmyForm(List.of("Table", "Davion Heavy", "Davion Light"), "Table",
+                  List.of("Me"), (count, table) -> {
                 List<MekSummary> units = new ArrayList<>();
                 for (int i = 0; i < count; i++) {
                     MekSummary unit = new MekSummary();
@@ -107,9 +112,13 @@ class LobbyDialogsL17SmokeTest {
                 return units;
             });
             form.count(2);
+            RatBrowser.Folder davion = new RatBrowser.Folder("Davion", List.of(),
+                  List.of("Davion Heavy", "Davion Light"));
+            RatBrowser.Folder source = new RatBrowser.Folder("(3039) - War of 39", List.of(davion), List.of());
+            RatBrowser browser = new RatBrowser(new RatBrowser.Folder("RATs", List.of(source), List.of("Table")));
             List<String> said = new ArrayList<>();
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
-            dialogs.randomArmy(form, key -> null, new LobbyRandomArmyView.Host() {
+            dialogs.randomArmy(form, browser, key -> null, new LobbyRandomArmyView.Host() {
                 @Override
                 public void edt(Runnable work, Runnable then) {
                     work.run();
@@ -131,6 +140,29 @@ class LobbyDialogsL17SmokeTest {
                 }
             });
             ui.draw();
+            // The browser: a folder opens, a table is chosen, the back button goes up, a search finds across all
+            click(ui, find(ui, "army-folder-0"));
+            assertEquals(List.of("War of 39"), browser.path(), "a folder row opens the folder");
+            click(ui, find(ui, "army-folder-0"));
+            click(ui, find(ui, "army-rat-0"));
+            assertEquals("Davion Heavy", form.table(), "a table row chooses the table");
+            assertTrue(((UiButton) find(ui, "army-rat-0")).isChecked(), "the chosen table's row is marked");
+            assertEquals("Davion Heavy", ((Label) find(ui, "army-chosen")).getText().toString());
+            click(ui, find(ui, "army-up"));
+            assertEquals(List.of("War of 39"), browser.path(), "back goes up a folder");
+            click(ui, find(ui, "army-search-field"));
+            for (char character : "light".toCharArray()) {
+                ui.stage.keyTyped(character);
+            }
+            ui.draw();
+            assertTrue(browser.searching(), "typing searches");
+            assertEquals(1, browser.matches());
+            click(ui, find(ui, "army-rat-0"));
+            assertEquals("Davion Light", form.table(), "a search result chooses its table");
+            click(ui, find(ui, "army-up"));
+            assertFalse(browser.searching(), "back ends the search");
+            assertEquals("", ((UiKit.TokenSearch) find(ui, "army-search")).field.getText());
+            form.table("Table");
             click(ui, find(ui, "army-roll"));
             assertEquals(2, form.cards().size(), "Roll deals the unit count");
             click(ui, find(ui, "army-keep-0"));

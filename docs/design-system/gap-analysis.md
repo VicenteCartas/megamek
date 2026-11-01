@@ -1158,6 +1158,22 @@ work for Swing, and item 11 is under investigation.
        `StartWelcomeSmokeTest` (unfold timing, the blocked screen, links, checkbox, Enter, Quit and Escape),
        `UnitBaySmokeTest`, `LobbyC3ManagerSmokeTest`, `LobbyMapSetupSmokeTest` and `LobbyDossierTabsSmokeTest`.
        Live: `main+welcome`, `lobby+readout`, `lobby+c3`, `lobby+mapsetup` and the pilot tab.
+     - ~~Random army table browser~~. The random army's table was one select listing all ~8,600 random assignment
+       tables. It is now a browser on the dialog's left, beside the hand:
+       - Folders open one at a time: source, faction, command, unit type. Each folder row shows its years
+         ("3076–3100", taken from the "(3076 - 3100) - FM 3085" folder name) and its table count in aligned columns.
+       - A back arrow goes up a folder, and the line under the open folder's name shows where it is.
+       - A search finds tables across all folders when every word is in the table's name or its folders. A
+         four-digit year also matches every source whose years cover it, so "davion heavy 3067" works. The search
+         shows up to 80 results, each with its path, and counts the rest.
+       - The dialog opens on the folder of the last chosen table. The right side shows the table being rolled on
+         ("Rolling on", with its path) above the count, Roll and the hand.
+       The browsing is the toolkit-free `RatBrowser` in `megamek.client.lobby`, built from the generator's
+       `RatTreeNode` tree.
+       Checks: `RatBrowserTest`, plus the on-demand `LobbyDialogsL17SmokeTest`, which opens a folder, picks a
+       table, goes back, searches, picks a result and ends the search.
+       Live: `lobby+randomarmy`. The probe's click list now takes a `type:text` step that types into the focused
+       field.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
          loading game options, a loadout and a unit list through the real system file dialog was checked (L18);
