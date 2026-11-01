@@ -309,10 +309,14 @@ final class GpuMaterialCache {
      * shared edge (separating axes).
      */
     private static boolean overlap(Vector3[] a, Vector3[] b, float touch) {
-        for (Vector3[] edges : new Vector3[][] { a, b }) {
-            for (int i = 0; i < 3; i++) {
-                float nx = edges[(i + 1) % 3].y - edges[i].y, ny = edges[i].x - edges[(i + 1) % 3].x;
-                float length = (float) Math.hypot(nx, ny);
+        return overlap(a, axes(a), b, axes(b), touch);
+    }
+
+    /** {@link #overlap(Vector3[], Vector3[], float)} with each triangle's {@link #axes}, kept by a caller that reuses them. */
+    private static boolean overlap(Vector3[] a, float[] axesA, Vector3[] b, float[] axesB, float touch) {
+        for (float[] axes : new float[][] { axesA, axesB }) {
+            for (int i = 0; i < 9; i += 3) {
+                float nx = axes[i], ny = axes[i + 1], length = axes[i + 2];
                 if (length == 0) { continue; }
                 float minA = Float.MAX_VALUE, maxA = -Float.MAX_VALUE, minB = Float.MAX_VALUE, maxB = -Float.MAX_VALUE;
                 for (int k = 0; k < 3; k++) {
@@ -326,6 +330,18 @@ final class GpuMaterialCache {
             }
         }
         return true;
+    }
+
+    /** A triangle's separating axes: each edge's normal in XY and its length (nx, ny, length, edge by edge). */
+    private static float[] axes(Vector3[] t) {
+        float[] axes = new float[9];
+        for (int i = 0; i < 3; i++) {
+            float nx = t[(i + 1) % 3].y - t[i].y, ny = t[i].x - t[(i + 1) % 3].x;
+            axes[3 * i] = nx;
+            axes[3 * i + 1] = ny;
+            axes[3 * i + 2] = (float) Math.hypot(nx, ny);
+        }
+        return axes;
     }
 
     /** Whether a top lies level: the same at every detail. */
@@ -499,7 +515,7 @@ final class GpuMaterialCache {
         // The slots holding a face: only their pages are needed.
         private final Set<Edge> used = new HashSet<>();
         // The chart triangles each slot holds so far: a face overlapping one there stays direct.
-        private final Map<Slot, List<Vector3[]>> placed = new HashMap<>();
+        private final Map<Slot, List<Placed>> placed = new HashMap<>();
         /** The slots' extent in the wall region (world units); invalid without any. */
         final BoundingBox bounds = new BoundingBox().inf();
 
@@ -600,26 +616,33 @@ final class GpuMaterialCache {
             }
             if ((chart[1].x - chart[0].x) * (chart[2].y - chart[0].y)
                   - (chart[1].y - chart[0].y) * (chart[2].x - chart[0].x) <= 0) { return null; }
-            List<Vector3[]> held = placed.computeIfAbsent(slot, ignored -> new ArrayList<>());
+            List<Placed> held = placed.computeIfAbsent(slot, ignored -> new ArrayList<>());
             // A slot holds many of its wall's triangles; each new one is tested against all of them.
             float touch = BoardRelief.metres(TOUCH);
-            for (Vector3[] other : held) {
+            Placed placing = Placed.of(chart);
+            for (Placed other : held) {
                 // Apart in plan, two charts with area are apart along an edge of one of them too.
-                if (apart(chart, other)) { continue; }
-                if (overlap(chart, other, touch)) { return null; }
+                if (placing.apart(other)) { continue; }
+                if (overlap(chart, placing.axes(), other.chart(), other.axes(), touch)) { return null; }
             }
-            held.add(chart);
+            held.add(placing);
             used.add(key);
             return new float[] { slot.x() + chart[0].x, slot.y() + chart[0].y, slot.x() + chart[1].x,
                   slot.y() + chart[1].y, slot.x() + chart[2].x, slot.y() + chart[2].y };
         }
 
-        /** Whether two triangles' bounds lie strictly apart in XY. */
-        private static boolean apart(Vector3[] a, Vector3[] b) {
-            return Math.max(a[0].x, Math.max(a[1].x, a[2].x)) < Math.min(b[0].x, Math.min(b[1].x, b[2].x))
-                  || Math.max(b[0].x, Math.max(b[1].x, b[2].x)) < Math.min(a[0].x, Math.min(a[1].x, a[2].x))
-                  || Math.max(a[0].y, Math.max(a[1].y, a[2].y)) < Math.min(b[0].y, Math.min(b[1].y, b[2].y))
-                  || Math.max(b[0].y, Math.max(b[1].y, b[2].y)) < Math.min(a[0].y, Math.min(a[1].y, a[2].y));
+        /** A held chart with its separating axes (#axes) and XY bounds, worked out once for every later test. */
+        private record Placed(Vector3[] chart, float[] axes, float minX, float maxX, float minY, float maxY) {
+            static Placed of(Vector3[] t) {
+                return new Placed(t, GpuMaterialCache.axes(t), Math.min(t[0].x, Math.min(t[1].x, t[2].x)),
+                      Math.max(t[0].x, Math.max(t[1].x, t[2].x)), Math.min(t[0].y, Math.min(t[1].y, t[2].y)),
+                      Math.max(t[0].y, Math.max(t[1].y, t[2].y)));
+            }
+
+            /** Whether the two triangles' bounds lie strictly apart in XY. */
+            boolean apart(Placed other) {
+                return maxX < other.minX || other.maxX < minX || maxY < other.minY || other.maxY < minY;
+            }
         }
 
         /** {@code reused}: hexes whose meshes come from {@code source}'s build (sameLayout), slots and all. */
