@@ -54,7 +54,7 @@ uniform float u_levelHeight;
 // ground-surface-functions
 // Those shared functions are inserted just before main, after the helpers below.
 vec3 groundNormal(vec2 uv, float strength);
-#ifdef roadCoatFlag
+#if defined(normalTextureFlag) || defined(roadCoatFlag)
 vec3 mappedNormal(vec4 texel, float strength);
 #endif
 vec3 toLinear(vec3 c);
