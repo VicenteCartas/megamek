@@ -36,8 +36,8 @@ import megamek.logging.MMLogger;
  * Domed multi-hex buildings ({@code models/buildings/README.md}): one design generated over a whole building instead of
  * a model per hex. Every hex draws only its own share, so drawing, picking, clearance and a collapsed hex stay per hex,
  * and neighbouring shares meet exactly on their hexsides: the domes stand on a plinth over the building, fitted to its
- * heights ({@link #fits}), each hex taking the part over its own hex; a hex outside every podium is an annex, blocks at
- * its own height ({@link #blocks}) joined to the podium by a wing. The lunar habitats are a connected kit instead
+ * heights ({@link #fits}), each hex taking the part over its own hex; a hex outside every podium is an annex: the
+ * plinth, and a module at its own height standing out from the podium's ring towards it ({@link #module}). The lunar habitats are a connected kit instead
  * ({@code buildings/lunar_habitat}).
  * Coordinates are model units (a level {@link GpuBuilding#LEVEL_HEIGHT} high) about the hex centre on its own ground.
  */
@@ -45,8 +45,6 @@ final class BoardMultiHexBuilding {
     static final int LODS = 2;
     /** How far a facade stands back from a hexside the building does not connect across. */
     static final float SETBACK = 4;
-    /** An annex's roof parapet: its rise and its thickness. */
-    static final float PARAPET = 3.2f, PARAPET_WIDTH = 2.2f;
     /** A dome's plinth above the highest ground under it, and how far its podium keeps inside the footprint: its fins
      * stay on the plinth's set-back deck. */
     static final float PLINTH = 6, DOME_MARGIN = SETBACK + 4;
@@ -57,20 +55,17 @@ final class BoardMultiHexBuilding {
      * circle: its width as a share of that circle's radius, within bounds. Pylons stand at the six corners that face
      * hexsides, buttress fins at the six between, as far out as the podium keeps inside the footprint's set-back facades.
      */
-    private static final float PODIUM_WIDTH = .14f, FIN = DOME_MARGIN - SETBACK;
+    private static final float PODIUM_WIDTH = .2f, FIN = DOME_MARGIN - SETBACK;
     static final String FIN_MATERIAL = "structures/common/safety-yellow";
-    /** Where a connected neighbour closes towards the hex beyond a shared corner, this hex's wall runs from that corner
-     * to the neighbour's set-back facade: the set-back met at the corner's 120 degrees. */
-    private static final float NOTCH = SETBACK / (float) Math.sin(Math.PI / 3);
-    /** A roof service bank's raised curb, the gap between its pieces, and its duct's section. */
-    private static final float CURB = 1.2f, GAP = 2.5f, DUCT = 1.4f;
     /** The smallest dome worth drawing (a lone hex's fits); a footprint too narrow for any stands as annexes. */
     private static final float MIN_DOME = 16;
     /**
-     * Half a hex's core's width ({@link #blocks}): half a hexside, the width of the hex from its north to south side;
-     * an annex's wing ({@link #wing}) is as wide.
+     * An annex's module ({@link #module}), a wing of the ring building ending in a gatehouse as the printed lunar map's
+     * gate modules: the wing's half width, the gatehouse's length and how much wider it stands, the cut of its corners;
+     * the root where the wing meets the ring, how much wider and how far out; its cap's bevel, in and up.
      */
-    static final float CORE = HexTile.cornerOffsetX(0, HexTile.MODEL_WIDTH) / 2;
+    private static final float MODULE_HALF = 15, GATEHOUSE = 34, HEAD = 4, MODULE_CHAMFER = 4, ROOT = 10, ROOT_REACH = 10,
+          BEVEL = 3, BEVEL_RISE = 1.6f;
     /** Geodesic strut length the frequency aims at, and the struts' cross-section. */
     private static final float STRUT_LENGTH = 16, STRUT_WIDTH = .75f, STRUT_OUT = .5f, STRUT_IN = .4f;
     private static final float LEVEL = GpuBuilding.LEVEL_HEIGHT;
@@ -80,10 +75,10 @@ final class BoardMultiHexBuilding {
     private static final float EPSILON = 1e-3f;
 
     // Board materials (textures/<name>.tres); their .tres files give every finish, transparency included.
-    static final String WALL = "structures/lunar/habitat-wall", ROOF = "structures/lunar/habitat-roof",
+    static final String WALL = "structures/lunar/colony-panel", ROOF = "structures/lunar/habitat-roof",
           PLINTH_MATERIAL = "structures/lunar/regolith-concrete", FRAME = "structures/lunar/dome-frame",
           GLASS = "structures/lunar/dome-glass", GARDEN = "structures/lunar/biodome-garden",
-          PIER = "structures/lunar/habitat-pier";
+          PIER = "structures/lunar/habitat-pier", SKYLIGHT = "structures/lunar/skylight-glass";
 
     private static final MMLogger LOGGER = MMLogger.create(BoardMultiHexBuilding.class);
 
@@ -114,19 +109,17 @@ final class BoardMultiHexBuilding {
      * of the podium roof its glass rises from and of its apex over the hex's ground, its geodesic frequency (even, so
      * the base is a vertex ring), and its building's airlocks' backs relative to its centre, x and y in turn, which
      * entrance wings join to its podium, the ring building round its foot whose twelve-sided outline has its corners
-     * {@code podium} from the centre; {@code wings}, six numbers each: an annex's wing ({@link #wing}), its hexside's
-     * middle relative to the centre, its direction across the hex beyond, its rise above the foot and its length.
+     * {@code podium} from the centre; {@code modules}, four numbers each: an annex's module ({@link #module}), its
+     * direction from the centre, how far its outer end lies from it and its rise above the foot.
      */
     record Dome(float x, float y, float radius, float foot, float ring, float apex, int frequency, float podium,
-          List<Float> entrances, List<Float> wings) {
+          List<Float> entrances, List<Float> modules) {
         Dome {
             entrances = List.copyOf(entrances);
-            wings = List.copyOf(wings);
+            modules = List.copyOf(modules);
         }
 
-        /** The podium's ring's width, and its height above the foot: where the glass meets its roof. */
-        float width() { return Math.clamp(podium * PODIUM_WIDTH, 9, 24); }
-
+        /** The podium's ring's height above the foot: where the glass meets its roof. */
         float height() { return ring - foot; }
 
         /** The cap's sphere radius and its centre's height: the glass between the ring and the apex. */
@@ -143,18 +136,18 @@ final class BoardMultiHexBuilding {
 
         /**
          * Whether something {@code margin} radians wide at {@code angle} round the centre would meet an entrance wing or an
-         * annex's wing: fins and pylons keep clear of them.
+         * annex's module: fins and pylons keep clear of them.
          */
         boolean joined(double angle, double margin) {
             for (int at = 0; at < entrances.size(); at += 2) {
                 double toward = Math.atan2(entrances.get(at + 1), entrances.get(at));
                 if (Math.abs(Math.IEEEremainder(toward - angle, 2 * Math.PI)) < Math.toRadians(12) + margin) { return true; }
             }
-            for (int at = 0; at < wings.size(); at += 6) {
-                float x = wings.get(at) + wings.get(at + 2) * wings.get(at + 5);
-                float y = wings.get(at + 1) + wings.get(at + 3) * wings.get(at + 5);
-                double half = Math.atan2(CORE + 2, Math.hypot(x, y));
-                if (Math.abs(Math.IEEEremainder(Math.atan2(y, x) - angle, 2 * Math.PI)) < half + margin) { return true; }
+            // Its root, the widest part at the ring.
+            double half = Math.atan2(MODULE_HALF + ROOT + 2, podium * Math.cos(Math.PI / 12));
+            for (int at = 0; at < modules.size(); at += 4) {
+                double toward = Math.atan2(modules.get(at + 1), modules.get(at));
+                if (Math.abs(Math.IEEEremainder(toward - angle, 2 * Math.PI)) < half + margin) { return true; }
             }
             return false;
         }
@@ -163,29 +156,16 @@ final class BoardMultiHexBuilding {
     /**
      * Derived from the captured board; shared by drawing, picking and clearance. {@code top}: the shell's height,
      * {@code reach}: how high it connects towards each board direction (model units, 0 where a facade closes it);
-     * {@code notches}: per direction d, for the corner it shares with direction d + 1 and then the one with d - 1, the
-     * height from which the neighbour towards d closes towards the hex beyond that corner (above the top: never);
-     * {@code around}, an annex's ({@link #blocks}): the tops of the neighbours it connects to towards each direction
-     * (0 for none), then how high each pair of neighbours d and d + 1 connect to each other, in this hex's frame, then
-     * the height at and under which its cells are the domes' plinth, then the directions its wings leave by (bits);
-     * {@code annex}: a domed building's hex outside every podium, a block at its own height joined to the plinth.
+     * {@code annex}: a domed building's hex outside every podium, whose share is the plinth and the modules over it
+     * ({@link #module}): the domes are there for their modules alone.
      */
-    record Layout(Design design, float top, List<Float> reach, List<Float> notches, List<Float> around, List<Dome> domes,
-          List<Gear> gear, List<Pad> pads, boolean annex) {
+    record Layout(Design design, float top, List<Float> reach, List<Dome> domes, List<Gear> gear, boolean annex) {
         Layout {
             domes = List.copyOf(domes);
             reach = List.copyOf(reach);
-            notches = List.copyOf(notches);
-            around = List.copyOf(around);
             gear = List.copyOf(gear);
-            pads = List.copyOf(pads);
         }
     }
-
-    /** A roof service bank's raised curb: its centre, its row's direction (unit), half its length and width, its foot. */
-    record Pad(float x, float y, float ux, float uy, float along, float across, float z) { }
-
-    private record Support(List<Gear> gear, List<Pad> pads) { }
 
     /** A support piece on the share: its node in the equipment kit, its origin, its turn clockwise in degrees, its size. */
     record Gear(String piece, float x, float y, float z, float angle, float scale) {
@@ -204,7 +184,6 @@ final class BoardMultiHexBuilding {
      */
     record Fit(float x, float y, float radius, int base, float ring, float apex, int frequency, float podium) { }
 
-    private static final List<Float> NEVER = java.util.Collections.nCopies(12, Float.MAX_VALUE);
 
     /** A lone hex of the design, {@code levels} high: palette thumbnails and previews. */
     static Layout layout(String asset, int levels) {
@@ -214,8 +193,7 @@ final class BoardMultiHexBuilding {
         Coords lone = new Coords(0, 0);
         var fits = fits(List.of(new Member(lone, 0, height, false)));
         var none = java.util.Collections.nCopies(fits.size(), List.<Float>of());
-        return new Layout(design, PLINTH, List.of(closed), NEVER, List.of(), domes(fits, lone, 0, none, none), List.of(),
-              List.of(), false);
+        return new Layout(design, PLINTH, List.of(closed), domes(fits, lone, 0, none, none), List.of(), false);
     }
 
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
@@ -226,28 +204,31 @@ final class BoardMultiHexBuilding {
         var fits = fits(group);
         int base = group.stream().mapToInt(Member::elevation).max().orElse(tile.elevation());
         float shift = (base - tile.elevation()) * LEVEL, plinth = PLINTH + shift;
+        var none = java.util.Collections.nCopies(fits.size(), List.<Float>of());
         if (annex(fits, tile.coords())) {
-            // An annex: blocks at its own height, joined to the neighbouring annexes; towards a hex under a dome over
-            // its whole height where its wing runs on across that hex to the podium, else closed, as that hex is.
-            boolean[] winged = new boolean[6];
+            // An annex: the plinth, joined to its neighbours', under the modules that cross it, its own among them; one
+            // without a module of its own (no higher than the plinth, or none fits) a block at its own height.
+            float top = levels * LEVEL, apron = Math.min(top, plinth);
+            boolean block = annexModule(scene, tile, fits, base, feature.asset()) == null;
             for (int direction = 0; direction < 6; direction++) {
+                connected[direction] = Math.min(connected[direction], apron);
+                // A block opens only towards another block: the hexes under the domes and the wings draw no wall to meet.
                 var neighbor = scene.neighbor(tile, direction);
-                if (connected[direction] <= 0 || annex(fits, neighbor.coords())) { continue; }
-                winged[direction] = wing(fits, base, tile, neighbor) != null;
-                if (!winged[direction]) { connected[direction] = 0f; }
+                if (block && connected[direction] > 0 && !(annex(fits, neighbor.coords())
+                      && annexModule(scene, neighbor, fits, base, feature.asset()) == null)) {
+                    connected[direction] = 0f;
+                }
             }
-            float top = levels * LEVEL;
-            var support = support(scene, tile, design, top, connected, List.of(), true, plinth);
-            return new Layout(design, top, List.of(connected), NEVER,
-                  annexAround(scene, tile, feature.asset(), connected, fits, plinth, winged, top), List.of(), support.gear(),
-                  support.pads(), true);
+            var domes = block ? List.<Dome>of()
+                  : domes(fits, tile.coords(), shift, none, modules(scene, group, fits, base, feature.asset()));
+            return new Layout(design, top, List.of(connected), domes,
+                  support(scene, tile, design, block ? 0 : apron, connected, List.of(), true, block), true);
         }
-        plinth(scene, tile, fits, base, plinth, connected);
+        plinth(connected, plinth);
         var domes = domes(fits, tile.coords(), shift, entrances(scene, group, fits, base, feature.asset()),
-              wings(scene, group, fits, base, feature.asset()));
-        var support = support(scene, tile, design, plinth, connected, domes, false, plinth);
-        return new Layout(design, plinth, List.of(connected), notches(scene, tile, connected, fits, plinth),
-              List.of(), domes, support.gear(), support.pads(), false);
+              modules(scene, group, fits, base, feature.asset()));
+        return new Layout(design, plinth, List.of(connected), domes,
+              support(scene, tile, design, plinth, connected, domes, false, false), false);
     }
 
     /**
@@ -272,64 +253,10 @@ final class BoardMultiHexBuilding {
         return result;
     }
 
-    /** The neighbours' tops and their connections to each other, in this hex's frame ({@link Layout#around}). */
-    private static List<Float> around(BoardScene scene, BoardScene.Tile tile, String asset, Float[] connected) {
-        Float[] result = new Float[13];
-        result[12] = 0f;
+    /** {@code connected} for a hex under the domes, in place: its plinth joins its neighbours', annexes' too, at its height. */
+    private static void plinth(Float[] connected, float plinth) {
         for (int direction = 0; direction < 6; direction++) {
-            var neighbor = scene.neighbor(tile, direction);
-            result[direction] = 0f;
-            result[6 + direction] = 0f;
-            if (neighbor == null || neighbor.features().stream().noneMatch(feature -> feature.asset().equals(asset))) {
-                continue;
-            }
-            int levels = Math.max(1, neighbor.cover().height());
-            float shift = (neighbor.elevation() - tile.elevation()) * LEVEL;
-            if (connected[direction] > 0) { result[direction] = shift + levels * LEVEL; }
-            // Towards the next neighbour round this hex, two sixths on from this one.
-            float joined = connections(scene, neighbor, asset, levels)[(direction + 2) % 6];
-            if (joined > 0) { result[6 + direction] = shift + joined; }
-        }
-        return List.of(result);
-    }
-
-    /**
-     * {@link Layout#around} for an annex: a hex under the domes stands as high as the annex where its wing runs on
-     * across it, and is closed off otherwise; then the plinth's height, at which its cells are plinth, and the directions
-     * its wings leave by (bits).
-     */
-    private static List<Float> annexAround(BoardScene scene, BoardScene.Tile tile, String asset, Float[] connected,
-          List<Fit> fits, float plinth, boolean[] winged, float top) {
-        var result = new ArrayList<>(around(scene, tile, asset, connected));
-        int wings = 0;
-        for (int direction = 0; direction < 6; direction++) {
-            var neighbor = scene.neighbor(tile, direction);
-            var next = scene.neighbor(tile, (direction + 1) % 6);
-            boolean under = neighbor != null && !annex(fits, neighbor.coords());
-            boolean nextUnder = next != null && !annex(fits, next.coords());
-            if (under && result.get(direction) > 0) { result.set(direction, top); }
-            if (winged[direction]) { wings |= 1 << direction; }
-            // Two hexes under the domes join at the plinth; an annex and one of them do not join at all.
-            if ((under || nextUnder) && result.get(6 + direction) > 0) {
-                result.set(6 + direction, under && nextUnder ? Math.min(result.get(6 + direction), plinth) : 0f);
-            }
-        }
-        result.set(12, plinth);
-        result.add((float) wings);
-        return result;
-    }
-
-    /**
-     * {@code connected} for a hex under the domes, in place: its plinth joins its neighbours under the domes, and an
-     * annex whose wing crosses it, at the plinth's height; it closes towards any other annex.
-     */
-    private static void plinth(BoardScene scene, BoardScene.Tile tile, List<Fit> fits, int base, float plinth,
-          Float[] connected) {
-        for (int direction = 0; direction < 6; direction++) {
-            if (connected[direction] <= 0) { continue; }
-            var neighbor = scene.neighbor(tile, direction);
-            boolean annex = annex(fits, neighbor.coords());
-            connected[direction] = !annex || wing(fits, base, neighbor, tile) != null ? plinth : 0f;
+            if (connected[direction] > 0) { connected[direction] = plinth; }
         }
     }
 
@@ -353,62 +280,112 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * The wing joining an annex to the podium of the dome nearest the hexside it shares with a hex {@code under} the
-     * domes to its north or south: straight from that hexside across that hex, as wide as the annex's core, until both
-     * its far corners lie in the middle of the podium's ring. Null where the annex rises no higher than the plinth or the wing would not
-     * reach the ring within that hex; else that dome's index and the wing as {@link Dome#wings} gives it.
+     * An annex's module ({@link #module}): on the line from the centre of the dome nearest it through its own, out of
+     * the ring over the annex's centre, where units stand, its gatehouse end drawn in as far as it must to keep inside
+     * the annex's facades and clear of the airlocks before it. That dome's index and the module as {@link Dome#modules}
+     * gives it; null where the annex rises no higher than the plinth.
      */
-    private static float[] wing(List<Fit> fits, int base, BoardScene.Tile annex, BoardScene.Tile under) {
-        float rise = (annex.elevation() + Math.max(1, annex.cover().height()) - base) * LEVEL - PLINTH;
+    private static float[] annexModule(BoardScene scene, BoardScene.Tile annex, List<Fit> fits, int base, String asset) {
+        int levels = Math.max(1, annex.cover().height());
+        float rise = (annex.elevation() + levels - base) * LEVEL - PLINTH;
         if (rise <= EPSILON || fits.isEmpty()) { return null; }
         float ax = HexTile.centerX(annex.coords(), WIDTH), ay = HexTile.centerY(annex.coords(), HEIGHT);
-        float ux = HexTile.centerX(under.coords(), WIDTH), uy = HexTile.centerY(under.coords(), HEIGHT);
-        float mx = (ax + ux) / 2, my = (ay + uy) / 2, apart = (float) Math.hypot(ux - ax, uy - ay);
-        float ix = (ux - ax) / apart, iy = (uy - ay) / apart;
-        if (Math.abs(ix) > EPSILON) { return null; }
         int nearest = 0;
         for (int index = 1; index < fits.size(); index++) {
             var fit = fits.get(index);
-            if (Math.hypot(mx - fit.x(), my - fit.y()) - fit.podium()
-                  < Math.hypot(mx - fits.get(nearest).x(), my - fits.get(nearest).y()) - fits.get(nearest).podium()) {
+            if (Math.hypot(ax - fit.x(), ay - fit.y()) - fit.podium()
+                  < Math.hypot(ax - fits.get(nearest).x(), ay - fits.get(nearest).y()) - fits.get(nearest).podium()) {
                 nearest = index;
             }
         }
         var fit = fits.get(nearest);
-        float middle = (fit.radius() + fit.podium() * (float) Math.cos(Math.PI / 12)) / 2;
-        float enter = 0, leave = Float.POSITIVE_INFINITY;
-        for (int side = -1; side <= 1; side += 2) {
-            float px = mx - iy * CORE * side - fit.x(), py = my + ix * CORE * side - fit.y();
-            float along = px * ix + py * iy, room = along * along - (px * px + py * py) + middle * middle;
-            if (room < 0) { return null; }
-            enter = Math.max(enter, -along - (float) Math.sqrt(room));
-            leave = Math.min(leave, -along + (float) Math.sqrt(room));
+        float dx = ax - fit.x(), dy = ay - fit.y(), apart = (float) Math.hypot(dx, dy), ux = dx / apart, uy = dy / apart;
+        var kit = equipment();
+        List<List<float[]>> airlocks = new ArrayList<>();
+        for (Gear airlock : airlocks(kit, scene, annex, 0, connections(scene, annex, asset, levels), List.of(), true, false)) {
+            airlocks.add(footprint(kit, airlock));
         }
-        if (enter <= 0 || enter > leave || enter > HEIGHT * .9f) { return null; }
-        return new float[] { nearest, mx - fit.x(), my - fit.y(), ix, iy, rise, enter };
+        List<float[]> facades = outline(63, SETBACK);
+        float inner = ringMiddle(fit.radius(), fit.podium());
+        for (float outer = apart + GATEHOUSE / 2; outer > apart + MODULE_CHAMFER; outer -= .5f) {
+            var shape = moduleOutline(-dx, -dy, ux, uy, Math.max(inner, outer - GATEHOUSE), outer, MODULE_HALF + HEAD,
+                  MODULE_CHAMFER);
+            boolean clear = true;
+            // Its outer end's corners (#moduleOutline).
+            for (int corner = 1; corner <= 4 && clear; corner++) {
+                clear = inside(facades, shape.get(corner)[0], shape.get(corner)[1]);
+            }
+            for (var airlock : airlocks) {
+                for (float[] corner : airlock) { clear &= !inside(shape, corner[0], corner[1]); }
+                for (float[] corner : shape) { clear &= !inside(airlock, corner[0], corner[1]); }
+            }
+            if (clear) { return new float[] { nearest, ux, uy, outer, rise }; }
+        }
+        return null;
     }
 
-    /** Each dome's annexes' wings ({@link Dome#wings}), in a stable order. */
-    private static List<List<Float>> wings(BoardScene scene, List<Member> group, List<Fit> fits, int base, String asset) {
+    /** Each dome's annexes' modules ({@link Dome#modules}), in a stable order. */
+    private static List<List<Float>> modules(BoardScene scene, List<Member> group, List<Fit> fits, int base, String asset) {
         List<float[]> found = new ArrayList<>();
         for (Member member : group) {
             if (member.ghost() || !annex(fits, member.coords())) { continue; }
-            var tile = scene.tile(member.coords());
-            var connected = connections(scene, tile, asset, Math.max(1, tile.cover().height()));
-            for (int direction = 0; direction < 6; direction++) {
-                var neighbor = scene.neighbor(tile, direction);
-                if (connected[direction] <= 0 || annex(fits, neighbor.coords())) { continue; }
-                var wing = wing(fits, base, tile, neighbor);
-                if (wing != null) { found.add(wing); }
-            }
+            var module = annexModule(scene, scene.tile(member.coords()), fits, base, asset);
+            if (module != null) { found.add(module); }
         }
-        found.sort(Comparator.<float[]>comparingDouble(wing -> wing[1]).thenComparingDouble(wing -> wing[2]));
+        found.sort(Comparator.<float[]>comparingDouble(module -> module[1]).thenComparingDouble(module -> module[2]));
         List<List<Float>> result = new ArrayList<>();
         fits.forEach(fit -> result.add(new ArrayList<>()));
-        for (float[] wing : found) {
-            for (int at = 1; at < wing.length; at++) { result.get((int) wing[0]).add(wing[at]); }
+        for (float[] module : found) {
+            for (int at = 1; at < module.length; at++) { result.get((int) module[0]).add(module[at]); }
         }
         return result;
+    }
+
+    /** The middle of a dome's ring, where an annex's module ends inside it. */
+    private static float ringMiddle(float radius, float podium) {
+        return (radius + podium * (float) Math.cos(Math.PI / 12)) / 2;
+    }
+
+    /**
+     * A module's outline about the dome's centre at (cx, cy), counter-clockwise from its inner end's right corner: from
+     * {@code from} to {@code to} along (ux, uy), {@code half} either side, its corners cut by {@code chamfer}; its outer
+     * end's corners are the second to fifth points.
+     */
+    private static List<float[]> moduleOutline(float cx, float cy, float ux, float uy, float from, float to, float half,
+          float chamfer) {
+        float px = -uy, py = ux;
+        float[][] points = { { from + chamfer, -half }, { to - chamfer, -half }, { to, chamfer - half },
+              { to, half - chamfer }, { to - chamfer, half }, { from + chamfer, half }, { from, half - chamfer },
+              { from, chamfer - half } };
+        List<float[]> result = new ArrayList<>(points.length);
+        for (float[] point : points) {
+            result.add(new float[] { cx + ux * point[0] + px * point[1], cy + uy * point[0] + py * point[1] });
+        }
+        return result;
+    }
+
+    /** A convex, counter-clockwise outline moved in by {@code by} on every edge (out where negative). */
+    private static List<float[]> parapets(List<float[]> outline, float by) {
+        int count = outline.size();
+        List<float[]> result = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            float[] before = outline.get((i + count - 1) % count), at = outline.get(i), after = outline.get((i + 1) % count);
+            result.add(meet(shifted(before, at, by), shifted(at, after, by)));
+        }
+        return result;
+    }
+
+    /** The line through a to b moved left by {@code by}: a point on it and its direction. */
+    private static float[] shifted(float[] a, float[] b, float by) {
+        float dx = b[0] - a[0], dy = b[1] - a[1], length = (float) Math.hypot(dx, dy);
+        return new float[] { a[0] - dy / length * by, a[1] + dx / length * by, dx, dy };
+    }
+
+    /** Where two lines (#shifted) meet. */
+    private static float[] meet(float[] first, float[] second) {
+        float cross = first[2] * second[3] - first[3] * second[2];
+        float t = ((second[0] - first[0]) * second[3] - (second[1] - first[1]) * second[2]) / cross;
+        return new float[] { first[0] + first[2] * t, first[1] + first[3] * t };
     }
 
     /**
@@ -428,9 +405,9 @@ final class BoardMultiHexBuilding {
             var tile = scene.tile(member.coords());
             float shift = (base - tile.elevation()) * LEVEL;
             var connected = connections(scene, tile, asset, Math.max(1, tile.cover().height()));
-            plinth(scene, tile, fits, base, PLINTH + shift, connected);
+            plinth(connected, PLINTH + shift);
             for (Gear airlock : airlocks(kit, scene, tile, PLINTH + shift, connected,
-                  domes(fits, member.coords(), shift, none, none), false)) {
+                  domes(fits, member.coords(), shift, none, none), false, false)) {
                 points.add(new float[] { HexTile.centerX(member.coords(), WIDTH) + airlock.x(),
                       HexTile.centerY(member.coords(), HEIGHT) + airlock.y() });
             }
@@ -448,41 +425,9 @@ final class BoardMultiHexBuilding {
         return result;
     }
 
-    /**
-     * {@link Layout#notches}: where this hex connects towards d and towards the hex beyond a corner of that hexside while
-     * the neighbour towards d does not, the neighbour's facade stands back from the corner this hex's share reaches;
-     * this hex closes the gap between them with a wall along the hexside.
-     */
-    private static List<Float> notches(BoardScene scene, BoardScene.Tile tile, Float[] connected, List<Fit> fits,
-          float plinth) {
-        Float[] result = new Float[12];
-        for (int direction = 0; direction < 6; direction++) {
-            var neighbor = scene.neighbor(tile, direction);
-            for (int side = 0; side < 2; side++) {
-                int beyond = (direction + (side == 0 ? 2 : 4)) % 6;
-                float height = Float.MAX_VALUE;
-                if (neighbor != null && connected[direction] > 0) {
-                    float shift = (neighbor.elevation() - tile.elevation()) * LEVEL;
-                    if (!ConnectedKit.back(scene, neighbor, beyond)) {
-                        height = Math.max(0, shift);
-                    } else if (!annex(fits, neighbor.coords())) {
-                        // A hex under the domes fills that corner with its plinth alone: an annex's wing keeps clear.
-                        height = Math.max(0, plinth);
-                    }
-                }
-                result[direction * 2 + side] = height;
-            }
-        }
-        return List.of(result);
-    }
-
     // ---- Support pieces ------------------------------------------------------------------------------------------------
 
     private static final String EQUIPMENT = "buildings/multihex/lunar-equipment.glb";
-    /** An annex roof's gear: skylights, as the printed lunar map's roofs show most, twice as often as the rest. */
-    private static final List<String> ROOF_GEAR = List.of("skylight", "skylight", "plant", "tanks", "solar", "radiator",
-          "antenna");
-    private static final List<String> APRON_GEAR = List.of("tanks", "radiator", "plant");
     private static final List<String> INTERIOR_GEAR = List.of("plant", "tanks");
     private static volatile BoardKit<Equipment> equipment = new BoardKit<>(BoardMultiHexBuilding::loadEquipment);
     /** Whether each board material's .tres is transparent ({@link GodotMaterial#blended}), read once per asset load. */
@@ -521,49 +466,26 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * What stands on the share, chosen per hex and stable for it: an airlock at each closed hexside a corridor (a ground
-     * rail) arrives at, against an annex's core or on a dome's plinth; on an annex's roof ({@code blocks}), unless placed
-     * objects stand there, banks of roof gear; on a dome's plinth outside the dome, plant and tanks; under a glass
-     * dome, at its middle, a piece that clears the glass. A piece goes only where it fits, turned to a hexside.
+     * What stands on the share, chosen per hex and stable for it: an airlock at each closed hexside a road or a corridor
+     * (a ground rail) arrives at, at {@code top} (an annex's, {@code blocks}: on its plinth, or in front of the block it
+     * stands as, {@code block}); under a glass dome, at its middle, a piece that clears the glass; pylons round the
+     * podiums. A piece goes only where it fits, turned to a hexside.
      */
-    private static Support support(BoardScene scene, BoardScene.Tile tile, Design design, float top, Float[] reach,
-          List<Dome> domes, boolean blocks, float deck) {
+    private static List<Gear> support(BoardScene scene, BoardScene.Tile tile, Design design, float top, Float[] reach,
+          List<Dome> domes, boolean blocks, boolean block) {
         var kit = equipment();
         List<Gear> result = new ArrayList<>();
-        List<Pad> pads = new ArrayList<>();
-        if (kit.lods().isEmpty()) { return new Support(List.of(), List.of()); }
+        if (kit.lods().isEmpty()) { return List.of(); }
         var random = new SplittableRandom(tile.coords().getX() * 73_856_093L ^ tile.coords().getY() * 19_349_663L);
         float[] heights = new float[6];
         for (int direction = 0; direction < 6; direction++) { heights[direction] = reach[direction]; }
         List<float[]> base = outline(closed(heights, 0), SETBACK - .01f);
-        result.addAll(airlocks(kit, scene, tile, top, reach, domes, blocks));
-        if (blocks) {
-            // No gear on an annex no higher than the plinth, nor where placed objects stand.
-            boolean decorated = top <= deck + EPSILON
-                  || tile.features().stream().anyMatch(feature -> feature.decoration() != null);
-            float chance = random.nextFloat();
-            int banks = decorated ? 0 : chance < .12f ? 0 : chance < .5f ? 1 : 2;
-            // An annex's core ({@link #blocks}) inside its parapets.
-            float a = CORE - PARAPET_WIDTH - 1, b = HEIGHT / 2 - PARAPET_WIDTH - 1;
-            List<float[]> roof = List.of(new float[] { -a, -b }, new float[] { a, -b }, new float[] { a, b },
-                  new float[] { -a, b });
-            int turn = random.nextInt(6);
-            for (int bank = 0; bank < banks; bank++) {
-                String piece = ROOF_GEAR.get(random.nextInt(ROOF_GEAR.size()));
-                int count = piece.equals("antenna") ? 1 : 2 + random.nextInt(2);
-                float offset = banks == 1 ? 0 : bank == 0 ? -1 : 1;
-                for (int tries = 0; tries < 6 && !bank(kit, piece, count, (turn + tries) % 6, offset, top, roof, result, pads); tries++) {
-                    if (count > 1) { count--; }
-                }
-            }
-        } else if (!domes.isEmpty()) {
+        result.addAll(airlocks(kit, scene, tile, top, reach, domes, blocks, block));
+        if (!blocks && !domes.isEmpty()) {
             Dome dome = domes.stream().min(Comparator.comparingDouble(near -> Math.hypot(near.x(), near.y()) - near.podium()))
                   .orElseThrow();
             float distance = (float) Math.hypot(dome.x(), dome.y());
-            if (domes.stream().allMatch(near -> Math.hypot(near.x(), near.y()) > near.podium()) && random.nextFloat() >= .2f) {
-                place(result, kit, APRON_GEAR.get(random.nextInt(APRON_GEAR.size())), 0, 0, top, random.nextInt(6), base,
-                      domes, false);
-            } else if (design == Design.DOME && distance < dome.radius()) {
+            if (design == Design.DOME && distance < dome.radius()) {
                 // Under the glass, towards the dome's middle where it is highest, within this hex.
                 float toward = Math.min(distance, 18);
                 float x = distance < 1 ? 0 : dome.x() / distance * toward, y = distance < 1 ? 0 : dome.y() / distance * toward;
@@ -583,15 +505,18 @@ final class BoardMultiHexBuilding {
                 }
             }
         }
-        return new Support(List.copyOf(result), List.copyOf(pads));
+        return List.copyOf(result);
     }
 
     /**
-     * An airlock at each closed hexside a corridor (a ground rail) arrives at: against an annex's core ({@code blocks}),
-     * or on a dome's plinth where it fits clear of the podiums.
+     * An airlock at each closed hexside a road or a corridor (a ground rail) arrives at, facing it on its axis (a road
+     * meets a closed hexside square at its middle, BoardRoad#layout), on the plinth at {@code top} (a colony slab
+     * road's deck where one arrives, GpuRoads#SLAB_RISE): an annex's
+     * ({@code blocks}) always, its module keeping clear of it (#annexModule) or in front of the {@code block} it stands
+     * as, else where it fits clear of the podiums.
      */
     private static List<Gear> airlocks(Equipment kit, BoardScene scene, BoardScene.Tile tile, float top, Float[] reach,
-          List<Dome> domes, boolean blocks) {
+          List<Dome> domes, boolean blocks, boolean block) {
         var bounds = kit.bounds().get("airlock");
         if (bounds == null) { return List.of(); }
         float[] heights = new float[6];
@@ -600,74 +525,18 @@ final class BoardMultiHexBuilding {
         List<Gear> result = new ArrayList<>();
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.neighbor(tile, direction);
-            if (heights[direction] > 0 || neighbor == null || (neighbor.railBed() & 1 << (direction + 3) % 6) == 0) {
+            if (heights[direction] > 0 || neighbor == null
+                  || ((neighbor.railBed() | neighbor.roadExits()) & 1 << (direction + 3) % 6) == 0) {
                 continue;
             }
             float[] side = side(direction);
-            if (blocks) {
-                // Against the core's facade: across the hexside to the north or south, else its long side.
-                boolean across = direction % 3 == 0;
-                float x = across ? 0 : direction < 3 ? CORE : -CORE, y = Math.signum(side[1]) * HEIGHT / (across ? 2 : 4);
-                result.add(new Gear("airlock", x, y, 0, across ? 60 * direction : direction < 3 ? 90 : 270));
-                continue;
-            }
-            float along = side[2] - SETBACK - bounds.max.y;
-            var airlock = new Gear("airlock", side[0] * along, side[1] * along, top, 60 * direction);
-            if (fits(kit, airlock, base, domes, false)) { result.add(airlock); }
-        }
-        return result;
-    }
-
-    /**
-     * A service bank on an annex's roof: {@code count} copies of {@code piece} in a row along its shorter side, turned to a
-     * hexside, on a raised curb with a duct along it; side by side with the hex's other bank ({@code offset} -1 or 1, 0
-     * alone). False, placing nothing, where the curb would leave the roof.
-     */
-    private static boolean bank(Equipment kit, String piece, int count, int turn, float offset, float top,
-          List<float[]> roof, List<Gear> gear, List<Pad> pads) {
-        BoundingBox box = kit.bounds().get(piece);
-        if (box == null || roof.isEmpty()) { return false; }
-        boolean alongX = box.getWidth() <= box.getHeight();
-        float pitch = (alongX ? box.getWidth() : box.getHeight()) + GAP;
-        float along = (count * pitch - GAP) / 2 + 2, across = (alongX ? box.getHeight() : box.getWidth()) / 2 + 2 + DUCT;
-        Matrix4 frame = ConnectedKit.placement(0, turn);
-        Vector3 row = new Vector3(alongX ? 1 : 0, alongX ? 0 : 1, 0).rot(frame);
-        Vector3 cross = new Vector3(-row.y, row.x, 0);
-        Vector3 centre = new Vector3(cross).scl(offset * (across + 2));
-        var curb = new Pad(centre.x, centre.y, row.x, row.y, along, across, top);
-        for (float[] corner : corners(curb, 0)) {
-            if (!inside(roof, corner[0], corner[1])) { return false; }
-        }
-        // Clear of the hex's other bank: nothing of this curb inside that one's, with a walkway between.
-        for (Pad other : pads) {
-            List<float[]> overlap = corners(curb, 0);
-            List<float[]> around = corners(other, GAP);
-            for (int i = 0; i < 4 && !overlap.isEmpty(); i++) {
-                float[] a = around.get(i), b = around.get((i + 1) % 4);
-                float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
-                float nx = (b[1] - a[1]) / length, ny = -(b[0] - a[0]) / length;
-                overlap = clip(overlap, nx, ny, nx * a[0] + ny * a[1], false);
-            }
-            if (!overlap.isEmpty()) { return false; }
-        }
-        // Each piece centred on its slot, the duct along the curb's +cross side.
-        Vector3 middle = new Vector3(box.getCenterX(), box.getCenterY(), 0).rot(frame);
-        Vector3 shift = new Vector3(cross).scl(-DUCT / 2);
-        for (int index = 0; index < count; index++) {
-            var slot = new Vector3(centre).add(shift).mulAdd(row, (index - (count - 1) / 2f) * pitch).sub(middle);
-            gear.add(new Gear(piece, slot.x, slot.y, top + CURB, 60 * turn));
-        }
-        pads.add(curb);
-        return true;
-    }
-
-    /** A curb's outline, counter-clockwise, grown by {@code margin}. */
-    private static List<float[]> corners(Pad pad, float margin) {
-        float along = pad.along() + margin, across = pad.across() + margin, cx = -pad.uy(), cy = pad.ux();
-        List<float[]> result = new ArrayList<>(4);
-        for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
-            result.add(new float[] { pad.x() + pad.ux() * along * sign[0] + cx * across * sign[1],
-                  pad.y() + pad.uy() * along * sign[0] + cy * across * sign[1] });
+            // In front of a block's facade, else on the plinth inside its edge.
+            float along = side[2] - SETBACK - (block ? 0 : bounds.max.y);
+            // At a colony slab road's deck where one arrives, so it runs on level to the door.
+            float z = GpuRoads.slabs(neighbor, false) && (neighbor.roadExits() & 1 << (direction + 3) % 6) != 0
+                  ? Math.max(0, GpuRoads.SLAB_RISE + (neighbor.elevation() - tile.elevation()) * LEVEL) : top;
+            var airlock = new Gear("airlock", side[0] * along, side[1] * along, z, 60 * direction);
+            if (blocks || fits(kit, airlock, base, domes, false)) { result.add(airlock); }
         }
         return result;
     }
@@ -736,19 +605,29 @@ final class BoardMultiHexBuilding {
     private static boolean fits(Equipment kit, Gear gear, List<float[]> area, List<Dome> domes, boolean inside) {
         BoundingBox box = kit.bounds().get(gear.piece());
         if (box == null || area.isEmpty()) { return false; }
-        Matrix4 frame = frame(gear);
-        for (float x : new float[] { box.min.x, box.max.x }) {
-            for (float y : new float[] { box.min.y, box.max.y }) {
-                var corner = new Vector3(x, y, 0).mul(frame);
-                if (!inside(area, corner.x, corner.y)) { return false; }
-                for (Dome dome : domes) {
-                    float from = (float) Math.hypot(corner.x - dome.x(), corner.y - dome.y());
-                    if (!inside && from < dome.podium() + 12) { return false; }
-                    if (inside && (from > dome.radius() - 3 || dome.glass(from) < gear.z() + box.max.z + 4)) { return false; }
-                }
+        for (float[] corner : footprint(kit, gear)) {
+            if (!inside(area, corner[0], corner[1])) { return false; }
+            for (Dome dome : domes) {
+                float from = (float) Math.hypot(corner[0] - dome.x(), corner[1] - dome.y());
+                if (!inside && from < dome.podium() + 12) { return false; }
+                if (inside && (from > dome.radius() - 3 || dome.glass(from) < gear.z() + box.max.z + 4)) { return false; }
             }
         }
         return true;
+    }
+
+    /** The piece's footprint on the share, counter-clockwise; empty for a piece the kit lacks. */
+    private static List<float[]> footprint(Equipment kit, Gear gear) {
+        BoundingBox box = kit.bounds().get(gear.piece());
+        if (box == null) { return List.of(); }
+        Matrix4 frame = frame(gear);
+        List<float[]> result = new ArrayList<>(4);
+        for (float[] corner : new float[][] { { box.min.x, box.min.y }, { box.max.x, box.min.y }, { box.max.x, box.max.y },
+              { box.min.x, box.max.y } }) {
+            var point = new Vector3(corner[0], corner[1], 0).mul(frame);
+            result.add(new float[] { point.x, point.y });
+        }
+        return result;
     }
 
     /** The piece's placement: turned to its hexside, at its origin. */
@@ -874,7 +753,7 @@ final class BoardMultiHexBuilding {
         List<Fit> result = new ArrayList<>();
         for (float[] centre : centres) {
             float podium = centre[2];
-            float radius = podium * (float) Math.cos(Math.PI / 12) - Math.clamp(podium * PODIUM_WIDTH, 9, 24);
+            float radius = podium * (float) Math.cos(Math.PI / 12) - Math.clamp(podium * PODIUM_WIDTH, 9, 30);
             if (radius < MIN_DOME) { continue; }
             float apex = (centre[3] - base) * LEVEL;
             // The tops of the standing hexes this dome is nearest, within its podium.
@@ -1003,15 +882,16 @@ final class BoardMultiHexBuilding {
         var mesh = new Mesh();
         float[] reach = new float[6];
         for (int direction = 0; direction < 6; direction++) { reach[direction] = layout.reach().get(direction); }
-        if (layout.annex()) {
-            blocks(mesh, layout, lod);
-        } else {
-            float[] notches = new float[12];
-            for (int corner = 0; corner < 12; corner++) { notches[corner] = layout.notches().get(corner); }
-            shell(mesh, layout.top(), reach, notches);
+        if (layout.domes().isEmpty()) {
+            // A footprint too narrow for any dome, or an annex without a module of its own, stands at its own height.
+            shell(mesh, layout.top(), reach);
         }
-        for (Pad pad : layout.pads()) { pad(mesh, pad); }
+        if (!layout.domes().isEmpty() || layout.annex()) { skirt(mesh, layout); }
         for (Dome dome : layout.domes()) {
+            if (layout.annex()) {
+                for (int at = 0; at < dome.modules().size(); at += 4) { module(mesh, hex(), dome, at); }
+                continue;
+            }
             dome(mesh, dome, lod);
             if (layout.design() == Design.BIODOME) { garden(mesh, dome); }
         }
@@ -1032,112 +912,71 @@ final class BoardMultiHexBuilding {
         return result;
     }
 
-    // ---- An annex's blocks --------------------------------------------------------------------------------------------
+    // ---- The plinth ----------------------------------------------------------------------------------------------------
+
+    /** How far the plinth's foundation reaches past a podium's outline: under its pylons and fins. */
+    private static final float SKIRT = 10;
 
     /**
-     * An annex's share in rectangular blocks, as the printed lunar maps draw them. Each hex's core, the rectangle
-     * between its north and south hexsides as wide as a hexside, stands at its own height; the cell beside a slanted
-     * hexside, between the cores of two neighbours that connect, at their connection's height. A facade rises wherever a
-     * cell stands above the cell beyond its edge, crowned by a parapet, with steel piers at its corners and joints; the
-     * cells a slanted hexside splits are cut to the hex.
+     * The domes' plinth under what stands on it alone, cut to the hex, so the regolith shows between, as round a real
+     * colony's buildings: a foundation round each podium, pads under its annexes' modules, and under each airlock and
+     * its entrance's way to the podium or its module.
      */
-    private static void blocks(Mesh mesh, Layout layout, int lod) {
-        float a = CORE, half = HEIGHT / 2, top = layout.top();
-        float[] reach = new float[6], top6 = new float[6], link = new float[6];
-        for (int direction = 0; direction < 6; direction++) {
-            reach[direction] = layout.reach().get(direction);
-            top6[direction] = layout.around().get(direction);
-            link[direction] = layout.around().get(6 + direction);
-        }
-        // Each cell: x from, to; y from, to; its height; the heights beyond its south, east, north and west edges.
-        float[][] cells = {
-              { -a, a, 0, half, top, top, reach[1], top6[0], reach[5] },
-              { -a, a, -half, 0, top, top6[3], reach[2], top, reach[4] },
-              { a, 2 * a, 0, half, reach[1], reach[2], top6[1], link[0], top },
-              { a, 2 * a, -half, 0, reach[2], link[2], top6[2], reach[1], top },
-              { -2 * a, -a, -half, 0, reach[4], link[3], top, reach[5], top6[4] },
-              { -2 * a, -a, 0, half, reach[5], reach[4], top, link[5], top6[5] } };
+    private static void skirt(Mesh mesh, Layout layout) {
         List<float[]> hex = hex();
-        float deck = layout.around().get(12);
-        for (int index = 0; index < cells.length; index++) {
-            if (cells[index][4] > EPSILON) { cell(mesh, index < 2 ? null : hex, cells[index], deck, lod); }
-        }
-        // Under a wing to the north or south the plinth beyond is set back from its corners: the core closes to the
-        // ground there, up to the plinth's deck.
-        int wings = Math.round(layout.around().get(13));
-        for (int direction : new int[] { 0, 3 }) {
-            if ((wings & 1 << direction) == 0) { continue; }
-            float y = direction == 0 ? half : -half, ny = direction == 0 ? 1 : -1;
-            face(mesh, null, PLINTH_MATERIAL, new float[] { -a, y }, new float[] { a, y }, 0, ny, 0, deck,
-                  across(new float[] { -a, y }, 0, ny), across(new float[] { a, y }, 0, ny));
-        }
-    }
-
-    /**
-     * One cell of {@link #blocks}, cut to the hex unless that is null: its roof inside its parapets, a facade with a
-     * parapet over each edge it stands above the cell beyond (from that cell's height), a pier at the start of each
-     * (on the corner's bisector where two meet), and on the ground a base course along it. A cell no higher than
-     * {@code deck} is the domes' plinth: concrete, with neither parapets nor piers.
-     */
-    private static void cell(Mesh mesh, List<float[]> hex, float[] cell, float deck, int lod) {
-        float x0 = cell[0], x1 = cell[1], y0 = cell[2], y1 = cell[3], z = cell[4];
-        // Counter-clockwise from the south-west corner: the edges south, east, north and west.
-        float[][] corners = { { x0, y0 }, { x1, y0 }, { x1, y1 }, { x0, y1 } };
-        float[][] normals = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
-        boolean[] wall = new boolean[4];
-        for (int edge = 0; edge < 4; edge++) { wall[edge] = cell[5 + edge] < z - EPSILON; }
-        if (z <= deck + EPSILON) {
-            if (hex == null) { flat(mesh, PLINTH_MATERIAL, List.of(corners), z, 1); }
-            else { clippedFlat(mesh, hex, PLINTH_MATERIAL, List.of(corners), z); }
-            for (int edge = 0; edge < 4; edge++) {
-                if (!wall[edge]) { continue; }
-                float[] a = corners[edge], b = corners[(edge + 1) % 4];
-                face(mesh, hex, PLINTH_MATERIAL, a, b, normals[edge][0], normals[edge][1], Math.max(0, cell[5 + edge]), z,
-                      across(a, normals[edge][0], normals[edge][1]), across(b, normals[edge][0], normals[edge][1]));
+        var kit = equipment();
+        for (Dome dome : layout.domes()) {
+            float top = dome.foot(), flat = dome.podium() * (float) Math.cos(Math.PI / 12);
+            List<float[]> foundation = new ArrayList<>(12);
+            float corner = (flat + SKIRT) / (float) Math.cos(Math.PI / 12);
+            for (int k = 0; k < 12; k++) {
+                double angle = Math.PI / 6 * k;
+                foundation.add(new float[] { dome.x() + corner * (float) Math.cos(angle), dome.y() + corner * (float) Math.sin(angle) });
             }
-            return;
-        }
-        float south = wall[0] ? PARAPET_WIDTH : 0, east = wall[1] ? PARAPET_WIDTH : 0, north = wall[2] ? PARAPET_WIDTH : 0,
-              west = wall[3] ? PARAPET_WIDTH : 0;
-        List<float[]> roof = List.of(new float[] { x0 + west, y0 + south }, new float[] { x1 - east, y0 + south },
-              new float[] { x1 - east, y1 - north }, new float[] { x0 + west, y1 - north });
-        if (hex == null) { flat(mesh, ROOF, roof, z, 1); } else { clippedFlat(mesh, hex, ROOF, roof, z); }
-        for (int edge = 0; edge < 4; edge++) {
-            if (!wall[edge]) { continue; }
-            float[] a = corners[edge], b = corners[(edge + 1) % 4], c = roof.get(edge), d = roof.get((edge + 1) % 4);
-            float nx = normals[edge][0], ny = normals[edge][1], bottom = Math.max(0, cell[5 + edge]);
-            // Along the facade from the viewer's left, continuous across hexes: a hex column's width per repeat across,
-            // half a hex up.
-            float u0 = across(a, nx, ny), u1 = across(b, nx, ny);
-            face(mesh, hex, WALL, a, b, nx, ny, bottom, z + PARAPET, u0, u1);
-            face(mesh, hex, WALL, c, d, -nx, -ny, z, z + PARAPET, u0, u1);
-            if (hex == null) { flat(mesh, PLINTH_MATERIAL, List.of(a, b, d, c), z + PARAPET, 1); }
-            else { clippedFlat(mesh, hex, PLINTH_MATERIAL, List.of(a, b, d, c), z + PARAPET); }
-            // A parapet ending where the roof runs on closes its end.
-            if (!wall[(edge + 1) % 4]) { face(mesh, hex, WALL, b, d, -ny, nx, z, z + PARAPET, 0, PARAPET_WIDTH / WALL_REPEAT); }
-            if (!wall[(edge + 3) % 4]) { face(mesh, hex, WALL, c, a, ny, -nx, z, z + PARAPET, 0, PARAPET_WIDTH / WALL_REPEAT); }
-            if (bottom < EPSILON) {
-                float[] e = { b[0] + nx * COURSE_DEPTH, b[1] + ny * COURSE_DEPTH }, f = { a[0] + nx * COURSE_DEPTH, a[1] + ny * COURSE_DEPTH };
-                prism(mesh, hex, PLINTH_MATERIAL, List.of(b, e, f, a), 0, COURSE, 3);
+            prism(mesh, hex, PLINTH_MATERIAL, foundation, 0, top, foundation.size());
+            var modules = dome.modules();
+            for (int at = 0; at < modules.size(); at += 4) {
+                float ux = modules.get(at), uy = modules.get(at + 1), outer = modules.get(at + 2);
+                float inner = ringMiddle(dome.radius(), dome.podium());
+                List<float[]> pad = moduleOutline(dome.x(), dome.y(), ux, uy, inner, outer + 2, MODULE_HALF + HEAD + 2,
+                      MODULE_CHAMFER);
+                prism(mesh, hex, PLINTH_MATERIAL, pad, 0, top, pad.size());
+                // Under its wider root too.
+                List<float[]> root = moduleOutline(dome.x(), dome.y(), ux, uy, inner,
+                      Math.min(outer, flat + ROOT_REACH) + 2, MODULE_HALF + ROOT + 2, MODULE_CHAMFER);
+                prism(mesh, hex, PLINTH_MATERIAL, root, 0, top, root.size());
             }
-            // The pier at its start: on the corner's bisector where the facade before it turns there.
-            int previous = (edge + 3) % 4;
-            boolean corner = wall[previous];
-            if (!corner && (lod > 0 || cell[5 + previous] > z + EPSILON)) { continue; }
-            float px = corner ? nx + normals[previous][0] : nx, py = corner ? ny + normals[previous][1] : ny;
-            float length = (float) Math.hypot(px, py);
-            px /= length;
-            py /= length;
-            if (hex == null || inside(hex, a[0] - px, a[1] - py)) {
-                float from = corner ? Math.max(bottom, Math.max(0, cell[5 + previous])) : bottom;
-                pier(mesh, a[0], a[1], px, py, corner ? CORNER_PIER : PIER_HALF, from, z + PARAPET + .6f, from < EPSILON);
+            for (int at = 0; at < dome.entrances().size(); at += 2) {
+                float x = dome.entrances().get(at), y = dome.entrances().get(at + 1), from = (float) Math.hypot(x, y);
+                if (from > flat) { way(mesh, hex, dome.x(), dome.y(), x / from, y / from, flat, from, 7, top); }
+            }
+        }
+        // Under each raised airlock, and on an annex from its back to the module over the annex's centre.
+        for (Gear gear : layout.gear()) {
+            if (!gear.piece().equals("airlock") || gear.z() <= EPSILON) { continue; }
+            List<float[]> pad = grown(footprint(kit, gear), 2);
+            if (pad.isEmpty()) { continue; }
+            prism(mesh, hex, PLINTH_MATERIAL, pad, 0, gear.z(), pad.size());
+            float from = (float) Math.hypot(gear.x(), gear.y());
+            if (layout.annex() && !layout.domes().isEmpty() && from > EPSILON) {
+                way(mesh, hex, 0, 0, gear.x() / from, gear.y() / from, 0, from, 7, gear.z());
             }
         }
     }
 
-    /** Where {@code point} lies along a facade facing (nx, ny), from the viewer's left, in wall texture repeats. */
-    private static float across(float[] point, float nx, float ny) {
-        return nx != 0 ? point[1] * nx / (HEIGHT / 2) : -point[0] * ny / (WIDTH * .75f / 2);
+    /** A plinth way from {@code from} to {@code to} along (ux, uy) about (cx, cy), {@code half} either side, cut to the hex. */
+    private static void way(Mesh mesh, List<float[]> hex, float cx, float cy, float ux, float uy, float from, float to,
+          float half, float top) {
+        float px = -uy * half, py = ux * half;
+        List<float[]> pad = List.of(new float[] { cx + ux * from + px, cy + uy * from + py },
+              new float[] { cx + ux * from - px, cy + uy * from - py }, new float[] { cx + ux * to - px, cy + uy * to - py },
+              new float[] { cx + ux * to + px, cy + uy * to + py });
+        prism(mesh, hex, PLINTH_MATERIAL, pad, 0, top, 4);
+    }
+
+    /** A convex, counter-clockwise outline grown by {@code by} on every edge (corners stay sharp). */
+    private static List<float[]> grown(List<float[]> outline, float by) {
+        return outline.isEmpty() ? outline : parapets(outline, -by);
     }
 
     // ---- The shell -----------------------------------------------------------------------------------------------------
@@ -1195,7 +1034,7 @@ final class BoardMultiHexBuilding {
      * there stand on the outline's set-back edges; where the next band closes more hexsides a ledge covers the difference;
      * the top band carries the deck.
      */
-    private static void shell(Mesh mesh, float top, float[] reach, float[] notches) {
+    private static void shell(Mesh mesh, float top, float[] reach) {
         TreeSet<Float> breaks = new TreeSet<>(List.of(0f, top));
         for (float connected : reach) { if (connected > EPSILON && connected < top - EPSILON) { breaks.add(connected); } }
         List<Float> heights = List.copyOf(breaks);
@@ -1204,7 +1043,6 @@ final class BoardMultiHexBuilding {
             int closed = closed(reach, bottom);
             List<float[]> outline = outline(closed, SETBACK);
             walls(mesh, PLINTH_MATERIAL, outline, closed, SETBACK, bottom, ceiling);
-            notchWalls(mesh, PLINTH_MATERIAL, reach, notches, bottom, ceiling);
             if (band == heights.size() - 2) {
                 flat(mesh, PLINTH_MATERIAL, outline, ceiling, 1);
                 continue;
@@ -1216,30 +1054,6 @@ final class BoardMultiHexBuilding {
                 float[] side = side(direction);
                 flat(mesh, PLINTH_MATERIAL, clip(remaining, side[0], side[1], side[2] - SETBACK, true), ceiling, .9f);
                 remaining = clip(remaining, side[0], side[1], side[2] - SETBACK, false);
-            }
-        }
-    }
-
-    /**
-     * The walls closing this share where it reaches a corner its connected neighbour's facade stands back from
-     * ({@link Layout#notches}): along the hexside, from the corner to that facade.
-     */
-    private static void notchWalls(Mesh mesh, String material, float[] reach, float[] notches, float bottom, float ceiling) {
-        for (int direction = 0; direction < 6; direction++) {
-            if (reach[direction] <= bottom + EPSILON) { continue; }
-            int edge = Math.floorMod(1 - direction, 6);
-            float[] first = { HexTile.cornerOffsetX(edge, WIDTH), HexTile.cornerOffsetY(edge, HEIGHT) };
-            float[] last = { HexTile.cornerOffsetX((edge + 1) % 6, WIDTH), HexTile.cornerOffsetY((edge + 1) % 6, HEIGHT) };
-            for (int side = 0; side < 2; side++) {
-                int beside = (direction + (side == 0 ? 1 : 5)) % 6;
-                float from = Math.max(bottom, notches[direction * 2 + side]);
-                if (reach[beside] <= bottom + EPSILON || from >= ceiling - EPSILON) { continue; }
-                // The corner shared with direction + 1 is the hexside's first in counter-clockwise order.
-                float[] corner = side == 0 ? first : last, other = side == 0 ? last : first;
-                float length = (float) Math.hypot(other[0] - corner[0], other[1] - corner[1]);
-                float[] end = { corner[0] + (other[0] - corner[0]) * NOTCH / length,
-                      corner[1] + (other[1] - corner[1]) * NOTCH / length };
-                facade(mesh, material, side == 0 ? corner : end, side == 0 ? end : corner, side(direction), from, ceiling);
             }
         }
     }
@@ -1274,9 +1088,9 @@ final class BoardMultiHexBuilding {
         return null;
     }
 
-    /** A pier's half width at a corner and along a facade, how far it stands out, its chamfer; its footing's. */
-    private static final float CORNER_PIER = 2.6f, PIER_HALF = 1.8f, PIER_DEPTH = 2.1f, PIER_CHAMFER = .75f,
-          FOOTING_GROW = .9f, FOOTING_DEPTH = 3.2f, FOOTING = 2.4f, COURSE = 1.6f, COURSE_DEPTH = .9f;
+    /** A corner pier's half width, how far a pier stands out, its chamfer; its footing's. */
+    private static final float CORNER_PIER = 2.6f, PIER_DEPTH = 2.1f, PIER_CHAMFER = .75f, FOOTING_GROW = .9f,
+          FOOTING_DEPTH = 3.2f, FOOTING = 2.4f;
     /** A pier facing (nx, ny) at (x, y) on a facade, its back buried in the wall even at a corner; on a footing. */
     private static void pier(Mesh mesh, float x, float y, float nx, float ny, float half, float bottom, float top,
           boolean footing) {
@@ -1355,18 +1169,14 @@ final class BoardMultiHexBuilding {
         mesh.quad(material, a0, b0, b1, a1);
     }
 
-    /** A service bank's curb: a low concrete block with a white duct along its +cross side. */
-    private static void pad(Mesh mesh, Pad pad) {
-        float rx = pad.ux(), ry = pad.uy(), cx = -ry, cy = rx;
-        block(mesh, PLINTH_MATERIAL, pad.x(), pad.y(), rx, ry, pad.along(), pad.across(), pad.z(), pad.z() + CURB);
-        float ductX = pad.x() + cx * (pad.across() - DUCT / 2 - .4f), ductY = pad.y() + cy * (pad.across() - DUCT / 2 - .4f);
-        block(mesh, FRAME, ductX, ductY, rx, ry, pad.along() - .6f, DUCT / 2, pad.z() + CURB, pad.z() + CURB + DUCT);
-    }
-
     /** A block centred at (x, y), {@code along} and {@code across} half sizes along (rx, ry) and across it. */
     private static void block(Mesh mesh, String material, float x, float y, float rx, float ry, float along, float across,
           float bottom, float top) {
-        List<float[]> corners = corners(new Pad(x, y, rx, ry, along, across, bottom), 0);
+        List<float[]> corners = new ArrayList<>(4);
+        for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
+            corners.add(new float[] { x + rx * along * sign[0] - ry * across * sign[1],
+                  y + ry * along * sign[0] + rx * across * sign[1] });
+        }
         flat(mesh, material, corners, top, 1);
         for (int i = 0; i < 4; i++) {
             float[] a = corners.get(i), b = corners.get((i + 1) % 4);
@@ -1436,7 +1246,7 @@ final class BoardMultiHexBuilding {
         for (int entrance = 0; entrance < dome.entrances().size(); entrance += 2) {
             vestibule(mesh, hex, dome, dome.entrances().get(entrance), dome.entrances().get(entrance + 1));
         }
-        for (int wing = 0; wing < dome.wings().size(); wing += 6) { annexWing(mesh, hex, dome, wing); }
+        for (int at = 0; at < dome.modules().size(); at += 4) { module(mesh, hex, dome, at); }
         podium(mesh, hex, dome);
         for (int[] edge : geodesic.edges()) { strut(mesh, hex, points.get(edge[0]), points.get(edge[1]), centre, lod); }
         ring(mesh, hex, dome, lod);
@@ -1503,13 +1313,37 @@ final class BoardMultiHexBuilding {
             double angle = Math.toRadians(fin < 6 ? 60 * fin : 15 + 30 * (fin - 6));
             if (!dome.joined(angle, 0)) { fin(mesh, hex, dome, (float) angle, fin < 6 ? corner : flat, bottom, top); }
         }
-        // A service unit on the ring roof over each side: a housing, its long side along the ring.
-        float middle = (inner + flat) / 2, along = Math.min(7, (flat - inner) * .45f);
+        // The ring roof in bays, one a side, as the colony's ring buildings are: steel ribs on the corners' radial lines
+        // and a steel rim along the outline, and in each bay its plant, two or three dark units and housings of
+        // different sizes along the ring, chosen per bay and stable for it.
+        float depth = flat - inner, middle = (inner + flat) / 2, rib = .45f, rim = .7f;
+        for (int k = 0; k < sides; k++) {
+            double angle = 2 * Math.PI * k / sides;
+            float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle), reach = (corner - inner) / 2;
+            clippedBlock(mesh, hex, PIER, x + ux * (inner + reach), y + uy * (inner + reach), ux, uy, reach, rib, top,
+                  top + .55f);
+        }
+        float half = corner * (float) Math.sin(Math.PI / sides);
         for (int side = 0; side < sides; side++) {
             double angle = Math.PI / sides * (2 * side + 1);
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle);
-            float rise = side % 2 == 0 ? 1.8f : 1.1f;
-            clippedBlock(mesh, hex, FRAME, x + ux * middle, y + uy * middle, -uy, ux, along, along * .55f, top, top + rise);
+            clippedBlock(mesh, hex, PIER, x + ux * (flat - rim), y + uy * (flat - rim), -uy, ux, half - rim, rim, top,
+                  top + .9f);
+            // Seeded alike in every share the bay crosses (dome.x/y are each share's own).
+            var random = new SplittableRandom(Float.floatToIntBits(dome.podium()) * 31L + Float.floatToIntBits(dome.radius()) * 17L + side);
+            int units = 2 + random.nextInt(2);
+            float room = (half - 2) * 2 * (inner + depth * .5f) / flat, span = room / units;
+            for (int unit = 0; unit < units; unit++) {
+                float along = Math.min(span * .5f - 1, Math.min(7, depth * .4f)) * (.55f + .4f * random.nextFloat());
+                float across = Math.min(depth * .5f - 1.2f, along * (.5f + .5f * random.nextFloat()));
+                float at = -room / 2 + span * (unit + .5f), out = (random.nextFloat() - .5f) * (depth * .5f - 1.2f - across);
+                float cx = x + ux * (middle + out) - uy * at, cy = y + uy * (middle + out) + ux * at;
+                boolean housing = random.nextFloat() < .35f;
+                float rise = housing ? 1.6f + random.nextFloat() : .8f + 1.4f * random.nextFloat();
+                if (along > .8f && across > .8f) {
+                    clippedBlock(mesh, hex, housing ? FRAME : PIER, cx, cy, -uy, ux, along, across, top, top + rise);
+                }
+            }
         }
     }
 
@@ -1590,39 +1424,87 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * An annex's wing ({@link #wing}): a block from the annex's hexside to the middle of the podium's ring, faced and
-     * parapeted as the annex, its roof continuing the annex's.
+     * An annex's module ({@link Dome#modules}), cut to the hex: a wing of the ring building on the line from the dome's
+     * centre through the annex's, from the middle of the ring out to a wider gatehouse over the annex's centre, its root
+     * wider where it meets the ring; on the gatehouse one machinery cluster and its conduit, now and then a lit roof
+     * light, a blast door under a yellow lintel in its outer face and yellow braces at its outer corners.
      */
-    private static void annexWing(Mesh mesh, List<float[]> hex, Dome dome, int at) {
-        var wing = dome.wings();
-        float mx = dome.x() + wing.get(at), my = dome.y() + wing.get(at + 1), ix = wing.get(at + 2), iy = wing.get(at + 3);
-        float bottom = dome.foot(), top = dome.foot() + wing.get(at + 4), length = wing.get(at + 5);
-        float lx = -iy, ly = ix;
-        // Counter-clockwise from the start's right: the hexside it starts at stays open to the annex.
-        List<float[]> outer = List.of(new float[] { mx - lx * CORE, my - ly * CORE },
-              new float[] { mx - lx * CORE + ix * length, my - ly * CORE + iy * length },
-              new float[] { mx + lx * CORE + ix * length, my + ly * CORE + iy * length },
-              new float[] { mx + lx * CORE, my + ly * CORE });
-        float inset = CORE - PARAPET_WIDTH, reach = length - PARAPET_WIDTH;
-        List<float[]> inner = List.of(new float[] { mx - lx * inset, my - ly * inset },
-              new float[] { mx - lx * inset + ix * reach, my - ly * inset + iy * reach },
-              new float[] { mx + lx * inset + ix * reach, my + ly * inset + iy * reach },
-              new float[] { mx + lx * inset, my + ly * inset });
-        float[][] normals = { { -lx, -ly }, { ix, iy }, { lx, ly } };
-        for (int side = 0; side < 3; side++) {
-            float[] a = outer.get(side), b = outer.get(side + 1), c = inner.get(side), d = inner.get(side + 1);
-            // Textured as the annex's core facades, so the wing's sides continue them.
-            float along = across(a, normals[side][0], normals[side][1]), next = across(b, normals[side][0], normals[side][1]);
-            face(mesh, hex, WALL, a, b, normals[side][0], normals[side][1], bottom, top + PARAPET, along, next);
-            face(mesh, hex, WALL, c, d, -normals[side][0], -normals[side][1], top, top + PARAPET, along, next);
-            clippedFlat(mesh, hex, PLINTH_MATERIAL, List.of(a, b, d, c), top + PARAPET);
-            // A pier at the middle of each side, on its footing on the plinth: the share it stands over draws it.
-            float px = (a[0] + b[0]) / 2, py = (a[1] + b[1]) / 2;
-            if (side != 1 && inside(hex, px, py)) {
-                pier(mesh, px, py, normals[side][0], normals[side][1], PIER_HALF, bottom, top + PARAPET + .6f, true);
-            }
+    private static void module(Mesh mesh, List<float[]> hex, Dome dome, int at) {
+        var module = dome.modules();
+        float ux = module.get(at), uy = module.get(at + 1), outer = module.get(at + 2), rise = module.get(at + 3);
+        float bottom = dome.foot(), top = bottom + rise, cx = dome.x(), cy = dome.y(), px = -uy, py = ux;
+        float inner = ringMiddle(dome.radius(), dome.podium()), flat = dome.podium() * (float) Math.cos(Math.PI / 12);
+        float head = Math.max(inner, outer - GATEHOUSE);
+        moduleBlock(mesh, hex, moduleOutline(cx, cy, ux, uy, inner, Math.min(outer, flat + ROOT_REACH),
+              MODULE_HALF + ROOT, MODULE_CHAMFER), bottom, Math.min(top, bottom + dome.height()));
+        if (head > inner + EPSILON) {
+            // The neck a step lower than the gatehouse.
+            moduleBlock(mesh, hex, moduleOutline(cx, cy, ux, uy, inner, head + MODULE_CHAMFER, MODULE_HALF, MODULE_CHAMFER),
+                  bottom, top - Math.min(6, rise * .25f));
         }
-        clippedFlat(mesh, hex, ROOF, inner, top);
+        moduleBlock(mesh, hex, moduleOutline(cx, cy, ux, uy, head, outer, MODULE_HALF + HEAD, MODULE_CHAMFER), bottom, top);
+        float side = MODULE_HALF + HEAD - BEVEL - 1;
+        // Chosen by the module, alike in every share it crosses.
+        var random = new SplittableRandom(Float.floatToIntBits(ux) * 31L + Float.floatToIntBits(uy) * 17L
+              + Float.floatToIntBits(outer));
+        // The machinery cluster on the gatehouse: a pale housing between two dark units, a conduit to the door.
+        float spot = head + (outer - head) * .35f, flank = random.nextFloat() < .5f ? 1 : -1;
+        clippedBlock(mesh, hex, FRAME, cx + ux * spot, cy + uy * spot, ux, uy, 4.5f, 5, top, top + 3 + random.nextFloat());
+        for (int unit = -1; unit <= 1; unit += 2) {
+            float across = unit * 9.5f;
+            clippedBlock(mesh, hex, PIER, cx + ux * spot + px * across, cy + uy * spot + py * across, ux, uy, 3, 2.4f, top,
+                  top + 1.4f + .8f * random.nextFloat());
+        }
+        float conduit = (outer - BEVEL - 2 + spot + 5) / 2, length = (outer - BEVEL - 2 - spot - 5) / 2;
+        if (length > 1) {
+            clippedBlock(mesh, hex, PIER, cx + ux * conduit + px * flank * (side - 1), cy + uy * conduit + py * flank * (side - 1),
+                  ux, uy, length, .7f, top, top + .9f);
+        }
+        if (random.nextFloat() < .5f) {
+            float light = head + (outer - head) * .75f;
+            clippedBlock(mesh, hex, SKYLIGHT, cx + ux * light - px * flank * 3, cy + uy * light - py * flank * 3, ux, uy,
+                  3.5f, 4, top, top + .7f);
+        }
+        // The blast door: a dark steel frame round a pale door under a yellow lintel.
+        float door = Math.min(15, rise - 3), fx = cx + ux * outer, fy = cy + uy * outer;
+        clippedBlock(mesh, hex, PIER, fx + ux * .5f, fy + uy * .5f, px, py, 7.5f, 1, bottom, bottom + door);
+        clippedBlock(mesh, hex, FRAME, fx + ux * 1.1f, fy + uy * 1.1f, px, py, 5.5f, .6f, bottom, bottom + door - 1.8f);
+        clippedBlock(mesh, hex, FIN_MATERIAL, fx + ux * .6f, fy + uy * .6f, px, py, 7.5f, 1.2f, bottom + door,
+              bottom + door + 1.3f);
+        // Yellow braces at the foot of its outer corners.
+        for (int corner = -1; corner <= 1; corner += 2) {
+            float along = outer - MODULE_CHAMFER / 2, across = corner * (MODULE_HALF + HEAD - MODULE_CHAMFER / 2);
+            float nx = (ux + px * corner) * .7071f, ny = (uy + py * corner) * .7071f;
+            float bx = cx + ux * along + px * across + nx * 1.2f, by = cy + uy * along + py * across + ny * 1.2f;
+            clippedBlock(mesh, hex, FIN_MATERIAL, bx, by, nx, ny, 1.4f, 1.1f, bottom, bottom + Math.min(10, rise * .4f));
+        }
+    }
+
+    /**
+     * A module's block over {@code walls} (#moduleOutline), cut to the hex: panelled faces, its cut corners in dark
+     * steel, under a bevelled steel cap, its roof at {@code top}.
+     */
+    private static void moduleBlock(Mesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top) {
+        List<float[]> roof = parapets(walls, BEVEL);
+        float along = 0, slope = (float) Math.hypot(BEVEL, BEVEL_RISE);
+        for (int edge = 0; edge < walls.size(); edge++) {
+            int next = (edge + 1) % walls.size();
+            float[] a = walls.get(edge), b = walls.get(next), c = roof.get(edge), d = roof.get(next);
+            float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+            float nx = (b[1] - a[1]) / length, ny = -(b[0] - a[0]) / length;
+            // The odd edges are the cut corners (#moduleOutline).
+            face(mesh, hex, edge % 2 == 1 ? PIER : WALL, a, b, nx, ny, bottom, top - BEVEL_RISE, along / WALL_REPEAT,
+                  (along + length) / WALL_REPEAT);
+            along += length;
+            float sx = nx * BEVEL_RISE / slope, sy = ny * BEVEL_RISE / slope, sz = BEVEL / slope;
+            float[] va = vertex(a[0], a[1], top - BEVEL_RISE, sx, sy, sz, 1, a[0] / 24, a[1] / 24);
+            float[] vb = vertex(b[0], b[1], top - BEVEL_RISE, sx, sy, sz, 1, b[0] / 24, b[1] / 24);
+            float[] vd = vertex(d[0], d[1], top, sx, sy, sz, 1, d[0] / 24, d[1] / 24);
+            float[] vc = vertex(c[0], c[1], top, sx, sy, sz, 1, c[0] / 24, c[1] / 24);
+            mesh.clipped(FRAME, hex, va, vb, vd);
+            mesh.clipped(FRAME, hex, va, vd, vc);
+        }
+        clippedFlat(mesh, hex, ROOF, roof, top);
     }
 
     /**

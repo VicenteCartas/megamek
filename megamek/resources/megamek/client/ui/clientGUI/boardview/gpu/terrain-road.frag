@@ -61,9 +61,12 @@ vec3 toLinear(vec3 c);
 // Paved wear's noise reads the shared rain noise, which those functions declare: it follows main.
 vec4 wearNoise(vec2 m, float size, float offset, float pixel);
 
+// GpuRoads.MATERIALS.size(): a merged coat's maps past the road materials are sculpt materials.
+const int ROAD_MATERIALS = 4;
+
 // A surface's maps and settings: from its material, or for a merged coat from its vertices.
 struct RoadMaps {
-    int maps;           // a merged coat's road material, or 3 plus its sculpt material
+    int maps;           // a merged coat's road material, or ROAD_MATERIALS plus its sculpt material
     float transition;   // positive: material joins; negative: loose, wear, landings, tracks (GpuRoads#attribute)
     float response;     // wet response; negative excludes the surface from liquid water
     bool mapped;        // has a surface map: grain, roughness and occlusion
@@ -74,7 +77,7 @@ RoadMaps roadMaps() {
 #ifdef roadCoatFlag
     vec4 coat = floor(v_roadCoat * 255.0 + .5);
     int maps = int(coat.r);
-    return RoadMaps(maps, coat.g - 8.0, coat.b / 255.0, maps < 3, maps == 1);
+    return RoadMaps(maps, coat.g - 8.0, coat.b / 255.0, maps < ROAD_MATERIALS, maps == 1);
 #else
     RoadMaps m = RoadMaps(-1, 0.0, u_groundResponse, false, false);
 #ifdef roadMapsFlag
@@ -91,7 +94,7 @@ RoadMaps roadMaps() {
 vec4 roadAlbedo(RoadMaps m, vec2 uv) {
 #ifdef roadCoatFlag
     return m.mapped ? texture(u_roadColors, vec3(uv, float(m.maps)))
-          : texture(u_sculptColors, vec3(uv, float(m.maps - 3)));
+          : texture(u_sculptColors, vec3(uv, float(m.maps - ROAD_MATERIALS)));
 #else
     return texture(u_diffuseTexture, uv);
 #endif
@@ -111,7 +114,7 @@ vec4 roadSurface(RoadMaps m, vec2 uv) {
 vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 #ifdef roadCoatFlag
     return mappedNormal(m.mapped ? texture(u_roadData, vec3(uv, float(m.maps * 2)))
-          : texture(u_sculptData, vec3(uv, float(m.maps - 3))), strength);
+          : texture(u_sculptData, vec3(uv, float(m.maps - ROAD_MATERIALS))), strength);
 #else
     return groundNormal(uv, strength);
 #endif
@@ -121,7 +124,7 @@ vec3 roadNormal(RoadMaps m, vec2 uv, float strength) {
 // The material's place in the board's finish arrays (finish-arrays.glsl); -1 for a road material they lack.
 int roadFinish(RoadMaps m) {
 #ifdef roadCoatFlag
-    return m.mapped ? ROAD_FINISH + m.maps : m.maps - 3;
+    return m.mapped ? ROAD_FINISH + m.maps : m.maps - ROAD_MATERIALS;
 #else
     return u_roadFinish < -.5 ? -1 : ROAD_FINISH + int(u_roadFinish + .5);
 #endif
@@ -174,6 +177,50 @@ vec4 roadProfile() {
     return u_roadProfile;
 #else
     return vec4(1.0);
+#endif
+}
+
+// ---- Colony slabs ---------------------------------------------------------------------------------------------------
+// A paved road laid in a colony's precast slabs (GpuRoads#slabs): its maps follow its course. The coat's mask carries the
+// phase along it as a unit vector (RG; a period of a plain slab and an X-braced one, BoardRoad#slab) and where across it
+// a point lies (B: 0 one edge, 1 the other). Its UVs wrap at every period, so their reads take the course's own
+// gradients. The maps are symmetric along and across, so neighbouring hexes agree whichever way their courses run.
+bool slabCoat(RoadMaps m) {
+    return m.mapped && abs(m.transition + 8.0) < .5;
+}
+
+vec4 slabAlbedo(RoadMaps m, vec2 uv, mat2 g) {
+#ifdef roadCoatFlag
+    return textureGrad(u_roadColors, vec3(uv, float(m.maps)), g[0], g[1]);
+#else
+    return textureGrad(u_diffuseTexture, uv, g[0], g[1]);
+#endif
+}
+
+vec4 slabSurface(RoadMaps m, vec2 uv, mat2 g) {
+#ifdef roadCoatFlag
+    return textureGrad(u_roadData, vec3(uv, float(m.maps * 2 + 1)), g[0], g[1]);
+#elif defined(roadMapsFlag)
+    return textureGrad(u_roadSurface, uv, g[0], g[1]);
+#else
+    return vec4(.5);
+#endif
+}
+
+// Its normal, from its maps' frame (U along `along`, V along `onward`, in world XY) to the world frame mappedNormal reads
+// a texel in (U along X, V along -Y).
+vec3 slabNormal(RoadMaps m, vec2 uv, mat2 g, vec2 along, vec2 onward, float strength) {
+#ifdef roadCoatFlag
+    vec4 texel = textureGrad(u_roadData, vec3(uv, float(m.maps * 2)), g[0], g[1]);
+#elif defined(normalTextureFlag)
+    vec4 texel = textureGrad(u_normalTexture, uv, g[0], g[1]);
+#else
+    return normalize(v_normal);
+#endif
+#if defined(roadCoatFlag) || defined(normalTextureFlag)
+    vec2 detail = (texel.rg * 255.0 - 128.0) / 127.0;
+    vec2 world = detail.x * along + detail.y * onward;
+    return mappedNormal(vec4((vec2(world.x, -world.y) * 127.0 + 128.0) / 255.0, texel.ba), strength);
 #endif
 }
 
@@ -568,6 +615,27 @@ void main() {
     // texture covers. The material's own maps, magnified or not, take uv, so its grain keeps its size too.
     vec2 groundUV = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_worldMetre;
     RoadMaps m = roadMaps();
+    // A colony slab road's UVs and their gradients, from its course (slabCoat), and the world directions of its maps'
+    // U and V, which turn their normals.
+    bool slabs = slabCoat(m);
+    vec2 slabAlong = vec2(1.0, 0.0), slabOnward = vec2(0.0, -1.0);
+    vec2 slabPhase = (roadColor.rg * 255.0 - 128.0) / 127.0;
+    vec2 phaseX = dFdx(slabPhase), phaseY = dFdy(slabPhase);
+    vec2 acrossGradient = vec2(dFdx(roadColor.b), dFdy(roadColor.b));
+    if (slabs) {
+        // The phase's angle, in periods: its gradient is the unit vector's turn, smooth through the wrap at a period.
+        float turn = 1.0 / (6.2831853 * max(dot(slabPhase, slabPhase), 1e-4));
+        vec2 onward = vec2(slabPhase.x * phaseX.y - slabPhase.y * phaseX.x,
+              slabPhase.x * phaseY.y - slabPhase.y * phaseY.x) * turn;
+        uv = vec2(roadColor.b, dot(slabPhase, slabPhase) > 1e-6 ? atan(slabPhase.y, slabPhase.x) / 6.2831853 : 0.0);
+        roadGradient = mat2(vec2(acrossGradient.x, onward.x), vec2(acrossGradient.y, onward.y));
+        vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
+        float determinant = roadGradient[0].x * roadGradient[1].y - roadGradient[0].y * roadGradient[1].x;
+        if (abs(determinant) > 1e-12) {
+            slabAlong = normalize(((dx * roadGradient[1].y - dy * roadGradient[0].y) / determinant).xy);
+            slabOnward = normalize(((dy * roadGradient[0].x - dx * roadGradient[1].x) / determinant).xy);
+        }
+    }
     // Paved wear's ground in metres and the pixel it covers, taken before the varying branches.
     vec2 wearMetres = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_metre;
     float wearPixel = max(length(dFdx(wearMetres)), length(dFdy(wearMetres)));
@@ -584,8 +652,8 @@ void main() {
     // change it. Their shared atlas also holds join coordinates and wheel directions, which must remain data.
     else { tint = toLinear(tint); }
 #endif
-    vec3 albedo = roadAlbedo(m, materialUV).rgb * tint;
-    vec4 properties = m.mapped ? roadSurface(m, materialUV) : vec4(.5);
+    vec3 albedo = (slabs ? slabAlbedo(m, materialUV, roadGradient) : roadAlbedo(m, materialUV)).rgb * tint;
+    vec4 properties = slabs ? slabSurface(m, materialUV, roadGradient) : m.mapped ? roadSurface(m, materialUV) : vec4(.5);
     float roadCoverage = 1.0;
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
     float wearPatches = 0.0, loosePatches = 0.0;
@@ -613,6 +681,10 @@ void main() {
         // Grit and dust carried onto a paved road: pale and grey.
         albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .65) * 1.4;
         properties.g = .95;
+    } else if (slabs) {
+        // Settled dust, anchored to the ground, varies the repeating slabs.
+        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
+        albedo *= mix(.92, 1.06, wearPatches);
     } else if (m.mapped && abs(m.transition) > .5) {
         wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
         loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
@@ -644,8 +716,9 @@ void main() {
         }
         roadCoverage = clamp(roadCoverage, 0.0, 1.0);
     }
-    vec3 normal = roadNormal(m, materialUV, normalStrength);
-    // Potholes' walls (asphaltWear's slope) and washboard (looseTrack's), in the road UVs' frame.
+    vec3 normal = slabs ? slabNormal(m, materialUV, roadGradient, slabAlong, slabOnward, normalStrength)
+          : roadNormal(m, materialUV, normalStrength);
+    // Potholes' walls (asphaltWear's slope), washboard (looseTrack's) and rut walls (dirtTrack's), in the road UVs' frame.
     if (paved || track) normal = normalize(normal + vec3(wearSlope.x, -wearSlope.y, 0.0));
     // Only exposed, upward-facing ground receives liquid water. No accumulation or terrain-rule changes.
     float wet = u_wetness * step(0.0, m.response) * smoothstep(0.2, 0.8, v_normal.z);
@@ -702,6 +775,8 @@ void main() {
     float alpha = clamp(roadColor.a + (grain - .5) * min(roadColor.a, 1.0 - roadColor.a) * .7, 0.0, 1.0);
     if (track) {
         alpha = trackAlpha;
+    } else if (slabs) {
+        // A cast kerb: its edge is the coverage's own.
     } else if (spill) {
         // Sparse, broken grains over a thin film of dust, both thinning out over the spill's reach (A), most in the wheel
         // bands: G runs across the nearest arm, as a transition's does (GpuRoads#color).

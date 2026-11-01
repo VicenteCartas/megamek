@@ -5876,10 +5876,11 @@ final class GpuTerrain implements Disposable {
             var patch = preparedPatch.patch();
             var mask = new GpuRoads.Mask(masks.region(preparedPatch.mask().pixels()), preparedPatch.mask());
             String road = GpuRoads.material(preparedPatch.source(), preparedPatch.flat(), patch.texture());
-            int maps = road != null ? GpuRoads.MATERIALS.indexOf(road) : 3 + SCULPT_LAYERS.indexOf(patch.texture());
+            int maps = road != null ? GpuRoads.MATERIALS.indexOf(road)
+                  : GpuRoads.MATERIALS.size() + SCULPT_LAYERS.indexOf(patch.texture());
             Material material;
             float coat = Color.WHITE.toFloatBits();
-            if (roadMaps != null && maps >= (road != null ? 0 : 3)) {
+            if (roadMaps != null && maps >= (road != null ? 0 : GpuRoads.MATERIALS.size())) {
                 // Every coat of the chunk shares this material; its own maps, finish and response are in its vertices.
                 // The mask page stands in as the diffuse texture only to give the coat its texture coordinates.
                 material = material(mask.textureDescription.texture, true);

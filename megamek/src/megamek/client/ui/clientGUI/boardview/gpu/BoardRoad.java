@@ -89,8 +89,8 @@ final class BoardRoad {
     private record Circle(float x, float y, float radius, int lanes, Coords owner) { }
     private final Circle circle;
     private final Map<Float, Area> outlines = new HashMap<>();
-    /** The course's sections, derived once and shared by every worker that grades it; see {@link #sections()}. */
-    private volatile float[] sections;
+    /** The courses' sections, derived once and shared by every worker that grades or paints them; see {@link #sections()}. */
+    private volatile float[][] sections;
     private RailRoute.Corridor corridor = RailRoute.Corridor.NONE;
     private Area median;
     /** Connected bends requiring a solid divider on this road's immediate approaches. */
@@ -1607,10 +1607,15 @@ final class BoardRoad {
      */
     float throughStation(float x, float y) {
         if (borders.size() != 2 || paths.size() != 1) { return Float.NaN; }
+        return station(0, x, y);
+    }
+
+    /** Distance along path {@code index} from its first point, as {@link #throughStation} measures it. */
+    private float station(int index, float x, float y) {
         float station = 0, nearest = Float.POSITIVE_INFINITY, length = 0;
         boolean bounded = false;
-        var path = paths.getFirst();
-        float[] sections = sections();
+        var path = paths.get(index);
+        float[] sections = sections()[index];
         for (int i = 1; i < path.size(); i++) {
             Point a = path.get(i - 1), b = path.get(i);
             float dx = b.x - a.x, dy = b.y - a.y, span = (float) Math.hypot(dx, dy);
@@ -1630,36 +1635,103 @@ final class BoardRoad {
     }
 
     /**
-     * The unit normal {x, y} of {@link #throughStation}'s section at each vertex of the course: square to the bisector of
-     * the segments meeting there. Where the course crosses a border, the section is the border itself, so both hexes
+     * Per path, the unit normal {x, y} of {@link #station}'s section at each of its vertices: square to the bisector of
+     * the segments meeting there. Where a course crosses a border, the section is the border itself, so both hexes
      * measure one station all along their shared edge: the lattice is regular only to a 32nd, and a square crossing is
      * not exactly square to it.
      */
-    private float[] sections() {
-        float[] result = sections;
+    private float[][] sections() {
+        float[][] result = sections;
         if (result != null) { return result; }
-        var path = paths.getFirst();
-        result = new float[2 * path.size()];
-        for (int i = 0; i < path.size(); i++) {
-            Point p = path.get(i);
-            float sx = 0, sy = 0;
-            if (i > 0) {
-                Point before = path.get(i - 1);
-                float run = (float) Math.hypot(p.x - before.x, p.y - before.y);
-                if (run > 0) { sx += (p.x - before.x) / run; sy += (p.y - before.y) / run; }
+        result = new float[paths.size()][];
+        for (int index = 0; index < paths.size(); index++) {
+            var path = paths.get(index);
+            float[] normals = new float[2 * path.size()];
+            for (int i = 0; i < path.size(); i++) {
+                Point p = path.get(i);
+                float sx = 0, sy = 0;
+                if (i > 0) {
+                    Point before = path.get(i - 1);
+                    float run = (float) Math.hypot(p.x - before.x, p.y - before.y);
+                    if (run > 0) { sx += (p.x - before.x) / run; sy += (p.y - before.y) / run; }
+                }
+                if (i + 1 < path.size()) {
+                    Point after = path.get(i + 1);
+                    float run = (float) Math.hypot(after.x - p.x, after.y - p.y);
+                    if (run > 0) { sx += (after.x - p.x) / run; sy += (after.y - p.y) / run; }
+                }
+                float[] border = borderNormal(p, sx, sy);
+                if (border != null) { sx = border[0]; sy = border[1]; }
+                float length = (float) Math.hypot(sx, sy);
+                if (length > 0) { normals[2 * i] = sx / length; normals[2 * i + 1] = sy / length; }
             }
-            if (i + 1 < path.size()) {
-                Point after = path.get(i + 1);
-                float run = (float) Math.hypot(after.x - p.x, after.y - p.y);
-                if (run > 0) { sx += (after.x - p.x) / run; sy += (after.y - p.y) / run; }
-            }
-            float[] border = borderNormal(p, sx, sy);
-            if (border != null) { sx = border[0]; sy = border[1]; }
-            float length = (float) Math.hypot(sx, sy);
-            if (length > 0) { result[2 * i] = sx / length; result[2 * i + 1] = sy / length; }
+            result[index] = normals;
         }
         sections = result;
         return result;
+    }
+
+    /** A colony slab road's pattern period in tile pixels (terrain-road.frag): a plain slab and an X-braced one. */
+    static final float SLAB_PERIOD = 36;
+
+    /**
+     * Where a point lies on a colony slab road (terrain-road.frag), from the nearest course its paint follows: along it,
+     * in slab periods from the course's first end, whole periods fitting between its ends so that neighbouring hexes
+     * meet on one phase at every border, a plain slab's middle; and across it, 0 on the course and -1 or 1 at its
+     * edges, its left or right looking along it. Null without a course.
+     */
+    float[] slab(float x, float y) {
+        var sampled = paintPaths();
+        byte[] ends = pathEnds();
+        int nearest = -1;
+        float distance = Float.POSITIVE_INFINITY, width = 0, side = 1;
+        for (int p = 0; p < sampled.size(); p++) {
+            var path = sampled.get(p);
+            // Past a border the road runs on straight, as in #track.
+            boolean first = (ends[p] & BORDER_ENDS) != 0, last = (ends[p] & BORDER_ENDS << 1) != 0;
+            for (int i = 1; i < path.size(); i++) {
+                Point a = path.get(i - 1), b = path.get(i);
+                float dx = b.x - a.x, dy = b.y - a.y, span = dx * dx + dy * dy;
+                if (span == 0) { continue; }
+                float t = Math.clamp(((x - a.x) * dx + (y - a.y) * dy) / span, first && i == 1 ? Float.NEGATIVE_INFINITY : 0,
+                      last && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
+                float ex = x - a.x - t * dx, ey = y - a.y - t * dy;
+                float near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
+                if (near < distance) {
+                    side = dx * ey - dy * ex < 0 ? -1 : 1;
+                    t = Math.clamp(t, 0, 1);
+                    distance = near; nearest = p; width = a.width + t * (b.width - a.width);
+                }
+            }
+        }
+        if (nearest < 0) { return null; }
+        // Periods count from where the course crosses its first border to where it crosses its last: an end past the
+        // border runs on from its border's middle, the path's next point (#approach).
+        var path = sampled.get(nearest);
+        float[] stations = new float[path.size()];
+        for (int i = 1; i < path.size(); i++) {
+            stations[i] = stations[i - 1]
+                  + (float) Math.hypot(path.get(i).x - path.get(i - 1).x, path.get(i).y - path.get(i - 1).y);
+        }
+        int last = path.size() - 1;
+        boolean first = (ends[nearest] & BORDER_ENDS) != 0, end = (ends[nearest] & BORDER_ENDS << 1) != 0;
+        float from = first ? stations[1] : 0, to = end ? stations[last - 1] : stations[last];
+        if (to <= from) { from = 0; to = stations[last]; }
+        // The coat runs on past its borders, under or over its neighbour's: there its station runs on from the
+        // border's section too, so both coats lay the same slabs.
+        float station = station(nearest, x, y);
+        float[] sections = sections()[nearest];
+        if (first) {
+            Point border = path.get(1);
+            float past = (x - border.x) * sections[2] + (y - border.y) * sections[3];
+            if (past < 0) { station = stations[1] + past; }
+        }
+        if (end) {
+            Point border = path.get(last - 1);
+            float past = (x - border.x) * sections[2 * last - 2] + (y - border.y) * sections[2 * last - 1];
+            if (past > 0) { station = stations[last - 1] + past; }
+        }
+        return new float[] { (station - from) / fit(to - from, SLAB_PERIOD), side * Math.min(1, distance / width) };
     }
 
     /** The normal of the hex edge a course point lies on, turned along (dx, dy); null off the hex outline. */

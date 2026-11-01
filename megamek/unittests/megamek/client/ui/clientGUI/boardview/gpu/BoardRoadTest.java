@@ -248,6 +248,48 @@ class BoardRoadTest {
     }
 
     @Test
+    void lunarPavedRoadsAreColonySlabsWhoseHexesMeetOnOnePhase() {
+        // A straight road into a straight neighbour, a broad bend and a tight one.
+        for (int turn = 0; turn < 3; turn++) {
+            for (int d = 0; d < 6; d++) {
+                int direction = d, reverse = (d + 3) % 6, onward = (d + turn) % 6;
+                Coords next = CENTER.translated(d);
+                var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED,
+                      c.equals(CENTER) ? 1 << direction | 1 << reverse : c.equals(next) ? 1 << onward | 1 << reverse : 0,
+                      0, BoardScene.Surface.LUNAR));
+                var here = BoardRoad.of(scene, scene.tile(CENTER));
+                var there = BoardRoad.of(scene, scene.tile(next));
+                var patches = GpuRoads.patches(scene.tile(CENTER), here);
+                assertTrue(patches.stream().allMatch(p -> p.texture().equals(GpuRoads.SLABS)),
+                      "The slabs' own maps carry kerbs, joints and lamps: no verge or paint");
+                assertTrue(patches.stream().allMatch(p -> GpuRoads.attribute(p).value == -8));
+                // Its mask carries the phase along the road (RG, a unit vector), not a heading.
+                int texel = maskTexel(GpuRoads.mask(here, patches.getFirst()), 0, 0);
+                double angle = Math.atan2(((texel >>> 16 & 255) - 128) / 127.0, ((texel >>> 24 & 255) - 128) / 127.0);
+                assertEquals(0, Math.IEEEremainder(angle / (2 * Math.PI) - here.slab(0, 0)[0], 1), .02);
+                float dx = (BoardGeometry.centerX(CENTER) - BoardGeometry.centerX(next)) / BoardGeometry.hexScale();
+                float dy = (BoardGeometry.centerY(CENTER) - BoardGeometry.centerY(next)) / BoardGeometry.hexScale();
+                Vector3 gate = gate(CENTER, d), along = new Vector3(gate).nor(), across = new Vector3(-along.y, along.x, 0);
+                for (float offset = -14; offset <= 14; offset += 2) {
+                    Vector3 inside = new Vector3(gate).mulAdd(along, -.05f).mulAdd(across, offset);
+                    Vector3 beyond = new Vector3(gate).mulAdd(along, .05f).mulAdd(across, offset);
+                    float[] mine = here.slab(inside.x, inside.y), theirs = there.slab(beyond.x + dx, beyond.y + dy);
+                    for (float phase : new float[] { mine[0], theirs[0] }) {
+                        assertEquals(0, phase - Math.round(phase), .01f, "Whole periods end on the border: turn " + turn);
+                    }
+                    assertEquals(Math.abs(mine[1]), Math.abs(theirs[1]), .02f,
+                          "Both hexes measure one place across the road: turn " + turn);
+                }
+            }
+        }
+        // Martian roads too; elsewhere a paved road stays asphalt.
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.MARS));
+        assertTrue(GpuRoads.slabs(scene.tile(CENTER), false));
+        var grass = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        assertFalse(GpuRoads.slabs(grass.tile(CENTER), false));
+    }
+
+    @Test
     void aLooseRoadStopsAtThePavedRoadItMeetsAndLeavesTheGroundBetweenItsArms() {
         Coords north = CENTER.translated(0), northEast = CENTER.translated(1);
         for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {

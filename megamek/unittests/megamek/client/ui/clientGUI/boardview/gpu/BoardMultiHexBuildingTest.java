@@ -83,7 +83,7 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void anAnnexJoinsItsDomesPodiumThroughAWing() {
+    void anAnnexIsAWingOfItsDomesRingBuilding() {
         // A flower with a two-level hex beyond its northern petal: outside the podium, an annex at its own height.
         Map<Coords, Integer> heights = flower(3, 2);
         Coords petal = CENTRE.translated(0), annex = petal.translated(0);
@@ -91,17 +91,26 @@ class BoardMultiHexBuildingTest {
         BoardScene scene = scene(heights, DOME, Map.of(), Set.of());
         var block = layout(scene, annex);
         assertTrue(block.annex());
-        assertEquals(2 * GpuBuilding.LEVEL_HEIGHT, block.reach().get(3), 1e-3f,
-              "Towards the petal the annex stays open over its whole height: its wing continues it");
         var under = layout(scene, petal);
-        var wings = under.domes().getFirst().wings();
-        assertEquals(6, wings.size(), "One wing, from the annex's hexside to the podium");
-        float top = under.top() + wings.get(4);
-        assertEquals(2 * GpuBuilding.LEVEL_HEIGHT, top, 1e-3f, "The wing's roof continues the annex's");
-        var walls = vertices(BoardMultiHexBuilding.model(under, 0), BoardMultiHexBuilding.WALL);
-        assertTrue(walls.stream().anyMatch(vertex -> Math.abs(vertex[1] - HexTile.HEIGHT / 2f) < .01f
-                    && Math.abs(vertex[2] - top - BoardMultiHexBuilding.PARAPET) < .01f && Math.abs(vertex[3]) > .99f),
-              "The wing's side walls start at the hexside the annex shares with the petal");
+        assertEquals(under.top(), block.reach().get(3), 1e-3f, "Towards the petal the annex's plinth joins the petal's");
+        var modules = under.domes().getFirst().modules();
+        assertEquals(4, modules.size(), "One module, the annex's");
+        float top = 2 * GpuBuilding.LEVEL_HEIGHT;
+        assertEquals(top, under.top() + modules.get(3), 1e-3f, "The module stands at the annex's own height");
+        // Its roof at that height covers the annex's centre, where units stand (the annex's own frame).
+        var roof = vertices(BoardMultiHexBuilding.model(block, 0), BoardMultiHexBuilding.ROOF).stream()
+              .filter(vertex -> Math.abs(vertex[2] - top) < .01f).toList();
+        assertTrue(roof.stream().anyMatch(vertex -> vertex[0] < 0) && roof.stream().anyMatch(vertex -> vertex[0] > 0)
+              && roof.stream().anyMatch(vertex -> vertex[1] < 0) && roof.stream().anyMatch(vertex -> vertex[1] > 0));
+        // It is a wing of the ring building: over the petal, the petal's share draws it on the annex's axis from inside
+        // the podium out towards the annex.
+        var parts = world(petal, BoardMultiHexBuilding.model(under, 0));
+        float x = HexTile.centerX(annex, HexTile.MODEL_WIDTH), centreY = HexTile.centerY(CENTRE, HexTile.HEIGHT);
+        float podium = under.domes().getFirst().podium();
+        assertTrue(parts.stream().anyMatch(vertex -> Math.abs(vertex.x - x) < 8 && vertex.z > under.top() + 1
+              && Math.abs(vertex.y - centreY) < podium - 5), "It starts inside the podium");
+        assertTrue(parts.stream().anyMatch(vertex -> Math.abs(vertex.x - x) < 8 && vertex.z > under.top() + 1
+              && Math.abs(vertex.y - centreY) > podium + 5), "It runs on out towards the annex");
     }
 
     @Test
