@@ -135,7 +135,8 @@ class GpuElevationGradeSmokeTest {
                 var coords = new Coords(x, y);
                 var hex = new Hex(level);
                 if (coords.equals(CENTER)) { hex.addTerrain(new Terrain(Terrains.ROUGH, 1)); }
-                var base = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, level, -1, 0);
+                // Dirt has no sublevel floor (GpuTerrain.FLOORS): only the grade changes with the level.
+                var base = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.DIRT, level, -1, 0);
                 tiles.add(new BoardScene.Tile(coords, level, -1, false, 0, base.surface(), null, null,
                       BoardFeatures.capture(hex, coords, Map.of()), List.of(), BoardLiquid.NONE, null, true));
             }

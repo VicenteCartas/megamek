@@ -454,7 +454,11 @@ two compact texture arrays: sRGB colour/height (`u_terrainLayers`) and raw norma
 (`u_terrainData`). Sampling helpers map the stable even-colour/odd-normal semantic
 IDs into those arrays. A sculpt material's `SculptLayers` gives its family's ground,
 debris, wall and mantle IDs (`u_sculptLayers`), and boundary palettes give theirs per
-family. The shared pair takes two texture units (see
+family. With `GpuTerrain.SUBLEVEL_FLOORS`, sunken ground takes its family's floor from
+`GpuTerrain.FLOORS` (grassland, snow, fungus, desert, Mars and volcano) in place of its ground cover:
+`cliffMaterial` and `naturalMaterialFor` read `u_floorMaterials` and evaluate the material with the floor
+from level -1 down, both ground and floor between -.35 and -.8 on level ground and gentle slopes (a
+broken contour), where the two meet by height; banks and walls keep their own roles. The shared pair takes two texture units (see
 [shaders](gpu-shaders.md#boundaries-to-preserve) for the 16-unit budget). The arrays set
 their own anisotropic filtering, because libGDX's `setAnisotropicFilter` only addresses
 `GL_TEXTURE_2D`.

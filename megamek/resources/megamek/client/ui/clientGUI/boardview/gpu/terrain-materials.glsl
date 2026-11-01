@@ -19,6 +19,37 @@ struct TerrainMaterial {
 
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
+#ifdef sublevelFloorFlag
+// Each family's floor from level -1 down (GpuTerrain.SUBLEVEL_FLOORS): its colour layer and metres per repeat; a
+// negative layer where the family keeps its ground.
+uniform vec2 u_floorMaterials[FLOOR_FAMILIES];
+
+// How far the family's floor replaces its ground cover at a point (world in metres): none above level -.3, all from
+// about -.72 down, along a contour 23 m and 8 m fields break by up to .28 of a level (level 0 never, level -1 always);
+// level ground and gentle lower slopes only, so banks and walls keep their own materials.
+float floorShare(vec3 world, vec3 face, float familyId, out vec2 floorMaterial) {
+    int family = int(familyId + .5);
+    floorMaterial = family >= 0 && family < FLOOR_FAMILIES ? u_floorMaterials[family] : vec2(-1.0);
+    if (floorMaterial.x < 0.0) return 0.0;
+    float contour = .36 * (textureLod(u_rainNoise, world.xy / 23.0 + .63, 0.0).b - .5)
+          + .2 * (textureLod(u_rainNoise, world.xy / 8.0 + .29, 0.0).g - .5);
+    return smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight) * smoothstep(.55, .85, face.z);
+}
+
+// Ground and floor meet by height, as materialWeights blends roles, but feathered wider: a fringe, not a stipple.
+TerrainMaterial floorBlend(TerrainMaterial ground, TerrainMaterial sunken, float share) {
+    float spread = .25 * 4.0 * share * (1.0 - share);
+    float wa = 1.0 - share + ground.height * spread, wb = share + sunken.height * spread;
+    float width = 1.6 * materialBlendWidth();
+    float ka = max(wa - max(wa, wb) + width, 0.0), kb = max(wb - max(wa, wb) + width, 0.0);
+    float t = kb / max(ka + kb, .00001);
+    return TerrainMaterial(mix(ground.color, sunken.color, t), normalize(mix(ground.normal, sunken.normal, t)),
+          mix(ground.cavity, sunken.cavity, t), mix(ground.height, sunken.height, t),
+          mixFinish(ground.finish, sunken.finish, t), mix(ground.volcanic, sunken.volcanic, t),
+          mix(ground.relief, sunken.relief, t));
+}
+#endif
+
 // Natural wear follows the existing relief, modulated by continuous world fields instead of repeated stamps.
 // Channels are recesses, low grains, chipped edges and high grains. Loose/organic covers favour the height
 // channels; stone favours cavities and normal-map edges.
@@ -478,7 +509,7 @@ vec2 materialNoise(vec3 world, vec4 families) {
 }
 
 // Ordinary families only: blendCovers handles volcanic slots with one shared surface sample.
-TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,
+TerrainMaterial naturalMaterialOf(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,
       float aboveFoot, float belowRim, float rock, float hardness, float broad, float fine, float region,
       float familyId, vec4 tiles, vec4 layers, float sediment) {
     float up = clamp(face.z, 0.0, 1.0);
@@ -656,6 +687,29 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
           materialFinish(layers.z, tiles.z, weights.w, pd, broad, fungus, false), weights);
     result.volcanic = 0.0;
     return result;
+}
+
+// The family's floor takes its ground's place from level -1 down (floorShare), as in cliffMaterial.
+TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, vec3 world, vec3 face,
+      float aboveFoot, float belowRim, float rock, float hardness, float broad, float fine, float region,
+      float familyId, vec4 tiles, vec4 layers, float sediment) {
+#ifdef sublevelFloorFlag
+    vec2 floorMaterial;
+    float share = floorShare(world, face, familyId, floorMaterial);
+    TerrainMaterial ground, sunken;
+    int passes = share > 0.0 && share < 1.0 ? 2 : 1;
+    for (int pass = 0; pass < passes; pass++) {
+        bool floored = share >= 1.0 || pass == 1;
+        TerrainMaterial m = naturalMaterialOf(projection, noise, world, face, aboveFoot, belowRim, rock, hardness,
+              broad, fine, region, familyId, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
+              floored ? vec4(floorMaterial.x, layers.yzw) : layers, sediment);
+        if (pass == 0) ground = m; else sunken = m;
+    }
+    return passes == 2 ? floorBlend(ground, sunken, share) : ground;
+#else
+    return naturalMaterialOf(projection, noise, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
+          familyId, tiles, layers, sediment);
+#endif
 }
 
 // Volcanic programs without a palette draw sculpt materials only for crust and bank families.
@@ -1168,7 +1222,7 @@ float familyDust(vec4 palette, int slot) {
 }
 
 // The projection's gradients must come from before the caller's varying branches; the noise reads use explicit LOD.
-TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
+TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
       float rock, float hardness, float broad, float fine, float region, float sediment, vec4 palette, int slot,
       vec4 tiles, vec4 layers, bool sides, bool single) {
     // The shared cliff's joints stand upright: level bedrock of its families shows the rock tops' map instead.
@@ -1401,6 +1455,30 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     result.finish = mixFinish(surfaceA, surfaceB, share);
     result.volcanic = 0.0;
     return result;
+}
+
+// The family's floor takes its ground's place from level -1 down (floorShare); between, the two meet by height. One
+// loop evaluates the material once or twice, so the program keeps one copy of it.
+TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim,
+      float rock, float hardness, float broad, float fine, float region, float sediment, vec4 palette, int slot,
+      vec4 tiles, vec4 layers, bool sides, bool single) {
+#ifdef sublevelFloorFlag
+    vec2 floorMaterial;
+    float share = floorShare(world, face, dot(palette, vec4(equal(ivec4(0, 1, 2, 3), ivec4(slot)))), floorMaterial);
+    TerrainMaterial ground, sunken;
+    int passes = share > 0.0 && share < 1.0 ? 2 : 1;
+    for (int pass = 0; pass < passes; pass++) {
+        bool floored = share >= 1.0 || pass == 1;
+        TerrainMaterial m = cliffMaterialOf(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
+              sediment, palette, slot, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
+              floored ? vec4(floorMaterial.x, layers.yzw) : layers, sides, single);
+        if (pass == 0) ground = m; else sunken = m;
+    }
+    return passes == 2 ? floorBlend(ground, sunken, share) : ground;
+#else
+    return cliffMaterialOf(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region, sediment, palette,
+          slot, tiles, layers, sides, single);
+#endif
 }
 
 #ifdef terrainBlendFlag

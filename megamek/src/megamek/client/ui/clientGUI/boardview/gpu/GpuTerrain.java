@@ -279,6 +279,7 @@ final class GpuTerrain implements Disposable {
                   + "#define VOLCANIC_BANK_FAMILY " + BoardSurfaceBlend.BANK + ".0\n"
                   + "#define FOOT_METRES " + BoardSurfaceBlend.FOOT_METRES + "\n"
                   + "#define CLOSE_PIXEL " + GpuMaterialCache.CLOSE_PIXEL + "\n"
+                  + (SUBLEVEL_FLOORS ? "#define sublevelFloorFlag\n#define FLOOR_FAMILIES " + FLOORS.length + "\n" : "")
                   + GpuIceShader.prefix(renderable.material)
                   + (renderable.material.has(GpuBiomeVegetation.Kind.TYPE) ? "#define biomeVegetationFlag\n" : "")
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
@@ -586,6 +587,15 @@ final class GpuTerrain implements Disposable {
                         if (relief.length > 0 && program.hasUniform("u_finishRelief[0]")) {
                             program.setUniform2fv("u_finishRelief[0]", relief, 0, relief.length);
                         }
+                    }
+                    if (SUBLEVEL_FLOORS && program.hasUniform("u_floorMaterials[0]")) {
+                        float[] floors = new float[2 * FLOORS.length];
+                        for (int family = 0; family < FLOORS.length; family++) {
+                            String floor = FLOORS[family];
+                            floors[2 * family] = floor == null ? -1 : 2f * SCULPT_LAYERS.indexOf(floor);
+                            floors[2 * family + 1] = floor == null ? 0 : assets.sculptTile(floor);
+                        }
+                        program.setUniform2fv("u_floorMaterials[0]", floors, 0, floors.length);
                     }
                     if (program.hasUniform("u_roadRelief[0]")) {
                         float[] relief = assets.roadRelief();
@@ -1767,12 +1777,25 @@ final class GpuTerrain implements Disposable {
         return SCULPT_MATERIALS[family.ordinal()][0];
     }
 
-    private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.concat(
+    /** Whether sunken ground (level -1 and below) takes its family's floor material from {@link #FLOORS}. */
+    static final boolean SUBLEVEL_FLOORS = true;
+
+    /**
+     * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
+     * (terrain-materials.glsl floorShare). Null keeps the ground.
+     */
+    private static final String[] FLOORS = {
+          "grassland-floor", null, null, null, null, "snow-floor", null, "fungus-floor", "desert-floor", "mars-floor",
+          "volcano-floor", null,
+    };
+
+    private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.of(
           Arrays.stream(SCULPT_MATERIALS).flatMap(Arrays::stream),
           java.util.stream.Stream.of("tundra-crust", "tundra-ground", "tundra-mat", "biome-soil",
                 "tundra-ground-variant",
-                "concrete-mulch", "ground-scorch", "biome-mud"))
-          .distinct().toList();
+                "concrete-mulch", "ground-scorch", "biome-mud"),
+          Arrays.stream(FLOORS).filter(floor -> SUBLEVEL_FLOORS && floor != null))
+          .flatMap(names -> names).distinct().toList();
     /**
      * The board materials whose finish the terrain reads from arrays (finish-arrays.glsl): the sculpt layers, at their
      * index, then the road materials, at ROAD_FINISH plus theirs.
