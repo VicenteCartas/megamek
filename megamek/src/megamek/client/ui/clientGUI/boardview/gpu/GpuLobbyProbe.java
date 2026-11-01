@@ -131,7 +131,15 @@ import org.lwjgl.glfw.GLFW;
  *     menu would; {@code +c3plan} clicks Plan Force through the stage 2.5 s before the shot, or {@code +c3config=N}
  *     the Configuration N template, and {@code +c3build} then clicks Build; the board is logged before the shot (see
  *     {@link LobbyC3Probe}).</li>
- *     <li>{@code lobby+configure}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the unit bay for the player's
+ *     <li>{@code lobby+mapsetup}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the map setup in the forces'
+ *     place, as the battlefield column would, and {@code lobby+randommap} the random map settings; with
+ *     {@code +mapclick=name,name} it then clicks their controls, or those of the dialog over them, by name through the
+ *     stage, one every {@value LobbyMapSetupProbe#CLICK_GAP} s, logging the setup after each and the server's map
+ *     settings once done: such as {@code map-slot-1}, {@code map-board-2} and {@code map-place},
+ *     {@code map-width-up} (and {@code nag-dont-show}, {@code nag-ok} of the odd-sized board warning),
+ *     {@code map-medium-space}, {@code map-rotate}, {@code map-level-offset-up}, {@code map-generate}; or
+ *     {@code random-advanced}, {@code random-tab-water}, {@code random-lakes-high}, {@code random-ok} (see
+ *     {@link LobbyMapSetupProbe}).</li> *     <li>{@code lobby+configure}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the unit bay for the player's
  *     first unit, as the unit menu's Configure does; with {@code +multi} for all their units at once. With
  *     {@code +bayclick=name,name} it then clicks the bay's controls by name through the stage, one every
  *     {@value LobbyUnitBayProbe#CLICK_GAP} s, logging after each the unit, the first crew member's gunnery, the zone,
@@ -186,6 +194,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final String SCROLL_OPTION = "scroll=";
     private static final String SEARCH_OPTION = "search=";
     private static final String BAY_CLICK_OPTION = "bayclick=";
+    private static final String MAP_CLICK_OPTION = "mapclick=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -588,10 +597,19 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
 
     /** The unit bay's controls {@code lobby+configure+bayclick=name,name} clicks, in order; empty without it. */
     List<String> bayClicks() {
+        return clicks(BAY_CLICK_OPTION);
+    }
+
+    /** The map setup's controls {@code lobby+mapsetup+mapclick=name,name} clicks, in order; empty without it. */
+    List<String> mapClicks() {
+        return clicks(MAP_CLICK_OPTION);
+    }
+
+    private List<String> clicks(String prefix) {
         List<String> names = new ArrayList<>();
         for (String option : options) {
-            if (option.startsWith(BAY_CLICK_OPTION)) {
-                for (String name : option.substring(BAY_CLICK_OPTION.length()).split(",")) {
+            if (option.startsWith(prefix)) {
+                for (String name : option.substring(prefix.length()).split(",")) {
                     if (!name.isBlank()) {
                         names.add(name.trim());
                     }

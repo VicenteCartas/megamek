@@ -17,15 +17,18 @@ import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomMapForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.common.icons.Camouflage;
 
 /**
  * The single entry point of the lobby's libGDX dialogs, as {@link LobbyDialogs} is of its Swing ones: the camo chooser,
- * the player settings, the bot setup, the planetary conditions, the game options, a message and a confirmation. A
+ * the player settings, the bot setup, the planetary conditions, the game options, the random map settings, the odd-sized board warning, a
+ * message and a confirmation. A
  * dialog shows over the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo
  * chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
  * and a confirmation go over it, as the player settings' Bot settings opens the bot setup or hiding a rule category
@@ -53,6 +56,7 @@ final class LobbyNativeDialogs {
     private LobbyBotSetupView botView;
     private LobbyConditionsView conditionsView;
     private LobbyGameOptionsView optionsView;
+    private LobbyRandomMapView randomMapView;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -172,8 +176,43 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
-    /** Shows {@code text} with an OK button over whatever shows, as an alert. */
-    UiDialog message(String title, String text) {
+    /**
+     * Opens the random map settings.
+     *
+     * @param themes the tileset's themes
+     */
+    LobbyRandomMapView randomMap(RandomMapForm form, List<String> themes, LobbyRandomMapView.Host host) {
+        UiDialog dialog = begin(Messages.getString("RandomMapDialog.title"), "dialog.lg", false,
+              () -> randomMapView = null);
+        randomMapView = new LobbyRandomMapView(kit, dialog, form, themes, host, this::close);
+        show(dialog);
+        return randomMapView;
+    }
+
+    /**
+     * Warns that boards of odd width do not tile, over whatever shows, as the Swing map setup's bother dialog.
+     *
+     * @param dontShowAgain runs once OK closed it with "Don't show again" checked
+     */
+    UiDialog oddBoardNag(Runnable dontShowAgain) {
+        UiDialog dialog = begin(Messages.getString("ChatLounge.board.warning.title"), "dialog.md", true, () -> { });
+        var label = kit.typeLabel(Messages.getString("ChatLounge.board.warning.message"), "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left().row();
+        UiChoice again = kit.check(Messages.getString("SimpleNagNotice.dontShowAgain"), false);
+        again.setName("nag-dont-show");
+        dialog.body().add(again).left().padTop(DesignTokens.shipped().space().get("lg"));
+        dialog.primary(Messages.getString("Ok.text"), () -> {
+            close();
+            if (again.isChecked()) {
+                dontShowAgain.run();
+            }
+        }).setName("nag-ok");
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows {@code text} with an OK button over whatever shows, as an alert. */    UiDialog message(String title, String text) {
         UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
         var label = kit.typeLabel(text, "body", "text.primary");
         label.setWrap(true);
@@ -262,6 +301,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyGameOptionsView optionsView() {
         return optionsView;
+    }
+
+    @Nullable LobbyRandomMapView randomMapView() {
+        return randomMapView;
     }
 
     /** The top dialog, or null. */

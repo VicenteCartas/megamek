@@ -8,6 +8,7 @@ import static org.lwjgl.util.nfd.NativeFileDialog.NFD_Init;
 import static org.lwjgl.util.nfd.NativeFileDialog.NFD_OKAY;
 import static org.lwjgl.util.nfd.NativeFileDialog.NFD_OpenDialog;
 import static org.lwjgl.util.nfd.NativeFileDialog.NFD_Quit;
+import static org.lwjgl.util.nfd.NativeFileDialog.NFD_SaveDialog;
 
 import java.io.File;
 import java.util.concurrent.ExecutorService;
@@ -23,9 +24,9 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.nfd.NFDFilterItem;
 
 /**
- * The system's own open-file dialog for the start screen, through LWJGL's Native File Dialog, on Windows only: on
- * macOS it must run on the main thread, which the start window's loop holds, and on Linux it would share GTK with AWT.
- * It runs on a thread of its own, so the start window keeps drawing while it is open; where it can't show, the caller
+ * The system's own open and save file dialogs of the GPU windows, through LWJGL's Native File Dialog, on Windows only: on
+ * macOS it must run on the main thread, which the window's loop holds, and on Linux it would share GTK with AWT.
+ * It runs on a thread of its own, so the window keeps drawing while it is open; where it can't show, the caller
  * falls back to Swing's chooser.
  */
 final class NativeFileChooser {
@@ -46,14 +47,16 @@ final class NativeFileChooser {
     }
 
     /**
-     * Any thread: shows the dialog at {@code directory} for {@code filter}'s files, then, on the dialog's thread,
-     * hands {@code done} the file chosen, or null when the player cancels, or runs {@code failed} when it couldn't show.
+     * Any thread: shows the open, or the {@code save}, dialog at {@code directory} for {@code filter}'s files, then, on
+     * the dialog's thread, hands {@code done} the file chosen, or null when the player cancels, or runs {@code failed}
+     * when it couldn't show.
      */
-    static void open(File directory, FileNameExtensionFilter filter, Consumer<File> done, Runnable failed) {
+    static void show(File directory, FileNameExtensionFilter filter, boolean save, Consumer<File> done,
+          Runnable failed) {
         THREAD.execute(() -> {
             File chosen;
             try {
-                chosen = show(directory, filter);
+                chosen = blocking(directory, filter, save);
             } catch (RuntimeException | LinkageError failure) {
                 LOGGER.warn("The system file dialog couldn't show; using Swing's from now on: {}", failure.toString());
                 usable = false;
@@ -65,7 +68,7 @@ final class NativeFileChooser {
     }
 
     /** Blocks: the file chosen, or null when the player cancels. */
-    private static File show(File directory, FileNameExtensionFilter filter) {
+    private static File blocking(File directory, FileNameExtensionFilter filter, boolean save) {
         if (NFD_Init() != NFD_OKAY) {
             throw new IllegalStateException(NFD_GetError());
         }
@@ -78,7 +81,7 @@ final class NativeFileChooser {
             String start = directory != null && directory.isDirectory()
                   ? directory.toPath().toAbsolutePath().normalize().toString()
                   : null;
-            int result = NFD_OpenDialog(path, filters, start);
+            int result = save ? NFD_SaveDialog(path, filters, start, null) : NFD_OpenDialog(path, filters, start);
             if (result == NFD_OKAY) {
                 File file = new File(path.getStringUTF8(0));
                 NFD_FreePath(path.get(0));

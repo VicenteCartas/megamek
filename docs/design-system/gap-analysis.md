@@ -969,10 +969,38 @@ work for Swing, and item 11 is under investigation.
        `lobby+configure` (`+multi`, `+bayrules`, `+bayclick=...`) opens the bay and clicks through it, and an OK after
        Next customizes both units; `lobby+c3+c3plan+c3build` plans a ten-unit force into two lances and builds them
        (two C3 networks, team BV 17,879 to 20,845). MekHQ and MegaMekLab compile.
-     - Still open after #34, for a later round once #33 and #34 are merged:
-       - L16 Map setup in libGDX: board selection, map size, random map settings, and loading and saving a map
-         setup.
-       - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,
+     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` and
+       `RandomMapDialog` stay for other callers:
+       - Edit Map and the Battlefield menu open a "war table" centre view (with Back) in place of `MapSetupDialog`:
+         the map type (ground, low altitude, space) as a segmented choice; boards across and down as steppers; the
+         board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
+         slot. The selected slot shows its rotation, theme and level offset (with Reset), and a searchable board
+         browser with a preview that places a board, places it rotated, or makes a random or a surprise board from
+         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, Advanced Search (the Swing
+         `BoardSearchDialog`, through `LobbyDialogs`), the planetary conditions, the map assembly help, the 3D
+         preview and Generate Battlefield sit in the view's header and footer.
+       - Random Map Settings is a native dialog: the normal view sets each feature as None, Low, Medium or High by
+         theme tab; the advanced view shows every generator field as sliders and steppers; the board size and theme
+         sit above. Load, Apply and Save, OK and Cancel send the settings to the server as the Swing dialog does,
+         and the normal or advanced choice is kept in the preferences.
+       - The odd-sized board warning is a native dialog, shown when odd-width boards are joined across; "Don't show
+         again" turns its preference off.
+       - Loading and saving a map setup or random map settings use the system file dialog through
+         `SystemFileDialog`, which wraps the start screen's `NativeFileChooser` (now able to save too); the start
+         screen uses the same helper. Lobby input is blocked while it is open, and saving asks before replacing a
+         file.
+       - The logic is in `megamek.client.lobby`: `MapSetupForm` (size, slots, boards, search, generate, load and
+         save, the odd-board check) and `RandomMapForm` (levels, advanced fields, apply and save).
+       - Differences on purpose: boards are placed by a click (or double-click) rather than drag and drop; the Swing
+         2D preview and its deployment overlay are gone, as the 3D preview stays; positive advanced fields are
+         capped at 999; saving random map settings applies them and closes the dialog. `LobbyDialogEntryPointsTest`
+         learned `HelpDialog`, which takes its owner last.
+       Checks: `MapSetupFormTest`, `RandomMapFormTest`; the on-demand `LobbyMapSetupSmokeTest` (a slot and a board
+       clicked and placed, the map grown, space chosen, a surprise board, random map settings changed and sent, the
+       warning's "Don't show again"). Live: the probe's `lobby+mapsetup` and `lobby+randommap`, with
+       `+mapclick=...` to click named controls; the log shows the setup after each click and the server's map
+       settings at the end. MekHQ and MegaMekLab compile.
+     - Still open after #34, for a later round once #33 and #34 are merged:       - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,
          the load list, the Princess help, the unit readout and the remaining prompts through `SwingLobbyPrompts`.
        - L18 File choosers: game options, loadouts, unit lists and map setups open the system file dialog (as the
          start screen does) instead of a Swing chooser.

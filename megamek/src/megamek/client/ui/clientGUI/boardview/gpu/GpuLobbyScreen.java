@@ -47,8 +47,10 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
 import megamek.client.lobby.RequisitionLoader;
@@ -121,6 +123,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private LobbyBattlefieldPanel battlefield;
     private LobbyCentre centre;
     private LobbyRequisitionPanel requisition;
+    /** The map setup, made when it first opens. */
+    private LobbyMapSetupView mapSetupView;
     /** The C3 network manager, made when it first opens. */
     private LobbyC3View c3View;
     /** The unit bay in the forces' place, or null when it is shut. */
@@ -156,6 +160,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private LobbyC3Probe c3Probe;
     /** The developer switch's run through the unit bay, or null. */
     private LobbyUnitBayProbe bayProbe;
+    private LobbyMapSetupProbe mapProbe;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -252,6 +257,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         gmClicks = gmClicks(probe);
         c3Probe = LobbyC3Probe.of(probe);
         bayProbe = LobbyUnitBayProbe.of(probe);
+        mapProbe = LobbyMapSetupProbe.of(probe);
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -872,6 +878,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             unitBay.dispose();
             unitBay = null;
         }
+        if (mapSetupView != null && mapSetupView.shown() != null && !LobbyMapSetupView.KEY.equals(showing)) {
+            mapSetupView.closed();
+            mapSetupView.dispose();
+            window.mapSetupClosed();
+        }
     }
 
     /** GPU thread: shows the unit bay for the form's units in the forces' place, instead of any bay shown. */
@@ -896,8 +907,64 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
-    /** GPU thread: opens the C3 network manager in the forces' place; its board follows from the window. */
-    void openC3() {
+    /** GPU thread: opens the map setup in the forces' place; its setup follows from the window. */
+    void openMapSetup() {
+        if (stage == null) {
+            return;
+        }
+        if (mapSetupView == null) {
+            mapSetupView = new LobbyMapSetupView(kit, window.mapSetupHost());
+        }
+        closeMenus();
+        if (!LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.closed();
+            centre.show(LobbyMapSetupView.KEY, Messages.getString("Lobby.map.title"), mapSetupView.body());
+        }
+    }
+
+    /** GPU thread: shows the map setup anew while it shows. */
+    void mapSetup(MapSetupForm.Picture picture, List<MapSetupForm.Theme> themes) {
+        if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.show(picture, themes);
+        }
+    }
+
+    /** GPU thread: a board's picture for the map setup, while it shows. */
+    void mapPicture(String key, BufferedImage image) {
+        if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.picture(key, image);
+        }
+    }
+
+    /** GPU thread: the map setup, for the probe and the tests; null before it first opens. */
+    @Nullable LobbyMapSetupView mapSetupView() {
+        return mapSetupView;
+    }
+
+    /** GPU thread: warns that boards of odd width do not tile; {@code dontShowAgain} runs if asked not to again. */
+    void oddBoardNag(Runnable dontShowAgain) {
+        if (stage != null) {
+            nativeDialogs.oddBoardNag(dontShowAgain);
+        }
+    }
+
+    /** GPU thread: asks {@code text} over the lobby; {@code yes} runs on OK. */
+    void confirmDialog(String title, String text, Runnable yes) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.confirm(title, text, yes);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the random map settings over the lobby. */
+    void randomMapDialog(RandomMapForm form, List<String> themes, LobbyRandomMapView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.randomMap(form, themes, host);
+        }
+    }
+
+    /** GPU thread: opens the C3 network manager in the forces' place; its board follows from the window. */    void openC3() {
         if (stage == null) {
             return;
         }
@@ -1347,6 +1414,12 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (c3Probe != null) {
             c3Probe.step(elapsed, stage, () -> window.forcesCommand(LobbyForcesPanel.Command.C3), c3View);
         }
+        if (mapProbe != null) {
+            LobbyMapSetupProbe run = mapProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeMapSetup(run.random())),
+                  mapSetupView, nativeDialogs.randomMapView(), nativeDialogs.dialog(),
+                  what -> SwingUtilities.invokeLater(() -> window.probeMapSettings(what)));
+        }
         if (bayProbe != null) {
             LobbyUnitBayProbe run = bayProbe;
             run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeConfigure(run.multi())),
@@ -1518,6 +1591,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     public void dispose() {
         if (nativeDialogs != null) {
             nativeDialogs.dispose();
+        }
+        if (mapSetupView != null) {
+            mapSetupView.dispose();
+            mapSetupView = null;
         }
         if (unitBay != null) {
             unitBay.dispose();

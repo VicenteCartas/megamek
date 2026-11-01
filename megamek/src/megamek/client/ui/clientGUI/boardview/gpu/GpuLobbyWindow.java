@@ -24,6 +24,7 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationListener;
 import jakarta.annotation.Nullable;
@@ -48,15 +49,20 @@ import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.LobbyUnitOrder;
+import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
+import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
 import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
@@ -312,6 +318,9 @@ public final class GpuLobbyWindow {
     private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
+    private static final String MAP_ASSEMBLY_HELP = "docs/Customization/MegaMek/Map and Board Stuff/MapAssemblyHelp.html";
+    /** EDT: the map setup while it shows in the centre; null otherwise. */
+    private LobbyMapSetupController mapSetup;
     /** EDT: the C3 network manager while it shows in the centre; null otherwise. */
     private LobbyC3Controller c3;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
@@ -443,8 +452,21 @@ public final class GpuLobbyWindow {
 
     /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
     /** EDT, for the developer switch's {@code lobby+configure}: opens the unit bay for the player's first unit or all. */
-    void probeConfigure(boolean all) {
-        if (closing) {
+    /** EDT, for the developer switch: opens the map setup, or with {@code random} the random map settings. */
+    void probeMapSetup(boolean random) {
+        if (!closing) {
+            battlefieldCommand(random ? LobbyBattlefieldController.Command.RANDOM_MAP
+                  : LobbyBattlefieldController.Command.MAP_SETUP);
+        }
+    }
+
+    /** EDT, for the developer switch: logs the server's map settings, with what happened. */
+    void probeMapSettings(String what) {
+        LOGGER.info("The lobby probe's server map settings, {}: {}", what,
+              LobbyMapSetupController.describe(gui.getClient().getMapSettings()));
+    }
+
+    void probeConfigure(boolean all) {        if (closing) {
             return;
         }
         Client client = gui.getClient();
@@ -555,6 +577,9 @@ public final class GpuLobbyWindow {
         sendCamos();
         if (c3 != null) {
             c3.refresh();
+        }
+        if (mapSetup != null) {
+            mapSetup.refresh();
         }
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
@@ -832,13 +857,16 @@ public final class GpuLobbyWindow {
                 switch (command) {
                     case CONDITIONS -> openConditions();
                     case GAME_OPTIONS -> openGameOptions();
+                    case RANDOM_MAP -> openRandomMap();
+                    case LOAD_MAP_SETUP -> loadMapSetup();
+                    case SAVE_MAP_SETUP -> saveMapSetup();
                     default -> lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
                 }
             }
 
             @Override
             public void mapSetup() {
-                MapSetupDialog.open(gui);
+                openMapSetup();
             }
 
             @Override
@@ -1094,6 +1122,303 @@ public final class GpuLobbyWindow {
         SwingUtilities.invokeLater(() -> c3 = null);
     }
 
+    // ---- The map setup ----
+
+    /** Any thread: the map setup left the centre; its board pictures stop. */
+    void mapSetupClosed() {
+        SwingUtilities.invokeLater(() -> {
+            if (mapSetup != null) {
+                mapSetup.dispose();
+                mapSetup = null;
+            }
+        });
+    }
+
+    /** Any thread: runs {@code action} on the screen on the GPU thread, if one shows. */
+    private void onScreen(Consumer<GpuLobbyScreen> action) {
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                action.accept(shown);
+            }
+        });
+    }
+
+    /** EDT: opens the map setup in the forces' place, as the Swing lobby's Map Setup dialog. */
+    private void openMapSetup() {
+        if (closing) {
+            return;
+        }
+        if (mapSetup == null) {
+            Client client = gui.getClient();
+            MapSetupForm form;
+            try {
+                form = new MapSetupForm(client::getMapSettings, client::getAvailableMapSizes,
+                      MapSetupForm.Commands.of(gui.lobbyCommands(), client::sendLobbyBoardGenerationRequest),
+                      MapSetupForm::fileTags, BoardArtwork::themes);
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "The lobby could not read the map settings");
+                return;
+            }
+            mapSetup = new LobbyMapSetupController(form,
+                  (picture, themes) -> onScreen(shown -> shown.mapSetup(picture, themes)),
+                  (key, image) -> onScreen(shown -> shown.mapPicture(key, image)));
+        }
+        onScreen(GpuLobbyScreen::openMapSetup);
+        mapSetup.refresh();
+    }
+
+    /** The map setup view's side of the window. */
+    LobbyMapSetupView.Host mapSetupHost() {
+        return new LobbyMapSetupView.Host() {
+            @Override
+            public void act(Consumer<MapSetupForm> action) {
+                mapSetup(controller -> controller.act(action));
+            }
+
+            @Override
+            public void mapWidth(int width) {
+                mapSetup(controller -> {
+                    boolean[] nag = new boolean[1];
+                    controller.act(form -> nag[0] = form.mapWidth(width));
+                    nagOddBoards(nag[0]);
+                });
+            }
+
+            @Override
+            public void boardWidth(int width) {
+                mapSetup(controller -> {
+                    boolean[] nag = new boolean[1];
+                    controller.act(form -> nag[0] = form.boardWidth(width));
+                    nagOddBoards(nag[0]);
+                });
+            }
+
+            @Override
+            public void preview(String board) {
+                mapSetup(controller -> controller.preview(board));
+            }
+
+            @Override
+            public void run(LobbyMapSetupView.Action action) {
+                SwingUtilities.invokeLater(() -> {
+                    if (!closing) {
+                        mapSetupAction(action);
+                    }
+                });
+            }
+        };
+    }
+
+    /** Any thread: runs {@code action} on the map setup's controller on the Swing thread, while it shows. */
+    private void mapSetup(Consumer<LobbyMapSetupController> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && mapSetup != null) {
+                action.accept(mapSetup);
+                refreshSoon();
+            }
+        });
+    }
+
+    /** EDT: warns of boards of odd width tiled across, unless told not to again, as the Swing map setup does. */
+    private void nagOddBoards(boolean due) {
+        if (due && LobbyMapSetupController.nagWanted()) {
+            onScreen(shown -> shown.oddBoardNag(() -> SwingUtilities.invokeLater(
+                  () -> GUIPreferences.getInstance().setNagForOddSizedBoard(false))));
+        }
+    }
+
+    /** EDT: one of the map setup's toolbar or footer actions. */
+    private void mapSetupAction(LobbyMapSetupView.Action action) {
+        switch (action) {
+            case LOAD -> loadMapSetup();
+            case SAVE -> saveMapSetup();
+            case RANDOM_MAP -> openRandomMap();
+            case CONDITIONS -> openConditions();
+            case PREVIEW_3D -> battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
+            case HELP -> {
+                try {
+                    new HelpDialog(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
+                          new File(MAP_ASSEMBLY_HELP).toURI().toURL(), swingDialogs.parent()).setVisible(true);
+                } catch (java.net.MalformedURLException failure) {
+                    LOGGER.error(failure, "The map assembly help could not be found");
+                }
+            }
+            case ADVANCED_SEARCH -> {
+                AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
+                if (search.showDialog().isConfirmed() && mapSetup != null) {
+                    String path = search.getPath();
+                    if (path != null) {
+                        mapSetup.act(form -> form.singleBoard(path));
+                        refreshSoon();
+                    }
+                }
+            }
+        }
+    }
+
+    /** The map settings the map setup works on, or else the server's. */
+    private MapSettings mapSettings() {
+        return mapSetup != null ? mapSetup.form().settings() : gui.getClient().getMapSettings();
+    }
+
+    /** EDT: asks for a map setup file in the system's file dialog and applies it, sending it to the server. */
+    private void loadMapSetup() {
+        MapSettings settings = MapSettings.getInstance(mapSettings());
+        mapSetupFile(false, file -> {
+            if (!file.exists()) {
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.fileNotFound")));
+                return;
+            }
+            try {
+                if (mapSetup != null) {
+                    mapSetup.form().load(file);
+                    mapSetup.act(form -> { });
+                } else {
+                    new MapSetupForm(() -> settings, gui.getClient()::getAvailableMapSizes,
+                          MapSetupForm.Commands.of(gui.lobbyCommands(), () -> { }), board -> "", List::of)
+                          .load(file);
+                }
+                refreshSoon();
+            } catch (java.io.IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The map setup {} could not be loaded", file);
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.map.problemLoadMapSetup")));
+            }
+        });
+    }
+
+    /** EDT: asks for a file in the system's file dialog and saves the map setup to it. */
+    private void saveMapSetup() {
+        MapSettings settings = MapSettings.getInstance(mapSettings());
+        mapSetupFile(true, file -> {
+            try {
+                new MapSetupForm(() -> settings, gui.getClient()::getAvailableMapSizes,
+                      MapSetupForm.Commands.of(gui.lobbyCommands(), () -> { }), board -> "", List::of).save(file);
+            } catch (java.io.IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The map setup could not be saved to {}", file);
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.map.problemSaving")));
+            }
+        });
+    }
+
+    /**
+     * EDT: asks for a map setup file in the system's file dialog, as the start screen asks for a game; a file to save
+     * to gets the XML extension and, unless the system's dialog asked already, a confirmation to replace it.
+     *
+     * @param chosen takes the file on the Swing thread
+     */
+    private void mapSetupFile(boolean save, Consumer<File> chosen) {
+        String title = Messages.getString(save ? "ChatLounge.map.saveMapSetup" : "ChatLounge.map.loadMapSetup");
+        chooseFile(new SystemFileDialog.Request(MapSetupForm.setupFolder(), title,
+              new FileNameExtensionFilter(Messages.getString("ChatLounge.map.SetupXMLfiles"), "xml"), save),
+              save ? "ChatLounge.map.saveMapSetupReplace" : null, chosen);
+    }
+
+    /**
+     * EDT: shows the system's file dialog over the lobby, which takes no input meanwhile.
+     *
+     * @param replaceKey the message asking to replace an existing file, with its name as {0}; null when opening
+     */
+    private void chooseFile(SystemFileDialog.Request request, @Nullable String replaceKey, Consumer<File> chosen) {
+        LOGGER.info("[LobbyFiles] The system file dialog opens: {}", request.title());
+        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+            if (closing || choice == null) {
+                return;
+            }
+            File file = choice.file();
+            if (replaceKey != null && choice.askReplace()) {
+                String text = Messages.getString(replaceKey, file.getName());
+                onScreen(shown -> shown.confirmDialog(Messages.getString("ChatLounge.map.confirmReplace"), text,
+                      () -> SwingUtilities.invokeLater(() -> {
+                          if (!closing) {
+                              chosen.accept(file);
+                          }
+                      })));
+            } else {
+                chosen.accept(file);
+            }
+        });
+    }
+
+    /** EDT: opens the random map settings natively over the lobby; OK sends them to the server. */
+    private void openRandomMap() {
+        if (closing) {
+            return;
+        }
+        RandomMapForm form;
+        List<String> themes;
+        try {
+            form = new RandomMapForm(MapSettings.getInstance(mapSettings()), gui.getClient()::sendMapSettings);
+            form.advanced(GUIPreferences.getInstance().getBoolean(GUIPreferences.RND_MAP_ADVANCED));
+            themes = new ArrayList<>(gui.getTilesetManager().getThemes());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the random map settings");
+            return;
+        }
+        LobbyRandomMapView.Host host = new LobbyRandomMapView.Host() {
+            @Override
+            public void advanced(boolean advanced) {
+                GUIPreferences.getInstance().setValue(GUIPreferences.RND_MAP_ADVANCED, advanced);
+            }
+
+            @Override
+            public void load(RandomMapForm loaded, Runnable then) {
+                SwingUtilities.invokeLater(() -> randomMapFile(false, file -> {
+                    try {
+                        loaded.load(file);
+                    } catch (java.io.IOException | RuntimeException failure) {
+                        LOGGER.error(failure, "The random map settings {} could not be loaded", file);
+                        onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                              Messages.getString("ChatLounge.fileNotFound")));
+                    }
+                }, () -> GpuHost.post(then)));
+            }
+
+            @Override
+            public void save(RandomMapForm saved, Consumer<Boolean> then) {
+                boolean[] done = new boolean[1];
+                SwingUtilities.invokeLater(() -> randomMapFile(true, file -> {
+                    try {
+                        done[0] = saved.applyAndSave(file);
+                    } catch (java.io.IOException | RuntimeException failure) {
+                        LOGGER.error(failure, "The random map settings could not be saved to {}", file);
+                        onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                              Messages.getString("ChatLounge.map.problemSaving")));
+                    }
+                }, () -> GpuHost.post(() -> then.accept(done[0]))));
+            }
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                GpuLobbyWindow.this.edt("random map settings", work, then);
+            }
+        };
+        onScreen(shown -> shown.randomMapDialog(form, themes, host));
+    }
+
+    /**
+     * EDT: asks for a random map settings file in the system's file dialog; {@code done} runs after {@code chosen}, or
+     * when none was chosen.
+     */
+    private void randomMapFile(boolean save, Consumer<File> chosen, Runnable done) {
+        String title = Messages.getString("RandomMapDialog.title") + " - "
+              + Messages.getString(save ? "RandomMapDialog.Save" : "RandomMapDialog.Load");
+        SystemFileDialog.Request request = new SystemFileDialog.Request(RandomMapForm.settingsFolder(), title,
+              new FileNameExtensionFilter(Messages.getString("ChatLounge.map.SetupXMLfiles"), "xml"), save);
+        LOGGER.info("[LobbyFiles] The system file dialog opens: {}", title);
+        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+            try {
+                if (!closing && choice != null) {
+                    chosen.accept(choice.file());
+                }
+            } finally {
+                done.run();
+            }
+        });
+    }
     /** Reads the lobby now and twice more, as the server's answer to a unit change takes a moment to come back. */
     private void refreshSoon() {
         queueRefresh();
@@ -1823,6 +2148,10 @@ public final class GpuLobbyWindow {
         boolean replaced = closing;
         closing = true;
         sprites.stop();
+        if (mapSetup != null) {
+            mapSetup.dispose();
+            mapSetup = null;
+        }
         if (mapTimer != null) {
             mapTimer.stop();
         }
