@@ -51,6 +51,11 @@ final class BoardRelief {
      */
     private static final float SHORE_SHIFT = 28;
     /**
+     * The top, in hex-scale units, a hex keeps round its centre beyond a smooth step's band and round where the step
+     * moves its corner toward it: the unit anchor's clearance, as rocks keep it (a fifth of the hex's width).
+     */
+    private static final float STEP_KEEP = 16.625f;
+    /**
      * The room, in hex-scale units, a corner the shore moves keeps beyond the water where land lies at the water's
      * level: BoardSurface's bank of 4.5, a unit, and most of the reach of the bank's rounding, so the shore runs on
      * past the corner as its field lies instead of bending short of it.
@@ -158,8 +163,33 @@ final class BoardRelief {
      */
     static final boolean DEFAULT_CONTAINMENT_WALLS = true;
 
+    /** How a natural step between tops runs round a hill: see {@link StepOutline}. */
+    static final StepOutline DEFAULT_STEP_OUTLINE = StepOutline.HEX;
+
+    /**
+     * The outline of the natural steps between hexes of different levels. HEX follows each hex's edges, rounding
+     * their corners a little by the ground's own roundness; CORNERS rounds every corner as far as its edges allow;
+     * SMOOTH also moves each corner of a two-level step, as the water's shore moves its own, to where a smoothed field
+     * of the hexes above and below crosses its middle ({@link #stepField}), so a hill's edge along a row of hexes runs
+     * as one curve instead of a hex's corners. Concrete, roads, water and three-level corners keep their places.
+     */
+    enum StepOutline {
+        HEX("Hex edges"), CORNERS("Rounded corners"), SMOOTH("Smooth");
+
+        private final String label;
+
+        StepOutline(String label) { this.label = label; }
+
+        @Override
+        public String toString() { return label; }
+    }
+
     /** Visual landform controls. Fixed lattice, stitching and sampling rules remain shared by every hex. */
-    record Tuning(boolean cliffsIntoWater, boolean containmentWalls) {}
+    record Tuning(boolean cliffsIntoWater, boolean containmentWalls, StepOutline stepOutline) {
+        Tuning(boolean cliffsIntoWater, boolean containmentWalls) {
+            this(cliffsIntoWater, containmentWalls, DEFAULT_STEP_OUTLINE);
+        }
+    }
 
     static final Tuning DEFAULTS = new Tuning(DEFAULT_CLIFFS_INTO_WATER, DEFAULT_CONTAINMENT_WALLS);
     private static Tuning tuning = DEFAULTS;
@@ -273,6 +303,11 @@ final class BoardRelief {
     private BoardObstacles obstacles;
     /** Separate liquid fields within {@link #SHORE_WINDOW} of this hex, NaN until computed for this scene. */
     private float[] shoreWeights, moltenShoreWeights;
+    /**
+     * Each step's pulls ({@link #stepPull}) on the hexes within {@link #SHORE_WINDOW} of this one, by the step's
+     * levels; NaN until known.
+     */
+    private final Map<Long, float[]> stepPulls = new HashMap<>();
     /** Shares of the shore's moves the land hexes allow, by coordinates; see {@link #keep}. */
     private final Map<Coords, Float> keeps = new HashMap<>();
     private float[] drops;
@@ -517,6 +552,102 @@ final class BoardRelief {
         if (channel == Float.NEGATIVE_INFINITY) { return value; }
         return Math.min(value, channel);
     }
+
+    /**
+     * The smoothed field of a step from {@code low} to {@code high} at (x, y) ({@link StepOutline#SMOOTH}): the shore's
+     * kernel over the hex centres around, +1 for hexes at or above the step's top, -1 at or below its foot, normalised.
+     * As the shore's, a hex pulls harder by {@link #SHORE_NARROW} for each neighbour on the other side, so a ridge or a
+     * valley a hex wide keeps its width. Its zero is the step's smooth outline. The field is the board's, whichever hex
+     * asks.
+     */
+    private float stepField(float x, float y, int low, int high) {
+        float scale = BoardGeometry.hexScale(), r2 = square(SHORE_REACH * scale), field = 0, sum = 0;
+        float width = BoardGeometry.width(), height = BoardGeometry.height(), step = .75f * width;
+        float[] pull = new float[2];
+        int column = Math.round((x - width / 2) / step);
+        for (int cx = column - 2; cx <= column + 2; cx++) {
+            float dx = x - (cx * step + width / 2);
+            int row = Math.round((-y - height / 2 - (cx & 1) * height / 2) / height);
+            for (int cy = row - 2; cy <= row + 2; cy++) {
+                float dy = y + cy * height + (cx & 1) * height / 2 + height / 2, t = 1 - (dx * dx + dy * dy) / r2;
+                if (t <= 0) { continue; }
+                stepPull(cx, cy, low, high, pull);
+                field += t * t * t * pull[0];
+                sum += t * t * t * pull[1];
+            }
+        }
+        return sum == 0 ? 0 : field / sum;
+    }
+
+    /**
+     * The pull of the hex at column cx and row cy on the field of the step from {@code low} to {@code high}, into
+     * {@code out} as {its side times its weight, its weight}: harder by {@link #SHORE_NARROW} for each neighbour on the
+     * other side. Kept for the hexes within {@link #SHORE_WINDOW} of this one.
+     */
+    private void stepPull(int cx, int cy, int low, int high, float[] out) {
+        int size = 2 * SHORE_WINDOW + 1;
+        int ix = cx - tile.coords().getX() + SHORE_WINDOW, iy = cy - tile.coords().getY() + SHORE_WINDOW;
+        int index = ix >= 0 && iy >= 0 && ix < size && iy < size ? 2 * (ix * size + iy) : -1;
+        float[] pulls = index < 0 ? null : stepPulls.computeIfAbsent((long) low << 32 | high & 0xffffffffL, key -> {
+            float[] values = new float[2 * size * size];
+            Arrays.fill(values, Float.NaN);
+            return values;
+        });
+        if (pulls != null && !Float.isNaN(pulls[index])) {
+            out[0] = pulls[index];
+            out[1] = pulls[index + 1];
+            return;
+        }
+        Coords at = new Coords(cx, cy);
+        int side = side(boardSite(at).level(), low, high), other = 0;
+        for (int d = 0; d < 6 && side != 0; d++) {
+            other += side(boardSite(at.translated(d)).level(), low, high) == -side ? 1 : 0;
+        }
+        float weight = 1 + SHORE_NARROW * other;
+        out[0] = side * weight;
+        out[1] = weight;
+        if (pulls != null) {
+            pulls[index] = out[0];
+            pulls[index + 1] = out[1];
+        }
+    }
+
+    /**
+     * A rounded corner's offset along its bisector at u (0 to 1) of its round's length L from the corner, in units of
+     * L: where the circle tangent to both edges at L meets the line from the edge's point along the bisector. c is the
+     * cosine of half the angle between the edges; at the lattice's 120 degrees (c = .5) the bulge is 2 - sqrt 3. Zero
+     * for a straight run.
+     */
+    private static float arc(float u, float c) {
+        if (c < .02f) { return 0; }
+        float s = (float) Math.sqrt(1 - c * c);
+        return (1 - s * (float) Math.sqrt(1 - u * u * c * c)) / c - u * c;
+    }
+
+    /** An arc's share of its bulge at u of its round's length (see {@link #arc}). */
+    private static float share(float u, float c) {
+        float bulge = arc(0, c);
+        return bulge <= 0 ? 0 : arc(u, c) / bulge;
+    }
+
+    /**
+     * How fast an arc's offset changes along its edge at the corner, per unit of its bulge and of the edge's own
+     * length: c per unit of the moved edge, which runs {@code stretch} times the edge's length; the arc runs
+     * {@code length} along it.
+     */
+    private static float arcSlope(float c, float length, float stretch) {
+        float bulge = length * arc(0, c);
+        return bulge <= 0 ? 0 : c * stretch / bulge;
+    }
+
+    /** An edge's length as the corners' moves place its ends. */
+    private static float movedLength(Edge edge) {
+        float[] ma = edge.a.move(), mb = edge.b.move();
+        return (float) Math.hypot(edge.b.x + mb[0] - edge.a.x - ma[0], edge.b.y + mb[1] - edge.a.y - ma[1]);
+    }
+
+    /** A level's side of a step from {@code low} to {@code high}: 1 at or above its top, -1 at or below its foot. */
+    private static int side(int level, int low, int high) { return level >= high ? 1 : level <= low ? -1 : 0; }
 
     private float shoreBase(float x, float y, boolean molten) {
         float scale = BoardGeometry.hexScale(), r2 = square(SHORE_REACH * scale), f = 0, gx = 0, gy = 0;
@@ -789,14 +920,23 @@ final class BoardRelief {
         final boolean banded;
         /** Length of the corner's fillet along each edge, in world units; zero where the corner stays sharp. */
         final float fillet;
+        /** Whether its round is a circle's arc ({@link StepOutline#CORNERS}, see {@link #arcFrame}), not the cubic. */
+        final boolean arc;
+        /** The arc as the moved step edges meet; see {@link #arcFrame}. Null until asked. */
+        private float[] frame;
+        /** The far ends of its two step edges, once {@link #arcFrame} has found them. */
+        private Corner[] arcEnds;
+        /** {@link #arcLength} per height. */
+        private final Map<Integer, Float> arcLengths = new HashMap<>();
         /** A free waterfall end shares its rock corner with the adjoining dry cliff. */
         final boolean waterfall;
         /** A bank above a gentle liquid step keeps its mouth fixed through this height; NaN elsewhere. */
         final float gradedContact;
         /**
          * Fillet displacements (a sixth of the fillet length) toward the hex on the other side of the outline: the
-         * lone high hex of a convex corner or the lone low hex of a concave one ({@code odd}); on a three-level
-         * corner toward the high, middle and low hex for the upper span, the middle hex's own level and the lower span.
+         * lone high hex of a convex corner or the lone low hex of a concave one ({@code odd}); on a three-level corner
+         * toward the high, middle and low hex for the upper span, the middle hex's own level and the lower span. An
+         * arc's comes from its {@link #arcFrame}.
          */
         final float[] odd = new float[2];
         final float[] towardHigh = new float[2];
@@ -866,6 +1006,7 @@ final class BoardRelief {
                 high = banded ? Math.max(around[0].level(), around[1].level()) : 0;
                 mid = low;
                 fillet = 0;
+                arc = false;
                 return;
             }
             int a = around[0].level(), b = around[1].level(), c = around[2].level();
@@ -877,9 +1018,17 @@ final class BoardRelief {
                 if (!site.liquid() && site.family() == CONCRETE) { round = 0; break; }
                 round += ROCKS[site.family()].round();
             }
-            fillet = low == high ? 0 : Math.min(.5f, round / 3 * (.8f + .4f * variation)) * BoardGeometry.width() / 2;
+            // A rounded two-level corner runs a circle's arc over half of each edge. Water's banks keep their own
+            // shape, which its shore rounds, roads their reserved ground, and three-level corners their turn.
+            StepOutline outline = tuning().stepOutline();
+            boolean kept = mid != low && mid != high;
+            for (Site site : around) { kept |= site.liquid() || site.road(); }
+            arc = outline != StepOutline.HEX && banded && round > 0 && !kept;
+            fillet = low == high ? 0 : (arc ? .5f : Math.min(.5f, round / 3 * (.8f + .4f * variation)))
+                  * BoardGeometry.width() / 2;
             for (Site site : around) {
-                float dx = site.x() - x, dy = site.y() - y, scale = fillet / 6 / (float) Math.hypot(dx, dy);
+                float dx = site.x() - x, dy = site.y() - y;
+                float scale = fillet / 6 / (float) Math.hypot(dx, dy);
                 float[] target = site.level() == high && mid != high ? towardHigh
                       : site.level() == low && mid != low ? towardLow : towardMid;
                 target[0] = dx * scale;
@@ -888,7 +1037,125 @@ final class BoardRelief {
             float[] lone = mid == low ? towardHigh : towardLow;
             odd[0] = lone[0];
             odd[1] = lone[1];
+            if (outline == StepOutline.SMOOTH) { smoothStep(); }
             wantShore();
+        }
+
+        /**
+         * A smooth step's corner ({@link StepOutline#SMOOTH}): a natural slope of one or two levels moves it out from
+         * its hill, or in toward it, to where {@link #stepField} turns from the hill to the ground below, but no nearer
+         * the lone hex's centre than leaves that hex {@link #STEP_KEEP} of its top beyond the step's band and round at
+         * its level, and away from it no more than a third of an edge. Water's corners follow its shore instead;
+         * concrete, roads, cliffs and three-level corners keep their places.
+         */
+        private void smoothStep() {
+            if (move != null || waterfall || !banded || low == high || mid != low && mid != high || high - low > 2) {
+                return;
+            }
+            for (Site site : around) {
+                if (site.liquid() || site.road() || site.family() == CONCRETE) { return; }
+            }
+            Site lone = null;
+            int highs = 0;
+            for (Site site : around) { highs += site.level() == high ? 1 : 0; }
+            for (Site site : around) {
+                if (highs == 1 ? site.level() == high : site.level() == low) { lone = site; }
+            }
+            // Outward from the hill: from its lone hex through a convex corner, toward the lone lower hex of a concave
+            // one.
+            float ux = highs == 1 ? x - lone.x() : lone.x() - x, uy = highs == 1 ? y - lone.y() : lone.y() - y;
+            float length = (float) Math.hypot(ux, uy);
+            ux /= length;
+            uy /= length;
+            // Toward the lone hex its top at its level ends where the step's band and round reach into it from this
+            // corner. Away from it the corner slides along the seam between the other two hexes, at most a third of
+            // it, so the corners at the seam's two ends never meet.
+            float[] band = new float[2];
+            bandOffset(this, lone.level() * BoardGeometry.level(), band);
+            float tx = (lone.x() - x) / length, ty = (lone.y() - y) / length;
+            float rim = Math.max(0, band[0] * tx + band[1] * ty) + fillet * (2 - (float) Math.sqrt(3));
+            float keep = STEP_KEEP * BoardGeometry.hexScale();
+            boolean hill = stepField(x, y, low, high) > 0;
+            float direction = hill ? 1 : -1, toward = highs == 1 ? -1 : 1;
+            float span = direction == toward ? Math.max(0, length - keep - rim) : length / 3;
+            float lo = 0, hi = Float.NaN, previous = 0, reach = direction * span;
+            for (int i = 1; i <= 6 && Float.isNaN(hi); i++) {
+                float s = direction * span * i / 6;
+                if ((stepField(x + ux * s, y + uy * s, low, high) > 0) != hill) {
+                    lo = Math.min(previous, s);
+                    hi = Math.max(previous, s);
+                }
+                previous = s;
+            }
+            if (!Float.isNaN(hi)) {
+                for (int i = 0; i < REACH_HALVINGS; i++) {
+                    float s = (lo + hi) / 2;
+                    if (stepField(x + ux * s, y + uy * s, low, high) > 0) { lo = s; } else { hi = s; }
+                }
+                reach = (lo + hi) / 2;
+            }
+            move = new float[] { ux * reach, uy * reach };
+        }
+
+        /**
+         * A rounded corner's arc where its two step edges meet as the corners move them: {bisector x, y, c, length},
+         * the bisector of their directions pointing into the lone hex's side, c the cosine of half the angle between
+         * them, and the length its round runs along each, at most half the shorter edge (at each height, see
+         * {@link #arcLength}). Unmoved, the corner is the lattice's 120 degrees (c = .5); where the moves straighten a
+         * run (c near 0) little is left to round.
+         */
+        float[] arcFrame() {
+            if (frame != null) { return frame; }
+            int highs = 0;
+            for (Site site : around) { highs += site.level() == high ? 1 : 0; }
+            Site lone = null;
+            for (Site site : around) {
+                if (highs == 1 ? site.level() == high : site.level() == low) { lone = site; }
+            }
+            int k = 0;
+            while (corner(lone, k) != this) { k++; }
+            float[] own = move();
+            float sx = 0, sy = 0, ex = 0, ey = 0, shortest = Float.POSITIVE_INFINITY;
+            // The lone hex's corners either side of this one end its two step edges.
+            arcEnds = new Corner[] { corner(lone, k - 1), corner(lone, k + 1) };
+            for (Corner far : arcEnds) {
+                float[] moved = far.move();
+                float dx = far.x + moved[0] - x - own[0], dy = far.y + moved[1] - y - own[1];
+                float length = (float) Math.hypot(dx, dy);
+                ex = dx / length;
+                ey = dy / length;
+                sx += ex;
+                sy += ey;
+                shortest = Math.min(shortest, length);
+            }
+            float bisector = (float) Math.hypot(sx, sy);
+            frame = bisector < 1e-4f ? new float[4] : new float[] { sx / bisector, sy / bisector,
+                  (ex * sx + ey * sy) / bisector, Math.min(fillet, shortest / 2) };
+            return frame;
+        }
+
+        /**
+         * How far the arc runs along each of its step edges at height z: the frame's length, but at most half of either
+         * edge as the moves and the band's slide carry it there (BoardRelief#naturalPoint), so the arcs at an edge's
+         * two ends never meet and every edge through a corner starts exactly at it.
+         */
+        float arcLength(float z) {
+            float length = arcFrame()[3];
+            if (length <= 0 || !BoardGeometry.tuning().stepsBetweenTops()) { return length; }
+            Float known = arcLengths.get(Float.floatToIntBits(z));
+            if (known != null) { return known; }
+            float[] own = move(), near = new float[2], far = new float[2];
+            bandOffset(this, z, near);
+            for (Corner end : arcEnds) {
+                float[] moved = end.move();
+                float dx = end.x + moved[0] - x - own[0], dy = end.y + moved[1] - y - own[1];
+                float run = (float) Math.hypot(dx, dy);
+                bandOffset(end, z, far);
+                float speed = run + ((far[0] - near[0]) * dx + (far[1] - near[1]) * dy) / run;
+                length = Math.min(length, Math.max(0, speed / 2));
+            }
+            arcLengths.put(Float.floatToIntBits(z), length);
+            return length;
         }
 
         /** Sets {@link #away} and {@link #want}. */
@@ -1172,6 +1439,12 @@ final class BoardRelief {
             out[0] = lerp(corner.towardMid[0], far[0], f);
             out[1] = lerp(corner.towardMid[1], far[1], f);
         }
+        if (corner.arc && (out[0] != 0 || out[1] != 0)) {
+            float[] frame = corner.arcFrame();
+            float bulge = corner.arcLength(z) * arc(0, frame[2]);
+            out[0] = frame[0] * bulge;
+            out[1] = frame[1] * bulge;
+        }
         float weight = corner.wallWeight(z);
         out[0] *= weight;
         out[1] *= weight;
@@ -1415,8 +1688,8 @@ final class BoardRelief {
      * Displaced point of an edge at canonical parameter t and height z (horizontal offset only). Each corner's fillet
      * moves the outline by its displacement times (1 - u/s)^3, u being the distance from the corner and s the fillet
      * length. A displacement of s/6 toward the far side makes the outlines meeting at the corner tangent-continuous,
-     * so no corner keeps a crease. Relief moves along the face normal and blends into each corner's canonical
-     * relief, which every edge through that corner shares.
+     * so no corner keeps a crease; a rounded corner runs a circle's arc instead ({@link #arc}). Relief moves along the
+     * face normal and blends into each corner's canonical relief, which every edge through that corner shares.
      */
     private Vector3 edgePoint(Edge edge, float t, float z) {
         // A board cut remains a straight section between its shared corners after bridge clearance, too.
@@ -1986,29 +2259,58 @@ final class BoardRelief {
         filletOffset(edge.b, z, scratchB);
         float ua = edge.a.fillet > 0 ? Math.min(1, along / edge.a.fillet) : 1;
         float ub = edge.b.fillet > 0 ? Math.min(1, (edge.length - along) / edge.b.fillet) : 1;
-        float fa = (1 - ua) * (1 - ua) * (1 - ua), fb = (1 - ub) * (1 - ub) * (1 - ub);
+        // An arc runs along its corner's two step edges only; across the level seam between the hexes on one side of
+        // the step its bulge fades as the cubic's does, within half the seam, so the seam ends exactly at both corners.
+        boolean step = edge.upper != null && edge.lower != null && edge.upper.level() != edge.lower.level();
+        float[] frameA = edge.a.arc && step ? edge.a.arcFrame() : null;
+        float[] frameB = edge.b.arc && step ? edge.b.arcFrame() : null;
+        boolean bands = BoardGeometry.tuning().stepsBetweenTops();
+        float ex = lx / edge.length, ey = ly / edge.length, sx = 0, sy = 0, slideA = 0, slideB = 0;
+        // An arc runs along the edge as the corners' moves and the band's slide (below) carry it: from each corner, its
+        // share of the bulge at each world unit of that run, so it meets both edges through the corner tangent.
+        float moved = frameA != null || frameB != null ? movedLength(edge) : edge.length, speed = moved;
+        if (bands) {
+            bandOffset(edge.a, z, bandA);
+            bandOffset(edge.b, z, bandB);
+            if (frameA != null || frameB != null) {
+                float[] ma = edge.a.move(), mb = edge.b.move();
+                sx = (edge.b.x + mb[0] - edge.a.x - ma[0]) / moved;
+                sy = (edge.b.y + mb[1] - edge.a.y - ma[1]) / moved;
+            } else {
+                sx = -edge.bandNormal.y;
+                sy = edge.bandNormal.x;
+                if (sx * ex + sy * ey < 0) { sx = -sx; sy = -sy; }
+            }
+            slideA = bandA[0] * sx + bandA[1] * sy;
+            slideB = bandB[0] * sx + bandB[1] * sy;
+            speed = moved + slideB - slideA;
+        }
+        float lengthA = frameA != null ? edge.a.arcLength(z) : 0, lengthB = frameB != null ? edge.b.arcLength(z) : 0;
+        if (frameA != null) { ua = lengthA > 0 ? Math.min(1, t * speed / lengthA) : 1; }
+        if (frameB != null) { ub = lengthB > 0 ? Math.min(1, (1 - t) * speed / lengthB) : 1; }
+        float fa = frameA != null ? share(ua, frameA[2]) : (1 - ua) * (1 - ua) * (1 - ua);
+        float fb = frameB != null ? share(ub, frameB[2]) : (1 - ub) * (1 - ub) * (1 - ub);
         float rx = scratchA[0] * fa + scratchB[0] * fb, ry = scratchA[1] * fa + scratchB[1] * fb;
         float blend = .3f * edge.length;
         float wa = 1 - smooth(along / blend), wb = 1 - smooth((edge.length - along) / blend), rest = 1 - wa - wb;
         boolean spans = edge.profiled && z >= edge.bottom() - EPSILON && z <= edge.top() + EPSILON;
-        float ex = lx / edge.length, ey = ly / edge.length;
         // The transition band offsets the outline as a polygon: along the edge's normal by its own band, turning into
         // each corner's band near that corner, and along the edge by a shift running evenly from one corner's to the
-        // other's. Where two seams meet, the corner's band is where their offset lines cross, so the edge stays straight.
-        // Written, like the relief below, so that at a corner every edge through it adds the corner's own band exactly.
-        // The cubic corner rounds also consume tangent travel; their largest slope is at the endpoint.
-        float roundedA = edge.a.fillet > 0 ? 3 * (scratchA[0] * ex + scratchA[1] * ey) / edge.a.fillet : 0;
-        float roundedB = edge.b.fillet > 0 ? -3 * (scratchB[0] * ex + scratchB[1] * ey) / edge.b.fillet : 0;
+        // other's (along the moved edge where a corner rounds an arc). Where two seams meet, the corner's band is
+        // where their offset lines cross, so the edge stays straight. Written, like the relief below, so that at a
+        // corner every edge through it adds the corner's own band exactly.
+        // The corner rounds also consume tangent travel; their largest slope is at the endpoint: 3 for the cubic, as
+        // its frame gives it for an arc (arcSlope).
+        float stretch = speed / edge.length;
+        float roundedA = frameA != null ? arcSlope(frameA[2], lengthA, stretch) * (scratchA[0] * ex + scratchA[1] * ey)
+              : edge.a.fillet > 0 ? 3 * (scratchA[0] * ex + scratchA[1] * ey) / edge.a.fillet : 0;
+        float roundedB = frameB != null ? -arcSlope(frameB[2], lengthB, stretch) * (scratchB[0] * ex + scratchB[1] * ey)
+              : edge.b.fillet > 0 ? -3 * (scratchB[0] * ex + scratchB[1] * ey) / edge.b.fillet : 0;
         float bx = 0, by = 0, tangentRoom = 1 - Math.max(0, Math.max(roundedA, roundedB));
-        if (BoardGeometry.tuning().stepsBetweenTops()) {
+        if (bands) {
             float own = spans && edge.room > 0 ? band(edge.upper, edge.lower, z, px, py) * rest : 0;
-            bandOffset(edge.a, z, bandA);
-            bandOffset(edge.b, z, bandB);
-            float sx = -edge.bandNormal.y, sy = edge.bandNormal.x;
-            if (sx * ex + sy * ey < 0) { sx = -sx; sy = -sy; }
-            float ta = bandA[0] * sx + bandA[1] * sy, tb = bandB[0] * sx + bandB[1] * sy;
-            tangentRoom += Math.min(0, (tb - ta) / edge.length);
-            float slide = ta * (1 - t) + tb * t - ta * wa - tb * wb;
+            tangentRoom += Math.min(0, (slideB - slideA) / edge.length);
+            float slide = slideA * (1 - t) + slideB * t - slideA * wa - slideB * wb;
             bx = edge.bandNormal.x * own + bandA[0] * wa + bandB[0] * wb + sx * slide;
             by = edge.bandNormal.y * own + bandA[1] * wa + bandB[1] * wb + sy * slide;
         }

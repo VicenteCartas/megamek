@@ -138,6 +138,7 @@ final class GpuBoardTuning {
     private int terrainPercent = -1;
     private final CheckBox cliffsIntoWater;
     private final CheckBox containmentWalls;
+    private final SelectBox<BoardRelief.StepOutline> stepOutline;
     private final List<Control> familySizes;
     private final CheckBox zoomScaling;
     private final List<Control> zoomScale;
@@ -698,6 +699,14 @@ final class GpuBoardTuning {
             }
         });
         padding = controls(skin, List.of(PADDING), this::applyGeometry, 0);
+        stepOutline = choice(skin, "Hill outlines", "tuning-step-outline", BoardRelief.StepOutline.values(),
+              this::applyRelief);
+        syncing = true;
+        stepOutline.setSelected(BoardRelief.tuning().stepOutline());
+        syncing = false;
+        stepOutline.addListener(new TextTooltip("How the slopes between levels run round a hill: along each hex's "
+              + "edges, with every hex corner rounded, or smooth, the hill's edge running as one curve along its "
+              + "row of hexes. Visual only; the game's levels and hexes are unchanged.", skin, "menu"));
         section(skin, "Water");
         cliffsIntoWater = checkbox(skin, "Cliffs directly into water", "tuning-cliffs-into-water");
         cliffsIntoWater.addListener(new TextTooltip("Keep more flat land above waterside cliffs and let their rock face "
@@ -1375,13 +1384,15 @@ final class GpuBoardTuning {
     }
 
     private void applyRelief() {
-        BoardRelief.tune(new BoardRelief.Tuning(cliffsIntoWater.isChecked(), containmentWalls.isChecked()));
+        BoardRelief.tune(new BoardRelief.Tuning(cliffsIntoWater.isChecked(), containmentWalls.isChecked(),
+              stepOutline.getSelected()));
     }
 
     private void syncRelief() {
         syncing = true;
         cliffsIntoWater.setChecked(BoardRelief.tuning().cliffsIntoWater());
         containmentWalls.setChecked(BoardRelief.tuning().containmentWalls());
+        stepOutline.setSelected(BoardRelief.tuning().stepOutline());
         syncing = false;
     }
 

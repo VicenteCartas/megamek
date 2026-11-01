@@ -2719,6 +2719,9 @@ final class GpuTerrain implements Disposable {
     List<BoardConcrete.Cut> concreteCuts() { return coast == null ? List.of() : coast.cuts(); }
 
     private static int editReach(BoardScene before, BoardScene after, Coords at) {
+        // Smooth steps move their corners on a field like the shore's, read from the levels round them.
+        if (BoardRelief.tuning().stepOutline() == BoardRelief.StepOutline.SMOOTH
+              && before.tile(at).groundLevel() != after.tile(at).groundLevel()) { return BoardSurface.SHORE_RINGS; }
         if (!shoreNearby(before, after, at)) { return 2; }
         BoardScene.Tile was = before.tile(at), is = after.tile(at);
         if ((was.liquid().present() || is.liquid().present()) && !deepened(was, is)) { return BoardSurface.SHORE_RINGS; }
