@@ -78,6 +78,18 @@ final class GpuBuilding implements Disposable {
         return ConnectedKit.kit(file, new File(Configuration.dataDir(), "models").toPath());
     }
 
+    /**
+     * A building asset's kit: its GLB, or generated from its JSON spec in the asset's footprint and variant
+     * ({@link HabitatKit}, {@link megamek.common.board.TilesetScenery#kitVariant}).
+     */
+    static ConnectedKit.Kit kit(String asset) {
+        File file = megamek.common.board.TilesetScenery.customBuildingFile(asset);
+        if (!file.getName().endsWith(".json")) { return kit(file); }
+        int at = asset.indexOf('@');
+        String design = at < 0 ? asset : asset.substring(0, at);
+        return HabitatKit.kit(file, design.endsWith("-square"), at < 0 ? null : asset.substring(at + 1));
+    }
+
     /** Trim trailing fallbacks, retaining authored level numbers and any gaps filled by the generic reader. */
     static <T extends ModelData> List<T> lods(List<T> loaded) {
         require(MeshLod.level(loaded.getFirst().id) == 0, "Building requires -lod0");

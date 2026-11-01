@@ -42,6 +42,7 @@ import megamek.common.board.HexAppearance;
 import megamek.common.board.HexIssue;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
+import megamek.common.board.TilesetScenery;
 import megamek.common.enums.BuildingType;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
@@ -94,6 +95,11 @@ public final class BoardEditorSession {
          * (value "angled" or "square") in one undo step.
          */
         FOOTPRINT,
+        /**
+         * Gives the selected building's whole connected structure ({@link #structure}) one variant of its generated kit
+         * (value: the variant's name in the kit's JSON spec, {@link HexAppearance#kitVariant}) in one undo step.
+         */
+        KIT_VARIANT,
         /**
          * Changes the board, not a hex (target: "arena" or "roads" with value true/false, "tag" or "untag" with a manual
          * tag, "autotags"); see {@link #boardSetting(String, String)}. Not an undo step: the control is its own undo.
@@ -191,7 +197,8 @@ public final class BoardEditorSession {
      * "exit roads to pavement" option; {@code boardComponents} are the blueprint components that the whole-board Remove
      * offers, those some hex holds ({@link #boardComponents()}). {@code drawsRoutes}: a Paint drag with the active brush
      * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
-     * list reports, which {@link Action#REMOVE_COPIES} removes.
+     * list reports, which {@link Action#REMOVE_COPIES} removes. {@code kitVariants}: the variants of the selected
+     * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -199,7 +206,7 @@ public final class BoardEditorSession {
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
-          int copies) {
+          int copies, List<String> kitVariants) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -451,7 +458,7 @@ public final class BoardEditorSession {
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
               board().getRoadsAutoExit(), boardComponents(), drawsRoutes(),
-              copies.values().stream().mapToInt(Integer::intValue).sum());
+              copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex));
     }
 
     /**
@@ -816,6 +823,16 @@ public final class BoardEditorSession {
                           Messages.getString("BoardEditor.selectBuildingFirst"));
                     var footprint = HexAppearance.Footprint.valueOf(command.value().toUpperCase(java.util.Locale.ROOT));
                     for (Coords cell : structure(selected, Terrains.BUILDING)) { change(cell, hex -> footprint(hex, footprint)); }
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case KIT_VARIANT -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    require(kitVariants(board().getHex(selected)).contains(command.value()),
+                          "Choose one of the building's variants.");
+                    for (Coords cell : structure(selected, Terrains.BUILDING)) {
+                        change(cell, hex -> kitVariant(hex, command.value()));
+                    }
                     if (!continuousEdit) { finishStroke(); }
                 }
                 case BRIDGE_TYPE -> {
@@ -2864,6 +2881,19 @@ public final class BoardEditorSession {
         hex.setAppearance(styles);
     }
 
+    /** The variants of the generated kit {@code hex}'s building draws ({@link TilesetScenery#kitVariants}); none: empty. */
+    private static List<String> kitVariants(Hex hex) {
+        return hex.containsTerrain(Terrains.BUILDING)
+              ? TilesetScenery.kitVariants(TilesetScenery.structureModels(hex).get(Terrains.BUILDING)) : List.of();
+    }
+
+    /** Stores the kit variant {@code name} in {@code hex}'s appearance ({@link HexAppearance#kitVariant}); null: none. */
+    private static void kitVariant(Hex hex, String name) {
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        if (name == null) { styles.remove("kitVariant"); } else { styles.put("kitVariant", HexAppearance.ofKitVariant(name)); }
+        hex.setAppearance(styles);
+    }
+
     private void setEdges(Hex hex, String value) {
         require(hex.containsTerrain(Terrains.PAVEMENT), Messages.getString("BoardEditor.pavementFirst"));
         var edges = HexAppearance.Edges.valueOf(value.toUpperCase(java.util.Locale.ROOT));
@@ -3229,14 +3259,15 @@ public final class BoardEditorSession {
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
-        joinFootprints();
+        joinBuildingLooks();
     }
 
     /**
-     * A building the stroke changed keeps one footprint: the one most of the hexes the stroke left alone hold (Square on
-     * a tie) goes to all its hexes, so a joined hex, or a joined building, takes it.
+     * A building the stroke changed keeps one footprint and one kit variant: the ones most of the hexes the stroke left
+     * alone hold (Square on a tie; the first such hex's variant, none or an unlisted name counting as the kit's first)
+     * go to all its hexes, so a joined hex, or a joined building, takes them.
      */
-    private void joinFootprints() {
+    private void joinBuildingLooks() {
         Set<Coords> done = new java.util.HashSet<>();
         java.util.function.Predicate<Coords> changed = at -> stroke.containsKey(at)
               && !BoardFile.hexNode(stroke.get(at)).equals(BoardFile.hexNode(board().getHex(at)));
@@ -3249,7 +3280,18 @@ public final class BoardEditorSession {
             if (kept.isEmpty()) { continue; }
             long square = kept.stream().filter(HexAppearance.Footprint.SQUARE::equals).count();
             var joined = 2 * square >= kept.size() ? HexAppearance.Footprint.SQUARE : HexAppearance.Footprint.ANGLED;
-            building.forEach(cell -> change(cell, hex -> footprint(hex, joined)));
+            Map<String, Integer> variants = new LinkedHashMap<>();
+            List<String> listed = kitVariants(board().getHex(at));
+            building.stream().filter(changed.negate()).forEach(cell -> {
+                String stored = HexAppearance.kitVariant(board().getHex(cell).getAppearance());
+                variants.merge(stored != null && listed.contains(stored) ? stored : listed.isEmpty() ? "" : listed.getFirst(), 1,
+                      Integer::sum);
+            });
+            String variant = java.util.Collections.max(variants.entrySet(), Map.Entry.comparingByValue()).getKey();
+            building.forEach(cell -> change(cell, hex -> {
+                footprint(hex, joined);
+                kitVariant(hex, variant.isEmpty() ? null : variant);
+            }));
         }
     }
 

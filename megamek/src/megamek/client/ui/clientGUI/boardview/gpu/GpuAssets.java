@@ -70,7 +70,8 @@ final class GpuAssets implements Disposable {
     /** How many mesh levels each placed model's file holds, read from its JSON once. */
     private final Map<String, Integer> fileLevels = new HashMap<>();
     private final Map<Interior, Model> interiors = new HashMap<>();
-    private final Map<File, GpuBuilding> buildings = new HashMap<>();
+    // By kit: every kit file and generated footprint is read once (ConnectedKit#kit, HabitatKit#kit).
+    private final Map<ConnectedKit.Kit, GpuBuilding> buildings = new java.util.IdentityHashMap<>();
     private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
     /** Each share building share's levels and glass (BoardMultiHexBuilding), retired with the other generated models. */
     private record MultiHex(List<Model> levels, Model glass) { }
@@ -1335,7 +1336,8 @@ final class GpuAssets implements Disposable {
 
     /**
      * Custom kits override the tileset path for buildings, fuel tanks and industrial structures; every key that resolves
-     * to one kit file (TilesetScenery#customBuildingFile) shares its meshes. {@code reach}: {@link ConnectedKit#reach}.
+     * to one kit (TilesetScenery#customBuildingFile, a generated kit's footprint) shares its meshes. {@code reach}:
+     * {@link ConnectedKit#reach}.
      */
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed, boolean withInterior) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
@@ -1345,7 +1347,7 @@ final class GpuAssets implements Disposable {
         if (!file.isFile()) { return null; }
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
-            return buildings.computeIfAbsent(file, key -> new GpuBuilding(GpuBuilding.kit(key), this::createModel))
+            return buildings.computeIfAbsent(GpuBuilding.kit(asset), key -> new GpuBuilding(key, this::createModel))
                   .assemble(levels, reach, seed, withInterior);
         } catch (RuntimeException failure) {
             missing(kit, reason(failure));

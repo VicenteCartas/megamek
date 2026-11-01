@@ -20,7 +20,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
       BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
       TrafficControl trafficControl) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint");
+          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant");
     /**
      * A built bridge with concrete piers under the joints between its hexes, never at a hex centre (owner
      * {@code "bridge"}). Cosmetic, like the other bridge types: the 3D views draw them; rules and the 2D views ignore it.
@@ -98,6 +98,21 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** The appearance that stores {@code footprint}; null for {@link Footprint#ANGLED}, which is stored as none. */
     public static HexAppearance of(Footprint footprint) { return footprint == Footprint.SQUARE ? SQUARE : null; }
+
+    /**
+     * A generated building kit's variant (owner {@code "kitVariant"}): the name of one of the variants its JSON spec lists
+     * ({@link TilesetScenery#kitVariants}); none, or a name the spec no longer lists, draws its first. Cosmetic, like the
+     * {@link Footprint}. A connected building has one.
+     */
+    public static String kitVariant(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("kitVariant");
+        return stored == null ? null : stored.variant();
+    }
+
+    /** The appearance that stores the kit variant {@code name}; null for none. */
+    public static HexAppearance ofKitVariant(String name) {
+        return name == null ? null : new HexAppearance(name, null, null, null);
+    }
 
     public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);
     public static final HexAppearance EDGES_HEX = new HexAppearance("pavement/hex", null, null, null);

@@ -1640,7 +1640,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
-        if (definition.id().equals("building") && snapshot.property("building") != null) { buildingFootprint(); }
+        if (definition.id().equals("building") && snapshot.property("building") != null) {
+            buildingFootprint();
+            buildingVariant();
+        }
         if (definition.id().equals("road")) { trafficControl("road"); }
         if (definition.id().equals("scorch")) {
             detail.add(scorchSeverity(snapshot.appearance(), chosen -> send(Action.VARIANT, "scorch", chosen))).growX().row();
@@ -1759,6 +1762,18 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             row.add(button);
         }
         detail.add(row).growX().row();
+    }
+
+    /**
+     * The building's kit variant ({@link megamek.common.board.HexAppearance#kitVariant}) where its generated kit has more
+     * than one: a choice of the names its JSON spec gives them; a choice sets the whole connected building.
+     */
+    private void buildingVariant() {
+        var names = snapshot.kitVariants();
+        if (names.size() < 2) { return; }
+        String stored = megamek.common.board.HexAppearance.kitVariant(snapshot.appearance());
+        choose(UiKit.text("BoardEditor.kitVariant"), names.contains(stored) ? stored : names.getFirst(),
+              names.stream().map(name -> new Option(name, name)).toList(), name -> send(Action.KIT_VARIANT, name));
     }
 
     private static String edgesKey(megamek.common.board.HexAppearance.Edges edges) {

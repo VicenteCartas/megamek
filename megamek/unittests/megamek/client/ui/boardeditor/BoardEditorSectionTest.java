@@ -154,6 +154,38 @@ class BoardEditorSectionTest {
         assertEquals("Select a building first.", session.snapshot().message(), "Only a building has a footprint");
     }
 
+    @Test void kitVariantSetsTheWholeConnectedBuildingInOneUndoStep() {
+        // A lunar habitat over three hexes joined north to south: a generated kit with variants.
+        Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3);
+        for (Coords at : List.of(north, middle, south)) {
+            int exits = at.equals(north) ? 8 : at.equals(middle) ? 9 : 1;
+            Hex hex = new Hex(0, "building:1:" + exits + ";bldg_cf:40;bldg_elev:2", "");
+            hex.setAppearance(java.util.Map.of("building", new HexAppearance("building/lunar-habitat", null, null, null)));
+            session.board().setHex(at, hex);
+        }
+        select(middle);
+        assertEquals(List.of("rounded", "parapet"), session.snapshot().kitVariants(), "The panel lists the spec's names");
+        send(Action.KIT_VARIANT, "", "gone");
+        assertEquals("Choose one of the building's variants.", session.snapshot().message(), "Only a listed name");
+        send(Action.KIT_VARIANT, "", "parapet");
+        assertEquals(List.of("parapet", "parapet", "parapet"), variants(north, middle, south), "The whole connected building");
+        send(Action.UNDO, "", "");
+        assertEquals(java.util.Arrays.asList(null, null, null), variants(north, middle, south), "None stored, the first drawn");
+        assertFalse(session.snapshot().canUndo(), "One undo step");
+        send(Action.KIT_VARIANT, "", "parapet");
+        Coords added = south.translated(3);
+        Hex joining = new Hex(0, "building:1:0;bldg_cf:40;bldg_elev:2", "");
+        joining.setAppearance(java.util.Map.of("building", new HexAppearance("building/lunar-habitat", null, null, null)));
+        session.board().setHex(added, joining);
+        select(added);
+        send(Action.EDGE, "building", "0");
+        assertEquals("parapet", HexAppearance.kitVariant(hex(added).getAppearance()), "A new hex of the building joins it");
+    }
+
+    private List<String> variants(Coords... cells) {
+        return java.util.Arrays.stream(cells).map(at -> HexAppearance.kitVariant(hex(at).getAppearance())).toList();
+    }
+
     private List<HexAppearance.Footprint> footprints(Coords... cells) {
         return java.util.Arrays.stream(cells).map(at -> HexAppearance.footprint(hex(at).getAppearance())).toList();
     }

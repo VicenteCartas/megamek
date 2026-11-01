@@ -172,7 +172,7 @@ final class BoardObstacles {
             ConnectedKit.Kit kit = null;
             if (custom) {
                 try {
-                    kit = GpuBuilding.kit(customFile);
+                    kit = GpuBuilding.kit(feature.asset());
                 } catch (RuntimeException failure) {
                     // The asset's own model then draws (GpuAssets#building), and keeps its clearance.
                     unreadable(customFile, failure);

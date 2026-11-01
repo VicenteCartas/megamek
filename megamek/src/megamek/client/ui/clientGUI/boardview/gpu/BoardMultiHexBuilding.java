@@ -15,12 +15,6 @@ import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.TreeSet;
 
-import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.VertexAttribute;
-import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
-import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
-import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
-import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
@@ -31,6 +25,8 @@ import megamek.common.board.BoardGenerator;
 import megamek.common.board.Coords;
 import megamek.common.board.HexTile;
 import megamek.logging.MMLogger;
+
+import static megamek.client.ui.clientGUI.boardview.gpu.GeneratedMesh.clip;
 
 /**
  * Domed multi-hex buildings ({@code models/buildings/README.md}): one design generated over a whole building instead of
@@ -460,13 +456,11 @@ final class BoardMultiHexBuilding {
     private static final String EQUIPMENT = "buildings/multihex/lunar-equipment.glb";
     private static final List<String> INTERIOR_GEAR = List.of("plant", "tanks");
     private static volatile BoardKit<Equipment> equipment = new BoardKit<>(BoardMultiHexBuilding::loadEquipment);
-    /** Whether each board material's .tres is transparent ({@link GodotMaterial#blended}), read once per asset load. */
-    private static final Map<String, Boolean> BLENDED = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** A reload publishes the kit afresh; in-flight terrain workers keep the copy they hold. */
     static void reload() {
         equipment = new BoardKit<>(BoardMultiHexBuilding::loadEquipment);
-        BLENDED.clear();
+        GeneratedMesh.reload();
     }
 
     static Equipment equipment() { return equipment.get(); }
@@ -935,8 +929,8 @@ final class BoardMultiHexBuilding {
         return mesh.has(true) ? mesh.data(layout + "-glass", true) : null;
     }
 
-    private static Mesh mesh(Layout layout, int lod) {
-        var mesh = new Mesh();
+    private static GeneratedMesh mesh(Layout layout, int lod) {
+        var mesh = new GeneratedMesh();
         float[] reach = new float[6];
         for (int direction = 0; direction < 6; direction++) { reach[direction] = layout.reach().get(direction); }
         if (layout.domes().isEmpty()) {
@@ -979,7 +973,7 @@ final class BoardMultiHexBuilding {
      * colony's buildings: a foundation round each podium, pads under its annexes' modules and under each airlock; and
      * the flexible tubes joining the airlocks to the podium or to their annex's gatehouse.
      */
-    private static void skirt(Mesh mesh, Layout layout, int lod) {
+    private static void skirt(GeneratedMesh mesh, Layout layout, int lod) {
         List<float[]> hex = hex();
         var kit = equipment();
         for (Dome dome : layout.domes()) {
@@ -1057,7 +1051,7 @@ final class BoardMultiHexBuilding {
      * joined to the building by its passage (#passage); in its face a pale blast door of three leaves in a dark frame, at
      * the road's level ({@code floor}), under a yellow lintel between hazard posts.
      */
-    private static void gate(Mesh mesh, List<float[]> hex, float x, float y, float ux, float uy, float floor) {
+    private static void gate(GeneratedMesh mesh, List<float[]> hex, float x, float y, float ux, float uy, float floor) {
         moduleBlock(mesh, hex, moduleOutline(x, y, ux, uy, -GATE_DEPTH, 0, GATE_HALF, 2), 0, floor + GATE_HEIGHT);
         float px = -uy, py = ux, top = floor + GATE_DOOR_HEIGHT;
         clippedBlock(mesh, hex, PIER, x + ux * .4f, y + uy * .4f, px, py, GATE_DOOR + 1.2f, .8f, floor, top + 1.2f);
@@ -1141,7 +1135,7 @@ final class BoardMultiHexBuilding {
      * {@link #bellows} takes its ends, and the height it reaches at each, over a door it covers): straight on, a rigid
      * panelled corridor under a sloping roof; turned, a corrugated tunnel that bends.
      */
-    private static void passage(Mesh mesh, List<float[]> hex, float[] from, float[] to, int lod) {
+    private static void passage(GeneratedMesh mesh, List<float[]> hex, float[] from, float[] to, int lod) {
         float dx = to[0] - from[0], dy = to[1] - from[1], length = (float) Math.hypot(dx, dy);
         if (length < 1.5f) { return; }
         boolean straight = from[2] * to[2] + from[3] * to[3] > Math.cos(Math.toRadians(8))
@@ -1162,7 +1156,7 @@ final class BoardMultiHexBuilding {
      * {@code from} to half a unit inside the gate at {@code to}, on the ground, its roof sloping from the one's height
      * to the other's.
      */
-    private static void corridor(Mesh mesh, List<float[]> hex, float[] from, float[] to) {
+    private static void corridor(GeneratedMesh mesh, List<float[]> hex, float[] from, float[] to) {
         float dx = to[0] - from[0], dy = to[1] - from[1], length = (float) Math.hypot(dx, dy);
         float ux = dx / length, uy = dy / length, px = -uy * GATE_HALF, py = ux * GATE_HALF;
         float sx = from[0] - ux, sy = from[1] - uy, ex = to[0] + ux * .5f, ey = to[1] + uy * .5f;
@@ -1208,7 +1202,7 @@ final class BoardMultiHexBuilding {
      * to the ground; or ({@code tunnel}) a ribbed tunnel {@code radius} either side, its walls on the ground and its
      * roof arched over them (#arch).
      */
-    private static void bellows(Mesh mesh, List<float[]> hex, float[] from, float[] to, int lod, float radius,
+    private static void bellows(GeneratedMesh mesh, List<float[]> hex, float[] from, float[] to, int lod, float radius,
           boolean tunnel) {
         float chord = (float) Math.hypot(to[0] - from[0], to[1] - from[1]), reach = chord * .4f;
         if (chord < 3) { return; }
@@ -1341,7 +1335,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** A triangle of a tube's wall, wound to face along its vertices' normals. */
-    private static void outward(Mesh mesh, String material, List<float[]> hex, float[] a, float[] b, float[] c) {
+    private static void outward(GeneratedMesh mesh, String material, List<float[]> hex, float[] a, float[] b, float[] c) {
         float ex = b[0] - a[0], ey = b[1] - a[1], ez = b[2] - a[2], fx = c[0] - a[0], fy = c[1] - a[1], fz = c[2] - a[2];
         float nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
         if (nx * (a[3] + b[3] + c[3]) + ny * (a[4] + b[4] + c[4]) + nz * (a[5] + b[5] + c[5]) < 0) {
@@ -1394,24 +1388,6 @@ final class BoardMultiHexBuilding {
         return new float[] { nx, ny, nx * ax + ny * ay, ax, ay };
     }
 
-    /** {@code polygon} (convex, counter-clockwise) where n.p <= offset, or >= offset with {@code beyond}. */
-    private static List<float[]> clip(List<float[]> polygon, float nx, float ny, float offset, boolean beyond) {
-        List<float[]> result = new ArrayList<>(polygon.size() + 1);
-        float sign = beyond ? -1 : 1;
-        for (int i = 0; i < polygon.size(); i++) {
-            float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
-            float da = sign * (nx * a[0] + ny * a[1] - offset), db = sign * (nx * b[0] + ny * b[1] - offset);
-            if (da <= 0) { result.add(a); }
-            if (da < 0 != db < 0 && da != 0 && db != 0) {
-                float t = da / (da - db);
-                float[] cut = new float[a.length];
-                for (int k = 0; k < a.length; k++) { cut[k] = a[k] + (b[k] - a[k]) * t; }
-                result.add(cut);
-            }
-        }
-        return result.size() < 3 ? List.of() : result;
-    }
-
     /** The hex with the hexsides of {@code closed} (direction bits) moved in by {@code inset}. */
     private static List<float[]> outline(int closed, float inset) {
         List<float[]> result = hex();
@@ -1428,7 +1404,7 @@ final class BoardMultiHexBuilding {
      * there stand on the outline's set-back edges; where the next band closes more hexsides a ledge covers the difference;
      * the top band carries the deck.
      */
-    private static void shell(Mesh mesh, float top, float[] reach) {
+    private static void shell(GeneratedMesh mesh, float top, float[] reach) {
         TreeSet<Float> breaks = new TreeSet<>(List.of(0f, top));
         for (float connected : reach) { if (connected > EPSILON && connected < top - EPSILON) { breaks.add(connected); } }
         List<Float> heights = List.copyOf(breaks);
@@ -1461,7 +1437,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** The facades on the edges of {@code outline} that lie on a closed hexside's line moved in by {@code inset}. */
-    private static void walls(Mesh mesh, String material, List<float[]> outline, int closed, float inset, float bottom,
+    private static void walls(GeneratedMesh mesh, String material, List<float[]> outline, int closed, float inset, float bottom,
           float ceiling) {
         for (int i = 0; i < outline.size(); i++) {
             float[] a = outline.get(i), b = outline.get((i + 1) % outline.size());
@@ -1486,7 +1462,7 @@ final class BoardMultiHexBuilding {
     private static final float CORNER_PIER = 2.6f, PIER_DEPTH = 2.1f, PIER_CHAMFER = .75f, FOOTING_GROW = .9f,
           FOOTING_DEPTH = 3.2f, FOOTING = 2.4f;
     /** A pier facing (nx, ny) at (x, y) on a facade, its back buried in the wall even at a corner; on a footing. */
-    private static void pier(Mesh mesh, float x, float y, float nx, float ny, float half, float bottom, float top,
+    private static void pier(GeneratedMesh mesh, float x, float y, float nx, float ny, float half, float bottom, float top,
           boolean footing) {
         float tx = -ny, ty = nx, back = -(.6f * half + .3f);
         float[][] profile = { { half, back }, { half, PIER_DEPTH - PIER_CHAMFER }, { half - PIER_CHAMFER, PIER_DEPTH },
@@ -1515,7 +1491,7 @@ final class BoardMultiHexBuilding {
      * An upright prism over {@code outline} (convex) from {@code bottom} to {@code top}, its roof and the faces of its
      * first {@code faces} edges, cut to the hex unless that is null; facades' texture, one repeat per {@link #WALL_REPEAT}.
      */
-    private static void prism(Mesh mesh, List<float[]> hex, String material, List<float[]> outline, float bottom,
+    private static void prism(GeneratedMesh mesh, List<float[]> hex, String material, List<float[]> outline, float bottom,
           float top, int faces) {
         float cx = 0, cy = 0;
         for (float[] point : outline) { cx += point[0] / outline.size(); cy += point[1] / outline.size(); }
@@ -1549,7 +1525,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** One facade from a to b (counter-clockwise round the share), along hexside {@code side} and facing out from it. */
-    private static void facade(Mesh mesh, String material, float[] a, float[] b, float[] side, float bottom, float ceiling) {
+    private static void facade(GeneratedMesh mesh, String material, float[] a, float[] b, float[] side, float bottom, float ceiling) {
         // Texture along the hexside from its first corner, so every band of the facade lines up.
         float tx = -side[1], ty = side[0];
         float ua = ((a[0] - side[3]) * tx + (a[1] - side[4]) * ty) / WALL_REPEAT;
@@ -1564,7 +1540,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** A block centred at (x, y), {@code along} and {@code across} half sizes along (rx, ry) and across it. */
-    private static void block(Mesh mesh, String material, float x, float y, float rx, float ry, float along, float across,
+    private static void block(GeneratedMesh mesh, String material, float x, float y, float rx, float ry, float along, float across,
           float bottom, float top) {
         List<float[]> corners = new ArrayList<>(4);
         for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
@@ -1590,7 +1566,7 @@ final class BoardMultiHexBuilding {
      * A horizontal polygon at {@code z}, textured along the board's axes, one repeat a column's width across and half a
      * hex up: every hex centre lies on a whole repeat, so roofs and decks continue across hexes without a per-hex offset.
      */
-    private static void flat(Mesh mesh, String material, List<float[]> polygon, float z, float shade) {
+    private static void flat(GeneratedMesh mesh, String material, List<float[]> polygon, float z, float shade) {
         if (polygon.isEmpty()) { return; }
         List<float[]> vertices = new ArrayList<>(polygon.size());
         for (float[] point : polygon) { vertices.add(deck(point[0], point[1], z, shade)); }
@@ -1598,7 +1574,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** {@link #flat}, cut to the hex: a part of a dome's building over whichever shares it stands. */
-    private static void clippedFlat(Mesh mesh, List<float[]> hex, String material, List<float[]> polygon, float z) {
+    private static void clippedFlat(GeneratedMesh mesh, List<float[]> hex, String material, List<float[]> polygon, float z) {
         float[] first = deck(polygon.getFirst()[0], polygon.getFirst()[1], z, 1);
         for (int i = 1; i < polygon.size() - 1; i++) {
             mesh.clipped(material, hex, first, deck(polygon.get(i)[0], polygon.get(i)[1], z, 1),
@@ -1618,7 +1594,7 @@ final class BoardMultiHexBuilding {
      * polar angle squeezed onto the cap, glass panels between struts, and a ring beam at its foot; only what lies over
      * this hex is kept.
      */
-    private static void dome(Mesh mesh, Dome dome, int lod) {
+    private static void dome(GeneratedMesh mesh, Dome dome, int lod) {
         float radius = dome.radius(), sphere = dome.sphere(), centreZ = dome.apex() - sphere;
         float cap = (float) Math.asin(Math.min(1, radius / sphere));
         var geodesic = Geodesic.hemisphere(dome.frequency());
@@ -1654,7 +1630,7 @@ final class BoardMultiHexBuilding {
      * panels inside and out, roofed in regolith concrete laid round the ring; yellow buttress fins at
      * its six corners between the pylons and the middle of each side, where no entrance wing arrives.
      */
-    private static void podium(Mesh mesh, List<float[]> hex, Dome dome) {
+    private static void podium(GeneratedMesh mesh, List<float[]> hex, Dome dome) {
         int sides = 12, steps = 4, segments = sides * steps;
         float inner = dome.radius() + 1.4f, corner = dome.podium(), bottom = dome.foot(), top = dome.foot() + dome.height();
         float flat = corner * (float) Math.cos(Math.PI / sides);
@@ -1724,9 +1700,9 @@ final class BoardMultiHexBuilding {
     }
 
     /** {@link #block}, cut to the hex: a podium's parts belong to whichever shares they stand over. */
-    private static void clippedBlock(Mesh mesh, List<float[]> hex, String material, float x, float y, float rx, float ry,
+    private static void clippedBlock(GeneratedMesh mesh, List<float[]> hex, String material, float x, float y, float rx, float ry,
           float along, float across, float bottom, float top) {
-        var part = new Mesh();
+        var part = new GeneratedMesh();
         block(part, material, x, y, rx, ry, along, across, bottom, top);
         FloatArray triangles = part.parts.get(material);
         int stride = RigidGlb.STRIDE;
@@ -1741,7 +1717,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** A buttress fin standing out from the podium's corner at {@code angle}: a yellow wedge, tall at the wall. */
-    private static void fin(Mesh mesh, List<float[]> hex, Dome dome, float angle, float corner, float bottom, float top) {
+    private static void fin(GeneratedMesh mesh, List<float[]> hex, Dome dome, float angle, float corner, float bottom, float top) {
         float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle), cx = -uy, cy = ux, half = .8f;
         float wall = corner - 1, foot = corner + FIN, height = (top - bottom) * .7f;
         float[][] at = new float[2][];
@@ -1770,7 +1746,7 @@ final class BoardMultiHexBuilding {
      * wider where it meets the ring; on the gatehouse one machinery cluster and its conduit, now and then a lit roof
      * light, a blast door under a yellow lintel in its outer face and yellow braces at its outer corners.
      */
-    private static void module(Mesh mesh, List<float[]> hex, Dome dome, int at) {
+    private static void module(GeneratedMesh mesh, List<float[]> hex, Dome dome, int at) {
         var module = dome.modules();
         float ux = module.get(at), uy = module.get(at + 1), outer = module.get(at + 2), rise = module.get(at + 3);
         float bottom = dome.foot(), top = bottom + rise, cx = dome.x(), cy = dome.y(), px = -uy, py = ux;
@@ -1827,7 +1803,7 @@ final class BoardMultiHexBuilding {
      * A module's block over {@code walls} (#moduleOutline), cut to the hex: panelled faces, its cut corners in dark
      * steel, under a bevelled steel cap, its roof at {@code top}.
      */
-    private static void moduleBlock(Mesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top) {
+    private static void moduleBlock(GeneratedMesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top) {
         List<float[]> roof = parapets(walls, BEVEL);
         float along = 0, slope = (float) Math.hypot(BEVEL, BEVEL_RISE);
         for (int edge = 0; edge < walls.size(); edge++) {
@@ -1864,7 +1840,7 @@ final class BoardMultiHexBuilding {
      * A wall from a to b between two heights, facing (nx, ny), cut to the hex unless that is null; its texture from
      * {@code u0} to {@code u1} along it, one repeat per {@link #WALL_REPEAT} up it.
      */
-    private static void face(Mesh mesh, List<float[]> hex, String material, float[] a, float[] b, float nx, float ny,
+    private static void face(GeneratedMesh mesh, List<float[]> hex, String material, float[] a, float[] b, float nx, float ny,
           float bottom, float top, float u0, float u1) {
         float[] a0 = vertex(a[0], a[1], bottom, nx, ny, 0, contact(0), u0, -bottom / WALL_REPEAT);
         float[] b0 = vertex(b[0], b[1], bottom, nx, ny, 0, contact(0), u1, -bottom / WALL_REPEAT);
@@ -1882,7 +1858,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** A strut standing proud of the glass: its outer face and, near, its two sides. */
-    private static void strut(Mesh mesh, List<float[]> hex, Vector3 a, Vector3 b, Vector3 centre, int lod) {
+    private static void strut(GeneratedMesh mesh, List<float[]> hex, Vector3 a, Vector3 b, Vector3 centre, int lod) {
         Vector3 along = new Vector3(b).sub(a);
         float length = along.len();
         along.scl(1 / length);
@@ -1897,7 +1873,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** A strut face from a to b between two offsets, wound to face {@code normal}. */
-    private static void quad(Mesh mesh, List<float[]> hex, Vector3 a, Vector3 b, Vector3 first, Vector3 second,
+    private static void quad(GeneratedMesh mesh, List<float[]> hex, Vector3 a, Vector3 b, Vector3 first, Vector3 second,
           Vector3 normal, float length) {
         Vector3 a0 = new Vector3(a).add(first), b0 = new Vector3(b).add(first);
         Vector3 b1 = new Vector3(b).add(second), a1 = new Vector3(a).add(second);
@@ -1917,7 +1893,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** The ring beam the dome's struts stand on, a low box round its foot. */
-    private static void ring(Mesh mesh, List<float[]> hex, Dome dome, int lod) {
+    private static void ring(GeneratedMesh mesh, List<float[]> hex, Dome dome, int lod) {
         int segments = Math.max(24, dome.frequency() * 10);
         float inner = dome.radius() - 1.4f, outer = dome.radius() + 1.4f, bottom = dome.ring(), top = dome.ring() + 2.4f;
         for (int segment = 0; segment < segments; segment++) {
@@ -1965,7 +1941,7 @@ final class BoardMultiHexBuilding {
     private static float floor(Dome dome) { return dome.foot() + .4f; }
 
     /** A biodome's planted floor inside its ring. */
-    private static void garden(Mesh mesh, Dome dome) {
+    private static void garden(GeneratedMesh mesh, Dome dome) {
         int segments = Math.max(24, dome.frequency() * 10);
         float radius = dome.radius() - 1.4f, z = floor(dome);
         float[] middle = vertex(dome.x(), dome.y(), z, 0, 0, 1, 1, 0, 0);
@@ -2052,97 +2028,6 @@ final class BoardMultiHexBuilding {
             if (pa.z + pb.z + pc.z < -1e-4f) { return; }
             Vector3 normal = new Vector3(pb).sub(pa).crs(new Vector3(pc).sub(pa));
             faces.add(normal.dot(new Vector3(pa).add(pb).add(pc)) < 0 ? new int[] { a, c, b } : new int[] { a, b, c });
-        }
-    }
-
-    // ---- Assembly ------------------------------------------------------------------------------------------------------
-
-    /** Triangles by board material, in RigidGlb's vertex layout, unindexed. */
-    private static final class Mesh {
-        private final Map<String, FloatArray> parts = new LinkedHashMap<>();
-
-        void triangle(String material, float[] a, float[] b, float[] c) {
-            var part = parts.computeIfAbsent(material, ignored -> new FloatArray());
-            part.addAll(a);
-            part.addAll(b);
-            part.addAll(c);
-        }
-
-        void quad(String material, float[] a, float[] b, float[] c, float[] d) {
-            triangle(material, a, b, c);
-            triangle(material, a, c, d);
-        }
-
-        /** The part of a triangle over the hex (its outline about the centre), attributes interpolated. */
-        void clipped(String material, List<float[]> hex, float[] a, float[] b, float[] c) {
-            List<float[]> polygon = List.of(a, b, c);
-            for (int corner = 0; corner < 6 && !polygon.isEmpty(); corner++) {
-                float[] p = hex.get(corner), q = hex.get((corner + 1) % 6);
-                float length = (float) Math.hypot(q[0] - p[0], q[1] - p[1]);
-                float nx = (q[1] - p[1]) / length, ny = -(q[0] - p[0]) / length;
-                polygon = clip(polygon, nx, ny, nx * p[0] + ny * p[1], false);
-            }
-            for (int i = 1; i < polygon.size() - 1; i++) {
-                triangle(material, normalised(polygon.get(0)), normalised(polygon.get(i)), normalised(polygon.get(i + 1)));
-            }
-        }
-
-        private static float[] normalised(float[] vertex) {
-            float length = (float) Math.sqrt(vertex[3] * vertex[3] + vertex[4] * vertex[4] + vertex[5] * vertex[5]);
-            if (length > 0 && Math.abs(length - 1) > 1e-4f) {
-                vertex = vertex.clone();
-                vertex[3] /= length; vertex[4] /= length; vertex[5] /= length;
-            }
-            return vertex;
-        }
-
-        /** Whether any part is (or, with {@code blended} false, is not) a transparent board material. */
-        boolean has(boolean blended) {
-            return parts.keySet().stream().anyMatch(material -> blended(material) == blended);
-        }
-
-        private static boolean blended(String material) {
-            return BLENDED.computeIfAbsent(material, name -> GpuMaterialMaps.board(name).blended());
-        }
-
-        /** The parts whose board material is transparent, or those that are not. */
-        RigidGlb.Data data(String id, boolean blended) {
-            var data = new RigidGlb.Data();
-            data.id = id;
-            var vertices = new FloatArray();
-            var mesh = new ModelMesh();
-            mesh.id = "multihex";
-            mesh.attributes = new VertexAttribute[] { VertexAttribute.Position(), VertexAttribute.Normal(),
-                  VertexAttribute.ColorUnpacked(), VertexAttribute.TexCoords(0) };
-            var node = new ModelNode();
-            node.id = "multihex";
-            node.meshId = mesh.id;
-            node.children = new ModelNode[0];
-            List<ModelMeshPart> meshParts = new ArrayList<>();
-            List<ModelNodePart> nodeParts = new ArrayList<>();
-            parts.forEach((material, part) -> {
-                if (blended(material) != blended) { return; }
-                int first = vertices.size / RigidGlb.STRIDE, count = part.size / RigidGlb.STRIDE;
-                if (first + count > 65_536) { throw new IllegalStateException("Multi-hex building share too large: " + id); }
-                vertices.addAll(part);
-                var meshPart = new ModelMeshPart();
-                meshPart.id = material;
-                meshPart.primitiveType = GL20.GL_TRIANGLES;
-                meshPart.indices = new short[count];
-                for (int i = 0; i < count; i++) { meshPart.indices[i] = (short) (first + i); }
-                meshParts.add(meshPart);
-                RigidGlb.boardMaterial(data, material, material);
-                var nodePart = new ModelNodePart();
-                nodePart.meshPartId = material;
-                nodePart.materialId = material;
-                nodeParts.add(nodePart);
-            });
-            mesh.vertices = vertices.toArray();
-            mesh.parts = meshParts.toArray(ModelMeshPart[]::new);
-            node.parts = nodeParts.toArray(ModelNodePart[]::new);
-            data.meshes.add(mesh);
-            data.nodes.add(node);
-            return data;
         }
     }
 }

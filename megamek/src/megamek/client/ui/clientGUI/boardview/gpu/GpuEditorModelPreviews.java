@@ -167,7 +167,7 @@ final class GpuEditorModelPreviews implements Disposable {
                 if (asset.startsWith("buildings/")) {
                     File custom = megamek.common.board.TilesetScenery.customBuildingFile(asset);
                     // A design stands alone, two levels high: one of each module, its closed sides' pieces.
-                    if (custom.isFile()) { return ConnectedKit.model(GpuBuilding.kit(custom), 0, 2, new int[6], 0, 0, asset); }
+                    if (custom.isFile()) { return ConnectedKit.model(GpuBuilding.kit(asset), 0, 2, new int[6], 0, 0, asset); }
                 }
                 var data = RigidGlb.loadLods(RigidGlb.source(root, asset), root.toPath()).getFirst();
                 RigidGlb.recolour(data, colours);

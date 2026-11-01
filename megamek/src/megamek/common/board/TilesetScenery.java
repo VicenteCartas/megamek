@@ -149,19 +149,67 @@ public final class TilesetScenery {
      * pieces follow the hex's exits.
      */
     public static File customBuildingFile(String asset) {
-        String relative = asset.substring("buildings/".length());
+        String relative = asset.substring("buildings/".length()).replaceFirst("@.*$", "");
         if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
         File exact = new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
         File design = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
+        // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one)
+        // and all its variants (@ and a variant's name, kitVariant).
+        File generated = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("-square$", "") + ".json");
+        if (!exact.isFile() && !design.isFile() && generated.isFile()) { return generated; }
         return exact.isFile() || !design.isFile() ? exact : design;
+    }
+
+    /** Whether the asset's kit is generated from a JSON spec, which holds both footprints ({@link #customBuildingFile}). */
+    public static boolean generatedKit(String asset) {
+        return asset.startsWith("buildings/") && customBuildingFile(asset).getName().endsWith(".json");
+    }
+
+    /**
+     * The building asset for a generated kit's variant {@code name} ({@link HexAppearance#kitVariant}): the asset and
+     * {@code @name} for one of its listed variants but the first; the asset itself for the first, none (null), a name
+     * the spec does not list, or any other asset, so that all of those draw one kit.
+     */
+    public static String kitVariant(String asset, String name) {
+        return name != null && kitVariants(asset).indexOf(name) > 0 ? asset + "@" + name : asset;
+    }
+
+    /** A generated kit's spec, read for its variants' names while the file is unchanged ({@link #kitVariants}). */
+    private record Variants(long modified, long length, List<String> names) { }
+
+    private static final Map<File, Variants> VARIANTS = new ConcurrentHashMap<>();
+
+    /**
+     * The names of the variants a generated kit's JSON spec lists, in its order (the first is the default); empty for
+     * any other asset (null: none) or a spec that cannot be read.
+     */
+    public static List<String> kitVariants(String asset) {
+        if (asset == null || !asset.startsWith("buildings/") || !generatedKit(asset)) { return List.of(); }
+        File spec = customBuildingFile(asset).getAbsoluteFile();
+        long modified = spec.lastModified(), length = spec.length();
+        Variants known = VARIANTS.get(spec);
+        if (known == null || known.modified() != modified || known.length() != length) {
+            List<String> names = new ArrayList<>();
+            try {
+                for (var variant : new com.fasterxml.jackson.databind.ObjectMapper().readTree(spec)) {
+                    if (variant.hasNonNull("name")) { names.add(variant.get("name").asText()); }
+                }
+            } catch (IOException failure) {
+                LOGGER.warn("Cannot read the variants of {}: {}", spec, failure.getMessage());
+            }
+            known = new Variants(modified, length, List.copyOf(names));
+            VARIANTS.put(spec, known);
+        }
+        return known.names();
     }
 
     /**
      * The building asset for a {@link HexAppearance.Footprint}: a Square hex's connected kit is the {@code <kit>-square.glb}
-     * beside its Angled {@code <kit>.glb}, where the kit has one.
+     * beside its Angled {@code <kit>.glb}, where the kit has one, or the Square footprint of a generated kit.
      */
     public static String footprint(String asset, HexAppearance.Footprint footprint) {
         if (footprint != HexAppearance.Footprint.SQUARE || !asset.startsWith("buildings/")) { return asset; }
+        if (generatedKit(asset)) { return asset.endsWith("-square") ? asset : asset + "-square"; }
         File kit = customBuildingFile(asset);
         File square = new File(kit.getParentFile(), kit.getName().replaceFirst("\\.glb$", "-square.glb"));
         if (!kit.isFile() || !square.isFile()) { return asset; }
@@ -244,8 +292,8 @@ public final class TilesetScenery {
                 }
             }
         }
-        models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> footprint(asset,
-              HexAppearance.footprint(hex.getAppearance())));
+        models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> kitVariant(footprint(asset,
+              HexAppearance.footprint(hex.getAppearance())), HexAppearance.kitVariant(hex.getAppearance())));
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
         if (hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()) {
             models.putIfAbsent(Terrains.BUILDING, "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63));

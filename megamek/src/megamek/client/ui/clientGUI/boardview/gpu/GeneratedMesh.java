@@ -1,0 +1,293 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.client.ui.clientGUI.boardview.gpu;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
+import com.badlogic.gdx.math.Matrix3;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Quaternion;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.FloatArray;
+
+/**
+ * Generated geometry: triangles by board material, in RigidGlb's vertex layout (position, normal, colour, UV),
+ * unindexed. Written as one model node ({@link #data}, the multi-hex buildings' shares) or as a connected kit's named
+ * pieces ({@link #kit}, the generated building kits).
+ */
+final class GeneratedMesh {
+    /** Whether each board material's .tres is transparent ({@link GodotMaterial#blended}), read once per asset load. */
+    private static final Map<String, Boolean> BLENDED = new ConcurrentHashMap<>();
+    /** A mesh's vertex count limit: kit parts index their vertices with shorts. */
+    private static final int MESH_VERTICES = 65_536;
+    final Map<String, FloatArray> parts = new LinkedHashMap<>();
+
+    /** A half plane: the side where {@code at(x, y) >= 0} is kept. */
+    interface Keep {
+        double at(double x, double y);
+    }
+
+    /** An asset reload rereads the board materials' .tres. */
+    static void reload() { BLENDED.clear(); }
+
+    void triangle(String material, float[] a, float[] b, float[] c) {
+        var part = parts.computeIfAbsent(material, ignored -> new FloatArray());
+        part.addAll(a);
+        part.addAll(b);
+        part.addAll(c);
+    }
+
+    void quad(String material, float[] a, float[] b, float[] c, float[] d) {
+        triangle(material, a, b, c);
+        triangle(material, a, c, d);
+    }
+
+    /** A convex polygon, fanned from its first vertex. */
+    void polygon(String material, List<float[]> points) {
+        for (int i = 1; i < points.size() - 1; i++) { triangle(material, points.get(0), points.get(i), points.get(i + 1)); }
+    }
+
+    void add(GeneratedMesh other) {
+        other.parts.forEach((material, part) -> parts.computeIfAbsent(material, ignored -> new FloatArray()).addAll(part));
+    }
+
+    /**
+     * Node {@code id} of a pieces GLB's level, placed by {@code frame}, stretched up so its top stands {@code height}
+     * over its origin (0: as modelled), its parts by their board materials. The node's position is only its place in
+     * the file's layout.
+     */
+    void piece(ModelData source, String id, Matrix4 frame, float height) {
+        var node = ConnectedKit.node(source, id);
+        if (node.parts == null || node.parts.length == 0) { throw new IllegalArgumentException("Empty piece " + id); }
+        var mesh = source.meshes.first();
+        Map<String, ModelMeshPart> meshParts = new HashMap<>();
+        for (var part : mesh.parts) { meshParts.put(part.id, part); }
+        var placement = new Matrix4(new Vector3(), node.rotation, node.scale);
+        var point = new Vector3();
+        if (height > 0) {
+            float top = -Float.MAX_VALUE;
+            for (var nodePart : node.parts) {
+                for (short index : meshParts.get(nodePart.meshPartId).indices) {
+                    int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                    top = Math.max(top, point.set(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).mul(placement).z);
+                }
+            }
+            if (top <= 0) { throw new IllegalArgumentException("Piece " + id + " has no height to stretch"); }
+            placement = new Matrix4().scale(1, 1, height / top).mul(placement);
+        }
+        placement = new Matrix4(frame).mul(placement);
+        Matrix3 normals = new Matrix3().set(placement).inv().transpose();
+        for (var nodePart : node.parts) {
+            var target = parts.computeIfAbsent(nodePart.materialId, ignored -> new FloatArray());
+            for (short index : meshParts.get(nodePart.meshPartId).indices) {
+                int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                float[] vertex = Arrays.copyOfRange(mesh.vertices, at, at + RigidGlb.STRIDE);
+                point.set(vertex[0], vertex[1], vertex[2]).mul(placement);
+                vertex[0] = point.x; vertex[1] = point.y; vertex[2] = point.z;
+                point.set(vertex[3], vertex[4], vertex[5]).mul(normals).nor();
+                vertex[3] = point.x; vertex[4] = point.y; vertex[5] = point.z;
+                target.addAll(vertex);
+            }
+        }
+    }
+
+    /** The part of a triangle over the hex (its outline about the centre), attributes interpolated. */
+    void clipped(String material, List<float[]> hex, float[] a, float[] b, float[] c) {
+        List<float[]> polygon = List.of(a, b, c);
+        for (int corner = 0; corner < 6 && !polygon.isEmpty(); corner++) {
+            float[] p = hex.get(corner), q = hex.get((corner + 1) % 6);
+            float length = (float) Math.hypot(q[0] - p[0], q[1] - p[1]);
+            float nx = (q[1] - p[1]) / length, ny = -(q[0] - p[0]) / length;
+            polygon = clip(polygon, nx, ny, nx * p[0] + ny * p[1], false);
+        }
+        for (int i = 1; i < polygon.size() - 1; i++) {
+            triangle(material, normalised(polygon.get(0)), normalised(polygon.get(i)), normalised(polygon.get(i + 1)));
+        }
+    }
+
+    /** The geometry where every half plane in {@code keeps} holds, each triangle clipped, attributes interpolated. */
+    GeneratedMesh clipped(List<Keep> keeps) {
+        var result = new GeneratedMesh();
+        parts.forEach((material, part) -> {
+            for (int start = 0; start < part.size; start += 3 * RigidGlb.STRIDE) {
+                List<float[]> polygon = new ArrayList<>(3);
+                for (int k = 0; k < 3; k++) {
+                    float[] vertex = new float[RigidGlb.STRIDE];
+                    System.arraycopy(part.items, start + k * RigidGlb.STRIDE, vertex, 0, RigidGlb.STRIDE);
+                    polygon.add(vertex);
+                }
+                for (Keep keep : keeps) {
+                    polygon = clip(polygon, keep);
+                    if (polygon.isEmpty()) { break; }
+                }
+                result.polygon(material, polygon);
+            }
+        });
+        return result;
+    }
+
+    /** {@code polygon} (convex, counter-clockwise) where n.p <= offset, or >= offset with {@code beyond}. */
+    static List<float[]> clip(List<float[]> polygon, float nx, float ny, float offset, boolean beyond) {
+        List<float[]> result = new ArrayList<>(polygon.size() + 1);
+        float sign = beyond ? -1 : 1;
+        for (int i = 0; i < polygon.size(); i++) {
+            float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
+            float da = sign * (nx * a[0] + ny * a[1] - offset), db = sign * (nx * b[0] + ny * b[1] - offset);
+            if (da <= 0) { result.add(a); }
+            if (da < 0 != db < 0 && da != 0 && db != 0) { result.add(between(a, b, da / (da - db))); }
+        }
+        return result.size() < 3 ? List.of() : result;
+    }
+
+    /** Sutherland-Hodgman: {@code polygon}'s part where {@code keep} holds, attributes interpolated; empty below three. */
+    static List<float[]> clip(List<float[]> polygon, Keep keep) {
+        List<float[]> result = new ArrayList<>(polygon.size() + 1);
+        for (int i = 0; i < polygon.size(); i++) {
+            float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
+            double da = keep.at(a[0], a[1]), db = keep.at(b[0], b[1]);
+            if (da >= 0) { result.add(a); }
+            if (da < 0 != db < 0 && da != 0 && db != 0) { result.add(between(a, b, (float) (da / (da - db)))); }
+        }
+        return result.size() < 3 ? List.of() : result;
+    }
+
+    private static float[] between(float[] a, float[] b, float t) {
+        float[] cut = new float[a.length];
+        for (int k = 0; k < a.length; k++) { cut[k] = a[k] + (b[k] - a[k]) * t; }
+        return cut;
+    }
+
+    private static float[] normalised(float[] vertex) {
+        float length = (float) Math.sqrt(vertex[3] * vertex[3] + vertex[4] * vertex[4] + vertex[5] * vertex[5]);
+        if (length > 0 && Math.abs(length - 1) > 1e-4f) {
+            vertex = vertex.clone();
+            vertex[3] /= length; vertex[4] /= length; vertex[5] /= length;
+        }
+        return vertex;
+    }
+
+    /** Whether any part is (or, with {@code blended} false, is not) a transparent board material. */
+    boolean has(boolean blended) {
+        return parts.keySet().stream().anyMatch(material -> blended(material) == blended);
+    }
+
+    private static boolean blended(String material) {
+        return BLENDED.computeIfAbsent(material, name -> GpuMaterialMaps.board(name).blended());
+    }
+
+    /** The parts whose board material is transparent, or those that are not, as one node. */
+    RigidGlb.Data data(String id, boolean blended) {
+        var data = new RigidGlb.Data();
+        data.id = id;
+        var vertices = new FloatArray();
+        var mesh = new ModelMesh();
+        mesh.id = "multihex";
+        mesh.attributes = attributes();
+        var node = new ModelNode();
+        node.id = "multihex";
+        node.meshId = mesh.id;
+        node.children = new ModelNode[0];
+        List<ModelMeshPart> meshParts = new ArrayList<>();
+        List<ModelNodePart> nodeParts = new ArrayList<>();
+        parts.forEach((material, part) -> {
+            if (blended(material) != blended) { return; }
+            int first = vertices.size / RigidGlb.STRIDE, count = part.size / RigidGlb.STRIDE;
+            if (first + count > MESH_VERTICES) { throw new IllegalStateException("Multi-hex building share too large: " + id); }
+            vertices.addAll(part);
+            var meshPart = new ModelMeshPart();
+            meshPart.id = material;
+            meshPart.primitiveType = GL20.GL_TRIANGLES;
+            meshPart.indices = new short[count];
+            for (int i = 0; i < count; i++) { meshPart.indices[i] = (short) (first + i); }
+            meshParts.add(meshPart);
+            RigidGlb.boardMaterial(data, material, material);
+            var nodePart = new ModelNodePart();
+            nodePart.meshPartId = material;
+            nodePart.materialId = material;
+            nodeParts.add(nodePart);
+        });
+        mesh.vertices = vertices.toArray();
+        mesh.parts = meshParts.toArray(ModelMeshPart[]::new);
+        node.parts = nodeParts.toArray(ModelNodePart[]::new);
+        data.meshes.add(mesh);
+        data.nodes.add(node);
+        return data;
+    }
+
+    /**
+     * Named pieces as a connected kit's nodes ({@link ConnectedKit}), their materials the board materials of the same
+     * names, in one mesh of welded vertices (a kit reads one).
+     */
+    static RigidGlb.Data kit(String id, Map<String, GeneratedMesh> pieces) {
+        var data = new RigidGlb.Data();
+        data.id = id;
+        Set<String> materials = new HashSet<>();
+        var vertices = new FloatArray();
+        List<ModelMeshPart> meshParts = new ArrayList<>();
+        Map<String, Integer> welded = new HashMap<>();
+        for (var piece : pieces.entrySet()) {
+            var node = new ModelNode();
+            node.id = piece.getKey();
+            node.children = new ModelNode[0];
+            // At the kit's origin, as a GLB's nodes read (RigidGlb#node).
+            node.translation = new Vector3();
+            node.rotation = new Quaternion();
+            node.scale = new Vector3(1, 1, 1);
+            List<ModelNodePart> nodeParts = new ArrayList<>();
+            piece.getValue().parts.forEach((material, part) -> {
+                var meshPart = new ModelMeshPart();
+                meshPart.id = piece.getKey() + "/" + material;
+                meshPart.primitiveType = GL20.GL_TRIANGLES;
+                meshPart.indices = new short[part.size / RigidGlb.STRIDE];
+                for (int i = 0; i < meshPart.indices.length; i++) {
+                    int offset = i * RigidGlb.STRIDE;
+                    meshPart.indices[i] = (short) (int) welded.computeIfAbsent(key(part.items, offset), ignored -> {
+                        vertices.addAll(part.items, offset, RigidGlb.STRIDE);
+                        return vertices.size / RigidGlb.STRIDE - 1;
+                    });
+                }
+                meshParts.add(meshPart);
+                if (materials.add(material)) { RigidGlb.boardMaterial(data, material, material); }
+                var nodePart = new ModelNodePart();
+                nodePart.meshPartId = meshPart.id;
+                nodePart.materialId = material;
+                nodeParts.add(nodePart);
+            });
+            node.parts = nodeParts.toArray(ModelNodePart[]::new);
+            data.nodes.add(node);
+        }
+        if (vertices.size / RigidGlb.STRIDE > MESH_VERTICES) { throw new IllegalStateException("Generated kit too large: " + id); }
+        var mesh = new ModelMesh();
+        mesh.id = id;
+        mesh.attributes = attributes();
+        mesh.vertices = vertices.toArray();
+        mesh.parts = meshParts.toArray(ModelMeshPart[]::new);
+        data.meshes.add(mesh);
+        return data;
+    }
+
+    private static String key(float[] items, int offset) {
+        var key = new StringBuilder(RigidGlb.STRIDE * 9);
+        for (int k = 0; k < RigidGlb.STRIDE; k++) { key.append(Float.floatToIntBits(items[offset + k])).append(','); }
+        return key.toString();
+    }
+
+    private static VertexAttribute[] attributes() {
+        return new VertexAttribute[] { VertexAttribute.Position(), VertexAttribute.Normal(), VertexAttribute.ColorUnpacked(),
+              VertexAttribute.TexCoords(0) };
+    }
+}

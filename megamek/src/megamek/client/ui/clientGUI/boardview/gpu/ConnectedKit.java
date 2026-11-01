@@ -121,7 +121,10 @@ final class ConnectedKit {
               key -> new BoardKit<>(() -> load(RigidGlb.loadLods(new FileHandle(key), textureRoot)))).get();
     }
 
-    static void reload() { KITS.clear(); }
+    static void reload() {
+        KITS.clear();
+        HabitatKit.reload();
+    }
 
     static Kit load(List<ModelData> lods) {
         List<RigidGlb.Data> data = lods.stream().map(RigidGlb.Data.class::cast).toList();
