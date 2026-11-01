@@ -260,10 +260,10 @@ these values safely).
 | `terrain/ice/ice-sheet` | 1024 | – |
 | `terrain/lava/lava-crust`, `terrain/lava/lava-flow` | 1024 | – |
 | `terrain/surfaces/concrete-mulch` | 512 | 1 |
-| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-floor`, `desert-ground`, `dirt-debris`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `fungus-floor`, `grassland-floor`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-floor`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-floor`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-ground`, `volcano-cap`, `volcano-cliff`, `volcano-floor`, `volcano-ground` | 512 | 12 |
+| `terrain/surfaces/arid-cliff`, `arid-debris`, `concrete-bank`, `concrete-ground`, `desert-cap`, `desert-floor`, `desert-ground`, `dirt-debris`, `dirt-floor`, `dirt-ground`, `fungus-bank`, `fungus-cliff`, `fungus-debris`, `grassland-floor`, `grassland-ground`, `lunar-cliff`, `lunar-debris`, `lunar-floor`, `lunar-ground`, `mars-cap`, `mars-cliff`, `mars-floor`, `mars-ground`, `rock-ground`, `sand-ground`, `sand-verge`, `scatter-stone`, `snow-floor`, `snow-ground`, `temperate-bank`, `temperate-cliff`, `temperate-debris`, `tropical-floor`, `tropical-ground`, `volcano-cap`, `volcano-cliff`, `volcano-floor`, `volcano-ground` | 512 | 12 |
 | `terrain/surfaces/biome-soil` | 512 | 20 |
 | `terrain/surfaces/fungus-ground` | 512 | 22 |
-| `terrain/surfaces/tundra-mat` | 512 | 24 |
+| `terrain/surfaces/fungus-floor`, `rock-floor`, `tundra-mat` | 512 | 24 |
 | `terrain/surfaces/tundra-ground`, `tundra-ground-variant` | 1024 | 48 |
 | `terrain/surfaces/tundra-crust` | 512 | 28 |
 | `terrain/surfaces/biome-mud`, `ground-scorch` | 512 | 64 |

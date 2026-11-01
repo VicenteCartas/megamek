@@ -1788,10 +1788,10 @@ final class GpuTerrain implements Disposable {
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
      * (terrain-materials.glsl floorShare). Snow stays snow but where it melts first: thin snow over frozen ground in
      * broken tongues along the banks' feet.
-     * Null keeps the ground: concrete stays paved.
+     * Null keeps the ground: concrete stays paved, sand stays rippled sand (its level grade marks the hollow).
      */
     private static final Floor[] FLOORS = {
-          new Floor("grassland-floor", false), new Floor("dirt-floor", false), new Floor("sand-floor", false),
+          new Floor("grassland-floor", false), new Floor("dirt-floor", false), null,
           new Floor("rock-floor", false), null, new Floor("snow-floor", true), new Floor("lunar-floor", false),
           new Floor("fungus-floor", false), new Floor("desert-floor", false), new Floor("mars-floor", false),
           new Floor("volcano-floor", false), new Floor("tropical-floor", false),

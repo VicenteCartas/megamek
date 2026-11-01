@@ -39,13 +39,13 @@ float floorShare(vec3 world, vec3 face, float aboveFoot, float familyId, out vec
     float sunken = smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight);
     if (floorMaterial.z < .5) return sunken * smoothstep(.55, .85, face.z);
     // Snow melts first where a hollow's banks meet its floor: broken tongues strongest within a few metres of the
-    // foot, gone by 5-8 m, reaching up the lower slopes, along about a third of the edge, in stretches of some 30 m;
-    // the sheltered middle stays snowed.
+    // foot, gone by 5-8 m, on the floor only (bare ground on a slope reads as a cliff face), along about a third of
+    // the edge in stretches of some 30 m; the banks and the sheltered middle stay snowed.
     float stretch = smoothstep(.52, .64, textureLod(u_rainNoise, world.xy / 1920.0 + .37, 0.0).r);
     float reach = mix(5.0, 8.0, textureLod(u_rainNoise, world.xy / 960.0 + .13, 0.0).b);
     float feather = 3.0 * (textureLod(u_rainNoise, world.xy / 96.0 + .71, 0.0).g - .5);
     float tongue = 1.0 - smoothstep(.3 * reach, reach, max(aboveFoot, 0.0) + feather);
-    return sunken * tongue * stretch * smoothstep(.3, .6, face.z);
+    return sunken * tongue * stretch * smoothstep(.8, .95, face.z);
 }
 
 // The floor takes the ground's role, and the mantle's where the family mantles its banks in its own ground (snow).
