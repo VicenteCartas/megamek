@@ -123,7 +123,7 @@ final class ConnectedKit {
 
     static void reload() {
         KITS.clear();
-        HabitatKit.reload();
+        GeneratedKit.reload();
     }
 
     static Kit load(List<ModelData> lods) {

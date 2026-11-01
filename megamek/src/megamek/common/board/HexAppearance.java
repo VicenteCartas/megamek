@@ -82,8 +82,8 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /**
      * A connected building kit's footprint (owner {@code "footprint"}, models/buildings/README.md): {@link #ANGLED}, the
-     * classic exits art's, its walls along the hex's directions, stored as none; {@link #SQUARE} right-angled blocks,
-     * the kit's {@code <kit>-square.glb} ({@link TilesetScenery#footprint}). Cosmetic, like the pavement {@link Edges}:
+     * classic exits art's, its walls along the hex's directions, stored as none; {@link #SQUARE} right-angled blocks
+     * ({@link TilesetScenery#footprint}). Cosmetic, like the pavement {@link Edges}:
      * the 3D views draw it; rules and the 2D views ignore it. A connected building has one.
      */
     public enum Footprint { ANGLED, SQUARE }

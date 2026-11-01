@@ -13,9 +13,7 @@ import org.junit.jupiter.api.Test;
 class GpuBuildingInteriorTest {
     @Test
     void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
-        var file = new com.badlogic.gdx.files.FileHandle(megamek.common.board.TilesetScenery
-              .customBuildingFile("buildings/saxarba/building_light/building_light_00"));
-        var kit = ConnectedKit.load(GpuBuildingTest.lods(file));
+        var kit = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00");
         // Alone, its storeys' walls close round its centre and its roof covers it; connected, its walls stay open
         // towards its neighbours (GpuBuilding#volume then takes the roof) and its roof still covers the centre.
         for (int[] reach : List.of(new int[6], new int[] { 2, 0, 0, 2, 0, 0 }, new int[] { 2, 0, 2, 0, 2, 0 })) {
@@ -31,7 +29,7 @@ class GpuBuildingInteriorTest {
 
     @Test
     void fortressFootprintRemainsCompact() {
-        var data = GpuBuildingTest.lods(GpuBuildingTest.file()).get(1);
+        var data = GpuBuildingTest.lods(GpuBuildingTest.ASSET).get(1);
         for (var mesh : data.meshes) {
             for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
                 mesh.vertices[i] += 71; mesh.vertices[i + 1] -= 23; mesh.vertices[i + 2] += 43;

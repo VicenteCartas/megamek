@@ -232,7 +232,7 @@ class BoardObstaclesTest {
 
     @Test
     void modularClearancePreservesAuthoredXyOffsetsAndDiscardsVerticalPlacement() {
-        var data = GpuBuildingTest.lods(GpuBuildingTest.file()).getFirst();
+        var data = GpuBuildingTest.lods(GpuBuildingTest.ASSET).getFirst();
         var original = clearance(ConnectedKit.load(List.of(data)));
         // Both baked geometry and node transforms determine XY placement; only Z is normalized.
         for (var mesh : data.meshes) {

@@ -32,7 +32,7 @@ class LunarHabitatKitTest {
      * corner piece, one-level modules.
      */
     private static ConnectedKit.Kit kit(boolean square) {
-        return HabitatKit.kit(new File(Configuration.dataDir(), "models/buildings/lunar_habitat/lunar_habitat.json"), square,
+        return GeneratedKit.kit(new File(Configuration.dataDir(), "models/buildings/lunar_habitat/lunar_habitat.json"), square,
               null);
     }
 

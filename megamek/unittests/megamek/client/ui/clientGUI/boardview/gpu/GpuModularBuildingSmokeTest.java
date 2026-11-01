@@ -61,7 +61,7 @@ class GpuModularBuildingSmokeTest {
     private static void checkKit() {
         var textures = new HashMap<String, Texture>();
         var authoredBounds = new java.util.ArrayList<Map<String, BoundingBox>>();
-        var lods = GpuBuildingTest.lods(GpuBuildingTest.file());
+        var lods = GpuBuildingTest.lods(GpuBuildingTest.ASSET);
         // Preserve both baked and node XY offsets, including the modules' asymmetric details.
         for (var data : lods.stream().distinct().toList()) {
             for (var mesh : data.meshes) {

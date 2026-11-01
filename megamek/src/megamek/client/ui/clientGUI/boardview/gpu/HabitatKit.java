@@ -1,19 +1,13 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix4;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import megamek.common.Configuration;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.A;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.EXTEND;
@@ -25,28 +19,24 @@ import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
 
 /**
- * A habitat building kit generated from its JSON spec ({@code models/buildings/<kit>/<kit>.json}: its named variants,
- * each a {@link Spec}, the first the default) in place of a GLB: the lunar habitat's corner and whole-hex pieces ({@link KitOutline}) in its Angled or Square footprint, every
- * module (base, the storeys the runtime picks from per hex and level, the roofs) at two levels of detail, as connected
- * kit nodes ({@link ConnectedKit}), so drawing, picking, interiors and cutaways read it as any kit. A facade along every
- * wall, dark piers at its corners and joints; on the ground a battered skirt and footings, on top a parapet over plating
- * and the roof's fittings. Piers, footings and fittings are modelled pieces from the kit's pieces GLB.
+ * A generated kit in the habitat style ({@link GeneratedKit}, style "habitat", a variant's {@link Spec}): the lunar
+ * habitat's corner and whole-hex pieces ({@link KitOutline}) in its Angled or Square footprint, every module (base, the
+ * storeys the runtime picks from per hex and level, the roofs) at each level of detail. A facade along every wall, dark
+ * piers at its corners and joints; on the ground a battered skirt and footings, on top a parapet or a rounded edge over
+ * plating and the roof's fittings. Piers, footings and fittings are modelled pieces from the kit's pieces GLB.
  * Square facades and plating keep the board's texture axes; an Angled piece lays its plating along its building, mitred
  * where arms meet ({@code -bend} roofs behind a 60-degree bend).
  */
 final class HabitatKit {
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Map<String, BoardKit<ConnectedKit.Kit>> KITS = new ConcurrentHashMap<>();
     /** Wall texture: two storeys a repeat up the wall; across, a third of a hex column (x facades), a quarter hex (y). */
     private static final double REPEAT_UP = 2 * LEVEL, REPEAT_X = A, REPEAT_Y = H / 2;
     /** Where a storey's foot lies in the wall texture: its upper storey's windows are lit, its lower storey's dimmed. */
     private static final double LIT = -.5, DIM = 0;
-    private static final int LODS = 2;
 
     private HabitatKit() { }
 
     /**
-     * A habitat kit's look, as data: its variant's {@code name}; board materials by role ({@code wall}, {@code roof}, {@code pier}, {@code concrete});
+     * A habitat kit's look, as data: its variant's {@code name} and {@code style} (habitat); board materials by role ({@code wall}, {@code roof}, {@code pier}, {@code concrete});
      * the GLB of its modelled pieces beside the spec ({@code pieces}); convex corners rounded to {@code cornerRadius} in
      * {@code cornerSegments} arcs; the parapet ({@code null}: none); the roof's rounded edge ({@code eave}: the parapet's
      * outer top edge, or without one a rim curving from the wall onto the roof; {@code null}: square); the ground storey's
@@ -55,7 +45,7 @@ final class HabitatKit {
      * above the ground ({@code windows} lit or dim, shifted along by a fraction of a repeat); the roofs' fittings per
      * footprint (hatch and vent pieces, laid out at x, y).
      */
-    record Spec(String name, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
+    record Spec(String name, String style, Map<String, String> materials, String pieces, double cornerRadius, int cornerSegments, Parapet parapet,
                 Eave eave, Skirt skirt, Uprights piers, Uprights tops, Uprights footings, Lone lone, List<Storey> storeys,
                 Fittings fittings) { }
 
@@ -90,41 +80,7 @@ final class HabitatKit {
     /** One module's geometry for a piece, before the piece's cut, and the piers it stands. */
     private record Laid(GeneratedMesh geometry, List<Pier> piers) { }
 
-    /**
-     * The kit of {@code spec} (a JSON file) in its Square footprint or Angled, in the variant named {@code variant} (null,
-     * or a name the spec does not list: its first); it and its pieces GLB read once, until assets reload.
-     */
-    static ConnectedKit.Kit kit(File spec, boolean square, String variant) {
-        String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant;
-        return KITS.computeIfAbsent(key, ignored -> new BoardKit<>(() -> {
-            Spec read;
-            try {
-                List<Spec> variants = List.of(JSON.readValue(spec, Spec[].class));
-                if (variants.size() > 1 && variants.stream().map(Spec::name).filter(java.util.Objects::nonNull).distinct()
-                      .count() < variants.size()) {
-                    throw new IllegalArgumentException("its variants need distinct names");
-                }
-                // A building stores its variant's name in its appearance, as a valid appearance key.
-                variants.stream().map(Spec::name).filter(java.util.Objects::nonNull)
-                      .forEach(megamek.common.board.HexAppearance::ofKitVariant);
-                read = variants.stream().filter(listed -> listed.name() != null && listed.name().equals(variant)).findFirst()
-                      .orElse(variants.getFirst());
-            } catch (IOException | RuntimeException failure) {
-                throw new IllegalArgumentException("Cannot read habitat kit " + spec + ": " + failure.getMessage(), failure);
-            }
-            var modelled = RigidGlb.loadLods(new FileHandle(new File(spec.getParentFile(), read.pieces())),
-                  new File(Configuration.dataDir(), "models").toPath());
-            String name = spec.getName().replaceFirst("\\.json$", "");
-            return ConnectedKit.load(List.copyOf(lods(read, modelled, square, name)));
-        })).get();
-    }
-
-    static void reload() { KITS.clear(); }
-
-    /**
-     * The kit's levels of detail: every piece of every module, named as a kit GLB's nodes; {@code modelled}, the pieces
-     * GLB's levels.
-     */
+    /** The kit's levels of detail ({@link GeneratedKit#lods}); {@code modelled}, the pieces GLB's levels. */
     static List<RigidGlb.Data> lods(Spec spec, List<ModelData> modelled, boolean square, String name) {
         if (spec.cornerRadius() > 0 && spec.cornerSegments() < 1 || spec.eave() != null
               && (spec.eave().segments() == null || spec.eave().segments().length == 0
@@ -136,57 +92,48 @@ final class HabitatKit {
                 throw new IllegalArgumentException("Habitat kit " + name + " names a joint and a corner piece for each upright");
             }
         }
-        String suffix = square ? "-square" : "";
         List<double[]> lone = List.of(new double[] { -A, -spec.lone().halfLength() }, new double[] { A, -spec.lone().halfLength() },
               new double[] { A, spec.lone().halfLength() }, new double[] { -A, spec.lone().halfLength() });
-        List<KitOutline.Piece> pieces = KitOutline.footprint(square, lone, spec.lone().bandEnd()).stream()
+        List<KitOutline.Piece> pieces = KitOutline.footprint(square, lone, spec.lone().bandEnd(), false).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), spec.cornerSegments())).toList();
         Fitting fitting = square ? spec.fittings().square() : spec.fittings().angled();
         List<Layout> roofs = fitting.layouts();
-        List<RigidGlb.Data> result = new ArrayList<>();
-        for (int lod = 0; lod < LODS; lod++) {
-            Map<String, GeneratedMesh> nodes = new LinkedHashMap<>();
-            List<String> roles = new ArrayList<>();
-            roles.add("base0");
-            for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
-            for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
-            for (String role : roles) {
-                boolean roof = role.startsWith("roof");
-                double z0 = role.equals("base0") ? 0 : roof ? 2 * LEVEL : LEVEL;
-                for (var piece : pieces) {
-                    List<String> twins = new ArrayList<>(List.of(""));
-                    // A linkless Angled corner's roof also as it stands behind a 60-degree bend (ConnectedKit.Twin).
-                    if (roof && !square && piece.direction() != null && !piece.tags().contains("link")) { twins.add("-bend"); }
-                    for (String twin : twins) {
-                        Plating plating = square ? new Plating(0, 0, null) : plating(piece, twin.equals("-bend"));
-                        Laid laid;
-                        if (roof) {
-                            laid = roof(spec, modelled, piece, z0, lod, fitting, roofs.get(Integer.parseInt(role.substring(4))),
-                                  square, plating);
-                        } else {
-                            Storey storey = role.equals("base0") ? new Storey("lit", 0)
-                                  : spec.storeys().get(Integer.parseInt(role.substring(5)));
-                            laid = storey(spec, piece, z0, role.equals("base0"), lod, square, plating, storey);
-                        }
-                        GeneratedMesh mesh = piece.direction() != null
-                              ? laid.geometry().clipped(KitOutline.sector(piece.direction())) : laid.geometry();
-                        for (Pier pier : laid.piers()) {
-                            if (roof) {
-                                upright(mesh, modelled, lod, spec.tops(), pier, z0, rim(spec) + .6);
-                            } else {
-                                upright(mesh, modelled, lod, spec.piers(), pier, z0, LEVEL);
-                                if (role.equals("base0")) { upright(mesh, modelled, lod, spec.footings(), pier, z0, 0); }
-                            }
-                        }
-                        String node = name + suffix + "-lod" + lod + "-" + role + piece.tags() + twin;
-                        if (mesh.parts.isEmpty()) { throw new IllegalStateException("Empty piece " + node); }
-                        nodes.put(node, mesh);
+        List<String> roles = new ArrayList<>();
+        roles.add("base0");
+        for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
+        for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
+        return GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
+            boolean roof = role.startsWith("roof");
+            double z0 = role.equals("base0") ? 0 : roof ? 2 * LEVEL : LEVEL;
+            List<String> twins = new ArrayList<>(List.of(""));
+            // A linkless Angled corner's roof also as it stands behind a 60-degree bend (ConnectedKit.Twin).
+            if (roof && !square && piece.direction() != null && !piece.tags().contains("link")) { twins.add("-bend"); }
+            Map<String, GeneratedMesh> result = new LinkedHashMap<>();
+            for (String twin : twins) {
+                Plating plating = square ? new Plating(0, 0, null) : plating(piece, twin.equals("-bend"));
+                Laid laid;
+                if (roof) {
+                    laid = roof(spec, modelled, piece, z0, lod, fitting, roofs.get(Integer.parseInt(role.substring(4))),
+                          square, plating);
+                } else {
+                    Storey storey = role.equals("base0") ? new Storey("lit", 0)
+                          : spec.storeys().get(Integer.parseInt(role.substring(5)));
+                    laid = storey(spec, piece, z0, role.equals("base0"), lod, square, plating, storey);
+                }
+                GeneratedMesh mesh = piece.direction() != null
+                      ? laid.geometry().clipped(KitOutline.sector(piece.direction())) : laid.geometry();
+                for (Pier pier : laid.piers()) {
+                    if (roof) {
+                        upright(mesh, modelled, lod, spec.tops(), pier, z0, rim(spec) + .6);
+                    } else {
+                        upright(mesh, modelled, lod, spec.piers(), pier, z0, LEVEL);
+                        if (role.equals("base0")) { upright(mesh, modelled, lod, spec.footings(), pier, z0, 0); }
                     }
                 }
+                result.put(twin, mesh);
             }
-            result.add(GeneratedMesh.kit(name + suffix + "-lod" + lod, nodes));
-        }
-        return result;
+            return result;
+        });
     }
 
     // ---- Surfaces ------------------------------------------------------------------------------------------------------
@@ -284,14 +231,6 @@ final class HabitatKit {
         }
     }
 
-    /** A modelled piece of the kit's pieces GLB at {@code lod}, {@link GeneratedMesh#piece}. */
-    private static void piece(GeneratedMesh geometry, List<ModelData> modelled, int lod, String name, Matrix4 frame,
-          double height) {
-        // A level the GLB lacks repeats the one before it, under that level's names (MeshLod#load).
-        var level = modelled.get(Math.min(lod, modelled.size() - 1));
-        geometry.piece(level, name + "-lod" + MeshLod.level(level.id), frame, (float) height);
-    }
-
     /** A pier's piece of {@code uprights} ({@code null}: none) at its foot z0, stretched to {@code height} (0: as modelled). */
     private static void upright(GeneratedMesh geometry, List<ModelData> modelled, int lod, Uprights uprights, Pier pier,
           double z0, double height) {
@@ -300,7 +239,7 @@ final class HabitatKit {
         // The piece's x along the wall (left to right seen from outside), its -y out of the wall.
         var frame = new Matrix4(new float[] { -ny, nx, 0, 0, -nx, -ny, 0, 0, 0, 0, 1, 0,
               (float) pier.x(), (float) pier.y(), (float) z0, 1 });
-        piece(geometry, modelled, lod, pier.corner() ? uprights.corner() : uprights.joint(), frame, height);
+        GeneratedKit.piece(geometry, modelled, lod, pier.corner() ? uprights.corner() : uprights.joint(), frame, height);
     }
 
     // ---- Walls and piers -----------------------------------------------------------------------------------------------
@@ -476,8 +415,8 @@ final class HabitatKit {
             geometry.add(mitred(band, wall));
             if (piered(spec, wall, lod)) { piers.add(pierAt(wall, piece.walls())); }
         }
-        for (double[] at : layout.hatches()) { piece(geometry, modelled, lod, fitting.hatch(), on(at, deck), 0); }
-        for (double[] at : layout.vents()) { piece(geometry, modelled, lod, fitting.vent(), on(at, deck), 0); }
+        for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck), 0); }
+        for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck), 0); }
         return new Laid(geometry, piers);
     }
 

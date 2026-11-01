@@ -97,7 +97,7 @@ final class KitOutline {
         return sector(direction).stream().allMatch(keep -> keep.at(point[0], point[1]) >= 0);
     }
 
-    private static double insideHex(double x, double y) {
+    static double insideHex(double x, double y) {
         double best = Double.POSITIVE_INFINITY;
         for (int i = 0; i < 6; i++) {
             double[] a = HEX[i], b = HEX[(i + 1) % 6];
@@ -432,13 +432,17 @@ final class KitOutline {
     }
 
     /**
-     * Every piece a kit of one footprint authors, in all six corners and directions (not turned): the corner pieces in
-     * their four link states, and for Angled its whole-hex pieces, alone ({@code lone}, counter-clockwise from its front)
-     * and with one link (a hexside wide band ending {@code end} short of the far hexside, its front).
+     * Every piece a kit of one footprint authors: the corner pieces in their four link states, and for Angled its
+     * whole-hex pieces, alone ({@code lone}, counter-clockwise from its front) and with one link (a hexside wide band
+     * ending {@code end} short of the far hexside, its front). An Angled kit {@code turned} is symmetric: its north and
+     * north-east corner pieces and a band linked north, which the runtime turns to every corner and link. A kit whose
+     * pieces hold something placed in the hex (roof fittings) is not turned: its pieces stand in all six corners, its
+     * bands in all six directions, as the Square cells' always do.
      */
-    static List<Piece> footprint(boolean square, List<double[]> lone, double end) {
+    static List<Piece> footprint(boolean square, List<double[]> lone, double end, boolean turned) {
+        int directions = !square && turned ? 1 : 6;
         List<Piece> result = new ArrayList<>();
-        for (int direction = 0; direction < 6; direction++) {
+        for (int direction = 0; direction < directions; direction++) {
             int following = (direction + 1) % 6;
             for (int state = 0; state < 4; state++) {
                 boolean first = (state & 1) != 0, second = (state & 2) != 0;
@@ -452,7 +456,7 @@ final class KitOutline {
             for (String direction : DIRECTIONS) { alone.append("-end-").append(direction); }
             result.add(new Piece(alone.toString(), null, List.of(lone), outlineWalls(lone, Set.of())));
             double[][] band = { { -A, -H + end }, { A, -H + end } };
-            for (int direction = 0; direction < 6; direction++) {
+            for (int direction = 0; direction < directions; direction++) {
                 List<double[]> outline = List.of(turnPoint(band[0], direction), turnPoint(band[1], direction),
                       hexCorner(direction), hexCorner((direction + 5) % 6));
                 StringBuilder tags = new StringBuilder();

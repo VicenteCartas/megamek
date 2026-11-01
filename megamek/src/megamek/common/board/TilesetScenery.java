@@ -153,9 +153,10 @@ public final class TilesetScenery {
         if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
         File exact = new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
         File design = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
-        // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one)
-        // and all its variants (@ and a variant's name, kitVariant).
-        File generated = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("-square$", "") + ".json");
+        // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one),
+        // all its variants (@ and a variant's name, kitVariant) and, as the design does, every exit value.
+        File generated = new File(Configuration.dataDir(), "models/buildings/"
+              + relative.replaceFirst("-square$", "").replaceFirst("_[0-9]{2}$", "") + ".json");
         if (!exact.isFile() && !design.isFile() && generated.isFile()) { return generated; }
         return exact.isFile() || !design.isFile() ? exact : design;
     }
@@ -204,18 +205,14 @@ public final class TilesetScenery {
     }
 
     /**
-     * The building asset for a {@link HexAppearance.Footprint}: a Square hex's connected kit is the {@code <kit>-square.glb}
-     * beside its Angled {@code <kit>.glb}, where the kit has one, or the Square footprint of a generated kit.
+     * The building asset for a {@link HexAppearance.Footprint}: a Square hex's generated kit in its Square footprint
+     * (the asset and {@code -square}); any other asset as it is.
      */
     public static String footprint(String asset, HexAppearance.Footprint footprint) {
-        if (footprint != HexAppearance.Footprint.SQUARE || !asset.startsWith("buildings/")) { return asset; }
-        if (generatedKit(asset)) { return asset.endsWith("-square") ? asset : asset + "-square"; }
-        File kit = customBuildingFile(asset);
-        File square = new File(kit.getParentFile(), kit.getName().replaceFirst("\\.glb$", "-square.glb"));
-        if (!kit.isFile() || !square.isFile()) { return asset; }
-        String relative = new File(Configuration.dataDir(), "models/buildings").toPath().relativize(square.toPath())
-              .toString().replace(File.separatorChar, '/');
-        return "buildings/" + relative.substring(0, relative.length() - ".glb".length());
+        if (footprint != HexAppearance.Footprint.SQUARE || !asset.startsWith("buildings/") || !generatedKit(asset)) {
+            return asset;
+        }
+        return asset.endsWith("-square") ? asset : asset + "-square";
     }
 
     /**

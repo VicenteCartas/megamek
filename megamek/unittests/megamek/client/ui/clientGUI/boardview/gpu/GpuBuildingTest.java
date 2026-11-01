@@ -6,9 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.IntStream;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
@@ -18,13 +16,12 @@ import org.junit.jupiter.api.Test;
 class GpuBuildingTest {
     static final String ASSET = "buildings/saxarba/fortress_light/fortress_light_a_52";
 
-    /** A kit's levels of detail as the game reads them: its textures may be the board's shared materials. */
-    static List<ModelData> lods(FileHandle file) {
-        return RigidGlb.loadLods(file, new java.io.File(megamek.common.Configuration.dataDir(), "models").toPath());
-    }
-
-    static FileHandle file() {
-        return new FileHandle(TilesetScenery.customBuildingFile(ASSET));
+    /** A fresh copy of {@code asset}'s generated kit's levels of detail, which a test may change; none kept cached. */
+    static List<ModelData> lods(String asset) {
+        GeneratedKit.reload();
+        var lods = List.<ModelData>copyOf(GpuBuilding.kit(asset).lods());
+        GeneratedKit.reload();
+        return lods;
     }
 
     /** The kit's module roles, each with its core node ({@link ConnectedKit#parts}). */
@@ -109,7 +106,7 @@ class GpuBuildingTest {
 
     @Test
     void shippedDistantLodStaysWithinItsSmallGeometryBudget() {
-        var kit = ConnectedKit.load(lods(file()));
+        var kit = GpuBuilding.kit(ASSET);
         // What a distant hex draws: alone, and in a straight run, three storeys and the roof.
         for (int[] reach : List.of(new int[6], new int[] { 3, 0, 0, 3, 0, 0 })) {
             int triangles = ConnectedKit.placements(kit, 1, 3, reach, 0, 1).stream()
@@ -119,30 +116,10 @@ class GpuBuildingTest {
     }
 
     @Test
-    void shippedGlbHasSuperimposedLodsWithStackedModulesAndMatchingVariants() {
-        var lods = lods(file()).stream().distinct().toList();
-        assertEquals(2, lods.size());
-        for (int lod = 0; lod < lods.size(); lod++) {
-            assertEquals(Set.of("base0", "floor0", "floor1", "roof0"), roles(lods.get(lod)).keySet());
-            Map<String, String> names = new java.util.HashMap<>();
-            ConnectedKit.parts(lods.get(lod)).forEach(piece -> names.put(piece.node(), piece.role()));
-            int current = lod;
-            IntStream.range(0, lods.get(lod).nodes.size).forEach(index -> {
-                var node = lods.get(current).nodes.get(index);
-                String role = names.get(node.id);
-                assertEquals(Map.of("base0", 0f, "floor0", 18f, "floor1", 36f, "roof0", 54f).get(role),
-                      node.translation.z, .001f);
-                assertEquals(0, node.translation.x, .001f, "Both LODs share the authored XY origin");
-                assertEquals(0, node.translation.y, .001f, "Both LODs share the authored XY origin");
-            });
-        }
-    }
-
-    @Test
-    void shippedHandMadeKitsChangeTowardsAConnectedNeighbour() {
+    void shippedKitsChangeTowardsAConnectedNeighbour() {
         for (String asset : List.of(ASSET, "buildings/saxarba/building_light/building_light_00")) {
             // Loading checks the connected kits' contract (ConnectedKit.load).
-            var kit = GpuBuilding.kit(TilesetScenery.customBuildingFile(asset));
+            var kit = GpuBuilding.kit(asset);
             var alone = ConnectedKit.placements(kit, 0, 2, new int[6], 0, 1).stream().map(ConnectedKit.Placement::node).toList();
             var joined = ConnectedKit.placements(kit, 0, 2, new int[] { 2, 0, 0, 0, 0, 0 }, 0, 1).stream()
                   .map(ConnectedKit.Placement::node).toList();
@@ -152,8 +129,7 @@ class GpuBuildingTest {
 
     @Test
     void shippedLightBuildingVariantsCoverTheSamePiecesInBothLods() {
-        var file = new FileHandle(TilesetScenery.customBuildingFile("buildings/saxarba/building_light/building_light_00"));
-        var lods = GpuBuilding.lods(lods(file));
+        var lods = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00").lods();
         assertEquals(2, lods.size());
         for (var lod : lods) {
             assertEquals(Set.of("base0", "base1", "floor0", "floor1", "roof0"), roles(lod).keySet());
@@ -185,14 +161,14 @@ class GpuBuildingTest {
     }
 
     @Test
-    void aSquareFootprintDrawsTheKitsSquareFileWhereItHasOne() {
+    void aSquareFootprintDrawsAGeneratedKitsSquareFootprint() {
         String light = "buildings/saxarba/building_light/building_light_00";
         assertEquals(light, TilesetScenery.footprint(light, megamek.common.board.HexAppearance.Footprint.ANGLED));
         String square = TilesetScenery.footprint(light, megamek.common.board.HexAppearance.Footprint.SQUARE);
-        assertEquals("buildings/building_light/building_light-square", square);
-        assertTrue(TilesetScenery.customBuildingFile(square).isFile());
+        assertEquals(light + "-square", square);
+        assertEquals(TilesetScenery.customBuildingFile(light), TilesetScenery.customBuildingFile(square), "One spec");
         // Loading checks the Square kit's contract too.
-        GpuBuilding.kit(TilesetScenery.customBuildingFile(square));
+        GpuBuilding.kit(square);
         String generated = "buildings/multihex/dome";
         assertEquals(generated, TilesetScenery.footprint(generated, megamek.common.board.HexAppearance.Footprint.SQUARE),
               "A building without a Square kit keeps its own");

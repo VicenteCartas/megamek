@@ -32,6 +32,11 @@ import com.badlogic.gdx.utils.FloatArray;
 final class GeneratedMesh {
     /** Whether each board material's .tres is transparent ({@link GodotMaterial#blended}), read once per asset load. */
     private static final Map<String, Boolean> BLENDED = new ConcurrentHashMap<>();
+    /**
+     * A part keyed {@code <board material>#board} draws that board material textured on the board's axes ({@link #kit}),
+     * under a material of its own, so a modelled piece of the same board material keeps its own texture coordinates.
+     */
+    static final String BOARD_UV = "#board";
     /** A mesh's vertex count limit: kit parts index their vertices with shorts. */
     private static final int MESH_VERTICES = 65_536;
     final Map<String, FloatArray> parts = new LinkedHashMap<>();
@@ -186,7 +191,7 @@ final class GeneratedMesh {
     }
 
     private static boolean blended(String material) {
-        return BLENDED.computeIfAbsent(material, name -> GpuMaterialMaps.board(name).blended());
+        return BLENDED.computeIfAbsent(material, name -> GpuMaterialMaps.board(boardName(name)).blended());
     }
 
     /** The parts whose board material is transparent, or those that are not, as one node. */
@@ -230,9 +235,10 @@ final class GeneratedMesh {
 
     /**
      * Named pieces as a connected kit's nodes ({@link ConnectedKit}), their materials the board materials of the same
-     * names, in one mesh of welded vertices (a kit reads one).
+     * names, in one mesh of welded vertices (a kit reads one); {@code boardUVs}, the {@link #BOARD_UV} parts' repeats on
+     * the board's axes ({@link RigidGlb.Data#boardUVs}).
      */
-    static RigidGlb.Data kit(String id, Map<String, GeneratedMesh> pieces) {
+    static RigidGlb.Data kit(String id, Map<String, GeneratedMesh> pieces, Map<String, Float> boardUVs) {
         var data = new RigidGlb.Data();
         data.id = id;
         Set<String> materials = new HashSet<>();
@@ -261,7 +267,10 @@ final class GeneratedMesh {
                     });
                 }
                 meshParts.add(meshPart);
-                if (materials.add(material)) { RigidGlb.boardMaterial(data, material, material); }
+                if (materials.add(material)) {
+                    RigidGlb.boardMaterial(data, material, boardName(material));
+                    if (boardUVs.containsKey(material)) { data.boardUVs.put(material, boardUVs.get(material)); }
+                }
                 var nodePart = new ModelNodePart();
                 nodePart.meshPartId = meshPart.id;
                 nodePart.materialId = material;
@@ -278,6 +287,11 @@ final class GeneratedMesh {
         mesh.parts = meshParts.toArray(ModelMeshPart[]::new);
         data.meshes.add(mesh);
         return data;
+    }
+
+    /** The board material a part's key names ({@link #BOARD_UV}). */
+    private static String boardName(String key) {
+        return key.endsWith(BOARD_UV) ? key.substring(0, key.length() - BOARD_UV.length()) : key;
     }
 
     private static String key(float[] items, int offset) {
