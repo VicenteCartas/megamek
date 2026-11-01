@@ -249,6 +249,8 @@ class GpuModularBuildingSmokeTest {
             BoardGeometry.tune(new BoardGeometry.Tuning(tuning.hexScale(), tuning.unitScale(), tuning.unitHeightScale(),
                   12, tuning.gridShade()));
             terrain.update(scene);
+            // A retune rebuilds every chunk: until the view settles, a pick meets their shapes only.
+            GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
             checkPicking(terrain, scene);
         } finally {
             BoardGeometry.tune(tuning);
