@@ -23,6 +23,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -251,13 +252,21 @@ class GpuEditorMaglevSmokeTest {
 
     static boolean ready(Actor actor) {
         if (actor instanceof Image image && "editor-card-preview".equals(image.getName())) {
-            assertNotEquals("Preview unavailable", image.getUserObject());
-            assertNotEquals("No preview", image.getUserObject());
+            assertNotEquals("Preview unavailable", image.getUserObject(), () -> card(image));
+            assertNotEquals("No preview", image.getUserObject(), () -> card(image));
             return image.getDrawable() != null;
         }
         if (actor instanceof Group group) {
             for (Actor child : group.getChildren()) { if (!ready(child)) { return false; } }
         }
         return true;
+    }
+
+    /** The title of the card that shows {@code preview}, for a failure message. */
+    private static String card(Actor preview) {
+        for (Actor parent = preview.getParent(); parent != null; parent = parent.getParent()) {
+            if (parent instanceof TextButton button) { return "The card " + button.getText(); }
+        }
+        return "A card preview";
     }
 }

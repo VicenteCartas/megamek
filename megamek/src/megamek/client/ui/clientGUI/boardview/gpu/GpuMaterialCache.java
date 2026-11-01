@@ -157,6 +157,13 @@ final class GpuMaterialCache {
     private static final float LEAN = -.1f;
     /** The fill's GPU time a frame (a target), and its CPU time (a bound); a loading frame's prewarm takes more. */
     private static final long FILL_NANOS = 2_000_000, FILL_CPU_NANOS = 3_000_000, PREWARM_NANOS = 30_000_000;
+    /**
+     * Set by the GPU test tasks (gpuBoardSmoke, gpuBoardLargeMapTest): a frame builds every page it needs, within
+     * {@link #AT_ONCE_NANOS}. No frame a test reads then shows a coarser stand-in while pages build, however the test
+     * settles; the pages built are the same.
+     */
+    private static final boolean FILL_AT_ONCE = Boolean.getBoolean("megamek.gpu.materialCacheFillAtOnce");
+    private static final long AT_ONCE_NANOS = 60_000_000_000L;
 
     /** Draws the cache tops that reach a world rectangle (world units) with the fill programs, from {@code camera}. */
     interface Tops {
@@ -931,6 +938,7 @@ final class GpuMaterialCache {
      */
     private boolean end(long budget, long cpuNanos) {
         if (!pages.allocated() || !filling) { return true; }
+        if (FILL_AT_ONCE) { budget = cpuNanos = AT_ONCE_NANOS; }
         long deadline = System.nanoTime() + cpuNanos;
         // The root first, whatever the view: it stands in for every admitted page still building.
         int rootPages = 0;

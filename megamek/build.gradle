@@ -849,6 +849,7 @@ tasks.register('gpuBoardLargeMapTest', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    systemProperty 'megamek.gpu.materialCacheFillAtOnce', 'true'
 }
 
 // Explicit opt-in: requires an actual desktop OpenGL context, unlike the regular geometry/source tests.
@@ -873,6 +874,8 @@ tasks.register('gpuBoardSmoke', Test) {
     systemProperty 'java.awt.headless', 'false'
     systemProperty 'megamek.gpu.screenshots', layout.buildDirectory.dir('gpu-board-review').get().asFile.absolutePath
     systemProperty 'megamek.gpu.programCacheDir', layout.buildDirectory.dir('gpu-program-cache').get().asFile.absolutePath
+    // Every frame a test reads shows the ground material cache built, never its stand-ins (GpuMaterialCache).
+    systemProperty 'megamek.gpu.materialCacheFillAtOnce', 'true'
     systemProperties System.properties.findAll { it.key.toString().startsWith('megamek.gpu.') }
     outputs.upToDateWhen { false }
 }

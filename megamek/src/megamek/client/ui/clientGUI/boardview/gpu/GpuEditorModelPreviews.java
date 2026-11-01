@@ -36,9 +36,11 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.Configuration;
 import megamek.common.board.RailRoute;
+import megamek.logging.MMLogger;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
 final class GpuEditorModelPreviews implements Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuEditorModelPreviews.class);
     /** A model in these colours; for a route asset its layout of {@code sides} and {@code tracks}, from above when {@code top}. */
     private record Request(String asset, megamek.common.board.BoardDecoration.Colours colours, int sides, int tracks, boolean top,
           Image target) { }
@@ -149,6 +151,7 @@ final class GpuEditorModelPreviews implements Disposable {
                 // A program it draws with still links: the same model draws again next frame.
                 if (render(model, current.top(), current.target())) { current = null; release(); }
             } catch (Exception failure) {
+                LOGGER.warn(failure, "No editor preview of {}", current.asset());
                 current.target().setUserObject(megamek.client.ui.gdx.UiKit.text("BoardEditor.noPreview"));
                 pending = null; current = null; release();
             }

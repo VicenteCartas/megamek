@@ -56,9 +56,11 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexIssue;
 import megamek.common.board.RailRoute;
+import megamek.logging.MMLogger;
 
 /** Native UIKit workspace. All document changes are commands to the EDT-owned editor session. */
 final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
+    private static final MMLogger LOGGER = MMLogger.create(GpuBoardEditor.class);
     static final float LIBRARY_WIDTH = 260, INSPECTOR_WIDTH = 280, TOOLBAR_HEIGHT = 34;
     /**
      * The corner panels over the board area: the Brush panel at most this wide (its controls wrap inside it), the side
@@ -287,8 +289,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         this.source = source; this.ui = ui; this.stage = stage; this.terrain = terrain; this.frame = frame;
         themeCards = ui.choiceGrid(148, 6);
         choices = new UiPopover(ui); stage.addActor(choices);
-        thumbnails.setErrorListener((asset, failure) -> previews.stream().filter(preview -> preview.file().equals(asset.fileName))
-              .forEach(preview -> preview.image().setUserObject(UiKit.text("BoardEditor.noPreview"))));
+        thumbnails.setErrorListener((asset, failure) -> {
+            LOGGER.warn(failure, "No editor preview from {}", asset.fileName);
+            previews.stream().filter(preview -> preview.file().equals(asset.fileName))
+                  .forEach(preview -> preview.image().setUserObject(UiKit.text("BoardEditor.noPreview")));
+        });
         toolbar = ui.panel(); toolbar.setName("editor-toolbar"); toolbar.pad(4);
         for (BoardEditorSession.Tool tool : BoardEditorSession.Tool.values()) {
             ToolStyle style = TOOLS.get(tool);
