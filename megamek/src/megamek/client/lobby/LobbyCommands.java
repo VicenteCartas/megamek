@@ -121,8 +121,10 @@ public class LobbyCommands {
 
     private final LobbySession session;
     private final LobbyPrompts prompts;
+    private final LobbyAsks blockingAsks;
     private volatile CamoPicker camoPicker;
     private volatile UnitConfigurator unitConfigurator;
+    private volatile LobbyAsks nativeAsks;
 
     /**
      * @param session the local client, its game and bots
@@ -131,6 +133,20 @@ public class LobbyCommands {
     public LobbyCommands(LobbySession session, LobbyPrompts prompts) {
         this.session = session;
         this.prompts = prompts;
+        blockingAsks = (prompts == null) ? null : LobbyAsks.of(prompts);
+    }
+
+    /**
+     * Has the commands ask {@code asks} instead of the prompts for everything but camouflage and unit
+     * configuration; null goes back to the prompts.
+     */
+    public void asks(@Nullable LobbyAsks asks) {
+        nativeAsks = asks;
+    }
+
+    private LobbyAsks asks() {
+        LobbyAsks asks = nativeAsks;
+        return (asks != null) ? asks : blockingAsks;
     }
 
     /**
@@ -167,7 +183,7 @@ public class LobbyCommands {
     public boolean checkReady() {
         List<ReadyCheck.Blocker> blockers = readyBlockers();
         if (!blockers.isEmpty()) {
-            prompts.readyBlocked(blockers.get(0));
+            asks().readyBlocked(blockers.get(0));
             return false;
         }
         return true;
@@ -283,7 +299,7 @@ public class LobbyCommands {
      */
     public void removeBot(@Nullable Client botClient) {
         if (!localBots().containsValue(botClient)) {
-            prompts.error(LobbyError.ONLY_OWN_BOT);
+            asks().error(LobbyError.ONLY_OWN_BOT);
             return;
         }
         // Don't delete the bot's forces, as that could also delete other players' entities
@@ -482,7 +498,7 @@ public class LobbyCommands {
             return;
         }
         if (entities.stream().anyMatch(e -> !e.tracksHeat())) {
-            prompts.error(LobbyError.HEAT_TRACKING);
+            asks().error(LobbyError.HEAT_TRACKING);
             return;
         }
         Set<Entity> updateCandidates = new HashSet<>();
@@ -552,7 +568,7 @@ public class LobbyCommands {
             return;
         }
         if (entities.stream().anyMatch(e -> e.getUnitType() != UnitType.MEK)) {
-            prompts.error(LobbyError.ONLY_MEKS);
+            asks().error(LobbyError.ONLY_MEKS);
             return;
         }
         Set<Entity> updateCandidates = new HashSet<>();
@@ -573,7 +589,7 @@ public class LobbyCommands {
     /** Shows the editor which allows adding pre-existing damage to units. */
     public void configureDamage(Collection<Entity> entities) {
         if (entities.size() != 1) {
-            prompts.error(LobbyError.SINGLE_UNIT, "assign damage");
+            asks().error(LobbyError.SINGLE_UNIT, "assign damage");
             return;
         }
         if (!validateUpdate(entities)) {
@@ -581,21 +597,18 @@ public class LobbyCommands {
         }
         Entity entity = CollectionUtil.anyOneElement(entities);
         if (!canEditDamage(client(), entity)) {
-            prompts.error(LobbyError.CANNOT_EDIT_DAMAGE);
+            asks().error(LobbyError.CANNOT_EDIT_DAMAGE);
             return;
         }
         // An asset has no armor/structure/criticals; its only persistent damage is a lowered Destroy Check.
         if (entity instanceof BattlefieldSupportAsset asset) {
-            if (prompts.editAssetDamage(asset)) {
-                sendUpdates(entities);
-            }
+            asks().editAssetDamage(asset, () -> sendUpdates(entities));
             return;
         }
 
         // Reaching here means the local player may edit this unit: the gamemaster, or the owner when no gamemaster
         // is present. Either way the editor offers the full editing tools without re-checking the gamemaster role.
-        prompts.editDamage(entity);
-        sendUpdates(entities);
+        asks().editDamage(entity, () -> sendUpdates(entities));
     }
 
     /**
@@ -668,7 +681,7 @@ public class LobbyCommands {
             return;
         }
         if (!LobbyRules.haveSingleOwner(entities)) {
-            prompts.error(LobbyError.SINGLE_OWNER);
+            asks().error(LobbyError.SINGLE_OWNER);
             return;
         }
         // Assets use their own minimal crew editor. A mixed selection must run both configuration flows rather than
@@ -710,9 +723,8 @@ public class LobbyCommands {
      */
     private void customizeBattlefieldSupportAsset(Entity entity) {
         boolean editable = allowCustomization(entity);
-        if (prompts.configureAsset((BattlefieldSupportAsset) entity, editable)) {
-            sendCustomizationUpdate(List.of(entity));
-        }
+        asks().configureAsset((BattlefieldSupportAsset) entity, editable,
+              () -> sendCustomizationUpdate(List.of(entity)));
     }
 
     /**
@@ -1023,7 +1035,7 @@ public class LobbyCommands {
             return;
         }
         if (entities.size() != 1) {
-            prompts.error(LobbyError.SINGLE_UNIT, "swap pilots");
+            asks().error(LobbyError.SINGLE_UNIT, "swap pilots");
             return;
         }
         Entity selected = CollectionUtil.anyOneElement(entities);
@@ -1045,7 +1057,7 @@ public class LobbyCommands {
         if (entities.isEmpty() || game().getPlayer(newOwnerId) == null) {
             return;
         } else if (!forceList.isEmpty()) {
-            prompts.error(LobbyError.ENTITY_OR_FORCE);
+            asks().error(LobbyError.ENTITY_OR_FORCE);
             return;
         }
         if (!validateUpdate(entities)) {
@@ -1059,17 +1071,17 @@ public class LobbyCommands {
      */
     public void showSbfView(Collection<Force> forces) {
         if (forces.stream().anyMatch(f -> !SBFFormationConverter.canConvertToSbfFormation(f, game()))) {
-            prompts.error(LobbyError.SBF_CONVERSION);
+            asks().error(LobbyError.SBF_CONVERSION);
             return;
         }
-        prompts.showSbfStats(forces, game());
+        asks().showSbfStats(forces, game());
     }
 
     /**
      * Shows the Alpha Strike stats of the given entities.
      */
     public void showAlphaStrikeView(Collection<Entity> entities) {
-        prompts.showAlphaStrikeStats(entities);
+        asks().showAlphaStrikeStats(entities);
     }
 
     // endregion
@@ -1094,15 +1106,15 @@ public class LobbyCommands {
         Player newParentOwner = forces.getOwner(newParent);
 
         if (owner.isEnemyOf(newParentOwner)) {
-            prompts.error(LobbyError.ONLY_TEAM);
+            asks().error(LobbyError.ONLY_TEAM);
             return;
         }
         if (subForces.contains(newParent)) {
-            prompts.error(LobbyError.FORCE_ATTACH_TO_SUB_FORCE);
+            asks().error(LobbyError.FORCE_ATTACH_TO_SUB_FORCE);
             return;
         }
         if (!isEditable(force)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         var forceList = new ArrayList<>(List.of(force));
@@ -1119,7 +1131,7 @@ public class LobbyCommands {
         }
         Set<Force> forceList = forceIds.stream().map(forces::getForce).collect(toSet());
         if (!areForcesEditable(forceList)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         client().sendForceParent(forceList, Force.NO_FORCE);
@@ -1131,14 +1143,14 @@ public class LobbyCommands {
     public void forceMove(Collection<Force> forceList, Collection<Entity> entityList, boolean up) {
         // May only move a single force or a single entity
         if (forceList.size() + entityList.size() != 1) {
-            prompts.error(LobbyError.SINGLE_UNIT_OR_FORCE);
+            asks().error(LobbyError.SINGLE_UNIT_OR_FORCE);
             return;
         }
         if (!entityList.isEmpty() && !validateUpdate(entityList)) {
             return;
         }
         if (!forceList.isEmpty() && !areForcesEditable(forceList)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         var forces = game().getForces();
@@ -1167,11 +1179,9 @@ public class LobbyCommands {
      */
     public void forceCreateEmpty() {
         // Ask for a name, offering ones that suit the side and read well on the radio
-        Optional<String> name = chooseForceName(localPlayer(), null);
-        if (name.isEmpty()) {
-            return;
-        }
-        client().sendAddForce(Force.createToplevelForce(name.get(), localPlayer()), new ArrayList<>());
+        Player owner = localPlayer();
+        chooseForceName(owner, null,
+              name -> client().sendAddForce(Force.createToplevelForce(name, owner), new ArrayList<>()));
     }
 
     /**
@@ -1201,16 +1211,13 @@ public class LobbyCommands {
             return;
         }
         if (!areAllied(entities)) {
-            prompts.error(LobbyError.ONLY_TEAM);
+            asks().error(LobbyError.ONLY_TEAM);
             return;
         }
         // Ask for a name, offering ones that suit the side and read well on the radio
-        Optional<String> name = chooseForceName(CollectionUtil.anyOneElement(entities).getOwner(), null);
-        if (name.isEmpty()) {
-            return;
-        }
-        client().sendAddForce(Force.createToplevelForce(name.get(), CollectionUtil.anyOneElement(entities).getOwner()),
-              entities);
+        Player owner = CollectionUtil.anyOneElement(entities).getOwner();
+        chooseForceName(owner, null,
+              name -> client().sendAddForce(Force.createToplevelForce(name, owner), entities));
     }
 
     /**
@@ -1221,12 +1228,9 @@ public class LobbyCommands {
             return;
         }
         // Ask for a name, offering ones that suit the side and read well on the radio
-        Optional<String> name = chooseForceName(game().getForces().getOwner(parentId), null);
-        if (name.isEmpty()) {
-            return;
-        }
-        client().sendAddForce(Force.createSubforce(name.get(), game().getForces().getForce(parentId)),
-              new ArrayList<>());
+        chooseForceName(game().getForces().getOwner(parentId), null,
+              name -> client().sendAddForce(Force.createSubforce(name, game().getForces().getForce(parentId)),
+                    new ArrayList<>()));
     }
 
     /** Asks for a new name for the provided forceId and applies it. */
@@ -1240,22 +1244,22 @@ public class LobbyCommands {
         }
         Force force = forces.getForce(forceId);
         if (!isEditable(force)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         // Ask for a name, offering ones that suit the side and read well on the radio
-        Optional<String> name = chooseForceName(forces.getOwner(forceId), force.getName());
-        if (name.isEmpty()) {
-            return;
-        }
-        forces.renameForce(name.get(), forceId);
-        var forceList = new ArrayList<>(List.of(force)); // must be mutable
-        client().sendUpdateForce(forceList);
+        chooseForceName(forces.getOwner(forceId), force.getName(), name -> {
+            if (!forces.contains(forceId)) {
+                return;
+            }
+            forces.renameForce(name, forceId);
+            var forceList = new ArrayList<>(List.of(force)); // must be mutable
+            client().sendUpdateForce(forceList);
+        });
     }
 
-    private Optional<String> chooseForceName(@Nullable Player owner, @Nullable String currentName) {
-        return prompts.chooseForceName(ForceNameRequest.of(game(), owner, currentName))
-              .filter(name -> !name.isBlank());
+    private void chooseForceName(@Nullable Player owner, @Nullable String currentName, Consumer<String> chosen) {
+        asks().chooseForceName(ForceNameRequest.of(game(), owner, currentName), chosen);
     }
 
     /**
@@ -1279,7 +1283,7 @@ public class LobbyCommands {
             return;
         }
         if (!areForcesEditable(finalFoDelete)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
 
@@ -1295,11 +1299,13 @@ public class LobbyCommands {
                 question += (enCount == 1 ? "one unit" : enCount + " units");
             }
             question += "?";
-            if (!prompts.confirm("Delete Units...", question)) {
-                return;
-            }
+            asks().confirm("Delete Units...", question, () -> sendDeletes(finalFoDelete, finalEnDelete));
+            return;
         }
+        sendDeletes(finalFoDelete, finalEnDelete);
+    }
 
+    private void sendDeletes(Set<Force> finalFoDelete, Set<Entity> finalEnDelete) {
         // Send a command to remove the forceless entities
         Set<Client> senders = finalEnDelete.stream().map(this::correctSender).collect(toSet());
         for (Client sender : senders) {
@@ -1347,7 +1353,7 @@ public class LobbyCommands {
         }
         var forceOwner = forces.getOwner(forceId);
         if (entities.stream().anyMatch(e -> e.getOwner().isEnemyOf(forceOwner))) {
-            prompts.error(LobbyError.ONLY_TEAM);
+            asks().error(LobbyError.ONLY_TEAM);
             return;
         }
         client().sendAddEntitiesToForce(entities, forceId);
@@ -1368,12 +1374,12 @@ public class LobbyCommands {
             return;
         }
         if (!areForcesEditable(forceList)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         Forces forces = game().getForces();
         if (forceList.stream().anyMatch(f -> newOwner.isEnemyOf(forces.getOwner(f)))) {
-            prompts.error(LobbyError.ONLY_TEAMMATE);
+            asks().error(LobbyError.ONLY_TEAMMATE);
             return;
         }
         List<Force> changedForces = new ArrayList<>();
@@ -1395,7 +1401,7 @@ public class LobbyCommands {
             return;
         }
         if (!areForcesEditable(forceList)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return;
         }
         client().sendAssignForceFull(forceList, newOwnerId);
@@ -1415,7 +1421,7 @@ public class LobbyCommands {
             if (entity.hasNhC3()) {
                 String networkId = entity.getC3NetId();
                 if (networkId != null && networkId.endsWith(Entity.C3_NETWORK_ID_SEPARATOR + entity.getId())) {
-                    prompts.error(LobbyError.CANNOT_DISCONNECT_MASTER);
+                    asks().error(LobbyError.CANNOT_DISCONNECT_MASTER);
                     return;
                 }
             }
@@ -1436,7 +1442,7 @@ public class LobbyCommands {
         try {
             C3Util.setCompanyMaster(entities);
         } catch (MissingC3MException e) {
-            prompts.error(LobbyError.ONLY_C3M);
+            asks().error(LobbyError.ONLY_C3M);
             return;
         }
         sendUpdates(entities);
@@ -1450,7 +1456,7 @@ public class LobbyCommands {
         try {
             C3Util.setLanceMaster(entities);
         } catch (MissingC3MException e) {
-            prompts.error(LobbyError.ONLY_C3M);
+            asks().error(LobbyError.ONLY_C3M);
             return;
         }
         sendUpdates(entities);
@@ -1464,16 +1470,16 @@ public class LobbyCommands {
             return;
         }
         if (!areAllied(entities)) {
-            prompts.error(LobbyError.ONLY_TEAM);
+            asks().error(LobbyError.ONLY_TEAM);
             return;
         }
         try {
             C3Util.joinNh(game(), entities, masterID, disconnectFirst);
         } catch (MismatchingC3MException e) {
-            prompts.error(LobbyError.SAME_C3);
+            asks().error(LobbyError.SAME_C3);
             return;
         } catch (C3CapacityException e) {
-            prompts.error(LobbyError.EXCEED_C3_CAPACITY);
+            asks().error(LobbyError.EXCEED_C3_CAPACITY);
             return;
         }
         sendUpdates(entities);
@@ -1487,17 +1493,17 @@ public class LobbyCommands {
             return;
         }
         if (!areAllied(entities)) {
-            prompts.error(LobbyError.ONLY_TEAM);
+            asks().error(LobbyError.ONLY_TEAM);
             return;
         }
         Set<Entity> updateCandidates;
         try {
             updateCandidates = C3Util.connect(game(), entities, masterID, disconnectFirst);
         } catch (MismatchingC3MException e) {
-            prompts.error(LobbyError.SAME_C3);
+            asks().error(LobbyError.SAME_C3);
             return;
         } catch (C3CapacityException e) {
-            prompts.error(LobbyError.EXCEED_C3_CAPACITY);
+            asks().error(LobbyError.EXCEED_C3_CAPACITY);
             return;
         }
         sendUpdates(updateCandidates);
@@ -1532,13 +1538,13 @@ public class LobbyCommands {
               .filter(e -> e.getTransportId() != Entity.NONE)
               .map(e -> game().getEntity(e.getTransportId())).collect(toSet());
         if (!Collections.disjoint(entities, carriers)) {
-            prompts.error(LobbyError.NO_DUAL_LOAD);
+            asks().error(LobbyError.NO_DUAL_LOAD);
             return;
         }
 
         StringBuilder errorMsg = new StringBuilder();
         if (!LobbyRules.validateLobbyLoad(entities, loader, bayNumber, loadRear, errorMsg)) {
-            prompts.error(LobbyError.LOADING_BAY, errorMsg.toString());
+            asks().error(LobbyError.LOADING_BAY, errorMsg.toString());
             return;
         }
 
@@ -1573,7 +1579,7 @@ public class LobbyCommands {
             BombLoadout bombChoices = fSquad.getBombChoices();
             // We can't load all the squadrons bombs
             if (bombChoices.getTotalBombCost() > ((IBomber) carried).getMaxBombPoints()) {
-                prompts.error(LobbyError.SQUADRON_BOMBS);
+                asks().error(LobbyError.SQUADRON_BOMBS);
                 return;
             }
         }
@@ -1605,7 +1611,7 @@ public class LobbyCommands {
         // re-attaching it. Currently not possible as a single
         // server update and updates for one unit shouldn't be chained.
         if (tractor.getTowing() != Entity.NONE && trailer.getTractor() != Entity.NONE) {
-            prompts.error(LobbyError.NO_DUAL_TOW);
+            asks().error(LobbyError.NO_DUAL_TOW);
         }
 
         towBy(trailer, tractorId);
@@ -1646,7 +1652,7 @@ public class LobbyCommands {
         for (Entity entity : editable) {
             if (entity.getTractor() != Entity.NONE) {
                 logger.info("[Train] cannot connect: {} is already part of a train", entity.getShortName());
-                prompts.error(LobbyError.ONLY_TRAIN_MEMBERS);
+                asks().error(LobbyError.ONLY_TRAIN_MEMBERS);
                 return;
             }
             if (entity.isTrailer()) {
@@ -1656,13 +1662,13 @@ public class LobbyCommands {
                     // The server builds a train from an unattached tractor. Catch it here so the player gets a
                     // message instead of a dialog that quietly does nothing.
                     logger.info("[Train] cannot connect: {} already tows a trailer", entity.getShortName());
-                    prompts.error(LobbyError.SINGLE_TRACTOR_REQUIRED);
+                    asks().error(LobbyError.SINGLE_TRACTOR_REQUIRED);
                     return;
                 }
                 candidateHeads.add(entity);
             } else {
                 logger.info("[Train] cannot connect: {} is neither a tractor nor a trailer", entity.getShortName());
-                prompts.error(LobbyError.ONLY_TRAIN_MEMBERS);
+                asks().error(LobbyError.ONLY_TRAIN_MEMBERS);
                 return;
             }
         }
@@ -1670,34 +1676,31 @@ public class LobbyCommands {
         if (candidateHeads.size() != 1) {
             logger.info("[Train] cannot connect: found {} possible tractors, need exactly one",
                   candidateHeads.size());
-            prompts.error(LobbyError.SINGLE_TRACTOR_REQUIRED);
+            asks().error(LobbyError.SINGLE_TRACTOR_REQUIRED);
             return;
         }
         if (trailers.isEmpty()) {
             logger.info("[Train] cannot connect: no trailers in the selection");
-            prompts.error(LobbyError.ONLY_TRAIN_MEMBERS);
+            asks().error(LobbyError.ONLY_TRAIN_MEMBERS);
             return;
         }
 
         Entity head = candidateHeads.get(0);
-        Optional<List<Entity>> ordered = prompts.orderTrain(head, trailers);
-        if (ordered.isEmpty()) {
-            logger.info("[Train] connect cancelled by the player");
-            return;
-        }
-
-        List<Integer> orderedTrailerIds = new ArrayList<>();
-        for (Entity trailer : ordered.get()) {
-            orderedTrailerIds.add(trailer.getId());
-        }
-        logger.info("[Train] requesting train: {} + {} trailer(s)", head.getShortName(), orderedTrailerIds.size());
-        clientFor(head).sendBuildTrain(head.getId(), orderedTrailerIds);
+        asks().orderTrain(head, trailers, ordered -> {
+            List<Integer> orderedTrailerIds = new ArrayList<>();
+            for (Entity trailer : ordered) {
+                orderedTrailerIds.add(trailer.getId());
+            }
+            logger.info("[Train] requesting train: {} + {} trailer(s)", head.getShortName(),
+                  orderedTrailerIds.size());
+            clientFor(head).sendBuildTrain(head.getId(), orderedTrailerIds);
+        });
     }
 
     /** Unloads all units from the given bay of the single given carrier. */
     public void unloadFromBay(Collection<Entity> entities, int bayId) {
         if (entities.size() != 1) {
-            prompts.error(LobbyError.SINGLE_UNIT, "offload from bays");
+            asks().error(LobbyError.SINGLE_UNIT, "offload from bays");
             return;
         }
         Entity carrier = CollectionUtil.anyOneElement(entities);
@@ -1706,7 +1709,7 @@ public class LobbyCommands {
         }
         Bay bay = carrier.getBayById(bayId);
         if (bay == null) {
-            prompts.error(LobbyError.NO_SUCH_BAY);
+            asks().error(LobbyError.NO_SUCH_BAY);
             return;
         }
         Set<Entity> updateCandidates = new HashSet<>();
@@ -1815,7 +1818,7 @@ public class LobbyCommands {
             // An off board train stays hooked up. There is no board position to drop a trailer at, and the train is
             // the only thing holding the trailer's place off the map edge.
             if (tractor.isOffBoard() || trailer.isOffBoard()) {
-                prompts.error(LobbyError.NO_DETACH_OFF_BOARD);
+                asks().error(LobbyError.NO_DETACH_OFF_BOARD);
                 return;
             }
             // Copy the ids: disconnectUnit drops the detached trailers from this list as it works, and walking
@@ -1842,31 +1845,27 @@ public class LobbyCommands {
             return;
         }
         if (entities.stream().anyMatch(e -> !e.isFighter() || e instanceof FighterSquadron)) {
-            prompts.error(LobbyError.ONLY_FIGHTERS);
+            asks().error(LobbyError.ONLY_FIGHTERS);
             return;
         }
         if (!areAllied(entities)) {
-            prompts.error(LobbyError.LOAD_ONLY_ALLIED);
+            asks().error(LobbyError.LOAD_ONLY_ALLIED);
             return;
         }
         boolean largeSquadrons = game().getOptions()
               .booleanOption(OptionsConstants.ADVANCED_AERO_RULES_ALLOW_LARGE_SQUADRONS);
         if ((!largeSquadrons && entities.size() > FighterSquadron.MAX_SIZE)
               || entities.size() > FighterSquadron.ALTERNATE_MAX_SIZE) {
-            prompts.error(LobbyError.SQUADRON_TOO_MANY);
+            asks().error(LobbyError.SQUADRON_TOO_MANY);
         }
 
-        // Ask for a squadron name
-        Optional<String> name = prompts.chooseSquadronDesignation();
-        if (name.isEmpty() || name.get().isBlank()) {
-            return;
-        }
-
-        // Now, actually create the squadron
-        FighterSquadron fs = new FighterSquadron(name.get());
-        fs.setOwner(createSquadronOwner(entities));
-        List<Integer> fighterIds = entities.stream().map(Entity::getId).collect(Collectors.toList());
-        Objects.requireNonNull(correctSender(fs)).sendAddSquadron(fs, fighterIds);
+        // Ask for a squadron name, then actually create the squadron
+        asks().chooseSquadronDesignation(name -> {
+            FighterSquadron fs = new FighterSquadron(name);
+            fs.setOwner(createSquadronOwner(entities));
+            List<Integer> fighterIds = entities.stream().map(Entity::getId).collect(Collectors.toList());
+            Objects.requireNonNull(correctSender(fs)).sendAddSquadron(fs, fighterIds);
+        });
     }
 
     /**
@@ -2012,16 +2011,16 @@ public class LobbyCommands {
             return false;
         }
         if (!isEditable(entities)) {
-            prompts.error(LobbyError.CANNOT_CONFIG_ENEMIES);
+            asks().error(LobbyError.CANNOT_CONFIG_ENEMIES);
             return false;
         }
         if (!canSeeAll(entities)) {
-            prompts.error(LobbyError.CANNOT_VIEW_HIDDEN);
+            asks().error(LobbyError.CANNOT_VIEW_HIDDEN);
             return false;
         }
 
         if (localPlayer().isDone()) {
-            prompts.error(LobbyError.PLAYER_DONE);
+            asks().error(LobbyError.PLAYER_DONE);
             return false;
         }
         return true;

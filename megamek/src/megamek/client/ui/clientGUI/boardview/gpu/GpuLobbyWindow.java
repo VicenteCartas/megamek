@@ -63,7 +63,6 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
-import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
 import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
@@ -176,6 +175,7 @@ public final class GpuLobbyWindow {
         }
     });
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
+    private final GpuLobbyTools tools = new GpuLobbyTools(this);
     private final GameListener gameListener = new GameListenerAdapter() {
         @Override
         public void gamePlayerConnected(GamePlayerConnectedEvent event) {
@@ -373,6 +373,7 @@ public final class GpuLobbyWindow {
         window.swingDialogs.install();
         gui.lobbyCommands().camoPicker(window.camoPicker);
         gui.lobbyCommands().unitConfigurator(window.unitConfigurator);
+        gui.lobbyCommands().asks(window.tools.asks());
         window.refresh();
         GpuHost.show(window.scene);
         window.probe = GpuLobbyProbe.applyOnce(gui);
@@ -435,6 +436,21 @@ public final class GpuLobbyWindow {
         return gui;
     }
 
+    /** Whether the lobby is closing. */
+    boolean closing() {
+        return closing;
+    }
+
+    /** The lobby's screen, or null before it shows. */
+    @Nullable GpuLobbyScreen screen() {
+        return screen;
+    }
+
+    /** The lobby's tools and prompts. */
+    GpuLobbyTools tools() {
+        return tools;
+    }
+
     /** The developer switch's shot and quit, or null; see {@link GpuLobbyProbe}. */
     GpuLobbyProbe probe() {
         return probe;
@@ -451,6 +467,13 @@ public final class GpuLobbyWindow {
     }
 
     /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
+    /** EDT, for the developer switch: opens the L17 tool or prompt {@code tool} names; see {@link LobbyToolsProbe}. */
+    void probeTool(String tool) {
+        if (!closing) {
+            tools.probe(tool);
+        }
+    }
+
     /** EDT, for the developer switch's {@code lobby+configure}: opens the unit bay for the player's first unit or all. */
     /** EDT, for the developer switch: opens the map setup, or with {@code random} the random map settings. */
     void probeMapSetup(boolean random) {
@@ -758,10 +781,13 @@ public final class GpuLobbyWindow {
             }
             SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES -> services.forcesCommand(
-                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), null);
+                case ADD_UNIT -> services.forcesCommand(SwingLobbyServices.ForcesCommand.ADD_UNIT, null);
+                case RANDOM_ARMY -> tools.randomArmy();
+                case SKILLS -> tools.skills();
+                case NAMES -> tools.names();
                 case C3 -> openC3(List.of());
-                case LOAD_LIST, SAVE_LIST, PRINT_LIST -> services.forcesCommand(
+                case LOAD_LIST -> tools.loadList();
+                case SAVE_LIST, PRINT_LIST -> services.forcesCommand(
                       SwingLobbyServices.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
@@ -860,6 +886,7 @@ public final class GpuLobbyWindow {
                     case RANDOM_MAP -> openRandomMap();
                     case LOAD_MAP_SETUP -> loadMapSetup();
                     case SAVE_MAP_SETUP -> saveMapSetup();
+                    case VICTORY -> tools.victory();
                     default -> lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
                 }
             }
@@ -1076,6 +1103,9 @@ public final class GpuLobbyWindow {
                 List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
                 if (c3Units != null) {
                     openC3(c3Units);
+                    return;
+                }
+                if (tools.unitCommand(command)) {
                     return;
                 }
                 new SwingLobbyUnitActions(gui).run(command);
@@ -1322,7 +1352,7 @@ public final class GpuLobbyWindow {
      *
      * @param replaceKey the message asking to replace an existing file, with its name as {0}; null when opening
      */
-    private void chooseFile(SystemFileDialog.Request request, @Nullable String replaceKey, Consumer<File> chosen) {
+    void chooseFile(SystemFileDialog.Request request, @Nullable String replaceKey, Consumer<File> chosen) {
         LOGGER.info("[LobbyFiles] The system file dialog opens: {}", request.title());
         SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
             if (closing || choice == null) {
@@ -1420,7 +1450,7 @@ public final class GpuLobbyWindow {
         });
     }
     /** Reads the lobby now and twice more, as the server's answer to a unit change takes a moment to come back. */
-    private void refreshSoon() {
+    void refreshSoon() {
         queueRefresh();
         for (int delay : new int[] { 300, 1000 }) {
             Timer timer = new Timer(delay, event -> queueRefresh());
@@ -1482,7 +1512,7 @@ public final class GpuLobbyWindow {
         });
     }
 
-    private static @Nullable BufferedImage sprite(Entity entity, Camouflage camouflage) {
+    static @Nullable BufferedImage sprite(Entity entity, Camouflage camouflage) {
         try {
             Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
             Image icon = base == null ? null
@@ -1942,11 +1972,7 @@ public final class GpuLobbyWindow {
 
             @Override
             public void help() {
-                SwingUtilities.invokeLater(() -> {
-                    if (!closing) {
-                        new PrincessHelpDialog(swingDialogs.parent()).setVisible(true);
-                    }
-                });
+                tools.princessHelp();
             }
 
             @Override
@@ -1972,7 +1998,7 @@ public final class GpuLobbyWindow {
     }
 
     /** Runs {@code work} on the Swing thread unless the lobby closes, then {@code then} on the GPU thread. */
-    private void edt(String what, Runnable work, Runnable then) {
+    void edt(String what, Runnable work, Runnable then) {
         SwingUtilities.invokeLater(() -> {
             try {
                 if (!closing) {
@@ -2141,6 +2167,7 @@ public final class GpuLobbyWindow {
         if (active == this || active == null || active.gui != gui) {
             gui.lobbyCommands().camoPicker(null);
         gui.lobbyCommands().unitConfigurator(null);
+        gui.lobbyCommands().asks(null);
         }
         gui.getClient().getGame().removeGameListener(gameListener);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);

@@ -3331,49 +3331,7 @@ public class ClientGUI extends AbstractClientGUI
             File unitFile = dlgLoadList.getSelectedFile();
 
             try {
-                // Read the units from the file.
-                final MULParser parser = new MULParser(unitFile,
-                      (GameOptions) getClient().getGame().getOptions());
-                if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
-                    return;
-                }
-                final Vector<Entity> loadedUnits = parser.getEntities();
-
-                // in the Lounge, set default deployment to "Before Game Start", round 0
-                // but in a game in-progress, deploy at the start of next round
-                final int deployRound = client.getGame().getRoundCount() + ((client.getGame().getPhase()
-                      == GamePhase.LOUNGE) ? 0 : 1);
-
-                // Add the units from the file.
-                for (Entity entity : loadedUnits) {
-                    entity.setOwner(player);
-                    if (reinforce) {
-                        entity.setDeployRound(deployRound);
-                        entity.setGame(client.getGame());
-                        // Set these to true, otherwise units reinforced in
-                        // the movement turn are considered selectable
-                        entity.setDone(true);
-                        entity.setUnloaded(true);
-                        if (entity instanceof IBomber && (client.getGame().getPhase() != GamePhase.LOUNGE)) {
-                            // Only apply bombs when we're going straight into the game; doing this in the
-                            // lounge
-                            // breaks the bombs completely.
-                            ((IBomber) entity).applyBombs();
-                        }
-                    }
-                }
-
-                if (!loadedUnits.isEmpty()) {
-                    client.sendAddEntity(loadedUnits);
-                    String msg = client.getLocalPlayer()
-                          + " loaded MUL file for player: "
-                          + player.getName()
-                          + " ["
-                          + loadedUnits.size()
-                          + " units]";
-                    client.sendServerChat(Player.PLAYER_NONE, msg);
-                    addedUnits = true;
-                }
+                addedUnits = loadUnitFile(player, unitFile, reinforce) > 0;
             } catch (Exception ex) {
                 logger.error(ex, "loadListFile");
                 doAlertDialog(Messages.getString("ClientGUI.errorLoadingFile"), ex.getMessage());
@@ -3389,6 +3347,64 @@ public class ClientGUI extends AbstractClientGUI
             doAlertDialog(Messages.getString("ClientGUI.errorLoadingFile"),
                   Messages.getString("ClientGUI.errorSelectingPlayer"));
         }
+    }
+
+    /**
+     * Loads the MegaMek Unit List {@code unitFile} onto {@code player}, as Load List does once a file is chosen, for a
+     * caller that chose the file itself.
+     *
+     * @return how many units were added, or -1 when the file's version was refused
+     *
+     * @throws Exception when the file cannot be read
+     */
+    public int loadListFile(Player player, File unitFile) throws Exception {
+        return loadUnitFile(player, unitFile, false);
+    }
+
+    private int loadUnitFile(Player player, File unitFile, boolean reinforce) throws Exception {
+        // Read the units from the file.
+        final MULParser parser = new MULParser(unitFile,
+              (GameOptions) getClient().getGame().getOptions());
+        if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
+            return -1;
+        }
+        final Vector<Entity> loadedUnits = parser.getEntities();
+
+        // in the Lounge, set default deployment to "Before Game Start", round 0
+        // but in a game in-progress, deploy at the start of next round
+        final int deployRound = client.getGame().getRoundCount() + ((client.getGame().getPhase()
+              == GamePhase.LOUNGE) ? 0 : 1);
+
+        // Add the units from the file.
+        for (Entity entity : loadedUnits) {
+            entity.setOwner(player);
+            if (reinforce) {
+                entity.setDeployRound(deployRound);
+                entity.setGame(client.getGame());
+                // Set these to true, otherwise units reinforced in
+                // the movement turn are considered selectable
+                entity.setDone(true);
+                entity.setUnloaded(true);
+                if (entity instanceof IBomber && (client.getGame().getPhase() != GamePhase.LOUNGE)) {
+                    // Only apply bombs when we're going straight into the game; doing this in the
+                    // lounge
+                    // breaks the bombs completely.
+                    ((IBomber) entity).applyBombs();
+                }
+            }
+        }
+
+        if (!loadedUnits.isEmpty()) {
+            client.sendAddEntity(loadedUnits);
+            String msg = client.getLocalPlayer()
+                  + " loaded MUL file for player: "
+                  + player.getName()
+                  + " ["
+                  + loadedUnits.size()
+                  + " units]";
+            client.sendServerChat(Player.PLAYER_NONE, msg);
+        }
+        return loadedUnits.size();
     }
 
     @Override

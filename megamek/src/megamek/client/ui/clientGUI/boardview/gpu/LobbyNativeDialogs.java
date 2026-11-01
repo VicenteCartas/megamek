@@ -8,27 +8,39 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomMapForm;
+import megamek.client.lobby.RandomNamesForm;
+import megamek.client.lobby.RandomSkillsForm;
+import megamek.client.lobby.TrainOrderForm;
+import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.common.icons.Camouflage;
+import megamek.common.units.Entity;
 
 /**
  * The single entry point of the lobby's libGDX dialogs, as {@link LobbyDialogs} is of its Swing ones: the camo chooser,
- * the player settings, the bot setup, the planetary conditions, the game options, the random map settings, the odd-sized board warning, a
- * message and a confirmation. A
+ * the player settings, the bot setup, the planetary conditions, the game options, the random map settings, the
+ * odd-sized board warning, the victory conditions, the random army, skills and names, the unit readout and a help
+ * document, the small prompts ({@link LobbyPromptViews}), a message and a confirmation. A
  * dialog shows over the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo
  * chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
  * and a confirmation go over it, as the player settings' Bot settings opens the bot setup or hiding a rule category
@@ -57,6 +69,10 @@ final class LobbyNativeDialogs {
     private LobbyConditionsView conditionsView;
     private LobbyGameOptionsView optionsView;
     private LobbyRandomMapView randomMapView;
+    private LobbyVictoryView victoryView;
+    private LobbyRandomArmyView randomArmyView;
+    private LobbyCrewToolsView crewView;
+    private LobbyReadoutView readoutView;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -159,6 +175,109 @@ final class LobbyNativeDialogs {
               host, this::close);
         show(dialog);
         return optionsView;
+    }
+
+    /** Opens the victory conditions as objective cards. */
+    LobbyVictoryView victory(VictoryConditionsForm form, LobbyVictoryView.Host host) {
+        UiDialog dialog = begin(Messages.getString("VictoryConditionsDialog.title"), "dialog.lg", false,
+              () -> victoryView = null);
+        victoryView = new LobbyVictoryView(kit, dialog, form, bodyWidth(dialog, "dialog.lg"), host, this::close);
+        show(dialog);
+        return victoryView;
+    }
+
+    /** Opens the random army, as wide as the game options; {@code sprites} has the units' sprites drawn so far. */
+    LobbyRandomArmyView randomArmy(RandomArmyForm form, Function<String, Drawable> sprites,
+          LobbyRandomArmyView.Host host) {
+        UiDialog dialog = begin(Messages.getString("Lobby.randomArmy.title"), OPTIONS_WIDTH, false,
+              () -> randomArmyView = null);
+        randomArmyView = new LobbyRandomArmyView(kit, dialog, form, bodyWidth(dialog, OPTIONS_WIDTH), sprites, host,
+              this::close);
+        show(dialog);
+        return randomArmyView;
+    }
+
+    /** Opens the random skills. */
+    LobbyCrewToolsView skills(RandomSkillsForm form, LobbyCrewToolsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("Lobby.skills.title"), "dialog.sm", false, () -> crewView = null);
+        crewView = LobbyCrewToolsView.skills(kit, dialog, form, host, this::close);
+        show(dialog);
+        return crewView;
+    }
+
+    /** Opens the random names. */
+    LobbyCrewToolsView names(RandomNamesForm form, LobbyCrewToolsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("RandomNameDialog.title"), "dialog.sm", false,
+              () -> crewView = null);
+        crewView = LobbyCrewToolsView.names(kit, dialog, form, host, this::close);
+        show(dialog);
+        return crewView;
+    }
+
+    /** Opens the dossiers of one or more units. */
+    LobbyReadoutView readout(List<LobbyReadoutView.Dossier> dossiers) {
+        String title = dossiers.size() == 1 ? dossiers.get(0).name() : Messages.getString("Lobby.readout.title");
+        UiDialog dialog = begin(title, "dialog.lg", false, () -> {
+            readoutView.dispose();
+            readoutView = null;
+        });
+        readoutView = new LobbyReadoutView(kit, dialog, dossiers, motion, this::close);
+        show(dialog);
+        return readoutView;
+    }
+
+    /** Shows a help document's rows over whatever shows, as the bot setup's help. */
+    LobbyReadoutView help(String title, List<EntityReadout.Row> rows) {
+        UiDialog dialog = begin(title, "dialog.lg", true, () -> {
+            readoutView.dispose();
+            readoutView = null;
+        });
+        readoutView = new LobbyReadoutView(kit, dialog,
+              List.of(new LobbyReadoutView.Dossier(title, "", null, List.of(rows))), motion, this::close);
+        show(dialog);
+        return readoutView;
+    }
+
+    /** Asks for a force designation over whatever shows. */
+    UiDialog forceName(ForceNameRequest request, LobbyPromptViews.Edt edt, Consumer<String> chosen) {
+        UiDialog dialog = begin(Messages.getString("ChatLounge.forceName.title"), "dialog.sm", true, () -> { });
+        LobbyPromptViews.forceName(kit, dialog, request, edt, chosen, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Asks for a squadron designation over whatever shows. */
+    UiDialog squadron(LobbyPromptViews.Edt edt, Consumer<String> chosen) {
+        UiDialog dialog = begin(Messages.getString("Lobby.prompt.squadronTitle"), "dialog.sm", true, () -> { });
+        LobbyPromptViews.squadron(kit, dialog, edt, chosen, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows a Battlefield Support Asset's crew over whatever shows. */
+    UiDialog assetCrew(AssetForm form, LobbyPromptViews.Edt edt, Runnable applied) {
+        UiDialog dialog = begin(Messages.getString("BattlefieldSupportAssetConfigDialog.title"), "dialog.sm", true,
+              () -> { });
+        LobbyPromptViews.assetCrew(kit, dialog, form, edt, applied, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows a Battlefield Support Asset's damage over whatever shows. */
+    UiDialog assetDamage(AssetForm form, LobbyPromptViews.Edt edt, Runnable applied) {
+        UiDialog dialog = begin(Messages.getString("BattlefieldSupportAssetDamageDialog.title"), "dialog.sm", true,
+              () -> { });
+        LobbyPromptViews.assetDamage(kit, dialog, form, edt, applied, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Asks for a train's order over whatever shows. */
+    UiDialog trainOrder(TrainOrderForm form, LobbyPromptViews.Edt edt, Consumer<List<Entity>> ordered) {
+        UiDialog dialog = begin(Messages.getString("TrainOrderDialog.title"), "dialog.sm", true, () -> { });
+        LobbyPromptViews.trainOrder(kit, dialog, form, edt, ordered, this::close);
+        show(dialog);
+        return dialog;
     }
 
     /** Asks {@code text} over whatever shows; {@code yes} runs once OK closed it, and Cancel only closes it. */
@@ -305,6 +424,22 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyRandomMapView randomMapView() {
         return randomMapView;
+    }
+
+    @Nullable LobbyVictoryView victoryView() {
+        return victoryView;
+    }
+
+    @Nullable LobbyRandomArmyView randomArmyView() {
+        return randomArmyView;
+    }
+
+    @Nullable LobbyCrewToolsView crewView() {
+        return crewView;
+    }
+
+    @Nullable LobbyReadoutView readoutView() {
+        return readoutView;
     }
 
     /** The top dialog, or null. */

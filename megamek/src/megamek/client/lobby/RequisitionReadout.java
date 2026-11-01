@@ -28,7 +28,7 @@ public final class RequisitionReadout {
     private static final Pattern TOKEN = Pattern.compile("<(/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>|<!--.*?-->|([^<]+)",
           Pattern.DOTALL);
     private static final Pattern ENTITY = Pattern.compile("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);");
-    private static final Pattern HIDDEN = Pattern.compile("<(head|script|style)[^>]*>.*?</\\1>",
+    private static final Pattern HIDDEN = Pattern.compile("<(head|script|style)[^>]*>.*?</\\1>|<![a-zA-Z][^>]*>",
           Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
     private RequisitionReadout() { }

@@ -161,6 +161,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** The developer switch's run through the unit bay, or null. */
     private LobbyUnitBayProbe bayProbe;
     private LobbyMapSetupProbe mapProbe;
+    private LobbyToolsProbe toolsProbe;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -258,6 +259,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         c3Probe = LobbyC3Probe.of(probe);
         bayProbe = LobbyUnitBayProbe.of(probe);
         mapProbe = LobbyMapSetupProbe.of(probe);
+        toolsProbe = LobbyToolsProbe.of(probe);
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -696,8 +698,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             eldest.remove();
             entry.getValue().getRegion().getTexture().dispose();
             requisition.spriteForgotten(entry.getKey());
+            randomArmySprite(entry.getKey());
         }
         requisition.spriteArrived(key);
+        randomArmySprite(key);
+    }
+
+    /** Shows the random army's cards of the unit {@code key} with its sprite as now drawn, or none. */
+    private void randomArmySprite(String key) {
+        LobbyRandomArmyView army = nativeDialogs == null ? null : nativeDialogs.randomArmyView();
+        if (army != null) {
+            army.spriteArrived(key);
+        }
+    }
+
+    /** The Requisition's sprites drawn so far, by {@link LobbyRequisitionPanel#spriteKey}. */
+    @Nullable TextureRegionDrawable requisitionSprite(String key) {
+        return requisitionSprites.get(key);
     }
 
     /** The battlefield column's actions, which the window runs on the Swing thread. */
@@ -848,6 +865,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (stage != null) {
             closeMenus();
             nativeDialogs.message(title, text);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then has {@code open} open one of the lobby's libGDX dialogs. */
+    void nativeDialog(Consumer<LobbyNativeDialogs> open) {
+        if (stage != null) {
+            closeMenus();
+            open.accept(nativeDialogs);
         }
     }
 
@@ -1424,6 +1449,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             LobbyUnitBayProbe run = bayProbe;
             run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeConfigure(run.multi())),
                   unitBay);
+        }
+        if (toolsProbe != null) {
+            LobbyToolsProbe run = toolsProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeTool(run.tool())),
+                  nativeDialogs);
         }
         if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
             ProbeClick click = gmClicks.removeFirst();

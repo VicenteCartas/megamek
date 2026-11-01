@@ -1000,10 +1000,42 @@ work for Swing, and item 11 is under investigation.
        warning's "Don't show again"). Live: the probe's `lobby+mapsetup` and `lobby+randommap`, with
        `+mapclick=...` to click named controls; the log shows the setup after each click and the server's map
        settings at the end. MekHQ and MegaMekLab compile.
-     - Still open after #34, for a later round once #33 and #34 are merged:       - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,
-         the load list, the Princess help, the unit readout and the remaining prompts through `SwingLobbyPrompts`.
-       - L18 File choosers: game options, loadouts, unit lists and map setups open the system file dialog (as the
-         start screen does) instead of a Swing chooser.
+     - ~~L17 Lobby dialogs~~. The other dialogs and prompts the libGDX lobby opened are native, through
+       `LobbyNativeDialogs`, with `GpuLobbyTools` as their EDT controller:
+       - Victory Conditions (the Battlefield column's Change) shows objective cards, one per master switch (Battle
+         Value destroyed and ratio, turn limit, kill count, objectives) with its values, and a General card; a card's
+         switch arms its fields, numbers keep `VictoryOptionLayout`'s bounds, and OK sends the changed options (with
+         the server password) and saves them as the last used ones, as `VictoryConditionsDialog` did.
+       - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
+         the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
+         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. Advanced opens the Swing dialog for
+         its other tabs (BV- and force-generator armies). The tables load on a thread of their own; the lobby waits
+         for them.
+       - Random skills and random names are small cards over the lobby with the Swing dialogs' choices (client,
+         method, type, level, force close; faction, female share, ethnicity), Save and Randomize.
+       - Load list opens the system file dialog through L16's `SystemFileDialog`, and
+         `ClientGUI.loadListFile(Player, File)` loads the list as before.
+       - The unit readout (unit menu View, BV and Cost) is a dossier: the sprite, name and line, tabs for the summary,
+         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help shows the
+         bot documentation as rows in the same view.
+       - `LobbyCommands` asks through `LobbyAsks`, an asynchronous version of `LobbyPrompts` set with
+         `LobbyCommands.asks(...)`, as L15's unit configurator is; with none set, as in MekHQ and MegaMekLab,
+         `LobbyAsks.of(prompts)` answers through the blocking prompts and `SwingLobbyPrompts` runs as before. The
+         libGDX lobby's asks are native for the error and ready-blocked messages, confirmations, force and squadron
+         names (the force name with suggestion chips), a Battlefield Support Asset's crew and damage, and the train
+         order.
+       - Still Swing, through `LobbyDialogs` or `SwingLobbyPrompts`: Add Unit (the Requisition supersedes it), the
+         unit damage editor (`UnitEditorDialog`), the SBF and Alpha Strike stats, the unit's sprite and camo picker,
+         the bot facing and role, the GIF recording consent and the auto-resolve dialogs; the readout has no Alpha
+         Strike card or faction tab and does not update while open.
+       Checks: `VictoryConditionsFormTest`, `RandomArmyFormTest`, `RandomSkillsFormTest`, `RandomNamesFormTest`,
+       `TrainOrderFormTest`, `AssetFormTest` and `LobbyAsksTest`; the on-demand `LobbyDialogsL17SmokeTest` (victory
+       switch and count, roll, keep, discard and add, skills save, readout units, the prompts' suggestion, stepper and
+       order buttons). Live: `lobby+victory`, `+randomarmy`, `+skills`, `+names`, `+readout`, `+princesshelp` and
+       `+prompt=name`, with `+click=name,name` (see `LobbyToolsProbe`).
+     - Still open after #34, for a later round once #33 and #34 are merged:
+       - L18 File choosers: game options, loadouts and bot presets open the system file dialog (as the start
+         screen, the load list and the map setups do) instead of a Swing chooser.
        - Live checks still to do: a real MekHQ game, a network reconnect, saving and loading game options and bot
          presets through the real file chooser and a password-protected game. A second human player was checked
          for the Game Master seat (a windowless client); a second MegaMek window remains to try.

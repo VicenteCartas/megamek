@@ -153,8 +153,8 @@ import org.lwjgl.glfw.GLFW;
  *     log tells where the dialog stands against the window, then, as the probe closes it, whether the lobby has its
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
- *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3} (now the native C3 network manager, on the stage), {@code randomarmy}, {@code skills},
- *     {@code names}, {@code loadlist}, {@code alert} and {@code settings} (Client Settings, through a click on the top
+ *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3} (now the native C3 network manager, on the
+ *     stage), {@code randomarmy}, {@code skills}, {@code names}, {@code loadlist}, {@code alert} and {@code settings} (Client Settings, through a click on the top
  *     bar's gear). The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
  *     {@code playersettings}, {@code botconfig}, {@code addbot}, {@code conditions} and {@code gameoptions}) open on
  *     the stage instead, where the probe clicks through them: a colour camo for {@code camo}, the SE start and an
@@ -163,7 +163,11 @@ import org.lwjgl.glfw.GLFW;
  *     {@code +targets} a force and a hex on the targets tab; two steps down the light and one down the weather for
  *     {@code conditions}; a search for double blind and its check box for {@code gameoptions}; it saves the frame
  *     buffer, presses OK, and logs what the next snapshot shows, the battlefield's conditions and notable rules
- *     among it.</li>
+ *     among it. Since L17 {@code victory}, {@code randomarmy}, {@code skills} and {@code names} open their libGDX
+ *     views and {@code loadlist} the system's file dialog; the pages below probe those views.</li>
+ *     <li>{@code lobby+victory}, {@code +randomarmy}, {@code +skills}, {@code +names}, {@code +readout},
+ *     {@code +princesshelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
+ *     {@link LobbyToolsProbe}.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
