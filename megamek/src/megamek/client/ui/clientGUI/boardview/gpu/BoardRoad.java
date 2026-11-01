@@ -106,10 +106,8 @@ final class BoardRoad {
     private int meetings;
     /** Of those, the sides where a paved road ends square on its border: a construction edge (#meet). */
     private int squared;
-    /** Sides where a dirt road runs on into another's hex, whose own coat draws the track there (#meet). */
+    /** Sides where a loose road runs on into another's hex, whose own coat draws the track there (#meet). */
     private int tracked;
-    /** Sides where a road joins a bridge's deck: their paint lies on separate supports (#meet). */
-    private int apart;
     /** The paved roads a loose one meets, and the gores it fills between arms into one of them, as corner lists. */
     private List<BoardRoad> paved = List.of();
     private List<float[]> mouths = List.of();
@@ -298,14 +296,11 @@ final class BoardRoad {
             var next = scene.neighbor(tile, d);
             if ((tile.roadExits() & 1 << d) == 0 || next == null) { continue; }
             if (BoardSurface.connectingBridge(tile, next, d) != null
-                  || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null) {
-                apart |= 1 << d;
-                continue;
-            }
+                  || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null) { continue; }
             if (next.elevation() != tile.elevation() || !rendered(next) || (next.roadExits() & 1 << (d + 3) % 6) == 0) {
                 continue;
             }
-            if (tile.road() == Kind.DIRT && next.road() == Kind.DIRT) { tracked |= 1 << d; }
+            if (loose && !paved(next.road())) { tracked |= 1 << d; }
             if (paved(next.road()) == loose) {
                 meetings |= 1 << d;
                 if (loose) { roads.add(of(scene, next)); }
@@ -335,13 +330,13 @@ final class BoardRoad {
     /** Whether this road meets a road of the other family through the join's side (#meet). */
     boolean meets(Join join) { return (meetings & 1 << join.direction()) != 0; }
 
-    /** Whether the join's other road lies on a bridge's deck, or this one does on its ground's side (#meet). */
-    boolean apart(Join join) { return (apart & 1 << join.direction()) != 0; }
+    /** Whether a loose road runs on through the join's side into another loose road's hex at its level (#trackedHexes). */
+    boolean tracked(Join join) { return (tracked & 1 << join.direction()) != 0; }
 
     /**
-     * The hexes, in this road's tile pixels, of the dirt roads it runs on into (#meet). Each one's own coat draws the
-     * track over its hex, measured from its own course; this one's paint stops at their border, so the two never
-     * overlap with two measures of where across the road a point lies.
+     * The hexes, in this road's tile pixels, of the loose roads (dirt or gravel) it runs on into (#meet). Each one's own
+     * coat draws the track over its hex, measured from its own course; this one's paint stops at their border, so the
+     * two never overlap with two measures of where across the road a point lies.
      */
     Area trackedHexes() {
         Area result = new Area();
@@ -1269,7 +1264,6 @@ final class BoardRoad {
         result.meetings = meetings;
         result.squared = squared;
         result.tracked = tracked;
-        result.apart = apart;
         result.paved = paved;
         result.mouths = mouths;
         return result;
@@ -1380,12 +1374,6 @@ final class BoardRoad {
     /** Canonical source for a shared footprint, preventing repeated blended paint on neighbouring support cells. */
     Coords owner() { return circle == null ? coords : circle.owner; }
     List<Join> joins() { return joins; }
-
-    /** Symmetric feathering changes tyre wear intensity, never the axle spacing or tyre width. */
-    float wheelCoverage(float x, float y) {
-        float t = Math.clamp((TRACK_HALF_WIDTH - Math.abs(laneOffset(x, y) - WHEEL_OFFSET)) / TRACK_HALF_WIDTH, 0, 1);
-        return t * t * (3 - 2 * t);
-    }
 
     /** How far a point lies from the centre line of its lane, whichever side. */
     private float laneOffset(float x, float y) {
@@ -2053,33 +2041,5 @@ final class BoardRoad {
             }
         }
         return null;
-    }
-
-    /** Each lane's two worn wheel courses remain legible where unsealed soil matches the surrounding sand. */
-    Area tracks(int exits) {
-        Area result = new Area();
-        for (var points : paintPaths()) {
-            int[] lanes = points.stream().allMatch(p -> laneCenter(p.width) == 0) ? new int[] { 0 } : new int[] { -1, 1 };
-            for (int lane : lanes) {
-                for (int side : new int[] { -1, 1 }) {
-                    Path2D.Float path = new Path2D.Float();
-                    for (int i = 0; i < points.size(); i++) {
-                        Point p = points.get(i), before = points.get(Math.max(0, i - 1));
-                        Point after = points.get(Math.min(points.size() - 1, i + 1));
-                        float dx = after.x - before.x, dy = after.y - before.y;
-                        float length = (float) Math.hypot(dx, dy);
-                        float offset = lane * laneCenter(p.width) + side * WHEEL_OFFSET;
-                        float x = p.x - dy / length * offset, y = p.y + dx / length * offset;
-                        if (i == 0) { path.moveTo(x, y); } else { path.lineTo(x, y); }
-                    }
-                    Area track = new Area(new BasicStroke(2 * TRACK_HALF_WIDTH, BasicStroke.CAP_BUTT,
-                          BasicStroke.JOIN_ROUND).createStrokedShape(path));
-                    clipEnds(track, side < 0 ? -2 : 0);
-                    result.add(track);
-                }
-            }
-        }
-        if (Integer.bitCount(exits) > 2) { result.subtract(new Area(new Ellipse2D.Float(-10, -10, 20, 20))); }
-        return result;
     }
 }

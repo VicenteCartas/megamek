@@ -40,11 +40,10 @@ class BoardRoadRailTest {
         assertTrue(road.medianLines().contains(BoardRoad.MEDIAN_HALF + .4f, 20));
         assertFalse(road.markings(AT, 9).contains(0, 20), "No dashes under the central track");
         for (float tyre : new float[] { lane - 3, lane + 3 }) {
-            assertEquals(1, road.wheelCoverage(tyre, 20), .001f);
-            assertTrue(road.tracks(9).contains(tyre, 20));
+            assertEquals(BoardRoad.WHEEL_OFFSET / (BoardRoad.Kind.PAVED.halfWidth / 2), road.wearLane(tyre, 20), .001f,
+                  "Each lane's wheel paths keep their axle spacing beside the ballast");
         }
-        assertEquals(0, road.wheelCoverage(3, 20), .001f, "Unsealed wheel wear stays outside the ballast");
-        assertEquals(0, road.wheelCoverage(lane, 20), .001f, "The lane centre stays between the tyres");
+        assertEquals(0, road.wearLane(lane, 20), .001f, "The lane centre stays between the tyres");
         assertEquals(0, BoardRoad.clearance(AT, 9, new RailRoute.Corridor(9, 0, 0)).distance(BoardRoad.CORRIDOR_HALF, y), .02f);
     }
 

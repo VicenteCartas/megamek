@@ -109,11 +109,13 @@ final class GpuTerrainLayer {
     }
 
     /**
-     * One atlas page can blend all road coats in index order. With multiple pages, each coat needs its own sort
-     * layer: drawing a whole gravel/markings page before or after a whole asphalt page cannot preserve both.
+     * One atlas page can blend all road coats in index order. With multiple pages, or coats drawn apart from the
+     * merged ones (a sand verge's maps are no sculpt layer), each coat needs its own sort layer: drawing a whole
+     * gravel/markings page before or after a whole asphalt page, or a verge after it, cannot preserve both.
      */
     private Map<Material, List<Shape>> roadGroups(Map<Material, List<Shape>> groups) {
-        if (groups.keySet().stream().filter(material -> material.has(GpuRoads.Coats.TYPE)).limit(2).count() < 2) {
+        if (groups.keySet().stream().noneMatch(material -> material.has(GpuRoads.Coats.TYPE))
+              || groups.keySet().stream().filter(material -> material.has(GpuRoads.Mask.TYPE)).limit(2).count() < 2) {
             return groups;
         }
         Map<Material, List<Shape>> result = new LinkedHashMap<>();
