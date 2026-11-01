@@ -370,6 +370,22 @@ vec2 paintWear(vec2 m, float pixel) {
 }
 
 void main() {
+    vec4 roadColor = v_color;
+    // Off its mask a fragment is discarded at the end: it keeps its neighbours' lanes through the material's filtering
+    // and fwidth, but skips the asphalt's wear and the lighting (whose derivatives are taken below, before them).
+    bool roadHidden = false;
+#ifdef roadMaskFlag
+    vec2 maskUV = v_roadMaskUV;
+    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
+    roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
+#if __VERSION__ >= 450
+    // A quad wholly off its mask draws nothing: it stops before the material. Fine derivatives make it the quad's
+    // decision (one shown lane keeps all four), so no lane below loses a neighbour its derivatives read.
+    float shown = roadHidden ? 0.0 : 1.0;
+    float row = shown + abs(dFdxFine(shown));
+    if (row + abs(dFdyFine(row)) == 0.0) discard;
+#endif
+#endif
     vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     // Before the mask's discard, like the face above.
     vec3 face = normalize(v_normal);
@@ -392,15 +408,6 @@ void main() {
     vec2 materialUV = uv;
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
     materialUV += roadParallax(m, uv, roadGradient, face, dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
-#endif
-    vec4 roadColor = v_color;
-    // Off its mask a fragment is discarded at the end: it keeps its neighbours' lanes through the material's filtering
-    // and fwidth, but skips the asphalt's wear and the lighting (whose derivatives were taken above).
-    bool roadHidden = false;
-#ifdef roadMaskFlag
-    vec2 maskUV = v_roadMaskUV;
-    roadColor = texture(u_roadMask, v_roadMaskRegion.xy + maskUV * v_roadMaskRegion.zw);
-    roadHidden = any(lessThan(maskUV, vec2(0.0))) || any(greaterThan(maskUV, vec2(1.0))) || roadColor.a < .002;
 #endif
     vec3 tint = roadColor.rgb;
     if (m.mapped && (m.transition > .5 || m.transition < -1.5)) { tint = vec3(1.0); }
