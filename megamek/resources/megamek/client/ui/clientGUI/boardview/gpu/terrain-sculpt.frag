@@ -92,26 +92,31 @@ layout(std140) uniform MaterialCachePages {
     ivec4 cachePages[1020];
 };
 
-// The cached material at a world point (metres): colour and height; the mean of the unit normals (its length l is
-// their agreement); cavity, relief and their mean alpha^2. The page's own mips are the close view's material averaged
-// (colour, height, cavity and relief sharpened so the trilinear read lands on the plain average): they filter it
-// trilinearly and anisotropically from this pixel's derivatives.
-vec4 cachedMaterial(vec3 world, vec3 worldDx, vec3 worldDy, out vec3 meanNormal, out vec3 detail) {
-    vec2 cell = (world.xy - cacheGrid.xy) / cacheGrid.z;
+// The cached material at a point of the pages' plane (metres: a top's XY, or a wall's chart): colour and height;
+// the mean of the unit normals (its length l is their agreement); cavity, relief and their mean alpha^2. The page's
+// own mips are the close view's material averaged (colour, height, cavity and relief sharpened so the trilinear read
+// lands on the plain average): they filter it trilinearly and anisotropically from this pixel's derivatives.
+vec4 cachedMaterial(vec2 at, vec2 atDx, vec2 atDy, out vec3 meanNormal, out vec3 detail) {
+    vec2 cell = (at - cacheGrid.xy) / cacheGrid.z;
     ivec2 page = clamp(ivec2(floor(cell)), ivec2(0), ivec2(cacheWindow.xy) - 1);
     int index = page.y * int(cacheWindow.x) + page.x;
     int entry = cachePages[index >> 2][index & 3];
     float size = cacheGrid.z * exp2(float(entry >> 12));
     float interior = cacheGrid.w - 2.0 * cacheWindow.z;
-    vec3 uv = vec3((cacheWindow.z + fract(world.xy / size) * interior) / cacheGrid.w, float(entry & 4095));
+    vec3 uv = vec3((cacheWindow.z + fract(at / size) * interior) / cacheGrid.w, float(entry & 4095));
     // Explicit gradients: a quad that straddles two pages keeps its footprint.
     float scale = interior / (size * cacheGrid.w);
-    vec2 dx = worldDx.xy * scale, dy = worldDy.xy * scale;
+    vec2 dx = atDx * scale, dy = atDy * scale;
     vec4 moments = textureGrad(u_cacheMoments, uv, dx, dy);
+    // A pixel on a sliver narrower than a texel may find no texel the fill covered around it: the page's coarsest mip,
+    // whose texels take in its neighbours, stands in there.
+    bool covered = moments.a >= 1.0 / 255.0;
+    if (!covered) moments = textureLod(u_cacheMoments, uv, 2.0);
     float coverageScale = 1.0 / max(moments.a, 1e-4);
     meanNormal = vec3(moments.xy * 2.0 - moments.a, moments.z) * coverageScale;
-    detail = textureGrad(u_cacheDetail, uv, dx, dy).xyz * coverageScale;
-    return textureGrad(u_cacheColour, uv, dx, dy) * coverageScale;
+    detail = (covered ? textureGrad(u_cacheDetail, uv, dx, dy) : textureLod(u_cacheDetail, uv, 2.0)).xyz
+          * coverageScale;
+    return (covered ? textureGrad(u_cacheColour, uv, dx, dy) : textureLod(u_cacheColour, uv, 2.0)) * coverageScale;
 }
 
 // The GGX alpha^2 of texels whose unit normals average to length l: their own mean alpha^2 plus their spread, which a
@@ -122,6 +127,19 @@ float filteredAlpha2(float alpha2, float l) {
     float l2 = l * l;
     float spread = l2 < 1.0 ? (1.0 - l2) / max(2.0 * l * (3.0 - l2), 1e-6) : 0.0;
     return clamp(alpha2 + spread, 0.0, 1.0);
+}
+#endif
+#ifdef wallChartFlag
+// A charted wall (GpuMaterialCache.Charts): its point in its chart (world units in the cache's wall region), where the
+// fill draws it flat and the cached-lit program reads it.
+in vec2 v_wallChart;
+
+// The frame a wall's cached normal is kept in, the same in the fill and the read: across the wall, up it and out of it,
+// from its smooth normal (one facing straight up takes X across).
+mat3 wallFrame(vec3 face) {
+    vec3 across = cross(vec3(0.0, 0.0, 1.0), face);
+    across = dot(across, across) > 1e-6 ? normalize(across) : vec3(1.0, 0.0, 0.0);
+    return mat3(across, cross(face, across), face);
 }
 #endif
 
@@ -311,6 +329,9 @@ void main() {
     float steps = shore ? (tintByte - 16.0 * palette) / 2.0 : (v_color.a - .3) / .1;
     vec3 world = v_cloudPosition / u_metre;
     vec3 worldDx = dFdx(world), worldDy = dFdy(world);
+#if defined(wallChartFlag) && defined(materialCachedFlag)
+    vec2 chart = v_wallChart / u_metre, chartDx = dFdx(chart), chartDy = dFdy(chart);
+#endif
 #ifdef lightingFlag
     vec3 geometric = visibleFace(worldDx, worldDy, -viewDirection());
     terrainView = -viewDirection();
@@ -398,7 +419,12 @@ void main() {
 #ifdef materialCachedFlag
     // The canonical material the fill wrote for this top (cachedMaterial); the layers after it stay live.
     vec3 meanNormal, cachedDetail;
-    vec4 cachedColour = cachedMaterial(world, worldDx, worldDy, meanNormal, cachedDetail);
+#ifdef wallChartFlag
+    vec4 cachedColour = cachedMaterial(chart, chartDx, chartDy, meanNormal, cachedDetail);
+    meanNormal = wallFrame(face) * meanNormal;
+#else
+    vec4 cachedColour = cachedMaterial(world.xy, worldDx.xy, worldDy.xy, meanNormal, cachedDetail);
+#endif
     albedo = cachedColour.rgb;
     materialHeight = cachedColour.a;
     float meanLength = length(meanNormal);
@@ -726,6 +752,10 @@ void main() {
 #ifdef materialFillFlag
     // The fill stores the canonical material, premultiplied by full coverage, and stops before the live layers.
     vec3 unitNormal = normalize(normal);
+#ifdef wallChartFlag
+    // A wall keeps its normal in its own frame, which its chart's texels share (wallFrame).
+    unitNormal = transpose(wallFrame(face)) * unitNormal;
+#endif
     float alpha = finish.roughness * finish.roughness;
     fragColor = vec4(albedo, materialHeight);
     fillMoments = vec4(unitNormal.xy * .5 + .5, max(unitNormal.z, 0.0), 1.0);

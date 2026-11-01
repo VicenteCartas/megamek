@@ -151,6 +151,11 @@ final class GpuProgramCache {
         }
     }
 
+    /** Whether there is an entry for these stages; loading it can still find it damaged or rejected. */
+    boolean has(String key) {
+        return Files.isRegularFile(directory.resolve(key + ".bin"));
+    }
+
     /**
      * Loads the entry into the unlinked program on the current thread's context. False leaves the program to compile
      * from source: there is no entry, or a damaged or rejected one, which is deleted.

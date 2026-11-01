@@ -83,13 +83,25 @@ final class GpuSurfaceScars implements Disposable {
         return new VertexAttributes(attributes.toArray(VertexAttribute[]::new));
     }
 
-    /** The receiver's layout key (getMaskWithSizePacked) of a mesh's attributes: a patch's without its page UV. */
+    /**
+     * The receiver's layout key (getMaskWithSizePacked) of a mesh's attributes: a patch's without its page UV, and a
+     * charted wall's without its chart (GpuMaterialCache.CHART), which only the cache's own programs read (they tell
+     * walls apart themselves).
+     */
     static long receiverLayout(VertexAttributes attributes) {
-        int last = attributes.size() - 1;
-        if (last < 0 || !UV.equals(attributes.get(last).alias)) { return attributes.getMaskWithSizePacked(); }
         long mask = 0;
-        for (int i = 0; i < last; i++) { mask |= attributes.get(i).usage; }
-        return mask | (long) last << 32;
+        int count = 0;
+        for (int i = 0, end = attributes.size() - (patch(attributes) ? 1 : 0); i < end; i++) {
+            if (attributes.get(i).alias.equals(GpuMaterialCache.CHART)) { continue; }
+            mask |= attributes.get(i).usage;
+            count++;
+        }
+        return mask | (long) count << 32;
+    }
+
+    /** Whether a layout is a patch's: its receiver's, then the page UV. */
+    private static boolean patch(VertexAttributes attributes) {
+        return attributes.size() > 0 && UV.equals(attributes.get(attributes.size() - 1).alias);
     }
 
     /**
@@ -99,8 +111,7 @@ final class GpuSurfaceScars implements Disposable {
      */
     static Mesh layout(ShaderProgram program, Mesh mesh) {
         var attributes = mesh.getVertexAttributes();
-        if (mesh.isInstanced() || program.getAttributeLocation(UV) < 0 || receiverLayout(attributes)
-              != attributes.getMaskWithSizePacked()) { return null; }
+        if (mesh.isInstanced() || program.getAttributeLocation(UV) < 0 || patch(attributes)) { return null; }
         return new Mesh(Mesh.VertexDataType.VertexArray, true, 0, 0, attributes(attributes));
     }
 

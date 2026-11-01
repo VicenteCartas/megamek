@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Pixmap;
@@ -270,6 +271,32 @@ final class GpuWaterShader extends Attribute {
      * seamlessly, and mipmaps average the slopes, so distant water calms into a clean reflection instead of aliasing.
      */
     static Texture detailTexture() {
+        byte[] rgba = GpuAssets.joined(prepareDetail());
+        Pixmap pixels = new Pixmap(DETAIL_SIZE, DETAIL_SIZE, Pixmap.Format.RGBA8888);
+        try {
+            pixels.getPixels().put(0, rgba);
+            Texture texture = new Texture(pixels, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+            return texture;
+        } finally {
+            pixels.dispose();
+        }
+    }
+
+    /** {@link #detailTexture}'s RGBA bytes, the same for every terrain: computed once per process, on the common pool. */
+    private static CompletableFuture<byte[]> detailPixels;
+
+    /**
+     * Starts computing the detail maps on the common pool, once: a view calls it as it is made, before its window and
+     * GL context; its terrains take them.
+     */
+    static synchronized CompletableFuture<byte[]> prepareDetail() {
+        if (detailPixels == null) { detailPixels = GpuAssets.pooled(GpuWaterShader::detailBytes); }
+        return detailPixels;
+    }
+
+    private static byte[] detailBytes() {
         int size = DETAIL_SIZE;
         float[] slopeX = new float[size * size], slopeY = new float[size * size];
         Random random = new Random(0x7761746572L);
@@ -285,24 +312,16 @@ final class GpuWaterShader extends Attribute {
         float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
         for (float value : foam) { low = Math.min(low, value); high = Math.max(high, value); }
         float[] caustics = caustics(random, size);
-        Pixmap pixels = new Pixmap(size, size, Pixmap.Format.RGBA8888);
-        try {
-            ByteBuffer buffer = pixels.getPixels();
-            for (int i = 0; i < slopeX.length; i++) {
-                buffer.put(i * 4, unit(0.5f + 0.5f * slopeX[i] / range));
-                buffer.put(i * 4 + 1, unit(0.5f + 0.5f * slopeY[i] / range));
-                // Contrast leaves foam free to break into patches instead of a uniform haze.
-                float froth = (foam[i] - low) / (high - low);
-                buffer.put(i * 4 + 2, unit(froth * froth * (3 - 2 * froth)));
-                buffer.put(i * 4 + 3, unit(caustics[i]));
-            }
-            Texture texture = new Texture(pixels, true);
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            return texture;
-        } finally {
-            pixels.dispose();
+        byte[] rgba = new byte[size * size * 4];
+        for (int i = 0; i < slopeX.length; i++) {
+            rgba[i * 4] = unit(0.5f + 0.5f * slopeX[i] / range);
+            rgba[i * 4 + 1] = unit(0.5f + 0.5f * slopeY[i] / range);
+            // Contrast leaves foam free to break into patches instead of a uniform haze.
+            float froth = (foam[i] - low) / (high - low);
+            rgba[i * 4 + 2] = unit(froth * froth * (3 - 2 * froth));
+            rgba[i * 4 + 3] = unit(caustics[i]);
         }
+        return rgba;
     }
 
     /** Sums wave slopes as separable angle additions: two table lookups per wave and texel, no trigonometry. */

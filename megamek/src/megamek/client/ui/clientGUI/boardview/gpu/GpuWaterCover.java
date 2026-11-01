@@ -105,6 +105,28 @@ final class GpuWaterCover {
               : surfaces.computeIfAbsent(adjacent.coords(), key -> new BoardSurface(scene, adjacent));
     }
 
+    /**
+     * Whether water leaves a sculpted face whole and dry: none can clip it (clippingWater), or coveredPolygons hands it
+     * back as it is. One wholly under water comes back whole but tinted with its water optics, which its dry chart would
+     * lose. {@code coverage}: the clipping waters' covers, kept across faces.
+     */
+    static boolean whole(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
+          Map<Coords, BoardSurface> surfaces, Map<BoardSurface, GpuWaterCover> coverage) {
+        BoardSurface water = clippingWater(surface, face, scene, surfaces);
+        if (water == null) { return true; }
+        GpuWaterCover waters = coverage.computeIfAbsent(water, own -> coveringWaters(scene, own, surfaces));
+        List<List<MeshPartBuilder.VertexInfo>> pieces = new ArrayList<>();
+        coveredPolygons(surface, face, waters, pieces::add);
+        if (pieces.size() != 1 || pieces.getFirst().size() != 3) { return false; }
+        Vector3[] corners = { face.a(), face.b(), face.c() };
+        for (int i = 0; i < 3; i++) {
+            var vertex = pieces.getFirst().get(i);
+            var dry = GpuTerrain.sculptVertex(corners[i], surface.relief.shade(corners[i]), Float.NaN, surface);
+            if (!vertex.position.equals(corners[i]) || !vertex.color.equals(dry.color)) { return false; }
+        }
+        return true;
+    }
+
     /** One drawn water triangle and its clipping planes, derived once per hex for every face it may cover. */
     private record WaterTop(BoardSurface water, BoardSurface.Face top, float minX, float maxX, float minY, float maxY,
           float maxZ, float nx, float ny, float nz, float[] edges) {

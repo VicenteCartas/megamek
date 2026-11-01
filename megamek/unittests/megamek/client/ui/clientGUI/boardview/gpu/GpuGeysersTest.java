@@ -8,8 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
+import megamek.common.Hex;
+import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class GpuGeysersTest {
@@ -33,6 +40,23 @@ class GpuGeysersTest {
         assertTrue(GpuGeysers.emitter("scenery/geysers/water-erupting-b", transform, .84f).active());
         assertTrue(GpuGeysers.emitter("scenery/geysers/magma-b", transform, 1.85f).magma());
         assertNull(GpuGeysers.emitter("scenery/fluff/pool", transform, 0));
+    }
+
+    @Test
+    void eachHexPaintsTheApronOfTheLookItShows() {
+        for (String key : List.of("geyser_magma", "geyser_water_off", "geyser_water_on")) {
+            var layout = BoardSceneryLayouts.layout("scenery/saxarba/misc/" + key);
+            Set<Boolean> looks = new HashSet<>();
+            for (int x = 0; x < 8; x++) {
+                var features = BoardFeatures.features(layout, new Coords(x, 3), new Hex());
+                String model = features.stream().filter(f -> f.decoration() == null).findFirst().orElseThrow().asset();
+                String apron = features.stream().filter(f -> f.decoration() != null).findFirst().orElseThrow()
+                      .decoration().asset();
+                assertEquals(model.endsWith("-b"), apron.endsWith("-b"), key + " at x " + x);
+                looks.add(model.endsWith("-b"));
+            }
+            assertEquals(2, looks.size(), "Both looks occur");
+        }
     }
 
     @Test

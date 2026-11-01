@@ -348,6 +348,8 @@ final class GpuShaderEditor {
     private void reload() {
         Document document = selected();
         if (document == null) { return; }
+        // Programs built from disk afterwards read the files again too (GpuShaderSource#forget).
+        GpuShaderSource.forget();
         try {
             if (Files.exists(document.saved.destination())) {
                 document.saved = new GpuShaderSource.FileSource(Files.readString(document.saved.destination()),
@@ -372,6 +374,7 @@ final class GpuShaderEditor {
     }
 
     void reloadAllFromDisk() {
+        GpuShaderSource.forget();
         Map<String, GpuShaderSource.FileSource> loaded = new LinkedHashMap<>();
         try {
             var names = new java.util.TreeSet<>(sources.keySet());

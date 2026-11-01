@@ -29,9 +29,8 @@ import org.lwjgl.opengl.GL33;
  * it changes. A page at pyramid level v covers 2^v times the ground of a level-0 page in the owner's plane, and builds in
  * as many steps as its owner needs (one a budget unit). The owner names the pages it needs each frame and builds a page
  * when {@link #fill} asks; this class keeps the layers (the pages needed this frame pinned, the others out least
- * recently needed first), readiness, the shaders' page table (one std140 uniform block over one level, where a page
- * not ready stands in with its nearest ready coarser one) and the fill
- * budget.
+ * recently needed first), readiness, the shaders' page tables (each a std140 uniform block over a window of one
+ * level, where a page not ready stands in with its nearest ready coarser one) and the fill budget.
  * <p>
  * A page is ready once its last step has been issued for the current revision, in the layer it holds now; a layer handed
  * to another page never answers for the one before. A page marked {@link #invalidate stale} stays ready, serving its
@@ -48,9 +47,12 @@ final class GpuPageCache implements Disposable {
 
     static final int MORE = 0, DONE = 1, AGAIN = 2;
 
-    /** Which pages of a table's window a coarser ready page may stand in for while they build. */
+    /** Which pages of a table's window a coarser ready page may stand in for while they build, and which may serve. */
     interface StandIns {
         boolean allowed(int x, int y);
+
+        /** Whether ready page (x, y) of {@code level} may serve window page (wx, wy), itself or standing in. */
+        default boolean serves(int level, int x, int y, int wx, int wy) { return true; }
     }
 
     /**
@@ -61,6 +63,8 @@ final class GpuPageCache implements Disposable {
     static final int TABLE_HEADER_BYTES = 32;
     static final int TABLE_BYTES = TABLE_HEADER_BYTES + TABLE_ENTRIES * 4;
     static final int FALLBACK = 4096;
+    /** Page tables: one for each window the owner's shaders read (GpuMaterialCache: the tops' and the walls'). */
+    static final int TABLES = 2;
     /** The anisotropy a read may take: its footprint stays within the gutter at the levels it reads. */
     static final float MAX_ANISOTROPY = 4;
     /** The first fill's cost guess in nanoseconds of GPU time; measured fills replace it. */
@@ -75,7 +79,7 @@ final class GpuPageCache implements Disposable {
     private final ArrayDeque<Integer> free = new ArrayDeque<>();
     private final ByteBuffer table = BufferUtils.newByteBuffer(TABLE_BYTES);
     private final IntBuffer binding = BufferUtils.newIntBuffer(16);
-    private int buffer;
+    private final int[] buffers = new int[TABLES];
     private long frame, revision;
     // The fill budget: credit in nanoseconds of GPU time; per pyramid level, the cost one step is expected to take and
     // the last steps' costs, of which the estimate is the second largest (one stall does not throttle the fills that
@@ -91,7 +95,7 @@ final class GpuPageCache implements Disposable {
         final int level, x, y;
         int layer = -1, spare = -1, step;
         long revision = -1, needed;
-        boolean pinned, stale;
+        boolean pinned, stale, urgent;
 
         Page(int level, int x, int y) {
             this.level = level;
@@ -185,9 +189,11 @@ final class GpuPageCache implements Disposable {
             Gdx.gl.glViewport(viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
             Gdx.gl.glClearColor(clear.get(0), clear.get(1), clear.get(2), clear.get(3));
         }
-        buffer = Gdx.gl.glGenBuffer();
-        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffer);
-        Gdx.gl.glBufferData(GL31.GL_UNIFORM_BUFFER, TABLE_BYTES, null, GL20.GL_DYNAMIC_DRAW);
+        for (int i = 0; i < TABLES; i++) {
+            buffers[i] = Gdx.gl.glGenBuffer();
+            Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffers[i]);
+            Gdx.gl.glBufferData(GL31.GL_UNIFORM_BUFFER, TABLE_BYTES, null, GL20.GL_DYNAMIC_DRAW);
+        }
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
     }
 
@@ -249,7 +255,14 @@ final class GpuPageCache implements Disposable {
         }
         page.needed = frame;
         page.pinned = pinned;
+        page.urgent = false;
         needed.add(page);
+    }
+
+    /** Page (x, y) of {@code level}, stale and needed this frame, no longer serves: it builds with those not built. */
+    void urgent(int level, int x, int y) {
+        Page page = pages.get(pack(level, x, y));
+        if (page != null && page.needed == frame) { page.urgent = true; }
     }
 
     private boolean ready(Page page) { return page.layer >= 0 && page.revision == revision; }
@@ -268,10 +281,11 @@ final class GpuPageCache implements Disposable {
 
     /**
      * Builds the needed pages a step at a time, within this frame's share of {@code budget} nanoseconds of GPU time a
-     * frame, and before {@code cpuDeadline} (System.nanoTime): first those not ready, in their order, then the stale
-     * ones, which serve meanwhile. The budget is a target: the cost of a step is an estimate from earlier steps, a frame
-     * may take none, and credit carries over by up to one step so a step dearer than the budget still runs every few
-     * frames. True when it stopped for no budget: every needed page that could take a layer is built.
+     * frame, and before {@code cpuDeadline} (System.nanoTime): first those not ready and the urgent ones, in their
+     * order, then the other stale ones, which serve meanwhile. The budget is a target: the cost of a step is an
+     * estimate from earlier steps, a frame may take none, and credit carries over by up to one step so a step dearer
+     * than the budget still runs every few frames. True when it stopped for no budget: every needed page that could take
+     * a layer is built.
      */
     boolean fill(long budget, long cpuDeadline, Filler filler) {
         readTimings();
@@ -282,7 +296,7 @@ final class GpuPageCache implements Disposable {
         try {
             for (boolean staleOnes : new boolean[] { false, true }) {
                 for (Page page : needed) {
-                    if (staleOnes != page.stale) { continue; }
+                    if (staleOnes != (page.stale && !page.urgent)) { continue; }
                     while (!ready(page) || page.stale) {
                         long estimate = estimate(page.level);
                         if (credit < estimate || System.nanoTime() >= cpuDeadline) { return false; }
@@ -332,46 +346,46 @@ final class GpuPageCache implements Disposable {
     }
 
     /**
-     * Writes the page table for the window of {@code columns} x {@code rows} pages of pyramid level {@code level} from
-     * (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and pages
-     * {@code pageSize} of them: each page's layer, or for those {@code standIns} allows its {@link #entry}. False if the
-     * window holds more pages than the table.
+     * Writes page table {@code index} for the window of {@code columns} x {@code rows} pages of pyramid level
+     * {@code level} from (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and
+     * pages {@code pageSize} of them: each page's {@link #entry}. False if the window holds more pages than the table.
      */
-    boolean upload(int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
+    boolean upload(int index, int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
           float pageSize, StandIns standIns) {
-        if (buffer == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
+        if (buffers[index] == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
         table.clear();
         table.putFloat(originX).putFloat(originY).putFloat(pageSize).putFloat(texels);
         table.putFloat(columns).putFloat(rows).putFloat(gutter).putFloat(0);
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < columns; x++) {
-                table.putInt(standIns.allowed(x0 + x, y0 + y) ? entry(level, top, x0 + x, y0 + y)
-                      : layer(level, x0 + x, y0 + y));
+                table.putInt(entry(level, top, x0 + x, y0 + y, standIns));
             }
         }
         int used = table.position();
         table.flip();
-        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffer);
+        Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, buffers[index]);
         Gdx.gl.glBufferSubData(GL31.GL_UNIFORM_BUFFER, 0, used, table);
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
         return true;
     }
 
     /**
-     * Page (x, y) of {@code level}'s table entry: its layer while it can be read, else its nearest ready coarser page's
-     * up to {@code top} (that layer plus {@link #FALLBACK} times the levels up), else -1.
+     * Page (x, y) of {@code level}'s table entry: its layer while it can be read and serves, else, where
+     * {@code standIns} allows, its nearest coarser such page's up to {@code top} (that layer plus {@link #FALLBACK}
+     * times the levels up), else -1.
      */
-    int entry(int level, int top, int x, int y) {
-        for (int up = 0; level + up <= top; up++) {
+    int entry(int level, int top, int x, int y, StandIns standIns) {
+        int last = standIns.allowed(x, y) ? top : level;
+        for (int up = 0; level + up <= last; up++) {
             int layer = layer(level + up, x >> up, y >> up);
-            if (layer >= 0) { return layer + up * FALLBACK; }
+            if (layer >= 0 && standIns.serves(level + up, x >> up, y >> up, x, y)) { return layer + up * FALLBACK; }
         }
         return -1;
     }
 
-    /** Binds the page table to uniform block binding {@code binding}. */
-    void bindTable(int binding) {
-        if (buffer != 0) { Gdx.gl30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, binding, buffer); }
+    /** Binds page table {@code index} to uniform block binding {@code binding}. */
+    void bindTable(int index, int binding) {
+        if (buffers[index] != 0) { Gdx.gl30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, binding, buffers[index]); }
     }
 
     /**
@@ -447,7 +461,9 @@ final class GpuPageCache implements Disposable {
         for (int i = 0; i < arrays.length; i++) {
             if (arrays[i] != null) { arrays[i].dispose(); arrays[i] = null; }
         }
-        if (buffer != 0) { Gdx.gl.glDeleteBuffer(buffer); buffer = 0; }
+        for (int i = 0; i < TABLES; i++) {
+            if (buffers[i] != 0) { Gdx.gl.glDeleteBuffer(buffers[i]); buffers[i] = 0; }
+        }
         for (int[] query : queries) { GL15.glDeleteQueries(query[0]); }
         queries.clear();
         pages.clear();

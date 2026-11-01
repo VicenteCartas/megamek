@@ -169,20 +169,24 @@ class GpuCutoutTest {
 
     private record Extrusion(MeshBuilder caps, MeshBuilder sides) { }
 
+    /** With {@code bottom}, the artwork shows underneath as well; else the bottom cap goes elsewhere, as a meeple paints it. */
     private static Extrusion extrude(BufferedImage image, boolean bottom) {
         var caps = new MeshBuilder();
         var sides = new MeshBuilder();
+        var under = new MeshBuilder();
         long attributes = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal
               | VertexAttributes.Usage.TextureCoordinates;
         caps.begin(attributes, GL20.GL_TRIANGLES);
         sides.begin(attributes, GL20.GL_TRIANGLES);
+        under.begin(attributes, GL20.GL_TRIANGLES);
         var region = mock(TextureRegion.class);
         when(region.getU()).thenReturn(.2f);
         when(region.getU2()).thenReturn(.6f);
         when(region.getV()).thenReturn(.3f);
         when(region.getV2()).thenReturn(.9f);
-        int count = GpuCutout.extrude(new BoardScene.Pixels(image), region, Vector3.Zero, 1, 32, bottom, caps, sides);
-        assertEquals(caps.getNumVertices() + sides.getNumVertices(), count);
+        int count = GpuCutout.extrude(new BoardScene.Pixels(image), region, Vector3.Zero, 1, 32, caps, sides,
+              bottom ? caps : under);
+        assertEquals(caps.getNumVertices() + sides.getNumVertices() + under.getNumVertices(), count);
         return new Extrusion(caps, sides);
     }
 

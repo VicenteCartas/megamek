@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -15,13 +16,17 @@ import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.VertexAttribute;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
+import com.badlogic.gdx.math.Frustum;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -51,6 +56,10 @@ import org.lwjgl.opengl.GL31;
  * cached ({@link #material}) where every cache page under them can be read at that level, else directly; where the
  * storage cannot hold the view's pages, those furthest from its centre draw directly. Its storage follows the scene's
  * pixel count, within the video memory.
+ * <p>
+ * Steep natural walls, which no page seen from above can hold, are charted ({@link Charts}): each chunk's walls lie
+ * flat in its cell of a region of the same plane past the board's north edge, where their pages build, mip and stand in
+ * as the tops' do, at the levels up to {@link #WALL_TOP}, read through a second page table ({@link #WALL_BINDING}).
  */
 final class GpuMaterialCache {
     private static final MMLogger LOGGER = MMLogger.create(GpuMaterialCache.class);
@@ -83,6 +92,18 @@ final class GpuMaterialCache {
     private static final int ROOT_PAGES = 4, MAX_ROOT = 16;
     /** The uniform block binding of the page table (MaterialCachePages); no other program uses uniform blocks. */
     static final int BINDING = 1;
+    /** The walls' page table and its binding: a wall's cached-lit program reads MaterialCachePages there. */
+    private static final int WALL_TABLE = 1;
+    static final int WALL_BINDING = 2;
+    /**
+     * The coarsest level walls are read at: their slots start on, and stay apart by, a mip-2 texel of it
+     * ({@link Charts#ALIGN}). Coarser views draw them directly.
+     */
+    static final int WALL_TOP = 3;
+    /** The id suffix of a wall's material, whose mesh carries each vertex's chart position ({@link #CHART}). */
+    private static final String WALL = "#cacheWall";
+    /** A wall vertex's place in its chart: world units in the wall region (a generic attribute, no Attribute type). */
+    static final String CHART = "a_wallChart";
     /**
      * Colour and height; the sum of the unit normals with the coverage; cavity, relief and the intrinsic GGX alpha^2.
      * All premultiplied by the coverage, 8 bits each (12 bytes a texel): the cached ground is dielectric and does not
@@ -95,6 +116,12 @@ final class GpuMaterialCache {
      * along the ground (√3), and a quarter more for the pages cut by the view's edges and the ring around them.
      */
     private static final float TEXELS_PER_PIXEL = 4 * 1.732f * 1.25f;
+    /**
+     * The pages a board's charted walls take, in units of its tops': their slots leave room around each wall, and a
+     * view needs every wall it sees whichever way it faces (Kozice Valley: 1.6 to 2.0 times the tops' pages at levels
+     * 0 to 2).
+     */
+    private static final int WALL_PAGES = 2;
     /**
      * Page memory, MiB: {@code -Dmegamek.gpu.materialCacheMiB}, else half of what the driver reports free when the
      * storage is allocated (capacity), else this.
@@ -119,8 +146,15 @@ final class GpuMaterialCache {
      * coverage and roughness stay exact means.
      */
     static final float SHARPEN = Float.parseFloat(System.getProperty("megamek.gpu.materialCacheSharpen", ".15"));
-    /** A face counts as level from this normal Z: a level top's material reads the same from above as in the view. */
+    /** A face counts as level from this normal Z: the same at every detail. */
     private static final float LEVEL_Z = .999f;
+    /**
+     * The steepest top, its normal's Z: the pages hold a slope from above, stretched by up to 1/Z along its fall line.
+     * Steeper banks and cliffs are walls ({@link #wall}).
+     */
+    private static final float SLOPE_Z = .7f;
+    /** The lowest normal Z a charted wall may have: a few degrees past vertical, as natural cliffs lean. */
+    private static final float LEAN = -.1f;
     /** The fill's GPU time a frame (a target), and its CPU time (a bound); a loading frame's prewarm takes more. */
     private static final long FILL_NANOS = 2_000_000, FILL_CPU_NANOS = 3_000_000, PREWARM_NANOS = 30_000_000;
 
@@ -129,8 +163,12 @@ final class GpuMaterialCache {
         void draw(Camera camera, float minX, float minY, float maxX, float maxY);
     }
 
-    /** A chunk's cache tops this frame: their terrain page and bounds (world units). */
-    private record Chunk(int page, BoundingBox bounds) { }
+    /**
+     * A chunk's cache tops or walls this frame: their terrain page, bounds in the pages' plane (world units: the tops',
+     * or each seen wall slot's) and generation (#chunk); walls also each slot's centre on the board, which orders their
+     * pages.
+     */
+    private record Chunk(int page, List<BoundingBox> bounds, List<Vector3> centres, int since) { }
 
     /** A page of any level. */
     private record PageKey(int at, int x, int y) { }
@@ -148,7 +186,7 @@ final class GpuMaterialCache {
     private int coarseFramebuffer, coarseDepth;
     private final int[] coarseTargets = new int[FORMATS.length];
     private ShaderProgram means, sharpen;
-    private boolean active, usable = true, enabled = ENABLED, prewarmed = true;
+    private boolean active, usable = true, enabled = ENABLED, prewarmed = true, hasWalls;
     // The board's extent (world units), its world metre, and the pages the context allows (read once).
     private final BoundingBox board = new BoundingBox();
     private float metre = 1;
@@ -163,13 +201,19 @@ final class GpuMaterialCache {
     // view and how many of them the storage holds, the terrain pages drawn cached, and whether all read their own level.
     private int level, reading = -1, under, admitted;
     private boolean exact;
-    // The chunks with cache tops (all, those near the pages this frame builds, and the visible ones).
+    // The chunks with cache tops or walls (all, those near the pages this frame builds), the visible tops and walls,
+    // the terrain pages whose walls draw cached, how many wall pages the frame needs and how many its table leaves out.
     private final List<BoundingBox> topBounds = new ArrayList<>(), nearBounds = new ArrayList<>();
     private final BoundingBox near = new BoundingBox();
-    private final List<Chunk> visible = new ArrayList<>();
-    private final IntArray cachedPages = new IntArray();
+    private final List<Chunk> visible = new ArrayList<>(), walls = new ArrayList<>();
+    private final IntArray cachedPages = new IntArray(), cachedWalls = new IntArray();
+    private int walled, wallsOutside;
     // Pages copied from their children: their mip 2 only approximates the next level, so none is copied from them.
     private final Set<PageKey> copied = new HashSet<>();
+    // Detail changes so far (detailChanged), and the one each page's build finished at: a change over a page in the
+    // middle of its build restarts it (GpuPageCache.invalidate), so its content is drawn from the geometry of then.
+    private int generation;
+    private final Map<PageKey, Integer> stamps = new HashMap<>();
     private Camera view;
     private Tops tops;
     // Whether this frame may build pages (the root at least): the fill's programs are ready.
@@ -216,30 +260,81 @@ final class GpuMaterialCache {
     static boolean isCached(Attributes material) { return material instanceof Material m && m.id.endsWith(CACHED); }
 
     /**
-     * A dry ground face of a cached top that lies level, untouched by water, in a hex that no biome cover reaches:
-     * the canonical material holds no biome layer, and its weathering follows the cover.
+     * A face of ground or of a natural bank (a cliff of up to two levels, whose low caprock stands over none of its own
+     * faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), in a hex that no biome cover
+     * reaches: the canonical material holds no biome layer, and its weathering follows the cover. Water over it stays
+     * live (absorption, the column's tint, caustics), its sediment and wet bank canonical: both follow the face's own
+     * water level and palette.
      */
-    static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene,
-          Map<Coords, BoardSurface> surfaces) {
+    static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene) {
         if (!uncovered(scene, surface.tile)) { return false; }
         for (Vector3 p : new Vector3[] { face.a(), face.b(), face.c() }) {
             var shade = surface.relief.shade(p);
-            if (shade == null || shade.kind() != BoardRelief.Kind.GROUND) { return false; }
+            if (shade == null || shade.kind() != BoardRelief.Kind.GROUND && (shade.kind() != BoardRelief.Kind.CLIFF
+                  || !Float.isNaN(shade.projection()) || shade.level() > 0)) { return false; }
         }
-        Vector3 a = face.a(), b = face.b(), c = face.c();
-        Vector3 normal = new Vector3(b).sub(a).crs(c.x - a.x, c.y - a.y, c.z - a.z);
-        float length = normal.len();
-        return length > 0 && normal.z / length >= LEVEL_Z
-              && GpuWaterCover.clippingWater(surface, face, scene, surfaces) == null;
+        return normalZ(face) >= SLOPE_Z;
     }
 
     /**
-     * Whether the biome stage leaves the hex as the material is: no liquid in it, no biome or deck mud in it or beside
-     * it (their cover reaches 14 m past a hex, less than a neighbour's width), and beside it no molten or frozen liquid
-     * and water of one palette at most (GpuBiomeSurface.aqueous: one palette changes nothing on dry ground).
+     * An open water hex's bed face the cache can hold, as {@link #top}: level or sloping gently, and overlapped from
+     * above by none of the hex's bank tops ({@code banks}): an undercut bank would stand over it in the pages.
+     */
+    static boolean bed(BoardSurface surface, BoardSurface.Face face, BoardScene scene, List<BoardSurface.Face> banks) {
+        if (!uncovered(scene, surface.tile) || normalZ(face) < SLOPE_Z) { return false; }
+        float lowest = Math.min(face.a().z, Math.min(face.b().z, face.c().z)), clearance = BoardRelief.metres(.05f);
+        for (BoardSurface.Face bank : banks) {
+            if (Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance && overlap(face, bank)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Whether two faces overlap seen from above, by more than a touch along a shared edge (separating axes). */
+    private static boolean overlap(BoardSurface.Face f, BoardSurface.Face g) {
+        return overlap(new Vector3[] { f.a(), f.b(), f.c() }, new Vector3[] { g.a(), g.b(), g.c() });
+    }
+
+    /** Whether two triangles overlap in XY by more than a touch along a shared edge (separating axes). */
+    private static boolean overlap(Vector3[] a, Vector3[] b) {
+        float touch = BoardRelief.metres(.01f);
+        for (Vector3[] edges : new Vector3[][] { a, b }) {
+            for (int i = 0; i < 3; i++) {
+                float nx = edges[(i + 1) % 3].y - edges[i].y, ny = edges[i].x - edges[(i + 1) % 3].x;
+                float length = (float) Math.hypot(nx, ny);
+                if (length == 0) { continue; }
+                float minA = Float.MAX_VALUE, maxA = -Float.MAX_VALUE, minB = Float.MAX_VALUE, maxB = -Float.MAX_VALUE;
+                for (int k = 0; k < 3; k++) {
+                    float pa = (a[k].x * nx + a[k].y * ny) / length, pb = (b[k].x * nx + b[k].y * ny) / length;
+                    minA = Math.min(minA, pa);
+                    maxA = Math.max(maxA, pa);
+                    minB = Math.min(minB, pb);
+                    maxB = Math.max(maxB, pb);
+                }
+                if (maxA <= minB + touch || maxB <= minA + touch) { return false; }
+            }
+        }
+        return true;
+    }
+
+    /** Whether a top lies level: the same at every detail. */
+    static boolean level(BoardSurface.Face face) { return normalZ(face) >= LEVEL_Z; }
+
+    private static float normalZ(BoardSurface.Face face) { return normalZ(face.a(), face.b(), face.c()); }
+
+    private static float normalZ(Vector3 a, Vector3 b, Vector3 c) {
+        Vector3 normal = new Vector3(b).sub(a).crs(c.x - a.x, c.y - a.y, c.z - a.z);
+        float length = normal.len();
+        return length > 0 ? normal.z / length : -1;
+    }
+
+    /**
+     * Whether the biome stage leaves the hex as the material is: no biome or deck mud in it or beside it (their cover
+     * reaches 14 m past a hex, less than a neighbour's width), and in it and beside it no molten or frozen liquid and
+     * water of one palette at most (GpuBiomeSurface.aqueous: the stage mixes nothing in for one palette).
      */
     private static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
-        if (tile.liquid().present()) { return false; }
         int palettes = 0;
         for (int direction = -1; direction < 6; direction++) {
             var near = direction < 0 ? tile : scene.neighbor(tile, direction);
@@ -253,9 +348,274 @@ final class GpuMaterialCache {
         return Integer.bitCount(palettes) < 2;
     }
 
-    /** A top as this frame draws it on terrain page {@code page}: its cached twin once its pages can be read. */
+    // ---- Walls: their charts ----
+
+    /**
+     * A natural wall's face the cache can chart: a cliff or bank (CLIFF shade at its corners, no panel),
+     * {@link #steep}, in a hex that no biome cover reaches ({@link #top}).
+     */
+    static boolean wall(BoardSurface surface, BoardSurface.Face face, BoardScene scene) {
+        if (!steep(face.a(), face.b(), face.c()) || !uncovered(scene, surface.tile)) { return false; }
+        for (Vector3 p : new Vector3[] { face.a(), face.b(), face.c() }) {
+            var shade = surface.relief.shade(p);
+            if (shade == null || shade.kind() != BoardRelief.Kind.CLIFF || !Float.isNaN(shade.projection())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A theme boundary's triangle of hex {@code tile} the cache can chart, as {@link #wall}: its pieces keep their
+     * corners' kinds (GpuTerrain.sculptVertex: .5 a natural cliff or bank, no panel) instead of their shades.
+     */
+    static boolean wall(BoardScene scene, BoardScene.Tile tile, MeshPartBuilder.VertexInfo a,
+          MeshPartBuilder.VertexInfo b, MeshPartBuilder.VertexInfo c) {
+        return a.color.b == .5f && b.color.b == .5f && c.color.b == .5f && steep(a.position, b.position, c.position)
+              && uncovered(scene, tile);
+    }
+
+    /**
+     * Whether a triangle is too steep for a top ({@link #SLOPE_Z}) but faces up, or down by no more than a few degrees
+     * past vertical ({@link #LEAN}): an overhang's underside stays direct.
+     */
+    private static boolean steep(Vector3 a, Vector3 b, Vector3 c) {
+        float z = normalZ(a, b, c);
+        return z >= LEAN && z < SLOPE_Z;
+    }
+
+    /** The material a chunk's charted walls draw in: the same attributes, so the same programs, under its own id. */
+    static Material wall(Material material) {
+        Material copy = new Material(material);
+        copy.id = material.id + WALL;
+        return copy;
+    }
+
+    static boolean isWall(Material material) { return material.id.endsWith(WALL); }
+
+    /** A wall's vertex layout: its material's own, then its chart position ({@link #CHART}). */
+    static VertexAttributes chartLayout(VertexAttributes source) {
+        VertexAttribute[] attributes = new VertexAttribute[source.size() + 1];
+        for (int i = 0; i < source.size(); i++) { attributes[i] = source.get(i).copy(); }
+        attributes[source.size()] = new VertexAttribute(VertexAttributes.Usage.Generic, 2, CHART, 6);
+        return new VertexAttributes(attributes);
+    }
+
+    /** Whether a layout carries chart positions: a wall's, whose fill and cached-lit programs read them. */
+    static boolean charted(VertexAttributes attributes) {
+        // Chunk workers share layouts; libGDX's cached iterator is not safe across those workers.
+        for (int i = 0; i < attributes.size(); i++) {
+            if (attributes.get(i).alias.equals(CHART)) { return true; }
+        }
+        return false;
+    }
+
+    /** A layout without its chart positions: the one a wall's direct draws share with the other ground's programs. */
+    static VertexAttributes uncharted(VertexAttributes attributes) {
+        if (!charted(attributes)) { return attributes; }
+        VertexAttribute[] plain = new VertexAttribute[attributes.size() - 1];
+        for (int i = 0, j = 0; i < attributes.size(); i++) {
+            if (!attributes.get(i).alias.equals(CHART)) { plain[j++] = attributes.get(i).copy(); }
+        }
+        return new VertexAttributes(plain);
+    }
+
+    /**
+     * The sculpt vertex stage with a wall's chart (wallChartFlag): passed on to the cached-lit read, and in the fill
+     * the wall drawn flat at it, keeping its depth and every other output.
+     */
+    static String vertex(String source) {
+        source = GpuShaderSource.replaceOnce(source, "void main() {", """
+              #ifdef wallChartFlag
+              in vec2 a_wallChart;
+              out vec2 v_wallChart;
+              #endif
+              void main() {""", "wall chart");
+        String position = "gl_Position = u_projViewTrans * pos;";
+        return GpuShaderSource.replaceOnce(source, position, position + """
+
+              #ifdef wallChartFlag
+              v_wallChart = a_wallChart;
+              #ifdef materialFillFlag
+              gl_Position = u_projViewTrans * vec4(a_wallChart, pos.z, 1.0);
+              #endif
+              #endif
+              """, "wall chart");
+    }
+
+    /**
+     * A chunk's wall charts. Its cell of the wall region (a part of the pages' plane past the board's north edge, twice
+     * the chunk's extent a side) holds a slot for each edge of its hexes down which the ground drops: the walls a face
+     * of the hex can face out over (it owns those down to its lower neighbours, BoardSurface.walls; a bank rising from
+     * it faces back into it). A slot is {@link #SLOT} along the edge and as tall as the drop, a metre more each way;
+     * a wall turning a corner from a deeper neighbour's drop may reach past it and stay direct. Slots are column-packed
+     * in the hexes' build order from game data alone, so every detail of the chunk lays them out alike; those that do
+     * not fit leave their walls direct. Slots start on, and stay apart by, a mip-2 texel of the
+     * coarsest level walls are read at ({@link #ALIGN}), so no read reaches a neighbour's. A wall face takes the
+     * slot of its hex's edge it faces most ({@link #place}).
+     */
+    static final class Charts {
+        /** A slot's span along its edge, metres: the edge's 15 m and 2 m past each end. */
+        private static final float SLOT = 19;
+        /** A mip-2 texel of {@link #WALL_TOP}, metres. */
+        private static final float ALIGN = CLOSE_PIXEL * (1 << (WALL_TOP + 2));
+
+        /** A hex's edge (BoardGeometry.edgeDirection), the key of its slot. */
+        private record Edge(Coords hex, int edge) { }
+
+        /**
+         * A slot: its corner in the region; its edge's middle and direction (counter-clockwise round the hex, so a wall
+         * facing out of the hex keeps its winding in the chart); its base (z) and height (world units).
+         */
+        private record Slot(float x, float y, float midX, float midY, float alongX, float alongY, float base,
+              float height) { }
+
+        /** The edges' outward directions, edge k from corner k to corner k + 1 (BoardGeometry.corner). */
+        private static final float[][] OUTWARD = new float[6][];
+
+        static {
+            for (int k = 0; k < 6; k++) {
+                Vector3 a = BoardGeometry.modelCorner(k), b = BoardGeometry.modelCorner(k + 1);
+                float x = b.x - a.x, y = b.y - a.y, length = (float) Math.hypot(x, y);
+                OUTWARD[k] = new float[] { y / length, -x / length };
+            }
+        }
+
+        private final Map<Edge, Slot> slots = new HashMap<>();
+        // Each slot's edge, rectangle in the region, the box its faces stand in on the board, and that box's centre.
+        private final List<Edge> edges = new ArrayList<>();
+        private final List<BoundingBox> rectangles = new ArrayList<>(), boxes = new ArrayList<>();
+        private final List<Vector3> centres = new ArrayList<>();
+        // The slots holding a face: only their pages are needed.
+        private final Set<Edge> used = new HashSet<>();
+        // The chart triangles each slot holds so far: a face overlapping one there stays direct.
+        private final Map<Slot, List<Vector3[]>> placed = new HashMap<>();
+        /** The slots' extent in the wall region (world units); invalid without any. */
+        final BoundingBox bounds = new BoundingBox().inf();
+
+        /** The charts of the chunk of {@code scene} whose first hex is (x0, y0). */
+        Charts(BoardScene scene, int x0, int y0) {
+            float metre = BoardRelief.metres(1), align = ALIGN * metre;
+            int size = GpuTerrain.CHUNK_SIZE;
+            float cellWidth = aligned(2 * size * .75f * BoardGeometry.width(), align);
+            float cellHeight = aligned(2 * size * BoardGeometry.height(), align);
+            // The board lies south of y = 0; the region starts two pages of WALL_TOP north of it, clear of the pages
+            // (and their gutters) the board's northern tops reach at the levels walls are read at.
+            float left = x0 / size * cellWidth, bottom = 2 * pageMetres(WALL_TOP) * metre + y0 / size * cellHeight;
+            float column = aligned((SLOT + ALIGN) * metre, align), x = left, y = bottom;
+            Vector3 a = new Vector3(), b = new Vector3();
+            // The hexes in their build order (GpuTerrain.ChunkBuild.collectUntil).
+            for (int hx = x0; hx < Math.min(scene.width(), x0 + size); hx++) {
+                for (int hy = y0; hy < Math.min(scene.height(), y0 + size); hy++) {
+                    BoardScene.Tile tile = scene.tile(hx, hy);
+                    for (int edge = 0; edge < 6; edge++) {
+                        var across = scene.neighbor(tile, BoardGeometry.edgeDirection(edge));
+                        if (across == null || BoardGeometry.groundZ(across) >= BoardGeometry.groundZ(tile)) {
+                            continue;
+                        }
+                        float low = BoardGeometry.groundZ(across), high = Math.max(tile.groundLevel(),
+                              across.groundLevel()) * BoardGeometry.level();
+                        float height = high - low + 2 * metre, footprint = aligned(height + align, align);
+                        if (y + footprint > bottom + cellHeight) {
+                            x += column;
+                            y = bottom;
+                        }
+                        if (x + column > left + cellWidth || footprint > cellHeight) { continue; }
+                        BoardGeometry.corner(a, tile.coords(), 0, edge);
+                        BoardGeometry.corner(b, tile.coords(), 0, edge + 1);
+                        float length = (float) Math.hypot(b.x - a.x, b.y - a.y);
+                        edges.add(new Edge(tile.coords(), edge));
+                        slots.put(edges.getLast(), new Slot(x, y, (a.x + b.x) / 2, (a.y + b.y) / 2,
+                              (b.x - a.x) / length, (b.y - a.y) / length, low - metre, height));
+                        rectangles.add(new BoundingBox(new Vector3(x, y, 0),
+                              new Vector3(x + column, y + footprint, 0)));
+                        bounds.ext(rectangles.getLast());
+                        // Its faces stand anywhere in the hex that faces the edge, leaning out by up to their height.
+                        Vector3 centre = BoardGeometry.center(tile.coords(), 0);
+                        float reachX = BoardGeometry.width() / 2 + height, reachY = BoardGeometry.height() / 2 + height;
+                        boxes.add(new BoundingBox(new Vector3(centre.x - reachX, centre.y - reachY, low - metre),
+                              new Vector3(centre.x + reachX, centre.y + reachY, low - metre + height)));
+                        centres.add(boxes.getLast().getCenter(new Vector3()));
+                        y += footprint;
+                    }
+                }
+            }
+        }
+
+        private static float aligned(float value, float align) { return (float) Math.ceil(value / align) * align; }
+
+        /**
+         * Adds the rectangles in the region of the slots holding faces whose walls {@code frustum} meets, with their
+         * centres.
+         */
+        void seen(Frustum frustum, List<BoundingBox> into, List<Vector3> at) {
+            for (int i = 0; i < boxes.size(); i++) {
+                if (used.contains(edges.get(i)) && frustum.boundsInFrustum(boxes.get(i))) {
+                    into.add(rectangles.get(i));
+                    at.add(centres.get(i));
+                }
+            }
+        }
+
+        /** Whether two chunks' charts lie alike: a hex's built walls keep their place in either. */
+        boolean sameLayout(Charts other) { return other != null && slots.equals(other.slots); }
+
+        /**
+         * A wall triangle's place in its chart, its corners' region positions (x, y each; world units), or null: it
+         * draws directly. Its slot is its hex's edge it faces most; there a corner's position is its place along the
+         * edge (from the slot's start) and its height above the slot's base. A triangle reaching out of its slot,
+         * folding back, or overlapping one the slot holds by more than a touch leaves the slot as it was.
+         */
+        float[] place(Coords hex, Vector3 a, Vector3 b, Vector3 c) {
+            float nx = (b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y);
+            float ny = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+            int edge = 0;
+            for (int k = 1; k < 6; k++) {
+                if (nx * OUTWARD[k][0] + ny * OUTWARD[k][1] > nx * OUTWARD[edge][0] + ny * OUTWARD[edge][1]) {
+                    edge = k;
+                }
+            }
+            Edge key = new Edge(hex, edge);
+            Slot slot = slots.get(key);
+            if (slot == null) { return null; }
+            float width = SLOT * BoardRelief.metres(1);
+            Vector3[] chart = new Vector3[3];
+            Vector3[] corners = { a, b, c };
+            for (int i = 0; i < 3; i++) {
+                Vector3 p = corners[i];
+                float u = (p.x - slot.midX()) * slot.alongX() + (p.y - slot.midY()) * slot.alongY() + width / 2;
+                float v = p.z - slot.base();
+                if (u < 0 || u > width || v < 0 || v > slot.height()) { return null; }
+                chart[i] = new Vector3(u, v, 0);
+            }
+            if ((chart[1].x - chart[0].x) * (chart[2].y - chart[0].y)
+                  - (chart[1].y - chart[0].y) * (chart[2].x - chart[0].x) <= 0) { return null; }
+            List<Vector3[]> held = placed.computeIfAbsent(slot, ignored -> new ArrayList<>());
+            for (Vector3[] other : held) {
+                if (overlap(chart, other)) { return null; }
+            }
+            held.add(chart);
+            used.add(key);
+            return new float[] { slot.x() + chart[0].x, slot.y() + chart[0].y, slot.x() + chart[1].x,
+                  slot.y() + chart[1].y, slot.x() + chart[2].x, slot.y() + chart[2].y };
+        }
+
+        /** {@code reused}: hexes whose meshes come from {@code source}'s build (sameLayout), slots and all. */
+        void keep(Charts source, Set<Coords> reused) {
+            if (source == null) { return; }
+            for (Edge edge : source.used) {
+                if (reused.contains(edge.hex())) { used.add(edge); }
+            }
+        }
+
+        /** The chunk is built: the placed faces are no longer needed. */
+        void built() { placed.clear(); }
+    }
+
+    /** A top or wall as this frame draws it on terrain page {@code page}: its cached twin once its pages are read. */
     Material material(int page, Material top) {
-        if (!active || !cachedPages.contains(page) || !isTop(top)) { return top; }
+        boolean wall = isWall(top);
+        if (!active || !wall && !isTop(top) || !(wall ? cachedWalls : cachedPages).contains(page)) { return top; }
         return twins.computeIfAbsent(top, GpuMaterialCache::cachedTwin);
     }
 
@@ -286,10 +646,11 @@ final class GpuMaterialCache {
 
     /**
      * A build installed the board, now spanning {@code bounds} (world units, {@code worldMetre} a metre): after an
-     * edit, the pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile;
-     * after a load ({@code changed} null) every page is lost.
+     * edit, the pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile,
+     * and the generation its new tops are installed at is returned (#detailChanged); after a load ({@code changed} null)
+     * every page is lost.
      */
-    void rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
+    int rebuilt(BoundingBox bounds, BoundingBox changed, float worldMetre) {
         board.set(bounds);
         metre = worldMetre;
         root = TOP_LEVEL;
@@ -303,9 +664,19 @@ final class GpuMaterialCache {
         if (changed == null) {
             pages.invalidateAll();
             copied.clear();
-            return;
+            stamps.clear();
+            return generation;
         }
+        return detailChanged(changed);
+    }
+
+    /**
+     * A chunk whose tops follow its detail changed detail over {@code changed} (world units): its pages rebuild, serving
+     * their old content meanwhile where it still fits (#chunk). The generation its new tops are installed at.
+     */
+    int detailChanged(BoundingBox changed) {
         invalidate(changed);
+        return ++generation;
     }
 
     /** The pages any level holds of {@code changed} (world units) rebuild, serving their old content meanwhile. */
@@ -321,11 +692,12 @@ final class GpuMaterialCache {
     }
 
     /**
-     * Storage for the scene's pixels ({@link #capacity}) once the board has loaded ({@link #rebuilt}); none without
-     * cache tops or without a usable program. The first view's pages then build behind the loading stage
-     * ({@link #prewarm}).
+     * Storage for the scene's pixels ({@link #capacity}) once the board has loaded ({@link #rebuilt}), its charted
+     * walls' ({@code haveWalls}) too; none without cache tops or without a usable program. The first view's pages then
+     * build behind the loading stage ({@link #prewarm}).
      */
-    void allocate(boolean haveTops) {
+    void allocate(boolean haveTops, boolean haveWalls) {
+        hasWalls = haveWalls;
         prewarmed = true;
         resized = settled = 0;
         reading = -1;
@@ -350,8 +722,9 @@ final class GpuMaterialCache {
     }
 
     /**
-     * The pages the scene's pixels need ({@link #TEXELS_PER_PIXEL}), at most as many as the board holds at the finest
-     * level and as the memory allows ({@link #memory}), and no more than an array's layers.
+     * The pages the scene's pixels need ({@link #TEXELS_PER_PIXEL}) and their walls' ({@link #WALL_PAGES}), at most as
+     * many as the board holds at the finest level and as the memory allows ({@link #memory}), and no more than an
+     * array's layers.
      */
     private int capacity() {
         if (limit < 0) {
@@ -363,10 +736,11 @@ final class GpuMaterialCache {
         }
         long pixels = (long) (Gdx.graphics.getBackBufferWidth() * BoardCamera.renderScale)
               * (long) (Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale);
-        long wanted = (long) Math.ceil(pixels * TEXELS_PER_PIXEL / Math.pow(PAGE_TEXELS - 2 * GUTTER, 2));
+        int share = hasWalls ? 1 + WALL_PAGES : 1;
+        long wanted = (long) Math.ceil(pixels * TEXELS_PER_PIXEL * share / Math.pow(PAGE_TEXELS - 2 * GUTTER, 2));
         float page = pageMetres(0) * metre;
         long across = (long) Math.ceil(board.getWidth() / page) + 3, down = (long) Math.ceil(board.getHeight() / page) + 3;
-        return (int) Math.max(1, Math.min(Math.min(wanted, across * down), limit));
+        return (int) Math.max(1, Math.min(Math.min(wanted, across * down * share), limit));
     }
 
     /**
@@ -421,16 +795,16 @@ final class GpuMaterialCache {
     /** Test hook: off, every top draws with its own program. */
     void setEnabled(boolean value) { enabled = ENABLED && value; }
 
-    /** Whether this frame drew every visible top cached from the level its pixels need (tests). */
+    /** Whether this frame drew every visible top and wall cached from the level its pixels need (tests). */
     boolean complete() {
-        int shown = shownPages();
-        return active && exact && shown > 0 && cachedPages.size == shown;
+        int shown = shownPages(visible);
+        return active && exact && shown > 0 && cachedPages.size == shown && cachedWalls.size == shownPages(walls);
     }
 
-    /** The terrain pages with visible tops this frame. */
-    private int shownPages() {
+    /** The terrain pages with visible tops (or walls) this frame. */
+    private static int shownPages(List<Chunk> chunks) {
         Set<Integer> terrainPages = new HashSet<>();
-        for (Chunk chunk : visible) { terrainPages.add(chunk.page()); }
+        for (Chunk chunk : chunks) { terrainPages.add(chunk.page()); }
         return terrainPages.size();
     }
 
@@ -444,11 +818,12 @@ final class GpuMaterialCache {
             for (int y = rootY0; y <= rootY1; y++) { rootBuilt += pages.layer(root, x, y) >= 0 ? 1 : 0; }
         }
         return String.format(Locale.ROOT, "materialCache active=%b level=%d reading=%d exact=%b capacity=%d (%d MiB) "
-                    + "root=%d:%d/%d under=%d admitted=%d shown=%d cached=%s fills=%d tiles=%d gpuEstimate=%.3fms "
-                    + "endMs=%.2f endSteps=%d",
+                    + "root=%d:%d/%d under=%d admitted=%d shown=%d cached=%s wallPages=%d wallsOutside=%d wallsShown=%d "
+                    + "wallsCached=%s fills=%d tiles=%d gpuEstimate=%.3fms endMs=%.2f endSteps=%d",
               active, level, reading, exact, pages.capacity(), pages.capacity() * pages.pageBytes() >> 20, root,
-              rootBuilt, (rootX1 - rootX0 + 1) * (rootY1 - rootY0 + 1), under, admitted, shownPages(), cachedPages,
-              pages.fills(), pages.steps(), pages.estimate(Math.max(0, level)) / 1e6, endNanos / 1e6, endSteps);
+              rootBuilt, (rootX1 - rootX0 + 1) * (rootY1 - rootY0 + 1), under, admitted, shownPages(visible),
+              cachedPages, walled, wallsOutside, shownPages(walls), cachedWalls, pages.fills(), pages.steps(),
+              pages.estimate(Math.max(0, level)) / 1e6, endNanos / 1e6, endSteps);
     }
 
     // ---- The frame ----
@@ -467,10 +842,12 @@ final class GpuMaterialCache {
         filling = fill && enabled && usable;
         active = false;
         exact = false;
-        under = admitted = 0;
+        under = admitted = walled = wallsOutside = 0;
         cachedPages.clear();
+        cachedWalls.clear();
         topBounds.clear();
         visible.clear();
+        walls.clear();
         near.inf();
         pages.begin();
         if (!pages.allocated()) { return; }
@@ -511,11 +888,30 @@ final class GpuMaterialCache {
         return new float[] { Math.min(across, upward), Math.max(across, upward) };
     }
 
-    /** A chunk's cache tops ({@code bounds}, world units) on terrain page {@code page}, and whether it is in view. */
-    void chunk(int page, BoundingBox bounds, boolean inView) {
+    /**
+     * A chunk's cache tops ({@code bounds}, world units) on terrain page {@code page}, and whether it is in view. Tops
+     * that follow its detail were installed at generation {@code since} (#detailChanged), else 0: a page built before
+     * may lack their coverage, so they draw cached only from a page (their own or a coarser one standing in) whose build
+     * began since.
+     */
+    void chunk(int page, BoundingBox bounds, boolean inView, int since) {
         if (!filling || !bounds.isValid()) { return; }
         topBounds.add(bounds);
-        if (active && inView) { visible.add(new Chunk(page, bounds)); }
+        if (active && inView) { visible.add(new Chunk(page, List.of(bounds), null, since)); }
+    }
+
+    /**
+     * A chunk's charted walls on terrain page {@code page}: their charts, whether their bounds on the board are in
+     * view, and their install (#chunk). Only the pages of the slots the view sees are needed; a view coarser than
+     * {@link #WALL_TOP} draws the walls directly.
+     */
+    void walls(int page, Charts charts, boolean inView, int since) {
+        if (!filling || !charts.bounds.isValid()) { return; }
+        topBounds.add(charts.bounds);
+        if (!active || level > WALL_TOP || !inView) { return; }
+        Chunk chunk = new Chunk(page, new ArrayList<>(), new ArrayList<>(), since);
+        charts.seen(view.frustum, chunk.bounds(), chunk.centres());
+        if (!chunk.bounds().isEmpty()) { walls.add(chunk); }
     }
 
     /** {@link #end(long, long)} within a view frame's share of the fill. */
@@ -568,16 +964,32 @@ final class GpuMaterialCache {
         Vector3 focus = new Vector3(view.position);
         if (view.direction.z != 0) { focus.mulAdd(view.direction, (board.min.z - view.position.z) / view.direction.z); }
         float size = pageMetres(level) * metre;
+        // The walls' pages, each as near as its nearest seen slot on the board; the coarser level's that a zoom in
+        // still reads stay where built.
+        Map<Long, Float> wallPages = wallPages(level, focus);
+        Map<Long, Float> coarseWalls = reading != level && reading <= WALL_TOP ? wallPages(reading, focus) : Map.of();
+        walled = wallPages.size();
+        int coarseHeld = 0;
+        for (long page : coarseWalls.keySet()) {
+            if (pages.layer(reading, unpackX(page), unpackY(page)) < 0) { continue; }
+            pages.need(reading, unpackX(page), unpackY(page), true);
+            coarseHeld++;
+        }
+        // The tops' pages nearest the view's centre first, as many as the storage holds, then the walls' in the room
+        // left: a terrain page whose tops all fit keeps them cached whatever its walls need.
         List<Long> order = new ArrayList<>(wanted);
         order.sort((a, b) -> Float.compare(distance(a, size, focus), distance(b, size, focus)));
+        List<Long> wallOrder = new ArrayList<>(wallPages.keySet());
+        wallOrder.sort((a, b) -> Float.compare(wallPages.get(a), wallPages.get(b)));
+        order.addAll(wallOrder);
         Set<Long> held = new HashSet<>(order.subList(0, Math.min(order.size(), Math.max(0,
-              pages.capacity() - rootPages - coarse.size() - SPARES))));
+              pages.capacity() - rootPages - coarse.size() - coarseHeld - SPARES))));
         admitted = held.size();
         int[] window = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
         for (long page : order) {
             if (!held.contains(page)) { break; }
             pages.need(level, unpackX(page), unpackY(page), true);
-            extend(window, unpackX(page), unpackY(page));
+            if (wanted.contains(page)) { extend(window, unpackX(page), unpackY(page)); }
         }
         nearTops(window, level, 3);
         // Their parents over the view and a page around it, one step each (coarse, or copied from built children),
@@ -595,6 +1007,7 @@ final class GpuMaterialCache {
         }
         // The ring: the pages around them that hold tops, built once the view's are, where layers are left.
         for (long page : held) {
+            if (!wanted.contains(page)) { continue; }
             for (int dx = -1; dx <= 1; dx++) {
                 for (int dy = -1; dy <= 1; dy++) {
                     int x = unpackX(page) + dx, y = unpackY(page) + dy;
@@ -605,12 +1018,31 @@ final class GpuMaterialCache {
                 }
             }
         }
+        // A stale page the frame reads under tops installed since its build serves them nothing (#chunk): it builds
+        // first, as does a stale root, which stands in for every page while they build.
+        int newest = 0;
+        for (var page : since(reading).entrySet()) {
+            int x = unpackX(page.getKey()), y = unpackY(page.getKey());
+            newest = Math.max(newest, page.getValue());
+            if (stamps.getOrDefault(new PageKey(reading, x, y), 0) < page.getValue()) { pages.urgent(reading, x, y); }
+        }
+        for (int x = rootX0; x <= rootX1; x++) {
+            for (int y = rootY0; y <= rootY1; y++) {
+                if (stamps.getOrDefault(new PageKey(root, x, y), 0) < newest) { pages.urgent(root, x, y); }
+            }
+        }
         boolean done = build(budget, deadline);
         if (copied.size() > 2 * pages.capacity()) { copied.removeIf(page -> pages.layer(page.at(), page.x(), page.y()) < 0); }
-        // The finer level once every page of it the storage holds is built.
+        if (stamps.size() > 2 * pages.capacity()) {
+            stamps.keySet().removeIf(page -> pages.layer(page.at(), page.x(), page.y()) < 0);
+        }
+        // The finer level once every page of the tops' the storage holds is built; walls still building there read
+        // a coarser one of theirs, or draw directly.
         if (reading != level) {
             boolean built = true;
-            for (long page : held) { built &= pages.layer(level, unpackX(page), unpackY(page)) >= 0; }
+            for (long page : held) {
+                built &= !wanted.contains(page) || pages.layer(level, unpackX(page), unpackY(page)) >= 0;
+            }
             if (built) { reading = level; }
         }
         // The table over the level the frame reads; a window too large for it draws everything directly.
@@ -619,14 +1051,22 @@ final class GpuMaterialCache {
         for (long page : read) { extend(table, unpackX(page), unpackY(page)); }
         float metres = pageMetres(reading);
         // A page the storage holds reads a coarser one up to the root while it builds; one it cannot hold draws
-        // directly (never a coarser level for lack of room).
-        GpuPageCache.StandIns standIns = (x, y) -> reading == level && held.contains(pack(x, y));
-        if (!pages.upload(reading, root, table[0], table[1], table[2] - table[0] + 1, table[3] - table[1] + 1,
+        // directly (never a coarser level for lack of room). Under tops that follow their chunk's detail, a page serves
+        // only if its build began since they were installed (#chunk).
+        Map<Long, Integer> since = since(reading);
+        GpuPageCache.StandIns standIns = new GpuPageCache.StandIns() {
+            @Override public boolean allowed(int x, int y) { return reading == level && held.contains(pack(x, y)); }
+
+            @Override public boolean serves(int at, int x, int y, int wx, int wy) {
+                return stamps.getOrDefault(new PageKey(at, x, y), 0) >= since.getOrDefault(pack(wx, wy), 0);
+            }
+        };
+        if (!pages.upload(0, reading, root, table[0], table[1], table[2] - table[0] + 1, table[3] - table[1] + 1,
               table[0] * metres, table[1] * metres, metres, standIns)) {
             active = false;
             return true;
         }
-        pages.bindTable(BINDING);
+        pages.bindTable(0, BINDING);
         // A terrain page draws cached once every page under its visible tops can be read at that level, or (held and
         // still building) stood in for by a coarser one; the frame is exact once each is its own and current.
         exact = reading == level;
@@ -634,10 +1074,10 @@ final class GpuMaterialCache {
         Set<Long> chunkPages = new HashSet<>();
         for (Chunk chunk : visible) {
             chunkPages.clear();
-            under(chunk.bounds(), reading, chunkPages);
+            under(chunk, reading, chunkPages);
             for (long page : chunkPages) {
                 int x = unpackX(page), y = unpackY(page);
-                int entry = standIns.allowed(x, y) ? pages.entry(reading, root, x, y) : pages.layer(reading, x, y);
+                int entry = pages.entry(reading, root, x, y, standIns);
                 if (entry < 0) { direct.add(chunk.page()); }
                 exact &= entry >= 0 && entry < GpuPageCache.FALLBACK && pages.current(reading, unpackX(page), unpackY(page));
             }
@@ -645,18 +1085,99 @@ final class GpuMaterialCache {
         for (Chunk chunk : visible) {
             if (!direct.contains(chunk.page()) && !cachedPages.contains(chunk.page())) { cachedPages.add(chunk.page()); }
         }
+        // The walls' table, over the same level up to WALL_TOP, standing in as the tops' does: a terrain page draws its
+        // walls cached once every page under their charts can be read. Its window takes the nearest pages first, as
+        // many as the table spans (a wide view at a fine level); walls past it draw directly.
+        Map<Long, Float> wallsRead = reading == level ? wallPages : coarseWalls;
+        List<Long> nearest = new ArrayList<>(wallsRead.keySet());
+        nearest.sort((a, b) -> Float.compare(wallsRead.get(a), wallsRead.get(b)));
+        int[] wallTable = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
+        for (long page : nearest) {
+            int[] grown = wallTable.clone();
+            extend(grown, unpackX(page), unpackY(page));
+            if ((long) (grown[2] - grown[0] + 1) * (grown[3] - grown[1] + 1) > GpuPageCache.TABLE_ENTRIES) {
+                wallsOutside++;
+            } else {
+                wallTable = grown;
+            }
+        }
+        if (walls.isEmpty() || wallsRead.isEmpty() || !pages.upload(WALL_TABLE, reading, WALL_TOP, wallTable[0],
+              wallTable[1], wallTable[2] - wallTable[0] + 1, wallTable[3] - wallTable[1] + 1, wallTable[0] * metres,
+              wallTable[1] * metres, metres, standIns)) { return done; }
+        pages.bindTable(WALL_TABLE, WALL_BINDING);
+        direct.clear();
+        for (Chunk chunk : walls) {
+            chunkPages.clear();
+            under(chunk, reading, chunkPages);
+            for (long page : chunkPages) {
+                int x = unpackX(page), y = unpackY(page), entry = pages.entry(reading, WALL_TOP, x, y, standIns);
+                boolean inside = x >= wallTable[0] && x <= wallTable[2] && y >= wallTable[1] && y <= wallTable[3];
+                if (!inside || entry < 0) { direct.add(chunk.page()); }
+                exact &= inside && entry >= 0 && entry < GpuPageCache.FALLBACK && pages.current(reading, x, y);
+            }
+        }
+        for (Chunk chunk : walls) {
+            if (!direct.contains(chunk.page()) && !cachedWalls.contains(chunk.page())) {
+                cachedWalls.add(chunk.page());
+            }
+        }
         return done;
+    }
+
+    /**
+     * The pages of {@code at} under the seen wall slots, each with the squared distance of its nearest slot on the
+     * board to {@code focus}: what orders them.
+     */
+    private Map<Long, Float> wallPages(int at, Vector3 focus) {
+        Map<Long, Float> nearness = new HashMap<>();
+        Set<Long> below = new HashSet<>();
+        for (Chunk chunk : walls) {
+            for (int i = 0; i < chunk.bounds().size(); i++) {
+                Vector3 centre = chunk.centres().get(i);
+                float distance = Vector3.dst2(centre.x, centre.y, 0, focus.x, focus.y, 0);
+                below.clear();
+                under(chunk.bounds().get(i), at, below, false);
+                for (long page : below) { nearness.merge(page, distance, Math::min); }
+            }
+        }
+        return nearness;
+    }
+
+    /**
+     * The pages of {@code at} under visible tops and walls that follow their detail, each with the latest install among
+     * them.
+     */
+    private Map<Long, Integer> since(int at) {
+        Map<Long, Integer> since = new HashMap<>();
+        Set<Long> below = new HashSet<>();
+        for (List<Chunk> chunks : List.of(visible, walls)) {
+            for (Chunk chunk : chunks) {
+                if (chunk.since() == 0) { continue; }
+                below.clear();
+                under(chunk, at, below);
+                for (long page : below) { since.merge(page, chunk.since(), Math::max); }
+            }
+        }
+        return since;
     }
 
     /** The pages of {@code at} under the visible tops that the view's frustum meets. */
     private Set<Long> under(int at) {
         Set<Long> pagesUnder = new HashSet<>();
-        for (Chunk chunk : visible) { under(chunk.bounds(), at, pagesUnder); }
+        for (Chunk chunk : visible) { under(chunk, at, pagesUnder); }
         return pagesUnder;
     }
 
-    /** Adds the pages of {@code at} under {@code bounds} (world units) that the view's frustum meets. */
-    private void under(BoundingBox bounds, int at, Set<Long> into) {
+    /** Adds the pages of {@code at} under a chunk's tops that the view's frustum meets, or under its seen slots. */
+    private void under(Chunk chunk, int at, Set<Long> into) {
+        for (BoundingBox bounds : chunk.bounds()) { under(bounds, at, into, chunk.centres() == null); }
+    }
+
+    /**
+     * Adds the pages of {@code at} under {@code bounds} (world units): with {@code frustum}, only those the view's
+     * frustum meets (tops; walls' charts lie in the wall region, where their slots were seen).
+     */
+    private void under(BoundingBox bounds, int at, Set<Long> into, boolean frustum) {
         float size = pageMetres(at) * metre;
         int x0 = (int) Math.floor(bounds.min.x / size), x1 = (int) Math.floor(bounds.max.x / size);
         int y0 = (int) Math.floor(bounds.min.y / size), y1 = (int) Math.floor(bounds.max.y / size);
@@ -666,7 +1187,7 @@ final class GpuMaterialCache {
                 box.min.set(x * size, y * size, bounds.min.z);
                 box.max.set((x + 1) * size, (y + 1) * size, bounds.max.z);
                 box.update();
-                if (view.frustum.boundsInFrustum(box)) { into.add(pack(x, y)); }
+                if (!frustum || view.frustum.boundsInFrustum(box)) { into.add(pack(x, y)); }
             }
         }
     }
@@ -760,6 +1281,8 @@ final class GpuMaterialCache {
     private int fill(int at, int x, int y, int layer, int step) {
         if (step == 0 && copiable(at, x, y)) {
             copyChildren(at, x, y, layer);
+            // Its children are current: drawn from the geometry of now.
+            stamps.put(new PageKey(at, x, y), generation);
             copied.add(new PageKey(at, x, y));
             return GpuPageCache.DONE;
         }
@@ -787,6 +1310,7 @@ final class GpuMaterialCache {
         if (step < side * side - 1) { return GpuPageCache.MORE; }
         sharpen(layer);
         copied.remove(new PageKey(at, x, y));
+        stamps.put(new PageKey(at, x, y), generation);
         return GpuPageCache.DONE;
     }
 
@@ -1160,10 +1684,11 @@ final class GpuMaterialCache {
     }
 
     /**
-     * A cached-lit program's page arrays and table. A program the context cannot serve (more samplers than units, a
-     * table of another size) leaves the cache unused for this terrain, and frees its storage.
+     * A cached-lit program's page arrays and table: a wall's ({@code wall}) at the walls' binding. A program the
+     * context cannot serve (more samplers than units, a table of another size) leaves the cache unused for this
+     * terrain, and frees its storage.
      */
-    void registerCached(DefaultShader shader) {
+    void registerCached(DefaultShader shader, boolean wall) {
         int program = shader.program.getHandle();
         int block = GL31.glGetUniformBlockIndex(program, "MaterialCachePages");
         if (block == GL31.GL_INVALID_INDEX) { return; }
@@ -1184,7 +1709,7 @@ final class GpuMaterialCache {
             prewarmed = true;
             return;
         }
-        GL31.glUniformBlockBinding(program, block, BINDING);
+        GL31.glUniformBlockBinding(program, block, wall ? WALL_BINDING : BINDING);
         for (int i = 0; i < SAMPLERS.length; i++) {
             int index = i;
             shader.register(SAMPLERS[i], new BaseShader.LocalSetter() {

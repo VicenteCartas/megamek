@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -27,8 +28,13 @@ import com.badlogic.gdx.utils.FloatArray;
  */
 final class MeepleShatter {
     static final String PIECE = "piece-";
-    /** A piece's empty marker children: its outermost points along {@link #AXES} and its cuts, which it rests on. */
+    /**
+     * A piece's empty marker children, which it rests on: its outermost points along {@link #AXES} and its cuts, and
+     * points across its surface.
+     */
     private static final String SUPPORT = "support";
+    /** The surface's support points lie in a grid of this many cells along each of the piece's bounds. */
+    private static final int SURFACE_CELLS = 4;
     /** The 13 directions of a 26-sided bounding volume. */
     private static final List<Vector3> AXES = axes();
 
@@ -321,12 +327,17 @@ final class MeepleShatter {
         return model;
     }
 
-    /** The piece's outermost points along the volume's directions and its cuts. */
+    /**
+     * The piece's outermost points along the volume's directions and its cuts, and one point of its surface in each cell
+     * of a {@link #SURFACE_CELLS}-cubed grid over its bounds that the surface crosses: a rock under the middle of a face
+     * holds the piece up rather than pass through it.
+     */
     private static void markers(Node node, List<Channel> channels, Piece piece) {
         List<Vector3> directions = new ArrayList<>(AXES);
         directions.addAll(piece.cuts());
         Set<Vector3> supports = new LinkedHashSet<>();
         var point = new Vector3();
+        var bounds = new BoundingBox().inf();
         for (Vector3 direction : directions) {
             float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
             Vector3 lowest = null, highest = null;
@@ -341,6 +352,32 @@ final class MeepleShatter {
             if (lowest == null) { return; }
             supports.add(lowest);
             supports.add(highest);
+            bounds.ext(lowest).ext(highest);
+        }
+        var size = bounds.getDimensions(new Vector3());
+        Set<Integer> cells = new HashSet<>();
+        var a = new Vector3();
+        var b = new Vector3();
+        var c = new Vector3();
+        for (int index = 0; index < channels.size(); index++) {
+            var channel = channels.get(index);
+            FloatArray triangles = piece.triangles()[index];
+            for (int at = 0; at + 3 * channel.stride <= triangles.size; at += 3 * channel.stride) {
+                channel.position(triangles.items, at, a);
+                channel.position(triangles.items, at + channel.stride, b);
+                channel.position(triangles.items, at + 2 * channel.stride, c);
+                b.sub(a);
+                c.sub(a);
+                // Samples at most a cell apart across the triangle.
+                int steps = Math.max(1, MathUtils.ceil(Math.max(span(b, size), Math.max(span(c, size),
+                      span(point.set(c).sub(b), size))) * SURFACE_CELLS));
+                for (int i = 0; i <= steps; i++) {
+                    for (int j = 0; i + j <= steps; j++) {
+                        point.set(a).mulAdd(b, (float) i / steps).mulAdd(c, (float) j / steps);
+                        if (cells.add(cell(point, bounds.min, size))) { supports.add(new Vector3(point)); }
+                    }
+                }
+            }
         }
         for (Vector3 support : supports) {
             var marker = new Node();
@@ -350,7 +387,26 @@ final class MeepleShatter {
         }
     }
 
-    /** The piece's outermost points, in its own coordinates. */
+    /** The largest share of the piece's bounds {@code size} that {@code edge} spans along any axis. */
+    private static float span(Vector3 edge, Vector3 size) {
+        return Math.max(share(edge.x, size.x), Math.max(share(edge.y, size.y), share(edge.z, size.z)));
+    }
+
+    private static float share(float length, float size) {
+        return size > 0 ? Math.abs(length) / size : 0;
+    }
+
+    /** The {@link #SURFACE_CELLS}-cubed grid cell over bounds from {@code min} of {@code size} that holds {@code point}. */
+    private static int cell(Vector3 point, Vector3 min, Vector3 size) {
+        return (column(point.x - min.x, size.x) * SURFACE_CELLS + column(point.y - min.y, size.y)) * SURFACE_CELLS
+              + column(point.z - min.z, size.z);
+    }
+
+    private static int column(float offset, float size) {
+        return size > 0 ? MathUtils.clamp((int) (offset / size * SURFACE_CELLS), 0, SURFACE_CELLS - 1) : 0;
+    }
+
+    /** The piece's outermost points and points across its surface, in its own coordinates. */
     static List<Vector3> supports(Node piece) {
         List<Vector3> result = new ArrayList<>();
         for (Node marker : piece.getChildren()) {

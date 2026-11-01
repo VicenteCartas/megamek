@@ -36,6 +36,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TiledDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.design.DesignTokens.Palette;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTheme.EdgeBox;
 import megamek.client.ui.gdx.UiTheme.HudFrame;
@@ -63,8 +64,16 @@ final class GpuBoardSkin implements Disposable {
     /** The theme's Skin, which holds the battle entries as well. */
     final Skin skin;
     private final UiTheme theme;
+    /** The window's skin, which its scenes share and GpuHost disposes ({@link #release}). */
+    private final boolean shared;
+    /** The palette its token styles are in. */
+    private Palette palette = DesignTokens.palette();
 
-    GpuBoardSkin() {
+    GpuBoardSkin() { this(false); }
+
+    /** {@code shared}: GpuHost's skin for every scene of its window ({@link GpuHost#skin}). */
+    GpuBoardSkin(boolean shared) {
+        this.shared = shared;
         theme = new UiTheme(Configuration.fontsDir());
         skin = theme.skin;
         // Noto Sans stays the default font: the 3D hex labels and the window's loading message use it.
@@ -84,6 +93,7 @@ final class GpuBoardSkin implements Disposable {
 
     /** Builds the token styles again after the user's palette changed ({@link DesignTokens#setPalette}). */
     void refreshTokens() {
+        palette = DesignTokens.palette();
         theme.refreshTokens(this::tokenHud);
     }
 
@@ -243,6 +253,26 @@ final class GpuBoardSkin implements Disposable {
         stripes.dispose();
         theme.add("hatch-texture", hatch, Texture.class);
         theme.add("hatch", new TiledDrawable(new TextureRegion(hatch)).tint(AMBER), Drawable.class);
+    }
+
+    /**
+     * A scene's skin: its window's shared one in GpuHost's window, so the glyphs one scene drew stay drawn for the next
+     * (a board load would otherwise rasterise its fonts again); else a new one the scene owns. Hand it back with
+     * {@link #release}.
+     */
+    static GpuBoardSkin forScene() {
+        GpuBoardSkin window = GpuHost.skin();
+        return window != null ? window : new GpuBoardSkin();
+    }
+
+    /** Whether its token styles are in the user's palette. */
+    boolean inPalette() {
+        return palette == DesignTokens.palette();
+    }
+
+    /** A scene is done with its skin: one it owns is disposed, the window's stays for the next scene. */
+    void release() {
+        if (!shared) { dispose(); }
     }
 
     @Override

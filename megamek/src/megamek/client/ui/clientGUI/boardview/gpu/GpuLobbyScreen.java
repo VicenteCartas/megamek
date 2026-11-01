@@ -221,7 +221,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     @Override
     public void create() {
-        boardSkin = new GpuBoardSkin();
+        boardSkin = GpuBoardSkin.forScene();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
@@ -1652,7 +1652,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             hud.dispose();
         }
         if (boardSkin != null) {
-            boardSkin.dispose();
+            boardSkin.release();
         }
     }
 }

@@ -70,26 +70,37 @@ class UnitVolleyTest {
     }
 
     @Test
-    void aCasualtyBetweenWeaponResultsDoesNotSerializeTheVolley() {
+    void aCasualtyBetweenWeaponResultsDiesAsItsHitLandsWithoutSerializingTheVolley() {
         var attacker = unit(1, 0);
         var victim = unit(2, 2);
         var other = unit(3, 3);
         var playback = new UnitPlayback();
         var finalScene = scene(attacker, other);
+        var speed = UnitMotion.Speed.NORMAL;
         playback.accept(List.of(new BoardScene.SceneUpdate(scene(attacker, victim, other)),
               attack(attacker, victim, ResolvedAttack.Kind.SHOT, true),
               attack(victim, victim, ResolvedAttack.Kind.DEATH, true),
               new BoardScene.SceneUpdate(finalScene), attack(attacker, other, ResolvedAttack.Kind.SHOT, true),
               new BoardScene.SceneUpdate(finalScene)), finalScene, ignored -> false);
-        playback.advance(0, UnitMotion.Speed.NORMAL);
-        assertEquals(2, playback.attacks().size());
-        double duration = playback.attacks().stream().mapToDouble(shot -> shot.duration + shot.delay).max().orElseThrow();
-        playback.advance(duration / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
-        assertTrue(playback.present(finalScene).units().contains(victim), "Keep the victim through the volley's recovery and hold");
-        playback.advance(UnitPlayback.COMPLETION_HOLD_SECONDS, UnitMotion.Speed.NORMAL);
-        assertTrue(playback.attack().death());
-        assertTrue(playback.present(finalScene).units().contains(victim));
-        playback.advance(UnitAttack.DEATH_SECONDS / UnitMotion.Speed.NORMAL.rate + 1.001, UnitMotion.Speed.NORMAL);
+        playback.advance(0, speed);
+        var attacks = List.copyOf(playback.attacks());
+        assertEquals(3, attacks.size());
+        var hit = attacks.getFirst();
+        var death = attacks.stream().filter(UnitAttack::death).findFirst().orElseThrow();
+        assertSame(hit, death.cause);
+        assertEquals(hit.delay + hit.contactSeconds, death.delay, 1e-6, "The death plays from its hit's landing");
+        assertTrue(playback.present(finalScene).units().contains(victim), "The victim stands until the hit lands");
+        double contact = attacks.stream().filter(shot -> !shot.death()).mapToDouble(shot -> shot.delay + shot.contactSeconds)
+              .max().orElseThrow();
+        double duration = attacks.stream().mapToDouble(shot -> shot.duration + shot.delay).max().orElseThrow();
+        playback.advance((contact + .01) / speed.rate, speed);
+        assertTrue(death.seconds > 0 && death.seconds < death.duration);
+        assertFalse(playback.present(finalScene).units().contains(victim), "The volley's hits show while the death plays on");
+        playback.advance((duration - contact - .01) / speed.rate, speed);
+        assertEquals(death.duration, death.seconds, 1e-5);
+        double hold = UnitPlayback.COMPLETION_HOLD_SECONDS + UnitPlayback.DEATH_HOLD_SECONDS;
+        assertEquals(hold, playback.holdSeconds(), 1e-4, "A destruction holds a moment longer");
+        playback.advance(hold + .001, speed);
         assertFalse(playback.busy());
         assertEquals(finalScene.units(), playback.present(finalScene).units());
     }

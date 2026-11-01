@@ -4,11 +4,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -69,24 +71,18 @@ class GpuOrchardSmokeTest {
                             BoardScene scene = scene(List.of(tile), 1, 1);
                             terrain.update(scene);
                             int[] triangles = new int[TreeLod.LEVELS];
-                            Texture atlas = null;
+                            var maps = new HashMap<String, Texture>();
                             for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
                                 var model = assets.lodModel(name, lod);
                                 for (var part : model.meshParts) { triangles[lod] += part.size / 3; }
                                 for (var material : model.materials) {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
-                                    if (material.id.endsWith("-cutout")) {
-                                        var woodland = assets.model("vegetation/tree" + (snow ? "-snow" : ""))
-                                              .getMaterial(material.id).get(TextureAttribute.class, TextureAttribute.Diffuse);
-                                        assertSame(woodland.textureDescription.texture, map.textureDescription.texture,
-                                              "Orchards share the existing leaf cutout and clamped sampler");
-                                        continue;
-                                    }
-                                    // Legacy snow has its own map, and the impostor cards their own rendered atlas.
-                                    if (material.id.equals("snow") || material.id.equals("impostor")) { continue; }
-                                    if (atlas == null) { atlas = map.textureDescription.texture; }
-                                    assertSame(atlas, map.textureDescription.texture, "LOD borrows the shared atlas");
+                                    // The impostor cards have their own rendered atlas.
+                                    if (material.id.equals("impostor")) { continue; }
+                                    maps.putIfAbsent(material.id, map.textureDescription.texture);
+                                    assertSame(maps.get(material.id), map.textureDescription.texture,
+                                          "Orchard levels share each material's maps: " + material.id);
                                 }
                             }
                             var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
@@ -95,7 +91,7 @@ class GpuOrchardSmokeTest {
                             Ray ray = new Ray(BoardGeometry.center(coords, 0).add(0, 0, 1000), new Vector3(0, 0, -1));
                             var hit = terrain.hit(scene, ray);
                             assertNotNull(hit);
-                            int nearColour = 0, nearDepth = 0;
+                            int nearColour = 0, nearDepth = 0, nearShadow = 0;
                             for (int lod : new int[] { 0, 1, 2, 3, 0 }) {
                                 camera.camera.zoom = diameter * Gdx.graphics.getBackBufferHeight()
                                       / Gdx.graphics.getHeight() / GpuTreeLodSmokeTest.PIXELS[lod];
@@ -107,11 +103,13 @@ class GpuOrchardSmokeTest {
                                 int shadow = count(profiler, () -> terrain.renderShadows(camera.camera, List.of()));
                                 int colour = colour(profiler, terrain, camera);
                                 int depthCount = count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth));
-                                if (lod == 0) { nearColour = colour; nearDepth = depthCount; }
+                                if (lod == 0) { nearColour = colour; nearDepth = depthCount; nearShadow = shadow; }
                                 int saved = 3 * (triangles[0] - triangles[lod]);
                                 assertEquals(saved, nearColour - colour, name);
                                 assertEquals(saved, nearDepth - depthCount, name);
-                                assertEquals(depthCount, shadow, name);
+                                // The shadow map's level follows its own texel (GpuTerrain.renderDepth).
+                                assertTrue(GpuTreeLodSmokeTest.drawnLevel(nearShadow - shadow, triangles) >= 0,
+                                      "Shadow draws one level of the orchard: " + name);
                                 assertEquals(hit, terrain.hit(scene, ray), "Picking is independent of orchard LOD");
                             }
                         }

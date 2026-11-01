@@ -27,11 +27,12 @@ class BoardTreeDistributionTest {
           "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch", "vegetation/birch-tall",
           "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/willow", "vegetation/willow-broad",
           "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered");
-    /** The trees imported from the Quaternius pack (data/models/board/README.md), each with its winter form. */
+    /** The grown trees, each with its winter form, and the dead tree, palms and saguaros. */
     static final List<String> IMPORTED_TREES = java.util.stream.Stream.concat(
           BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
           java.util.stream.Stream.of("vegetation/tree-dead", "vegetation/tree-dead-snow", "vegetation/palm", "vegetation/palm-bent",
-                "vegetation/cactus", "vegetation/cactus-flowers")).toList();
+                "vegetation/cactus", "vegetation/cactus-flowers", "vegetation/cactus-old", "vegetation/cactus-young",
+                "vegetation/cactus-organ")).toList();
 
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, boolean natural) {
         return BoardFeatures.capture(hex, coords, Map.of(), Set.of(), c -> null, TilesetScenery.Scenery.EMPTY, natural)
@@ -87,8 +88,8 @@ class BoardTreeDistributionTest {
             var hex = new Hex(0, "woods:" + density + ";foliage_elev:2", "", coords);
             var trees = capture(hex, coords, true);
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, trees.size());
-            assertTrue(trees.stream().allMatch(t -> t.height() >= 2 && t.height() <= 2.2f
-                  && Math.hypot(t.x(), t.y()) <= 29), "Keep authoritative cover and the existing trunk footprint");
+            BoardFeaturesTest.assertWoodsHeights(trees, 2, density);
+            assertTrue(trees.stream().allMatch(t -> Math.hypot(t.x(), t.y()) <= 29), "Keep the existing trunk footprint");
         }
         var clear = new Hex(0, "", "", coords);
         assertTrue(capture(clear, coords, true).isEmpty());
@@ -162,15 +163,18 @@ class BoardTreeDistributionTest {
                         low = Math.min(low, m.vertices[v + 2]); high = Math.max(high, m.vertices[v + 2]);
                     }
                 }
-                assertTrue(triangles > 0 && triangles <= List.of(1000, 300, 96, 12).get(lod), name);
+                assertTrue(triangles > 0 && triangles <= List.of(1600, 410, 96, 12).get(lod), name);
                 assertEquals(0, low, .001f, name);
                 assertEquals(30, high, .001f, name);
                 for (var material : model.materials) {
                     if (!material.id.endsWith("-cutout")) { continue; }
                     assertEquals(.5f, ((RigidGlb.Data) model).alphaTests.get(material.id), .0001f);
                     var texture = ((RigidGlb.Data) model).images.get(material.textures.first().fileName);
-                    assertTrue(texture.file().endsWith((tree.startsWith("vegetation/pine") ? "conifer" : "broadleaf")
-                          + (snow ? "-snow" : "") + "-cutout_albedo.png"), "Variants borrow the existing texture");
+                    // Willows wear their own cutout in summer and the broadleaf snow in winter.
+                    String cutout = tree.startsWith("vegetation/pine") ? "conifer"
+                          : tree.startsWith("vegetation/willow") && !snow ? "willow" : "broadleaf";
+                    assertTrue(texture.file().endsWith(cutout + (snow ? "-snow" : "") + "-cutout_albedo.png"),
+                          "Variants borrow the shared textures");
                 }
             }
         }

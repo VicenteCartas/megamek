@@ -51,7 +51,8 @@ final class BoardFeatures {
           "vegetation/willow-broad", "vegetation/birch-spreading", "vegetation/tree-forked");
     private static final List<String> BARREN = List.of("vegetation/tree-dead");
     private static final List<String> DESERT = List.of("vegetation/cactus", "vegetation/palm", "vegetation/tree-dead",
-          "vegetation/cactus-flowers", "vegetation/palm-bent", "vegetation/cactus");
+          "vegetation/cactus-flowers", "vegetation/palm-bent", "vegetation/cactus-old", "vegetation/cactus-young",
+          "vegetation/cactus-organ");
     private static final List<String> PALMS = List.of("vegetation/palm", "vegetation/palm-bent");
     private static final List<String> TROPICAL = List.of("vegetation/palm", "vegetation/palm-bent",
           "vegetation/tree-broad", "vegetation/palm", "vegetation/tree-slender", "vegetation/palm-bent",
@@ -274,9 +275,9 @@ final class BoardFeatures {
             float crown = orchard ? (density >= 3 ? .62f : .82f)
                   : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
             List<String> species = mars ? MARS_CORALS
-                  : volcano ? (height == 1 ? List.of("vegetation/foliage-volcano") : VOLCANO_TREES)
+                  : volcano ? (height == 1 ? shrubVariants("vegetation/foliage-volcano") : VOLCANO_TREES)
                   : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(vegetation)
-                  : height == 1 ? List.of(shrub(vegetation, jungle)) : species(vegetation, jungle);
+                  : height == 1 ? shrubVariants(shrub(vegetation, jungle)) : species(vegetation, jungle);
             // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
             boolean understory = surface(vegetation) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
             if (understory) { count *= 2; }
@@ -312,19 +313,20 @@ final class BoardFeatures {
                 if (BoardRoad.distance(roads, roadX + x * roadScale, roadY + y * roadScale) < BoardRoad.SHOULDER + 2) {
                     continue;
                 }
-                // Every biome uses the same distribution. Eligibility and size still describe its vegetation:
-                // one mature fungal cup reaches cover height; tropical understory uses its low plant model.
-                List<String> choices = low ? List.of("vegetation/foliage-jungle") : fungus && index == 0 ? BoardFungus.CUPS : species;
+                // Every biome uses the same distribution. Eligibility and size still describe its vegetation.
+                // Height is the woods' rule: every woods may grow one shorter plant in light woods and two in
+                // heavier woods, the rest (mature fungal cups among them) reaching cover height, so a hex never reads
+                // lower than its woods. Tropical understory adds its low plants between the trees.
                 int speciesIndex = understory ? index / 2 : index;
+                boolean shorter = !low && speciesIndex >= 1 && speciesIndex <= (density == 1 ? 1 : 2);
+                List<String> choices = low ? shrubVariants("vegetation/foliage-jungle")
+                      : fungus && !shorter ? BoardFungus.CUPS : species;
                 String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
                       : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
-                float foliageHeight = low ? .4f + (index % 3) * .06f : height * (1f + (index % 3) * .05f);
-                if (fungus) {
-                    foliageHeight = height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
-                          : index == 0 ? 1 : .7f + (index % 3) * .1f);
-                } else if (mars) {
-                    foliageHeight = height * (index == 0 ? 1 : .7f + (index % 3) * .1f);
-                }
+                float foliageHeight = low ? .4f + (index % 3) * .06f
+                      : shorter ? height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
+                            : .7f + (index % 3) * .1f)
+                      : fungus || mars ? height : height * (1f + (index % 3) * .05f);
                 result.add(new BoardScene.Feature(tree, x,
                       y, natural ? treeRandom.nextFloat() * 360
                             : index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
@@ -636,7 +638,8 @@ final class BoardFeatures {
             int[] next = { 0 };
             layout.decorations(coords, hex, () -> prefix + layout.components().get(next[0]).asset() + "#" + next[0]++,
                         null, false).stream()
-                  .filter(object -> object.kind().equals("decal")).map(object -> feature(hex, object)).forEach(result::add);
+                  .filter(object -> object.kind().equals("decal"))
+                  .map(object -> feature(hex, object.withAsset(geyserLook(object.asset(), coords)))).forEach(result::add);
         }
         return List.copyOf(result);
     }
@@ -649,9 +652,12 @@ final class BoardFeatures {
      */
     static final String FORTIFICATION = "scenery/military/fortification", SANDBAGS = "scenery/military/sandbags";
 
-    /** A geyser's look on its hex: each geyser asset has a second look, {@code <asset>-b}, one or the other per hex. */
+    /**
+     * A geyser's look on its hex: each geyser asset, and the decal of its apron under it, has a second look,
+     * {@code <asset>-b}, one or the other per hex.
+     */
     static String geyserLook(String asset, Coords coords) {
-        if (!asset.startsWith(GpuGeysers.GEYSERS)) { return asset; }
+        if (!asset.startsWith(GpuGeysers.GEYSERS) && !asset.startsWith("decal/geysers/")) { return asset; }
         Random random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x67657973L);
         return random.nextBoolean() ? asset + "-b" : asset;
     }
@@ -1137,6 +1143,11 @@ final class BoardFeatures {
     private static List<String> orchardSpecies(Hex hex) {
         return surface(hex) == BoardScene.Surface.SNOW
               ? ORCHARD.stream().map(tree -> tree + "-snow").toList() : ORCHARD;
+    }
+
+    /** A shrub family grows three shapes, so level-one cover never repeats one bush across a hex. */
+    private static List<String> shrubVariants(String shrub) {
+        return List.of(shrub, shrub + "-2", shrub + "-3");
     }
 
     /** Level-one woods and jungle are understory, with their own low-growing geometry. */

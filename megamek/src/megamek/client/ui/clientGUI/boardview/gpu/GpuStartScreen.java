@@ -179,6 +179,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     int generation;
     /** Set once the screen is disposed, so results that arrive after it are dropped. GPU thread only. */
     boolean disposed;
+    /** Gives the button that is starting a game its use back; null while none is. */
+    private Runnable restoreStart;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
         this.window = window;
@@ -229,7 +231,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     @Override
     public void create() {
         window.started();
-        boardSkin = new GpuBoardSkin();
+        boardSkin = GpuBoardSkin.forScene();
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
@@ -341,7 +343,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             List<File> saves = StartSaves.list(new File(MMConstants.SAVEGAME_DIR));
             showPage(Page.LOAD);
             if (!saves.isEmpty()) {
-                loadPage.readSave(saves.get(0), false);
+                loadPage.readSave(saves.get(0), null);
             }
         } else if (asked != Page.MAIN) {
             showPage(asked);
@@ -547,7 +549,7 @@ final class GpuStartScreen extends ApplicationAdapter {
         UiButton button = kit.button("button-primary", null, Messages.getString("StartScreen.continue"),
               StartSaves.title(save) + "  \u00b7  " + StartSaves.ago(save.lastModified(), System.currentTimeMillis()));
         leftAligned(button);
-        UiKit.onChange(button, () -> loadPage.readSave(save, true));
+        UiKit.onChange(button, () -> loadPage.readSave(save, button));
         return button;
     }
 
@@ -634,9 +636,34 @@ final class GpuStartScreen extends ApplicationAdapter {
         return kit.roleTypeLabel("overline", Messages.getString(key), "text.muted");
     }
 
-    /** The scenario didn't start; see {@link StartBriefingPage#startFailed}. */
-    void startFailed(boolean gameUsed) {
-        briefingPage.startFailed(gameUsed);
+    /**
+     * Disables {@code button}, which starts a game, and has it say {@code key}'s text until {@link #startEnded}, which
+     * runs {@code ended}.
+     */
+    void starting(UiButton button, String key, Runnable ended) {
+        // The button of an earlier start, such as a save whose read another click dropped, works again
+        startEnded();
+        restoreStart = ended;
+        button.setDisabled(true);
+        button.setText(kit.cased("button", Messages.getString(key)));
+    }
+
+    /** As {@link #starting(UiButton, String, Runnable)}; {@code button} gets its own text back when the start ends. */
+    void starting(UiButton button, String key) {
+        String text = button.getText().toString();
+        starting(button, key, () -> {
+            button.setDisabled(false);
+            button.setText(text);
+        });
+    }
+
+    /** No game started, or the one that did has closed: the button that started it works again. */
+    void startEnded() {
+        Runnable ended = restoreStart;
+        restoreStart = null;
+        if (ended != null) {
+            ended.run();
+        }
     }
 
     private Table bottomRow() {
@@ -1329,7 +1356,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             hud.dispose();
         }
         if (boardSkin != null) {
-            boardSkin.dispose();
+            boardSkin.release();
         }
         briefingPage.disposeSwatches();
         briefingPage.disposeBriefingMap();

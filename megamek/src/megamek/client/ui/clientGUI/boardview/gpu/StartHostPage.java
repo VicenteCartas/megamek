@@ -174,6 +174,9 @@ final class StartHostPage {
 
     /** Checks the Host page; shows what is wrong under the inputs, or asks MegaMek to host the game. */
     void submitHost() {
+        if (hostButton.isDisabled()) {
+            return;
+        }
         String name = inputs.nameInput.getText().trim();
         int port = StartHostForm.port(inputs.portInput.getText());
         inputs.nameField.error(name.isEmpty() ? Messages.getString("MegaMek.GameConnection.nameError") : null);
@@ -192,6 +195,7 @@ final class StartHostPage {
             return;
         }
         boolean register = registerBox.isChecked();
+        screen.starting(hostButton, "StartScreen.starting");
         screen.window.host(new HostRequest(name, inputs.passwordInput.getText(), port, register,
               register ? metaserverInput.getText().trim() : ""));
     }
@@ -232,6 +236,9 @@ final class StartHostPage {
 
     /** Checks the Resume page as the Host page; asks MegaMek to host the save as the chosen player, or to watch it. */
     void submitResume() {
+        if (hostButton.isDisabled()) {
+            return;
+        }
         boolean watching = watching();
         String name = playAs != null && !watching ? playAs.getSelected() : inputs.nameInput.getText().trim();
         int port = StartHostForm.port(inputs.portInput.getText());
@@ -260,6 +267,7 @@ final class StartHostPage {
         }
         boolean register = registerBox.isChecked();
         List<String> bots = resume.bots().stream().filter(bot -> watching || !bot.equals(name)).toList();
+        screen.starting(hostButton, "StartScreen.starting");
         screen.window.load(new LoadRequest(resume.file(), new HostRequest(name, inputs.passwordInput.getText(), port,
               register, register ? metaserverInput.getText().trim() : ""), watching, bots));
     }

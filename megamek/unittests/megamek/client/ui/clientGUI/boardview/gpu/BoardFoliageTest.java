@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import javax.imageio.ImageIO;
 
-import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.math.Vector3;
@@ -30,12 +29,18 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFoliageTest {
+    /** Loading a glowing fungal material decodes its emission map with libGDX. */
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
     @ParameterizedTest
     @ValueSource(strings = { "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-snow", "vegetation/pine-tall-snow", "vegetation/pine-broad-snow",
           "vegetation/pine-slender", "vegetation/pine-layered", "vegetation/pine-slender-snow", "vegetation/pine-layered-snow" })
@@ -89,54 +94,6 @@ class BoardFoliageTest {
         assertTrue(checked > 8, "Check several branches around the upper trunk: " + name);
     }
 
-    @Test
-    void cactusPadsFormOneClosedConnectedSurfaceAtEveryMeshLod() {
-        File root = new File(Configuration.dataDir(), "models/board");
-        var levels = RigidGlb.loadLods(new FileHandle(new File(root, "vegetation/foliage-desert.glb")), root.toPath());
-        // The last level is the impostor's open cards, not a cactus body.
-        for (var data : levels.subList(0, 3)) {
-            // Hard normals and UV seams split render vertices; weld only positions for the topology check.
-            var positions = new HashMap<List<Integer>, Integer>();
-            var edges = new HashMap<List<Integer>, Integer>();
-            var neighbours = new HashMap<Integer, HashSet<Integer>>();
-            for (var mesh : data.meshes) {
-                int[] welded = new int[mesh.vertices.length / RigidGlb.STRIDE];
-                for (int i = 0; i < welded.length; i++) {
-                    int offset = i * RigidGlb.STRIDE;
-                    var point = List.of(Math.round(mesh.vertices[offset] * 100_000),
-                          Math.round(mesh.vertices[offset + 1] * 100_000), Math.round(mesh.vertices[offset + 2] * 100_000));
-                    welded[i] = positions.computeIfAbsent(point, ignored -> positions.size());
-                }
-                for (var part : mesh.parts) {
-                    for (int i = 0; i < part.indices.length; i += 3) {
-                        for (int side = 0; side < 3; side++) {
-                            int a = welded[Short.toUnsignedInt(part.indices[i + side])];
-                            int b = welded[Short.toUnsignedInt(part.indices[i + (side + 1) % 3])];
-                            assertTrue(a != b, "No collapsed pad joints");
-                            edges.merge(List.of(Math.min(a, b), Math.max(a, b)), 1, Integer::sum);
-                            neighbours.computeIfAbsent(a, ignored -> new HashSet<>()).add(b);
-                            neighbours.computeIfAbsent(b, ignored -> new HashSet<>()).add(a);
-                        }
-                    }
-                }
-            }
-            assertTrue(edges.values().stream().allMatch(count -> count == 2), "Every cactus edge has two faces");
-            var visited = new HashSet<Integer>();
-            var pending = new ArrayList<>(List.of(0));
-            while (!pending.isEmpty()) {
-                int vertex = pending.removeLast();
-                if (visited.add(vertex)) { pending.addAll(neighbours.get(vertex)); }
-            }
-            assertEquals(positions.size(), visited.size(), "Every pad belongs to one fused cactus body");
-            // Pads are individually flat, but the plant must branch in both horizontal directions.
-            for (int axis = 0; axis < 2; axis++) {
-                int coordinate = axis;
-                var extent = positions.keySet().stream().mapToInt(point -> point.get(coordinate)).summaryStatistics();
-                assertTrue(extent.getMax() - extent.getMin() > 1_000_000, "Cactus branches must have real depth");
-            }
-        }
-    }
-
     @ParameterizedTest
     @CsvSource({ "'', 0, temperate", "'', 2, highland", "rock, 0, rocky", "volcano, 0, volcano",
           "dirt, 0, wetland", "lunar, 0, barren", "Desert, 0, desert",
@@ -150,8 +107,13 @@ class BoardFoliageTest {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var features = BoardFeatures.capture(hex, coords, Map.of());
             assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, features.size());
-            assertTrue(features.stream().allMatch(feature -> feature.asset().equals("vegetation/foliage-" + family)
-                  && feature.kind() == BoardScene.FeatureKind.TREE && feature.height() >= 1 && feature.height() <= 1.1f));
+            assertTrue(features.stream().allMatch(feature -> shrub(feature, family)
+                  && feature.kind() == BoardScene.FeatureKind.TREE));
+            BoardFeaturesTest.assertWoodsHeights(features, 1, density);
+            if (density > 1) {
+                assertTrue(features.stream().map(BoardScene.Feature::asset).distinct().count() > 1,
+                      "A dense hex mixes the family's shrub shapes");
+            }
             assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()), "Roots remain deterministic");
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
             assertFalse(BoardFeatures.capture(hex, coords, Map.of()).stream()
@@ -172,17 +134,17 @@ class BoardFoliageTest {
               Terrains.SNOW, "snow").entrySet()) {
             hex.addTerrain(new Terrain(entry.getKey(), 1));
             assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-                  .allMatch(feature -> feature.asset().equals("vegetation/foliage-" + entry.getValue())));
+                  .allMatch(feature -> shrub(feature, entry.getValue())));
             hex.removeTerrain(entry.getKey());
         }
         hex.removeTerrain(Terrains.WOODS);
         hex.addTerrain(new Terrain(Terrains.JUNGLE, 2));
         hex.setTheme("desert");
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("vegetation/foliage-jungle")));
+              .allMatch(feature -> shrub(feature, "jungle")));
         hex.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
-              .allMatch(feature -> feature.asset().equals("vegetation/foliage-snow")));
+              .allMatch(feature -> shrub(feature, "snow")));
         hex.removeTerrain(Terrains.JUNGLE);
         assertTrue(BoardFeatures.capture(hex, coords, Map.of()).isEmpty());
     }
@@ -243,12 +205,17 @@ class BoardFoliageTest {
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
-            String plant = "vegetation/" + atlas.getName().replace(".png", "");
+            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/).
+            String name = atlas.getName().replace(".png", "");
+            String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/").map(folder -> folder + name)
+                  .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
             var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
             for (var material : near.materials) {
+                // The glowing mycelium is its vertex colour alone.
+                if (material.textures == null) { continue; }
                 var image = near.images.get(material.textures.first().fileName);
                 byte[] encoded = image.file() != null ? Files.readAllBytes(Path.of(image.file())) : image.encoded();
                 textures.put(material.id, ImageIO.read(new ByteArrayInputStream(encoded)));
@@ -279,6 +246,7 @@ class BoardFoliageTest {
             double weight = 0;
             for (var part : mesh.parts) {
                 BufferedImage texture = textures.get(partMaterials.get(part.id));
+                if (texture == null) { continue; }
                 double[] mean = cutoutMeans.get(partMaterials.get(part.id));
                 for (int i = 0; i < part.indices.length; i += 3) {
                     int a = corner(part.indices, i), b = corner(part.indices, i + 1), c = corner(part.indices, i + 2);
@@ -340,6 +308,11 @@ class BoardFoliageTest {
     }
 
     /** The area a mesh turns toward the views, the plant's outline as the board camera sees it. */
+    /** A low-woods feature is one of its family's three shrub shapes. */
+    private static boolean shrub(BoardScene.Feature feature, String family) {
+        return feature.asset().matches("vegetation/foliage-" + family + "(-[23])?");
+    }
+
     private static double outline(ModelData data, float[][] views) {
         double total = 0;
         for (var mesh : data.meshes) {

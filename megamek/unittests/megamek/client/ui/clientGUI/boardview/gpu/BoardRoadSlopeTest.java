@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
@@ -463,6 +464,11 @@ class BoardRoadSlopeTest {
     }
 
     static void assertClosed(BoardScene scene, Coords at, TerrainLod lod) {
+        assertClosed(scene, at, lod, p -> true);
+    }
+
+    /** As {@link #assertClosed(BoardScene, Coords, TerrainLod)}, for the boundary points {@code where} accepts. */
+    static void assertClosed(BoardScene scene, Coords at, TerrainLod lod, Predicate<Vector3> where) {
         Map<Coords, BoardSurface> surfaces = new HashMap<>();
         for (var tile : scene.tiles()) {
             if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, lod)); }
@@ -495,7 +501,7 @@ class BoardRoadSlopeTest {
         for (var edge : open) {
             for (float t : new float[] { .25f, .5f, .75f }) {
                 var p = new Vector3(edge.a()).lerp(edge.b(), t);
-                if (Math.hypot(p.x - center.x, p.y - center.y) > BoardGeometry.width() * .7f) { continue; }
+                if (Math.hypot(p.x - center.x, p.y - center.y) > BoardGeometry.width() * .7f || !where.test(p)) { continue; }
                 boolean covered = false;
                 for (var other : open) {
                     if (other == edge) { continue; }

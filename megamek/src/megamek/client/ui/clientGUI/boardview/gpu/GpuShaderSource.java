@@ -22,9 +22,15 @@ import com.badlogic.gdx.files.FileHandle;
 import megamek.common.Configuration;
 import megamek.common.board.HexTile;
 
-/** Uncached shader reads: installation overrides, checkout resources, then the bundled defaults. */
+/**
+ * Shader reads: installation overrides, checkout resources, then the bundled defaults. Each file is read once
+ * ({@link #readDisk}) until the shader editor saves or reloads files, or Reload assets runs ({@link #forget}): a file
+ * edited outside the game shows after Reload assets.
+ */
 final class GpuShaderSource {
     private static final String RESOURCES = "megamek/client/ui/clientGUI/boardview/gpu/";
+    /** Each file's text as {@link #readDisk} last read it, by data folder (tests switch it) and name. */
+    private static final Map<String, String> DISK = new java.util.concurrent.ConcurrentHashMap<>();
 
     private GpuShaderSource() { }
 
@@ -227,7 +233,13 @@ final class GpuShaderSource {
         return source.replace("void main() {", "// terrain-lighting-functions\n" + functions + "\nvoid main() {");
     }
 
-    static String readDisk(String name) { return resolve(name).readString("UTF-8"); }
+    /** A file's text, read once: a load assembles the same includes into many programs. */
+    static String readDisk(String name) {
+        return DISK.computeIfAbsent(Configuration.dataDir().getPath() + '\n' + name, key -> resolve(name).readString("UTF-8"));
+    }
+
+    /** Files are read from disk again: the shader editor saved or reloaded them, or Reload assets runs. */
+    static void forget() { DISK.clear(); }
 
     private static FileHandle resolve(String name) {
         FileHandle override = new FileHandle(new File(Configuration.dataDir(), "shaders/" + name));
@@ -306,7 +318,11 @@ final class GpuShaderSource {
             catch (AtomicMoveNotSupportedException ignored) {
                 Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING);
             }
-        } finally { Files.deleteIfExists(temporary); }
+        } finally {
+            // A saved file may also be a new override that now shadows the bundled one.
+            forget();
+            Files.deleteIfExists(temporary);
+        }
         return new FileSource(text, path, true);
     }
 }

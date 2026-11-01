@@ -19,6 +19,7 @@ import megamek.common.ResolvedAttack;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.ProneCause;
 import megamek.common.units.Targetable;
 import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
@@ -311,12 +312,29 @@ class UnitPlaybackTest {
                 playback.togglePaused();
                 playback.advance(.001 / speed.rate, speed);
                 assertTrue(playback.present(removed).units().isEmpty());
-                assertEquals(1, playback.holdSeconds(), 1e-5);
-                playback.advance(1.001, speed);
+                double hold = UnitPlayback.COMPLETION_HOLD_SECONDS + UnitPlayback.DEATH_HOLD_SECONDS;
+                assertEquals(hold, playback.holdSeconds(), 1e-5);
+                playback.advance(hold + .001, speed);
             }
             assertFalse(playback.busy());
             assertTrue(playback.present(removed).units().isEmpty());
         }
+    }
+
+    @Test
+    void aUnitThatDiesInItsFallDiesAsItLands() {
+        var victim = unit(2, 5);
+        var down = victim.at(victim.location().withProneCause(ProneCause.FORCED));
+        var fall = new BoardScene.Movement(victim.id(), 0, List.of(victim.location().withProneCause(ProneCause.NONE),
+              down.location()), EntityMovementType.MOVE_NONE, 0, 0, down);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(new BoardScene.SceneUpdate(scene(victim)), fall,
+              attack(down, down, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(scene())), scene(), ignored -> false);
+        var speed = UnitMotion.Speed.NORMAL;
+        playback.advance(0, speed);
+        assertNull(playback.attack(), "The fall plays first");
+        playback.advance(UnitMotion.POSTURE_SECONDS / speed.rate + .001, speed);
+        assertTrue(playback.attack() != null && playback.attack().death(), "The death plays as the fall lands");
     }
 
     @Test

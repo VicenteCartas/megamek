@@ -59,6 +59,7 @@ import megamek.common.units.BuildingEntity;
 import megamek.common.units.ConvInfantry;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
+import megamek.common.units.ProneCause;
 import megamek.common.units.Targetable;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
@@ -94,6 +95,8 @@ class GpuBoardSourceTest {
                 fixture.game.fireGameEvent(new GameAttackResolvedEvent(fixture.game, death, fixture.entity, fixture.entity));
                 if (concealed) {
                     fixture.game.removeEntity(fixture.entity.getId(), IEntityRemovalConditions.REMOVE_UNKNOWN);
+                } else {
+                    fixture.entity.setDoomed(true);
                 }
                 board.setHex(coords, new Hex(-3));
                 fixture.source.refresh();
@@ -121,6 +124,38 @@ class GpuBoardSourceTest {
             SwingUtilities.invokeAndWait(() -> fixture.game.fireGameEvent(
                   new GameNuclearDetonationEvent(fixture.game, strike, true)));
             assertTrue(fixture.source.takeFrame().timeline().isEmpty(), "Duplicate completion must not replay the blast");
+        }
+    }
+
+    @Test
+    void aDeathTheServerReportsBeforeTheFallThatCausedItPlaysAsTheFallLands() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            int id = fixture.entity.getId();
+            Coords start = fixture.entity.getPosition();
+            Coords end = start.translated(0);
+            fixture.source.takeFrame();
+            SwingUtilities.invokeAndWait(() -> {
+                var location = new UnitLocation(id, start, 0, 0, 0);
+                fixture.game.fireGameEvent(new GameAttackResolvedEvent(fixture.game, new ResolvedAttack(UUID.randomUUID(),
+                      ResolvedAttack.Kind.DEATH, location, location, Targetable.TYPE_ENTITY, -1, "", Entity.LOC_NONE, true),
+                      fixture.entity, fixture.entity));
+            });
+            // A refresh before the movement arrives, as the source's timer makes, leaves the death waiting for it.
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(end);
+                fixture.entity.setProne(ProneCause.FORCED);
+                fixture.entity.setDoomed(true);
+                fixture.game.fireGameEvent(new GameEntityChangeEvent(fixture.game, fixture.entity,
+                      new Vector<>(List.of(new UnitLocation(id, end, 0, 0, 0)))));
+            });
+            SwingUtilities.invokeAndWait(() -> { });
+            var timeline = fixture.source.takeFrame().timeline().stream()
+                  .filter(event -> !(event instanceof BoardScene.SceneUpdate)).toList();
+            assertEquals(2, timeline.size(), timeline.toString());
+            assertTrue(timeline.getFirst() instanceof BoardScene.Movement move && move.path().getLast().coords().equals(end));
+            assertTrue(timeline.getLast() instanceof BoardScene.Combat death && death.result().kind() == ResolvedAttack.Kind.DEATH
+                  && death.attacker().location().coords().equals(end), "The death follows its fall, where the fall left it");
         }
     }
 

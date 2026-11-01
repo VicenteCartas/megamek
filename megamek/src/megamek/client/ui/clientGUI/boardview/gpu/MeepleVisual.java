@@ -20,6 +20,8 @@ import com.badlogic.gdx.math.collision.Ray;
 final class MeepleVisual {
     static final String ROOT = "meeple";
     static final float HEIGHT = 32;
+    /** How bright the token's plain underside is, as a share of its walls' colour. */
+    private static final float UNDERSIDE = .4f;
     // Reuse the four body overlays, limiting coverage so even heavy damage preserves the player's camouflage.
     static final float DAMAGE_OPACITY = .5f;
 
@@ -54,15 +56,22 @@ final class MeepleVisual {
         long attributes = VertexAttributes.Usage.Position | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.Normal;
         var caps = new MeshBuilder();
         var sides = new MeshBuilder();
+        var underside = new MeshBuilder();
         caps.begin(attributes, GL20.GL_TRIANGLES);
         sides.begin(attributes, GL20.GL_TRIANGLES);
-        GpuCutout.extrude(pixels, region, Vector3.Zero, 1, HEIGHT, true, caps, sides);
+        underside.begin(attributes, GL20.GL_TRIANGLES);
+        // The artwork shows on top only; underneath, as when the token lies on its back, it is plain and darker than its
+        // walls.
+        GpuCutout.extrude(pixels, region, Vector3.Zero, 1, HEIGHT, caps, sides, underside);
         builder.part("cutout", caps.end(), GL20.GL_TRIANGLES,
               new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(),
                     IntAttribute.createCullFace(GL20.GL_NONE)));
         builder.part("sides", sides.end(), GL20.GL_TRIANGLES,
               new Material("paint", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),
                     IntAttribute.createCullFace(GL20.GL_NONE)));
+        builder.part("underside", underside.end(), GL20.GL_TRIANGLES,
+              new Material("underside", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels).mul(UNDERSIDE, UNDERSIDE, UNDERSIDE, 1)),
+                    new GpuLinearColors(), IntAttribute.createCullFace(GL20.GL_NONE)));
         return builder.end();
     }
 

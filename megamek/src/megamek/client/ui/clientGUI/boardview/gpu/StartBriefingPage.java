@@ -546,22 +546,18 @@ final class StartBriefingPage {
             screen.stage.setKeyboardFocus(inputs.portInput);
             return;
         }
-        startButton.setDisabled(true);
-        startButton.setText(screen.kit.cased("button", Messages.getString("StartScreen.starting")));
+        screen.starting(startButton, "StartScreen.starting", this::startFailed);
         screen.window.scenario(new ScenarioRequest(briefing.scenario(), briefing.game(), roles, name,
               online ? inputs.passwordInput.getText() : "", port));
     }
 
     /**
-     * The scenario didn't start; MegaMek has said why. Start works again, once the briefing has made its game again when
-     * {@code gameUsed}, keeping the sides' camouflage, the rules and the conditions the player chose.
+     * The scenario didn't start, and MegaMek has said why, or its game has closed. The server may have taken the
+     * briefing's game, so Start works again once the briefing has made it again, keeping the sides' camouflage, the
+     * rules and the conditions the player chose.
      */
-    void startFailed(boolean gameUsed) {
+    private void startFailed() {
         if (screen.page != Page.BRIEFING || briefing == null || briefing.error() != null) {
-            return;
-        }
-        if (!gameUsed) {
-            enableStart();
             return;
         }
         Briefing used = briefing;

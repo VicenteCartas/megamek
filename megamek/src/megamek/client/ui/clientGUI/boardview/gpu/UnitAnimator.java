@@ -59,6 +59,8 @@ final class UnitAnimator {
     private ProneCause posture = ProneCause.NONE;
     private float crouch, fallen, kneel, airborne;
     private megamek.common.units.FallSide fallSide;
+    /** How far a falling or fallen body is turned from its reported facing ({@link UnitMotion.Posture#turn}). */
+    private float fallTurn;
 
     UnitAnimator() { this(new BoardSurface.Cache()); }
 
@@ -278,6 +280,7 @@ final class UnitAnimator {
         kneel = sampledPosture == null ? approach(kneel, motion.moving() ? kneel
               : hullDown(unit) && posture == ProneCause.NONE ? 1 : 0, seconds, snap) : sampledPosture.kneel();
         if (fallen == 0 && posture == ProneCause.NONE) { fallSide = null; }
+        fallTurn = sampledPosture != null ? sampledPosture.turn() : UnitMotion.Posture.lyingTurn(fallSide) * fallen;
         airborne = approach(airborne, motion.airborne(unit) ? 1 : 0, seconds, snap);
         bodies.forEach(Body::reset);
         mounts.forEach(Joint::reset);
@@ -570,18 +573,13 @@ final class UnitAnimator {
     }
 
     private void fallenPose(Body body, boolean rising, float progress) {
-        if (fallen <= 0) { return; }
+        if (fallen <= 0 || !body.joints.containsKey("root")) { return; }
         var side = fallSide == null ? megamek.common.units.FallSide.FRONT : fallSide;
-        Vector3 axis = side == megamek.common.units.FallSide.LEFT || side == megamek.common.units.FallSide.RIGHT ? Vector3.Y : Vector3.X;
-        float sign = side == megamek.common.units.FallSide.FRONT || side == megamek.common.units.FallSide.LEFT ? -1 : 1;
         if (rising) {
-            // Roll onto the front, brace on the arms, draw the legs beneath the body, then stand.
-            float roll = MathUtils.clamp(progress / .25f, 0, 1);
-            float rise = MathUtils.clamp((progress - .2f) / .8f, 0, 1);
-            rise = rise * rise * (3 - 2 * rise);
-            var rotation = new Quaternion(axis, sign * 90).slerp(new Quaternion(Vector3.X, -90), roll);
-            rotation.slerp(new Quaternion(), rise);
-            body.joints.get("root").node().rotation.mul(rotation);
+            // Roll onto the front or not (UnitMotion.Posture#rising), brace on the arms, draw the legs beneath the body,
+            // then stand.
+            body.joints.get("root").node().rotation.mul(UnitMotion.Posture.rising(side, progress));
+            float rise = UnitMotion.Posture.rise(progress);
             float brace = MathUtils.clamp(progress / .25f, 0, 1);
             brace = brace * brace * (3 - 2 * brace);
             float release = MathUtils.clamp((progress - .5f) / .5f, 0, 1);
@@ -606,7 +604,9 @@ final class UnitAnimator {
             body.rotate("leftForearm", Vector3.X, 65 * kneel);
             body.rotate("rightForearm", Vector3.X, 65 * kneel);
         } else {
-            body.rotate("root", axis, sign * 90 * fallen * fallen);
+            // The fall itself gathers speed (UnitMotion.fall); the body turns only as the posture says, never spins.
+            body.joints.get("root").node().rotation.mul(new Quaternion(Vector3.Z, fallTurn))
+                  .mul(UnitMotion.Posture.tip(side, 90 * fallen));
             float brace = MathUtils.sin(fallen * MathUtils.PI);
             legs(body, 0, 0, brace * .28f, 0, 0);
             body.rotate("leftArm", Vector3.X, 55 * brace + 12 * fallen);
@@ -728,7 +728,8 @@ final class UnitAnimator {
             return;
         }
         if (attack.death()) {
-            if (unit.id() == event.entityId()) {
+            // A death that joined its hit's action waits for that hit to land.
+            if (unit.id() == event.entityId() && attack.seconds >= 0) {
                 dying = true;
                 deathPose(attack.deathProgress());
                 settleContacts();

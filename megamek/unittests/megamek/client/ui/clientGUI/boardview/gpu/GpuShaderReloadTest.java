@@ -76,18 +76,25 @@ class GpuShaderReloadTest {
             Path checkout = directory.resolve(root).resolve(resource);
             Files.createDirectories(checkout.getParent());
             Files.writeString(checkout, bundled + "\n// checkout edit\n");
+            assertEquals(bundled, GpuShaderSource.readDisk(name), "A file is read once, until Reload assets or the editor");
+            // Reload assets and the shader editor's saves and reloads forget the read files.
+            GpuShaderSource.forget();
             assertTrue(compose(name).contains("// checkout edit"));
 
             Path override = directory.resolve("data/shaders").resolve(name);
             Files.createDirectories(override.getParent());
             Files.writeString(override, bundled + "\n// first override\n");
+            GpuShaderSource.forget();
             assertTrue(compose(name).contains("// first override"));
             Files.writeString(override, bundled + "\n// second override\n");
+            GpuShaderSource.forget();
             assertTrue(compose(name).contains("// second override"), "Re-read the same filename without restarting");
 
             Files.delete(override);
+            GpuShaderSource.forget();
             assertTrue(compose(name).contains("// checkout edit"));
             Files.delete(checkout);
+            GpuShaderSource.forget();
             assertEquals(bundled, GpuShaderSource.readDisk(name));
 
             var session = new GpuShaderManager();
@@ -106,6 +113,7 @@ class GpuShaderReloadTest {
         } finally {
             Configuration.setDataDir(data);
             Gdx.files = previousFiles;
+            GpuShaderSource.forget();
         }
     }
 

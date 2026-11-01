@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -23,6 +24,17 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
+    /**
+     * Woods keep their height: at most one shorter plant in light woods and two in heavier woods (a shorter one at
+     * least .7 of it); the rest stand from their woods' height to a tenth above it.
+     */
+    static void assertWoodsHeights(List<BoardScene.Feature> plants, float height, int density) {
+        long shorter = plants.stream().filter(plant -> plant.height() < height).count();
+        assertTrue(shorter <= (density == 1 ? 1 : 2), "At most one shorter plant in light woods, two in heavier woods");
+        assertTrue(plants.stream().allMatch(plant -> plant.height() >= height * .7f && plant.height() <= height * 1.1f),
+              "Plants stand about their woods' height");
+    }
+
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3, 4 })
     void tankFarmDesignsUseFuelTankFeaturesWithoutBuildingInteriors(int weight) {
@@ -319,8 +331,9 @@ class BoardFeaturesTest {
             Hex hex = new Hex(0);
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, density == 3 ? 3 : 2));
-            for (var tree : BoardFeatures.capture(hex, coords, Map.of())) {
-                assertTrue(tree.height() >= (density == 3 ? 3 : 2), "Trees are as tall as the woods block sight");
+            var trees = BoardFeatures.capture(hex, coords, Map.of());
+            assertWoodsHeights(trees, density == 3 ? 3 : 2, density);
+            for (var tree : trees) {
                 assertTrue(tree.scale() >= 1.2f, "Woods are drawn oversized, so their cover reads at a glance");
             }
         }

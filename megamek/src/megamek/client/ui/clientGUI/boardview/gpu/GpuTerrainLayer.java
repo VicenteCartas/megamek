@@ -203,6 +203,7 @@ final class GpuTerrainLayer {
             if (material.has(Sculpt.TYPE) && GpuTessellation.curved(material)) {
                 attributes = GpuTessellation.contacts(attributes);
             }
+            if (GpuMaterialCache.isWall(material)) { attributes = GpuMaterialCache.chartLayout(attributes); }
             current = active.computeIfAbsent(attributes, key -> {
                 Buffer buffer = new Buffer(key);
                 buffers.add(buffer);
