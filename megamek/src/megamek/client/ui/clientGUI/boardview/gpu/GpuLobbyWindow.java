@@ -36,6 +36,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
@@ -50,12 +51,14 @@ import megamek.client.lobby.LobbyUnitOrder;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
+import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
@@ -83,7 +86,9 @@ import megamek.common.event.player.GamePlayerConnectedEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.icons.AbstractIcon;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.GameOptions;
@@ -307,6 +312,8 @@ public final class GpuLobbyWindow {
     private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
+    /** EDT: the C3 network manager while it shows in the centre; null otherwise. */
+    private LobbyC3Controller c3;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
     /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
@@ -356,6 +363,7 @@ public final class GpuLobbyWindow {
         GUIPreferences.getInstance().addPreferenceChangeListener(window.preferenceListener);
         window.swingDialogs.install();
         gui.lobbyCommands().camoPicker(window.camoPicker);
+        gui.lobbyCommands().unitConfigurator(window.unitConfigurator);
         window.refresh();
         GpuHost.show(window.scene);
         window.probe = GpuLobbyProbe.applyOnce(gui);
@@ -434,6 +442,31 @@ public final class GpuLobbyWindow {
     }
 
     /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
+    /** EDT, for the developer switch's {@code lobby+configure}: opens the unit bay for the player's first unit or all. */
+    void probeConfigure(boolean all) {
+        if (closing) {
+            return;
+        }
+        Client client = gui.getClient();
+        Player local = client.getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        List<Entity> units = new ArrayList<>();
+        for (Entity entity : client.getGame().getEntitiesVector()) {
+            if (entity.getOwnerId() == local.getId()) {
+                units.add(entity);
+            }
+        }
+        if (units.isEmpty()) {
+            LOGGER.warn("The lobby probe found no unit of the player to configure");
+        } else if (all) {
+            gui.lobbyCommands().customizeMeks(units);
+        } else {
+            gui.lobbyCommands().customizeMek(units.get(0));
+        }
+    }
+
     void probeClick(String name) {
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
@@ -520,6 +553,9 @@ public final class GpuLobbyWindow {
         LobbySnapshot shownRead = read;
         sendSprites(shownRead);
         sendCamos();
+        if (c3 != null) {
+            c3.refresh();
+        }
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
@@ -697,8 +733,9 @@ public final class GpuLobbyWindow {
             }
             SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES, C3 -> services.forcesCommand(
+                case ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES -> services.forcesCommand(
                       SwingLobbyServices.ForcesCommand.valueOf(command.name()), null);
+                case C3 -> openC3(List.of());
                 case LOAD_LIST, SAVE_LIST, PRINT_LIST -> services.forcesCommand(
                       SwingLobbyServices.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
@@ -1008,10 +1045,53 @@ public final class GpuLobbyWindow {
             unitMenu = null;
             String command = (menu == null) ? null : menu.command(path);
             if (!closing && command != null) {
+                List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
+                if (c3Units != null) {
+                    openC3(c3Units);
+                    return;
+                }
                 new SwingLobbyUnitActions(gui).run(command);
                 refreshSoon();
             }
         });
+    }
+
+    /** EDT: opens the C3 network manager in the forces' place, the units it opens on picked. */
+    private void openC3(List<Integer> units) {
+        Player local = gui.getClient().getLocalPlayer();
+        if (closing || local == null) {
+            return;
+        }
+        Client client = gui.getClient();
+        c3 = new LobbyC3Controller(new C3NetworkBoard(client::getGame, local.getId(),
+              C3NetworkBoard.Commands.of(gui.lobbyCommands()), units), picture -> GpuHost.post(() -> {
+                  GpuLobbyScreen shown = screen;
+                  if (shown != null) {
+                      shown.c3(picture);
+                  }
+              }));
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.openC3();
+            }
+        });
+        c3.refresh();
+    }
+
+    /** Any thread: runs one of the C3 network manager's actions on its board. */
+    void c3(Consumer<C3NetworkBoard> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && c3 != null) {
+                c3.act(action);
+                refreshSoon();
+            }
+        });
+    }
+
+    /** Any thread: the C3 network manager left the centre. */
+    void c3Closed() {
+        SwingUtilities.invokeLater(() -> c3 = null);
     }
 
     /** Reads the lobby now and twice more, as the server's answer to a unit change takes a moment to come back. */
@@ -1334,6 +1414,116 @@ public final class GpuLobbyWindow {
         }
     }
 
+    /** The unit menu's Configure and a unit card's double-click open the native unit bay while this lobby shows. */
+    private final LobbyCommands.UnitConfigurator unitConfigurator = this::openUnitBay;
+
+    /** The portraits in the unit bay, in pixels. */
+    private static final int PORTRAIT_PICTURE = 128;
+
+    /**
+     * EDT: reads the units into a form and shows the native unit bay in the forces' place; its OK writes them back and
+     * sends them here, its Previous and Next do so and then open the unit beside them.
+     */
+    private void openUnitBay(Client client, List<Entity> units, boolean editable) {
+        if (closing || units.isEmpty()) {
+            return;
+        }
+        UnitConfigForm form;
+        try {
+            form = UnitConfigForm.of(client, gui.getClient(), units, editable);
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the units to configure");
+            return;
+        }
+        List<BufferedImage> sprites = new ArrayList<>();
+        for (Entity entity : units.subList(0, Math.min(5, units.size()))) {
+            BufferedImage image = sprite(entity, entity.getCamouflageOrElseOwners());
+            if (image != null) {
+                sprites.add(image);
+            }
+        }
+        List<BufferedImage> portraits = new ArrayList<>();
+        for (UnitConfigForm.Member member : form.members()) {
+            portraits.add(portraitPicture(member.portrait()));
+        }
+        LobbyUnitBayView.Host host = new LobbyUnitBayView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        if (!closing) {
+                            work.run();
+                        }
+                    } catch (RuntimeException failure) {
+                        LOGGER.error(failure, "The unit bay failed");
+                    } finally {
+                        GpuHost.post(then);
+                        queueRefresh();
+                    }
+                });
+            }
+
+            @Override
+            public boolean apply(UnitConfigForm applied) {
+                if (!applied.apply()) {
+                    return false;
+                }
+                if (applied.editable()) {
+                    gui.lobbyCommands().finishCustomization(applied.applied());
+                }
+                refreshSoon();
+                return true;
+            }
+
+            @Override
+            public void next(UnitConfigForm applied, boolean forward) {
+                Entity next = applied.next(forward);
+                if (next != null) {
+                    gui.lobbyCommands().customizeMek(next);
+                }
+            }
+
+            @Override
+            public @Nullable BufferedImage portrait(UnitConfigForm shown, int slot) {
+                UnitConfigForm.Member member = shown.member(slot);
+                PortraitChooserDialog chooser = new PortraitChooserDialog(swingDialogs.parent(), member.portrait());
+                if (!chooser.showDialog().isConfirmed() || chooser.getSelectedItem() == null) {
+                    return null;
+                }
+                member.portrait(chooser.getSelectedItem());
+                return portraitPicture(member.portrait());
+            }
+
+            @Override
+            public void close() {
+                GpuLobbyScreen shown = screen;
+                if (shown != null) {
+                    shown.closeUnitBay();
+                }
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.unitBay(form, sprites, portraits, host);
+            }
+        });
+    }
+
+    /** The portrait's picture, {@value #PORTRAIT_PICTURE} pixels square, or null; any thread. */
+    private static @Nullable BufferedImage portraitPicture(Portrait portrait) {
+        try {
+            Image image = portrait.getBaseImage();
+            if (image == null || image.getWidth(null) <= 0 || image.getHeight(null) <= 0) {
+                return null;
+            }
+            return AbstractIcon.scaleAndCenter(image, PORTRAIT_PICTURE);
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The lobby could not draw the portrait {}", portrait);
+            return null;
+        }
+    }
+
     /** EDT: reads the player settings of the player {@code client} plays and opens them natively over the lobby. */
     private void openPlayerSettings(Client client) {
         if (closing) {
@@ -1625,6 +1815,7 @@ public final class GpuLobbyWindow {
         swingDialogs.uninstall();
         if (active == this || active == null || active.gui != gui) {
             gui.lobbyCommands().camoPicker(null);
+        gui.lobbyCommands().unitConfigurator(null);
         }
         gui.getClient().getGame().removeGameListener(gameListener);
         PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);

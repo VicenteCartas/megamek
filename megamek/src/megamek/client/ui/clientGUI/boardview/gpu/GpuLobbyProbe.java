@@ -127,13 +127,25 @@ import org.lwjgl.glfw.GLFW;
  *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
  *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its
  *     Summary switch. With {@code +scroll=percent} it scrolls the tab that far down half a second before the shot.</li>
+ *     <li>{@code lobby+c3}: opens the C3 network manager {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as the forces'
+ *     menu would; {@code +c3plan} clicks Plan Force through the stage 2.5 s before the shot, or {@code +c3config=N}
+ *     the Configuration N template, and {@code +c3build} then clicks Build; the board is logged before the shot (see
+ *     {@link LobbyC3Probe}).</li>
+ *     <li>{@code lobby+configure}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the unit bay for the player's
+ *     first unit, as the unit menu's Configure does; with {@code +multi} for all their units at once. With
+ *     {@code +bayclick=name,name} it then clicks the bay's controls by name through the stage, one every
+ *     {@value LobbyUnitBayProbe#CLICK_GAP} s, logging after each the unit, the first crew member's gunnery, the zone,
+ *     the round and whether OK may be pressed: such as {@code bay-gunnery-0-up}, {@code bay-zone-5},
+ *     {@code bay-tab-deployment}, {@code bay-round}'s {@code bay-round-up}, {@code bay-next} and {@code bay-ok}.
+ *     {@code +bayrules} first turns on the rules that add the bay's Abilities, Quirks and Partial Repairs tabs (pilot
+ *     advantages, edge, quirks and partial repairs), so {@code bay-tab-abilities} and the others can be clicked.</li>
  *     <li>{@code lobby+dialog=name}: opens a Swing dialog as the lobby's control would once the shot's time comes, and
  *     saves a photograph of the window and its dialogs, taken from the screen only when the dialog is in front,
  *     instead of the frame buffer, which has no Swing dialogs; the
  *     log tells where the dialog stands against the window, then, as the probe closes it, whether the lobby has its
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
- *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
+ *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3} (now the native C3 network manager, on the stage), {@code randomarmy}, {@code skills},
  *     {@code names}, {@code loadlist}, {@code alert} and {@code settings} (Client Settings, through a click on the top
  *     bar's gear). The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
  *     {@code playersettings}, {@code botconfig}, {@code addbot}, {@code conditions} and {@code gameoptions}) open on
@@ -173,6 +185,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final String TAB_OPTION = "tab=";
     private static final String SCROLL_OPTION = "scroll=";
     private static final String SEARCH_OPTION = "search=";
+    private static final String BAY_CLICK_OPTION = "bayclick=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -427,7 +440,10 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         }
     }
 
-    /** Sends the game options {@code lobby+blocked}, {@code lobby+overlap}, {@code lobby+blind} and {@code lobby+gm} ask for. */
+    /**
+     * Sends the game options {@code lobby+blocked}, {@code lobby+overlap}, {@code lobby+blind}, {@code lobby+gm} and
+     * {@code lobby+bayrules} ask for.
+     */
     private void sendOptions(Client client) {
         Vector<IBasicOption> changed = new Vector<>();
         if (options.contains("gm")) {
@@ -442,6 +458,12 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         }
         if (options.contains("blind")) {
             changed.add(new BasicOption(OptionsConstants.BASE_REAL_BLIND_DROP, true));
+        }
+        if (options.contains("bayrules")) {
+            changed.add(new BasicOption(OptionsConstants.RPG_PILOT_ADVANTAGES, true));
+            changed.add(new BasicOption(OptionsConstants.EDGE, true));
+            changed.add(new BasicOption(OptionsConstants.ADVANCED_STRATOPS_QUIRKS, true));
+            changed.add(new BasicOption(OptionsConstants.ADVANCED_STRATOPS_PARTIAL_REPAIRS, true));
         }
         if (!changed.isEmpty()) {
             client.sendGameOptions("", changed);
@@ -562,6 +584,21 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             dialog.setVisible(false);
         }
         openDialog(window, gui);
+    }
+
+    /** The unit bay's controls {@code lobby+configure+bayclick=name,name} clicks, in order; empty without it. */
+    List<String> bayClicks() {
+        List<String> names = new ArrayList<>();
+        for (String option : options) {
+            if (option.startsWith(BAY_CLICK_OPTION)) {
+                for (String name : option.substring(BAY_CLICK_OPTION.length()).split(",")) {
+                    if (!name.isBlank()) {
+                        names.add(name.trim());
+                    }
+                }
+            }
+        }
+        return names;
     }
 
     /** The dialog {@code lobby+dialog=name} opens over the lobby, or null. */

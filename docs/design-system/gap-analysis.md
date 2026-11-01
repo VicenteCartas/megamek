@@ -926,9 +926,50 @@ work for Swing, and item 11 is under investigation.
        the new `+saveprefs` (it saves the settings on quit, as quitting MegaMek does) a second run starts from the
        saved value and a plain restart shows the ids hidden; `lobby+dialog=settings` clicks the gear and gets Client
        Settings, centred and modal, with lobby input blocked until it closes.
+     - ~~L15 Unit dialogs~~. Unit customization and the C3 network manager are native, as centre views that take
+       the forces' place (with Back), laid out as game screens rather than forms:
+       - The unit bay replaces `CustomMekDialog` in the libGDX lobby. Configure, Configure All, a double-click on a
+         card and the probe all reach it through one hook, `LobbyCommands.setUnitConfigurator`, after the existing
+         checks (owner, permission, `validateUpdate`); with no hook set, as in MekHQ and MegaMekLab, the Swing dialog
+         runs as before, and Battlefield Support Assets keep their prompt. The header shows the unit's sprite, name,
+         BV and tonnage with Prev/Next (the Swing dialog's order); several units show stacked sprites and "N units".
+       - Tabs appear only when they apply, as in the Swing dialog: Pilot (portrait, name and callsign with their
+         random buttons, gunnery and piloting as large steppers, the RPG and LAM skills, toughness, fatigue,
+         aptitudes as chips, commander, backup, unit number swap, personal equipment), Abilities (a searchable grid
+         of ability chips by category, with the specialist choices inline and the Swing dialog's implant,
+         neural interface, prosthetic and wing rules), Equipment (ammo bins as cards with munition, shots,
+         half and hot loading; weapon feeds; a bomb loadout with its point bar; mines, rapid-fire MGs, VRT, AP
+         weapons, BA manipulators, infantry armor and SRMs, small support vehicle munitions; ECM, probe, C3 and comms
+         modes; ejection, searchlight, cockpits, the damage interrupt circuit and the starting sensor), Deployment or
+         State (the zone as a compass grid, custom zones, round, offset and width as steppers, the Any box, stances as
+         chips, aero speed, altitude and fuel, height, starting mode, off board), Quirks (unit and weapon, positive
+         and negative) and Partial Repairs. Several units share only the Deployment tab: the Swing dialog's equipment
+         panel then edits the first unit only, so the bay leaves it out.
+       - The logic is in `megamek.client.lobby`: `UnitConfigForm` reads the units on the EDT and applies them in the
+         Swing dialog's order (crew, abilities, repairs, quirks, equipment, deployment, then the design check), and
+         `UnitEquipmentForm`, `UnitAbilitiesForm` (with `OptionEntry`), `UnitQuirksForm` and `PartialRepairsForm`
+         hold the tabs. A bad number shows inline and disables OK and Apply, instead of a message box.
+       - Differences on purpose: the C3 choice of an unlinked slave opens on "Not connected" (the Swing dialog joins
+         the first network on an untouched OK); two ECM suites in use show an inline keep-one choice rather than a
+         dialog; implant changes reach the equipment only on OK, so Cancel drops them; the Partial Repairs tab is
+         hidden when nothing can be repaired. The Swing dialog's dump box (never shown) and command-detonated mines
+         (not implemented) stay out. The portrait picker is still the Swing `PortraitChooserDialog`, through
+         `LobbyDialogs`.
+       - The C3 network manager replaces `C3NetworkManagerDialog` in the lobby, from the unit and forces menus. Each
+         network is drawn as an org chart (company master, lance masters, slaves, joined by connector lines; C3i, NC3
+         and Nova as a linked row; open slots as ghost chips), the free units sit in a tray grouped as masters,
+         slaves and C3i, and the template buttons, Plan Force, the staged plan cards with Build, Discard and
+         Auto-assign, Form peer network, Disconnect and Reset all apply through `LobbyCommands` as before. Units move by
+         dragging, or by clicking them and then a slot. `C3FormationPlanner` moved to `megamek.client.lobby`, and
+         `C3NetworkBoard` is the toolkit-free model the view draws.
+       Checks: `UnitConfigFormTest`, `UnitEquipmentFormTest` (munitions, bombs, an untouched OK keeps a weapon's feed
+       and a slave's C3 link, the ECM choice), `UnitAbilitiesFormTest`, `C3NetworkBoardTest` and the moved
+       `C3FormationPlannerTest`; the on-demand `UnitBaySmokeTest` (steppers, the zone grid, Next, OK with bad input,
+       stances and ability chips clicked through the stage) and `LobbyC3ManagerSmokeTest`. Live: the probe's
+       `lobby+configure` (`+multi`, `+bayrules`, `+bayclick=...`) opens the bay and clicks through it, and an OK after
+       Next customizes both units; `lobby+c3+c3plan+c3build` plans a ten-unit force into two lances and builds them
+       (two C3 networks, team BV 17,879 to 20,845). MekHQ and MegaMekLab compile.
      - Still open after #34, for a later round once #33 and #34 are merged:
-       - L15 Unit dialogs in libGDX: unit customization (`CustomMekDialog`, including the multi-unit edit) and the
-         C3 network setup.
        - L16 Map setup in libGDX: board selection, map size, random map settings, and loading and saving a map
          setup.
        - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,

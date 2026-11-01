@@ -30,7 +30,7 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.panels.phaseDisplay.lobby;
+package megamek.client.lobby;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -58,7 +58,7 @@ import megamek.logging.MMLogger;
  * the head prefers an exact computer-count fit and lance master slots take the smallest masters, so multi-computer
  * units stay free for company roles.</p>
  */
-final class C3FormationPlanner {
+public final class C3FormationPlanner {
     private static final MMLogger LOGGER = MMLogger.create(C3FormationPlanner.class);
 
     /** Slaves in one lance block: a master runs three (CR p.198). */
@@ -73,7 +73,7 @@ final class C3FormationPlanner {
     private final Game game;
     private final int localPlayerId;
 
-    C3FormationPlanner(Game game, int localPlayerId) {
+    public C3FormationPlanner(Game game, int localPlayerId) {
         this.game = game;
         this.localPlayerId = localPlayerId;
     }
@@ -86,9 +86,9 @@ final class C3FormationPlanner {
      * @param directSlaveCount    slaves the head unit runs itself, in blocks of three
      * @param lanceSlaveCounts    the slave slots of each lance master's lance
      */
-    record ConfigurationShape(int configurationNumber, int directSlaveCount, int[] lanceSlaveCounts) {
+    public record ConfigurationShape(int configurationNumber, int directSlaveCount, int[] lanceSlaveCounts) {
 
-        static ConfigurationShape of(int configurationNumber) {
+        public static ConfigurationShape of(int configurationNumber) {
             return switch (configurationNumber) {
                 case 2 -> new ConfigurationShape(2, 3, new int[] { 3, 3 });
                 case 3 -> new ConfigurationShape(3, 6, new int[] { 3 });
@@ -97,7 +97,7 @@ final class C3FormationPlanner {
             };
         }
 
-        int totalSlots() {
+        public int totalSlots() {
             int total = 1 + directSlaveCount + lanceSlaveCounts.length;
             for (int lanceSlaveCount : lanceSlaveCounts) {
                 total += lanceSlaveCount;
@@ -109,13 +109,13 @@ final class C3FormationPlanner {
          * The lance that is the company's own lance in Configuration 1 - the two-slave lance under the head's third
          * lance master - or -1 where the company's own lance is the head's own slaves.
          */
-        int companyLanceIndex() {
+        public int companyLanceIndex() {
             return ((directSlaveCount == 0) && (lanceSlaveCounts.length > 0)) ? (lanceSlaveCounts.length - 1) : -1;
         }
     }
 
     /** Why a lance stayed out of a template or force plan. */
-    enum LeftOutReason {
+    public enum LeftOutReason {
         /** More slaves than one master can run. */
         TOO_MANY_SLAVES,
         /** More masters than the lance's block can hold. */
@@ -136,7 +136,7 @@ final class C3FormationPlanner {
      * @param masterCount its C3 Master units
      * @param slaveCount  its C3 Slave units
      */
-    record LeftOutLance(String lanceName, LeftOutReason reason, int masterCount, int slaveCount) {
+    public record LeftOutLance(String lanceName, LeftOutReason reason, int masterCount, int slaveCount) {
     }
 
     /**
@@ -174,22 +174,22 @@ final class C3FormationPlanner {
      * @param lanceSlaves         the slave slots of each lance master's lance
      * @param leftOut             lances that stayed out, with the reason
      */
-    record TemplateAssignment(int configurationNumber, @Nullable Entity head, Entity[] directSlaves,
+    public record TemplateAssignment(int configurationNumber, @Nullable Entity head, Entity[] directSlaves,
           Entity[] lanceMasters, Entity[][] lanceSlaves, List<LeftOutLance> leftOut) {
 
-        int filledCount() {
+        public int filledCount() {
             return assignedUnits().size();
         }
 
-        int totalSlots() {
+        public int totalSlots() {
             return ConfigurationShape.of(configurationNumber).totalSlots();
         }
 
-        boolean isComplete() {
+        public boolean isComplete() {
             return filledCount() == totalSlots();
         }
 
-        List<Entity> assignedUnits() {
+        public List<Entity> assignedUnits() {
             List<Entity> units = new ArrayList<>();
             if (head != null) {
                 units.add(head);
@@ -218,7 +218,7 @@ final class C3FormationPlanner {
      * @param members    its slaves, or the masters in slave roles
      * @param allMasters {@code true} for an all-master lance
      */
-    record PlannedLance(Entity master, List<Entity> members, boolean allMasters) {
+    public record PlannedLance(Entity master, List<Entity> members, boolean allMasters) {
     }
 
     /**
@@ -229,9 +229,9 @@ final class C3FormationPlanner {
      * @param leftoverUnits units that fit no network
      * @param leftOut       lances that stayed out, with the reason
      */
-    record ForcePlan(List<TemplateAssignment> companies, List<PlannedLance> lances, int leftoverUnits,
+    public record ForcePlan(List<TemplateAssignment> companies, List<PlannedLance> lances, int leftoverUnits,
           List<LeftOutLance> leftOut) {
-        boolean isEmpty() {
+        public boolean isEmpty() {
             return companies.isEmpty() && lances.isEmpty();
         }
     }
@@ -258,7 +258,7 @@ final class C3FormationPlanner {
      *
      * @return the planned slots and the lances left out
      */
-    TemplateAssignment planTemplate(int configurationNumber) {
+    public TemplateAssignment planTemplate(int configurationNumber) {
         TemplateAssignment assignment = planTemplate(ConfigurationShape.of(configurationNumber), collectPool());
         LOGGER.debug("[C3Manager] Configuration {} auto-assign filled {} of {} slots; left out: {}",
               configurationNumber, assignment.filledCount(), assignment.totalSlots(), assignment.leftOut());
@@ -270,7 +270,7 @@ final class C3FormationPlanner {
      * (4 down to 1), then each remaining lance as its own network, then units in no lance as remainder lances and
      * all-master lances.
      */
-    ForcePlan planForce() {
+    public ForcePlan planForce() {
         Pool pool = collectPool();
         List<TemplateAssignment> companies = new ArrayList<>();
         boolean progress = true;

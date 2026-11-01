@@ -30,7 +30,7 @@
  * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
  * affiliated with Microsoft.
  */
-package megamek.client.ui.panels.phaseDisplay.lobby;
+package megamek.client.lobby;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,10 +42,10 @@ import static org.junit.jupiter.api.Assertions.fail;
 import java.util.ArrayList;
 import java.util.List;
 
-import megamek.client.ui.panels.phaseDisplay.lobby.C3FormationPlanner.ForcePlan;
-import megamek.client.ui.panels.phaseDisplay.lobby.C3FormationPlanner.LeftOutLance;
-import megamek.client.ui.panels.phaseDisplay.lobby.C3FormationPlanner.LeftOutReason;
-import megamek.client.ui.panels.phaseDisplay.lobby.C3FormationPlanner.TemplateAssignment;
+import megamek.client.lobby.C3FormationPlanner.ForcePlan;
+import megamek.client.lobby.C3FormationPlanner.LeftOutLance;
+import megamek.client.lobby.C3FormationPlanner.LeftOutReason;
+import megamek.client.lobby.C3FormationPlanner.TemplateAssignment;
 import megamek.common.Player;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.force.Force;

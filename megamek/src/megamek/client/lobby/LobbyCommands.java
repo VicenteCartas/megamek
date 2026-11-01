@@ -103,9 +103,26 @@ public class LobbyCommands {
         void choose(Camouflage initial, boolean hasIndividualCamo, List<Entity> units, Consumer<Camouflage> chosen);
     }
 
+    /**
+     * A unit configuration editor that answers later, such as one drawn in the lobby's own window rather than a modal
+     * Swing dialog; it sends what it changes through {@link #finishCustomization}.
+     */
+    @FunctionalInterface
+    public interface UnitConfigurator {
+        /**
+         * Shows the editor and returns at once.
+         *
+         * @param client   the client of the units' owner, a local bot's for its units
+         * @param units    the units, all of one owner and none a Battlefield Support asset
+         * @param editable whether the player may change them
+         */
+        void configure(Client client, List<Entity> units, boolean editable);
+    }
+
     private final LobbySession session;
     private final LobbyPrompts prompts;
     private volatile CamoPicker camoPicker;
+    private volatile UnitConfigurator unitConfigurator;
 
     /**
      * @param session the local client, its game and bots
@@ -122,6 +139,14 @@ public class LobbyCommands {
      */
     public void camoPicker(@Nullable CamoPicker picker) {
         camoPicker = picker;
+    }
+
+    /**
+     * Has {@link #customizeMek} and {@link #customizeMeks} open {@code configurator} instead of
+     * {@link LobbyPrompts#customizeUnit} and {@link LobbyPrompts#customizeUnits}; null goes back to the prompts.
+     */
+    public void unitConfigurator(@Nullable UnitConfigurator configurator) {
+        unitConfigurator = configurator;
     }
 
     // region Readiness
@@ -662,6 +687,11 @@ public class LobbyCommands {
         Client client = clientForCustomization(oneSelected);
         boolean editable = allowCustomization(oneSelected);
 
+        UnitConfigurator configurator = unitConfigurator;
+        if (configurator != null) {
+            configurator.configure(client, new ArrayList<>(standardUnits), editable);
+            return;
+        }
         LobbyPrompts.CustomizeResult result = prompts.customizeUnits(client, new ArrayList<>(standardUnits),
               editable);
         if (editable && result.confirmed()) {
@@ -705,6 +735,11 @@ public class LobbyCommands {
         Client client = clientForCustomization(entity);
         boolean editable = allowCustomization(entity);
 
+        UnitConfigurator configurator = unitConfigurator;
+        if (configurator != null) {
+            configurator.configure(client, List.of(entity), editable);
+            return;
+        }
         while (entity != null) {
             LobbyPrompts.CustomizeResult result = prompts.customizeUnit(client, entity, editable);
             if (editable && result.confirmed()) {
@@ -725,6 +760,15 @@ public class LobbyCommands {
     private boolean allowCustomization(Entity entity) {
         boolean ownerIsLocalPlayer = entity.getOwner().getId() == localPlayer().getId();
         return localBotOwner(entity).isPresent() || ownerIsLocalPlayer || localPlayer().isGameMaster();
+    }
+
+    /**
+     * Sends the units a {@link UnitConfigurator} changed, with the units that depend on them, as the editor's OK does.
+     *
+     * @param entities the units that were configured
+     */
+    public void finishCustomization(Collection<Entity> entities) {
+        sendCustomizationUpdate(entities);
     }
 
     /**

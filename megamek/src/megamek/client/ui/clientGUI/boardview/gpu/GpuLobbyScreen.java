@@ -39,6 +39,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
@@ -54,6 +55,7 @@ import megamek.client.lobby.RequisitionLoader;
 import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.design.DesignTokens;
@@ -87,6 +89,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     static final String BATTLEFIELD = "battlefield";
     /** The centre view that shows the Requisition, the unit selector. */
     static final String REQUISITION = "requisition";
+    /** The centre's key for the unit bay. */
+    static final String UNIT_BAY = "unitbay";
     /** How many catalogue sprites the Requisition keeps as textures; the least recently shown go first. */
     private static final int REQUISITION_SPRITES = 200;
     /** When the developer switch's clicks run, in seconds after the lobby shows. */
@@ -117,6 +121,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private LobbyBattlefieldPanel battlefield;
     private LobbyCentre centre;
     private LobbyRequisitionPanel requisition;
+    /** The C3 network manager, made when it first opens. */
+    private LobbyC3View c3View;
+    /** The unit bay in the forces' place, or null when it is shut. */
+    private @Nullable LobbyUnitBayView unitBay;
     private ExecutorService searchThread;
     /** The dossier's full records and availabilities, each read on its own thread where the newest unit wins. */
     private ExecutorService recordThread;
@@ -144,6 +152,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** The {@code +setskills} clicks left: Set, then the gunnery's +. */
     private int skillClicksPending;
     private Deque<ProbeClick> gmClicks = new ArrayDeque<>();
+    /** The developer switch's run through the C3 network manager, or null. */
+    private LobbyC3Probe c3Probe;
+    /** The developer switch's run through the unit bay, or null. */
+    private LobbyUnitBayProbe bayProbe;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -238,6 +250,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         advancedStep = probe.options().contains("advanced") ? 0 : -1;
         skillClicksPending = probe.options().contains("setskills") ? 2 : 0;
         gmClicks = gmClicks(probe);
+        c3Probe = LobbyC3Probe.of(probe);
+        bayProbe = LobbyUnitBayProbe.of(probe);
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -746,6 +760,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
         });
         forces.redraw();
+        if (c3View != null && LobbyC3View.KEY.equals(centre.showing())) {
+            c3View.redraw();
+        }
     }
 
     /** GPU thread: takes the camo pictures of the players' swatches, by {@link LobbySnapshot#camoKey}. */
@@ -846,6 +863,66 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         rail.setChecked(battlefieldShown);
         if (!battlefieldShown && battlefield.body().getParent() != battlefield.panel()) {
             battlefield.dock();
+        }
+        if (c3View != null && c3View.shown() != null && !LobbyC3View.KEY.equals(showing)) {
+            c3View.closed();
+            window.c3Closed();
+        }
+        if (unitBay != null && !UNIT_BAY.equals(showing)) {
+            unitBay.dispose();
+            unitBay = null;
+        }
+    }
+
+    /** GPU thread: shows the unit bay for the form's units in the forces' place, instead of any bay shown. */
+    void unitBay(UnitConfigForm form, List<BufferedImage> sprites, List<BufferedImage> portraits,
+          LobbyUnitBayView.Host host) {
+        if (stage == null) {
+            return;
+        }
+        closeMenus();
+        LobbyUnitBayView old = unitBay;
+        unitBay = new LobbyUnitBayView(kit, form, sprites, portraits, host);
+        centre.show(UNIT_BAY, Messages.getString("Lobby.bay.title"), unitBay.body());
+        if (old != null) {
+            old.dispose();
+        }
+    }
+
+    /** GPU thread: shuts the unit bay, bringing the forces back. */
+    void closeUnitBay() {
+        if (UNIT_BAY.equals(centre.showing())) {
+            centre.back();
+        }
+    }
+
+    /** GPU thread: opens the C3 network manager in the forces' place; its board follows from the window. */
+    void openC3() {
+        if (stage == null) {
+            return;
+        }
+        if (c3View == null) {
+            c3View = new LobbyC3View(kit, new LobbyC3View.Host() {
+                @Override
+                public void act(Consumer<C3NetworkBoard> action) {
+                    window.c3(action);
+                }
+
+                @Override
+                public void confirm(String title, String text, Runnable yes) {
+                    nativeDialogs.confirm(title, text, yes);
+                }
+            }, spriteDrawables::get);
+        }
+        closeMenus();
+        c3View.closed();
+        centre.show(LobbyC3View.KEY, Messages.getString("C3NetworkManagerDialog.title"), c3View.body());
+    }
+
+    /** GPU thread: shows the C3 network manager's board anew while it shows. */
+    void c3(C3NetworkBoard.Picture picture) {
+        if (c3View != null && LobbyC3View.KEY.equals(centre.showing())) {
+            c3View.show(picture);
         }
     }
 
@@ -1267,6 +1344,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               && elapsed > advancedAt) {
             probeAdvanced(probe, elapsed);
         }
+        if (c3Probe != null) {
+            c3Probe.step(elapsed, stage, () -> window.forcesCommand(LobbyForcesPanel.Command.C3), c3View);
+        }
+        if (bayProbe != null) {
+            LobbyUnitBayProbe run = bayProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeConfigure(run.multi())),
+                  unitBay);
+        }
         if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
             ProbeClick click = gmClicks.removeFirst();
             Actor target = click.name().equals(GM_SEAT) ? gameMasterSeat.button()
@@ -1433,6 +1518,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     public void dispose() {
         if (nativeDialogs != null) {
             nativeDialogs.dispose();
+        }
+        if (unitBay != null) {
+            unitBay.dispose();
+            unitBay = null;
         }
         window.disposing();
         camoTextures.values().forEach(Texture::dispose);
