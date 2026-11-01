@@ -292,11 +292,13 @@ final class GpuMaterialCache {
         float lowest = Math.min(face.a().z, Math.min(face.b().z, face.c().z)), clearance = BoardRelief.metres(.05f);
         float touch = BoardRelief.metres(TOUCH);
         Vector3[] corners = { face.a(), face.b(), face.c() };
+        float[] bounds = bounds(corners), axes = axes(corners);
         for (BoardSurface.Face bank : banks) {
-            if (Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance
-                  && overlap(corners, new Vector3[] { bank.a(), bank.b(), bank.c() }, touch)) {
-                return false;
-            }
+            if (!(Math.max(bank.a().z, Math.max(bank.b().z, bank.c().z)) > lowest + clearance)) { continue; }
+            Vector3[] other = { bank.a(), bank.b(), bank.c() };
+            // The face slopes gently, so it has area in plan: apart in plan, an edge of one of them separates them.
+            if (apart(bounds, bounds(other))) { continue; }
+            if (overlap(corners, axes, other, axes(other), touch)) { return false; }
         }
         return true;
     }
@@ -306,13 +308,8 @@ final class GpuMaterialCache {
 
     /**
      * Whether two triangles overlap in XY by more than {@code touch} (BoardRelief.metres of {@link #TOUCH}) along a
-     * shared edge (separating axes).
+     * shared edge (separating axes), given each triangle's {@link #axes}, which a caller may keep.
      */
-    private static boolean overlap(Vector3[] a, Vector3[] b, float touch) {
-        return overlap(a, axes(a), b, axes(b), touch);
-    }
-
-    /** {@link #overlap(Vector3[], Vector3[], float)} with each triangle's {@link #axes}, kept by a caller that reuses them. */
     private static boolean overlap(Vector3[] a, float[] axesA, Vector3[] b, float[] axesB, float touch) {
         for (float[] axes : new float[][] { axesA, axesB }) {
             for (int i = 0; i < 9; i += 3) {
@@ -330,6 +327,20 @@ final class GpuMaterialCache {
             }
         }
         return true;
+    }
+
+    /** A triangle's XY bounds: least and greatest x, then least and greatest y. */
+    private static float[] bounds(Vector3[] t) {
+        return new float[] { Math.min(t[0].x, Math.min(t[1].x, t[2].x)), Math.max(t[0].x, Math.max(t[1].x, t[2].x)),
+              Math.min(t[0].y, Math.min(t[1].y, t[2].y)), Math.max(t[0].y, Math.max(t[1].y, t[2].y)) };
+    }
+
+    /**
+     * Whether two triangles' bounds ({@link #bounds}) lie strictly apart in XY. When either triangle has area in plan,
+     * {@link #overlap} then finds an axis that separates them, so it need not run.
+     */
+    private static boolean apart(float[] a, float[] b) {
+        return a[1] < b[0] || b[1] < a[0] || a[3] < b[2] || b[3] < a[2];
     }
 
     /** A triangle's separating axes: each edge's normal in XY and its length (nx, ny, length, edge by edge). */
@@ -622,7 +633,7 @@ final class GpuMaterialCache {
             Placed placing = Placed.of(chart);
             for (Placed other : held) {
                 // Apart in plan, two charts with area are apart along an edge of one of them too.
-                if (placing.apart(other)) { continue; }
+                if (apart(placing.bounds(), other.bounds())) { continue; }
                 if (overlap(chart, placing.axes(), other.chart(), other.axes(), touch)) { return null; }
             }
             held.add(placing);
@@ -631,17 +642,10 @@ final class GpuMaterialCache {
                   slot.y() + chart[1].y, slot.x() + chart[2].x, slot.y() + chart[2].y };
         }
 
-        /** A held chart with its separating axes (#axes) and XY bounds, worked out once for every later test. */
-        private record Placed(Vector3[] chart, float[] axes, float minX, float maxX, float minY, float maxY) {
+        /** A held chart with its separating axes (#axes) and XY bounds (#bounds), worked out once for later tests. */
+        private record Placed(Vector3[] chart, float[] axes, float[] bounds) {
             static Placed of(Vector3[] t) {
-                return new Placed(t, GpuMaterialCache.axes(t), Math.min(t[0].x, Math.min(t[1].x, t[2].x)),
-                      Math.max(t[0].x, Math.max(t[1].x, t[2].x)), Math.min(t[0].y, Math.min(t[1].y, t[2].y)),
-                      Math.max(t[0].y, Math.max(t[1].y, t[2].y)));
-            }
-
-            /** Whether the two triangles' bounds lie strictly apart in XY. */
-            boolean apart(Placed other) {
-                return maxX < other.minX || other.maxX < minX || maxY < other.minY || other.maxY < minY;
+                return new Placed(t, GpuMaterialCache.axes(t), GpuMaterialCache.bounds(t));
             }
         }
 
