@@ -121,7 +121,7 @@ final class ModelTextures {
                       surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
                       surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
                             : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() },
-                      glb.paintMasks.contains(id)));
+                      glb.paintMasks.contains(id), glb.boardUVs.getOrDefault(id, 0f)));
                 // The heightmap is the material's bump texture (GpuModelMaterial).
                 if (relief != null) {
                     material.set(TextureAttribute.createBump(load.apply(relief.map(), GpuMaterialMaps.HEIGHT_USAGE)));
@@ -130,6 +130,17 @@ final class ModelTextures {
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));
+            // Godot's alpha blending: the colour map's alpha is the opacity; nothing behind is hidden by depth. Its
+            // premultiplied mode fades only the diffuse share (model.frag), so glass keeps its whole reflection.
+            glb.blends.forEach((id, mode) -> {
+                var material = model.getMaterial(id);
+                boolean premultiplied = mode == 4;
+                material.set(new BlendingAttribute(premultiplied ? GL20.GL_ONE : GL20.GL_SRC_ALPHA,
+                            GL20.GL_ONE_MINUS_SRC_ALPHA, 1),
+                      new com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute(GL20.GL_LEQUAL, false));
+                var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                if (premultiplied && surface != null) { material.set(surface.premultiplied()); }
+            });
         }
         var owned = model.getManagedDisposables().iterator();
         while (owned.hasNext()) {

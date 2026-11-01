@@ -29,7 +29,7 @@ final class BoardObstacles {
     private record Geometry(Map<String, BoardShape> shapes, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
-    static void reload() { MODELS.clear(); UNREADABLE.clear(); BoardWall.reload(); }
+    static void reload() { MODELS.clear(); UNREADABLE.clear(); BoardWall.reload(); BoardMultiHexBuilding.reload(); }
 
     /** Remembers a file that cannot be read, unless the read failed because a closing board interrupted its worker. */
     private static void unreadable(File file, RuntimeException failure) {
@@ -162,7 +162,9 @@ final class BoardObstacles {
             var layout = wall ? BoardWall.layout(scene, tile, feature) : null;
             // A civilian wall stands on posts with open fencing and no base: ground cover grows everywhere beneath it.
             if (plants && wall && layout.family() == BoardWall.Family.CIVILIAN) { continue; }
-            boolean assembled = BoardIndustrial.supports(feature) || wall;
+            // A multi-hex building's share of this hex (BoardMultiHexBuilding) stands on its zero like a wall, each point at its height.
+            boolean multiHex = BoardMultiHexBuilding.supports(feature.asset());
+            boolean assembled = BoardIndustrial.supports(feature) || wall || multiHex;
             File customFile = feature.asset().startsWith("buildings/") ? TilesetScenery.customBuildingFile(feature.asset()) : null;
             boolean custom = object == null && !assembled && customFile != null && customFile.isFile()
                   && !UNREADABLE.contains(customFile);
@@ -202,6 +204,8 @@ final class BoardObstacles {
                     unreadable(kits, unreadableKit);
                     continue;
                 }
+            } else if (multiHex) {
+                points.addAll(BoardMultiHexBuilding.triangles(BoardMultiHexBuilding.layout(scene, tile, feature)));
             } else if (assembled) {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
@@ -263,15 +267,15 @@ final class BoardObstacles {
                   || feature.asset().startsWith("buildings/");
             float verticalScale = object != null ? 1 : feature.kind() == BoardScene.FeatureKind.SCENERY
                   ? scale * (float) feature.stretch().z()
-                  : custom || wall ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
+                  : custom || wall || multiHex ? BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT
                   : feature.height() * BoardGeometry.level() / (fitHeight ? bounds.getDepth() : 1);
             // Scenery grounds its lowest authored vertex, including models with an offset origin. A wall's kit and
             // footprint stand on their zero.
             float low = ground + feature.elevation() * BoardGeometry.level()
-                  + (feature.kind() == BoardScene.FeatureKind.SCENERY || wall ? 0 : bounds.min.z * verticalScale);
+                  + (feature.kind() == BoardScene.FeatureKind.SCENERY || wall || multiHex ? 0 : bounds.min.z * verticalScale);
             float height = custom ? feature.height() * BoardGeometry.level()
-                  : (wall ? bounds.max.z : bounds.getDepth()) * verticalScale;
-            if (wall) {
+                  : (wall || multiHex ? bounds.max.z : bounds.getDepth()) * verticalScale;
+            if (wall || multiHex) {
                 // The tall pier must not reserve empty space over its shorter connecting arms.
                 for (Vector3 point : points) { point.z = low + point.z * verticalScale + upperGround - ground; }
             }
@@ -282,7 +286,7 @@ final class BoardObstacles {
                       low + height + upperGround - ground, bounds, false, BoardRelief.metres(EARTHWORK_THIN), ground));
                 continue;
             }
-            footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall));
+            footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall || multiHex));
         }
     }
 

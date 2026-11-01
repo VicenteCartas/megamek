@@ -131,7 +131,8 @@ final class GpuBuilding implements Disposable {
     /**
      * The occupied volume: the full roof projection, which preserves notches, within every storey's closed mid-storey
      * wall outline from the simplest level of detail, which excludes facade seams and ledges. Connection pieces count
-     * on the storeys they stand on.
+     * on the storeys they stand on; a storey whose walls close nothing (open towards connected neighbours) leaves the
+     * roof projection as it is.
      */
     private Area volume(Recipe recipe) {
         Area result = new Area();
@@ -151,9 +152,9 @@ final class GpuBuilding implements Disposable {
             storeys.get(piece.level()).add(GpuBuildingInterior.walls(placed(piece, shape),
                   (piece.level() + .5f) * LEVEL_HEIGHT));
         }
+        // A connected kit's hex open towards its neighbours closes no outline of its own: its roof decides alone.
         for (Area storey : storeys) {
-            require(!storey.isEmpty(), kit.lods().getFirst().id + " requires a closed mid-storey wall outline");
-            result.intersect(storey);
+            if (!storey.isEmpty()) { result.intersect(storey); }
         }
         return result;
     }

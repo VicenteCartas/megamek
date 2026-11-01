@@ -81,6 +81,11 @@ void main() {
 #else
     vec4 emissive = vec4(0.0);
 #endif
+#if defined(blendedFlag) && defined(modelSurfaceFlag)
+    // Godot's premultiplied alpha (a .tres's blend_mode 4): the albedo fades with the opacity before lighting, so the
+    // diffuse light does and the specular reflection, which the dielectric's own reflectance sets, does not.
+    if (u_modelPremultiplied > 0.5) { diffuse.rgb *= diffuse.a * v_opacity; }
+#endif
     if (u_modelLight.x > 0.0) {
         emissive.rgb *= u_modelLight.y;
         diffuse.rgb *= u_modelLight.z;

@@ -36,7 +36,8 @@ import megamek.common.board.HexTile;
  * hexsides the structure connects across. Every building kit is one: {@link #placements} chooses, turns and stacks the
  * pieces that hold for a hex's connections, the single source of drawing (merged into one model by {@link #model} for
  * walls, placed from the kit's shared meshes by {@link GpuBuilding}), picking and ground-cover clearance. A symmetric
- * kit authors only the north (and north-east) pieces; the others are those turned.
+ * kit authors only the north (and north-east) pieces; the others are those turned. A whole-hex piece, tagged in all six
+ * directions, stands alone for exactly those connections, in place of its module's other pieces.
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
@@ -54,6 +55,8 @@ final class ConnectedKit {
     /** One mesh node: its module role ({@code base0}, {@code floor1}, ...) and the directions that must (not) connect. */
     record Piece(String node, String role, int links, int ends) {
         boolean core() { return links == 0 && ends == 0; }
+
+        boolean whole() { return (links | ends) == 63; }
 
         boolean holds(int connected) { return (connected & links) == links && (connected & ends) == 0; }
 
@@ -89,7 +92,8 @@ final class ConnectedKit {
                 require(((links | ends) & bit) == 0, "A direction appears twice: " + node.id);
                 if (tags.group(1).equals("link")) { links |= bit; } else { ends |= bit; }
             }
-            require(Integer.bitCount(links | ends) <= 2, "At most two tags: " + node.id);
+            require(Integer.bitCount(links | ends) <= 2 || (links | ends) == 63,
+                  "One or two tags, or all six for a whole hex: " + node.id);
             var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends);
             require(seen.add(piece.role() + "/" + piece.tags()), "Duplicate building module: " + node.id);
             result.add(piece);
@@ -131,9 +135,20 @@ final class ConnectedKit {
                   "Every module needs its core piece when any has one: " + role);
         }
         // Symmetric: one-tag pieces face north, two-tag pieces the north/north-east corner; turned for the others.
-        boolean symmetric = pieces.stream().allMatch(piece -> piece.core()
+        boolean symmetric = pieces.stream().allMatch(piece -> piece.core() || piece.whole()
               || Integer.bitCount(piece.links() | piece.ends()) == 1 && (piece.links() | piece.ends()) == 1
               || (piece.links() | piece.ends()) == 3);
+        Set<Long> wholes = pieces.stream().filter(Piece::whole).map(Piece::tags).collect(Collectors.toSet());
+        for (var piece : pieces) {
+            require(!piece.whole() || roles.keySet().stream().allMatch(role -> pieces.stream()
+                  .anyMatch(other -> other.role().equals(role) && other.tags() == piece.tags())),
+                  "Every module needs the kit's whole-hex pieces: " + piece.node());
+            for (int steps = 1; steps < 6 && symmetric && piece.whole(); steps++) {
+                long turned = piece.turned(steps).tags();
+                require(turned == piece.tags() || !wholes.contains(turned),
+                      "A symmetric kit authors each whole hex once, turned for the others: " + piece.node());
+            }
+        }
         if (!symmetric) {
             for (var piece : pieces) {
                 for (int steps = 1; steps < 6 && !piece.core(); steps++) {
@@ -201,7 +216,7 @@ final class ConnectedKit {
         return triangles(data, node(data, piece.node()), piece.matrix());
     }
 
-    private static List<Vector3> triangles(RigidGlb.Data data, ModelNode node, Matrix4 view) {
+    static List<Vector3> triangles(RigidGlb.Data data, ModelNode node, Matrix4 view) {
         Matrix4 placement = new Matrix4(view).mul(new Matrix4(node.translation, node.rotation, node.scale));
         var mesh = data.meshes.first();
         Set<String> parts = new HashSet<>();
@@ -217,7 +232,7 @@ final class ConnectedKit {
         return result;
     }
 
-    private static ModelNode node(ModelData data, String id) {
+    static ModelNode node(ModelData data, String id) {
         for (int index = 0; index < data.nodes.size; index++) {
             if (data.nodes.get(index).id.equals(id)) { return data.nodes.get(index); }
         }
@@ -237,17 +252,26 @@ final class ConnectedKit {
      */
     static int[] reach(BoardScene scene, BoardScene.Tile tile, int height) {
         int[] result = new int[6];
-        var cover = tile.cover();
         for (int direction = 0; direction < 6; direction++) {
-            if ((cover.exits() & 1 << direction) == 0) { continue; }
+            if ((tile.cover().exits() & 1 << direction) == 0) { continue; }
             var neighbor = scene.neighbor(tile, direction);
-            var other = neighbor == null ? BoardScene.Cover.NONE : neighbor.cover();
-            boolean back = other.structure() != 0
-                  && (other.structure() == BoardScene.Cover.FUEL_TANK) == (cover.structure() == BoardScene.Cover.FUEL_TANK)
-                  && (other.exits() & 1 << (direction + 3) % 6) != 0;
-            result[direction] = back ? arm(tile, height, neighbor, Math.max(1, other.height())) : height;
+            result[direction] = back(scene, tile, direction)
+                  ? arm(tile, height, neighbor, Math.max(1, neighbor.cover().height())) : height;
         }
         return result;
+    }
+
+    /**
+     * Whether the neighbour towards {@code direction} is the same structure terrain (building or fuel tank) and connects
+     * back across the shared hexside.
+     */
+    static boolean back(BoardScene scene, BoardScene.Tile tile, int direction) {
+        var neighbor = scene.neighbor(tile, direction);
+        var other = neighbor == null ? BoardScene.Cover.NONE : neighbor.cover();
+        var cover = tile.cover();
+        return other.structure() != 0
+              && (other.structure() == BoardScene.Cover.FUEL_TANK) == (cover.structure() == BoardScene.Cover.FUEL_TANK)
+              && (other.exits() & 1 << (direction + 3) % 6) != 0;
     }
 
     /**
@@ -271,6 +295,15 @@ final class ConnectedKit {
         var source = kit.lods().get(lod);
         var result = new RigidGlb.Data();
         result.id = id;
+        materials(result, source);
+        for (var placement : placements(kit, lod, height, reach, steps, seed)) {
+            append(result, source, node(source, placement.node()), placement.matrix(), placement.prefix());
+        }
+        return result;
+    }
+
+    /** Adds {@code source}'s materials, with their images and finishes, to {@code result} for its placed nodes. */
+    static void materials(RigidGlb.Data result, RigidGlb.Data source) {
         result.images.putAll(source.images);
         // libGDX Array reuses its iterator: immutable kit data is read concurrently by terrain workers.
         for (int index = 0; index < source.materials.size; index++) {
@@ -284,10 +317,7 @@ final class ConnectedKit {
         }
         result.surfaces.putAll(source.surfaces);
         result.alphaTests.putAll(source.alphaTests);
-        for (var placement : placements(kit, lod, height, reach, steps, seed)) {
-            append(result, source, node(source, placement.node()), placement.matrix(), placement.prefix());
-        }
-        return result;
+        result.boardUVs.putAll(source.boardUVs);
     }
 
     /**
@@ -317,6 +347,17 @@ final class ConnectedKit {
         List<Placement> result = new ArrayList<>();
         Set<Long> identities = new HashSet<>();
         byRole.values().forEach(pieces -> identities.addAll(pieces.keySet()));
+        // The whole-hex piece (and its turn) for the ground level's connections. It stands while a level keeps them;
+        // above, the corner pieces follow the falling connections, whose footprint only shrinks with them.
+        long whole = -1;
+        int wholeTurn = 0;
+        for (long tags : identities.stream().sorted().toList()) {
+            Piece any = byRole.values().stream().map(pieces -> pieces.get(tags)).filter(Objects::nonNull)
+                  .findFirst().orElseThrow();
+            for (int turn = 0; turn < (kit.symmetric() ? 6 : 1) && any.whole() && whole < 0; turn++) {
+                if (any.turned(turn).holds(connected[0])) { whole = tags; wholeTurn = turn; }
+            }
+        }
         for (long tags : identities.stream().sorted().toList()) {
             Piece any = byRole.values().stream().map(pieces -> pieces.get(tags)).filter(Objects::nonNull)
                   .findFirst().orElseThrow();
@@ -324,7 +365,9 @@ final class ConnectedKit {
                 Piece turned = any.turned(turn);
                 boolean before = false;
                 for (int level = 0; level <= height; level++) {
-                    boolean holds = level < height && turned.holds(connected[level]);
+                    boolean wholeLevel = whole >= 0 && level < height && connected[level] == connected[0];
+                    boolean holds = level < height && (any.whole() ? tags == whole && turn == wholeTurn && wholeLevel
+                          : !wholeLevel && turned.holds(connected[level]));
                     // A run's modules, then its own roof where it stops: below the top, or at the top.
                     String role = holds ? selected.get(level) : before ? selected.getLast() : null;
                     Piece piece = role == null ? null : byRole.get(role).get(tags);
@@ -343,7 +386,7 @@ final class ConnectedKit {
     private static final float[] SIN = { 0, (float) -Math.sqrt(.75), (float) -Math.sqrt(.75), 0, (float) Math.sqrt(.75),
           (float) Math.sqrt(.75) };
 
-    private static Matrix4 placement(float lift, int steps) {
+    static Matrix4 placement(float lift, int steps) {
         // Clockwise sixths of a turn about the up axis: exact, so every turned copy meets its edge like the north one.
         int turn = Math.floorMod(steps, 6);
         Matrix4 placement = new Matrix4();
@@ -353,7 +396,8 @@ final class ConnectedKit {
         return placement;
     }
 
-    private static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, Matrix4 frame, String prefix) {
+    /** Adds {@code node}'s parts, placed by {@code frame}, to {@code result} as a mesh of their own. */
+    static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, Matrix4 frame, String prefix) {
         Matrix4 placement = new Matrix4(frame).mul(new Matrix4(node.translation, node.rotation, node.scale));
         Matrix3 normals = new Matrix3().set(placement).inv().transpose();
         var point = new Vector3();

@@ -1852,6 +1852,8 @@ final class GpuTerrain implements Disposable {
         final List<Prop> props = new ArrayList<>();
         final List<PaintedDecal> paint = new ArrayList<>();
         final List<InteriorStruts> struts = new ArrayList<>();
+        /** Its multi-hex building share's glass (BoardMultiHexBuilding#glass), drawn with the transparent features. */
+        final List<ModelInstance> glass = new ArrayList<>();
         final BoundingBox bounds = new BoundingBox().inf();
         float scatterDiameter;
     }
@@ -1901,6 +1903,8 @@ final class GpuTerrain implements Disposable {
         final List<LiquidSurface> liquidMaterials = new ArrayList<>();
         final List<Prop> props = new ArrayList<>();
         final List<Prop> cutaways = new ArrayList<>();
+        /** Transparent board materials' instances (multi-hex buildings' glass): no depth writes, no shadows, no picking. */
+        final List<ModelInstance> glass = new ArrayList<>();
         final GpuTreeInstances.Stand stand = new GpuTreeInstances.Stand();
         /** The stand's cover trees alone, which the Tactical View draws ({@link Prop#cover}). */
         final GpuTreeInstances.Stand coverStand = new GpuTreeInstances.Stand();
@@ -2475,6 +2479,19 @@ final class GpuTerrain implements Disposable {
                 // Currents run between liquid hexes only (BoardFlow); dry ground changes level without moving them.
                 changedFlow |= !same && (!before.coords().equals(tile.coords()) || !before.liquid().equals(tile.liquid())
                       || tile.liquid().present() && (before.elevation() != tile.elevation() || before.frozen() != tile.frozen()));
+                // A dome is fitted to its whole building: a change to one of its hexes refits every hex of it.
+                if (!same && before.coords().equals(tile.coords())) {
+                    changedTiles.addAll(BoardMultiHexBuilding.domed(beforeScene, before));
+                    changedTiles.addAll(BoardMultiHexBuilding.domed(scene, tile));
+                    // A neighbour's dome may name this hex as a collapsed one, or take it in now.
+                    for (int direction = 0; direction < 6; direction++) {
+                        var next = beforeScene.neighbor(before, direction);
+                        if (next != null) {
+                            changedTiles.addAll(BoardMultiHexBuilding.domed(beforeScene, next));
+                            changedTiles.addAll(BoardMultiHexBuilding.domed(scene, scene.tile(next.coords())));
+                        }
+                    }
+                }
                 if (!same && !before.coords().equals(tile.coords())) {
                     rebuildAll = true;
                 } else {
@@ -3295,6 +3312,7 @@ final class GpuTerrain implements Disposable {
         }
         hasCutaways = chunks.stream().anyMatch(chunk -> !chunk.cutaways.isEmpty());
         Set<GpuBuilding.Assembly> liveBuildings = new HashSet<>();
+        // Generated models the installed chunks draw: industrial plants, and multi-hex building shares and their glass.
         Set<Model> liveIndustrial = new HashSet<>();
         Set<Model> liveRoutes = new HashSet<>();
         for (Chunk chunk : chunks) {
@@ -3302,14 +3320,16 @@ final class GpuTerrain implements Disposable {
                 if (prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
             }
             for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
-            for (Prop prop : chunk.props) { if (prop.industrial) { liveIndustrial.add(prop.instance.model); } }
+            for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
+            for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
         }
         for (Chunk chunk : detailCache.values()) {
             for (Prop prop : chunk.props) {
                 if (prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
             }
             for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
-            for (Prop prop : chunk.props) { if (prop.industrial) { liveIndustrial.add(prop.instance.model); } }
+            for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
+            for (ModelInstance pane : chunk.glass) { liveIndustrial.add(pane.model); }
         }
         Set<Mesh> sharedSources = new HashSet<>();
         for (Chunk chunk : chunks) {
@@ -4211,7 +4231,9 @@ final class GpuTerrain implements Disposable {
         Chunk chunk = build.chunk;
         TerrainLod lod = chunk.lod;
         GpuTerrainLayer solid = build.layers.get(0), scatter = build.layers.get(1);
-        var features = BoardFeatures.fittedControls(scene, tile);
+        var fitted = BoardFeatures.fittedControls(scene, tile);
+        // A biodome's garden trees (BoardMultiHexBuilding#withTrees) draw as trees but are no woods.
+        var features = BoardMultiHexBuilding.withTrees(scene, tile, fitted);
         if (features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.SCENERY || f.authoredPlacement() || f.decoration() != null)) {
             // Install solid supports first, regardless of the captured artwork layer order.
             features = features.stream().sorted(Comparator.comparing(f -> f.kind() == BoardScene.FeatureKind.SCENERY
@@ -4274,6 +4296,7 @@ final class GpuTerrain implements Disposable {
             boolean generatedIndustrial = BoardIndustrial.supports(feature);
             boolean wallBuilding = BoardWall.building(tile.cover(), feature);
             var wallLayout = BoardWall.supports(feature.asset()) ? BoardWall.layout(scene, tile, feature) : null;
+            var multiHexLayout = BoardMultiHexBuilding.supports(feature.asset()) ? BoardMultiHexBuilding.layout(scene, tile, feature) : null;
             GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
                   ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature),
                   feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding);
@@ -4288,6 +4311,7 @@ final class GpuTerrain implements Disposable {
                   : placedObject ? assets.slotted(feature.asset())
                   : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
                   : wallLayout != null ? assets.wall(wallLayout)
+                  : multiHexLayout != null ? assets.multiHexLevels(multiHexLayout).getFirst()
                   : building != null ? building.model(0)
                   : feature.kind() == BoardScene.FeatureKind.TREE
                   ? assets.lodModel(feature.asset(), 0)
@@ -4300,7 +4324,7 @@ final class GpuTerrain implements Disposable {
             boolean metal = feature.kind() == BoardScene.FeatureKind.METAL;
             // A single-model building or fuel tank (no kit assembly): a large occluder the depth pre-pass draws (prepass);
             // not kit modules, a wall, an industrial structure, a placed object or an interior floor.
-            boolean shell = building == null && wallLayout == null && !placedObject && !generatedIndustrial
+            boolean shell = building == null && wallLayout == null && multiHexLayout == null && !placedObject && !generatedIndustrial
                   && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
                   && (feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/"));
             // Its renderables carry the colours to the instance data and the shader (copy keeps them).
@@ -4400,7 +4424,8 @@ final class GpuTerrain implements Disposable {
                       || fungus || metal || feature.kind() == BoardScene.FeatureKind.BUILDING || feature.asset().startsWith("buildings/");
                 float sourceHeight = fitHeight ? bounds.getDepth() : 1;
                 float verticalScale = coral ? coralScale
-                      : building == null && wallLayout == null ? feature.height() * BoardGeometry.level() / sourceHeight
+                      : building == null && wallLayout == null && multiHexLayout == null
+                            ? feature.height() * BoardGeometry.level() / sourceHeight
                       : BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT;
                 // Authored colonies and understory retain their proportions when fitted to the foliage height.
                 float horizontalScale = fungus || coral
@@ -4437,7 +4462,8 @@ final class GpuTerrain implements Disposable {
             prop.infrastructure = routeFeature(tile, feature);
             prop.scatter = feature.kind() == BoardScene.FeatureKind.SCATTER;
             // Tundra tussocks stand with the trees but, like the grass, are no cover: the Tactical View omits them.
-            prop.cover = object == null && standTree && !prop.scatter && !feature.asset().equals(BoardScatter.TUSSOCK);
+            prop.cover = object == null && standTree && !prop.scatter && !feature.asset().equals(BoardScatter.TUSSOCK)
+                  && (features == fitted || fitted.contains(feature));
             // Terrain-owned transport furniture stays with its shared road/rail geometry in every view. Keep its
             // normal instanced-object path so traffic-signal LOD swaps and blinking materials continue to update.
             prop.tactical = placedObject ? BoardFeatures.coverSkin(object)
@@ -4455,18 +4481,27 @@ final class GpuTerrain implements Disposable {
             // A placed object's simpler levels, shared meshes as its near one (a stand tree has the stand's levels).
             if (wallLayout != null) {
                 prop.levels = assets.wallLevels(wallLayout);
+            } else if (multiHexLayout != null) {
+                prop.levels = assets.multiHexLevels(multiHexLayout);
             } else if (object != null && !standTree && !BoardRail.route(feature)) {
                 List<Model> levels = assets.objectLevels(feature.asset());
                 if (levels.stream().distinct().count() > 1) { prop.levels = levels.stream().map(drawn).toList(); }
             }
             prop.receiver = BoardFeatures.receiver(feature);
             chunk.props.add(prop);
+            Model glass = multiHexLayout == null ? null : assets.multiHexGlass(multiHexLayout);
+            if (glass != null) {
+                var pane = new ModelInstance(glass);
+                pane.transform.set(instance.transform);
+                chunk.glass.add(pane);
+                chunk.bounds.ext(pane.calculateBoundingBox(new BoundingBox()).mul(pane.transform));
+            }
             if (feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL || feature.kind() == BoardScene.FeatureKind.FUEL_TANK
                   || feature.kind() == BoardScene.FeatureKind.PROP && !feature.asset().equals("vegetation/field"))) {
                 supports.add(prop);
             }
-            if (feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding) {
+            if (feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding && multiHexLayout == null) {
                 Model interior = building == null ? assets.interior(feature.asset(), Math.round(feature.height()))
                       : building.interior();
                 ModelInstance struts = new ModelInstance(interior, "struts");
@@ -4891,8 +4926,10 @@ final class GpuTerrain implements Disposable {
                     for (InteriorStruts strut : previous.struts) {
                         tile.struts.add(new InteriorStruts(coords, new ModelInstance(strut.instance)));
                     }
+                    for (ModelInstance pane : previous.glass) { tile.glass.add(copy(pane)); }
                     chunk.props.addAll(tile.props);
                     chunk.struts.addAll(tile.struts);
+                    chunk.glass.addAll(tile.glass);
                     if (repaint) {
                         var support = prepared.topography().get(coords);
                         placeDecorationPaint(this, scene.tile(coords), support == null ? List.of() : support.faces(), tile.bridgeShape, tile.props);
@@ -4903,7 +4940,7 @@ final class GpuTerrain implements Disposable {
                 } else {
                     chunk.bounds.inf();
                     chunk.scatterDiameter = 0;
-                    int props = chunk.props.size(), struts = chunk.struts.size();
+                    int props = chunk.props.size(), struts = chunk.struts.size(), glass = chunk.glass.size();
                     collectTile(this, scene.tile(coords));
                     // A Classic hex's support is its column, which has no separate water geometry.
                     tile.support = prepared.topography().get(coords);
@@ -4912,6 +4949,7 @@ final class GpuTerrain implements Disposable {
                     tile.plants = prepared.plants().get(coords);
                     tile.props.addAll(chunk.props.subList(props, chunk.props.size()));
                     tile.struts.addAll(chunk.struts.subList(struts, chunk.struts.size()));
+                    tile.glass.addAll(chunk.glass.subList(glass, chunk.glass.size()));
                     tile.bounds.set(chunk.bounds);
                     tile.scatterDiameter = chunk.scatterDiameter;
                 }
@@ -5103,6 +5141,10 @@ final class GpuTerrain implements Disposable {
                 if (prepass(part.material) == Prepass.OBJECTS) {
                     prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
                 }
+            }
+            // Multi-hex buildings' glass draws blended by its .tres: its program links behind the loading stage too.
+            for (Renderable part : GpuTerrainDepth.snapshot(chunk.glass)) {
+                prepareTerrainMaterial(part.material, part.meshPart.mesh.getVertexAttributes());
             }
             // In the editor the water's depth pass and the roads', shores', decals', paint's and objects' programs
             // link before a stroke shows them too (advanceBuild): instanced parts as their batches draw them.
@@ -7484,6 +7526,7 @@ final class GpuTerrain implements Disposable {
                     // A close-up: a building or object with mesh levels draws its near one, whatever the board's zoom.
                     batch.render(prop.near(), environment);
                 }
+                if (isolate.isEmpty()) { for (ModelInstance pane : tile.glass) { batch.render(pane, environment); } }
             } finally { batch.end(); }
             return null;
         });
@@ -8143,6 +8186,7 @@ final class GpuTerrain implements Disposable {
             waterPages.add(chunk.waterRenderables, page, visible, waterVisible());
             if (visible) {
                 for (Prop prop : chunk.faded) { if (drawn(prop, false)) { batch.render(prop.instance(), environment); } }
+                for (ModelInstance pane : chunk.glass) { batch.render(pane, environment); }
             }
         }
         batch.end();

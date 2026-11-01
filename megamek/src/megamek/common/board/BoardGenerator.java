@@ -21,6 +21,8 @@ import megamek.common.units.Terrains;
 public enum BoardGenerator {
     /** A heavy industrial plant, assembled from its hex's equipment (the 3D board's BoardIndustrial). */
     HEAVY_INDUSTRIAL(Terrains.INDUSTRIAL, "buildings/(?:saxarba/)?misc/heavy_industrial_[a-d]"),
+    /** A building generated over its whole footprint: habitat, dome or biodome (BoardMultiHexBuilding). */
+    MULTI_HEX_BUILDING(Terrains.BUILDING, "buildings/multihex/(?:dome|biodome)"),
     /** A wall's kit pieces for its exits, 0 to 63 (BoardWall). */
     WALL(Terrains.BUILDING, "buildings/wall-(?:[0-9]|[1-5][0-9]|6[0-3])"),
     /** A rail route's marker: the route builder lays its track (BoardRail). */

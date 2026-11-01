@@ -20,7 +20,7 @@ public record HexAppearance(String variant, String asset, String material, Doubl
       BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
       TrafficControl trafficControl) implements Serializable {
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch");
+          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint");
     /**
      * A built bridge with concrete piers under the joints between its hexes, never at a hex centre (owner
      * {@code "bridge"}). Cosmetic, like the other bridge types: the 3D views draw them; rules and the 2D views ignore it.
@@ -79,6 +79,25 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(),
               current.colours(), current.rotation(), current.tracks(), current.beside(), control);
     }
+
+    /**
+     * A connected building kit's footprint (owner {@code "footprint"}, models/buildings/README.md): {@link #ANGLED}, the
+     * classic exits art's, its walls along the hex's directions, stored as none; {@link #SQUARE} right-angled blocks,
+     * the kit's {@code <kit>-square.glb} ({@link TilesetScenery#footprint}). Cosmetic, like the pavement {@link Edges}:
+     * the 3D views draw it; rules and the 2D views ignore it. A connected building has one.
+     */
+    public enum Footprint { ANGLED, SQUARE }
+
+    public static final HexAppearance SQUARE = new HexAppearance("footprint/square", null, null, null);
+
+    /** A hex's stored {@link Footprint}; {@link Footprint#ANGLED} when none is stored. */
+    public static Footprint footprint(Map<String, HexAppearance> appearance) {
+        HexAppearance stored = appearance.get("footprint");
+        return stored != null && SQUARE.variant().equals(stored.variant()) ? Footprint.SQUARE : Footprint.ANGLED;
+    }
+
+    /** The appearance that stores {@code footprint}; null for {@link Footprint#ANGLED}, which is stored as none. */
+    public static HexAppearance of(Footprint footprint) { return footprint == Footprint.SQUARE ? SQUARE : null; }
 
     public static final HexAppearance EDGES_FITTED = new HexAppearance("pavement/fitted", null, null, null);
     public static final HexAppearance EDGES_HEX = new HexAppearance("pavement/hex", null, null, null);

@@ -111,6 +111,53 @@ class BoardEditorSectionTest {
         return java.util.Arrays.stream(cells).map(at -> hex(at).getAppearance().get("bridge")).toList();
     }
 
+    @Test void footprintSwitchesTheWholeConnectedBuildingInOneUndoStep() {
+        // A building over three hexes joined north to south, and an unrelated building.
+        Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3), other = new Coords(5, 5);
+        for (Coords at : List.of(north, middle, south, other)) {
+            int exits = at.equals(north) ? 8 : at.equals(middle) ? 9 : at.equals(south) ? 1 : 0;
+            session.board().setHex(at, new Hex(0, "building:1:" + exits + ";bldg_cf:40;bldg_elev:2", ""));
+        }
+        var square = HexAppearance.Footprint.SQUARE;
+        var angled = HexAppearance.Footprint.ANGLED;
+        select(middle);
+        send(Action.FOOTPRINT, "", "square");
+        assertEquals(List.of(square, square, square, angled), footprints(north, middle, south, other),
+              "The whole connected building, not another one");
+        assertEquals(square, HexAppearance.footprint(session.snapshot().appearance()), "The panel shows it");
+        send(Action.UNDO, "", "");
+        assertEquals(List.of(angled, angled, angled), footprints(north, middle, south));
+        assertFalse(session.snapshot().canUndo(), "One undo step");
+        send(Action.FOOTPRINT, "", "square");
+        // A building hex joined to it, even through its own exit alone, takes its footprint.
+        Coords added = south.translated(3);
+        session.board().setHex(added, new Hex(0, "building:1:0;bldg_cf:40;bldg_elev:2", ""));
+        select(added);
+        send(Action.EDGE, "building", "0");
+        assertEquals(square, HexAppearance.footprint(hex(added).getAppearance()), "A new hex of the building joins it");
+        select(middle);
+        send(Action.FOOTPRINT, "", "angled");
+        assertFalse(hex(north).getAppearance().containsKey("footprint"), "Angled, the default, is stored as none");
+        assertFalse(hex(added).getAppearance().containsKey("footprint"), "The whole building, the new hex too");
+        // Two buildings joined become one footprint, the one most of the hexes the edit left alone hold, on every hex.
+        Coords above = other.translated(0), beside = other.translated(2), next = beside.translated(2);
+        session.board().setHex(above, new Hex(0, "building:1:" + (1 << 3) + ";bldg_cf:40;bldg_elev:2", ""));
+        session.board().setHex(beside, new Hex(0, "building:1:" + (1 << 2) + ";bldg_cf:40;bldg_elev:2", ""));
+        session.board().setHex(next, new Hex(0, "building:1:0;bldg_cf:40;bldg_elev:2", ""));
+        select(other);
+        send(Action.FOOTPRINT, "", "square");
+        assertEquals(List.of(square, square), footprints(other, above), "Joined through the other hex's exit");
+        send(Action.EDGE, "building", "2");
+        assertEquals(List.of(angled, angled, angled, angled), footprints(other, above, beside, next), "Joined, one footprint");
+        select(new Coords(3, 3));
+        send(Action.FOOTPRINT, "", "square");
+        assertEquals("Select a building first.", session.snapshot().message(), "Only a building has a footprint");
+    }
+
+    private List<HexAppearance.Footprint> footprints(Coords... cells) {
+        return java.util.Arrays.stream(cells).map(at -> HexAppearance.footprint(hex(at).getAppearance())).toList();
+    }
+
     @Test void bridgeTypeSwitchesTheWholeSpanInOneUndoStep() {
         // A bridge over three hexes joined north to south, and an unrelated built bridge.
         Coords north = new Coords(1, 1), middle = new Coords(1, 2), south = new Coords(1, 3), other = new Coords(5, 5);

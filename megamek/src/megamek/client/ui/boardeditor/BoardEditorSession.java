@@ -90,6 +90,11 @@ public final class BoardEditorSession {
          */
         BRIDGE_COLOUR,
         /**
+         * Gives the selected building's whole connected structure ({@link #structure}) one {@link HexAppearance.Footprint}
+         * (value "angled" or "square") in one undo step.
+         */
+        FOOTPRINT,
+        /**
          * Changes the board, not a hex (target: "arena" or "roads" with value true/false, "tag" or "untag" with a manual
          * tag, "autotags"); see {@link #boardSetting(String, String)}. Not an undo step: the control is its own undo.
          */
@@ -804,6 +809,13 @@ public final class BoardEditorSession {
                         }
                         return type;
                     });
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case FOOTPRINT -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    var footprint = HexAppearance.Footprint.valueOf(command.value().toUpperCase(java.util.Locale.ROOT));
+                    for (Coords cell : structure(selected, Terrains.BUILDING)) { change(cell, hex -> footprint(hex, footprint)); }
                     if (!continuousEdit) { finishStroke(); }
                 }
                 case BRIDGE_TYPE -> {
@@ -2294,7 +2306,8 @@ public final class BoardEditorSession {
 
     /**
      * The hexes of the structure at {@code start}: a bridge's {@link megamek.common.board.BridgeSpan}, the one span of
-     * its type, piers and deck height; another structure's hexes reached through the exits of its {@code type} terrain.
+     * its type, piers and deck height; another structure's hexes joined through the exits of its {@code type} terrain,
+     * either hex's.
      */
     private List<Coords> structure(Coords start, int type) {
         if (type == Terrains.BRIDGE) { return megamek.common.board.BridgeSpan.of(board()::getHex, start); }
@@ -2304,8 +2317,10 @@ public final class BoardEditorSession {
             Coords at = open.pop();
             for (int direction = 0; direction < 6; direction++) {
                 Coords next = at.translated(direction);
-                if (board().getHex(at).containsTerrainExit(type, direction) && board().contains(next)
-                      && board().getHex(next).containsTerrain(type) && found.add(next)) { open.add(next); }
+                if (board().contains(next) && board().getHex(next).containsTerrain(type)
+                      && (board().getHex(at).containsTerrainExit(type, direction)
+                            || board().getHex(next).containsTerrainExit(type, (direction + 3) % 6))
+                      && found.add(next)) { open.add(next); }
             }
         }
         return List.copyOf(found);
@@ -2840,6 +2855,14 @@ public final class BoardEditorSession {
      * Gives a pavement hex its {@link HexAppearance.Edges} ({@code value} "auto", "fitted" or "hex"): the Edit panel's
      * and the Brush's Edges row.
      */
+    /** Stores {@code footprint} in {@code hex}'s appearance ({@link HexAppearance#of(HexAppearance.Footprint)}). */
+    private static void footprint(Hex hex, HexAppearance.Footprint footprint) {
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        if (footprint == HexAppearance.Footprint.ANGLED) { styles.remove("footprint"); }
+        else { styles.put("footprint", HexAppearance.of(footprint)); }
+        hex.setAppearance(styles);
+    }
+
     private void setEdges(Hex hex, String value) {
         require(hex.containsTerrain(Terrains.PAVEMENT), Messages.getString("BoardEditor.pavementFirst"));
         var edges = HexAppearance.Edges.valueOf(value.toUpperCase(java.util.Locale.ROOT));
@@ -3204,6 +3227,28 @@ public final class BoardEditorSession {
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
+        joinFootprints();
+    }
+
+    /**
+     * A building the stroke changed keeps one footprint: the one most of the hexes the stroke left alone hold (Square on
+     * a tie) goes to all its hexes, so a joined hex, or a joined building, takes it.
+     */
+    private void joinFootprints() {
+        Set<Coords> done = new java.util.HashSet<>();
+        java.util.function.Predicate<Coords> changed = at -> stroke.containsKey(at)
+              && !BoardFile.hexNode(stroke.get(at)).equals(BoardFile.hexNode(board().getHex(at)));
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            if (done.contains(at) || !board().getHex(at).containsTerrain(Terrains.BUILDING) || !changed.test(at)) { continue; }
+            List<Coords> building = structure(at, Terrains.BUILDING);
+            done.addAll(building);
+            var kept = building.stream().filter(changed.negate())
+                  .map(cell -> HexAppearance.footprint(board().getHex(cell).getAppearance())).toList();
+            if (kept.isEmpty()) { continue; }
+            long square = kept.stream().filter(HexAppearance.Footprint.SQUARE::equals).count();
+            var joined = 2 * square >= kept.size() ? HexAppearance.Footprint.SQUARE : HexAppearance.Footprint.ANGLED;
+            building.forEach(cell -> change(cell, hex -> footprint(hex, joined)));
+        }
     }
 
     private boolean wallBrush() {

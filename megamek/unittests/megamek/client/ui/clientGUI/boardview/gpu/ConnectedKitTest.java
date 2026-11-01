@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
@@ -95,6 +96,47 @@ class ConnectedKitTest {
         assertEquals(18, arm[1], 1e-4, "No floor or roof piece follows the arm up the connected side");
     }
 
+    /** {@link #symmetric} with whole-hex pieces: a block alone, and a band towards a single link. */
+    private static List<Box> wholes() {
+        List<Box> result = new ArrayList<>(symmetric());
+        for (String role : List.of("base0", "floor0", "roof0")) {
+            float top = role.equals("roof0") ? 2 : 18;
+            result.add(new Box("kit-lod0-" + role + LONE, -20, -30, 0, 20, 30, top));
+            result.add(new Box("kit-lod0-" + role + BAND, -20, -28, 0, 20, 36, top));
+        }
+        return result;
+    }
+
+    private static final String LONE = "-end-n-end-ne-end-se-end-s-end-sw-end-nw";
+    private static final String BAND = "-link-n-end-ne-end-se-end-s-end-sw-end-nw";
+
+    @Test
+    void aWholeHexPieceStandsAloneForExactlyItsConnectionsWhileTheyHold() {
+        var kit = ConnectedKit.load(List.of(kit(wholes())));
+        assertTrue(kit.symmetric());
+        assertEquals(Set.of("kit-lod0-base0" + LONE + "@0/base0-at-0", "kit-lod0-roof0" + LONE + "@0/roof0-at-1"),
+              prefixes(kit, 1, new int[6]), "Alone: the block once, no core or caps");
+        var band = ConnectedKit.model(kit, 0, 1, new int[] { 0, 0, 1, 0, 0, 0 }, 0, 0, "band");
+        assertEquals(36, farthest(band, 2), 1e-4, "One link: the band turned onto it");
+        assertEquals(Set.of("kit-lod0-base0" + BAND + "@2/base0-at-0", "kit-lod0-roof0" + BAND + "@2/roof0-at-1"),
+              prefixes(kit, 1, new int[] { 0, 0, 1, 0, 0, 0 }));
+        assertTrue(prefixes(kit, 1, new int[] { 1, 0, 0, 1, 0, 0 }).stream().noneMatch(node -> node.contains("-nw@")),
+              "Two links: the corner pieces only");
+        // Linked north on the lower level only: the band below, then the core and its caps (the lone block above would
+        // overhang the band).
+        var stacked = prefixes(kit, 2, new int[] { 1, 0, 0, 0, 0, 0 });
+        assertTrue(stacked.contains("kit-lod0-base0" + BAND + "@0/base0-at-0"));
+        assertTrue(stacked.contains("kit-lod0-roof0" + BAND + "@0/roof0-at-1"), "The band's roof where it stops");
+        assertTrue(stacked.contains("kit-lod0-floor0@0/floor0-at-1"));
+        assertTrue(stacked.stream().noneMatch(node -> node.contains(LONE)));
+        assertTrue(stacked.stream().noneMatch(node -> node.endsWith("-at-0") && !node.contains(BAND)));
+    }
+
+    private static Set<String> prefixes(ConnectedKit.Kit kit, int height, int[] reach) {
+        return ConnectedKit.placements(kit, 0, height, reach, 0, 0).stream().map(ConnectedKit.Placement::prefix)
+              .map(prefix -> prefix.substring(0, prefix.length() - 1)).collect(java.util.stream.Collectors.toSet());
+    }
+
     @Test
     void theHexsExitsConnectAndOnlyAStructureOfItsKindThatConnectsBackLowersThem() {
         Hex[] hexes = new Hex[7 * 7];
@@ -145,6 +187,13 @@ class ConnectedKitTest {
             corner.add(new Box("kit-lod0-" + role + "-link-n-end-ne", 0, 0, 0, 20, 36, role.equals("roof0") ? 2 : 18));
         }
         kits.add(corner);
+        kits.add(wholes().stream().filter(box -> !box.node().equals("kit-lod0-floor0" + LONE)).toList());
+        var twice = new ArrayList<>(wholes());
+        for (String role : List.of("base0", "floor0", "roof0")) {
+            twice.add(new Box("kit-lod0-" + role + "-end-n-link-ne-end-se-end-s-end-sw-end-nw", -20, -28, 0, 20, 36,
+                  role.equals("roof0") ? 2 : 18));
+        }
+        kits.add(twice);
         for (var boxes : kits) {
             assertThrows(IllegalArgumentException.class, () -> ConnectedKit.load(List.of(kit(boxes))), boxes.toString());
         }

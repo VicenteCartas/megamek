@@ -37,6 +37,13 @@ final class GpuModelMaterial extends Attribute {
      * and merges, since other objects' surfaces select the same programs.
      */
     final boolean occluder;
+    /** Godot's premultiplied alpha (a .tres's blend_mode 4): only the diffuse share fades with the opacity (model.frag). */
+    final boolean premultiplied;
+    /**
+     * Units a texture repeat along the board's axes (RigidGlb.Data#boardUVs), 0 for the authored UVs: the vertex stage
+     * maps every texture from the board position (GpuUnitShader#linearVertex), so turned and repeated pieces join.
+     */
+    final float boardUV;
 
     GpuModelMaterial(float roughness, float metallic, Texture map) {
         this(roughness, metallic, 0, map, WHITE, BLACK, false, new float[4]);
@@ -49,11 +56,16 @@ final class GpuModelMaterial extends Attribute {
 
     GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
           boolean board, float[] relief, boolean paintMask) {
-        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false);
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, 0);
+    }
+
+    GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
+          boolean board, float[] relief, boolean paintMask, float boardUV) {
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, boardUV);
     }
 
     private GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
-          boolean board, float[] relief, boolean paintMask, boolean occluder) {
+          boolean board, float[] relief, boolean paintMask, boolean occluder, boolean premultiplied, float boardUV) {
         super(TYPE);
         this.roughness = roughness;
         this.metallic = metallic;
@@ -65,11 +77,20 @@ final class GpuModelMaterial extends Attribute {
         this.relief = relief.clone();
         this.paintMask = paintMask;
         this.occluder = occluder;
+        this.premultiplied = premultiplied;
+        this.boardUV = boardUV;
     }
 
     /** This surface, a building shell's or not ({@link #occluder}). */
     GpuModelMaterial occluder(boolean shell) {
-        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, shell);
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, shell,
+              premultiplied, boardUV);
+    }
+
+    /** This surface drawn with premultiplied alpha ({@link #premultiplied}). */
+    GpuModelMaterial premultiplied() {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, occluder, true,
+              boardUV);
     }
 
     static void register(DefaultShader shader) {
@@ -105,6 +126,18 @@ final class GpuModelMaterial extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 target.set(id, attributes.get(GpuModelMaterial.class, TYPE).board ? 1f : 0f);
+            }
+        });
+        shader.register("u_modelPremultiplied", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.get(GpuModelMaterial.class, TYPE).premultiplied ? 1f : 0f);
+            }
+        });
+        shader.register("u_modelBoardUV", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.get(GpuModelMaterial.class, TYPE).boardUV);
             }
         });
         shader.register("u_modelPaintMask", new BaseShader.LocalSetter() {
@@ -171,6 +204,8 @@ final class GpuModelMaterial extends Attribute {
         result = 31 * result + Arrays.hashCode(relief);
         result = 31 * result + Boolean.hashCode(paintMask);
         result = 31 * result + Boolean.hashCode(occluder);
+        result = 31 * result + Boolean.hashCode(premultiplied);
+        result = 31 * result + Float.floatToIntBits(boardUV);
         return 31 * result + (map == null ? 0 : map.getTextureObjectHandle());
     }
 
@@ -187,6 +222,8 @@ final class GpuModelMaterial extends Attribute {
         if (order == 0) { order = Arrays.compare(relief, surface.relief); }
         if (order == 0) { order = Boolean.compare(paintMask, surface.paintMask); }
         if (order == 0) { order = Boolean.compare(occluder, surface.occluder); }
+        if (order == 0) { order = Boolean.compare(premultiplied, surface.premultiplied); }
+        if (order == 0) { order = Float.compare(boardUV, surface.boardUV); }
         if (order == 0) {
             order = Integer.compare(map == null ? 0 : map.getTextureObjectHandle(),
                   surface.map == null ? 0 : surface.map.getTextureObjectHandle());

@@ -157,6 +157,20 @@ public final class TilesetScenery {
     }
 
     /**
+     * The building asset for a {@link HexAppearance.Footprint}: a Square hex's connected kit is the {@code <kit>-square.glb}
+     * beside its Angled {@code <kit>.glb}, where the kit has one.
+     */
+    public static String footprint(String asset, HexAppearance.Footprint footprint) {
+        if (footprint != HexAppearance.Footprint.SQUARE || !asset.startsWith("buildings/")) { return asset; }
+        File kit = customBuildingFile(asset);
+        File square = new File(kit.getParentFile(), kit.getName().replaceFirst("\\.glb$", "-square.glb"));
+        if (!kit.isFile() || !square.isFile()) { return asset; }
+        String relative = new File(Configuration.dataDir(), "models/buildings").toPath().relativize(square.toPath())
+              .toString().replace(File.separatorChar, '/');
+        return "buildings/" + relative.substring(0, relative.length() - ".glb".length());
+    }
+
+    /**
      * The hex's super images (and orthographic ones), each appearance resolved in isolation: an appearance owner's
      * layers come from its designed artwork hex, in place of the hex's own, and unrelated shared-fluff art stays. They are
      * drawn in the tileset's order ({@link TilesetMatcher#order}), as the token the design stands for would be.
@@ -230,6 +244,8 @@ public final class TilesetScenery {
                 }
             }
         }
+        models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> footprint(asset,
+              HexAppearance.footprint(hex.getAppearance())));
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
         if (hex.terrainLevel(Terrains.BUILDING) == megamek.common.enums.BuildingType.WALL.getTypeValue()) {
             models.putIfAbsent(Terrains.BUILDING, "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63));

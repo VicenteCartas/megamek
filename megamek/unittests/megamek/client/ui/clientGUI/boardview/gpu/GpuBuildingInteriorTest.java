@@ -15,16 +15,23 @@ class GpuBuildingInteriorTest {
     void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
         var file = new com.badlogic.gdx.files.FileHandle(megamek.common.board.TilesetScenery
               .customBuildingFile("buildings/saxarba/building_light/building_light_00"));
-        for (var entry : grounded(ConnectedKit.load(RigidGlb.loadLods(file))).entrySet()) {
-            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(entry.getValue())
-                  : GpuBuildingInterior.walls(entry.getValue(), 9);
-            assertTrue(area.contains(0, 0), entry.getKey());
+        var kit = ConnectedKit.load(GpuBuildingTest.lods(file));
+        // Alone, its storeys' walls close round its centre and its roof covers it; connected, its walls stay open
+        // towards its neighbours (GpuBuilding#volume then takes the roof) and its roof still covers the centre.
+        for (int[] reach : List.of(new int[6], new int[] { 2, 0, 0, 2, 0, 0 }, new int[] { 2, 0, 2, 0, 2, 0 })) {
+            boolean alone = java.util.Arrays.stream(reach).allMatch(levels -> levels == 0);
+            for (var entry : storeys(kit, reach).entrySet()) {
+                if (!alone && !entry.getKey().startsWith("roof")) { continue; }
+                var area = entry.getKey().startsWith("roof") ? GpuBuildingInterior.area(entry.getValue())
+                      : GpuBuildingInterior.walls(entry.getValue(), entry.getKey().endsWith("@0") ? 9 : 27);
+                assertTrue(area.contains(0, 0), entry.getKey() + " " + java.util.Arrays.toString(reach));
+            }
         }
     }
 
     @Test
     void fortressFootprintRemainsCompact() {
-        var data = RigidGlb.loadLods(GpuBuildingTest.file()).get(1);
+        var data = GpuBuildingTest.lods(GpuBuildingTest.file()).get(1);
         for (var mesh : data.meshes) {
             for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
                 mesh.vertices[i] += 71; mesh.vertices[i + 1] -= 23; mesh.vertices[i + 2] += 43;
@@ -32,9 +39,9 @@ class GpuBuildingInteriorTest {
         }
         for (var node : data.nodes) { node.translation.add(900, -400, 257); }
         java.awt.geom.Area volume = null;
-        for (var entry : grounded(ConnectedKit.load(List.of(data))).entrySet()) {
-            var area = entry.getKey().contains("roof") ? GpuBuildingInterior.area(entry.getValue())
-                  : GpuBuildingInterior.walls(entry.getValue(), 9);
+        for (var entry : storeys(ConnectedKit.load(List.of(data)), new int[6]).entrySet()) {
+            var area = entry.getKey().startsWith("roof") ? GpuBuildingInterior.area(entry.getValue())
+                  : GpuBuildingInterior.walls(entry.getValue(), entry.getKey().endsWith("@0") ? 9 : 27);
             // A module keeps its authored XY (ConnectedKit#placements): its centre moved with both offsets.
             assertTrue(area.contains(900 + 71, -400 - 23), "The wall outline must enclose usable volume");
             if (volume == null) { volume = area; } else { volume.intersect(area); }
@@ -43,13 +50,15 @@ class GpuBuildingInteriorTest {
         assertTrue(footprint.size() < 300, "The footprint must not inherit facade tessellation");
     }
 
-    /** Each piece of the kit's first level of detail, by node, standing on zero as an assembly's base does. */
-    private static java.util.Map<String, List<Vector3>> grounded(ConnectedKit.Kit kit) {
+    /**
+     * A two-storey hex assembled from the kit's first level of detail, connecting {@code reach} levels each way: its
+     * pieces' triangles by module type and level ("base@0", "floor@1", "roof@2").
+     */
+    private static java.util.Map<String, List<Vector3>> storeys(ConnectedKit.Kit kit, int[] reach) {
         java.util.Map<String, List<Vector3>> result = new java.util.HashMap<>();
-        for (var piece : kit.pieces()) {
-            var lift = new com.badlogic.gdx.math.Matrix4().setToTranslation(0, 0, -kit.grounds().getFirst().get(piece.role()));
-            result.put(piece.node(), ConnectedKit.triangles(kit, 0,
-                  new ConnectedKit.Placement(piece.node(), piece.role(), 0, lift, "")));
+        for (var piece : ConnectedKit.placements(kit, 0, 2, reach, 0, 1)) {
+            String key = piece.role().replaceFirst("[0-9]+$", "") + "@" + piece.level();
+            result.computeIfAbsent(key, ignored -> new ArrayList<>()).addAll(ConnectedKit.triangles(kit, 0, piece));
         }
         return result;
     }

@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -755,6 +756,7 @@ public final class BoardSceneryLayouts {
             carryRails(board, scanned);
             clearOfConcreteWalls(board, scanned);
             roadLinks(board);
+            lunarBases(board, scanned);
         }
         design(board, scanned);
         typeBridges(board, bridges);
@@ -762,6 +764,84 @@ public final class BoardSceneryLayouts {
         maglevTerrain(board, maglevs, issues, !nativeBoard);
         board.setNativeFormat(true);
         return List.copyOf(issues);
+    }
+
+    /** The lunar theme's building designs, generated over whole buildings (the 3D board's BoardMultiHexBuilding). */
+    static final String LUNAR_HABITAT = "building/lunar-habitat", GLASS_DOME = "building/glass-dome",
+          BIODOME = "building/biodome";
+    private static final Set<String> GLAZING = Set.of("scenery/roofs/skylight", "scenery/roofs/glass-roof-wide",
+          "scenery/roofs/glass-dome");
+
+    /**
+     * Lunar bases (the lunar theme's sealed buildings): every building of a legacy board without a design of its own
+     * becomes a lunar habitat, except a round one glazed over most of its hexes (skylights or glass roofs), which is a
+     * glass dome: a full ring of hexes round a centre holds most of it. Two full rings make it a biodome. A dome's
+     * glazing objects go, since the dome is its glass; the tokens stay for the 2D board.
+     */
+    private static void lunarBases(Board board, List<Coords> hexes) {
+        Set<Coords> done = new HashSet<>();
+        Map<BoardLocation, Hex> designed = new HashMap<>();
+        for (Coords start : hexes) {
+            if (done.contains(start) || !lunarBuilding(board.getHex(start))) { continue; }
+            Set<Coords> building = new LinkedHashSet<>(List.of(start));
+            List<Coords> open = new ArrayList<>(building);
+            while (!open.isEmpty()) {
+                Coords at = open.removeLast();
+                int exits = board.getHex(at).getTerrain(Terrains.BUILDING).getExits();
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords next = at.translated(direction);
+                    if ((exits & 1 << direction) == 0 || building.contains(next) || !board.contains(next)
+                          || !lunarBuilding(board.getHex(next))
+                          || (board.getHex(next).getTerrain(Terrains.BUILDING).getExits() & 1 << (direction + 3) % 6) == 0) {
+                        continue;
+                    }
+                    building.add(next);
+                    open.add(next);
+                }
+            }
+            done.addAll(building);
+            int rings = 0;
+            for (Coords centre : building) {
+                int full = 0;
+                while (within(building, centre, full + 1) == 1 + 3 * (full + 1) * (full + 2)) { full++; }
+                rings = Math.max(rings, full);
+            }
+            int disc = 1 + 3 * rings * (rings + 1);
+            long glazed = building.stream().filter(member -> glazed(board.getHex(member))).count();
+            boolean dome = rings >= 1 && disc * 5 >= building.size() * 3 && glazed * 2 >= building.size();
+            String variant = !dome ? LUNAR_HABITAT : rings >= 2 ? BIODOME : GLASS_DOME;
+            for (Coords member : building) {
+                Hex next = replacement(board.getHex(member));
+                Map<String, HexAppearance> appearance = new HashMap<>(next.getAppearance());
+                appearance.put("building", new HexAppearance(variant, null, null, null));
+                next.setAppearance(appearance);
+                if (dome) {
+                    next.setDecorations(next.getDecorations().stream().filter(object -> !GLAZING.contains(object.asset()))
+                          .toList());
+                }
+                designed.put(BoardLocation.of(member, board.getBoardId()), next);
+            }
+        }
+        if (!designed.isEmpty()) { board.setHexes(designed); }
+    }
+
+    private static int within(Collection<Coords> hexes, Coords centre, int distance) {
+        int result = 0;
+        for (Coords hex : hexes) { if (hex.distance(centre) <= distance) { result++; } }
+        return result;
+    }
+
+    /** A building of the lunar theme with no design of its own and no legacy building art chosen for it. */
+    private static boolean lunarBuilding(Hex hex) {
+        return "lunar".equals(hex.getTheme()) && hex.containsTerrain(Terrains.BUILDING)
+              && hex.terrainLevel(Terrains.BUILDING) != megamek.common.enums.BuildingType.WALL.getTypeValue()
+              && !hex.containsTerrain(Terrains.BLDG_FLUFF) && !hex.getAppearance().containsKey("building");
+    }
+
+    /** Skylights (fluff 6, variants 0 to 5) or glass roofs (fluff 90) over the hex. */
+    private static boolean glazed(Hex hex) {
+        var fluff = hex.getTerrain(Terrains.FLUFF);
+        return fluff != null && (fluff.getLevel() == 6 && fluff.getExits() <= 5 || fluff.getLevel() == 90);
     }
 
     /** The 3D board's preference among the roads a deck took from its approaches: dirt, gravel, alley, paved (ROAD levels). */

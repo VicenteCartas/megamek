@@ -305,6 +305,18 @@ final class GodotMaterial {
 
     float[] albedoColor() { return kind == Kind.SHADER ? parameterColor("albedo") : color("albedo_color", 1, 1, 1, 1); }
 
+    /**
+     * Godot's alpha blending: a StandardMaterial3D's {@code transparency} ALPHA (1) or ALPHA_DEPTH_PRE_PASS (4). Its
+     * opacity is the albedo's alpha times {@code albedo_color}'s, as the colour map packs it.
+     */
+    boolean blended() {
+        int transparency = kind == Kind.STANDARD ? integer("transparency", 0) : 0;
+        return transparency == 1 || transparency == 4;
+    }
+
+    /** Godot's BaseMaterial3D.BlendMode: MIX (0) by default, PREMULT_ALPHA (4) for glass whose reflections stay whole. */
+    int blendMode() { return kind == Kind.STANDARD ? integer("blend_mode", 0) : 0; }
+
     File normal() {
         if (kind == Kind.SHADER) { return parameterTexture("texture_normal"); }
         return flag("normal_enabled", false) ? texture("normal_texture") : null;

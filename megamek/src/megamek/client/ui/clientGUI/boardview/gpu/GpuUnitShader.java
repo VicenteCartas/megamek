@@ -164,8 +164,17 @@ final class GpuUnitShader extends DefaultShader {
               "#if defined(diffuseTextureFlag) || defined(specularTextureFlag) || defined(emissiveTextureFlag) || defined(modelSurfaceFlag)",
               "vertex");
         source = replaceOnce(source, MAIN,
-              "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\n#endif\n" + MAIN
+              "#ifdef modelSurfaceFlag\nout vec2 v_modelUV;\nuniform float u_modelBoardUV;\n#endif\n" + MAIN
                     + "\n#ifdef modelSurfaceFlag\nv_modelUV = a_texCoord0;\n#endif\n", "vertex");
+        // A material textured along the board's axes (GpuModelMaterial#boardUV) maps its colour, emission and surface
+        // maps from its board position, north up, one repeat per u_modelBoardUV units: turned and neighbouring pieces'
+        // floors join. The depth pass keeps the authored UVs (only an alpha-tested material would show it).
+        String placed = "gl_Position = u_projViewTrans * pos;";
+        source = replaceOnce(source, placed, placed + "\n#ifdef modelSurfaceFlag\nif (u_modelBoardUV > 0.0) {\n"
+              + "    v_modelUV = vec2(pos.x, -pos.y) / u_modelBoardUV;\n"
+              + "#ifdef diffuseTextureFlag\n    v_diffuseUV = u_diffuseUVTransform.xy + v_modelUV * u_diffuseUVTransform.zw;\n#endif\n"
+              + "#ifdef emissiveTextureFlag\n    v_emissiveUV = u_emissiveUVTransform.xy + v_modelUV * u_emissiveUVTransform.zw;\n#endif\n"
+              + "}\n#endif\n", "vertex");
         // The vertex colours' sRGB transfer (toLinear) alone: the light model belongs to the fragment stages, which
         // also define its environment lighting. Mesa refuses to link a vertex stage that declares it without them.
         source = replaceOnce(source, MAIN, GpuShaderSource.read("color-space.glsl") + "\n" + MAIN, "vertex");

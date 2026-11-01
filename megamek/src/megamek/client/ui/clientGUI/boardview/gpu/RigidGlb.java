@@ -102,6 +102,17 @@ final class RigidGlb {
         final Set<String> paintMasks = new HashSet<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
         final Set<String> labels = new HashSet<>();
+        /**
+         * Materials textured along the board's axes, the value units a repeat (extras {@code mmBoardUV},
+         * {@link GpuModelMaterial#boardUV}): a turned or repeated piece's floors run on across its neighbours.
+         */
+        final Map<String, Float> boardUVs = new HashMap<>();
+        /**
+         * Materials drawn alpha blended, without depth writes, by their Godot blend mode ({@link GodotMaterial#blendMode}):
+         * generated geometry's board materials whose .tres is transparent ({@link GodotMaterial#blended}). A GLB's own
+         * alpha mode decides its materials'.
+         */
+        final Map<String, Integer> blends = new HashMap<>();
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
         byte[] slots = new byte[0];
         List<ColourSlot> colourSlots = List.of();
@@ -385,6 +396,7 @@ final class RigidGlb {
         result.images.putAll(source.images);
         result.alphaTests.putAll(source.alphaTests);
         result.surfaces.putAll(source.surfaces);
+        result.boardUVs.putAll(source.boardUVs);
         result.slots = source.slots;
         result.colourSlots = source.colourSlots;
         ModelMesh mesh = source.meshes.first(), slotted = new ModelMesh();
@@ -556,6 +568,25 @@ final class RigidGlb {
     }
 
     /**
+     * Adds generated geometry's material {@code id} to {@code result} as the board material {@code name}: its albedo the
+     * base colour, sampled as a GLB's default sampler does, and its .tres the finish and every other map, as a GLB
+     * material on that albedo draws.
+     */
+    static void boardMaterial(Data result, String id, String name) {
+        var board = GpuMaterialMaps.board(name);
+        String path = board.albedo().toPath().toAbsolutePath().normalize().toString();
+        var base = new Image(path, null, path, GL20.GL_LINEAR_MIPMAP_LINEAR, GL20.GL_LINEAR, GL20.GL_REPEAT, GL20.GL_REPEAT);
+        result.images.put(base.key(), base);
+        var target = new ModelMaterial();
+        target.id = id;
+        target.diffuse = new Color(Color.WHITE);
+        texture(target, ModelTexture.USAGE_DIFFUSE, base.key());
+        result.surfaces.put(id, boardSurface(board, base, target, result));
+        if (board.blended()) { result.blends.put(id, board.blendMode()); }
+        result.materials.add(target);
+    }
+
+    /**
      * A board material's finish, adding to {@code target} the normal, occlusion and emission maps of its .tres the GLB
      * leaves out, each sampled as the base colour is. Its factors and maps replace the GLB's own metallic-roughness.
      */
@@ -619,6 +650,10 @@ final class RigidGlb {
                 if (material.getExtras() instanceof Map<?, ?> extras) {
                     if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmLabel"))) { result.labels.add(target.id); }
+                    if (extras.get("mmBoardUV") instanceof Number repeat) {
+                        require(repeat.floatValue() > 0, "mmBoardUV is a positive repeat");
+                        result.boardUVs.put(target.id, repeat.floatValue());
+                    }
                 }
                 if (material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) {
                     float cutoff = material.getAlphaCutoff();

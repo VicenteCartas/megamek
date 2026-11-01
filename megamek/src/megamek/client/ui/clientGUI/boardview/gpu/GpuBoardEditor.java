@@ -1092,10 +1092,12 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         else { thumbnail(BoardDecalArt.image(entry.asset().id()), image); }
     }
 
-    /** A design's preview: its thumbnail, else its model, else its sample. */
+    /** A design's preview: its thumbnail, else its model, else (a generated building's too) its sample. */
     private void preview(BoardEditorBlueprint.Variant variant, Image image) {
         if (!variant.thumbnail().isEmpty()) { thumbnail(variant.thumbnail(), image); }
-        else if (!variant.asset().isEmpty()) { models.add(variant.asset(), image); }
+        else if (!variant.asset().isEmpty() && !BoardMultiHexBuilding.supports(variant.asset())) {
+            models.add(variant.asset(), image);
+        }
         else { samples.add(libraryTheme, variant.owner(), variant.id(), image); }
     }
 
@@ -1638,6 +1640,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         } else if (appearance.hasChildren()) { detail.add(appearance).row(); }
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
+        if (definition.id().equals("building") && snapshot.property("building") != null) { buildingFootprint(); }
         if (definition.id().equals("road")) { trafficControl("road"); }
         if (definition.id().equals("scorch")) {
             detail.add(scorchSeverity(snapshot.appearance(), chosen -> send(Action.VARIANT, "scorch", chosen))).growX().row();
@@ -1732,6 +1735,26 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             UiButton button = button(UiKit.text(key), () -> send(Action.EDGES, value));
             button.setName("editor-pavement-edges-" + value);
             button.pressed(edges == current);
+            ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
+            row.add(button);
+        }
+        detail.add(row).growX().row();
+    }
+
+    /**
+     * The building's Footprint ({@link megamek.common.board.HexAppearance.Footprint}): one row of Angled and Square; a
+     * click sets the whole connected building.
+     */
+    private void buildingFootprint() {
+        heading(UiKit.text("BoardEditor.footprint"));
+        var current = megamek.common.board.HexAppearance.footprint(snapshot.appearance());
+        Table row = new Table(); row.defaults().growX().uniformX().minWidth(0).pad(0, 2, 0, 2);
+        for (var footprint : megamek.common.board.HexAppearance.Footprint.values()) {
+            String value = footprint.name().toLowerCase(Locale.ROOT);
+            String key = "BoardEditor.footprint" + footprint.name().charAt(0) + value.substring(1);
+            UiButton button = button(UiKit.text(key), () -> send(Action.FOOTPRINT, value));
+            button.setName("editor-building-footprint-" + value);
+            button.pressed(footprint == current);
             ui.tip(button).getActor().setText(UiKit.text(key + ".tooltip"));
             row.add(button);
         }

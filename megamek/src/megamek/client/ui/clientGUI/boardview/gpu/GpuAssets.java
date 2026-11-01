@@ -72,6 +72,9 @@ final class GpuAssets implements Disposable {
     private final Map<Interior, Model> interiors = new HashMap<>();
     private final Map<File, GpuBuilding> buildings = new HashMap<>();
     private final Map<BoardIndustrial.Layout, Model> industrial = new HashMap<>();
+    /** Each share building share's levels and glass (BoardMultiHexBuilding), retired with the other generated models. */
+    private record MultiHex(List<Model> levels, Model glass) { }
+    private final Map<BoardMultiHexBuilding.Layout, MultiHex> multiHexes = new HashMap<>();
     private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
@@ -1371,6 +1374,11 @@ final class GpuAssets implements Disposable {
         for (Live live : users.values()) { liveBuildings.addAll(live.buildings()); liveModels.addAll(live.models()); }
         this.buildings.values().forEach(building -> building.retain(liveBuildings));
         retain(this.industrial, liveModels);
+        multiHexes.values().removeIf(share -> {
+            if (share.levels().stream().anyMatch(liveModels::contains) || liveModels.contains(share.glass())) { return false; }
+            dispose(share);
+            return true;
+        });
         retain(this.routes, liveModels);
     }
 
@@ -1426,6 +1434,7 @@ final class GpuAssets implements Disposable {
 
     Model lodModel(String name, int level) {
         if (BoardWall.supports(name)) { return wallLevels(name, 1).get(level); }
+        if (BoardMultiHexBuilding.supports(name)) { return multiHexLevels(BoardMultiHexBuilding.layout(name, 1)).get(level); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
         try {
             return modelLods.computeIfAbsent(name, shape -> {
@@ -1448,6 +1457,47 @@ final class GpuAssets implements Disposable {
                 return List.copyOf(levels);
             }).get(level);
         } catch (RuntimeException failure) { return missing(name, reason(failure)); }
+    }
+
+    /** A share building's share of one hex (BoardMultiHexBuilding), cached by its layout as a wall's mesh is. */
+    List<Model> multiHexLevels(BoardMultiHexBuilding.Layout layout) {
+        var share = share(layout);
+        return share != null ? share.levels()
+              : java.util.Collections.nCopies(RigidGlb.LEVELS, missing(layout.design().asset, unloadable.get(layout.design().asset)));
+    }
+
+    /** A share building share's glass ({@link BoardMultiHexBuilding#glass}), with its levels; null without any. */
+    Model multiHexGlass(BoardMultiHexBuilding.Layout layout) {
+        var share = share(layout);
+        return share == null ? null : share.glass();
+    }
+
+    /** The share's models, made on first use; null (reported once) when its design cannot be built. */
+    private MultiHex share(BoardMultiHexBuilding.Layout layout) {
+        String asset = layout.design().asset;
+        if (unloadable.containsKey(asset)) { return null; }
+        var share = multiHexes.get(layout);
+        if (share != null) { return share; }
+        List<Model> levels = new ArrayList<>();
+        Model glass = null;
+        try {
+            for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) { levels.add(createModel(BoardMultiHexBuilding.model(layout, lod))); }
+            var panes = BoardMultiHexBuilding.glass(layout);
+            glass = panes == null ? null : createModel(panes);
+        } catch (RuntimeException failure) {
+            levels.forEach(Model::dispose);
+            missing(asset, reason(failure));
+            return null;
+        }
+        while (levels.size() < RigidGlb.LEVELS) { levels.add(levels.getLast()); }
+        share = new MultiHex(List.copyOf(levels), glass);
+        multiHexes.put(layout, share);
+        return share;
+    }
+
+    private static void dispose(MultiHex share) {
+        share.levels().stream().distinct().forEach(Model::dispose);
+        if (share.glass() != null) { share.glass().dispose(); }
     }
 
     /** The captured wall layout determines the shared mesh; this asset owner's ordinary cache disposes it. */
@@ -1841,6 +1891,8 @@ final class GpuAssets implements Disposable {
         routes.clear();
         industrial.values().forEach(Model::dispose);
         industrial.clear();
+        multiHexes.values().forEach(GpuAssets::dispose);
+        multiHexes.clear();
         buildings.values().forEach(GpuBuilding::dispose);
         buildings.clear();
         interiors.values().forEach(Model::dispose);
