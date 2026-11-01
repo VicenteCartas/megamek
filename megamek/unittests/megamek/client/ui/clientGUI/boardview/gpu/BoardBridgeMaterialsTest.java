@@ -69,6 +69,12 @@ class BoardBridgeMaterialsTest {
                           .filter(p -> !p.shape().isEmpty() && p.fade() != null && p.fade().join() != null)
                           .findFirst().orElseThrow();
                     assertEquals(a.texture(), b.texture(), "Both halves must use the same material over the same base");
+                    if (pair.getFirst() == BoardRoad.Kind.GRAVEL) {
+                        // The deck's paint lies on the bridge alone: the dirt road's coat cannot run on under it.
+                        assertTrue(GpuRoads.deckPatches(tile, deck, bridgeRoad).stream().anyMatch(p -> !p.shape().isEmpty()
+                              && p.texture().equals("roads/dirt") && GpuRoads.attribute(p).value == -6),
+                              "The gravel deck lays its own dirt base under its cover");
+                    }
                     var gate = BoardGeometry.center(next.coords(), 0).sub(BoardGeometry.center(at, 0)).scl(.5f);
                     var across = new Vector3(-gate.y, gate.x, 0).nor();
                     for (float offset : new float[] { -6, 0, 6 }) {
@@ -104,8 +110,9 @@ class BoardBridgeMaterialsTest {
         scene = replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.DIRT, 1));
         var deck = BoardBridge.deck(scene, scene.tile(at));
         var patches = GpuRoads.deckPatches(scene.tile(at), deck, deck.road(at));
-        assertTrue(patches.stream().anyMatch(patch -> !patch.shape().isEmpty() && patch.fade() != null
-              && patch.fade().outer() > 0 && patch.fade().inner() < 0), "A rock arch has ground-like loose shoulders");
+        // The ground's dirt track (-5, not a built deck's closed -6) frays into loose shoulders in the shader.
+        assertTrue(patches.stream().anyMatch(patch -> !patch.shape().isEmpty() && GpuRoads.attribute(patch).value == -5),
+              "A rock arch has ground-like loose shoulders");
         assertTrue(patches.stream().anyMatch(patch -> !patch.shape().isEmpty() && patch.fade() != null
               && patch.fade().end() > 0), "A dirt road ending on the arch must wear out rather than stop square");
     }

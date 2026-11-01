@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.awt.geom.Area;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -161,7 +163,7 @@ class BoardRoadTest {
             assertEquals(0, GpuRoads.coverage(road, tail, outward.x, outward.y));
             assertTrue(patches.stream().noneMatch(p -> !p.blended() && p.shape().contains(nearEnd.x, nearEnd.y)),
                   "An opaque road underneath the fade would hide the original ground");
-            if (kind == BoardRoad.Kind.DIRT) {
+            if (kind == BoardRoad.Kind.GRAVEL) {
                 var tracks = road.tracks(1);
                 Vector3 worn = new Vector3(outward).scl(.68f);
                 for (int lane : new int[] { -1, 1 }) {
@@ -176,7 +178,7 @@ class BoardRoadTest {
 
     @Test
     void unsealedMarginsExposeGroundWithoutAnOpaqueOrContrastingShoulderUnderThem() {
-        for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
+        for (var kind : List.of(BoardRoad.Kind.GRAVEL)) {
             var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 9, 0, BoardScene.Surface.GRASS));
             var tile = scene.tile(CENTER);
             var road = BoardRoad.of(scene, tile);
@@ -188,9 +190,113 @@ class BoardRoadTest {
                 assertTrue(margin.getFirst().blended());
                 float coverage = GpuRoads.coverage(road, margin.getFirst(), x, 0);
                 assertTrue(coverage > .2f && coverage < .8f, "The verge reaches inside the nominal boundary");
-                assertEquals(kind == BoardRoad.Kind.DIRT ? "roads/dirt" : "roads/gravel", margin.getFirst().texture(),
-                      "No pale gravel outline round a dirt road");
                 assertEquals(0, GpuRoads.coverage(road, margin.getFirst(), side * (kind.halfWidth + BoardRoad.SHOULDER), 0));
+            }
+        }
+    }
+
+    @Test
+    void aDirtRoadIsOneTrackCoatWhoseMaskCarriesItsProfileEverywhere() {
+        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.DIRT, 9, 0, BoardScene.Surface.GRASS));
+        var tile = scene.tile(CENTER);
+        var road = BoardRoad.of(scene, tile);
+        var patches = GpuRoads.patches(tile, road);
+        assertEquals(1, patches.size(), "The shader builds the wheel tracks, crown and shoulder of one coat");
+        var coat = patches.getFirst();
+        assertEquals(-5, GpuRoads.attribute(coat).value);
+        float edge = BoardRoad.Kind.DIRT.halfWidth + BoardRoad.SHOULDER;
+        assertTrue(coat.shape().contains(edge - .2f, 0) && !coat.shape().contains(edge + .2f, 0));
+        var mask = GpuRoads.mask(road, coat);
+        int heading = maskTexel(mask, 0, 0) & 0xFFFF0000;
+        // Linear filtering reads a texel past the coat's edge too (the atlas has no mipmaps).
+        for (float x = -edge - .2f; x <= edge + .2f; x += .1f) {
+            int texel = maskTexel(mask, x, 0);
+            assertEquals(Math.min(1, Math.abs(x) / edge), (texel >>> 8 & 255) / 255f, .03f,
+                  "B runs across the whole road and the texel past it: filtering never blends a tint into it");
+            assertEquals(heading, texel & 0xFFFF0000, "The heading holds across the road and the texel past its edge");
+        }
+        assertEquals(1, maskAlpha(mask, BoardRoad.WHEEL_OFFSET, 0), .01f, "The coat itself is solid: the shader opens it");
+    }
+
+    @Test
+    void neighbouringDirtTracksMeetAtTheirBorderWithOneProfile() {
+        // A straight road into a straight neighbour, a broad bend and a tight one.
+        for (int turn = 0; turn < 3; turn++) {
+            for (int d = 0; d < 6; d++) {
+                int direction = d, reverse = (d + 3) % 6, onward = (d + turn) % 6;
+                Coords next = CENTER.translated(d);
+                var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardRoad.Kind.DIRT,
+                      c.equals(CENTER) ? 1 << direction | 1 << reverse : c.equals(next) ? 1 << onward | 1 << reverse : 0,
+                      0, BoardScene.Surface.GRASS));
+                var here = BoardRoad.of(scene, scene.tile(CENTER));
+                var there = BoardRoad.of(scene, scene.tile(next));
+                var mine = track(GpuRoads.patches(scene.tile(CENTER), here));
+                var theirs = track(GpuRoads.patches(scene.tile(next), there));
+                float dx = (BoardGeometry.centerX(CENTER) - BoardGeometry.centerX(next)) / BoardGeometry.hexScale();
+                float dy = (BoardGeometry.centerY(CENTER) - BoardGeometry.centerY(next)) / BoardGeometry.hexScale();
+                Vector3 gate = gate(CENTER, d), along = new Vector3(gate).nor(), across = new Vector3(-along.y, along.x, 0);
+                for (float offset = -16; offset <= 16; offset += 2) {
+                    Vector3 inside = new Vector3(gate).mulAdd(along, -.25f).mulAdd(across, offset);
+                    Vector3 beyond = new Vector3(gate).mulAdd(along, .25f).mulAdd(across, offset);
+                    assertEquals(there.track(beyond.x + dx, beyond.y + dy).across(), here.track(inside.x, inside.y).across(),
+                          .02f, "Both coats measure one track, crown and verge where they meet: turn " + turn);
+                    if (Math.abs(offset) < 14) {
+                        assertTrue(mine.contains(inside.x, inside.y) && theirs.contains(beyond.x + dx, beyond.y + dy),
+                              "Each coat reaches the border");
+                    }
+                    for (float past = .5f; past <= 18; past += 2.5f) {
+                        Vector3 p = new Vector3(gate).mulAdd(along, past).mulAdd(across, offset);
+                        Vector3 q = new Vector3(gate).mulAdd(along, -past).mulAdd(across, offset);
+                        assertFalse(mine.contains(p.x, p.y) || theirs.contains(q.x + dx, q.y + dy),
+                              "Neither coat draws over the other's hex, with its own measure: turn " + turn);
+                    }
+                }
+            }
+        }
+    }
+
+    private static Area track(List<GpuRoads.Patch> patches) {
+        return patches.stream().filter(p -> GpuRoads.attribute(p).value == -5).findFirst().orElseThrow().shape();
+    }
+
+    @Test
+    void aLooseRoadStopsAtThePavedRoadItMeetsAndFillsTheGoreBetweenItsArms() {
+        Coords north = CENTER.translated(0), northEast = CENTER.translated(1);
+        for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
+            // Hex 1303 of Nebraska Farmhouse: two arms into one paved road, which runs on past them.
+            var scene = BoardSurfaceBlendTest.scene(c -> c.equals(CENTER) ? tile(c, kind, 1 | 2 | 8, 0, BoardScene.Surface.GRASS)
+                  : c.equals(north) ? tile(c, BoardRoad.Kind.PAVED, 8 | 4 | 32, 0, BoardScene.Surface.GRASS)
+                  : c.equals(northEast) ? tile(c, BoardRoad.Kind.PAVED, 16 | 32 | 4, 0, BoardScene.Surface.GRASS)
+                  : tile(c, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
+            var loose = BoardRoad.of(scene, scene.tile(CENTER));
+            for (Coords at : List.of(north, northEast)) {
+                var paved = BoardRoad.of(scene, scene.tile(at));
+                var pavedPatches = GpuRoads.patches(scene.tile(at), paved);
+                assertTrue(pavedPatches.stream().noneMatch(p -> p.fade() != null && p.fade().join() != null),
+                      "The paved road stays whole, under nothing of the loose one's");
+                // Its arm into the loose hex ends square on their border: a construction edge, not a rounded tongue.
+                int back = (at.equals(north) ? 0 : 1) + 3;
+                Vector3 border = gate(at, back % 6), across = new Vector3(-border.y, border.x, 0).nor();
+                for (float offset : new float[] { -10, 0, 10 }) {
+                    Vector3 before = new Vector3(border).scl(.97f).mulAdd(across, offset);
+                    Vector3 past = new Vector3(border).scl(1.03f).mulAdd(across, offset);
+                    assertTrue(pavedPatches.stream().anyMatch(p -> p.shape().contains(before.x, before.y)));
+                    assertTrue(pavedPatches.stream().noneMatch(p -> p.shape().contains(past.x, past.y)));
+                }
+            }
+            var patches = GpuRoads.patches(scene.tile(CENTER), loose);
+            Area way = loose.pavedCarriageway(0), deep = loose.pavedCarriageway(-1.5f * BoardRelief.metres(1.2f) / BoardGeometry.hexScale());
+            Area paint = new Area();
+            for (var patch : patches) {
+                Area shape = new Area(patch.shape());
+                shape.intersect(deep);
+                assertTrue(shape.isEmpty(), "Only a short spill reaches onto the paved road: " + patch.texture());
+                paint.add(patch.shape());
+            }
+            Vector3 corner = new Vector3(gate(CENTER, 0)).add(gate(CENTER, 1)).scl(.5f);
+            for (float t = .55f; t <= 1.3f; t += .05f) {
+                Vector3 p = new Vector3(corner).scl(t);
+                assertTrue(paint.contains(p.x, p.y) || way.contains(p.x, p.y), "No ground left in the gore at " + t);
             }
         }
     }
@@ -219,6 +325,8 @@ class BoardRoadTest {
                   c.equals(CENTER) ? BoardRoad.Kind.DIRT : BoardRoad.Kind.GRAVEL,
                   c.equals(CENTER) ? 1 << direction : 1 << reverse, 0, BoardScene.Surface.GRASS));
             Vector3 gate = gate(CENTER, d), across = new Vector3(-gate.y, gate.x, 0).nor();
+            var gravel = BoardRoad.of(scene, scene.tile(next));
+            var gravelPatches = GpuRoads.patches(scene.tile(next), gravel);
             for (Coords at : List.of(CENTER, next)) {
                 var tile = scene.tile(at);
                 var road = BoardRoad.of(scene, tile);
@@ -226,15 +334,22 @@ class BoardRoadTest {
                 for (float offset : new float[] { -15.5f, -14, 14, 15.5f }) {
                     Vector3 p = new Vector3(gate).scl(at.equals(CENTER) ? 1 : -1).mulAdd(across, offset);
                     var margin = patches.stream().filter(t -> t.shape().contains(p.x, p.y)).toList();
-                    assertEquals(2, margin.size(), "Only the two fading materials meet in the loose margin");
+                    // The dirt road's track runs on under the gravel's side (its own patches paint it there too).
+                    assertEquals(at.equals(CENTER) ? 2 : 1, margin.size(),
+                          "Only the dirt track and the fading gravel meet in the loose margin");
                     Vector3 beforeJoin = new Vector3(across).scl(offset);
-                    var usualEdge = patches.stream().filter(t -> t.shape().contains(beforeJoin.x, beforeJoin.y))
+                    var usualEdge = gravelPatches.stream().filter(t -> t.shape().contains(beforeJoin.x, beforeJoin.y))
                           .findFirst().orElseThrow();
                     for (var patch : margin) {
                         assertTrue(patch.blended(), "An opaque strip would harden the join's edge");
-                        assertEquals(GpuRoads.coverage(road, usualEdge, beforeJoin.x, beforeJoin.y),
+                        if (patch.texture().equals("roads/dirt")) {
+                            // Its margin frays in the shader, as all along the dirt road (aDirtRoadIsOneTrackCoat...).
+                            assertEquals(-5, GpuRoads.attribute(patch).value, "Dirt under gravel is the dirt road's track");
+                            continue;
+                        }
+                        assertEquals(GpuRoads.coverage(gravel, usualEdge, beforeJoin.x, beforeJoin.y),
                               GpuRoads.coverage(road, patch, p.x, p.y), .002f,
-                              "Material changes must preserve the broad edge fade");
+                              "The gravel keeps its broad edge fade through the join");
                     }
                 }
             }
@@ -291,13 +406,16 @@ class BoardRoadTest {
                     assertEquals(.5f, a.coverage(p.x, p.y), .001f);
                     assertEquals(.5f, b.coverage(q.x, q.y), .001f);
                 }
-                var firstCover = GpuRoads.patches(scene.tile(CENTER), first).stream()
-                      .filter(p -> p.fade() != null && p.fade().join() != null).findFirst().orElseThrow();
-                var secondCover = GpuRoads.patches(scene.tile(next), second).stream()
-                      .filter(p -> p.fade() != null && p.fade().join() != null).findFirst().orElseThrow();
-                assertEquals(firstCover.texture(), secondCover.texture(), "Use the same deposit on both sides of the edge");
-                assertEquals(GpuRoads.materialCoverage(firstCover, gate.x, gate.y),
-                      GpuRoads.materialCoverage(secondCover, -gate.x, -gate.y), .001f);
+                // A loose road meeting a paved one stops at its edge instead (aLooseRoadStopsAtThePavedRoad...).
+                if (pair.getLast() != BoardRoad.Kind.PAVED && pair.getFirst() != BoardRoad.Kind.ALLEY) {
+                    var firstCover = GpuRoads.patches(scene.tile(CENTER), first).stream()
+                          .filter(p -> p.fade() != null && p.fade().join() != null).findFirst().orElseThrow();
+                    var secondCover = GpuRoads.patches(scene.tile(next), second).stream()
+                          .filter(p -> p.fade() != null && p.fade().join() != null).findFirst().orElseThrow();
+                    assertEquals(firstCover.texture(), secondCover.texture(), "Use the same deposit on both sides of the edge");
+                    assertEquals(GpuRoads.materialCoverage(firstCover, gate.x, gate.y),
+                          GpuRoads.materialCoverage(secondCover, -gate.x, -gate.y), .001f);
+                }
                 Vector3 along = new Vector3(gate).nor();
                 for (float progress = -20; progress < 35; progress += 2) {
                     Vector3 edgePoint = new Vector3(along).scl(progress).mulAdd(across, BoardRoad.Kind.PAVED.halfWidth);
@@ -387,10 +505,15 @@ class BoardRoadTest {
     }
 
     static float maskAlpha(GpuRoads.MaskData mask, float x, float y) {
+        return (maskTexel(mask, x, y) & 255) / 255f;
+    }
+
+    /** The mask's RGBA texel at a point, 0 off the mask. */
+    static int maskTexel(GpuRoads.MaskData mask, float x, float y) {
         int px = (int) Math.floor((x - mask.x()) / mask.width() * mask.pixels().width());
         int py = (int) Math.floor((y - mask.y()) / mask.height() * mask.pixels().height());
         if (px < 0 || py < 0 || px >= mask.pixels().width() || py >= mask.pixels().height()) { return 0; }
-        return (mask.pixels().rgba(py * mask.pixels().width() + px) & 255) / 255f;
+        return mask.pixels().rgba(py * mask.pixels().width() + px);
     }
 
     @Test
@@ -460,12 +583,15 @@ class BoardRoadTest {
         }
         assertTrue(patches.stream().map(GpuRoads::attribute).distinct().count() > 2, "A paved road has several distinct coats");
         assertEquals(1, batches.stream().distinct().count(), "One draw holds every coat on a mask page");
-        for (var patch : patches) {
+        var deckTrack = new GpuRoads.Patch(new Area(), "roads/dirt", Color.WHITE, 1, GpuRoads.SURFACE_LIFT,
+              GpuRoads.Fade.track(0, true));
+        assertEquals(-6, GpuRoads.attribute(deckTrack).value);
+        for (var patch : Stream.concat(patches.stream(), Stream.of(deckTrack)).toList()) {
             // The shader reads back exact bytes; the packed colour only loses alpha's lowest bit.
             var color = new Color();
             Color.abgr8888ToColor(color, GpuRoads.coat(4, patch, .15f));
             assertEquals(4, Math.round(color.r * 255));
-            assertEquals(GpuRoads.attribute(patch).value + 4, Math.round(color.g * 255));
+            assertEquals(GpuRoads.attribute(patch).value + 8, Math.round(color.g * 255));
             assertEquals(38, Math.round(color.b * 255));
         }
     }

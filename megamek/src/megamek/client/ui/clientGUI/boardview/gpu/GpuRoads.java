@@ -160,11 +160,27 @@ final class GpuRoads {
     static final float FEATHER = .45f;
     private static final float LOOSE_FEATHER = 3;
 
-    record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing) {
-        Fade(float outer, float inner, float end) { this(outer, inner, end, false, null, 0, false); }
+    /**
+     * {@code deck}: on a built deck, whose dirt track (#track) stays closed over the deck's own top; {@code spill}: a
+     * loose road's grit and dust on the paved road it meets.
+     */
+    record Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback, boolean landing,
+          boolean deck, boolean spill) {
+        Fade(float outer, float inner, float end) { this(outer, inner, end, false, null, 0, false, false, false); }
         Fade(float outer, float inner, float end, boolean wheels, BoardRoad.Join join) {
-            this(outer, inner, end, wheels, join, 0, false);
+            this(outer, inner, end, wheels, join, 0, false, false, false);
         }
+
+        /** A grounded apron's fade (#bare). */
+        static Fade landing(float outer, float inner, float end, boolean wheels, BoardRoad.Join join, float setback) {
+            return new Fade(outer, inner, end, wheels, join, setback, true, false, false);
+        }
+
+        /** A dirt road's one coat, worn out over {@code end} at a road's end. */
+        static Fade track(float end, boolean deck) { return new Fade(0, 0, end, true, null, 0, false, deck, false); }
+
+        /** A loose road's spill onto the paved road it meets. */
+        static Fade spilled() { return new Fade(0, 0, 0, false, null, 0, false, false, true); }
     }
     /** {@code repeat} is a multiple of its material's own repeat (GpuAssets.roadCoverage, GpuAssets.sculptCoverage). */
     record Patch(Area shape, String texture, Color tint, float repeat, float lift, Fade fade) {
@@ -184,8 +200,11 @@ final class GpuRoads {
     private static float finish(Patch patch) {
         boolean transition = patch.fade() != null && patch.fade().join() != null;
         // Positive: material joins (1, 2) or paint (3). Negative: loose (-1), wheels (-2: tyre tracks, or a paved
-        // carriageway's wear), landing asphalt (-3) or aggregate/soil (-4).
-        float finish = patch.fade() != null && patch.fade().wheels() ? -2
+        // carriageway's wear), landing asphalt (-3) or aggregate/soil (-4), a dirt road's track (-5; -6 on a built deck),
+        // a loose road's spill onto a paved one (-7).
+        float finish = track(patch) ? patch.fade().deck() ? -6 : -5
+              : spill(patch) ? -7
+              : patch.fade() != null && patch.fade().wheels() ? -2
               : patch.fade() != null && patch.fade().landing() ? asphalt(patch) ? -3 : -4
               : patch.texture().equals("roads/dirt") || patch.texture().equals("roads/gravel") ? -1
               : paint(patch) ? 3 : 0;
@@ -193,6 +212,20 @@ final class GpuRoads {
     }
 
     private static boolean asphalt(Patch patch) { return patch.texture().equals("roads/asphalt"); }
+
+    /**
+     * A dirt road's one coat (#patches): the shader builds its wheel tracks, crown and shoulder from the heading and the
+     * place across the road its mask carries (#color).
+     */
+    private static boolean track(Patch patch) {
+        return patch.fade() != null && patch.fade().wheels() && patch.texture().equals("roads/dirt");
+    }
+
+    /** A loose road's grit and dust on the paved road it meets (#patches). */
+    private static boolean spill(Patch patch) { return patch.fade() != null && patch.fade().spill(); }
+
+    /** Spills lie over the asphalt and its paint, under the transitions between loose materials. */
+    private static final float SPILL_LIFT = .07f;
 
     /** Road markings: concrete-ground tinted with paint, at the paint's lift. */
     private static boolean paint(Patch patch) {
@@ -204,10 +237,10 @@ final class GpuRoads {
 
     /**
      * A merged coat's vertex colour: its maps (a {@link #MATERIALS} index, or 3 plus a sculpt material's index), its
-     * finish offset by 4, and its wet response in 255ths. Unmerged coats keep white.
+     * finish offset by 8, and its wet response in 255ths. Unmerged coats keep white.
      */
     static float coat(int maps, Patch patch, float response) {
-        return Color.toFloatBits(maps, Math.round(finish(patch)) + 4, Math.round(response * 255), 255);
+        return Color.toFloatBits(maps, Math.round(finish(patch)) + 8, Math.round(response * 255), 255);
     }
 
     /** Region placement is vertex data; only the atlas page and actual surface state split draw calls. */
@@ -249,7 +282,7 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false,
+        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, false,
               HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits()), road.crossing(tile, false));
     }
 
@@ -269,7 +302,7 @@ final class GpuRoads {
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road) {
         // A rock arch carries ordinary ground paint, including loose shoulders and worn ends. Only a built deck
         // clips them to its carriageway; the arch's own top facets already keep the paint off its sides.
-        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural(),
+        return patches(tile.coords(), tile.surface(), deck.kind(), deck.roadExits(), road, !deck.natural(), true,
               HexAppearance.trafficControl(tile.appearance(), "bridgeRoad", deck.roadExits()), road.crossing(tile, true));
     }
 
@@ -280,6 +313,9 @@ final class GpuRoads {
     private static float setback(boolean paved) { return paved ? BoardRelief.metres(2.5f) / BoardGeometry.hexScale() : 0; }
 
     private static boolean paved(BoardRoad.Kind kind) { return kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY; }
+
+    /** Tile pixels a loose road's spill reaches onto the paved road it meets (#patches). */
+    static float spill() { return BoardRelief.metres(1.2f) / BoardGeometry.hexScale(); }
 
     /** A bare bank gets a grounded material apron after the solid deck and its tapered rails have ended. */
     static List<Patch> deckPatches(BoardScene.Tile tile, BoardBridge.Deck deck, BoardRoad road, BoardBridgeFooting footing) {
@@ -399,12 +435,10 @@ final class GpuRoads {
             float shoulder = BoardRoad.SHOULDER * 3;
             Area earth = road.footprint(shoulder + 1);
             earth.intersect(landing);
-            result.add(new Patch(earth, "roads/dirt", Color.WHITE, 1, .02f,
-                  new Fade(shoulder + 1, -1, apron, false, null, 0, true)));
+            result.add(new Patch(earth, "roads/dirt", Color.WHITE, 1, .02f, Fade.landing(shoulder + 1, -1, apron, false, null, 0)));
             Area gravel = road.footprint(shoulder);
             gravel.intersect(landing);
-            result.add(new Patch(gravel, "roads/gravel", Color.WHITE, 1, .025f,
-                  new Fade(shoulder, -1, apron, false, null, 0, true)));
+            result.add(new Patch(gravel, "roads/gravel", Color.WHITE, 1, .025f, Fade.landing(shoulder, -1, apron, false, null, 0)));
         }
         for (var patch : patches) {
             Area head = new Area(patch.shape());
@@ -420,16 +454,20 @@ final class GpuRoads {
             result.add(new Patch(head, patch.texture(), patch.tint(), patch.repeat(), patch.lift(), patch.fade()));
             if (tail.isEmpty()) { continue; }
             var fade = patch.fade();
+            // The apron lies on the bank's ground: a dirt track opens there as on any ground.
             result.add(new Patch(tail, patch.texture(), patch.tint(), patch.repeat(), patch.lift(),
-                  new Fade(0, paved ? -FEATHER : -LOOSE_FEATHER, apron - setback,
-                        fade != null && fade.wheels() && !asphalt(patch), fade == null ? null : fade.join(), setback,
-                        true)));
+                  Fade.landing(0, paved ? -FEATHER : -LOOSE_FEATHER, apron - setback,
+                        fade != null && fade.wheels() && !asphalt(patch), fade == null ? null : fade.join(), setback)));
         }
         return result;
     }
 
-    private static List<Patch> patches(Coords coords, BoardScene.Surface family, BoardRoad.Kind kind,
-          int exits, BoardRoad road, boolean deck, HexAppearance.TrafficControl control, BoardRoad.Crossing crossing) {
+    /**
+     * {@code deck}: clipped to a built deck's carriageway; {@code bridge}: on any bridge's deck, whose paint lies on the
+     * bridge alone, apart from its neighbours' ground.
+     */
+    private static List<Patch> patches(Coords coords, BoardScene.Surface family, BoardRoad.Kind kind, int exits,
+          BoardRoad road, boolean deck, boolean bridge, HexAppearance.TrafficControl control, BoardRoad.Crossing crossing) {
         boolean sand = family == BoardScene.Surface.SAND;
         boolean snow = family == BoardScene.Surface.SNOW;
         boolean paved = kind == BoardRoad.Kind.PAVED || kind == BoardRoad.Kind.ALLEY;
@@ -440,9 +478,15 @@ final class GpuRoads {
         float endFade = deck || paved || Integer.bitCount(exits) > 1 ? 0 : kind == BoardRoad.Kind.DIRT ? 17 : 7;
         List<Patch> patches = new ArrayList<>();
         float feather = deck ? 0 : paved ? FEATHER : LOOSE_FEATHER;
-        Area core = road.footprint(-feather);
+        float outer = deck || paved ? 0 : BoardRoad.SHOULDER;
+        // A dirt road is one farm track in one coat: the shader builds its wheel tracks, crown, ragged shoulder and worn
+        // end from what its mask carries (#color).
+        boolean track = kind == BoardRoad.Kind.DIRT;
+        Area core = road.footprint(track ? outer : -feather);
+        // A neighbouring dirt road's own coat draws the track over its hex.
+        if (track) { core.subtract(road.trackedHexes()); }
         Area tail = new Area(core);
-        tail.intersect(road.endZone(endFade));
+        tail.intersect(road.endZone(track ? 0 : endFade));
         core.subtract(tail);
         if (paved && !deck) {
             Area verge = road.footprint(BoardRoad.SHOULDER);
@@ -452,17 +496,22 @@ final class GpuRoads {
                   1, .025f, new Fade(BoardRoad.SHOULDER, -.2f, endFade)));
         }
         // A paved core carries its traffic: the mask gives the shader the heading and lane its wear follows.
-        patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT, paved ? new Fade(0, 0, 0, true, null) : null));
+        patches.add(new Patch(core, texture, tint, repeat, SURFACE_LIFT,
+              track ? Fade.track(endFade, deck) : paved ? new Fade(0, 0, 0, true, null) : null));
         if (!tail.isEmpty()) {
             patches.add(new Patch(tail, texture, tint, repeat, SURFACE_LIFT, new Fade(0, 0, endFade)));
         }
-        float outer = deck || paved ? 0 : BoardRoad.SHOULDER;
-        Area edge = road.footprint(outer);
-        edge.subtract(road.footprint(-feather));
-        patches.add(new Patch(edge, texture, tint, repeat, .045f, new Fade(outer, -feather, endFade)));
+        Area edge = new Area();
+        if (!track) {
+            edge = road.footprint(outer);
+            edge.subtract(road.footprint(-feather));
+            patches.add(new Patch(edge, texture, tint, repeat, .045f, new Fade(outer, -feather, endFade)));
+        }
         for (var join : road.joins()) {
             String next = texture(join.kind());
             if (texture.equals(next)) { continue; }
+            // Where a loose road meets a paved one, the paved road stays whole: the loose one stops at its edge (below).
+            if (paved != paved(join.kind()) && road.meets(join)) { continue; }
             boolean looseJoin = !paved && (join.kind() == BoardRoad.Kind.DIRT || join.kind() == BoardRoad.Kind.GRAVEL);
             float joinOuter = !deck && looseJoin ? BoardRoad.SHOULDER : 0;
             float joinFeather = deck ? 0 : looseJoin ? LOOSE_FEATHER : FEATHER;
@@ -479,8 +528,17 @@ final class GpuRoads {
             baseCore.intersect(road.footprint(-joinFeather));
             Area baseEdge = new Area(change);
             baseEdge.subtract(baseCore);
-            patches.add(new Patch(baseCore, base, tint, repeat, SURFACE_LIFT, null));
-            patches.add(new Patch(baseEdge, base, tint, repeat, .045f, new Fade(joinOuter, -joinFeather, 0)));
+            if (!base.equals(texture(BoardRoad.Kind.DIRT))) {
+                patches.add(new Patch(baseCore, base, tint, repeat, SURFACE_LIFT, null));
+                patches.add(new Patch(baseEdge, base, tint, repeat, .045f, new Fade(joinOuter, -joinFeather, 0)));
+            } else if (track || bridge || road.apart(join)) {
+                // Dirt under gravel is the dirt road's own track. On one ground it runs on past the border under the
+                // gravel's solid cover, never out from under it, so the gravel's side needs no base of its own. Where
+                // a bridge's deck keeps their paint apart, each side lays its own.
+                Area under = new Area(change);
+                if (!bridge && !road.apart(join)) { under.intersect(join.area(BoardRoad.JOIN_REACH / 2)); }
+                patches.add(new Patch(under, base, tint, repeat, SURFACE_LIFT, Fade.track(0, deck)));
+            }
             patches.add(new Patch(baseCore, cover, tint, repeat, .075f, new Fade(0, 0, 0, false, join)));
             patches.add(new Patch(baseEdge, cover, tint, repeat, .075f, new Fade(joinOuter, -joinFeather, 0, false, join)));
         }
@@ -508,7 +566,7 @@ final class GpuRoads {
             if (!median.isEmpty()) {
                 patches.add(new Patch(median, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));
             }
-        } else if (!paved) {
+        } else if (kind == BoardRoad.Kind.GRAVEL) {
             Area tracks = road.tracks(exits);
             Area worn = new Area(tracks);
             worn.intersect(road.endZone(6));
@@ -518,6 +576,15 @@ final class GpuRoads {
             if (!worn.isEmpty()) {
                 patches.add(new Patch(worn, texture, wornSoil, repeat, .065f, new Fade(0, 0, 6, true, null)));
             }
+        }
+        Area meeting = road.pavedCarriageway(0);
+        if (!meeting.isEmpty()) {
+            for (var patch : patches) { patch.shape().subtract(meeting); }
+            // A short, broken spill of grit and dust onto the paved road, most where wheels carry it (#coverage, #color).
+            Area spill = road.footprint(outer);
+            spill.intersect(meeting);
+            spill.subtract(road.pavedCarriageway(-spill()));
+            patches.add(new Patch(spill, texture, tint, repeat, SPILL_LIFT, Fade.spilled()));
         }
         Area concrete = road.concreteClearance();
         if (!concrete.isEmpty()) {
@@ -740,13 +807,22 @@ final class GpuRoads {
         graphics.dispose();
         // This newly allocated ARGB image owns a contiguous raster. Paint it in place; Pixels takes the final copy.
         int[] pixels = ((DataBufferInt) image.getRaster().getDataBuffer()).getData();
+        // A dirt track's and a spill's masks are data, which linear filtering blends with the texels around the covered
+        // ones: those carry it too. The atlas has no mipmaps, so no texel farther out is ever read.
+        int[] covered = track(patch) || spill(patch) ? pixels.clone() : null;
+        int width = image.getWidth(), height = image.getHeight();
         Color scratch = new Color();
-        for (int py = 0; py < image.getHeight(); py++) {
-            for (int px = 0; px < image.getWidth(); px++) {
-                int i = py * image.getWidth() + px;
+        for (int py = 0; py < height; py++) {
+            for (int px = 0; px < width; px++) {
+                int i = py * width + px;
                 float alpha = (pixels[i] >>> 24) / 255f;
-                Color tint = alpha == 0 ? patch.tint()
-                      : color.at(x + (px + .5f) / density, y + (py + .5f) / density, scratch);
+                boolean read = alpha > 0;
+                for (int ny = Math.max(0, py - 1); covered != null && !read && ny <= Math.min(height - 1, py + 1); ny++) {
+                    for (int nx = Math.max(0, px - 1); !read && nx <= Math.min(width - 1, px + 1); nx++) {
+                        read = covered[ny * width + nx] >>> 24 != 0;
+                    }
+                }
+                Color tint = read ? color.at(x + (px + .5f) / density, y + (py + .5f) / density, scratch) : patch.tint();
                 pixels[i] = Math.round(alpha * tint.a * 255) << 24 | Math.round(tint.r * 255) << 16
                       | Math.round(tint.g * 255) << 8 | Math.round(tint.b * 255);
             }
@@ -863,6 +939,7 @@ final class GpuRoads {
     static float coverage(BoardRoad road, Patch patch, float x, float y) {
         Fade fade = patch.fade();
         if (fade == null) { return 1; }
+        if (spill(patch)) { return Math.clamp(1 - road.pavedDepth(x, y) / spill(), 0, 1); }
         if (fade.landing()) {
             float t = Math.clamp((-road.endDistance(x, y) - fade.setback()) / fade.end(), 0, 1);
             float metre = BoardRelief.metres(1) / BoardGeometry.hexScale();
@@ -889,9 +966,12 @@ final class GpuRoads {
         return fade.end() > 0 ? alpha * road.endCoverage(x, y, fade.end()) : alpha;
     }
 
-    /** A paved carriageway's wear covers it whole (the shader places it); tyre tracks only their wheel paths. */
+    /**
+     * A paved carriageway's wear and a dirt track cover their road whole (the shader places their features); tyre tracks
+     * only their wheel paths.
+     */
     private static float wheels(BoardRoad road, Patch patch, float x, float y) {
-        return patch.fade().wheels() && !asphalt(patch) ? road.wheelCoverage(x, y) : 1;
+        return patch.fade().wheels() && !asphalt(patch) && !track(patch) ? road.wheelCoverage(x, y) : 1;
     }
 
     static float materialCoverage(Patch patch, float x, float y) {
@@ -911,14 +991,24 @@ final class GpuRoads {
             tint.r = materialCoverage(patch, x, y);
             tint.g = Math.clamp(.5f + patch.fade().join().lateral(x, y) / (2 * BoardRoad.JOIN_REACH), 0, 1);
             tint.b = 0;
+        } else if (spill(patch)) {
+            // G: across the nearest arm, as transitions carry it, whose wheels carry most grit on.
+            BoardRoad.Join arm = null;
+            for (var join : road.joins()) {
+                if (road.meets(join) && (arm == null || Math.abs(join.lateral(x, y)) < Math.abs(arm.lateral(x, y)))) { arm = join; }
+            }
+            tint.g = Math.clamp(.5f + arm.lateral(x, y) / (2 * BoardRoad.JOIN_REACH), 0, 1);
         } else if (patch.fade() != null && patch.fade().wheels()) {
-            var direction = road.wheelDirection(x, y);
-            // Road UVs point down in Y. RG carries the wear direction, not an albedo tint. On paved wear its length
-            // falls to a half across a junction's hub, and B is the lane position (BoardRoad#wearHub, #wearLane).
-            float length = asphalt(patch) ? 1 - .5f * road.wearHub(x, y) : 1;
+            var sample = track(patch) ? road.track(x, y) : null;
+            var direction = sample != null ? sample.heading() : road.wheelDirection(x, y);
+            // Road UVs point down in Y. RG carries the wear direction, not an albedo tint. On paved wear and a dirt track
+            // its length falls to a half across a junction's hub; B is paved wear's lane position, or where across the
+            // whole road a track's point lies (BoardRoad#wearHub, #wearLane, #track).
+            float hub = asphalt(patch) ? road.wearHub(x, y) : sample != null ? road.trackHub(x, y) : 0;
+            float length = 1 - .5f * hub;
             tint.r = Math.round(128 + direction.x * 127 * length) / 255f;
             tint.g = Math.round(128 - direction.y * 127 * length) / 255f;
-            tint.b = asphalt(patch) ? road.wearLane(x, y) : 0;
+            tint.b = asphalt(patch) ? road.wearLane(x, y) : sample != null ? sample.across() : 0;
         }
         return tint;
     }

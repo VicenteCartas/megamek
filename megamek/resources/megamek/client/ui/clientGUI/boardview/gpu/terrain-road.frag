@@ -62,7 +62,7 @@ vec4 wearNoise(vec2 m, float size, float offset, float pixel);
 // A surface's maps and settings: from its material, or for a merged coat from its vertices.
 struct RoadMaps {
     int maps;           // a merged coat's road material, or 3 plus its sculpt material
-    float transition;   // positive: material joins; negative: loose, wheels, landings (GpuRoads#attribute)
+    float transition;   // positive: material joins; negative: loose, wheels, landings, tracks (GpuRoads#attribute)
     float response;     // wet response; negative excludes the surface from liquid water
     bool mapped;        // has a surface map: grain, roughness and occlusion
     bool soil;          // compact soil, which holds mud and shallow water
@@ -72,7 +72,7 @@ RoadMaps roadMaps() {
 #ifdef roadCoatFlag
     vec4 coat = floor(v_roadCoat * 255.0 + .5);
     int maps = int(coat.r);
-    return RoadMaps(maps, coat.g - 4.0, coat.b / 255.0, maps < 3, maps == 1);
+    return RoadMaps(maps, coat.g - 8.0, coat.b / 255.0, maps < 3, maps == 1);
 #else
     RoadMaps m = RoadMaps(-1, 0.0, u_groundResponse, false, false);
 #ifdef roadMapsFlag
@@ -361,6 +361,86 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
     return hollow;
 }
 
+// ---- Dirt track -----------------------------------------------------------------------------------------------------
+// A dirt road is one farm track in one coat (GpuRoads#patches): two pale, compacted wheel tracks, a trampled crown of
+// tufts between them, a little loose soil beside them, and a wide verge where grass takes the ground back. Its mask
+// carries the heading (RG; its length falls to a half across a junction's hub, BoardRoad#trackHub), where across the whole
+// road a point lies (B, BoardRoad#track: 0 on a centre line, 1 at the footprint's edge) and its coverage (A). The coat
+// never paints grass: where it opens, the ground under it shows. Sizes are metres.
+const float DIRT_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: B's full range
+const float DIRT_WHEEL = 1.08; // BoardRoad.WHEEL_OFFSET in metres: the wheel tracks' centres, where joins carry their ruts
+const float DIRT_LOOSE = 2.2;  // loose soil's reach
+const float DIRT_VERGE = 3.5;  // the verge's grass has taken the ground back by here
+// The grey-brown soil maps, tinted and lightened to dry tan loose soil.
+const vec3 DIRT_TAN = vec3(1.11, 1.06, .93);
+const vec3 DIRT_MEAN = vec3(.26, .21, .155); // the maps' mean albedo, linear: compacted soil shows little grain
+
+bool dirtCoat(RoadMaps m) {
+#if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
+    // -5 on the ground, -6 on a built deck (GpuRoads#finish).
+    return m.mapped && m.transition < -4.5 && m.transition > -6.5;
+#else
+    return false;
+#endif
+}
+
+// A loose road's grit and dust on the paved road it meets (GpuRoads#finish, -7).
+bool spillCoat(RoadMaps m) {
+#if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
+    return m.mapped && abs(m.transition + 7.0) < .5;
+#else
+    return false;
+#endif
+}
+
+// A tyre's lugs printed in soil, `off` metres from the tyre's middle: a chevron of lines across the track.
+float tread(float along, float off, float pixel) {
+    return wearLine((fract((along + off * .7) / .26) - .5) * .26, .035, pixel);
+}
+
+// The track at m (metres, Y flipped as the road UVs) over a pixel of `pixel` metres, `across` metres from its centre line:
+// its albedo and surface (R height, G roughness, B cavity), and its alpha, which opens onto the ground under it through
+// the crown, the verge and a worn end, never on a built deck. Returns how compacted it is: the wheel tracks, which also
+// hold the puddles. Takes derivatives: call it in uniform control flow.
+float dirtTrack(vec2 m, float pixel, vec2 heading, float across, float hub, float coverage, bool built,
+      inout vec3 albedo, inout vec4 surface, out float alpha) {
+    float grain = surface.r;
+    // Edges wander slowly along the road (2 m cells) and break up at the size of a tuft (0.3 to 1 m).
+    vec4 slow = wearNoise(m, 128.0, .23, pixel), clump = wearNoise(m, 64.0, .17, pixel), tuft = wearNoise(m, 20.0, .61, pixel);
+    // Turning traffic wears a junction's hub evenly: the tracks merge into it, the crown is gone before it.
+    float worn = smoothstep(0.0, .8, hub);
+    // The tracks give out before the soil does at a road's end.
+    float track = 1.0 - smoothstep(.3, .46, abs(across - DIRT_WHEEL) + (slow.g - .5) * .24 + (tuft.b - .5) * .06);
+    track = mix(track, .55, worn) * smoothstep(.45, .9, coverage);
+    float edge = .58 + (slow.r - .5) * .3 + (tuft.g - .5) * .2;
+    float crown = (1.0 - smoothstep(edge - .12, edge + .08, across)) * (1.0 - smoothstep(0.0, .35, hub));
+    float verge = smoothstep(DIRT_LOOSE, DIRT_VERGE, across);
+    // Pale, smooth tracks; tan loose soil, darker where the crown is trampled. Broad stretches dry paler or stay damper.
+    float broad = wearNoise(m, 400.0, .57, pixel).r;
+    albedo = mix(albedo, DIRT_MEAN, .45 * track);
+    albedo *= DIRT_TAN * mix(.9, 1.1, broad) * mix(mix(1.0, .8, crown), 1.45, track);
+    surface.g = mix(min(.98, surface.g + .05), .74, track);
+    surface.b = mix(surface.b, 1.0, .6 * track);
+    // Tread lugs where a pixel resolves them, each way printed in its own patches: the same whichever way the heading runs.
+    if (pixel < .05) {
+        float along = dot(m, heading), off = abs(across - DIRT_WHEEL);
+        vec2 passes = smoothstep(.35, .55, vec2(wearNoise(m + heading * .7, 14.0, .37, pixel).g,
+              wearNoise(m - heading * .7, 14.0, .37, pixel).g));
+        float lugs = max(tread(along, off, pixel) * passes.x, tread(-along, off, pixel) * passes.y);
+        lugs *= track * (1.0 - worn) * (1.0 - smoothstep(.03, .05, pixel));
+        albedo *= 1.0 - .4 * lugs;
+        surface.b *= 1.0 - .4 * lugs;
+    }
+    // The coat opens through the crown's tufts (about 60 % of it), and raggedly through the verge, which grass has
+    // mostly taken back by its outer reach; it frays where the road ends. Soft edges, never a line.
+    float tufts = .62 * crown - (.55 * clump.g + .45 * tuft.r + (grain - .5) * .15);
+    float kept = min(1.0 - verge, 2.0 * coverage) - (.5 * slow.b + .3 * clump.r + .2 * tuft.g + (grain - .5) * .1);
+    tufts = clamp(tufts / max(.04, 1.5 * fwidth(tufts)) + .5, 0.0, 1.0);
+    kept = clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
+    alpha = built ? coverage : kept * (1.0 - tufts);
+    return track;
+}
+
 // Road paint wears with its road, most on weathered stretches (asphaltWear's age): how much has flaked off (x), and
 // how dull and grimy the rest is (y).
 vec2 paintWear(vec2 m, float pixel) {
@@ -403,7 +483,7 @@ void main() {
     // Paved wear's ground in metres and the pixel it covers, taken before the varying branches.
     vec2 wearMetres = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_metre;
     float wearPixel = max(length(dFdx(wearMetres)), length(dFdy(wearMetres)));
-    bool paved = pavedWear(m);
+    bool paved = pavedWear(m), dirt = dirtCoat(m), spill = spillCoat(m);
     // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
     vec2 materialUV = uv;
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
@@ -423,12 +503,22 @@ void main() {
     // Reuse the shared, stable noise field. These masks describe use and loose material, not road width.
     float wearPatches = 0.0, loosePatches = 0.0, compaction = 0.0;
     vec2 wearSlope = vec2(0.0);
-    float wearWater = 0.0;
+    float wearWater = 0.0, compacted = 0.0, dirtAlpha = 1.0;
     if (paved) {
         vec2 heading = (roadColor.rg * 255.0 - 128.0) / 127.0;
         float hub = smoothstep(.04, .46, 1.0 - length(heading));
         wearWater = roadHidden ? 0.0 : asphaltWear(wearMetres, wearPixel, normalize(heading), roadColor.b, hub,
               materialUV, roadGradient, albedo, properties, wearSlope);
+    } else if (dirt) {
+        // Opposing headings filter to nothing at a hub's centre, where it wears flat anyway.
+        vec2 heading = (roadColor.rg * 255.0 - 128.0) / 127.0;
+        float hub = smoothstep(.04, .46, 1.0 - length(heading));
+        compacted = dirtTrack(wearMetres, wearPixel, heading / max(length(heading), 1e-3), roadColor.b * DIRT_HALF, hub,
+              roadColor.a, m.transition < -5.5, albedo, properties, dirtAlpha);
+    } else if (spill) {
+        // Grit and dust carried onto a paved road: pale and grey.
+        albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .65) * 1.4;
+        properties.g = .95;
     } else if (m.mapped && abs(m.transition) > .5) {
         wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
         loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
@@ -465,6 +555,8 @@ void main() {
         if (m.transition > 1.5) {
             // Soil dragged by tyres continues onto asphalt at the same axle spacing; no central blotch.
             float tracked = rut * (.4 + .6 * grain) * pow(carry, 1.3);
+            // The same dusty soil as a dirt track's (dirtTrack).
+            albedo *= DIRT_TAN;
             roadCoverage = max(body, dust + .8 * tracked);
             albedo *= mix(1.0, profile.w, rut * body);
         } else {
@@ -476,6 +568,7 @@ void main() {
     }
     float normalStrength = 1.0;
     if (wheelWear) { normalStrength = mix(1.2, .35, compaction); }
+    if (dirt) { normalStrength = mix(1.2, .3, compacted); }
     vec3 normal = roadNormal(m, materialUV, normalStrength);
     // Potholes' walls (asphaltWear's slope, in the road UVs' frame).
     if (paved) normal = normalize(normal + vec3(wearSlope.x, -wearSlope.y, 0.0));
@@ -488,6 +581,8 @@ void main() {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
         soilBasins = texture(u_rainNoise, groundUV / 22.0).r * .7
               + texture(u_rainNoise, groundUV / 7.0 + .37).g * .3;
+        // A track's puddles lie in its wheel tracks.
+        if (dirt) soilBasins += .3 * compacted - .15;
         float mud = wet * smoothstep(.24, .68, soilBasins);
         absorption = max(absorption, .7 * mud);
         properties.g = mix(properties.g, .55, mud);
@@ -528,7 +623,19 @@ void main() {
     // The road's outer strip carries coverage. World-anchored grain breaks up its dusty verge.
     float grain = m.mapped ? properties.r : roadAlbedo(m, uv * 2.3).r;
     float alpha = clamp(roadColor.a + (grain - .5) * min(roadColor.a, 1.0 - roadColor.a) * .7, 0.0, 1.0);
-    if (m.mapped && m.transition < -2.5) {
+    if (dirt) {
+        alpha = dirtAlpha;
+    } else if (spill) {
+        // Sparse, broken grains over a thin film of dust, both thinning out over the spill's reach (A), most in the wheel
+        // bands: G runs across the nearest arm, as a transition's does (GpuRoads#color).
+        vec4 profile = roadProfile();
+        float lane = abs(abs((roadColor.g - .5) * 2.0 * profile.x) - profile.y);
+        float wheels = 1.0 - smoothstep(profile.z * .5, profile.z, lane);
+        float broken = wearNoise(wearMetres, 16.0, .29, wearPixel).r;
+        float grit = roadColor.a * mix(.55, .85, wheels) - (.6 * grain + .4 * broken);
+        float dust = roadColor.a * roadColor.a * mix(.15, .3, wheels) * smoothstep(.3, .7, broken);
+        alpha = max(clamp(grit / max(.03, fwidth(grit)) + .5, 0.0, 1.0) * .85, dust);
+    } else if (m.mapped && m.transition < -2.5) {
         // Grounded bridge landings: individual asphalt chips/aggregate expose soil and grass. The broad
         // envelope is in the mask; material grain supplies the small fractured edge at every orientation.
         float chips = roadSurface(m, uv * .63 + .19).r;

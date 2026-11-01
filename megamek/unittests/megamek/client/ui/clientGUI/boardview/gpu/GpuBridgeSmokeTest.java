@@ -1100,10 +1100,13 @@ class GpuBridgeSmokeTest {
                     var top = BoardGeometry.center(deck, 2);
                     var ground = BoardGeometry.center(field, 0);
                     // The road is textured: a few samples along the deck's top, so one dark or bright patch of its
-                    // material decides nothing.
+                    // material decides nothing. They follow a wheel track: the dirt track's crown opens onto the rock.
                     var next = BoardGeometry.center(new Coords(3, 3), 2);
-                    Vector3[] points = { top, ground, new Vector3(top).lerp(next, -.3f), new Vector3(top).lerp(next, -.15f),
-                          new Vector3(top).lerp(next, .15f), new Vector3(top).lerp(next, .3f) };
+                    var wheel = new Vector3(next).sub(top).nor().rotate(Vector3.Z, 90)
+                          .scl(BoardRoad.WHEEL_OFFSET * BoardGeometry.hexScale());
+                    Vector3[] points = { top, ground, new Vector3(top).lerp(next, -.3f).add(wheel),
+                          new Vector3(top).lerp(next, -.15f).add(wheel), new Vector3(top).lerp(next, .15f).add(wheel),
+                          new Vector3(top).lerp(next, .3f).add(wheel) };
                     float[][] dryPixels = shot(terrain, frame, camera, dry, new File(output, "natural-deck-dry.png"), points);
                     float[][] mudPixels = shot(terrain, frame, camera, muddy, new File(output, "natural-deck-mud.png"), top, ground);
                     float[][] roadPixels = shot(terrain, frame, camera, road, new File(output, "natural-deck-road.png"), points);

@@ -949,8 +949,9 @@ class BoardBridgeFootingTest {
             var road = footing.road(deck, at);
             var patches = GpuRoads.deckPatches(tile, deck, road, footing);
             String material = GpuRoads.texture(kind);
+            // A dirt road's one coat is its track, which carries the heading as wheels do.
             var tail = patches.stream().filter(p -> p.texture().equals(material) && p.endFade() > 0
-                  && !p.fade().wheels()).findFirst().orElseThrow();
+                  && (!p.fade().wheels() || kind == BoardRoad.Kind.DIRT)).findFirst().orElseThrow();
             var mask = GpuRoads.mask(road, tail);
             float start = -BoardGeometry.TILE_HEIGHT / 2 - footing.lengths().get(3);
             float end = start - BoardRelief.metres(7) / scale;

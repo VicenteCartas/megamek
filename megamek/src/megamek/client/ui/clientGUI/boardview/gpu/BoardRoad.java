@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.BasicStroke;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
@@ -53,7 +54,9 @@ final class BoardRoad {
 
     /** Both sides of a connected material change meet at half coverage on their shared edge. */
     record Join(int direction, Kind kind, End edge) {
-        Area area() { return edge.band(-JOIN_REACH, 128); }
+        Area area() { return area(128); }
+        /** {@link #area}, ending {@code beyond} past the shared edge. */
+        Area area(float beyond) { return edge.band(-JOIN_REACH, beyond); }
         float coverage(float x, float y) {
             return Math.clamp((edge.distance(x, y) + JOIN_REACH) / (2 * JOIN_REACH), 0, 1);
         }
@@ -99,6 +102,17 @@ final class BoardRoad {
     /** Fitted roadless aprons and one lane plus verge of their entrance, in this road's local coordinates. */
     private Area concreteEntrances = new Area();
     private HexAppearance.TrafficControl control = HexAppearance.TrafficControl.STOPS;
+    /** Sides where this road meets one of the other family at its level, paved against loose (#meet). */
+    private int meetings;
+    /** Of those, the sides where a paved road ends square on its border: a construction edge (#meet). */
+    private int squared;
+    /** Sides where a dirt road runs on into another's hex, whose own coat draws the track there (#meet). */
+    private int tracked;
+    /** Sides where a road joins a bridge's deck: their paint lies on separate supports (#meet). */
+    private int apart;
+    /** The paved roads a loose one meets, and the gores it fills between arms into one of them, as corner lists. */
+    private List<BoardRoad> paved = List.of();
+    private List<float[]> mouths = List.of();
 
     /** What a road's course needs of one hex, whether from a scene tile or a captured hex. */
     record Node(int exits, int elevation, boolean plain, boolean circulating) {
@@ -266,7 +280,155 @@ final class BoardRoad {
             }
         } else { road = road.meetConcrete(scene, tile); }
         return road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
-              .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits()));
+              .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits())).meet(scene, tile);
+    }
+
+    private static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
+
+    /**
+     * Where a loose road (dirt or gravel) meets a paved one at its level, the paved road keeps its carriageway whole up to
+     * their border, where it ends square (a construction edge), and the loose one stops at its edge (GpuRoads#patches).
+     * Two arms of a loose road through adjacent borders into one paved road meet it in one mouth: the gore between them
+     * fills out to that road.
+     */
+    private BoardRoad meet(BoardScene scene, BoardScene.Tile tile) {
+        boolean loose = !paved(tile.road());
+        List<BoardRoad> roads = new ArrayList<>();
+        for (int d = 0; d < 6; d++) {
+            var next = scene.neighbor(tile, d);
+            if ((tile.roadExits() & 1 << d) == 0 || next == null) { continue; }
+            if (BoardSurface.connectingBridge(tile, next, d) != null
+                  || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null) {
+                apart |= 1 << d;
+                continue;
+            }
+            if (next.elevation() != tile.elevation() || !rendered(next) || (next.roadExits() & 1 << (d + 3) % 6) == 0) {
+                continue;
+            }
+            if (tile.road() == Kind.DIRT && next.road() == Kind.DIRT) { tracked |= 1 << d; }
+            if (paved(next.road()) == loose) {
+                meetings |= 1 << d;
+                if (loose) { roads.add(of(scene, next)); }
+            }
+        }
+        List<float[]> gores = new ArrayList<>();
+        for (Join a : joins) {
+            for (Join b : joins) {
+                int d = a.direction();
+                if (!loose || b.direction() != (d + 1) % 6 || !meets(a) || !meets(b)
+                      || (scene.neighbor(tile, d).roadExits() & 1 << (d + 2) % 6) == 0) { continue; }
+                // The whole sector between the arms, from the hex's centre out past each arm's reach beyond its border
+                // (#approach), onto the paved road's side.
+                Point p = a.edge().point(), q = b.edge().point();
+                float reach = .06f * (float) Math.hypot(p.x, p.y) + p.width + 2 * SHOULDER;
+                gores.add(new float[] { 0, 0, p.x + a.edge().nx() * reach, p.y + a.edge().ny() * reach,
+                      q.x + b.edge().nx() * reach, q.y + b.edge().ny() * reach });
+            }
+        }
+        paved = List.copyOf(roads);
+        mouths = List.copyOf(gores);
+        squared = loose ? 0 : meetings;
+        outlines.clear();
+        return this;
+    }
+
+    /** Whether this road meets a road of the other family through the join's side (#meet). */
+    boolean meets(Join join) { return (meetings & 1 << join.direction()) != 0; }
+
+    /** Whether the join's other road lies on a bridge's deck, or this one does on its ground's side (#meet). */
+    boolean apart(Join join) { return (apart & 1 << join.direction()) != 0; }
+
+    /**
+     * The hexes, in this road's tile pixels, of the dirt roads it runs on into (#meet). Each one's own coat draws the
+     * track over its hex, measured from its own course; this one's paint stops at their border, so the two never
+     * overlap with two measures of where across the road a point lies.
+     */
+    Area trackedHexes() {
+        Area result = new Area();
+        for (int d = 0; d < 6; d++) {
+            if ((tracked & 1 << d) == 0) { continue; }
+            Coords next = coords.translated(d);
+            float dx = (BoardGeometry.centerX(next) - BoardGeometry.centerX(coords)) / BoardGeometry.hexScale();
+            float dy = (BoardGeometry.centerY(next) - BoardGeometry.centerY(coords)) / BoardGeometry.hexScale();
+            Path2D.Float hex = new Path2D.Float();
+            for (int k = 0; k < 6; k++) {
+                float x = dx + HexTile.cornerOffsetX(k, BoardGeometry.TILE_WIDTH);
+                float y = dy + HexTile.cornerOffsetY(k, BoardGeometry.TILE_HEIGHT);
+                if (k == 0) { hex.moveTo(x, y); } else { hex.lineTo(x, y); }
+            }
+            hex.closePath();
+            result.add(new Area(hex));
+        }
+        return result;
+    }
+
+    /**
+     * The carriageways of the paved roads a loose one meets (#meet), widened by {@code margin}, in its tile pixels. A
+     * narrower one stops short of their square ends too, as a spill's reach does.
+     */
+    Area pavedCarriageway(float margin) {
+        Area result = new Area();
+        for (BoardRoad road : paved) {
+            float dx = (BoardGeometry.centerX(road.coords) - BoardGeometry.centerX(coords)) / BoardGeometry.hexScale();
+            float dy = (BoardGeometry.centerY(road.coords) - BoardGeometry.centerY(coords)) / BoardGeometry.hexScale();
+            Area carriageway = road.footprint(margin);
+            for (Join join : road.joins) {
+                if (margin < 0 && (road.squared & 1 << join.direction()) != 0) {
+                    carriageway.subtract(road.square(join, margin));
+                }
+            }
+            result.add(carriageway.createTransformedArea(AffineTransform.getTranslateInstance(dx, dy)));
+        }
+        return result;
+    }
+
+    /** How far a point lies inside the carriageways of the paved roads a loose one meets; negative outside them. */
+    float pavedDepth(float x, float y) {
+        return -distance(paved, BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale(),
+              BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale());
+    }
+
+    /**
+     * What a square end removes of its arm's outline widened by {@code margin}: the arm past its border (from
+     * {@code from} on), and nothing beside it, such as a shared roundabout's other members (#meet).
+     */
+    private Area square(Join join, float from) {
+        return join.edge().band(from, 128, join.edge().point().width + SHOULDER + 3);
+    }
+
+    /**
+     * How far a point lies past this road's square ends (negative short of them), within their arms' width; negative
+     * infinity beside them.
+     */
+    private float squareEdge(float x, float y) {
+        float result = Float.NEGATIVE_INFINITY;
+        for (Join join : joins) {
+            if ((squared & 1 << join.direction()) == 0) { continue; }
+            var edge = join.edge();
+            if (Math.abs(join.lateral(x, y)) < edge.point().width + SHOULDER + 3) {
+                result = Math.max(result, edge.distance(x, y));
+            }
+        }
+        return result;
+    }
+
+    /** Signed distance in tile pixels to the nearest mouth (#meet), negative inside one. */
+    private float mouthEdge(float x, float y) {
+        float result = Float.POSITIVE_INFINITY;
+        for (float[] mouth : mouths) {
+            float near = Float.POSITIVE_INFINITY, turn = 0;
+            boolean inside = true;
+            for (int i = 0; i < mouth.length; i += 2) {
+                float ax = mouth[i], ay = mouth[i + 1];
+                float bx = mouth[(i + 2) % mouth.length], by = mouth[(i + 3) % mouth.length];
+                near = Math.min(near, BoardRelief.distance(x, y, ax, ay, bx, by));
+                float side = Math.signum((bx - ax) * (y - ay) - (by - ay) * (x - ax));
+                inside &= side == 0 || turn == 0 || side == turn;
+                if (side != 0) { turn = side; }
+            }
+            result = Math.min(result, inside ? -near : near);
+        }
+        return result;
     }
 
     BoardRoad control(HexAppearance.TrafficControl value) { control = value; return this; }
@@ -1104,6 +1266,12 @@ final class BoardRoad {
         result.apronExits = apronExits;
         result.concreteEntrances = concreteEntrances;
         result.control = control;
+        result.meetings = meetings;
+        result.squared = squared;
+        result.tracked = tracked;
+        result.apart = apart;
+        result.paved = paved;
+        result.mouths = mouths;
         return result;
     }
 
@@ -1165,7 +1333,18 @@ final class BoardRoad {
                 area.add(new Area(quad));
             }
         }
+        for (float[] mouth : mouths) {
+            Path2D.Float gore = new Path2D.Float();
+            gore.moveTo(mouth[0], mouth[1]);
+            for (int i = 2; i < mouth.length; i += 2) { gore.lineTo(mouth[i], mouth[i + 1]); }
+            gore.closePath();
+            area.add(new Area(gore));
+        }
         clipEnds(area, margin);
+        for (Join join : joins) {
+            // Every outline stops on the border: a verge never lays a strip across the square end.
+            if ((squared & 1 << join.direction()) != 0) { area.subtract(square(join, 0)); }
+        }
         return area;
     }
 
@@ -1210,7 +1389,7 @@ final class BoardRoad {
 
     /** How far a point lies from the centre line of its lane, whichever side. */
     private float laneOffset(float x, float y) {
-        PathSample nearest = pathSample(x, y, paintPaths(), true);
+        PathSample nearest = pathSample(x, y, paintPaths(), ALL_ENDS);
         return Math.abs(nearest.distance() - laneCenter(nearest.width()));
     }
 
@@ -1224,11 +1403,40 @@ final class BoardRoad {
      * How far into a junction's hub a point lies for paved wear: 1 where the approaches' lanes cross and turning
      * traffic wears the whole surface, fading to 0 on the arms, whose lanes carry their own wear.
      */
-    float wearHub(float x, float y) {
-        if (borders.size() < 3 || circle != null) { return 0; }
-        float t = Math.clamp(((float) Math.hypot(x, y) - 14) / 10, 0, 1);
+    float wearHub(float x, float y) { return circle != null ? 0 : hub(x, y, 14, 10); }
+
+    /**
+     * A dirt track's hub, as {@link #wearHub}: wider, so its wheel tracks and crown give way to bare, evenly worn ground
+     * well before the crossing. A roundabout's narrow lanes wear that way all over.
+     */
+    float trackHub(float x, float y) { return circle != null ? 1 : hub(x, y, 12, 16); }
+
+    /** 1 within {@code radius} of a junction's centre, fading to 0 over {@code fade}; 0 off junctions. */
+    private float hub(float x, float y, float radius, float fade) {
+        if (borders.size() < 3) { return 0; }
+        float t = Math.clamp(((float) Math.hypot(x, y) - radius) / fade, 0, 1);
         return 1 - t * t * (3 - 2 * t);
     }
+
+    /**
+     * A dirt road's track at a point (terrain-road.frag), from the one nearest course its paint follows: the heading,
+     * and where across the road the point lies, 0 on that course and 1 at a dirt road's full half width with its
+     * shoulder, in the same metres on every course.
+     */
+    record Track(Vector2 heading, float across) { }
+
+    Track track(float x, float y) {
+        // Past a border the road runs on straight, as the neighbour's measures it up to there, never round an end.
+        PathSample nearest = pathSample(x, y, paintPaths(), BORDER_ENDS);
+        // A mouth onto a paved road is loose ground, past the wheel tracks' reach (#meet).
+        float across = Math.min(nearest.distance(), MOUTH + Math.max(0, mouthEdge(x, y))) / TRACK_REACH;
+        return new Track(new Vector2(nearest.dx(), nearest.dy()).nor(), Math.min(1, across));
+    }
+
+    /** {@link #track}'s whole width: a dirt road's half width with its shoulder. */
+    private static final float TRACK_REACH = Kind.DIRT.halfWidth + SHOULDER;
+    /** How far from a course a mouth's ground lies (#track): past the wheel tracks, short of the shoulder. */
+    private static final float MOUTH = .35f * TRACK_REACH;
 
     /** Disturbed soil/fines thin out in patches; their final extent still stays inside the terminal plane. */
     float endCoverage(float x, float y, float length) {
@@ -1241,7 +1449,8 @@ final class BoardRoad {
     }
 
     float distance(float x, float y) {
-        return Math.max(pathSample(x, y, paths).edge(), endDistance(x, y));
+        return Math.max(Math.max(Math.min(pathSample(x, y, paths).edge(), mouthEdge(x, y)), endDistance(x, y)),
+              squareEdge(x, y));
     }
 
     /** The same nearest path supplies the wheel mask and the direction of shallow, elongated scuffs. */
@@ -1265,24 +1474,50 @@ final class BoardRoad {
     }
 
     private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths) {
-        return pathSample(x, y, sampledPaths, false);
+        return pathSample(x, y, sampledPaths, 0);
+    }
+
+    /** Per path, which ends run on (#pathSample): its first end's flags, and its last end's shifted once; none on a ring. */
+    private volatile byte[] pathEnds;
+    private static final int ALL_ENDS = 1, BORDER_ENDS = 4;
+    /** Path ends this far out lie past the hex's border (#approach). */
+    private static final float BORDER = BoardGeometry.TILE_HEIGHT / 2 - .5f;
+
+    private byte[] pathEnds() {
+        byte[] result = pathEnds;
+        if (result != null) { return result; }
+        result = new byte[paths.size()];
+        for (int p = 0; p < paths.size(); p++) {
+            var path = paths.get(p);
+            // A ring closes on itself (to rounding): it has no ends.
+            if (Math.hypot(path.getFirst().x - path.getLast().x, path.getFirst().y - path.getLast().y) <= .01) { continue; }
+            int flags = ALL_ENDS | ALL_ENDS << 1;
+            if (Math.hypot(path.getFirst().x, path.getFirst().y) > BORDER) { flags |= BORDER_ENDS; }
+            if (Math.hypot(path.getLast().x, path.getLast().y) > BORDER) { flags |= BORDER_ENDS << 1; }
+            result[p] = (byte) flags;
+        }
+        pathEnds = result;
+        return result;
     }
 
     /**
-     * With {@code open}, a path's open ends run straight on, so a point past one (an oblique border crossing leaves a
-     * wedge of carriageway beyond it) still measures across the lane rather than round the end.
+     * A path's {@code open} ends run straight on: every end ({@link #ALL_ENDS}) or those past the hex's border
+     * ({@link #BORDER_ENDS}), so a point past one (an oblique border crossing leaves a wedge of carriageway beyond it)
+     * still measures across the lane rather than round the end. With open ends, {@code sampledPaths} is {@link #paths}
+     * or its prefix.
      */
-    private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, boolean open) {
+    private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, int open) {
         float distance = Float.POSITIVE_INFINITY, edge = Float.POSITIVE_INFINITY, alongX = 0, alongY = 1, width = 0;
-        for (var path : sampledPaths) {
-            // A ring closes on itself (to rounding): it has no ends.
-            boolean ends = open && Math.hypot(path.getFirst().x - path.getLast().x, path.getFirst().y - path.getLast().y) > .01;
+        byte[] ends = open == 0 ? null : pathEnds();
+        for (int p = 0; p < sampledPaths.size(); p++) {
+            var path = sampledPaths.get(p);
+            boolean first = ends != null && (ends[p] & open) != 0, last = ends != null && (ends[p] & open << 1) != 0;
             for (int i = 1; i < path.size(); i++) {
                 Point a = path.get(i - 1), b = path.get(i);
                 float dx = b.x - a.x, dy = b.y - a.y;
                 float along = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
-                float t = Math.clamp(along, ends && i == 1 ? Float.NEGATIVE_INFINITY : 0,
-                      ends && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
+                float t = Math.clamp(along, first && i == 1 ? Float.NEGATIVE_INFINITY : 0,
+                      last && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
                 float ex = x - a.x - t * dx, ey = y - a.y - t * dy;
                 // Not Math.hypot, which runs in software: a road's paint samples this for every texel and segment.
                 float near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
