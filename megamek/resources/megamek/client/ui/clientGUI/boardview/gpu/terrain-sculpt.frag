@@ -197,7 +197,7 @@ void lunarCraters(vec3 world, float pixel, float clear, vec2 clearGradient, floa
     for (int scale = 0; scale < 3; scale++) {
         float cell = scale == 0 ? 26.0 : scale == 1 ? 9.0 : 3.5;
         vec2 radius = scale == 0 ? vec2(3.0, 8.0) : scale == 1 ? vec2(1.0, 3.0) : vec2(.4, 1.1);
-        float chance = scale == 0 ? .35 : scale == 1 ? .16 : .08;
+        float chance = scale == 0 ? .525 : scale == 1 ? .24 : .12;
         vec2 cellOf = floor(world.xy / cell);
         for (int y = -1; y <= 1; y++) {
             for (int x = -1; x <= 1; x++) {
