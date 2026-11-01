@@ -20,9 +20,9 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
-// The first level below 0 also steps down, so a recession reads at a glance: 12.5% darker in all with the eased
-// grade at level -1; deeper levels ease on down to level -6. dry fades that step out under water, whose depth already darkens its bed, and there keeps the
-// grade above level -1.5.
+// Downhill every eased level darkens the ground by an eighth of its reflectance: 12.5% at level -1, building to
+// 50% at level -6 and below, so each level of a deep pit reads apart. A bed under water (dry 0), which its depth
+// already darkens, keeps the gentle .06 above level -1.5.
 vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     if (level == 0.0) return c;
     level = max(level, mix(-1.5, -6.0, dry));
@@ -37,7 +37,7 @@ vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     // Map peak p to e*p/(1+(e-1)*p), with positive derivative even at bright texture samples.
     // The one scalar preserves RGB ratios; it does not clamp separate channels or force a new white ceiling.
     c *= exposure / (1.0 + (exposure - 1.0) * peak);
-    return c * (1.0 - .06 * down) * (1.0 - .065 * dry * clamp(-level, 0.0, 1.0));
+    return c * (1.0 - mix(.06, .127, dry) * down);
 }
 
 vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0, 1.0); }

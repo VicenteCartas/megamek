@@ -67,7 +67,7 @@ class GpuElevationGradeSmokeTest {
                         if (level == -6) { deepest = samples; }
                         if (level < 0) {
                             assertTrue(samples[0] < baseline[0], "Below-zero ground still darkens");
-                            assertTrue(samples[1] > baseline[1] * .6, "Boulders retain visible texture at level " + level);
+                            assertTrue(samples[1] > baseline[1] * .4, "Boulders retain visible texture at level " + level);
                         }
                         if (level < -6) {
                             // The grade eases to its deepest at level -6: ground and boulders keep it together below.
