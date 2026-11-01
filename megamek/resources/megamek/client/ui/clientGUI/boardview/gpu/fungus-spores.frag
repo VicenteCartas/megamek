@@ -24,6 +24,7 @@ void main() {
     vec2 q = p * 3.0 + curl * .45 + vec2(seed, -age * 2.0);
     float wisps = sporeNoise(q) * .65 + sporeNoise(q * 2.13 + 3.7) * .35;
     float density = smoothstep(.14, .72, wisps);
-    vec3 pink = mix(toLinear(vec3(.73, .20, .58)), 1.08 * toLinear(vec3(1.0, .64 / 1.08, .91 / 1.08)), wisps);
-    fragColor = vec4(pink, envelope * density * v_effect.y);
+    // Magenta-violet, cooler than the orange-red cups so they stand apart from it, as in the map's concept art.
+    vec3 mist = mix(toLinear(vec3(.60, .24, .72)), toLinear(vec3(.90, .70, 1.0)), wisps);
+    fragColor = vec4(mist, envelope * density * v_effect.y);
 }

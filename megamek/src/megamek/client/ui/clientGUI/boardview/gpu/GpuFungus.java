@@ -91,7 +91,7 @@ final class GpuFungus implements Disposable {
                       age * radius * (source.cloud() ? .18f : .9f));
                 float fade = MathUtils.sin(age * MathUtils.PI);
                 mist.billboard(camera, point, radius * (.85f + age * .4f),
-                      1 + (int) (seed * 7) + age, (source.cloud() ? .24f : .4f) * fade * fade * detail);
+                      1 + (int) (seed * 7) + age, (source.cloud() ? .16f : .26f) * fade * fade * detail);
             }
         }
         mist.render(camera, mist.size());

@@ -15,12 +15,13 @@ cover, visibility or picking.
 
 ## Living surfaces
 
-The surface has four material roles:
+The surface has four material roles, coloured after the Fungal Crevasse concept art
+(each project's Pigment hue, saturation and value):
 
-- Open plain: mauve mineral skin and irregular blue mycelial marbling, 22 m span.
-- Ridge crowns and lips: lobed cyan crust, 12 m span.
-- Slopes: a separate purple fibrous mantle, 12 m span.
-- Exposed cliffs: dark violet rock with sparse cyan fissures, 12 m span.
+- Open plain: blue-violet mineral skin and irregular blue mycelial marbling, 22 m span.
+- Ridge crowns and lips: lobed turquoise crust, 12 m span.
+- Slopes: a separate violet fibrous mantle, 12 m span.
+- Exposed cliffs: dark navy-violet rock with sparse cyan fissures, 12 m span.
 
 `terrain-materials.glsl` evaluates these roles with the shared physical projection.
 Color, normal, height and cavity maps use the same role weights and translated
@@ -64,13 +65,13 @@ it retains lava's response. Lights install and retire with their terrain chunks,
 and native fungal prop lights are omitted from Tactical View.
 
 `GpuFungus` derives emitter anchors once from the installed large cover prop bounds
-when a chunk is assembled. Each occupied hex receives one broad, low pink cloud,
+when a chunk is assembled. Each occupied hex receives one broad, low violet cloud,
 regardless of woods density, plus a small wisp starting inside each large cup or
 spore body. Cliff and scatter fungi do not emit mist, but retain their glow.
 Replacing the chunk replaces its emitters, so board edits and scene changes retire
 the old clouds. Both native camera projections use those same emitters and clock.
 
-The existing `GpuEffectBatch` draws seeded, drifting pink billboards with the
+The existing `GpuEffectBatch` draws seeded, drifting magenta-violet billboards with the
 `fungus-spores.frag` noise shader. Wisps fade in and out, are depth-tested against
 the scene, and do not write depth or cast shadows. Visibility and projected size
 filter emitters; a bounded 4096-quad batch retains the nearest colonies if full.
