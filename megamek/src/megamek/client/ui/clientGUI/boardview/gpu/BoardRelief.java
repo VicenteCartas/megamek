@@ -1516,11 +1516,19 @@ final class BoardRelief {
         for (Corner end : ends) {
             for (Site site : end.around) {
                 if (site == null || !site.road() || site.liquid() || site.family() == CONCRETE) { continue; }
-                BoardRoad road = roads.computeIfAbsent(site.coords(), at -> BoardRoad.way(scene, scene.tile(at)));
+                BoardRoad road = bed(site);
                 if (road.distance((x - site.x()) / scale, (y - site.y()) / scale) < clear) { return false; }
             }
         }
         return true;
+    }
+
+    /** The ground a site's road is levelled and cleared for (BoardRoad#terrainBed): a loose road's track only. */
+    private BoardRoad bed(Site site) {
+        return roads.computeIfAbsent(site.coords(), at -> {
+            var tile = scene.tile(at);
+            return BoardRoad.way(scene, tile).terrainBed(scene, tile);
+        });
     }
 
     /** Furthest a natural band recedes from a road, in tile pixels; a road crossing it is cut through instead. */
@@ -1796,7 +1804,7 @@ final class BoardRelief {
         float[] free = NO_PUSH, walled = NO_PUSH;
         float rim = Float.NaN;
         // A wall retains only a natural slope rising from a road to a higher hex beside it, not one a road climbs onto,
-        // and only an earth slope: a taller cliff recedes as rock.
+        // and only an earth slope: a taller cliff recedes as rock. A dirt or gravel track cuts a natural bank instead.
         Site upper = across ? edge.upper : null;
         for (Site site : across ? new Site[0] : ends[0].around) {
             if (site != null && (upper == null || site.level() > upper.level())) { upper = site; }
@@ -1804,7 +1812,7 @@ final class BoardRelief {
         for (Corner end : ends) {
             for (Site site : end.around) {
                 if (site == null || !site.road() || site.liquid() || site.family() == CONCRETE) { continue; }
-                BoardRoad road = roads.computeIfAbsent(site.coords(), at -> BoardRoad.way(scene, scene.tile(at)));
+                BoardRoad road = bed(site);
                 float bx = (px - site.x()) / scale, by = (py - site.y()) / scale;
                 if (road.distance(bx, by) < clear && mouth(site, ends)) { continue; }
                 // Away from the road: its distance gradient at the edge. On the road itself, where a wide corridor
@@ -1870,7 +1878,8 @@ final class BoardRelief {
                 float wallTop = surface + BoardRoadBank.WALL * level, highest = Math.min(top, headroom);
                 float kept = moved;
                 if (upper != null && !upper.road() && upper.level() > site.level() && wallTop < highest
-                      && top - bottom <= BoardRoadBank.WALLED_SLOPE * level) {
+                      && top - bottom <= BoardRoadBank.WALLED_SLOPE * level
+                      && !BoardRoad.trackBed(scene, scene.tile(site.coords()))) {
                     float[] retained = new float[5];
                     for (int k = 0; k < retained.length; k++) { retained[k] = lerp(wallTop, highest, k / 4f); }
                     kept = clearance(edge, t, site, road, gx, gy, retained, retained.length);

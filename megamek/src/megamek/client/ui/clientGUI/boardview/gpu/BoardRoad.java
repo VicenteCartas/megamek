@@ -283,7 +283,7 @@ final class BoardRoad {
               .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits())).meet(scene, tile);
     }
 
-    private static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
+    static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
 
     /**
      * Where a loose road (dirt or gravel) meets a paved one at its level, the paved road keeps its carriageway whole up to
@@ -1392,6 +1392,50 @@ final class BoardRoad {
     private static final float RUT_BARE = .65f * METRE;
     /** Over how much farther its grass thickens back to the meadow's (#grass): beside the ruts, and on their crown. */
     private static final float RUT_THIN = METRE, CROWN_THIN = .25f * METRE;
+    /**
+     * A loose road's track, its half width about each of its courses: a dirt track's ruts with their loose soil, a
+     * gravel road's graded edge (terrain-road.frag GRAVEL_EDGE).
+     */
+    private static final float TRACK_HALF = RUT_OFFSET + RUT_REACH;
+
+    /**
+     * The ground this carriageway ({@link #way}) is levelled and cleared for (BoardRoadGrade, BoardRelief): where its
+     * bed is a loose road's track ({@link #trackBed}), its courses only {@link #TRACK_HALF} wide, ends as they are, so
+     * the slopes beside a dirt or gravel road stand back from its track, not from the paved width its paint's
+     * coordinates span; else this road.
+     */
+    BoardRoad terrainBed(BoardScene scene, BoardScene.Tile tile) {
+        if (!trackBed(scene, tile)) { return this; }
+        List<List<Point>> narrow = paths.stream()
+              .map(path -> path.stream().map(point -> new Point(point.x, point.y, TRACK_HALF)).toList()).toList();
+        BoardRoad bed = new BoardRoad(coords, narrow, borders, ends, joins, circle);
+        bed.squared = squared;
+        return bed;
+    }
+
+    /**
+     * Whether a hex's carriageway is levelled only as wide as its loose track ({@link #terrainBed}): a dirt or gravel
+     * road's, but not beside rails, not where a bridge's approach meets its parapets or an apron's lane its concrete,
+     * and not where a road of another kind is reached through a full-width transition coat (GpuRoads#patches): one
+     * that does not meet it on the same dry ground (#meet). No containment wall retains a slope beside one.
+     */
+    static boolean trackBed(BoardScene scene, BoardScene.Tile tile) {
+        if (tile.road() == Kind.NONE || paved(tile.road()) || tile.railExits() != 0 || tile.corridor().sides() != 0) {
+            return false;
+        }
+        for (int d = 0; d < 6; d++) {
+            var next = (tile.roadExits() & 1 << d) == 0 ? null : scene.neighbor(tile, d);
+            if (next == null) { continue; }
+            if (BoardSurface.connectingBridge(tile, next, d) != null
+                  || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null
+                  || BoardRoadGrade.apron(tile, next, d)
+                  || next.road() != tile.road() && (next.roadExits() & 1 << (d + 3) % 6) != 0
+                        && (next.elevation() != tile.elevation() || !rendered(next))) {
+                return false;
+            }
+        }
+        return true;
+    }
 
     /** Whether this road's arms meet in an open junction: not a roundabout, nor arms moved beside a rail's corridor. */
     private boolean openJunction() {

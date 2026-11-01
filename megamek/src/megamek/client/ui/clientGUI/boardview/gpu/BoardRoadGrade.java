@@ -74,6 +74,8 @@ final class BoardRoadGrade {
     private int planar;
     /** Whether the carriageway is built in concrete (see {@link #poured()}). */
     private final boolean poured;
+    /** Whether its bed is a loose road's track only (see {@link #track()}). */
+    private final boolean track;
     /** Whether a natural carriageway ramps down onto an apron (see {@link #intoApron()}). */
     private boolean intoApron;
 
@@ -122,6 +124,7 @@ final class BoardRoadGrade {
             }
         }
         poured = crossing && !natural;
+        track = road != null && BoardRoad.trackBed(scene, tile);
         region = region(scene, tile, road, arms);
         outline = outline(region);
         var box = region.getBounds2D();
@@ -382,6 +385,12 @@ final class BoardRoadGrade {
     boolean poured() { return poured; }
 
     /**
+     * Whether the ground reserved is a loose road's track only (BoardRoad#terrainBed): the slopes beside a dirt or
+     * gravel road stand back from its track and cut a natural bank, which no containment wall retains.
+     */
+    boolean track() { return track; }
+
+    /**
      * Whether this natural carriageway ramps down onto an apron, cut into its own ground: its bank cuts that ground over
      * the whole range it spans, which the steps beside it then clear as well (BoardRelief#push).
      */
@@ -498,15 +507,15 @@ final class BoardRoadGrade {
     }
 
     /**
-     * The carriageway's footprint with its shoulder, within its own hex and past its edges' corners, where a wide
-     * corridor reserves a sliver of the hex beyond; never across the edge it crosses. A bridge deck carries the road on
-     * across its edge, so beside the deck the mouth's full width stays reserved a little further. An apron reserves
-     * straight lanes.
+     * The carriageway's bed (BoardRoad#terrainBed) with its shoulder, within its own hex and past its edges' corners,
+     * where a wide corridor reserves a sliver of the hex beyond; never across the edge it crosses. A bridge deck
+     * carries the road on across its edge, so beside the deck the mouth's full width stays reserved a little further.
+     * An apron reserves straight lanes.
      */
     private Area region(BoardScene scene, BoardScene.Tile tile, BoardRoad road, int arms) {
         Area local;
         if (road != null) {
-            local = road.footprint(BoardRoad.SHOULDER);
+            local = road.terrainBed(scene, tile).footprint(BoardRoad.SHOULDER);
             Area ext = new Area(hexagon(1));
             for (int d = 0; d < 6; d++) {
                 if ((arms & 1 << d) != 0) { ext.add(new Area(strip(d))); }

@@ -911,8 +911,9 @@ final class BoardRoadCut {
                     for (int k = 0; k < count; k++) {
                         float x = a[0] + dx * k / count, y = a[1] + dy * k / count;
                         BoardRoadGrade grade = grade(x + nx * probe, y + ny * probe);
-                        // Only a road's edge, not where it runs on into another's.
-                        float bed = grade == null || grade.poured() || grade(x - nx * probe, y - ny * probe) != null
+                        // Only a road's edge, not where it runs on into another's, and not a loose track's.
+                        float bed = grade == null || grade.poured() || grade.track()
+                              || grade(x - nx * probe, y - ny * probe) != null
                               ? Float.NaN : roadHeight(road, x + nx * probe, y + ny * probe,
                                     grade.height(x + nx * probe, y + ny * probe));
                         float cut = Float.isNaN(bed) || relief.walled(x, y) < .5f ? Float.NaN

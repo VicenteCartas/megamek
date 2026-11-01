@@ -210,8 +210,10 @@ final class BoardRoadBank {
             float verge = 1 - smooth((d - VERGE * scale) / (VERGE * scale));
             float release = smooth((z - grade.high() - verge * BoardRoadGrade.CLEARANCE * level) / (RELEASE * level));
             if (release < 1) {
-                // Behind a containment wall the slope keeps up to the wall's height over the road.
-                float retained = d == 0 ? 0 : Math.min(z - beds[i], WALL * level) * relief.walled(nearby[2 * i], nearby[2 * i + 1]);
+                // Behind a containment wall the slope keeps up to the wall's height over the road; none stands beside
+                // a loose road's track (BoardRoadGrade#track).
+                float retained = d == 0 || grade.track() ? 0
+                      : Math.min(z - beds[i], WALL * level) * relief.walled(nearby[2 * i], nearby[2 * i + 1]);
                 cut = Math.min(cut, lerp(beds[i] + settle(z - beds[i], limits[i] + retained), z, release));
             }
         }
