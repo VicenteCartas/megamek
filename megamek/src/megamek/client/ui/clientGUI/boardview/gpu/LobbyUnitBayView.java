@@ -462,7 +462,8 @@ final class LobbyUnitBayView {
         }
         UiButton random = randomButton("bay-random-skills-" + slot, "CustomMekDialog.RandomSkill", member,
               () -> form.randomSkills(slot), () -> { });
-        dials.add(random).bottom().padRight(0);
+        // Its top on the dials' labels, so the row reads as one line of controls
+        dials.add(random).top().padRight(0);
         content.add(dials).row();
         if (member.lamPilot()) {
             Table aero = new Table();
@@ -1085,13 +1086,13 @@ final class LobbyUnitBayView {
 
     // ---- The footer ----
 
-    /** The status line over the buttons, which are centred with the main one first, as every dialog's footer. */
+    /** A full panel's command bar: the status line left, the buttons bottom right with the main one in the corner. */
     private Table footer() {
         Table footer = new Table();
         status = name(kit.typeLabel("", "small", "status.danger"), "bay-status");
-        status.setAlignment(Align.center);
+        status.setAlignment(Align.left);
         status.setWrap(true);
-        footer.add(status).growX().minWidth(0).row();
+        footer.add(status).growX().minWidth(0).left().padRight(space("md"));
         UiButton cancel = name(kit.button("button-secondary", null, Messages.getString("Cancel.text"), null),
               "bay-cancel");
         UiKit.onChange(cancel, () -> {
@@ -1106,10 +1107,10 @@ final class LobbyUnitBayView {
         Table buttons = new Table();
         float width = Math.max(UiDialog.MIN_BUTTON_WIDTH, Math.max(ok.getPrefWidth(),
               Math.max(apply.getPrefWidth(), cancel.getPrefWidth())));
-        buttons.add(ok).width(width);
+        buttons.add(cancel).width(width);
         buttons.add(apply).width(width).padLeft(space("md"));
-        buttons.add(cancel).width(width).padLeft(space("md"));
-        footer.add(buttons).padTop(space("sm"));
+        buttons.add(ok).width(width).padLeft(space("md"));
+        footer.add(buttons).right();
         return footer;
     }
 

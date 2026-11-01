@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.TemporalAction;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
@@ -21,6 +22,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.scenes.scene2d.utils.Disableable;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Pools;
 import megamek.client.ui.design.DesignTokens;
 
@@ -40,6 +42,8 @@ import megamek.client.ui.design.DesignTokens;
 public final class UiDialog {
     /** A footer button's least width (tokens.md). */
     public static final float MIN_BUTTON_WIDTH = 88;
+    /** How high an unfolding card starts, as a share of its height: a line across the screen. */
+    public static final float FOLDED = .02f;
 
     private final UiKit kit;
     private final UiModal layer;
@@ -53,6 +57,7 @@ public final class UiDialog {
     private UiButton primary;
     private float width = size("dialog.md");
     private Actor focusBefore;
+    private boolean unfold;
 
     /**
      * @param title  the card's title
@@ -132,6 +137,21 @@ public final class UiDialog {
         return this;
     }
 
+    /**
+     * Makes the card unfold as it opens, an immersive moment such as the welcome: it opens from a line across its
+     * middle to its full height over {@code motion.medium} on the token easing, as a screen powering on, while the scrim
+     * darkens over the same time. Without motion it opens at once as any dialog.
+     */
+    public UiDialog unfold(boolean unfold) {
+        this.unfold = unfold;
+        return this;
+    }
+
+    /** How long the card takes to unfold when it does, in seconds; {@link UiReveal} bands can wait for it. */
+    public static float unfoldSeconds() {
+        return DesignTokens.shipped().duration("medium") / 1000f;
+    }
+
     /** The body, which scrolls; the owner fills it. */
     public Table body() {
         return body;
@@ -200,13 +220,44 @@ public final class UiDialog {
     /** Shows the dialog over everything on {@code stage}; {@code motion} false opens it at once. */
     public void show(Stage stage, boolean motion) {
         focusBefore = stage.getKeyboardFocus();
-        layer.fadeIn(motion ? DesignTokens.shipped().duration("fast") / 1000f : 0);
+        boolean unfolds = motion && unfold;
+        layer.fadeIn(motion ? (unfolds ? unfoldSeconds() : DesignTokens.shipped().duration("fast") / 1000f) : 0);
         stage.addActor(layer);
         layer.open(true);
         layer.validate();
+        if (unfolds) {
+            unfoldCard();
+        }
         Actor first = firstFocus();
         stage.setKeyboardFocus(first == null ? layer : first);
         stage.setScrollFocus(scroll);
+    }
+
+    private void unfoldCard() {
+        float[] easing = DesignTokens.shipped().easing();
+        card.setTransform(true);
+        card.setOrigin(Align.center);
+        card.setScaleY(FOLDED);
+        card.addAction(new TemporalAction(unfoldSeconds()) {
+            @Override
+            protected void update(float percent) {
+                card.setScaleY(FOLDED + (1 - FOLDED) * UiReveal.ease(percent, easing));
+                if (Gdx.graphics != null) {
+                    Gdx.graphics.requestRendering();
+                }
+            }
+
+            @Override
+            protected void end() {
+                card.setScaleY(1);
+                card.setTransform(false);
+            }
+        });
+    }
+
+    /** Whether the card is still unfolding. */
+    public boolean unfolding() {
+        return card.getScaleY() < 1;
     }
 
     /** Whether the dialog shows. */

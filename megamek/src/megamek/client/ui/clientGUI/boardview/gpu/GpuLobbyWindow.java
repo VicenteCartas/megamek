@@ -144,6 +144,8 @@ public final class GpuLobbyWindow {
     private static ClientGUI displaced;
     /** The client whose lobby an open from another thread is about to show. */
     private static volatile ClientGUI pending;
+    /** EDT: the client whose map setup opened the 3D preview, so its lobby comes back to the map setup. */
+    private static ClientGUI previewedFromMapSetup;
 
     private final ClientGUI gui;
     private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
@@ -351,6 +353,9 @@ public final class GpuLobbyWindow {
     private Timer mapTimer;
     private volatile BufferedImage lastMap;
 
+    /** EDT: set when the lobby comes back from a 3D preview the map setup opened, to show the map setup again. */
+    private boolean reopenMapSetup;
+
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
     }
@@ -380,6 +385,8 @@ public final class GpuLobbyWindow {
             active.close();
         }
         GpuLobbyWindow window = new GpuLobbyWindow(gui);
+        window.reopenMapSetup = previewedFromMapSetup == gui;
+        previewedFromMapSetup = null;
         active = window;
         gui.getClient().getGame().addGameListener(window.gameListener);
         PreferenceManager.getClientPreferences().addPreferenceChangeListener(window.preferenceListener);
@@ -1288,7 +1295,10 @@ public final class GpuLobbyWindow {
             case SAVE -> saveMapSetup();
             case RANDOM_MAP -> openRandomMap();
             case CONDITIONS -> openConditions();
-            case PREVIEW_3D -> battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
+            case PREVIEW_3D -> {
+                previewedFromMapSetup = gui;
+                battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
+            }
             case HELP -> {
                 try {
                     new HelpDialog(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
@@ -2211,6 +2221,10 @@ public final class GpuLobbyWindow {
         }
         swingDialogs.presented();
         refresh();
+        if (reopenMapSetup) {
+            reopenMapSetup = false;
+            openMapSetup();
+        }
     }
 
     private void finished(Throwable failure) {

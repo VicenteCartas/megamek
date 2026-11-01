@@ -538,6 +538,21 @@ public final class GpuStartWindow {
         }
     }
 
+    /**
+     * EDT: shows the welcome on the open start screen while the Commander still wants it at each start. True when it
+     * is handled: shown, or not wanted; false when no start screen can show it, so the Swing form should.
+     */
+    public static boolean showWelcome() {
+        if (!GUIPreferences.getInstance().getNagForReadme()) {
+            return true;
+        }
+        GpuStartWindow window = open;
+        if (window == null || !window.live || window.screen == null) {
+            return false;
+        }
+        window.post(() -> window.screen.welcomeAtStart());
+        return true;
+    }
     /** GPU thread: the intro has finished, or was skipped. */
     void settled() {
         SwingUtilities.invokeLater(() -> {

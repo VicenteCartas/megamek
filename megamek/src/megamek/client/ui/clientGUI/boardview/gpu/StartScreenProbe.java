@@ -20,7 +20,8 @@ import megamek.MMConstants;
  *     names, or the last one played, and {@code briefing+play} presses its Start {@code MM_START_SHOT_AT} seconds in,
  *     once the scenario has loaded; {@code lobby} hosts a game at once with the Host page's saved values (on the next
  *     free port when the saved one is taken), and the lobby's own probe ({@link GpuLobbyProbe}) takes over from there,
- *     taking the shot itself.</li>
+ *     taking the shot itself. Any page with {@code +welcome} shows the welcome over it, whatever the saved choice
+ *     ({@code main+welcome}); without it a run with a page never shows the welcome.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the screen saves from its own frame buffer, {@code MM_START_SHOT_AT}
  *     seconds after its first frame (by default once the page has slid in, or the greeting has played).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>

@@ -183,6 +183,10 @@ public final class UiTheme implements Disposable {
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
+          // deployed_code: an isometric cube, the 3D preview of a board
+          Map.entry("cube", 0xF720),
+          // The welcome's links: open_in_new, menu_book (the wiki) and forum (Discord)
+          Map.entry("open-in-new", 0xE89E), Map.entry("book", 0xEA19), Map.entry("forum", 0xE0BF),
           // shield_person: the Game Master's toast (Token v0) and seat; cancel: a no in the seat's vote
           Map.entry("shield-person", 0xF650), Map.entry("cancel", 0xE5C9),
           // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,

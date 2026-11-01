@@ -279,12 +279,12 @@ final class LobbyC3View {
         peer.setVisible(picture.peerVisible());
         disconnect.setVisible(picture.disconnectVisible());
         actions.clearChildren();
-        status.setAlignment(Align.center);
-        actions.add(status).growX().row();
-        // The main action first, centred and of one width, as in every footer
+        status.setAlignment(Align.left);
+        actions.add(status).growX().minWidth(0).left();
+        // A full panel's command bar: the status left, the actions bottom right with the main one in the corner
         List<UiButton> shown = new ArrayList<>();
         float widest = UiDialog.MIN_BUTTON_WIDTH;
-        for (UiButton button : List.of(build, peer, disconnect, autoAssignPlan, discard)) {
+        for (UiButton button : List.of(discard, autoAssignPlan, disconnect, peer, build)) {
             if (button.isVisible()) {
                 shown.add(button);
                 widest = Math.max(widest, button.getPrefWidth());
@@ -294,7 +294,7 @@ final class LobbyC3View {
         for (UiButton button : shown) {
             buttons.add(button).width(widest).padLeft(buttons.getCells().isEmpty() ? 0 : space("md"));
         }
-        actions.add(buttons).center().padTop(shown.isEmpty() ? 0 : space("sm"));
+        actions.add(buttons).right().padLeft(shown.isEmpty() ? 0 : space("md"));
 
         diagrams.clearChildren();
         for (PlanCard card : picture.plans()) {

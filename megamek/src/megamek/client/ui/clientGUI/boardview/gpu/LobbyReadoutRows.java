@@ -87,8 +87,8 @@ final class LobbyReadoutRows {
                                 lines = new Table();
                                 lines.left().top();
                             }
-                            // One table for a run of lines, so their values start at the same place
-                            lines.add(kit.typeLabel(label, "body", "text.secondary")).top().left()
+                            // Each label in the readout's first column, so values start where the tables' do
+                            lines.add(wrapped(label, "body", "text.secondary")).width(columns.label()).top().left()
                                   .padRight(space("md")).padTop(space("xxs"));
                             lines.add(wrapped(value, "body", "text.primary")).growX().minWidth(0).top()
                                   .padTop(space("xxs")).row();
@@ -124,14 +124,18 @@ final class LobbyReadoutRows {
         return heading;
     }
 
-    /** The widths of a readout's table columns: the leading columns by place, and the last column of every table. */
-    private record Columns(float[] leading, float last) { }
+    /**
+     * The widths of a readout's columns: the labels of its lines, which the tables' first column shares, the tables'
+     * leading columns by place, and the last column of every table.
+     */
+    private record Columns(float label, float[] leading, float last) { }
 
     /**
      * A run of table rows as one table, as wide as the widest of the readout's tables: its leading cells in the
      * readout's leading columns, then its last column where every table's last column stands, so the last columns
      * of tables of different widths (a TRO's mass and tonnage, or a calculation's results) line up down the readout.
-     * A table of a single column runs to the edge.
+     * A table of a single column runs to the edge; one of two columns is label and value pairs, its value where the
+     * readout's lines put theirs.
      */
     private Table table(List<EntityReadout.Row> run, Columns columns) {
         Table table = new Table();
@@ -152,6 +156,12 @@ final class LobbyReadoutRows {
             for (int i = 0; i < count - 1; i++) {
                 table.add(wrapped(cell(row, i), type, role)).width(columns.leading()[i]).left().top()
                       .padRight(space("md")).padTop(space("xxs"));
+            }
+            if (count == 2) {
+                // Label and value pairs (a summary's availability): the value starts where the lines' values do
+                table.add(wrapped(cell(row, 1), type, role)).growX().minWidth(0).left().top().padTop(space("xxs"));
+                table.row();
+                continue;
             }
             for (int i = count - 1; i < columns.leading().length; i++) {
                 table.add().width(columns.leading()[i]).padRight(space("md"));
@@ -224,16 +234,30 @@ final class LobbyReadoutRows {
                         widths.add(width);
                     }
                 }
-                last = Math.max(last, textWidth(cell(row, count - 1), type));
+                if (count > 2) {
+                    last = Math.max(last, textWidth(cell(row, count - 1), type));
+                }
             }
         }
         float cap = size("dialog.sm") / 2;
+        float label = 0;
+        for (EntityReadout.Row row : rows) {
+            if (isLine(row) && !row.cells().isEmpty()) {
+                label = Math.max(label, textWidth(row.cells().get(0), "body"));
+            }
+        }
+        label = (float) Math.ceil(Math.min(label, cap));
         float[] leading = new float[Math.max(0, widest - 1)];
         for (int i = 0; i < leading.length; i++) {
             float width = i < widths.size() ? widths.get(i) : 0;
             leading[i] = (float) Math.ceil(Math.min(width, (i == 0) ? Math.max(location, cap) : cap));
         }
-        return new Columns(leading, (float) Math.ceil(Math.min(last, cap)));
+        if (leading.length > 0) {
+            // The lines' labels and the tables' first column are one column
+            leading[0] = Math.max(leading[0], label);
+            label = leading[0];
+        }
+        return new Columns(label, leading, (float) Math.ceil(Math.min(last, cap)));
     }
 
     private float textWidth(String text, String type) {

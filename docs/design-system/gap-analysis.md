@@ -37,7 +37,7 @@ Agreed so far:
 | Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case, the [type width](tokens.md#type-width) and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
 | Type width | **Final.** Roboto Condensed (`wdth` 75) for game mode's framing roles (display, headline, title, button, tab, overline) and a new `name` role for unit and pilot names (`body.strong`, sentence case), at the same weight (500) and tracking rules; body, small, caption, field labels, tables, values and running text stay regular width, and app mode is all regular width. Condensed packs some 15-20% more into narrow HUD columns and reads as technical and military; it stays off running text, tables and app mode because condensed letters crowd at 10-12 px and tire in long text. hud-v3's wide tracking on mixed case is not adopted: it uses up the space condensed saves. All condensed roles are medium, so Swing needs one more static face, Roboto Condensed Medium. See [tokens.md](tokens.md#type-width). |
 | Panels and rails | **Final.** Ticked frames (panels, dialog cards, status cards) draw their edge only at the top and bottom, a paper roll, since the ticks close the sides. The edge stays the quiet `border.subtle` so busy screens don't fill with lines (revisited and kept). Only the outermost frame has ticks: cards in a card grid stay plain, so a grid doesn't repeat a tick set per card. hud-v3's `panel-rails` (the Tactical View chip) keeps its rails as `token-rails`; `token-frame` is the plain frame. See [tokens.md](tokens.md#panels). |
-| Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. See [tokens.md](tokens.md#dialogs). |
+| Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. Full-screen panels are the exception: they end in a bottom-right command bar with the main action in the corner. See [tokens.md](tokens.md#dialogs). |
 | Segmented control | **Final.** Separate segments, `xs` apart, each with its own edge, instead of a joined frame with hairlines, in both sizes: hud-v3's joined `hud-pill` becomes the compact size, not a second look. See [tokens.md](tokens.md#segmented-control). |
 | Primary button | **Final.** The `surface.inverse` face, hud-v3's cream `hud-main` (dark in light mode), not mint, so mint stays for focus; checked toggles share its look. See [tokens.md](tokens.md#buttons). |
 | Menus and popups | **Final.** A plain popup frame without corner ticks in both modes; ticks frame lasting containers (panels, dialogs, status cards), and submenus would stack them. See [tokens.md](tokens.md#menus). |
@@ -1132,6 +1132,32 @@ work for Swing, and item 11 is under investigation.
        Checks: `UnitConfigFormTest` (the compass thirds, the zone hexes following offset and width), the on-demand
        `UnitBaySmokeTest` (a click on the picture chooses the zone, the offset steps it in, the hint), and
        `LobbyC3ManagerSmokeTest`. Live: `lobby+configure+bayclick=bay-tab-deployment,bay-zone-<id>` and `lobby+c3`.
+     - ~~Review polish 3~~. From the third live review:
+       - Start screen welcome: the Swing licensing dialog is now `StartWelcome`, a token card that unfolds from a
+         line at its centre while the screen behind darkens (`UiDialog.unfold`), then reveals its bands: the
+         version, the unofficial-software callout in `body.strong`, overline sections for the open-source rules and
+         for help and community (wiki, Discord), and the trademark line in muted text. "Don't show this again" and
+         Acknowledge keep `NagForReadme`; Quit (and Escape) leave. Without a live start screen the Swing dialog
+         still shows.
+       - Requisition: the category tab (Meks, Vehicles, ...) is kept with the other filters in the
+         `RequisitionFilters` preference (`C:<CATEGORY>;`), so reopening it shows the tab and filters last used.
+       - Readouts: label/value rows share one label column, as wide as the widest label (at most half a
+         `dialog.sm`) and the same as the tables' first column, so values such as the year and the C-bill cost line
+         up with each other and with the tables below. A two-column table (the summary's availability) is label and
+         value pairs, so its values start there too instead of where wider tables put their last column.
+       - Firing arcs: the gaps between sectors are an even `space.md` band, so each sector's sides are straight and
+         parallel to the divider instead of fanning out from the centre.
+       - Pilot tab: Random Skill is top-aligned with the skill dials.
+       - Full panels (unit bay, C3 manager, map setup) end in a game-style command bar: the status on the left, the
+         buttons bottom right with the main one in the corner (Cancel, Apply, OK; the C3 actions then Build). Cards
+         keep their centred footer, main action first.
+       - Map setup: Preview 3D has a cube icon, and closing the preview returns to map setup instead of the lobby.
+         On a 1080-high window the drawer no longer overflows under the command bar: it scrolls, and its board list
+         keeps at least four rows.
+       Checks: `RequisitionCatalogTest` (the kept category), `UiArcDiagramTest` (the even gap), the on-demand
+       `StartWelcomeSmokeTest` (unfold timing, the blocked screen, links, checkbox, Enter, Quit and Escape),
+       `UnitBaySmokeTest`, `LobbyC3ManagerSmokeTest`, `LobbyMapSetupSmokeTest` and `LobbyDossierTabsSmokeTest`.
+       Live: `main+welcome`, `lobby+readout`, `lobby+c3`, `lobby+mapsetup` and the pilot tab.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
          loading game options, a loadout and a unit list through the real system file dialog was checked (L18);

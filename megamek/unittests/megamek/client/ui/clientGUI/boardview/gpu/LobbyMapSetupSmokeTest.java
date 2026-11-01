@@ -67,7 +67,7 @@ class LobbyMapSetupSmokeTest {
 
             click(ui, body.findActor("map-medium-space"));
             assertEquals(MapSettings.MEDIUM_SPACE, fixture.form.settings().getMedium(), "the segmented control sets the map type");
-            assertFalse(body.findActor("map-drawer").isVisible(), "space has no boards to pick");
+            assertFalse(body.findActor("map-drawer-scroll").isVisible(), "space has no boards to pick");
 
             body.remove();
         });

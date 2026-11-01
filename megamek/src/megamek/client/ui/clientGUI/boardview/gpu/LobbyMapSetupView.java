@@ -107,7 +107,8 @@ final class LobbyMapSetupView {
     private final WarTable table = new WarTable();
     private final Label spaceHint;
     private final Table drawer = new Table();
-    private Cell<Table> drawerCell;
+    private final ScrollPane drawerScroll;
+    private Cell<ScrollPane> drawerCell;
     private final Table inspector = new Table();
     private final Label boardCount;
     private final UiKit.TokenSearch search;
@@ -254,7 +255,9 @@ final class LobbyMapSetupView {
         listScroll = kit.scrollList(list, true, false);
         listScroll.setScrollingDisabled(true, false);
         listScroll.setName("map-board-list");
-        drawer.add(listScroll).grow().minHeight(0).padTop(space("sm")).row();
+        // A few boards at least: on a short window the drawer scrolls rather than squeezing the list away
+        float listMinimum = 4 * size("control.md");
+        drawer.add(listScroll).grow().minHeight(listMinimum).prefHeight(listMinimum).padTop(space("sm")).row();
         preview = kit.pictureCard("", 1);
         preview.setName("map-preview");
         preview.maxHeight(size("dialog.sm") / 3);
@@ -285,7 +288,10 @@ final class LobbyMapSetupView {
         placing.add(random).padRight(space("xs")).padTop(space("xs"));
         placing.add(surprise).padTop(space("xs"));
         drawer.add(placing).growX().padTop(space("sm")).row();
-        drawerCell = main.add(drawer).width(size("dialog.sm")).growY().padLeft(space("md"));
+        drawerScroll = kit.scrollList(drawer, true, false);
+        drawerScroll.setScrollingDisabled(true, false);
+        drawerScroll.setName("map-drawer-scroll");
+        drawerCell = main.add(drawerScroll).width(size("dialog.sm")).growY().minHeight(0).padLeft(space("md"));
         body.add(main).grow().minHeight(0).padTop(space("md")).row();
 
         Table footer = new Table();
@@ -298,7 +304,7 @@ final class LobbyMapSetupView {
         footer.add(save).padRight(space("xs"));
         footer.add(advancedSearch);
         footer.add().growX();
-        preview3D = footButton("button-secondary", "wireframe", "BoardSelectionDialog.ViewGameBoard3D",
+        preview3D = footButton("button-secondary", "cube", "BoardSelectionDialog.ViewGameBoard3D",
               "map-preview-3d", Action.PREVIEW_3D);
         footer.add(preview3D).padRight(space("sm"));
         generate = kit.button("button-primary" + UiTheme.COMPACT, "play",
@@ -382,9 +388,9 @@ final class LobbyMapSetupView {
         advancedSearch.setDisabled(!picture.advancedSearch());
         generate.setDisabled(!picture.generable());
         kit.tip(generate, true).getActor().setText(plain(picture.generateTip()));
-        drawer.setVisible(!space);
+        drawerScroll.setVisible(!space);
         drawerCell.width(space ? 0 : size("dialog.sm")).padLeft(space ? 0 : space("md"));
-        drawer.invalidateHierarchy();
+        drawerScroll.invalidateHierarchy();
         spaceHint.setVisible(space);
         table.show(picture);
         if (!picture.boards().equals(listed)) {

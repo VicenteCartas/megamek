@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
@@ -66,9 +67,11 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiListPopup;
+import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.util.TipOfTheDay;
@@ -136,6 +139,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     private boolean shotSaved;
     /** Whether the developer switch's {@code briefing+play} has pressed the briefing's Start. */
     private boolean playPressed;
+    /** The welcome while it shows, or null. */
+    private StartWelcome welcome;
 
     private BufferedImage art;
     GpuBoardSkin boardSkin;
@@ -259,10 +264,53 @@ final class GpuStartScreen extends ApplicationAdapter {
         applyProbe();
     }
 
+    /** GPU thread: the welcome MegaMek shows at start; a developer switch's run shows it only when it asks to. */
+    void welcomeAtStart() {
+        if (probe == null || probe.page() == null) {
+            showWelcome();
+        }
+    }
+
+    /**
+     * GPU thread: shows the welcome over the screen, unless it already shows. Acknowledge with the box ticked stops it
+     * showing at later starts; the developer switch's welcome keeps the preference as it is.
+     */
+    void showWelcome() {
+        if (stage == null || disposed || (welcome != null && welcome.isOpen())) {
+            return;
+        }
+        welcome = new StartWelcome(kit, motion, new StartWelcome.Answer() {
+            @Override
+            public void acknowledged(boolean dontShowAgain) {
+                welcome = null;
+                if (dontShowAgain && probe == null) {
+                    SwingUtilities.invokeLater(() -> {
+                        preferences.setNagForReadme(false);
+                        PreferenceManager.getInstance().save();
+                    });
+                }
+            }
+
+            @Override
+            public void quit() {
+                window.dispatch(Action.QUIT);
+            }
+
+            @Override
+            public void browse(String url) {
+                SwingUtilities.invokeLater(() -> UIUtil.browse(url));
+            }
+        });
+        welcome.show(stage);
+    }
+
     /** Opens the page the developer switch asks for, in the state its options ask for. */
     private void applyProbe() {
         if (probe == null || probe.page() == null) {
             return;
+        }
+        if (probe.has("welcome")) {
+            showWelcome();
         }
         if (probe.lobby()) {
             showPage(Page.HOST);
@@ -689,6 +737,10 @@ final class GpuStartScreen extends ApplicationAdapter {
                 if (introTime() < StartTimeline.INTRO_END) {
                     skip();
                     return true;
+                }
+                if (UiModal.active(stage) != null) {
+                    // A dialog over the screen answers its own keys
+                    return false;
                 }
                 // An open list, and a select's own opening keys, are the select's; the event reaches here after
                 Actor target = event.getTarget();

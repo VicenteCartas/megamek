@@ -363,7 +363,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_EDITOR_SIDE_VIEW = "BoardEditorSideView";
     /** Whether the lobby requisition dossier's Readout tab shows the TRO rather than the Summary. */
     public static final String REQUISITION_READOUT_TRO = "RequisitionReadoutTro";
-    /** The lobby requisition's kept weights, tech bases and rules levels. */
+    /** The lobby requisition's kept category tab, weights, tech bases and rules levels. */
     public static final String REQUISITION_FILTERS = "RequisitionFilters";
     /** Whether the lobby's chat dock is folded. */
     public static final String LOBBY_CHAT_FOLDED = "LobbyChatFolded";
@@ -2132,7 +2132,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         return store.getBoolean(REQUISITION_READOUT_TRO);
     }
 
-    /** The lobby requisition's kept weights, tech bases and rules levels, as {@code Filters.kept()} writes them. */
+    /** The lobby requisition's kept category tab, weights, tech bases and rules levels, as {@code Filters.kept} writes them. */
     public String getRequisitionFilters() {
         return store.getString(REQUISITION_FILTERS);
     }

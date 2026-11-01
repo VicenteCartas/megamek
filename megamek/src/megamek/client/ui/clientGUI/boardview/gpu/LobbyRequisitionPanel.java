@@ -143,12 +143,12 @@ final class LobbyRequisitionPanel {
         /** Keeps whether the dossier's Readout shows the TRO. */
         default void readoutTro(boolean tro) { }
 
-        /** The kept weights, tech bases and rules levels ({@code Filters.kept()}, a client preference). */
+        /** The kept category tab, weights, tech bases and rules levels ({@code Filters.kept(Category)}, a preference). */
         default String keptFilters() {
             return "";
         }
 
-        /** Keeps the weights, tech bases and rules levels as {@code Filters.kept()} wrote them. */
+        /** Keeps the category tab, weights, tech bases and rules levels as {@code Filters.kept(Category)} wrote them. */
         default void keptFilters(String kept) { }
     }
 
@@ -453,6 +453,11 @@ final class LobbyRequisitionPanel {
         visit = RequisitionVisit.of(current);
         added = List.of();
         filters = filters.withKept(actions.keptFilters(), requisition.rules().levels());
+        category = Filters.keptCategory(actions.keptFilters());
+        tabs.select(category.ordinal());
+        if (filters.type() != null && filters.type().category() != category) {
+            filters = filters.withType(null);
+        }
         refreshFilters();
         refreshAdded();
         runSearch();
@@ -699,6 +704,7 @@ final class LobbyRequisitionPanel {
         if (filters.type() != null && filters.type().category() != next) {
             filters = filters.withType(null);
         }
+        actions.keptFilters(filters.kept(next));
         refreshFilters();
         runSearch();
     }
@@ -715,7 +721,7 @@ final class LobbyRequisitionPanel {
 
     private void setFilters(Filters next) {
         filters = next;
-        actions.keptFilters(next.kept());
+        actions.keptFilters(next.kept(category));
         refreshFilters();
         runSearch();
     }
