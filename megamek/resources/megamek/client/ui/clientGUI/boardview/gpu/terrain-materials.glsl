@@ -21,20 +21,27 @@ struct TerrainMaterial {
 float materialBlendWidth() { return .13 + min(.2, pixelMetres * .16); }
 
 #ifdef sublevelFloorFlag
-// Each family's floor from level -1 down (GpuTerrain.SUBLEVEL_FLOORS): its colour layer and metres per repeat; a
-// negative layer where the family keeps its ground.
-uniform vec2 u_floorMaterials[FLOOR_FAMILIES];
+// Each family's floor from level -1 down (GpuTerrain.SUBLEVEL_FLOORS): its colour layer, metres per repeat and the
+// share of the sunken ground it covers (1 all of it); a negative layer where the family keeps its ground.
+uniform vec3 u_floorMaterials[FLOOR_FAMILIES];
 
 // How far the family's floor replaces its ground cover at a point (world in metres): none above level -.3, all from
 // about -.72 down, along a contour 23 m and 8 m fields break by up to .28 of a level (level 0 never, level -1 always);
 // level ground and gentle lower slopes only, so banks and walls keep their own materials.
-float floorShare(vec3 world, vec3 face, float familyId, out vec2 floorMaterial) {
+float floorShare(vec3 world, vec3 face, float familyId, float broad, float fine, out vec3 floorMaterial) {
     int family = int(familyId + .5);
-    floorMaterial = family >= 0 && family < FLOOR_FAMILIES ? u_floorMaterials[family] : vec2(-1.0);
+    floorMaterial = family >= 0 && family < FLOOR_FAMILIES ? u_floorMaterials[family] : vec3(-1.0);
     if (floorMaterial.x < 0.0) return 0.0;
     float contour = .36 * (textureLod(u_rainNoise, world.xy / 23.0 + .63, 0.0).b - .5)
           + .2 * (textureLod(u_rainNoise, world.xy / 8.0 + .29, 0.0).g - .5);
-    return smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight) * smoothstep(.55, .85, face.z);
+    float share = smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight) * smoothstep(.55, .85, face.z);
+    // A partial floor lies in patches of the ground's own broad and fine fields (metres to tens of metres), which
+    // never line up as a grid.
+    if (share > 0.0 && floorMaterial.z < 1.0) {
+        float edge = mix(.68, .32, floorMaterial.z);
+        share *= smoothstep(edge - .05, edge + .05, broad * .5 + fine * .5);
+    }
+    return share;
 }
 
 // Ground and floor meet by height, as materialWeights blends roles, but feathered wider: a fringe, not a stipple.
@@ -701,8 +708,8 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
       float aboveFoot, float belowRim, float rock, float hardness, float broad, float fine, float region,
       float familyId, vec4 tiles, vec4 layers, float sediment) {
 #ifdef sublevelFloorFlag
-    vec2 floorMaterial;
-    float share = floorShare(world, face, familyId, floorMaterial);
+    vec3 floorMaterial;
+    float share = floorShare(world, face, familyId, broad, fine, floorMaterial);
     TerrainMaterial ground, sunken;
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
@@ -1479,8 +1486,9 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
       float rock, float hardness, float broad, float fine, float region, float sediment, vec4 palette, int slot,
       vec4 tiles, vec4 layers, bool sides, bool single) {
 #ifdef sublevelFloorFlag
-    vec2 floorMaterial;
-    float share = floorShare(world, face, dot(palette, vec4(equal(ivec4(0, 1, 2, 3), ivec4(slot)))), floorMaterial);
+    vec3 floorMaterial;
+    float share = floorShare(world, face, dot(palette, vec4(equal(ivec4(0, 1, 2, 3), ivec4(slot)))), broad, fine,
+          floorMaterial);
     TerrainMaterial ground, sunken;
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
