@@ -84,8 +84,7 @@ uniform float u_cacheClosePixel; // metres: the close view's pixel, the base til
 uniform sampler2DArray u_cacheColour;
 uniform sampler2DArray u_cacheMoments;
 uniform sampler2DArray u_cacheDetail;
-// GpuPageCache's page table: the window of pages of the level the frame reads, each entry a layer plus 4096 times the
-// levels up to the page it reads (a coarser one stands in while a page builds), four to an ivec4.
+// GpuPageCache's page table: the window of pages of the level the frame reads, each entry a layer, four to an ivec4.
 layout(std140) uniform MaterialCachePages {
     vec4 cacheGrid;   // the window's first corner (metres), a page's interior (metres), its texels with both gutters
     vec4 cacheWindow; // pages across and down, gutter texels
@@ -101,9 +100,9 @@ vec4 cachedMaterial(vec2 at, vec2 atDx, vec2 atDy, out vec3 meanNormal, out vec4
     ivec2 page = clamp(ivec2(floor(cell)), ivec2(0), ivec2(cacheWindow.xy) - 1);
     int index = page.y * int(cacheWindow.x) + page.x;
     int entry = cachePages[index >> 2][index & 3];
-    float size = cacheGrid.z * exp2(float(entry >> 12));
+    float size = cacheGrid.z;
     float interior = cacheGrid.w - 2.0 * cacheWindow.z;
-    vec3 uv = vec3((cacheWindow.z + fract(at / size) * interior) / cacheGrid.w, float(entry & 4095));
+    vec3 uv = vec3((cacheWindow.z + fract(at / size) * interior) / cacheGrid.w, float(entry));
     // Explicit gradients: a quad that straddles two pages keeps its footprint.
     float scale = interior / (size * cacheGrid.w);
     vec2 dx = atDx * scale, dy = atDy * scale;

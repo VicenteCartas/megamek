@@ -61,6 +61,8 @@ final class BoardRoad {
         float lateral(float x, float y) {
             return -(x - edge.point.x) * edge.ny + (y - edge.point.y) * edge.nx;
         }
+        /** How far a point lies past the join's border, along its arm: negative short of it. */
+        float past(float x, float y) { return edge.distance(x, y); }
     }
 
     static final float SHOULDER = 1.5f;
@@ -286,10 +288,10 @@ final class BoardRoad {
     static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
 
     /**
-     * Where a loose road (dirt or gravel) meets a paved one at its level, the paved road keeps its carriageway whole up to
-     * their border, where it ends square (a construction edge), and the loose one stops at its edge (GpuRoads#patches).
-     * Two arms of a loose road through adjacent borders into one paved road each meet it on their own, with the ground
-     * between them left as it is.
+     * Where a loose road (dirt or gravel) meets a paved one at its level, the paved road's carriageway ends square on
+     * their border, broken up there over gravel as a bridge landing ends (GpuRoads#painted), and the loose one runs on a
+     * little over it (GpuRoads#runOn), its wheels' lanes merging into the paved road's (#merged). Two arms of a loose road
+     * through adjacent borders into one paved road each meet it on their own, with the ground between them left as it is.
      */
     private BoardRoad meet(BoardScene scene, BoardScene.Tile tile) {
         boolean loose = !paved(tile.road());
@@ -316,6 +318,34 @@ final class BoardRoad {
 
     /** Whether this road meets a road of the other family through the join's side (#meet). */
     boolean meets(Join join) { return (meetings & 1 << join.direction()) != 0; }
+
+    /**
+     * How much of a loose road lies at a point on its run-on past a border where it meets a paved road (#meet): whole up
+     * to the border, wearing out over {@code reach} past it along the arm, of those it lies past, whose course lies
+     * nearest; 1 elsewhere.
+     */
+    float runOn(float x, float y, float reach) {
+        Join arm = null;
+        for (Join join : joins) {
+            if (meets(join) && join.past(x, y) > 0
+                  && (arm == null || Math.abs(join.lateral(x, y)) < Math.abs(arm.lateral(x, y)))) {
+                arm = join;
+            }
+        }
+        return arm == null ? 1 : Math.clamp(1 - arm.past(x, y) / reach, 0, 1);
+    }
+
+    /**
+     * The ground past the borders where this road meets the other family: {@code reach} along each arm, {@code half}
+     * either side of it.
+     */
+    Area pastMeetings(float reach, float half) {
+        Area result = new Area();
+        for (Join join : joins) {
+            if (meets(join)) { result.add(join.edge().band(0, reach, half)); }
+        }
+        return result;
+    }
 
     /** Whether a loose road runs on through the join's side into another loose road's hex at its level (#trackedHexes). */
     boolean tracked(Join join) { return (tracked & 1 << join.direction()) != 0; }
@@ -346,7 +376,7 @@ final class BoardRoad {
 
     /**
      * The carriageways of the paved roads a loose one meets (#meet), widened by {@code margin}, in its tile pixels. A
-     * narrower one stops short of their square ends too, as a spill's reach does.
+     * narrower one stops short of their square ends too.
      */
     Area pavedCarriageway(float margin) {
         Area result = new Area();
@@ -364,10 +394,19 @@ final class BoardRoad {
         return result;
     }
 
-    /** How far a point lies inside the carriageways of the paved roads a loose one meets; negative outside them. */
-    float pavedDepth(float x, float y) {
-        return -distance(paved, BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale(),
-              BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale());
+    /**
+     * How near a point lies to a wheel path of the paved roads a loose one meets (#meet), where their wear places them
+     * (#wearLane, terrain-road.frag asphaltWear): 1 on one, fading out a third of a metre beside it.
+     */
+    float pavedWheels(float x, float y) {
+        float result = 0;
+        for (BoardRoad road : paved) {
+            float dx = (BoardGeometry.centerX(road.coords) - BoardGeometry.centerX(coords)) / BoardGeometry.hexScale();
+            float dy = (BoardGeometry.centerY(road.coords) - BoardGeometry.centerY(coords)) / BoardGeometry.hexScale();
+            float off = Math.abs(road.wearLane(x - dx, y - dy) - WHEEL_OFFSET / (Kind.PAVED.halfWidth / 2));
+            result = Math.max(result, 1 - BoardRelief.smooth((off - .07f) / .13f));
+        }
+        return result;
     }
 
     /**
@@ -1305,23 +1344,59 @@ final class BoardRoad {
     /** Paint can cross inactive hex edges, but each connected approach owns only its side of the mouth. */
     void clipPaint(Area area) { clipEnds(area, 0); }
 
-    /** Clip only real termini. Curves and the shared hub of a junction keep their continuous joins. */
+    /**
+     * Clip only real termini, past each its arm's width (#endReach): curves, the shared hub of a junction and a junction's
+     * other arms keep their continuous joins.
+     */
     private void clipEnds(Area area, float margin) {
         for (End end : ends) {
             var bounds = area.getBounds2D();
             // Bridge footings and their aprons can reach farther than a tile-sized clipping rectangle.
             float reach = (float) (Math.hypot(bounds.getWidth(), bounds.getHeight()) / 2
                   + Math.hypot(bounds.getCenterX() - end.point.x, bounds.getCenterY() - end.point.y) + 1);
-            area.intersect(end.band(-reach, margin, reach));
+            Area past = end.band(margin, reach, endReach(end));
+            past.intersect(arm(end));
+            area.subtract(past);
         }
     }
 
+    /** The ground within {@code length} before each terminus, across its arm (#endReach). */
     Area endZone(float length) {
         Area result = new Area();
         if (length > 0) {
-            for (End end : ends) { result.add(end.band(-length, SHOULDER)); }
+            for (End end : ends) {
+                Area zone = end.band(-length, SHOULDER, endReach(end));
+                zone.intersect(arm(end));
+                result.add(zone);
+            }
         }
         return result;
+    }
+
+    /** How far either side of its course a terminus's arm reaches: its way and the widest landing apron (GpuRoads#bare). */
+    private static float endReach(End end) { return end.point.width + 3 * SHOULDER + 3; }
+
+    /**
+     * The ground nearer a terminus's arm than any other arm of this road (#borders): the wedge between the bisectors with
+     * its neighbours, so that a junction's other arms keep their own ground up to the end of this one.
+     */
+    private Area arm(End end) {
+        double heading = Math.atan2(end.ny, end.nx), below = -Math.PI, above = Math.PI;
+        for (Point border : borders) {
+            double turn = Math.atan2(border.y, border.x) - heading;
+            turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+            // The arm's own border, to the bend of its course.
+            if (Math.abs(turn) < .2) { continue; }
+            if (turn > 0) { above = Math.min(above, turn); } else { below = Math.max(below, turn); }
+        }
+        Path2D.Float wedge = new Path2D.Float();
+        wedge.moveTo(0, 0);
+        for (int i = 0; i <= 8; i++) {
+            double angle = heading + (below + (above - below) * i / 8) / 2;
+            wedge.lineTo(1024 * (float) Math.cos(angle), 1024 * (float) Math.sin(angle));
+        }
+        wedge.closePath();
+        return new Area(wedge);
     }
 
     float endDistance(float x, float y) {
@@ -1335,17 +1410,38 @@ final class BoardRoad {
     Coords owner() { return circle == null ? coords : circle.owner; }
     List<Join> joins() { return joins; }
 
-    /** How far a point lies from the centre line of its lane, whichever side. */
-    private float laneOffset(float x, float y) {
+    /**
+     * How far a point lies from the centre line of its lane, whichever side, its lanes closed in on the course by
+     * {@code merged} where a paved arm nears the loose road it meets, whose one lane its traffic drives (#merged).
+     */
+    private float laneOffset(float x, float y, float merged) {
         PathSample nearest = pathSample(x, y, paintPaths(), ALL_ENDS);
-        return Math.abs(nearest.distance() - laneCenter(nearest.width()));
+        return Math.abs(nearest.distance() - laneCenter(nearest.width()) * (1 - merged));
+    }
+
+    /**
+     * How far a paved road's traffic has merged into the single lane of a loose road it meets (#meet): 1 on their
+     * border, where both its lanes' wheel paths run on in the loose road's, easing to 0 MERGE back along the arm.
+     */
+    private float merged(float x, float y) {
+        float result = 0;
+        for (Join join : joins) {
+            if ((squared & 1 << join.direction()) == 0
+                  || Math.abs(join.lateral(x, y)) > join.edge().point().width + SHOULDER + 3) { continue; }
+            result = Math.max(result, BoardRelief.smooth(1 + join.past(x, y) / MERGE));
+        }
+        return result;
     }
 
     /**
      * Where a point lies across its lane for paved wear (terrain-road.frag): 0 on the lane's centre line, 1 at its edge,
      * a two-way road's middle or kerb, so its wheel paths lie at WHEEL_OFFSET of that.
      */
-    float wearLane(float x, float y) { return Math.min(1, laneOffset(x, y) / (Kind.PAVED.halfWidth / 2)); }
+    float wearLane(float x, float y) {
+        // Where the lanes merge, the asphalt beside the one lane lies untrodden, short of the kerb's grit.
+        float merged = merged(x, y);
+        return Math.min(1 - .2f * merged, laneOffset(x, y, merged) / (Kind.PAVED.halfWidth / 2));
+    }
 
     /**
      * How far into a junction's hub a point lies for paved wear: 1 where the approaches' lanes cross and turning
@@ -1380,10 +1476,12 @@ final class BoardRoad {
     }
 
     /** {@link #track}'s whole width: a loose road's half width with its shoulder. */
-    private static final float TRACK_REACH = Kind.DIRT.halfWidth + SHOULDER;
+    static final float TRACK_REACH = Kind.DIRT.halfWidth + SHOULDER;
 
     /** Tile pixels per metre. */
     private static final float METRE = BoardGeometry.TILE_WIDTH / 30;
+    /** How far back from a loose road a paved arm's lanes start to close in on its one (#merged). */
+    private static final float MERGE = 12 * METRE;
     /** A dirt track's wheel ruts lie this far either side of each of its courses (#ruts): a farm vehicle's half gauge. */
     static final float RUT_OFFSET = .9f * METRE;
     /** How far past a rut's centre line {@link #ruts} still measures: its loose soil lies within it. */
@@ -1392,22 +1490,23 @@ final class BoardRoad {
     private static final float RUT_BARE = .65f * METRE;
     /** Over how much farther its grass thickens back to the meadow's (#grass): beside the ruts, and on their crown. */
     private static final float RUT_THIN = METRE, CROWN_THIN = .25f * METRE;
-    /**
-     * A loose road's track, its half width about each of its courses: a dirt track's ruts with their loose soil, a
-     * gravel road's graded edge (terrain-road.frag GRAVEL_EDGE).
-     */
+    /** A gravel road's graded edge either side of its course (terrain-road.frag GRAVEL_EDGE), where its grass begins. */
+    private static final float GRAVEL_EDGE = 3.4f * METRE;
+
+    /** A dirt track's track, its half width about each of its courses: its ruts with their loose soil. */
     private static final float TRACK_HALF = RUT_OFFSET + RUT_REACH;
 
     /**
      * The ground this carriageway ({@link #way}) is levelled and cleared for (BoardRoadGrade, BoardRelief): where its
-     * bed is a loose road's track ({@link #trackBed}), its courses only {@link #TRACK_HALF} wide, ends as they are, so
-     * the slopes beside a dirt or gravel road stand back from its track, not from the paved width its paint's
-     * coordinates span; else this road.
+     * bed is a loose road's track ({@link #trackBed}), its courses only as wide as that track ({@link #TRACK_HALF}, a
+     * gravel road's {@link #GRAVEL_EDGE}), ends as they are, so the slopes beside a dirt or gravel road stand back from
+     * its track, not from the paved width its paint's coordinates span; else this road.
      */
     BoardRoad terrainBed(BoardScene scene, BoardScene.Tile tile) {
         if (!trackBed(scene, tile)) { return this; }
+        float half = tile.road() == Kind.GRAVEL ? GRAVEL_EDGE : TRACK_HALF;
         List<List<Point>> narrow = paths.stream()
-              .map(path -> path.stream().map(point -> new Point(point.x, point.y, TRACK_HALF)).toList()).toList();
+              .map(path -> path.stream().map(point -> new Point(point.x, point.y, half)).toList()).toList();
         BoardRoad bed = new BoardRoad(coords, narrow, borders, ends, joins, circle);
         bed.squared = squared;
         return bed;
@@ -1636,23 +1735,31 @@ final class BoardRoad {
     }
 
     /**
-     * How much of the meadow's grass a dirt track leaves at a point, 0 to 1: none on a rut or its lip (#ruts), thickening
-     * back beside them over RUT_THIN and on their crown over CROWN_THIN, as its soil thins out into the grass
-     * (terrain-road.frag#dirtTrack); none over the whole road where gravel spreads on over it towards a gravel neighbour
-     * (GpuRoads#patches). A neighbour whose own track draws its hex (#trackedHexes) decides there.
+     * How much of the meadow's grass a loose road of {@code kind} leaves at a point, 0 to 1, thickening back over RUT_THIN
+     * as its soil or stone thins out into the grass (terrain-road.frag): a gravel road's from its graded edge
+     * (GRAVEL_EDGE, #track); a dirt track's from the lips of its ruts (#ruts), on their crown over CROWN_THIN, and where
+     * gravel spreads on over it towards a gravel neighbour (GpuRoads#patches), from that stone's edge too, as much as the
+     * spread covers. A neighbour whose own track draws its hex (#trackedHexes) decides there.
      */
-    float grass(float x, float y) {
+    float grass(Kind kind, float x, float y) {
         float wx = BoardGeometry.centerX(coords) + x * BoardGeometry.hexScale();
         float wy = BoardGeometry.centerY(coords) + y * BoardGeometry.hexScale();
         for (int d = 0; d < 6; d++) {
             if ((tracked & 1 << d) != 0 && BoardGeometry.contains(coords.translated(d), wx, wy)) { return 1; }
         }
         if (distance(x, y) >= SHOULDER) { return 1; }
-        for (Join join : joins) {
-            if (tracked(join) && join.kind() == Kind.GRAVEL && join.edge().distance(x, y) > -JOIN_REACH) { return 0; }
-        }
+        float stone = BoardRelief.smooth((track(x, y).across() * TRACK_REACH - GRAVEL_EDGE) / RUT_THIN);
+        if (kind == Kind.GRAVEL) { return stone; }
         float rut = ruts(x, y).across() * (RUT_OFFSET + RUT_REACH) - RUT_OFFSET;
-        return BoardRelief.smooth((Math.abs(rut) - RUT_BARE) / (rut < 0 ? CROWN_THIN : RUT_THIN));
+        float grass = BoardRelief.smooth((Math.abs(rut) - RUT_BARE) / (rut < 0 ? CROWN_THIN : RUT_THIN));
+        // The spread is whole at the border and gone by the join's reach (GpuRoads#coverage).
+        float spread = 0;
+        for (Join join : joins) {
+            if (tracked(join) && join.kind() == Kind.GRAVEL) {
+                spread = Math.max(spread, Math.min(1, 2 * join.coverage(x, y)));
+            }
+        }
+        return BoardRelief.lerp(grass, Math.min(grass, stone), spread);
     }
 
     /** Where a dirt track's ruts and their loose soil can lie (#ruts): within their reach of them, and its scuffed middle. */

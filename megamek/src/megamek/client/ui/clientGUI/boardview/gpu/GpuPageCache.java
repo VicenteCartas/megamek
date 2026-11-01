@@ -30,7 +30,7 @@ import org.lwjgl.opengl.GL33;
  * as many steps as its owner needs (one a budget unit). The owner names the pages it needs each frame and builds a page
  * when {@link #fill} asks; this class keeps the layers (the pages needed this frame pinned, the others out least
  * recently needed first), readiness, the shaders' page tables (each a std140 uniform block over a window of one
- * level, where a page not ready stands in with its nearest ready coarser one) and the fill budget.
+ * level, where a page not ready reads none: its owner draws that content directly) and the fill budget.
  * <p>
  * A page is ready once its last step has been issued for the current revision, in the layer it holds now; a layer handed
  * to another page never answers for the one before. A page marked {@link #invalidate stale} stays ready, serving its
@@ -47,22 +47,15 @@ final class GpuPageCache implements Disposable {
 
     static final int MORE = 0, DONE = 1, AGAIN = 2;
 
-    /** Which pages of a table's window a coarser ready page may stand in for while they build, and which may serve. */
-    interface StandIns {
-        boolean allowed(int x, int y);
-
-        /** Whether ready page (x, y) of {@code level} may serve window page (wx, wy), itself or standing in. */
-        default boolean serves(int level, int x, int y, int wx, int wy) { return true; }
+    /** Whether a ready page (x, y) of a table's window may serve: its owner may know it lacks content it must hold. */
+    interface Serves {
+        boolean serves(int x, int y);
     }
 
-    /**
-     * Entries of the page table: a layer plus {@link #FALLBACK} times the levels up to the page it reads, or -1; four
-     * packed into each of 1020 ivec4 after a 32-byte header (16 KB).
-     */
+    /** Entries of the page table: a layer, or -1; four packed into each of 1020 ivec4 after a 32-byte header (16 KB). */
     static final int TABLE_ENTRIES = 4080;
     static final int TABLE_HEADER_BYTES = 32;
     static final int TABLE_BYTES = TABLE_HEADER_BYTES + TABLE_ENTRIES * 4;
-    static final int FALLBACK = 4096;
     /** Page tables: one for each window the owner's shaders read (GpuMaterialCache: the tops' and the walls'). */
     static final int TABLES = 2;
     /** The anisotropy a read may take: its footprint stays within the gutter at the levels it reads. */
@@ -350,15 +343,15 @@ final class GpuPageCache implements Disposable {
      * {@code level} from (x0, y0), its first corner at ({@code originX}, {@code originY}) in the owner's units and
      * pages {@code pageSize} of them: each page's {@link #entry}. False if the window holds more pages than the table.
      */
-    boolean upload(int index, int level, int top, int x0, int y0, int columns, int rows, float originX, float originY,
-          float pageSize, StandIns standIns) {
+    boolean upload(int index, int level, int x0, int y0, int columns, int rows, float originX, float originY,
+          float pageSize, Serves serves) {
         if (buffers[index] == 0 || columns <= 0 || rows <= 0 || columns * rows > TABLE_ENTRIES) { return false; }
         table.clear();
         table.putFloat(originX).putFloat(originY).putFloat(pageSize).putFloat(texels);
         table.putFloat(columns).putFloat(rows).putFloat(gutter).putFloat(0);
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < columns; x++) {
-                table.putInt(entry(level, top, x0 + x, y0 + y, standIns));
+                table.putInt(entry(level, x0 + x, y0 + y, serves));
             }
         }
         int used = table.position();
@@ -369,18 +362,10 @@ final class GpuPageCache implements Disposable {
         return true;
     }
 
-    /**
-     * Page (x, y) of {@code level}'s table entry: its layer while it can be read and serves, else, where
-     * {@code standIns} allows, its nearest coarser such page's up to {@code top} (that layer plus {@link #FALLBACK}
-     * times the levels up), else -1.
-     */
-    int entry(int level, int top, int x, int y, StandIns standIns) {
-        int last = standIns.allowed(x, y) ? top : level;
-        for (int up = 0; level + up <= last; up++) {
-            int layer = layer(level + up, x >> up, y >> up);
-            if (layer >= 0 && standIns.serves(level + up, x >> up, y >> up, x, y)) { return layer + up * FALLBACK; }
-        }
-        return -1;
+    /** Page (x, y) of {@code level}'s table entry: its layer while it can be read and serves, else -1. */
+    int entry(int level, int x, int y, Serves serves) {
+        int layer = layer(level, x, y);
+        return layer >= 0 && serves.serves(x, y) ? layer : -1;
     }
 
     /** Binds page table {@code index} to uniform block binding {@code binding}. */

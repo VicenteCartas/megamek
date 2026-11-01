@@ -116,14 +116,16 @@ final class GpuGroundCover implements Disposable {
     }
 
     /**
-     * How much grass a road leaves a root (world x, y), 0 to 1: none on its way, shoulder and {@code margin} tile pixels;
-     * of a dirt track none on its ruts, thinning in beside and between them (BoardRoad#grass).
+     * How much grass a road leaves a root (world x, y), 0 to 1: none on a paved road's way, shoulder and {@code margin}
+     * tile pixels; a loose road's thins in towards its stone or its ruts (BoardRoad#grass).
      */
     private static float roadside(BoardScene scene, BoardRoad road, float x, float y, float margin) {
         float rx = (x - BoardGeometry.centerX(road.coords())) / BoardGeometry.hexScale();
         float ry = (y - BoardGeometry.centerY(road.coords())) / BoardGeometry.hexScale();
         var tile = scene.tile(road.coords());
-        if (tile != null && tile.road() == BoardRoad.Kind.DIRT) { return road.grass(rx, ry); }
+        if (tile != null && (tile.road() == BoardRoad.Kind.DIRT || tile.road() == BoardRoad.Kind.GRAVEL)) {
+            return road.grass(tile.road(), rx, ry);
+        }
         return road.distance(rx, ry) < BoardRoad.SHOULDER + margin ? 0 : 1;
     }
 

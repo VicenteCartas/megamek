@@ -423,7 +423,7 @@ float asphaltWear(vec2 m, float pixel, vec2 heading, float lane, float hub, vec2
 //   (BoardRoad#trackHub).
 const float TRACK_HALF = 5.96;  // HexTile.ROAD_HALF_WIDTH plus BoardRoad.SHOULDER in metres: gravel's B range
 const float TRACK_WHEEL = 1.08; // BoardRoad.WHEEL_OFFSET in metres: the wheel tracks' centres, where joins carry their ruts
-const float GRAVEL_EDGE = 2.9;  // a gravel road's graded edge
+const float GRAVEL_EDGE = 3.4;  // a gravel road's graded edge (BoardRoad.GRAVEL_EDGE)
 const float GRAVEL_STRAY = .5;  // and how far beyond it stray stones run into the grass
 const float RUT_OFFSET = .9;    // BoardRoad.RUT_OFFSET in metres: a dirt track's ruts either side of its course
 const float RUT_RANGE = 2.9;    // BoardRoad.RUT_OFFSET + RUT_REACH in metres: dirt's B range
@@ -442,19 +442,19 @@ bool trackCoat(RoadMaps m) {
 #endif
 }
 
-// Whether a road's maps are gravel's (GpuRoads.MATERIALS).
-bool gravelMaps(RoadMaps m) {
-#if defined(roadMapsFlag) || defined(roadCoatFlag)
-    return roadFinish(m) == ROAD_FINISH + 2;
+// A loose road's grit carried on along the wheel paths of the paved road it meets (GpuRoads#finish, -7).
+bool carriedCoat(RoadMaps m) {
+#if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
+    return m.mapped && abs(m.transition + 7.0) < .5;
 #else
     return false;
 #endif
 }
 
-// A loose road's grit and dust on the paved road it meets (GpuRoads#finish, -7).
-bool spillCoat(RoadMaps m) {
-#if (defined(roadMapsFlag) || defined(roadCoatFlag)) && defined(roadMaskFlag)
-    return m.mapped && abs(m.transition + 7.0) < .5;
+// Whether a road's maps are gravel's (GpuRoads.MATERIALS).
+bool gravelMaps(RoadMaps m) {
+#if defined(roadMapsFlag) || defined(roadCoatFlag)
+    return roadFinish(m) == ROAD_FINISH + 2;
 #else
     return false;
 #endif
@@ -518,7 +518,13 @@ float looseTrack(vec2 m, float pixel, vec2 heading, float across, float hub, flo
     float stray = clamp(max(outside / GRAVEL_STRAY, -tongues / .4), 0.0, 1.0);
     float stones = grain + (tuft.r - .5) * .3 - mix(.5, 1.1, stray);
     float kept = max(min(firm, tongues), stones);
-    alpha = built ? coverage : clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0);
+    // Past the firm edge the stone thins out into the grass over most of a metre, as a dirt track's soil does
+    // (dirtTrack): in patches between ever fewer tufts, under a film of grit nearest the road. The blades thin out there
+    // too (BoardRoad#grass). Where the road ends, so does its fringe.
+    float gaps = smoothstep(-.8, 0.0, min(-outside, ends - 1.0));
+    float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
+    float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
+    alpha = built ? coverage : max(clamp(kept / max(.04, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
     return mix(mix(1.0, 1.35, loose), .45, track);
 }
 
@@ -541,7 +547,8 @@ float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bo
     float bare = .55 * clump.g + .3 * tuft.r + .15 * grain - .62 - 1.1 * crown;
     float soil = rut > 0.0 ? -band : bare;
     float kept = max(soil, pressed - .5);
-    float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g);
+    // Where it wears out (its end, or its ruts' run-on over a paved road's landing) it crumbles at the soil's own grain.
+    float ends = 2.0 * coverage - (.5 * slow.b + .3 * clump.r + .2 * tuft.g) - (grain - .5) * 1.4 * (1.0 - coverage);
     kept = min(kept, ends - .5);
     // Past that edge the soil thins out into the grass over most of a metre: bare between ever fewer tufts, under a
     // film of dust nearest the track. The blades thin out there too (BoardRoad#grass). Where the coat ends, RUT_REACH
@@ -550,6 +557,8 @@ float dirtTrack(vec2 m, float pixel, vec2 heading, float rut, float coverage, bo
     float between = .6 * gaps - (.6 * tuft.b + .4 * wearNoise(m, 6.0, .71, pixel).b);
     float open = clamp(between / max(.04, 1.5 * fwidth(between)) + .5, 0.0, 1.0);
     alpha = built ? coverage : max(clamp(kept / max(.03, 1.5 * fwidth(kept)) + .5, 0.0, 1.0), max(open, .18 * gaps * gaps));
+    // A thinning film where it wears out, not a cut-out of whole soil.
+    if (!built) alpha *= mix(.5, 1.0, coverage);
     // Packed ruts: pale and dusty, a little less of the soil's grain; loose soil darker and crumbly.
     vec3 mean = vec3(.277, .213, .154);
     albedo = mix(albedo, mean + (albedo - mean) * .8, pressed) * DIRT_LIGHT * mix(.8, 1.06, pressed) * mix(.93, 1.06, broad);
@@ -645,7 +654,7 @@ void main() {
     // Paved wear's ground in metres and the pixel it covers, taken before the varying branches.
     vec2 wearMetres = vec2(v_cloudPosition.x, -v_cloudPosition.y) / u_metre;
     float wearPixel = max(length(dFdx(wearMetres)), length(dFdy(wearMetres)));
-    bool paved = pavedWear(m), track = trackCoat(m), spill = spillCoat(m);
+    bool paved = pavedWear(m), track = trackCoat(m), carried = carriedCoat(m);
     // The material's own reads take its parallax; world-anchored patterns and its other grain scales do not.
     vec2 materialUV = uv;
 #if defined(roadMapsFlag) || defined(roadCoatFlag)
@@ -683,9 +692,9 @@ void main() {
             normalStrength = dirtTrack(wearMetres, wearPixel, unit, roadColor.b * RUT_RANGE - RUT_OFFSET, roadColor.a,
                   built, albedo, properties, trackAlpha, wearSlope, wearWater);
         }
-    } else if (spill) {
-        // Grit and dust carried onto a paved road: pale and grey.
-        albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .65) * 1.4;
+    } else if (carried) {
+        // Grit and dust from the loose road: paler and greyer than its own ground.
+        albedo = mix(albedo, vec3(dot(albedo, vec3(.2126, .7152, .0722))), .5) * 1.3;
         properties.g = .95;
     } else if (slabs) {
         // Settled dust, anchored to the ground, varies the repeating slabs.
@@ -783,16 +792,14 @@ void main() {
         alpha = trackAlpha;
     } else if (slabs) {
         // A cast kerb: its edge is the coverage's own.
-    } else if (spill) {
-        // Sparse, broken grains over a thin film of dust, both thinning out over the spill's reach (A), most in the wheel
-        // bands: G runs across the nearest arm, as a transition's does (GpuRoads#color).
-        vec4 profile = roadProfile();
-        float lane = abs(abs((roadColor.g - .5) * 2.0 * profile.x) - profile.y);
-        float wheels = 1.0 - smoothstep(profile.z * .5, profile.z, lane);
+    } else if (carried) {
+        // Faint: sparse grains over patchy dust on the paved road's wheel paths, thinning out away from the loose road
+        // (A, GpuRoads#coverage).
         float broken = wearNoise(wearMetres, 16.0, .29, wearPixel).r;
-        float grit = roadColor.a * mix(.55, .85, wheels) - (.6 * grain + .4 * broken);
-        float dust = roadColor.a * roadColor.a * mix(.15, .3, wheels) * smoothstep(.3, .7, broken);
-        alpha = max(clamp(grit / max(.03, fwidth(grit)) + .5, 0.0, 1.0) * .85, dust);
+        float fine = wearNoise(wearMetres, 3.0, .53, wearPixel).g;
+        float grit = roadColor.a - (.6 * grain + .4 * broken) + .15;
+        float dust = roadColor.a * .6 * smoothstep(.3, .7, broken) * smoothstep(.2, .7, fine);
+        alpha = max(clamp(grit / max(.03, fwidth(grit)) + .5, 0.0, 1.0) * .6, dust);
     } else if (m.mapped && m.transition < -2.5) {
         // Grounded bridge landings: individual asphalt chips/aggregate expose soil and grass. The broad
         // envelope is in the mask; material grain supplies the small fractured edge at every orientation.

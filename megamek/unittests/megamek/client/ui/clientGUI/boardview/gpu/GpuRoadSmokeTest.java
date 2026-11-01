@@ -545,27 +545,27 @@ class GpuRoadSmokeTest {
     }
 
     /**
-     * Dirt spills onto the asphalt where the dirt road meets it, at the paved road's edge (its arm runs on past their
-     * border): most in both tyre bands, with exposed asphalt between them.
+     * The dirt track runs on past its border with the paved road, over the asphalt's broken end (GpuRoads#runOn): its two
+     * ruts paler than the ground between them.
      */
     private static void checkDirtCarry(BoardCamera camera, BoardScene scene) {
         byte[] pixels = screen();
         var dirt = BoardRoad.of(scene, scene.tile(BoardRoadTest.CENTER));
         Vector3 center = BoardGeometry.center(BoardRoadTest.CENTER, 0);
         Vector3 along = BoardGeometry.center(BoardRoadTest.CENTER.translated(3), 0).sub(center).nor();
-        float scale = BoardGeometry.hexScale(), edge = 0, traces = 0, between = 0;
-        while (dirt.pavedDepth(along.x * edge, along.y * edge) < 0 && edge < 64) { edge += .05f; }
-        assertTrue(edge < 64, "The dirt road meets the asphalt");
+        float scale = BoardGeometry.hexScale(), traces = 0, between = 0;
+        // Their border, half way between the hexes' centres.
+        float edge = BoardGeometry.center(BoardRoadTest.CENTER.translated(3), 0).dst(center) / (2 * scale);
         for (float onto : new float[] { .2f, .35f, .5f }) {
-            Vector3 at = new Vector3(center).mulAdd(along, (edge + onto * GpuRoads.spill()) * scale).add(0, 0, .1f);
+            Vector3 at = new Vector3(center).mulAdd(along, (edge + onto * GpuRoads.runOn()) * scale).add(0, 0, .1f);
             between += brightness(pixels, camera.camera.project(new Vector3(at)));
             for (int side : new int[] { -1, 1 }) {
                 traces += brightness(pixels, camera.camera.project(new Vector3(at)
-                      .add(-along.y * side * BoardRoad.WHEEL_OFFSET * scale, along.x * side * BoardRoad.WHEEL_OFFSET * scale, 0)))
+                      .add(-along.y * side * BoardRoad.RUT_OFFSET * scale, along.x * side * BoardRoad.RUT_OFFSET * scale, 0)))
                       / 2;
             }
         }
-        assertTrue((traces - between) / 3 > 4, "Dirt should spill onto the asphalt at the fixed wheel offsets");
+        assertTrue((traces - between) / 3 > 4, "The dirt track's ruts should run on over the asphalt's end");
     }
 
     private static float brightness(byte[] pixels, Vector3 point) {

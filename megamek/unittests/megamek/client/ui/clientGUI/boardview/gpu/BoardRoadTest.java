@@ -300,7 +300,7 @@ class BoardRoadTest {
     }
 
     @Test
-    void aLooseRoadStopsAtThePavedRoadItMeetsAndLeavesTheGroundBetweenItsArms() {
+    void aLooseRoadRunsOnBrieflyOverThePavedRoadItMeetsAndLeavesTheGroundBetweenItsArms() {
         Coords north = CENTER.translated(0), northEast = CENTER.translated(1);
         for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
             // Hex 1303 of Nebraska Farmhouse: two arms into one paved road, which runs on past them.
@@ -325,12 +325,16 @@ class BoardRoadTest {
                 }
             }
             var patches = GpuRoads.patches(scene.tile(CENTER), loose);
-            Area way = loose.pavedCarriageway(0), deep = loose.pavedCarriageway(-1.5f * BoardRelief.metres(1.2f) / BoardGeometry.hexScale());
+            Area way = loose.pavedCarriageway(0), deep = loose.pavedCarriageway(0), farther = loose.pavedCarriageway(0);
+            deep.subtract(loose.pastMeetings(1.05f * GpuRoads.runOn(), 128));
+            farther.subtract(loose.pastMeetings(1.05f * GpuRoads.carry(), 128));
             Area paint = new Area();
             for (var patch : patches) {
                 Area shape = new Area(patch.shape());
-                shape.intersect(deep);
-                assertTrue(shape.isEmpty(), "Only a short spill reaches onto the paved road: " + patch.texture());
+                // Only its faint grit reaches farther, along the paved road's wheel paths (GpuRoads#carry).
+                shape.intersect(patch.fade() != null && patch.fade().carried() ? farther : deep);
+                // Rectangles sharing the border's edge leave rounding slivers: only covered ground counts.
+                assertFalse(covers(shape), "Only its run-on and grit reach onto the paved road: " + patch.texture());
                 paint.add(patch.shape());
             }
             // The gore between the arms, out to the corner the three hexes share, stays ground.
@@ -780,6 +784,17 @@ class BoardRoadTest {
             sharpest = Math.min(sharpest, length / Math.max(turn, 1e-6f));
         }
         assertTrue(sharpest > apothem / 2, "The road turns along a wide arc, not a kink: radius " + sharpest);
+    }
+
+    /** Whether an area covers any point of a half-pixel grid over its bounds: more than a rounding sliver. */
+    private static boolean covers(Area area) {
+        var bounds = area.getBounds2D();
+        for (double x = Math.floor(bounds.getMinX()); x <= bounds.getMaxX(); x += .5) {
+            for (double y = Math.floor(bounds.getMinY()); y <= bounds.getMaxY(); y += .5) {
+                if (area.contains(x, y)) { return true; }
+            }
+        }
+        return false;
     }
 
     private static Vector3 gate(Coords at, int d) {
