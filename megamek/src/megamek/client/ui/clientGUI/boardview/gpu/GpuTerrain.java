@@ -1782,11 +1782,11 @@ final class GpuTerrain implements Disposable {
 
     /**
      * Each surface family's floor, by ordinal: what gathers in its hollows, in place of its ground from level -1 down
-     * (terrain-materials.glsl floorShare). Null keeps the ground.
+     * (terrain-materials.glsl floorShare). Null keeps the ground: concrete stays paved.
      */
     private static final String[] FLOORS = {
-          "grassland-floor", null, null, null, null, "snow-floor", null, "fungus-floor", "desert-floor", "mars-floor",
-          "volcano-floor", null,
+          "grassland-floor", "dirt-floor", "sand-floor", "rock-floor", null, "snow-floor", "lunar-floor",
+          "fungus-floor", "desert-floor", "mars-floor", "volcano-floor", "tropical-floor",
     };
 
     private static final List<String> SCULPT_LAYERS = java.util.stream.Stream.of(

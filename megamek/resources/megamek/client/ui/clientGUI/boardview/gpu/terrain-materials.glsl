@@ -5,6 +5,7 @@
 uniform vec4 u_bankMaterials; // existing temperate-bank and dirt-debris: colour layer / repeat in metres
 uniform vec3 u_flatRock; // the shared cliff's colour layer, then the rock tops' colour layer and repeat in metres
 bool riverBank = false; // set by the water-owned ground, before evaluating its material roles
+float sunkenCover = 0.0; // 1 while cliffMaterial or naturalMaterialFor evaluate a family's floor (floorShare)
 float shallowSediment = -1.0; // Halfway depth-zero arid shore profile; negative on deeper water and dry land.
 
 struct TerrainMaterial {
@@ -621,6 +622,12 @@ TerrainMaterial naturalMaterialOf(MaterialProjection projection, vec2 noise, vec
         cover *= 1.0 - .92 * thin;
         dust = .12 * smoothstep(.88, .98, up) * (1.0 - sediment);
     }
+#ifdef sublevelFloorFlag
+    // Sediment half fills a sunken mineral floor, as in cliffMaterial; fungal felt grows over its weathering.
+    float settled = abs(familyId - FUNGUS_FAMILY) < .5 ? 0.0 : sunkenCover * smoothstep(.82, .97, up);
+    cover = mix(cover, 1.0, .5 * settled);
+    deposit *= 1.0 - .5 * settled;
+#endif
     soil = clamp(soil, 0.0, 1.0 - cover);
     vec4 roles = vec4(cover, soil, deposit, max(0.0, 1.0 - cover - soil));
     roles.xyw *= 1.0 - deposit;
@@ -700,11 +707,13 @@ TerrainMaterial naturalMaterialFor(MaterialProjection projection, vec2 noise, ve
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
         bool floored = share >= 1.0 || pass == 1;
+        sunkenCover = floored ? 1.0 : 0.0;
         TerrainMaterial m = naturalMaterialOf(projection, noise, world, face, aboveFoot, belowRim, rock, hardness,
               broad, fine, region, familyId, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
               floored ? vec4(floorMaterial.x, layers.yzw) : layers, sediment);
         if (pass == 0) ground = m; else sunken = m;
     }
+    sunkenCover = 0.0;
     return passes == 2 ? floorBlend(ground, sunken, share) : ground;
 #else
     return naturalMaterialOf(projection, noise, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
@@ -1311,6 +1320,13 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
         cover = smoothstep(.76, .97, up) * (1.0 - .90 * thin * (1.0 - growth));
         mantle = (1.0 - cover) * (1.0 - exposure) * (1.0 - smoothstep(.90, .99, up));
     }
+#ifdef sublevelFloorFlag
+    // Sediment half fills a sunken mineral floor: broad bare patches shrink to plates, soil and stones breaking through.
+    // Fungal felt grows over its weathering instead.
+    float settled = fungus ? 0.0 : sunkenCover * smoothstep(.82, .97, up);
+    cover = mix(cover, 1.0, .5 * settled);
+    deposit *= 1.0 - .5 * settled;
+#endif
     float capPlates = step(2.5, kind.x);
     vec4 roles = vec4(cover, clamp(mantle, 0.0, 1.0 - cover), deposit, 0.0);
     roles.xy *= 1.0 - deposit;
@@ -1469,11 +1485,13 @@ TerrainMaterial cliffMaterial(MaterialProjection p, vec3 world, vec3 face, float
     int passes = share > 0.0 && share < 1.0 ? 2 : 1;
     for (int pass = 0; pass < passes; pass++) {
         bool floored = share >= 1.0 || pass == 1;
+        sunkenCover = floored ? 1.0 : 0.0;
         TerrainMaterial m = cliffMaterialOf(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
               sediment, palette, slot, floored ? vec4(floorMaterial.y, tiles.yzw) : tiles,
               floored ? vec4(floorMaterial.x, layers.yzw) : layers, sides, single);
         if (pass == 0) ground = m; else sunken = m;
     }
+    sunkenCover = 0.0;
     return passes == 2 ? floorBlend(ground, sunken, share) : ground;
 #else
     return cliffMaterialOf(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region, sediment, palette,

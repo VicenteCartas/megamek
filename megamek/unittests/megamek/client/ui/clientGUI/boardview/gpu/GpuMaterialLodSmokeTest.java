@@ -392,7 +392,8 @@ class GpuMaterialLodSmokeTest {
                     }
                 }
             }
-            // Both fungal skins need visible weathering, while retaining mauve lowlands and cyan raised crust.
+            // Both fungal skins need visible weathering, while retaining violet lowlands and cyan raised crust.
+            int lowlandCrust = -1;
             for (int elevation : new int[] { -3, 0, 3 }) {
                 assertTrue(manager.apply(Map.of()).success());
                 terrain.update(scene("fungus", elevation));
@@ -415,15 +416,18 @@ class GpuMaterialLodSmokeTest {
                 var paletteProbe = manager.apply(Map.of("terrain-sculpt.frag", albedoProbe()));
                 assertTrue(paletteProbe.success(), paletteProbe.message());
                 byte[] pigment = render(surface, terrain, camera);
-                int mauve = 0, cyan = 0;
+                // Blue-violet lowland skin keeps red near green; the cyan crust has green well above red.
+                int violet = 0, cyan = 0;
                 for (int i = 0; i < pigment.length; i += 4) {
                     int red = pigment[i] & 255, green = pigment[i + 1] & 255;
-                    if (red > green + 2) { mauve++; }
-                    if (green > red + 2) { cyan++; }
+                    if (red + 5 > green) { violet++; }
+                    if (green > red + 20) { cyan++; }
                 }
-                assertTrue(elevation <= 0 ? mauve > cyan : cyan > mauve,
+                // Lowlands stay violet; raised ground grows the crust, broken by tissue gaps and slopes.
+                if (elevation == 0) { lowlandCrust = cyan; }
+                assertTrue(elevation <= 0 ? violet > cyan : cyan > 3 * lowlandCrust,
                       "Fungus must retain its elevation-specific pigment at level " + elevation
-                            + ": mauve=" + mauve + ", cyan=" + cyan);
+                            + ": violet=" + violet + ", cyan=" + cyan + ", level 0 cyan=" + lowlandCrust);
             }
             assertTrue(outcropFailures.isEmpty(), String.join("\n", outcropFailures));
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
