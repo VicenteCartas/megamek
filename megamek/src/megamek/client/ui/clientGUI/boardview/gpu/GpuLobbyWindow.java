@@ -1816,6 +1816,8 @@ public final class GpuLobbyWindow {
 
     /** The portraits in the unit bay, in pixels. */
     private static final int PORTRAIT_PICTURE = 128;
+    /** The unit bay's board picture along its longer side, in pixels: sharp on a screen scaled twice. */
+    private static final int ZONE_PICTURE = LobbyMapThumbnail.LONG_SIDE * 3 / 4;
 
     /**
      * EDT: reads the units into a form and shows the native unit bay in the forces' place; its OK writes them back and
@@ -1843,6 +1845,15 @@ public final class GpuLobbyWindow {
         for (UnitConfigForm.Member member : form.members()) {
             portraits.add(portraitPicture(member.portrait()));
         }
+        BufferedImage boardPicture = null;
+        if (form.board() != null) {
+            try {
+                boardPicture = LobbyMapThumbnail.bake(form.board(), List.of(), null, ZONE_PICTURE);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(failure, "The unit bay could not draw the board");
+            }
+        }
+        BufferedImage terrain = boardPicture;
         LobbyUnitBayView.Host host = new LobbyUnitBayView.Host() {
             @Override
             public void edt(Runnable work, Runnable then) {
@@ -1897,6 +1908,11 @@ public final class GpuLobbyWindow {
                 if (shown != null) {
                     shown.closeUnitBay();
                 }
+            }
+
+            @Override
+            public @Nullable BufferedImage boardPicture() {
+                return terrain;
             }
         };
         GpuHost.post(() -> {

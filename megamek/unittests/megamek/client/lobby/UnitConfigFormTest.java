@@ -118,6 +118,40 @@ class UnitConfigFormTest {
     }
 
     @Test
+    void theBoardInThirdsIsTheCompass() {
+        assertEquals(Board.START_NW, UnitConfigForm.compassZone(0, 0));
+        assertEquals(Board.START_N, UnitConfigForm.compassZone(.5f, .1f));
+        assertEquals(Board.START_NE, UnitConfigForm.compassZone(.99f, .2f));
+        assertEquals(Board.START_W, UnitConfigForm.compassZone(.1f, .5f));
+        assertEquals(Board.START_CENTER, UnitConfigForm.compassZone(.5f, .5f));
+        assertEquals(Board.START_E, UnitConfigForm.compassZone(.9f, .4f));
+        assertEquals(Board.START_SW, UnitConfigForm.compassZone(.2f, .9f));
+        assertEquals(Board.START_S, UnitConfigForm.compassZone(.5f, 1f));
+        assertEquals(Board.START_SE, UnitConfigForm.compassZone(1.5f, 2f), "a point past the edge is the nearest");
+    }
+
+    @Test
+    void theZoneHexesFollowTheZoneItsOffsetAndWidth() {
+        local.setStartingPos(Board.START_W);
+        Entity mek = mek(local, "Hunchback");
+        assertNull(form(mek).zoneHexes(), "no board, no picture");
+        UnitConfigForm form = new UnitConfigForm(client, client, List.of(mek), true, new Board(16, 17));
+
+        form.zone(Board.START_NONE);
+        boolean[][] owners = form.zoneHexes();
+        assertTrue(owners[0][8], "the owner's zone is the owner's west edge");
+        assertFalse(owners[15][8]);
+        form.zone(Board.START_E);
+        form.text(Field.OFFSET, "2");
+        form.text(Field.WIDTH, "3");
+        boolean[][] east = form.zoneHexes();
+        assertFalse(east[15][8], "the offset keeps it off the edge");
+        assertTrue(east[13][8]);
+        assertTrue(east[11][8], "three hexes wide");
+        assertFalse(east[10][8]);
+    }
+
+    @Test
     void wrongNumbersShowAProblemAndBlockTheApply() {
         Entity mek = mek(local, "Hunchback");
         UnitConfigForm form = form(mek);

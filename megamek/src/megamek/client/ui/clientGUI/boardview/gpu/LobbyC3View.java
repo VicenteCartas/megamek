@@ -43,6 +43,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
+import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiTheme;
@@ -278,12 +279,22 @@ final class LobbyC3View {
         peer.setVisible(picture.peerVisible());
         disconnect.setVisible(picture.disconnectVisible());
         actions.clearChildren();
-        actions.add(status).growX().left().padRight(space("md"));
-        for (UiButton button : List.of(autoAssignPlan, discard, build, peer, disconnect)) {
+        status.setAlignment(Align.center);
+        actions.add(status).growX().row();
+        // The main action first, centred and of one width, as in every footer
+        List<UiButton> shown = new ArrayList<>();
+        float widest = UiDialog.MIN_BUTTON_WIDTH;
+        for (UiButton button : List.of(build, peer, disconnect, autoAssignPlan, discard)) {
             if (button.isVisible()) {
-                actions.add(button).padLeft(space("sm"));
+                shown.add(button);
+                widest = Math.max(widest, button.getPrefWidth());
             }
         }
+        Table buttons = new Table();
+        for (UiButton button : shown) {
+            buttons.add(button).width(widest).padLeft(buttons.getCells().isEmpty() ? 0 : space("md"));
+        }
+        actions.add(buttons).center().padTop(shown.isEmpty() ? 0 : space("sm"));
 
         diagrams.clearChildren();
         for (PlanCard card : picture.plans()) {

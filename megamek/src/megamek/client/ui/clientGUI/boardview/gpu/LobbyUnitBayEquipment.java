@@ -160,7 +160,7 @@ final class LobbyUnitBayEquipment {
     /** An ammunition bin as a small card: where it sits, its munition, its shots and its load. */
     private Table bin(AmmoBin bin) {
         String prefix = "bay-ammo-" + bin.number();
-        Table tile = kit.panel(true);
+        Table tile = kit.plainPanel();
         tile.top().left().defaults().left().growX();
         tile.pad(space("md"));
         tile.add(kit.typeLabel(bin.location(), "overline", "text.secondary")).row();

@@ -18,6 +18,7 @@ import megamek.common.Player;
 import megamek.common.TechConstants;
 import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Board;
+import megamek.common.board.Coords;
 import megamek.common.compute.ArtilleryRange;
 import megamek.common.enums.Gender;
 import megamek.common.equipment.EquipmentMode;
@@ -101,6 +102,10 @@ public final class UnitConfigForm {
     /** The off board directions in the order the view offers them. */
     public static final List<OffBoardDirection> DIRECTIONS = List.of(OffBoardDirection.NORTH, OffBoardDirection.SOUTH,
           OffBoardDirection.EAST, OffBoardDirection.WEST);
+    /** The compass zones by row from the north, then by column from the west. */
+    private static final int[][] COMPASS = { { Board.START_NW, Board.START_N, Board.START_NE },
+                                             { Board.START_W, Board.START_CENTER, Board.START_E },
+                                             { Board.START_SW, Board.START_S, Board.START_SE } };
 
     private final Client client;
     private final Client human;
@@ -152,6 +157,10 @@ public final class UnitConfigForm {
     private boolean commander;
     private int mode;
     private int zone;
+    /** The board the zone picture shows, or null when there is none to show. */
+    private final @Nullable Board board;
+    /** The owner's own zone, as {@link #zoneHexes} reads a zone: position, width, offset, then the Any box. */
+    private final int[] ownersZone;
     private int round;
     private int anyNwX;
     private int anyNwY;
@@ -186,6 +195,7 @@ public final class UnitConfigForm {
         this.human = human;
         this.units = List.copyOf(units);
         this.editable = editable;
+        this.board = (board != null && board.getWidth() > 0 && board.getHeight() > 0) ? board : null;
         Game game = client.getGame();
         options = human.getGame().getOptions();
         MapSettings mapSettings = human.getMapSettings();
@@ -199,6 +209,13 @@ public final class UnitConfigForm {
         }
         Entity first = units.get(0);
         multiple = units.size() > 1 || first instanceof FighterSquadron;
+        Player owner = first.getOwner();
+        ownersZone = owner == null
+              ? new int[] { Board.START_ANY, 0, 0, Entity.STARTING_ANY_NONE, Entity.STARTING_ANY_NONE,
+                            Entity.STARTING_ANY_NONE, Entity.STARTING_ANY_NONE }
+              : new int[] { owner.getStartingPos(), owner.getStartWidth(), owner.getStartOffset(),
+                            owner.getStartingAnyNWx(), owner.getStartingAnyNWy(), owner.getStartingAnySEx(),
+                            owner.getStartingAnySEy() };
 
         boolean mek = true;
         boolean ship = true;
@@ -619,6 +636,46 @@ public final class UnitConfigForm {
 
     public int boardHeight() {
         return boardHeight;
+    }
+
+    /** The board the zone picture shows: the one the map settings make, in the lobby; null elsewhere. */
+    public @Nullable Board board() {
+        return board;
+    }
+
+    /**
+     * The hexes the chosen zone covers on {@link #board}, by column then row, with its offset, width and Any box as they
+     * stand; the owner's zone for {@link Board#START_NONE}. Null without a board.
+     */
+    public @Nullable boolean[][] zoneHexes() {
+        if (board == null) {
+            return null;
+        }
+        int[] chosen = zone == Board.START_NONE ? ownersZone
+              : new int[] { zone, value(Field.WIDTH), value(Field.OFFSET), Math.min(anyNwX, anySeX) - 1,
+                            Math.min(anyNwY, anySeY) - 1, Math.max(anyNwX, anySeX) - 1,
+                            Math.max(anyNwY, anySeY) - 1 };
+        if (chosen[0] == Board.START_NONE) {
+            chosen[0] = Board.START_ANY;
+        }
+        boolean[][] hexes = new boolean[board.getWidth()][board.getHeight()];
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                hexes[x][y] = board.isLegalDeployment(new Coords(x, y), chosen[0], chosen[1], chosen[2], chosen[3],
+                      chosen[4], chosen[5], chosen[6]);
+            }
+        }
+        return hexes;
+    }
+
+    /**
+     * The compass zone under a point of the board picture, {@code across} and {@code down} its share of the picture's
+     * width from the left and of its height from the top: the board in thirds, its middle the centre.
+     */
+    public static int compassZone(float across, float down) {
+        int column = Math.max(0, Math.min(2, (int) (across * 3)));
+        int row = Math.max(0, Math.min(2, (int) (down * 3)));
+        return COMPASS[row][column];
     }
 
     /** The custom box for the "Any" zone, its corners counted from 1: north-west x and y, south-east x and y. */

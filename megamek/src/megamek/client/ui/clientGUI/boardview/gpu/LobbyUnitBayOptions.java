@@ -268,7 +268,7 @@ final class LobbyUnitBayOptions {
 
     /** An option with a value beside its name, as a small card: the name over the control. */
     private Table titled(OptionEntry entry, Actor control) {
-        Table card = kit.panel(true);
+        Table card = kit.plainPanel();
         card.top().left().defaults().left();
         card.pad(space("sm"));
         Label label = kit.typeLabel(entry.label(), "small", entry.dimmed() ? "text.muted" : "text.secondary");

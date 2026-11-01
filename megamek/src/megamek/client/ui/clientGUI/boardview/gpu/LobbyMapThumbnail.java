@@ -116,6 +116,52 @@ final class LobbyMapThumbnail {
         return image;
     }
 
+    /**
+     * One zone alone, {@code zone}'s hexes by column then row, tinted and outlined in {@code style} over a transparent
+     * image the size {@link #bake} makes of a board of the same size, to lie over its picture.
+     */
+    static BufferedImage bakeZone(boolean[][] zone, ZoneStyle style, int longSide) {
+        int columns = zone.length;
+        int rows = columns == 0 ? 0 : zone[0].length;
+        double boardWidth = columns * .75 + .25;
+        double boardHeight = (rows + .5) * HEX_HEIGHT;
+        double unit = longSide / Math.max(boardWidth, boardHeight);
+        BufferedImage image = new BufferedImage(Math.max(1, (int) Math.round(boardWidth * unit)),
+              Math.max(1, (int) Math.round(boardHeight * unit)), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        double radius = unit / 2;
+        g.setColor(style.fill());
+        for (int x = 0; x < columns; x++) {
+            for (int y = 0; y < rows; y++) {
+                if (zone[x][y]) {
+                    Coords coords = new Coords(x, y);
+                    g.fill(hex(centreX(coords, unit), centreY(coords, unit), radius * HEX_FILL));
+                }
+            }
+        }
+        g.setStroke(new BasicStroke((float) Math.max(1.5, unit * ZONE_EDGE), BasicStroke.CAP_ROUND,
+              BasicStroke.JOIN_ROUND));
+        g.setColor(style.edge());
+        for (int x = 0; x < columns; x++) {
+            for (int y = 0; y < rows; y++) {
+                if (zone[x][y]) {
+                    outline(g, zone, x, y, unit);
+                }
+            }
+        }
+        g.dispose();
+        return image;
+    }
+
+    /** The style of a zone being chosen: the accent tint, edged in the text colour. */
+    static ZoneStyle chosenStyle() {
+        Color colour = token("accent.primary");
+        return new ZoneStyle(new Color(colour.getRed(), colour.getGreen(), colour.getBlue(), ZONE_ALPHA),
+              token("text.primary"));
+    }
+
     private static boolean isLocal(Player player, @Nullable Player local) {
         return local != null && player.getId() == local.getId();
     }

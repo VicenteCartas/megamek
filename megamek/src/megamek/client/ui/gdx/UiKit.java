@@ -536,6 +536,17 @@ public final class UiKit {
     }
 
     /**
+     * A panel inside a panel (Token v0's {@link UiTheme#TOKEN_PANEL_PLAIN}): the edge and fill without the corner ticks,
+     * padded lg, since only the outermost frame has ticks; such as a section card in a framed view.
+     */
+    public Table plainPanel() {
+        Table panel = new Table();
+        panel.setBackground(skin.getDrawable(UiTheme.TOKEN_PANEL_PLAIN));
+        panel.top();
+        return panel;
+    }
+
+    /**
      * A panel header (.phd): the upper-case title, an optional muted count (.n) beside it, and tools at the right:
      * buttons, or a count that a panel shows there.
      */

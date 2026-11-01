@@ -14,7 +14,6 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
-import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -160,13 +159,13 @@ public final class UiDialog {
 
     /** Adds the main button, which comes first and which Enter presses: the primary button style. */
     public UiButton primary(String text, Runnable action) {
-        primary = footerButton("button-primary", text, action);
+        primary = footerButton("button-primary", text, action, true);
         return primary;
     }
 
     /** Adds a secondary button after the main one; {@link #cancelButton} is the usual one. */
     public UiButton secondary(String text, Runnable action) {
-        return footerButton("button-secondary", text, action);
+        return footerButton("button-secondary", text, action, false);
     }
 
     /** Adds a Cancel button after the main one, which runs the dialog's cancel. */
@@ -182,17 +181,18 @@ public final class UiDialog {
         return button;
     }
 
-    private UiButton footerButton(String style, String text, Runnable action) {
+    /** Adds a footer button; the main one goes first whenever it is added, so every footer reads main, then the rest. */
+    private UiButton footerButton(String style, String text, Runnable action, boolean main) {
         UiButton button = kit.button(style, null, text, null);
         UiKit.onChange(button, action);
-        footerButtons.add(button);
-        actions.add(button).padLeft(footerButtons.size() > 1 ? space("md") : 0);
+        footerButtons.add(main ? 0 : footerButtons.size(), button);
         float widest = MIN_BUTTON_WIDTH;
         for (UiButton each : footerButtons) {
             widest = Math.max(widest, each.getPrefWidth());
         }
-        for (Cell<?> cell : actions.getCells()) {
-            cell.width(widest);
+        actions.clearChildren();
+        for (UiButton each : footerButtons) {
+            actions.add(each).width(widest).padLeft(actions.getCells().isEmpty() ? 0 : space("md"));
         }
         return button;
     }

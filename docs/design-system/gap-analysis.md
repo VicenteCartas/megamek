@@ -1114,6 +1114,24 @@ work for Swing, and item 11 is under investigation.
        on-demand `LobbyTogglesSmokeTest` (cards and compact rows show their ids; a wide compact row shows every
        fact, a narrow one keeps the skills and drops the tag). Live: `lobby+compact` at 1920 and 1300 wide, and the
        new `lobby+readout=tro`, `=bv` and `=cost` pages for the readouts.
+     - ~~Review polish 2~~. From the second live review:
+       - Pilot tab: the name and callsign fields are the same length (both random buttons share one width), Random
+         Skill sits on the row of skill dials, and the aptitudes list gunnery before piloting, as the numbers do.
+       - One footer order everywhere, as tokens.md says: the main action first, the buttons centred and of one width.
+         `UiDialog` enforces it (`footerButton` puts the main button first whatever the call order); the unit bay's
+         status now sits above OK / Apply / Cancel, and the C3 manager's above its centred actions, the main one
+         first. The Swing dialogs the lobby still opens already put OK first.
+       - Deployment: a picture of the current board (`LobbyZoneMap`) chooses the zone. Its thirds are the compass
+         zones and the middle is the centre; the chosen zone's hexes (`UnitConfigForm.zoneHexes`, from
+         `Board.isLegalDeployment` with the form's offset, width and Any box) are tinted over the terrain and follow
+         every change. Player's start, Any, Edge and custom zones stay as chips beside it. The offset and width
+         steppers only apply to edge zones and Any (as in Swing), and a hint now says so, or that the rules fix the
+         width, instead of leaving them silently disabled. Without a board the old grid of buttons stays.
+       - Nested cards (the unit bay's sections, the equipment bins and the options cards) use the plain frame; only
+         the outer frame has corner ticks.
+       Checks: `UnitConfigFormTest` (the compass thirds, the zone hexes following offset and width), the on-demand
+       `UnitBaySmokeTest` (a click on the picture chooses the zone, the offset steps it in, the hint), and
+       `LobbyC3ManagerSmokeTest`. Live: `lobby+configure+bayclick=bay-tab-deployment,bay-zone-<id>` and `lobby+c3`.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
          loading game options, a loadout and a unit list through the real system file dialog was checked (L18);

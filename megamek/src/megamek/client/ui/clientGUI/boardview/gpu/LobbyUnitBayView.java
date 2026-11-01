@@ -31,6 +31,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
+import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFormField;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSegmented;
@@ -68,6 +69,11 @@ final class LobbyUnitBayView {
 
         /** GPU thread: closes the bay, showing the forces again. */
         void close();
+
+        /** The board's terrain for the zone picture, as {@link LobbyMapThumbnail#bake} draws it; null for none. */
+        default @Nullable BufferedImage boardPicture() {
+            return null;
+        }
     }
 
     /** The zone grid: the compass, then Any and Edge, as {@link Board}'s start positions; the owner's stands above. */
@@ -75,6 +81,8 @@ final class LobbyUnitBayView {
     private static final String[] ZONE_KEYS = { "deployAny", "deployNW", "deployN", "deployNE", "deployE",
                                                 "deploySE", "deployS", "deploySW", "deployW", "deployEdge",
                                                 "deployCenter" };
+    /** The zone picture's longer side, in large controls. */
+    private static final float ZONE_MAP_SIDE = 5;
     /** The most sprites stacked in the header for several units. */
     private static final int STACKED = 5;
 
@@ -86,6 +94,7 @@ final class LobbyUnitBayView {
     private final List<Actor> pages = new ArrayList<>();
     private final List<Runnable> refreshers = new ArrayList<>();
     private final List<Texture> textures = new ArrayList<>();
+    private @Nullable LobbyZoneMap zoneMap;
     private final Map<Integer, Image> portraits = new HashMap<>();
     private final Map<String, Actor> named = new HashMap<>();
     private UiTabs tabs;
@@ -310,7 +319,7 @@ final class LobbyUnitBayView {
 
     /** A section of a page under {@code title}, already in words. */
     Table titledCard(String title, Actor content) {
-        Table card = kit.panel(true);
+        Table card = kit.plainPanel();
         card.top().left().defaults().left();
         card.pad(space("lg"));
         card.add(kit.caption(title, true)).row();
@@ -364,13 +373,16 @@ final class LobbyUnitBayView {
         UiKit.onChange(name, () -> member.name(name.getText()));
         UiButton randomName = randomButton("bay-random-name-" + slot, "CustomMekDialog.RandomName", member,
               () -> form.randomName(slot), () -> name.setText(member.name()));
-        fields.add(withButton(kit.formField(colonless("CustomMekDialog.labName"), name), randomName)).row();
         UiTextField nickname = name(kit.input(member.nickname(), false), "bay-nickname-" + slot);
         UiKit.onChange(nickname, () -> member.nickname(nickname.getText()));
         UiButton randomCallsign = randomButton("bay-random-callsign-" + slot, "CustomMekDialog.RandomCallsign",
               member, () -> form.randomCallsign(slot), () -> nickname.setText(member.nickname()));
-        fields.add(withButton(kit.formField(colonless("CustomMekDialog.labNick"), nickname), randomCallsign))
-              .padTop(space("sm")).row();
+        // Both buttons take the wider one's width, so the name and callsign fields end at one edge
+        float buttonWidth = Math.max(randomName.getPrefWidth(), randomCallsign.getPrefWidth());
+        fields.add(withButton(kit.formField(colonless("CustomMekDialog.labName"), name), randomName, buttonWidth))
+              .row();
+        fields.add(withButton(kit.formField(colonless("CustomMekDialog.labNick"), nickname), randomCallsign,
+              buttonWidth)).padTop(space("sm")).row();
         refreshers.add(() -> {
             name.setDisabled(!member.enabled());
             nickname.setDisabled(!member.enabled());
@@ -405,11 +417,11 @@ final class LobbyUnitBayView {
         return row;
     }
 
-    private static Table withButton(Actor field, Actor button) {
+    private static Table withButton(Actor field, Actor button, float buttonWidth) {
         Table row = new Table();
         row.bottom().left();
         row.add(field).growX().bottom();
-        row.add(button).bottom().padLeft(space("sm"));
+        row.add(button).width(buttonWidth).bottom().padLeft(space("sm"));
         return row;
     }
 
@@ -448,6 +460,9 @@ final class LobbyUnitBayView {
         if (member.shows(Skill.ARTILLERY)) {
             dials.add(dial(member, Skill.ARTILLERY, "CustomMekDialog.labArtillery"));
         }
+        UiButton random = randomButton("bay-random-skills-" + slot, "CustomMekDialog.RandomSkill", member,
+              () -> form.randomSkills(slot), () -> { });
+        dials.add(random).bottom().padRight(0);
         content.add(dials).row();
         if (member.lamPilot()) {
             Table aero = new Table();
@@ -462,14 +477,12 @@ final class LobbyUnitBayView {
             aero.add(dial(member, Skill.PILOTING_AERO, "CustomMekDialog.labPilotingAero"));
             content.add(aero).padTop(space("lg")).row();
         }
-        UiButton random = randomButton("bay-random-skills-" + slot, "CustomMekDialog.RandomSkill", member,
-              () -> form.randomSkills(slot), () -> { });
-        content.add(random).padTop(space("md")).row();
+
 
         Table aptitudes = new Table();
         aptitudes.left();
         boolean any = false;
-        for (Skill skill : List.of(Skill.PILOTING, Skill.GUNNERY, Skill.PILOTING_AERO, Skill.GUNNERY_AERO,
+        for (Skill skill : List.of(Skill.GUNNERY, Skill.PILOTING, Skill.GUNNERY_AERO, Skill.PILOTING_AERO,
               Skill.ARTILLERY, Skill.SMALL_ARMS)) {
             if (!member.showsAptitude(skill)) {
                 continue;
@@ -767,48 +780,97 @@ final class LobbyUnitBayView {
     private Table zone() {
         Table content = new Table();
         content.top().left();
-        float cell = size("control.lg") * 2.4f;
         UiButton owners = name(kit.button("button-toggle", "locate", Messages.getString("Lobby.bay.ownersZone"), null),
               "bay-zone-owner");
         kit.tip(owners, true).getActor().setText(Messages.getString("Lobby.bay.ownersZone.tip"));
         zoneToggle(owners, Board.START_NONE);
-        Table grid = new Table();
-        grid.defaults().width(cell).height(size("control.lg")).pad(space("xxs"));
-        for (int[] row : GRID) {
-            for (int id : row) {
-                grid.add(zoneButton(id, zoneName(id)));
-            }
-            grid.row();
-        }
-        Table column = new Table();
-        column.top().left();
-        column.add(owners).width(cell * 3 + space("xxs") * 4).height(size("control.lg")).left().row();
-        column.add(kit.typeLabel(Messages.getString("Lobby.bay.orZone"), "small", "text.secondary"))
-              .left().padTop(space("sm")).row();
-        column.add(grid).left().padTop(space("xxs")).row();
-        List<Integer> custom = form.customZones();
-        if (!custom.isEmpty()) {
-            Table zones = new Table();
-            zones.left().defaults().height(size("control.sm")).pad(space("xxs"));
-            for (int number : custom) {
-                zones.add(zoneButton(Board.encodeCustomDeploymentZoneID(number),
+        Table side = new Table();
+        side.top().left().defaults().left();
+        Board board = form.board();
+        if (board != null) {
+            // The board to click on the left, everything else beside it
+            Table picture = new Table();
+            picture.top().left();
+            picture.add(kit.typeLabel(Messages.getString("Lobby.bay.mapZone"), "small", "text.secondary")).left()
+                  .row();
+            zoneMap = new LobbyZoneMap(kit, host.boardPicture(), board.getWidth(), board.getHeight(),
+                  size("control.lg") * ZONE_MAP_SIDE, form::zone, form::zoneHexes, id -> {
+                      form.zone(id);
+                      refresh();
+                  }, zoneNames());
+            kit.tip(zoneMap, true).getActor().setText(Messages.getString("Lobby.bay.mapZone.tip"));
+            refreshers.add(zoneMap::refresh);
+            picture.add(zoneMap).left().padTop(space("xs")).row();
+            content.add(picture).top().padRight(space("xl"));
+            side.add(owners).height(size("control.lg")).row();
+            side.add(kit.typeLabel(Messages.getString("Lobby.bay.orZone"), "small", "text.secondary"))
+                  .padTop(space("sm")).row();
+            Table chips = new Table();
+            chips.left().defaults().height(size("control.sm")).padRight(space("xs")).padTop(space("xxs"));
+            chips.add(zoneButton(Board.START_ANY, zoneName(Board.START_ANY)));
+            chips.add(zoneButton(Board.START_EDGE, zoneName(Board.START_EDGE)));
+            for (int number : form.customZones()) {
+                chips.add(zoneButton(Board.encodeCustomDeploymentZoneID(number),
                       Messages.getString("Lobby.bay.customZone", number)));
             }
-            column.add(zones).left().padTop(space("xs")).row();
+            side.add(chips).padTop(space("xxs")).row();
+        } else {
+            float cell = size("control.lg") * 2.4f;
+            Table grid = new Table();
+            grid.defaults().width(cell).height(size("control.lg")).pad(space("xxs"));
+            for (int[] row : GRID) {
+                for (int id : row) {
+                    grid.add(zoneButton(id, zoneName(id)));
+                }
+                grid.row();
+            }
+            Table column = new Table();
+            column.top().left();
+            column.add(owners).width(cell * 3 + space("xxs") * 4).height(size("control.lg")).left().row();
+            column.add(kit.typeLabel(Messages.getString("Lobby.bay.orZone"), "small", "text.secondary"))
+                  .left().padTop(space("sm")).row();
+            column.add(grid).left().padTop(space("xxs")).row();
+            List<Integer> custom = form.customZones();
+            if (!custom.isEmpty()) {
+                Table zones = new Table();
+                zones.left().defaults().height(size("control.sm")).pad(space("xxs"));
+                for (int number : custom) {
+                    zones.add(zoneButton(Board.encodeCustomDeploymentZoneID(number),
+                          Messages.getString("Lobby.bay.customZone", number)));
+                }
+                column.add(zones).left().padTop(space("xs")).row();
+            }
+            content.add(column).top().padRight(space("xxl"));
         }
-        content.add(column).top().padRight(space("xxl"));
-
-        Table side = new Table();
-        side.top().left().defaults().left().growX();
-        side.add(fieldStepper(Field.OFFSET, "CustomMekDialog.labDeploymentOffset",
-              "CustomMekDialog.labDeploymentOffsetTip")).row();
-        side.add(fieldStepper(Field.WIDTH, "CustomMekDialog.labDeploymentWidth",
-              "CustomMekDialog.labDeploymentWidthTip")).padTop(space("md")).row();
+        Table steppers = new Table();
+        steppers.top().left().defaults().left().top();
+        steppers.add(fieldStepper(Field.OFFSET, "CustomMekDialog.labDeploymentOffset",
+              "CustomMekDialog.labDeploymentOffsetTip")).padRight(space("xl"));
+        steppers.add(fieldStepper(Field.WIDTH, "CustomMekDialog.labDeploymentWidth",
+              "CustomMekDialog.labDeploymentWidthTip"));
+        side.add(steppers).padTop(board != null ? space("lg") : 0).row();
+        Label edgeOnly = name(kit.typeLabel(Messages.getString("Lobby.bay.edgeOnly"), "small", "text.secondary"),
+              "bay-edge-only");
+        edgeOnly.setWrap(true);
+        side.add(edgeOnly).width(size("control.lg") * 6).padTop(space("xs")).row();
+        refreshers.add(() -> {
+            boolean offset = form.enabled(Field.OFFSET);
+            boolean width = form.enabled(Field.WIDTH);
+            edgeOnly.setVisible(!offset || !width);
+            edgeOnly.setText(Messages.getString(offset ? "Lobby.bay.widthFixed" : "Lobby.bay.edgeOnly"));
+        });
         Table box = anyBox();
-        side.add(box).padTop(space("lg")).row();
+        side.add(box).padTop(space("md")).row();
         refreshers.add(() -> box.setVisible(form.zone() == Board.START_ANY));
         content.add(side).growX().top();
         return content;
+    }
+    private static String[] zoneNames() {
+        String[] names = new String[ZONE_KEYS.length];
+        for (int id = 0; id < names.length; id++) {
+            names[id] = zoneName(id);
+        }
+        return names;
     }
 
     private static String zoneName(int id) {
@@ -1023,11 +1085,13 @@ final class LobbyUnitBayView {
 
     // ---- The footer ----
 
+    /** The status line over the buttons, which are centred with the main one first, as every dialog's footer. */
     private Table footer() {
         Table footer = new Table();
-        footer.left();
         status = name(kit.typeLabel("", "small", "status.danger"), "bay-status");
-        footer.add(status).growX().minWidth(0);
+        status.setAlignment(Align.center);
+        status.setWrap(true);
+        footer.add(status).growX().minWidth(0).row();
         UiButton cancel = name(kit.button("button-secondary", null, Messages.getString("Cancel.text"), null),
               "bay-cancel");
         UiKit.onChange(cancel, () -> {
@@ -1039,9 +1103,13 @@ final class LobbyUnitBayView {
         UiKit.onChange(apply, () -> confirm(false));
         ok = name(kit.button("button-primary", "check", Messages.getString("Ok.text"), null), "bay-ok");
         UiKit.onChange(ok, () -> confirm(true));
-        footer.add(cancel).padLeft(space("md"));
-        footer.add(apply).padLeft(space("sm"));
-        footer.add(ok).padLeft(space("sm"));
+        Table buttons = new Table();
+        float width = Math.max(UiDialog.MIN_BUTTON_WIDTH, Math.max(ok.getPrefWidth(),
+              Math.max(apply.getPrefWidth(), cancel.getPrefWidth())));
+        buttons.add(ok).width(width);
+        buttons.add(apply).width(width).padLeft(space("md"));
+        buttons.add(cancel).width(width).padLeft(space("md"));
+        footer.add(buttons).padTop(space("sm"));
         return footer;
     }
 
@@ -1133,6 +1201,9 @@ final class LobbyUnitBayView {
     void dispose() {
         textures.forEach(Texture::dispose);
         textures.clear();
+        if (zoneMap != null) {
+            zoneMap.dispose();
+        }
     }
 
     // ---- For the probe and the tests ----

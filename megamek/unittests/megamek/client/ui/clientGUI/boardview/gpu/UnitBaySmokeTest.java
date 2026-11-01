@@ -266,6 +266,56 @@ class UnitBaySmokeTest {
         });
     }
 
+    @Test
+    void theBoardPictureChoosesTheZone() throws Exception {
+        EquipmentType.initializeTypes();
+        Game game = new Game();
+        Player local = new Player(1, "Local");
+        local.setStartingPos(Board.START_N);
+        game.addPlayer(1, local);
+        Entity atlas = atlas(game, local, "Atlas");
+        Client client = mock(Client.class);
+        when(client.getGame()).thenReturn(game);
+        when(client.getLocalPlayer()).thenReturn(local);
+        MapSettings settings = MapSettings.getInstance();
+        settings.setBoardSize(16, 17);
+        settings.setMapSize(1, 1);
+        settings.setMedium(MapSettings.MEDIUM_GROUND);
+        when(client.getMapSettings()).thenReturn(settings);
+        when(client.getSkillGenerator()).thenReturn(SkillGeneratorMethod.TOTAL_WARFARE.getGenerator());
+        UnitConfigForm form = new UnitConfigForm(client, client, List.of(atlas), true, new Board(16, 17));
+
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            LobbyUnitBayView bay = new LobbyUnitBayView(ui.kit, form,
+                  List.of(new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB)), List.of(), host(said));
+            bay.body().setBounds(100, 100, 1100, 900);
+            ui.window.addActor(bay.body());
+            bay.body().validate();
+            ui.draw();
+
+            click(ui, control(bay, "bay-tab-deployment"));
+            assertTrue(control(bay, "bay-edge-only").isVisible(), "the owner's zone says why there is no offset");
+            assertTrue(form.zoneHexes()[5][0], "the picture shows the owner's north edge");
+            click(ui, control(bay, "bay-zone-" + Board.START_S));
+            assertEquals(Board.START_S, form.zone(), "a click on the board's south third chooses the south");
+            assertTrue(form.zoneHexes()[5][16]);
+            assertTrue(form.enabled(UnitConfigForm.Field.OFFSET), "an edge takes an offset");
+            assertEquals(!form.enabled(UnitConfigForm.Field.WIDTH), control(bay, "bay-edge-only").isVisible(),
+                  "the hint stays only to say the rules fix the width");
+            click(ui, control(bay, "bay-offset-up"));
+            assertEquals("1", form.text(UnitConfigForm.Field.OFFSET), "the offset steps");
+            assertFalse(form.zoneHexes()[5][16], "and the zone moves in from the edge");
+            assertTrue(form.zoneHexes()[5][15]);
+            click(ui, control(bay, "bay-zone-" + Board.START_CENTER));
+            assertEquals(Board.START_CENTER, form.zone(), "the middle third is the centre");
+            click(ui, control(bay, "bay-zone-" + Board.START_EDGE));
+            assertEquals(Board.START_EDGE, form.zone(), "the chips below choose the rest");
+            assertTrue(((Button) control(bay, "bay-zone-" + Board.START_EDGE)).isChecked());
+            bay.dispose();
+        });
+    }
+
     private static LobbyUnitBayView.Host host(List<String> said) {
         return new LobbyUnitBayView.Host() {
             @Override
