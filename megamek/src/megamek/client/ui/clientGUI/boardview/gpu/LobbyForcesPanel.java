@@ -591,7 +591,7 @@ final class LobbyForcesPanel {
         });
         unitMenuButtons.put(unit.id(), more);
         side.add(more).size(size("control.sm")).right().padLeft(compact ? space("sm") : 0);
-        card.add(side).top().padLeft(space("sm"));
+        card.add(side).top().padLeft(space("sm")).minWidth(sideMin(compact));
 
         unitCards.put(unit.id(), card);
         order.add(new Object[] { false, unit.id() });
@@ -623,6 +623,7 @@ final class LobbyForcesPanel {
         Table block = new Table();
         block.setName("lobby-unit-sheet");
         block.top().left().defaults().left();
+        block.columnDefaults(0).minWidth(sheetLabelWidth());
         sheetRow(block, "Lobby.card.move", sheet.move(), null);
         sheetRow(block, "Lobby.card.armor", sheet.protection(), null);
         if (!sheet.heat().isEmpty()) {
@@ -632,6 +633,23 @@ final class LobbyForcesPanel {
             sheetRow(block, "Lobby.card.weapons", sheet.weaponsSummary(SHEET_WEAPONS), sheet.weaponsAll());
         }
         return block;
+    }
+
+    /** The BV and menu column's least width: wide enough for a five-digit BV, so a shorter BV doesn't shift the sheet. */
+    private float sideMin(boolean compact) {
+        float bv = kit.typeLabel("00,000", "body.strong", "text.primary").getPrefWidth();
+        return compact ? bv + space("sm") + size("control.sm") : Math.max(bv, size("control.sm"));
+    }
+
+    /** The widest sheet label, so the values start at one column even on a card without heat sinks or weapons. */
+    private float sheetLabelWidth() {
+        float widest = 0;
+        for (String key : new String[] { "Lobby.card.move", "Lobby.card.armor", "Lobby.card.heat.sinks",
+              "Lobby.card.weapons" }) {
+            widest = Math.max(widest, kit.roleTypeLabel("overline", Messages.getString(key), "text.muted")
+                  .getPrefWidth());
+        }
+        return widest;
     }
 
     private void sheetRow(Table block, String key, String value, @Nullable String tip) {
@@ -662,8 +680,9 @@ final class LobbyForcesPanel {
             showSheet(false);
         }
 
+        /** Every card's sheet takes the same width, so the sheets and the ids before them line up down the list. */
         private float sheetWidth() {
-            return (sheet == null) ? 0 : Math.min(sheet.getPrefWidth(), sheetMax());
+            return (sheet == null) ? 0 : sheetMax();
         }
 
         private void showSheet(boolean show) {
