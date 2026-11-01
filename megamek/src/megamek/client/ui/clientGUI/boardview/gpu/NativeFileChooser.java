@@ -47,16 +47,16 @@ final class NativeFileChooser {
     }
 
     /**
-     * Any thread: shows the open, or the {@code save}, dialog at {@code directory} for {@code filter}'s files, then, on
-     * the dialog's thread, hands {@code done} the file chosen, or null when the player cancels, or runs {@code failed}
-     * when it couldn't show.
+     * Any thread: shows the open, or the {@code save}, dialog at {@code directory} for {@code filter}'s files, a save
+     * suggesting {@code name} when not null, then, on the dialog's thread, hands {@code done} the file chosen, or null
+     * when the player cancels, or runs {@code failed} when it couldn't show.
      */
-    static void show(File directory, FileNameExtensionFilter filter, boolean save, Consumer<File> done,
+    static void show(File directory, FileNameExtensionFilter filter, boolean save, String name, Consumer<File> done,
           Runnable failed) {
         THREAD.execute(() -> {
             File chosen;
             try {
-                chosen = blocking(directory, filter, save);
+                chosen = blocking(directory, filter, save, name);
             } catch (RuntimeException | LinkageError failure) {
                 LOGGER.warn("The system file dialog couldn't show; using Swing's from now on: {}", failure.toString());
                 usable = false;
@@ -68,7 +68,7 @@ final class NativeFileChooser {
     }
 
     /** Blocks: the file chosen, or null when the player cancels. */
-    private static File blocking(File directory, FileNameExtensionFilter filter, boolean save) {
+    private static File blocking(File directory, FileNameExtensionFilter filter, boolean save, String name) {
         if (NFD_Init() != NFD_OKAY) {
             throw new IllegalStateException(NFD_GetError());
         }
@@ -81,7 +81,7 @@ final class NativeFileChooser {
             String start = directory != null && directory.isDirectory()
                   ? directory.toPath().toAbsolutePath().normalize().toString()
                   : null;
-            int result = save ? NFD_SaveDialog(path, filters, start, null) : NFD_OpenDialog(path, filters, start);
+            int result = save ? NFD_SaveDialog(path, filters, start, name) : NFD_OpenDialog(path, filters, start);
             if (result == NFD_OKAY) {
                 File file = new File(path.getStringUTF8(0));
                 NFD_FreePath(path.get(0));

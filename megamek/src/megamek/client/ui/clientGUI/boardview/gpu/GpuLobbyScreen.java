@@ -975,9 +975,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     /** GPU thread: asks {@code text} over the lobby; {@code yes} runs on OK. */
     void confirmDialog(String title, String text, Runnable yes) {
+        confirmDialog(title, text, yes, () -> { });
+    }
+
+    /** GPU thread: as {@link #confirmDialog(String, String, Runnable)}, running {@code no} when not confirmed. */
+    void confirmDialog(String title, String text, Runnable yes, Runnable no) {
         if (stage != null) {
             closeMenus();
-            nativeDialogs.confirm(title, text, yes);
+            nativeDialogs.confirm(title, text, yes, no);
+        } else {
+            no.run();
         }
     }
 

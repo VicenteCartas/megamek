@@ -14,7 +14,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
 import jakarta.annotation.Nullable;
 import megamek.MegaMek;
@@ -415,17 +414,7 @@ final class GpuLobbyTools {
         if (player == null) {
             return;
         }
-        window.chooseFile(new SystemFileDialog.Request(new File("."),
-              Messages.getString("ClientGUI.openUnitListFileDialog.title"),
-              new FileNameExtensionFilter("MUL files", "mul", "mmu"), false), null, file -> {
-                  try {
-                      gui().loadListFile(player, file);
-                  } catch (Exception failure) {
-                      LOGGER.error(failure, "The lobby could not load the unit list {}", file);
-                      message(Messages.getString("ClientGUI.errorLoadingFile"), String.valueOf(failure.getMessage()));
-                  }
-                  window.refreshSoon();
-              });
+        window.files().loadUnitList(file -> gui().loadListFile(player, file), window::refreshSoon);
     }
 
     // ---- The readout and the help ----

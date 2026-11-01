@@ -17,14 +17,18 @@ import megamek.logging.MMLogger;
  * The developer switch's run through the L17 tools and prompts: {@code lobby+victory}, {@code +randomarmy},
  * {@code +skills}, {@code +names}, {@code +readout}, {@code +princesshelp} or {@code +prompt=name} ({@code forcename},
  * {@code squadron}, {@code asset}, {@code assetdamage}, {@code train}, {@code confirm} or {@code error}) opens it
- * {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as its control would; {@code +click=name,name} then clicks its actors by
- * name through the stage, one every {@value LobbyUnitBayProbe#CLICK_GAP} s and each once its actor shows (up to
- * {@value #WAIT} s after the opening), logging the tool after each.
+ * {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as its control would; so do the L18 file routes: {@code +gameoptions}
+ * and {@code +playersettings} open their dialogs (then {@code +click=options-save}, {@code options-load},
+ * {@code settings-save-loadout} or {@code settings-load-loadout} asks the system file dialog), and {@code +savelist},
+ * {@code +loadlist} and {@code +sprite} (the player's first unit) ask it at once. {@code +click=name,name} then clicks
+ * its actors by name through the stage, one every {@value LobbyUnitBayProbe#CLICK_GAP} s and each once its actor shows
+ * (up to {@value #WAIT} s after the opening), logging the tool after each.
  */
 final class LobbyToolsProbe {
     private static final MMLogger LOGGER = MMLogger.create(LobbyToolsProbe.class);
     /** The tools the probe opens by name. */
-    static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp");
+    static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp",
+          "gameoptions", "playersettings", "savelist", "loadlist", "sprite");
     private static final String PROMPT_OPTION = "prompt=";
     private static final String CLICK_OPTION = "click=";
     /** How long a click waits for its actor, as the random army waits for the unit tables, in seconds. */

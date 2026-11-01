@@ -52,11 +52,14 @@ final class LobbyPlayerSettingsView {
         /** Runs {@code work} on the Swing thread, then {@code then} back on the GPU thread. */
         void edt(Runnable work, Runnable then);
 
-        /** Swing thread: asks for a file and saves {@code tree} to it. */
-        void saveLoadout(MunitionTree tree);
+        /** Asks for a file and saves {@code tree} to it; {@code then} runs back on the GPU thread once done. */
+        void saveLoadout(MunitionTree tree, Runnable then);
 
-        /** Swing thread: asks for a loadout file and reads it; null when none was chosen. */
-        @Nullable MunitionTree loadLoadout();
+        /**
+         * Asks for a loadout file and reads it; {@code then} gets the loadout back on the GPU thread, null when none
+         * was chosen or it could not be read.
+         */
+        void loadLoadout(Consumer<MunitionTree> then);
 
         /** Opens the bot's own settings. */
         void botSettings();
@@ -246,20 +249,14 @@ final class LobbyPlayerSettingsView {
         content.add(checks).padTop(space("sm")).row();
 
         UiButton save = tool("settings-save-loadout", "PlayerSettingsDialog.saveADF", "CustomMekDialog.acfSaveADF",
-              () -> {
-                  MunitionTree tree = form.loadoutToSave();
-                  host.edt(() -> host.saveLoadout(tree), () -> { });
-              });
+              () -> host.saveLoadout(form.loadoutToSave(), () -> { }));
         UiButton load = tool("settings-load-loadout", "PlayerSettingsDialog.loadADF", "CustomMekDialog.acfLoadADF",
-              () -> {
-                  MunitionTree[] loaded = new MunitionTree[1];
-                  host.edt(() -> loaded[0] = host.loadLoadout(), () -> {
-                      if (loaded[0] != null) {
-                          form.loaded(loaded[0]);
-                          refresh();
-                      }
-                  });
-              });
+              () -> host.loadLoadout(loaded -> {
+                  if (loaded != null) {
+                      form.loaded(loaded);
+                      refresh();
+                  }
+              }));
         Table files = new Table();
         files.left();
         files.add(save);

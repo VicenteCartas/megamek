@@ -1033,12 +1033,43 @@ work for Swing, and item 11 is under investigation.
        switch and count, roll, keep, discard and add, skills save, readout units, the prompts' suggestion, stepper and
        order buttons). Live: `lobby+victory`, `+randomarmy`, `+skills`, `+names`, `+readout`, `+princesshelp` and
        `+prompt=name`, with `+click=name,name` (see `LobbyToolsProbe`).
+     - ~~L18 File choosers~~. Every file chooser the libGDX lobby opens is the system file dialog, through
+       `SystemFileDialog` (as the start screen and the map setups use it). The routes' logic is in the toolkit-free
+       `megamek.client.lobby.LobbyFiles` (which folder, title, filter and default name each route asks with, what is
+       saved or loaded, the error messages), with the dialog injected as a `LobbyFiles.Chooser`:
+       - Game options Save and Load (the native game options view) open in `mmconf` with the "GameOptions" XML
+         filter, instead of `GameOptionsDialog`'s JFileChooser; ".xml" is added to a saved name as before.
+       - Loadouts (Save and Load in the player settings view, the unit menu's Save/Apply configuration) open in the
+         user loadouts folder with the "adf files" filter; an unreadable file gives the ADF read error as before.
+       - Save List opens the system dialog with the player's name as the file name instead of
+         `ClientGUI.saveListFile`'s JFileChooser; Load List (L17) now goes through `LobbyFiles` too. ".mul" is
+         added unless the name ends with ".mul" or ".xml", as the Swing client does.
+       - The unit menu's sprite export asks for a PNG through the system dialog instead of an AWT `FileDialog`.
+       - The game options and player settings views' hosts are asynchronous (they get a callback), so the lobby
+         keeps drawing while the dialog is open; `SwingLobbyUnitActions` takes the `LobbyFiles` to use.
+         `GameOptionsDialog`, `ClientGUI.saveListFile` and the other Swing choosers that MekHQ, MegaMekLab and the
+         in-game screens open are unchanged.
+       - Bot presets have no file chooser: `BotSetupForm`'s named presets are kept in the bot behaviours file, so
+         there is nothing to move.
+       Differences on purpose: the system dialog filters by extension only, so the game options load shows every
+       XML file and refuses one without options with a message (the Swing chooser hid it); the native dialog has no
+       title of its own (the OS shows "Open" or "Save As"; the lobby's title is logged); Windows may open the
+       folder it last used instead of the given one; the unit list folders are remembered while MegaMek runs, not
+       across runs; a save asks before replacing a file; the sprite export opens where the system last saved.
+       Still Swing: the SBF and Alpha Strike stats dialogs' export and Add Unit's advanced search (through their
+       Swing dialogs). Checks: `LobbyFilesTest` (each route's folder, filter and default name, save and load
+       round-trips, a cancel, a non-options XML refused, a file that is no loadout, a unit list that fails to load, the
+       sprite's extension); the on-demand
+       `LobbyFileChoosersSmokeTest` (with a fake chooser: the options view's Save and Load round-trip a game option,
+       the player settings' loadout Save and Load round-trip, a unit list saves and loads back, a cancelled sprite
+       export writes nothing). Live, through the real Windows dialog: the probe's `lobby+gameoptions`,
+       `+playersettings`, `+savelist`, `+loadlist` and `+sprite` with `+click=options-save` and similar; the log
+       shows `[LobbyFiles] The system file dialog opens: ...`, the answer, and what was saved or loaded.
      - Still open after #34, for a later round once #33 and #34 are merged:
-       - L18 File choosers: game options, loadouts and bot presets open the system file dialog (as the start
-         screen, the load list and the map setups do) instead of a Swing chooser.
-       - Live checks still to do: a real MekHQ game, a network reconnect, saving and loading game options and bot
-         presets through the real file chooser and a password-protected game. A second human player was checked
-         for the Game Master seat (a windowless client); a second MegaMek window remains to try.
+       - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
+         loading game options, a loadout and a unit list through the real system file dialog was checked (L18);
+         bot presets have no file to save. A second human player was checked for the Game Master seat (a
+         windowless client); a second MegaMek window remains to try.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).

@@ -282,11 +282,22 @@ final class LobbyNativeDialogs {
 
     /** Asks {@code text} over whatever shows; {@code yes} runs once OK closed it, and Cancel only closes it. */
     UiDialog confirm(String title, String text, Runnable yes) {
-        UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
+        return confirm(title, text, yes, () -> { });
+    }
+
+    /** As {@link #confirm(String, String, Runnable)}, running {@code no} when the dialog closes otherwise. */
+    UiDialog confirm(String title, String text, Runnable yes, Runnable no) {
+        boolean[] confirmed = new boolean[1];
+        UiDialog dialog = begin(title, "dialog.sm", true, () -> {
+            if (!confirmed[0]) {
+                no.run();
+            }
+        });
         var label = kit.typeLabel(text, "body", "text.primary");
         label.setWrap(true);
         dialog.body().add(label).growX().left();
         dialog.primary(Messages.getString("Ok.text"), () -> {
+            confirmed[0] = true;
             close();
             yes.run();
         }).setName("confirm-ok");

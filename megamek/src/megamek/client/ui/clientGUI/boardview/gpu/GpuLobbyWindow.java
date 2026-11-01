@@ -43,6 +43,8 @@ import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
+import megamek.client.lobby.LobbyError;
+import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
@@ -61,7 +63,6 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
-import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
@@ -134,6 +135,8 @@ public final class GpuLobbyWindow {
     private static final int MAP_DELAY_MS = 150;
     /** How long a sent ready state shows before the server's echo, at most. */
     private static final long PENDING_READY_NANOS = 3_000_000_000L;
+    /** The folders the unit list dialogs last used, kept while MegaMek runs, as the Swing client's choosers keep them. */
+    private static final LobbyFiles.Folders FOLDERS = new LobbyFiles.Folders();
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;
@@ -176,6 +179,17 @@ public final class GpuLobbyWindow {
     });
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
     private final GpuLobbyTools tools = new GpuLobbyTools(this);
+    private final LobbyFiles files = new LobbyFiles(this::chooseFile, new LobbyFiles.Report() {
+        @Override
+        public void error(LobbyError error, Object... args) {
+            tools.asks().error(error, args);
+        }
+
+        @Override
+        public void message(String title, String text) {
+            onScreen(shown -> shown.messageDialog(title, text));
+        }
+    }, FOLDERS);
     private final GameListener gameListener = new GameListenerAdapter() {
         @Override
         public void gamePlayerConnected(GamePlayerConnectedEvent event) {
@@ -469,8 +483,20 @@ public final class GpuLobbyWindow {
     /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
     /** EDT, for the developer switch: opens the L17 tool or prompt {@code tool} names; see {@link LobbyToolsProbe}. */
     void probeTool(String tool) {
-        if (!closing) {
-            tools.probe(tool);
+        if (closing) {
+            return;
+        }
+        Player local = gui.getClient().getLocalPlayer();
+        switch (tool) {
+            case "gameoptions" -> openGameOptions();
+            case "playersettings" -> openPlayerSettings(gui.getClient());
+            case "savelist" -> forcesCommand(LobbyForcesPanel.Command.SAVE_LIST);
+            case "loadlist" -> forcesCommand(LobbyForcesPanel.Command.LOAD_LIST);
+            case "sprite" -> gui.getClient().getGame().getEntitiesVector().stream()
+                  .filter(unit -> local != null && unit.getOwnerId() == local.getId()).findFirst()
+                  .ifPresent(unit -> new SwingLobbyUnitActions(gui, files).run(LobbyUnitMenu.LMP_SPRITE + '|'
+                        + LobbyUnitMenu.SPRITE_CAMO + '|' + unit.getId()));
+            default -> tools.probe(tool);
         }
     }
 
@@ -787,8 +813,14 @@ public final class GpuLobbyWindow {
                 case NAMES -> tools.names();
                 case C3 -> openC3(List.of());
                 case LOAD_LIST -> tools.loadList();
-                case SAVE_LIST, PRINT_LIST -> services.forcesCommand(
-                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
+                case SAVE_LIST -> {
+                    Player local = gui.getClient().getLocalPlayer();
+                    if (local != null) {
+                        files.saveUnitList(gui.getClient().getGame(), local, () -> { });
+                    }
+                }
+                case PRINT_LIST -> services.forcesCommand(SwingLobbyServices.ForcesCommand.PRINT_LIST,
+                      gui.getClient().getLocalPlayer());
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
             refreshSoon();
@@ -1108,7 +1140,7 @@ public final class GpuLobbyWindow {
                 if (tools.unitCommand(command)) {
                     return;
                 }
-                new SwingLobbyUnitActions(gui).run(command);
+                new SwingLobbyUnitActions(gui, files).run(command);
                 refreshSoon();
             }
         });
@@ -1353,20 +1385,39 @@ public final class GpuLobbyWindow {
      * @param replaceKey the message asking to replace an existing file, with its name as {0}; null when opening
      */
     void chooseFile(SystemFileDialog.Request request, @Nullable String replaceKey, Consumer<File> chosen) {
+        chooseFileOrNone(request, replaceKey, file -> {
+            if (file != null) {
+                chosen.accept(file);
+            }
+        });
+    }
+
+    /** The lobby's file routes, which ask the system's file dialog; Swing thread. */
+    LobbyFiles files() {
+        return files;
+    }
+
+    /** EDT: asks for the file of a lobby file route in the system's file dialog; {@code chosen} gets null if none. */
+    private void chooseFile(LobbyFiles.Ask ask, Consumer<File> chosen) {
+        chooseFileOrNone(SystemFileDialog.Request.of(ask), ask.save() ? "Lobby.files.replace" : null, chosen);
+    }
+
+    /** EDT: as {@link #chooseFile(SystemFileDialog.Request, String, Consumer)}, but hands null on a cancel. */
+    private void chooseFileOrNone(SystemFileDialog.Request request, @Nullable String replaceKey,
+          Consumer<File> chosen) {
         LOGGER.info("[LobbyFiles] The system file dialog opens: {}", request.title());
         SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+            LOGGER.info("[LobbyFiles] The system file dialog answered: {}", choice == null ? "cancel" : choice.file());
             if (closing || choice == null) {
+                chosen.accept(null);
                 return;
             }
             File file = choice.file();
             if (replaceKey != null && choice.askReplace()) {
                 String text = Messages.getString(replaceKey, file.getName());
                 onScreen(shown -> shown.confirmDialog(Messages.getString("ChatLounge.map.confirmReplace"), text,
-                      () -> SwingUtilities.invokeLater(() -> {
-                          if (!closing) {
-                              chosen.accept(file);
-                          }
-                      })));
+                      () -> SwingUtilities.invokeLater(() -> chosen.accept(closing ? null : file)),
+                      () -> SwingUtilities.invokeLater(() -> chosen.accept(null))));
             } else {
                 chosen.accept(file);
             }
@@ -1913,13 +1964,13 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void saveLoadout(MunitionTree tree) {
-                new SwingLobbyUnitActions(gui).saveLoadout(tree);
+            public void saveLoadout(MunitionTree tree, Runnable then) {
+                SwingUtilities.invokeLater(() -> files.saveLoadout(tree, () -> GpuHost.post(then)));
             }
 
             @Override
-            public @Nullable MunitionTree loadLoadout() {
-                return new SwingLobbyUnitActions(gui).loadLoadout();
+            public void loadLoadout(Consumer<MunitionTree> then) {
+                SwingUtilities.invokeLater(() -> files.loadLoadout(tree -> GpuHost.post(() -> then.accept(tree))));
             }
 
             @Override
@@ -2080,21 +2131,14 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void save(Vector<IBasicOption> all) {
-                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), true);
-                if (file != null) {
-                    GameOptions.saveOptions(all, file.getAbsolutePath());
-                }
+            public void save(Vector<IBasicOption> all, Runnable then) {
+                SwingUtilities.invokeLater(() -> files.saveGameOptions(all, () -> GpuHost.post(then)));
             }
 
             @Override
-            public boolean load(GameOptions into) {
-                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), false);
-                if (file == null) {
-                    return false;
-                }
-                into.loadOptions(file, false);
-                return true;
+            public void load(GameOptions into, Consumer<Boolean> then) {
+                SwingUtilities.invokeLater(() -> files.loadGameOptions(into,
+                      loaded -> GpuHost.post(() -> then.accept(loaded))));
             }
 
             @Override

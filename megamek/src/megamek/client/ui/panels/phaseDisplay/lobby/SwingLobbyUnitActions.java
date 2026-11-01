@@ -3,11 +3,8 @@ package megamek.client.ui.panels.phaseDisplay.lobby;
 
 import static megamek.client.lobby.LobbyUnitMenu.*;
 
-import java.awt.FileDialog;
 import java.awt.Image;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -17,17 +14,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.StringTokenizer;
 import javax.imageio.ImageIO;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
-import javax.swing.filechooser.FileNameExtensionFilter;
 
-import megamek.MMConstants;
 import megamek.client.generator.ReconfigurationParameters;
 import megamek.client.generator.TeamLoadOutGenerator;
 import megamek.client.lobby.LobbyCommands;
+import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.ratgenerator.FactionRecord;
-import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.BotCommands.BotFormationsMenuBuilder;
 import megamek.client.ui.dialogs.BotCommands.BotOrderFacingDialog;
@@ -55,17 +49,21 @@ import megamek.server.commands.UnitOrderCommand;
 /**
  * Runs the items of the lobby's unit and formation menu ({@link LobbyUnitMenu}), given as their command strings
  * {@code COMMAND|info|unit ids}, through the lobby commands; the few that need a Swing dialog of their own (the C3
- * manager, munition loadouts, sprite export and the bot orders) open it on the client's frame.
+ * manager, the sprite camouflage and the bot orders) open it on the client's frame, and the loadout and sprite files
+ * are asked through the lobby's {@link LobbyFiles}.
  */
 public final class SwingLobbyUnitActions {
     private static final MMLogger LOGGER = MMLogger.create(SwingLobbyUnitActions.class);
 
     private final ClientGUI clientGUI;
     private final LobbyCommands commands;
+    private final LobbyFiles files;
 
-    public SwingLobbyUnitActions(ClientGUI clientGUI) {
+    /** @param files the lobby's file routes, which the loadout and sprite items ask their files through */
+    public SwingLobbyUnitActions(ClientGUI clientGUI, LobbyFiles files) {
         this.clientGUI = clientGUI;
         this.commands = clientGUI.lobbyCommands();
+        this.files = files;
     }
 
     private Game game() {
@@ -275,19 +273,18 @@ public final class SwingLobbyUnitActions {
             }
             case LMP_SAVE_CONFIG -> {
                 munitionTree.loadEntityList(entityArrayList);
-                saveLoadout(munitionTree);
+                files.saveLoadout(munitionTree, () -> { });
             }
-            case LMP_APPLY_CONFIG -> {
-                munitionTree = loadLoadout();
-                if (munitionTree != null) {
+            case LMP_APPLY_CONFIG -> files.loadLoadout(loaded -> {
+                if (loaded != null) {
                     // Use the unlimited availability map (all munitions allowed in any amount)
                     resetBombChoices(clientGUI, game(), entityArrayList);
                     HashMap<String, Object> availMap = TeamLoadOutGenerator.createUnlimitedAllMunitionsMap();
-                    tlg.reconfigureEntities(entityArrayList, faction, munitionTree, reconfigurationParameters,
-                          availMap);
-                    reconfigured = true;
+                    tlg.reconfigureEntities(entityArrayList, faction, loaded, reconfigurationParameters, availMap);
+                    commands.sendProxyUpdates(entityArrayList,
+                          game().getPlayer(entityArrayList.getFirst().getOwnerId()));
                 }
-            }
+            });
             default -> {
             }
         }
@@ -310,41 +307,6 @@ public final class SwingLobbyUnitActions {
         }
         if (!resetBombers.isEmpty()) {
             clientgui.lobbyCommands().sendProxyUpdates(resetBombers, game.getPlayer(el.getFirst().getOwnerId()));
-        }
-    }
-
-    /** Asks for a file and saves the loadout {@code source} to it, as Save Loadout does. */
-    public void saveLoadout(MunitionTree source) {
-        JFileChooser fc = new JFileChooser(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toString());
-        FileNameExtensionFilter adfFilter = new FileNameExtensionFilter("adf files (*.adf)", "adf");
-        fc.addChoosableFileFilter(adfFilter);
-        fc.setFileFilter(adfFilter);
-        fc.setDialogTitle(Messages.getString("ClientGui.LoadoutSaveDialog.title"));
-        if ((fc.showSaveDialog(frame()) != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
-            return;
-        }
-        String file = fc.getSelectedFile().getAbsolutePath();
-        if (!file.toLowerCase().endsWith(".adf")) {
-            file = file + ".adf";
-        }
-        source.writeToADFFilename(file);
-    }
-
-    /** Asks for a loadout file and reads it, as Load Loadout does; null when none was chosen or it was unreadable. */
-    public MunitionTree loadLoadout() {
-        JFileChooser fc = new JFileChooser(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toString());
-        FileNameExtensionFilter adfFilter = new FileNameExtensionFilter("adf files (*.adf)", "adf");
-        fc.addChoosableFileFilter(adfFilter);
-        fc.setFileFilter(adfFilter);
-        fc.setDialogTitle(Messages.getString("ClientGui.LoadoutLoadDialog.title"));
-        if ((fc.showOpenDialog(frame()) != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
-            return null;
-        }
-        try {
-            return new MunitionTree(fc.getSelectedFile().getAbsolutePath());
-        } catch (IllegalArgumentException e) {
-            LobbyErrors.showADFReadError(frame(), e.getMessage());
-            return null;
         }
     }
 
@@ -420,28 +382,14 @@ public final class SwingLobbyUnitActions {
     }
 
     private void exportSprite(Entity entity, Camouflage camouflage, boolean showDamage) {
-        FileDialog fd = new FileDialog(frame(), Messages.getString("ExportUnitSpriteDialog.title"));
-        fd.setMode(FileDialog.SAVE);
-        fd.setDirectory("");
-        fd.setFile(entity.getDisplayName() + ".png");
-        fd.setFilenameFilter((dir, file) -> file.endsWith(".png"));
-        fd.setVisible(true);
-
-        String directory = fd.getDirectory();
-        String filename = fd.getFile();
-        if ((filename == null) || (directory == null)) {
-            return;
-        }
-        File file = new File(directory, filename);
-        if (!file.getPath().endsWith(".png")) {
-            file = new File(file.getPath() + ".png");
-        }
-        Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
-        Image sprite = EntityImage.createLobbyIcon(base, camouflage, entity).loadPreviewImage(showDamage);
-        try {
-            ImageIO.write((BufferedImage) sprite, "png", file);
-        } catch (Exception ex) {
-            LOGGER.error(ex, "Failed to export to file");
-        }
+        files.exportSprite(entity.getDisplayName(), file -> {
+            Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
+            Image sprite = EntityImage.createLobbyIcon(base, camouflage, entity).loadPreviewImage(showDamage);
+            try {
+                ImageIO.write((BufferedImage) sprite, "png", file);
+            } catch (Exception ex) {
+                LOGGER.error(ex, "Failed to export to file");
+            }
+        });
     }
 }
