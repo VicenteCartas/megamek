@@ -241,7 +241,7 @@ final class GpuPageCache implements Disposable {
      * layer this frame, an unpinned one (a prefetch) only takes a layer nothing pinned needs.
      */
     void need(int level, int x, int y, boolean pinned) {
-        Page page = pages.computeIfAbsent(pack(level, x, y), ignored -> new Page(level, x, y));
+        Page page = pages.computeIfAbsent(key(level, x, y), ignored -> new Page(level, x, y));
         if (page.needed == frame) {
             page.pinned |= pinned;
             return;
@@ -254,7 +254,7 @@ final class GpuPageCache implements Disposable {
 
     /** Page (x, y) of {@code level}, stale and needed this frame, no longer serves: it builds with those not built. */
     void urgent(int level, int x, int y) {
-        Page page = pages.get(pack(level, x, y));
+        Page page = pages.get(key(level, x, y));
         if (page != null && page.needed == frame) { page.urgent = true; }
     }
 
@@ -262,13 +262,13 @@ final class GpuPageCache implements Disposable {
 
     /** Page (x, y) of {@code level}'s layer while it can be read (stale or not), else -1. */
     int layer(int level, int x, int y) {
-        Page page = pages.get(pack(level, x, y));
+        Page page = pages.get(key(level, x, y));
         return page != null && ready(page) ? page.layer : -1;
     }
 
     /** Whether page (x, y) of {@code level} is ready and current: content other pages may be built from. */
     boolean current(int level, int x, int y) {
-        Page page = pages.get(pack(level, x, y));
+        Page page = pages.get(key(level, x, y));
         return page != null && ready(page) && !page.stale;
     }
 
@@ -403,7 +403,7 @@ final class GpuPageCache implements Disposable {
                 victim.step = 0;
                 victim.stale = false;
                 dropSpare(victim);
-                if (victim.needed != frame) { pages.remove(pack(victim.level, victim.x, victim.y)); }
+                if (victim.needed != frame) { pages.remove(key(victim.level, victim.x, victim.y)); }
             }
         }
         if (page.layer < 0) {
@@ -432,8 +432,16 @@ final class GpuPageCache implements Disposable {
         }
     }
 
-    private static long pack(int level, int x, int y) {
-        return (long) level << 58 | (x & 0x1FFFFFFFL) << 29 | y & 0x1FFFFFFFL;
+    /**
+     * Multiplies a packed page key, a bijection: Long's hash is its high word xor its low one, so nearby pages' plain
+     * keys share a few dozen hashes and every per-frame set or map of them turns into trees. KEY_UNMIX is its inverse
+     * (their product is 1), which recovers a mixed key's fields.
+     */
+    static final long KEY_MIX = 0x9E3779B97F4A7C15L, KEY_UNMIX = 0xF1DE83E19937733DL;
+
+    /** A page's key, unique for every level and position, with a well spread hash ({@link #KEY_MIX}). */
+    static long key(int level, int x, int y) {
+        return ((long) level << 58 | (x & 0x1FFFFFFFL) << 29 | y & 0x1FFFFFFFL) * KEY_MIX;
     }
 
     private int boundFramebuffer() {

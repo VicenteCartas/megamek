@@ -172,8 +172,11 @@ final class GpuMaterialCache {
      */
     private record Chunk(int page, List<BoundingBox> bounds, List<Vector3> centres, int since) { }
 
-    /** A page of any level. */
-    private record PageKey(int at, int x, int y) { }
+    /** A page of any level, hashed as the page cache keys it: a record's own hash repeats along nearby rows. */
+    private record PageKey(int at, int x, int y) {
+        @Override
+        public int hashCode() { return Long.hashCode(GpuPageCache.key(at, x, y)); }
+    }
 
     private final GpuPageCache pages = new GpuPageCache(PAGE_TEXELS, GUTTER, LEVELS, TOP_LEVEL + 1, FORMATS);
     // A top's cached-lit twin, and the generic copy its fill draws: both serve every family alike (GpuFamilyPrograms),
@@ -1057,11 +1060,9 @@ final class GpuMaterialCache {
         }
         // The walls' table, over the same level up to WALL_TOP: a terrain page draws its walls cached once every page
         // under their charts is built and serves. Its window takes the nearest pages first, as many as the table spans
-        // (a wide view at a fine level); walls past it draw directly.
-        List<Long> nearest = new ArrayList<>(wallPages.keySet());
-        nearest.sort((a, b) -> Float.compare(wallPages.get(a), wallPages.get(b)));
+        // (a wide view at a fine level, in wallOrder); walls past it draw directly.
         int[] wallTable = { Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MIN_VALUE };
-        for (long page : nearest) {
+        for (long page : wallOrder) {
             int[] grown = wallTable.clone();
             extend(grown, unpackX(page), unpackY(page));
             if ((long) (grown[2] - grown[0] + 1) * (grown[3] - grown[1] + 1) > GpuPageCache.TABLE_ENTRIES) {
@@ -1700,11 +1701,12 @@ final class GpuMaterialCache {
         }
     }
 
-    private static long pack(int x, int y) { return ((long) x << 32) | (y & 0xFFFFFFFFL); }
+    /** A page's (x, y), mixed as the page cache's keys are ({@link GpuPageCache#KEY_MIX}). */
+    private static long pack(int x, int y) { return (((long) x << 32) | (y & 0xFFFFFFFFL)) * GpuPageCache.KEY_MIX; }
 
-    private static int unpackX(long packed) { return (int) (packed >> 32); }
+    private static int unpackX(long packed) { return (int) (packed * GpuPageCache.KEY_UNMIX >> 32); }
 
-    private static int unpackY(long packed) { return (int) packed; }
+    private static int unpackY(long packed) { return (int) (packed * GpuPageCache.KEY_UNMIX); }
 
     void dispose() {
         pages.dispose();
