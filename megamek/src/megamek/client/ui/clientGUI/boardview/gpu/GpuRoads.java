@@ -360,7 +360,7 @@ final class GpuRoads {
     static float runOn() { return BoardBridgeFooting.apronLength(); }
 
     /** Tile pixels a gravel road's stone spills on past the border where it meets a paved road, breaking up as it goes. */
-    static float overlap() { return BoardRelief.metres(2.4f) / BoardGeometry.hexScale(); }
+    static float overlap() { return BoardRelief.metres(1.2f) / BoardGeometry.hexScale(); }
 
     /** Tile pixels past that border a loose road's wheels carry faint grit on along the paved road's wheel paths. */
     static float carry() { return BoardRelief.metres(14) / BoardGeometry.hexScale(); }
@@ -1126,8 +1126,9 @@ final class GpuRoads {
         float alpha = fade.outer() > fade.inner()
               ? Math.clamp((fade.outer() - road.distance(x, y)) / (fade.outer() - fade.inner()), 0, 1) : 1;
         if (track(patch) && !patch.texture().equals(texture(BoardRoad.Kind.DIRT))) {
-            // Gravel's overlap breaks up into tongues and stray stones (terrain-road.frag looseTrack).
-            alpha *= Math.min(1, 2 * road.runOn(x, y, overlap()));
+            // Gravel's slight overlap breaks up into tongues and stray stones from the border on (terrain-road.frag
+            // looseTrack).
+            alpha *= road.runOn(x, y, overlap());
         } else if (track(patch)) {
             // A dirt track runs on over a paved road's landing in its ruts only, whole over half its run-on, then
             // wearing out as at its own end: its loose soil and the grass between them stay off it.
