@@ -7810,6 +7810,15 @@ final class GpuTerrain implements Disposable {
     /** Native checks: the twin draws of the last depth pre-pass. */
     int prepassDraws() { return prepassDraws; }
 
+    /**
+     * Native checks: whether a prop, terrain or top page the last frame showed has a merge still to make. A merge changes
+     * the draw order, so where surfaces tie in depth, a few pixels change when it lands. Scar and paint pages are left
+     * out: they advance after the opaque flush, past the frame's page deadline whenever that flush outlasts it.
+     */
+    boolean pagesMerging() {
+        return propBatch.merging() || terrainPages.merging() || topPages.merging();
+    }
+
     /** In render's colour stage: whether a depth pre-pass drew, so the scene depth holds its surfaces. */
     boolean prepassed() { return prepassed; }
 

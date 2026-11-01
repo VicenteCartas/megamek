@@ -213,8 +213,8 @@ class GpuDepthPrepassBaselineSmokeTest {
     /**
      * The view's detail installed and its programs built, family programs (and with the pre-pass its twins) included, as
      * the loading stage waits for them; then drawn until nothing builds and refinement twice has nothing left (detail,
-     * tree levels and scatter visibility settle with drawn frames), and given a fresh shadow map, which otherwise keeps
-     * what it showed when it was drawn.
+     * tree levels and scatter visibility settle with drawn frames) and the mesh pages have merged, and given a fresh
+     * shadow map, which otherwise keeps what it showed when it was drawn.
      */
     static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene)
           throws InterruptedException {
@@ -229,8 +229,12 @@ class GpuDepthPrepassBaselineSmokeTest {
             frame.render(terrain, camera, scene);
             assertTrue(System.nanoTime() < deadline, "Family programs must finish");
         } while (terrain.familyPrograms().pending() > 0);
-        // Deferred work waits for unchanged frames: stale mesh pages merge and refined chunks redraw the cached shadow.
-        for (int quiet = 0; quiet < GpuMeshPage.SETTLE_FRAMES + 2; ) {
+        // Deferred work waits for unchanged frames: stale mesh pages merge, a little each frame, and refined chunks
+        // redraw the cached shadow. A merge reorders draws, so pixels where surfaces tie in depth change when it lands.
+        // The merges take a few dozen frames; one that the frame's merge share never reaches (submissions outlasting it
+        // in a large view) is not waited for past ten times the settling frames.
+        for (int quiet = 0; quiet < GpuMeshPage.SETTLE_FRAMES + 2
+              || terrain.pagesMerging() && quiet < 10 * GpuMeshPage.SETTLE_FRAMES; ) {
             frame.render(terrain, camera, scene, BoardCamera.renderScale);
             quiet = terrain.refine(camera.camera) | terrain.busy() ? 0 : quiet + 1;
             assertTrue(System.nanoTime() < deadline, () -> "Terrain must settle: " + terrain.buildDetails());

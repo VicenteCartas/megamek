@@ -232,6 +232,9 @@ final class GpuPropBatch implements Disposable {
     /** Counts completed page merges, which source replacement causes, never visibility changes. */
     long rebuilds() { return rebuilds; }
 
+    /** Whether a page the last frame showed has a merge still to make (GpuMeshPage#needsBuild). */
+    boolean merging() { return enabled && pages.values().stream().anyMatch(GpuMeshPage::needsBuild); }
+
     /** Transfers the temporary builder's tightly sized meshes to destination; source meshes remain borrowed. */
     static void cache(Array<Renderable> destination, Consumer<ModelCache> submit) {
         ModelCache.TightMeshPool meshes = new ModelCache.TightMeshPool();

@@ -106,6 +106,9 @@ final class GpuTerrainPages implements Disposable {
 
     long rebuilds() { return rebuilds; }
 
+    /** Whether a page the last frame showed has a merge still to make (GpuMeshPage#needsBuild). */
+    boolean merging() { return active && pages.values().stream().anyMatch(GpuMeshPage::needsBuild); }
+
     @Override
     public void dispose() {
         pages.values().forEach(GpuMeshPage::dispose);
