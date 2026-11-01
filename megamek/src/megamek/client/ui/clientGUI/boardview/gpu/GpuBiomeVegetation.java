@@ -613,7 +613,7 @@ final class GpuBiomeVegetation implements Disposable {
     List<ModelInstance> visible(BoardScene scene, Camera camera, List<BoardScene.Tile> candidates,
           Function<Coords, BoardPlants> plants) {
         if (revision != BoardGeometry.revision() || boardId != scene.boardId()) {
-            dispose(); revision = BoardGeometry.revision(); boardId = scene.boardId();
+            forgetBoard(); revision = BoardGeometry.revision(); boardId = scene.boardId();
         }
         if (tiles != scene.tiles()) {
             tiles = scene.tiles(); view = null;
@@ -753,12 +753,20 @@ final class GpuBiomeVegetation implements Disposable {
         return new MeshPartBuilder.VertexInfo().setPos(point).setNor(normal).setCol(color);
     }
 
-    @Override
-    public void dispose() {
+    /**
+     * Drops one board's reeds. The sedge cutout is the same on every board and stays, so the one the editor's warm-up
+     * loads (prepareMaterials) is still there when a stroke paints the first marsh.
+     */
+    private void forgetBoard() {
         for (Chunk chunk : chunks.values()) { chunk.dispose(); }
         chunks.clear();
         distantReeds.dispose();
-        if (sedge != null) { sedge.dispose(); sedge = null; }
         marshes.clear(); tiles = null; view = null;
+    }
+
+    @Override
+    public void dispose() {
+        forgetBoard();
+        if (sedge != null) { sedge.dispose(); sedge = null; }
     }
 }
