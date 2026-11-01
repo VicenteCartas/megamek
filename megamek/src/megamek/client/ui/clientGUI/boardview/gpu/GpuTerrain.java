@@ -1066,12 +1066,18 @@ final class GpuTerrain implements Disposable {
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final GpuLavaLighting lavaLighting;
     private final List<Chunk> chunks = new ArrayList<>();
-    // At most four in-flight chunks and eight replaced chunks. Half the cores, at most eight, build terrain: each
-    // chunk spreads its hexes across the pool, while the other half keeps rendering, input and garbage collection
-    // responsive. All GL ownership stays on the render thread.
+    // At most four in-flight chunks (two for the camera) and eight replaced chunks. Half the cores, at most eight,
+    // build terrain: each chunk spreads its hexes across the pool, while the other half keeps rendering, input and
+    // garbage collection responsive. All GL ownership stays on the render thread.
     static final int DEFAULT_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors() / 2));
     /** Sections built at once, so also the most task lines the loading screen shows. */
     static final int BUILD_JOBS = 4;
+    /**
+     * Camera refinements in flight: the next chunk prepares on the workers while this one's render-thread stages run.
+     * Its hexes already spread across the pool, so a third or fourth only shared the busy workers, delayed the first
+     * installs and lengthened frames.
+     */
+    static final int REFINE_JOBS = 2;
     private final ExecutorService detailWorker = TerrainSettings.workers(DEFAULT_WORKERS);
     private final Map<Integer, Chunk> detailCache = new LinkedHashMap<>();
     /** {@code columns}: a Classic chunk ({@link #setColumns}). */
@@ -1104,7 +1110,6 @@ final class GpuTerrain implements Disposable {
         final TerrainLoadProgress progress;
         final Set<Integer> remaining = new HashSet<>();
         final Set<Integer> started = new HashSet<>();
-        final List<DetailJob> pending = new ArrayList<>();
         final Map<Integer, Chunk> replacements = new HashMap<>();
         UpdatePlan plan;
 
@@ -1114,6 +1119,11 @@ final class GpuTerrain implements Disposable {
             this.progress = progress;
         }
     }
+    /**
+     * The jobs in flight besides {@link #detailJob}, the one whose render-thread stage runs: a rebuild's sections
+     * (queueChunks) or the camera's refinements (refineChunks), never both.
+     */
+    private final List<DetailJob> pending = new ArrayList<>();
     private DetailJob detailJob;
     private volatile long meshGeneration;
     private Request requested;
@@ -2242,7 +2252,10 @@ final class GpuTerrain implements Disposable {
         return rebuild != null && rebuild.plan != null && rebuild.remaining.isEmpty() && !familySession && !materialsReady();
     }
 
-    boolean busy() { return requested != null || rebuild != null || detailJob != null || coverScene != null && !materialsReady(); }
+    boolean busy() {
+        return requested != null || rebuild != null || detailJob != null || !pending.isEmpty()
+              || coverScene != null && !materialsReady();
+    }
 
     /** The loading stage (ready, buildProgress) waits for a session's family programs; busy does not, nor tests. */
     private void startFamilySession() { familySession = true; }
@@ -2293,7 +2306,7 @@ final class GpuTerrain implements Disposable {
         if (requested == null || rebuild == null || rebuild.request.generation() != requested.generation()) {
             return List.of();
         }
-        List<DetailJob> jobs = new ArrayList<>(rebuild.pending);
+        List<DetailJob> jobs = new ArrayList<>(pending);
         if (detailJob != null && detailJob.rebuilding()) { jobs.add(detailJob); }
         if (jobs.isEmpty()) { return List.of(new TerrainLoadProgress.Status(0, 0, rebuild.progress.snapshot())); }
         BoardScene scene = rebuild.request.scene();
@@ -2707,17 +2720,6 @@ final class GpuTerrain implements Disposable {
         return TerrainLod.select(hexPixels(camera, bounds), null);
     }
 
-    /**
-     * The level an installed chunk builds next for its projected size. Coarsening goes straight to its level;
-     * refinement to full detail passes through medium detail when the chunk is coarser than that, because medium
-     * detail builds in a fraction of the time and already carries the grass that full detail shows, so a view that
-     * closes in fast sees its blades long before the full ground lands.
-     */
-    private static TerrainLod nextDetail(float pixels, TerrainLod current) {
-        TerrainLod lod = TerrainLod.select(pixels, current);
-        return lod == TerrainLod.FULL && current.ordinal() > TerrainLod.MEDIUM.ordinal() ? TerrainLod.MEDIUM : lod;
-    }
-
     private static float hexPixels(Camera camera, BoundingBox bounds) {
         if (camera.projection.val[Matrix4.M33] != 0) { return BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera); }
         // Nearest possible depth: every point of a perspective chunk receives at least the required detail.
@@ -2736,7 +2738,7 @@ final class GpuTerrain implements Disposable {
         if (kinds != null) { takeKinds(); }
         // A requested board's update plan starts before links, which can hold a first frame for seconds; links wait
         // until its first sections start, so these prepare on the workers while they link.
-        if (requested != null && rebuild == null && detailJob == null) { startRebuild(); }
+        if (requested != null && rebuild == null && detailJob == null && pending.isEmpty()) { startRebuild(); }
         boolean starting = rebuild != null && rebuild.started.isEmpty()
               && (rebuild.plan == null || !rebuild.remaining.isEmpty());
         // Launch links while CPU terrain jobs are being prepared, and poll without blocking the loading screen.
@@ -2772,7 +2774,9 @@ final class GpuTerrain implements Disposable {
               : installedColumns != columns || atlasColumns != columns ? 8_000_000 : 2_000_000);
         drainRetired(deadline);
         // A settled board still needs the camera scan in advanceBuild to start a new detail job after zooming.
-        if (camera == null && requested == null && rebuild == null && detailJob == null) { return false; }
+        if (camera == null && requested == null && rebuild == null && detailJob == null && pending.isEmpty()) {
+            return false;
+        }
         do {
             if (advanceBuild(camera, deadline)) { return true; }
             if (detailJob != null && !detailJob.ready()
@@ -2804,13 +2808,15 @@ final class GpuTerrain implements Disposable {
     }
 
     private boolean advanceBuild(Camera camera, long deadline) {
-        if (rebuild != null && !rebuild.pending.isEmpty() && (detailJob == null || !detailJob.ready())) {
+        // A level the replaced-chunk cache holds installs before a finished build can evict it.
+        if (installCached(camera)) { return true; }
+        if (!pending.isEmpty() && (detailJob == null || !detailJob.ready())) {
             int ready = 0;
-            for (int i = 0; i < rebuild.pending.size(); i++) {
-                if (rebuild.pending.get(i).ready()) { ready = i; break; }
+            for (int i = 0; i < pending.size(); i++) {
+                if (pending.get(i).ready()) { ready = i; break; }
             }
-            DetailJob next = rebuild.pending.remove(ready);
-            if (detailJob != null) { rebuild.pending.add(detailJob); }
+            DetailJob next = pending.remove(ready);
+            if (detailJob != null) { pending.add(detailJob); }
             detailJob = next;
         }
         if (detailJob != null && detailJob.ready()) {
@@ -2820,7 +2826,7 @@ final class GpuTerrain implements Disposable {
             if (!job.rebuilding()) {
                 valid &= requested == null && job.source() == chunks.get(job.index())
                       && (camera == null || job.settings().call(
-                            () -> nextDetail(hexPixels(camera, job.source().bounds), job.source().lod)) == job.lod());
+                            () -> TerrainLod.select(hexPixels(camera, job.source().bounds), job.source().lod)) == job.lod());
             }
             if (valid) {
                 try (TerrainSettings.Scope ignored = TerrainSettings.use(job.settings())) {
@@ -2863,11 +2869,11 @@ final class GpuTerrain implements Disposable {
         }
         if (detailJob != null) {
             if (rebuild != null && rebuild.plan != null && rebuild.request.generation() == meshGeneration) { queueChunks(camera); }
-            return false;
+            return refineChunks(camera);
         }
-        if (rebuild != null && !rebuild.pending.isEmpty()) {
-            detailJob = rebuild.pending.removeFirst();
-            return false;
+        if (!pending.isEmpty()) {
+            detailJob = pending.removeFirst();
+            return refineChunks(camera);
         }
         if (rebuild != null && rebuild.request.generation() != meshGeneration) {
             if (!rebuild.preparation.isDone()) { return false; }
@@ -2905,30 +2911,69 @@ final class GpuTerrain implements Disposable {
                 return false;
             }
         }
-        // Classic columns have one level of detail: the camera never refines them.
-        if (camera == null || coverScene == null || installedColumns) { return false; }
+        return refineChunks(camera);
+    }
+
+    /** A chunk the camera wants at another detail: refinements first, the largest first, then the nearest. */
+    private record Wanted(int index, TerrainLod lod, float score, float distance) { }
+
+    /** The chunks in the frustum whose detail is not the one their projected size wants, none of them in flight. */
+    private List<Wanted> wanted(Camera camera, Set<Integer> started) {
+        List<Wanted> wanted = new ArrayList<>();
+        // Classic columns have one level of detail: the camera never refines them. Nor does it during a rebuild.
+        if (camera == null || coverScene == null || installedColumns || requested != null || rebuild != null) {
+            return wanted;
+        }
+        pending.forEach(job -> started.add(job.index()));
+        if (detailJob != null) { started.add(detailJob.index()); }
+        Vector3 centre = new Vector3();
         try (TerrainSettings.Scope ignored = TerrainSettings.use(installedSettings)) {
-            int candidate = -1;
-            float priority = -Float.MAX_VALUE;
             for (int i = 0; i < chunks.size(); i++) {
                 Chunk chunk = chunks.get(i);
-                if (!camera.frustum.boundsInFrustum(chunk.bounds)) { continue; }
+                if (started.contains(i) || !camera.frustum.boundsInFrustum(chunk.bounds)) { continue; }
                 float pixels = hexPixels(camera, chunk.bounds);
-                TerrainLod lod = nextDetail(pixels, chunk.lod);
+                TerrainLod lod = TerrainLod.select(pixels, chunk.lod);
                 if (lod == chunk.lod) { continue; }
-                float score = lod.ordinal() < chunk.lod.ordinal() ? pixels : -pixels;
-                if (score > priority) { priority = score; candidate = i; }
+                chunk.bounds.getCenter(centre);
+                float dx = centre.x - camera.position.x, dy = centre.y - camera.position.y;
+                wanted.add(new Wanted(i, lod, lod.ordinal() < chunk.lod.ordinal() ? pixels : -pixels, dx * dx + dy * dy));
             }
-            if (candidate >= 0) {
-                Chunk source = chunks.get(candidate);
-                TerrainLod lod = nextDetail(hexPixels(camera, source.bounds), source.lod);
-                Chunk cached = detailCache.get(candidate);
-                if (cached != null && cached.lod == lod) {
-                    detailCache.remove(candidate);
-                    replaceDetail(candidate, cached);
-                    return true;
-                }
-                startChunk(candidate, source, lod, coverScene, installedSettings, floor, currents, false);
+        }
+        // An orthographic view gives every chunk one size: those nearest the view start first.
+        wanted.sort(Comparator.comparingDouble((Wanted want) -> -want.score()).thenComparingDouble(Wanted::distance));
+        return wanted;
+    }
+
+    /**
+     * Installs one level the replaced-chunk cache holds for a chunk the camera wants (true), whatever is in flight:
+     * builds taken first evicted the very levels a zoom back out wanted next.
+     */
+    private boolean installCached(Camera camera) {
+        for (Wanted want : wanted(camera, new HashSet<>())) {
+            Chunk cached = detailCache.get(want.index());
+            if (cached != null && cached.lod == want.lod()) {
+                replaceDetail(want.index(), detailCache.remove(want.index()));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Camera refinement: the chunks the camera wants at another detail ({@link #wanted}) start while fewer than
+     * {@link #REFINE_JOBS} are in flight, after any cached level installs. Each goes straight to its level: medium
+     * detail prepares in nearly the time full detail does, so a stop there only delayed the full ground and its grass.
+     */
+    private boolean refineChunks(Camera camera) {
+        if (installCached(camera)) { return true; }
+        Set<Integer> started = new HashSet<>();
+        List<Wanted> wanted = wanted(camera, started);
+        try (TerrainSettings.Scope ignored = TerrainSettings.use(installedSettings)) {
+            for (int i = 0; i < wanted.size() && started.size() < REFINE_JOBS; i++) {
+                Wanted want = wanted.get(i);
+                startChunk(want.index(), chunks.get(want.index()), want.lod(), coverScene, installedSettings, floor,
+                      currents, false);
+                started.add(want.index());
             }
         }
         return false;
@@ -2964,7 +3009,7 @@ final class GpuTerrain implements Disposable {
             int columns = (snapshot.width() + CHUNK_SIZE - 1) / CHUNK_SIZE;
             int rows = (snapshot.height() + CHUNK_SIZE - 1) / CHUNK_SIZE;
             boolean loading = !ready(snapshot);
-            while (rebuild.pending.size() + (detailJob == null ? 0 : 1) < BUILD_JOBS) {
+            while (pending.size() + (detailJob == null ? 0 : 1) < BUILD_JOBS) {
                 int candidate = -1;
                 float priority = -Float.MAX_VALUE;
                 for (int index : rebuild.remaining) {
@@ -2979,15 +3024,10 @@ final class GpuTerrain implements Disposable {
                 }
                 if (candidate < 0) { break; }
                 rebuild.started.add(candidate);
-                DetailJob active = detailJob;
                 int x = candidate / rows * CHUNK_SIZE, y = candidate % rows * CHUNK_SIZE;
                 TerrainLod lod = rebuild.request.columns() ? TerrainLod.FULL : initialDetail(snapshot, x, y, camera);
                 startChunk(candidate, rebuild.plan.all() ? null : chunks.get(candidate), lod, snapshot, rebuild.request.settings(), rebuild.plan.floor(),
                       rebuild.plan.currents(), true);
-                if (active != null) {
-                    rebuild.pending.add(detailJob);
-                    detailJob = active;
-                }
             }
         }
     }
@@ -3035,7 +3075,7 @@ final class GpuTerrain implements Disposable {
         TerrainLoadProgress progress = new TerrainLoadProgress();
         var paint = rebuilding ? rebuild.plan.paint() : installedPaint;
         Set<Coords> repainted = onlyPaint ? rebuild.plan.paintOnly() : Set.of();
-        detailJob = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding, columns,
+        DetailJob job = new DetailJob(generation, index, source, buildLod, scene, settings, bottom, rebuilding, columns,
               CompletableFuture.supplyAsync(() -> settings.call(
                     () -> columns ? prepareColumns(scene, x, y, bottom, buildLod, flow, settings, reuse, paintSurfaces, paint,
                           () -> checkBuild(generation), progress, roadMaskData)
@@ -3043,6 +3083,8 @@ final class GpuTerrain implements Disposable {
                           () -> checkBuild(generation))
                           : prepare(scene, x, y, bottom, buildLod, flow, settings, reuse, waterShapes,
                           () -> checkBuild(generation), progress, roadMaskData, paint, paintSurfaces)), detailWorker), null, null, progress);
+        // The job in a render-thread stage keeps it; this one waits its turn (advanceBuild).
+        if (detailJob == null) { detailJob = job; } else { pending.add(job); }
     }
 
     /**
@@ -8516,10 +8558,9 @@ final class GpuTerrain implements Disposable {
         terrainMaterialSamples.clear();
         retiredChunks.forEach(Chunk::dispose);
         retiredChunks.clear();
-        if (rebuild != null) {
-            rebuild.replacements.values().forEach(Chunk::dispose);
-            for (DetailJob job : rebuild.pending) { if (job.build() != null) { job.build().chunk.dispose(); } }
-        }
+        if (rebuild != null) { rebuild.replacements.values().forEach(Chunk::dispose); }
+        for (DetailJob job : pending) { if (job.build() != null) { job.build().chunk.dispose(); } }
+        pending.clear();
         rebuild = null;
         requested = null;
         if (detailJob != null && detailJob.build() != null) { detailJob.build().chunk.dispose(); }

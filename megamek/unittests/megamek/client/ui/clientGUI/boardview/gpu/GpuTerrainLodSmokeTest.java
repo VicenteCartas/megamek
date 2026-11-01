@@ -89,8 +89,8 @@ class GpuTerrainLodSmokeTest {
                     var distant = terrain.tacticalSurface(at);
                     assertEquals(TerrainLod.DISTANT, firstLod(terrain));
 
-                    // Only the previous tier of a chunk is cached. Refining to FULL passes through MEDIUM,
-                    // so test reuse between those adjacent tiers instead of assuming all old tiers survive.
+                    // Only the previous tier of a chunk is cached: test reuse between the tiers a zoom passes
+                    // instead of assuming all old tiers survive.
                     view(camera, 2.5f);
                     settle(terrain, tactical, scene, camera);
                     assertEquals(TerrainLod.MEDIUM, firstLod(terrain));
@@ -213,6 +213,61 @@ class GpuTerrainLodSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Terrain detail lifecycle", failure.get()); }
+    }
+
+    @Test
+    void zoomingBackReinstallsEveryCachedChunk() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowSizeLimits(1, 1, -1, -1);
+        config.setWindowedMode(1280, 900);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                var previousLod = TerrainLod.tuning();
+                try {
+                    // Fifteen chunks of flat grass, all in view at medium detail.
+                    List<BoardScene.Tile> tiles = new ArrayList<>();
+                    for (int x = 0; x < 40; x++) {
+                        for (int y = 0; y < 24; y++) {
+                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
+                                  null, null, List.of(), List.of(), BoardLiquid.NONE, null, true));
+                        }
+                    }
+                    BoardScene scene = new BoardScene(0, 40, 24, tiles, List.of(), List.of(), -1, "", List.of());
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(1280, 900);
+                    camera.camera.zoom = BoardGeometry.width() / 33;
+                    camera.center(BoardGeometry.center(new Coords(20, 12), 0));
+                    terrain.update(scene, camera.camera);
+                    settle(terrain, null, scene, camera);
+                    List<?> medium = new ArrayList<>((List<?>) field(terrain, "chunks"));
+                    for (Object chunk : medium) { assertEquals(TerrainLod.MEDIUM, field(chunk, "lod")); }
+                    // Full detail everywhere and back. The cache keeps the eight levels replaced last; the first chunks
+                    // to coarsen are not among them, and their builds must not evict the others first.
+                    TerrainLod.tune(new TerrainLod.Tuning(1, 1));
+                    settle(terrain, null, scene, camera);
+                    TerrainLod.tune(TerrainLod.DEFAULTS);
+                    settle(terrain, null, scene, camera);
+                    List<?> back = (List<?>) field(terrain, "chunks");
+                    int reused = 0;
+                    for (int i = 0; i < back.size(); i++) {
+                        assertEquals(TerrainLod.MEDIUM, field(back.get(i), "lod"));
+                        if (back.get(i) == medium.get(i)) { reused++; }
+                    }
+                    assertEquals(8, reused, "Every chunk the replaced-chunk cache held installs again");
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    TerrainLod.tune(previousLod);
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Cached detail on a zoom back", failure.get()); }
     }
 
     private static void view(BoardCamera camera, float zoom) {
