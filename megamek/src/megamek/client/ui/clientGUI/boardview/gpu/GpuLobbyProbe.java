@@ -108,8 +108,7 @@ import org.lwjgl.glfw.GLFW;
  *     dossier.</li>
  *     <li>{@code lobby+clickcompact}: clicks the forces' compact rows toggle through the stage, as a pointer would,
  *     {@value GpuLobbyScreen#PROBE_CLICK_AT} s in; with {@code +formations} it does so in the formations view.</li>
- *     <li>{@code lobby+clickids}: clicks the forces' unit ids toggle through the stage at the same time, which flips
- *     the client's lobby setting for unit ids; a second run shows whether it held.</li>
+
  *     <li>{@code lobby+saveprefs}: saves the client settings when {@code MM_START_QUIT} quits, as quitting MegaMek
  *     does; without it the probe leaves them as they were.</li>
  *     <li>{@code lobby+requisition+clickfilters}: clicks the Requisition's Filters button through the stage at the same

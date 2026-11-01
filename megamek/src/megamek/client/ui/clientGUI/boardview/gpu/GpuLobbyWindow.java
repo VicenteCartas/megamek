@@ -257,7 +257,7 @@ public final class GpuLobbyWindow {
     /** Any thread: the client and GUI settings the lobby shows take effect at once, as the Swing lobby's did. */
     private final IPreferenceChangeListener preferenceListener = event -> {
         switch (event.getName()) {
-            case ClientPreferences.LOBBY_SHOW_UNIT_ID, ClientPreferences.SHOW_AUTO_RESOLVE_PANEL -> queueRefresh();
+            case ClientPreferences.SHOW_AUTO_RESOLVE_PANEL -> queueRefresh();
             case GUIPreferences.USE_CAMO_OVERLAY -> {
                 spritesStale = true;
                 queueRefresh();
@@ -1061,15 +1061,6 @@ public final class GpuLobbyWindow {
             if (!closing) {
                 SwingLobbyServices.of(gui).unitOrder().select(index);
                 queueRefresh();
-            }
-        });
-    }
-
-    /** Any thread: shows or hides the unit ids on the lobby's cards; the client setting holds across restarts. */
-    void showUnitIds(boolean on) {
-        SwingUtilities.invokeLater(() -> {
-            if (!closing) {
-                PreferenceManager.getClientPreferences().setLobbyShowUnitId(on);
             }
         });
     }

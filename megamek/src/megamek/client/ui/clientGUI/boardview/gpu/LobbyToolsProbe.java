@@ -15,7 +15,8 @@ import megamek.logging.MMLogger;
 
 /**
  * The developer switch's run through the L17 tools and prompts: {@code lobby+victory}, {@code +randomarmy},
- * {@code +skills}, {@code +names}, {@code +readout}, {@code +princesshelp} or {@code +prompt=name} ({@code forcename},
+ * {@code +skills}, {@code +names}, {@code +readout} (or {@code +readout=tro}, {@code bv} or {@code cost} for that
+ * page), {@code +princesshelp} or {@code +prompt=name} ({@code forcename},
  * {@code squadron}, {@code asset}, {@code assetdamage}, {@code train}, {@code confirm} or {@code error}) opens it
  * {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as its control would; so do the L18 file routes: {@code +gameoptions}
  * and {@code +playersettings} open their dialogs (then {@code +click=options-save}, {@code options-load},
@@ -30,6 +31,8 @@ final class LobbyToolsProbe {
     static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp",
           "gameoptions", "playersettings", "savelist", "loadlist", "sprite");
     private static final String PROMPT_OPTION = "prompt=";
+    /** {@code readout=tro}, {@code readout=bv} or {@code readout=cost}: the readout, opened on that page. */
+    private static final String READOUT_OPTION = "readout=";
     private static final String CLICK_OPTION = "click=";
     /** How long a click waits for its actor, as the random army waits for the unit tables, in seconds. */
     private static final double WAIT = 40;
@@ -52,7 +55,7 @@ final class LobbyToolsProbe {
         for (String option : probe.options()) {
             if (TOOLS.contains(option)) {
                 tool = option;
-            } else if (option.startsWith(PROMPT_OPTION)) {
+            } else if (option.startsWith(PROMPT_OPTION) || option.startsWith(READOUT_OPTION)) {
                 tool = option;
             } else if (option.startsWith(CLICK_OPTION)) {
                 for (String name : option.substring(CLICK_OPTION.length()).split(",")) {

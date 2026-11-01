@@ -518,7 +518,8 @@ final class GpuLobbyTools {
         Player local = client().getLocalPlayer();
         List<Entity> units = client().getGame().getEntitiesVector().stream()
               .filter(unit -> local != null && unit.getOwnerId() == local.getId()).toList();
-        if ((tool.equals("readout") || tool.equals("prompt=train")) && units.isEmpty() && probeTries++ < PROBE_TRIES) {
+        if ((tool.startsWith("readout") || tool.equals("prompt=train")) && units.isEmpty()
+              && probeTries++ < PROBE_TRIES) {
             // The probe's units arrive a moment after the lobby opens
             Timer later = new Timer(RAT_POLL_MS * 2, event -> {
                 if (!window.closing()) {
@@ -536,6 +537,9 @@ final class GpuLobbyTools {
             case "names" -> names();
             case "princesshelp" -> princessHelp();
             case "readout" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.SUMMARY);
+            case "readout=tro" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.TRO);
+            case "readout=bv" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.BV);
+            case "readout=cost" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.COST);
             case "prompt=forcename" -> asks.chooseForceName(ForceNameRequest.of(client().getGame(), local, "Alpha"),
                   name -> LOGGER.info("The lobby probe's force name: {}", name));
             case "prompt=squadron" -> asks.chooseSquadronDesignation(

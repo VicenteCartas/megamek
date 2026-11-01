@@ -101,7 +101,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private static final String PROBE_PRESET = "COWARDLY";
     /** {@code lobby+gm}'s name for a click on the seat itself rather than on its card. */
     private static final String GM_SEAT = "seat";
-    private static final String IDS_TOGGLE = "ids";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -549,10 +548,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.chooseMenu(path);
             }
 
-            @Override
-            public void showIds(boolean on) {
-                window.showUnitIds(on);
-            }
         };
     }
 
@@ -1343,21 +1338,17 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /**
-     * A click {@code lobby+gm} or {@code lobby+clickids} makes through the stage: the seat itself, the forces' unit
-     * ids toggle, or a control on the seat's card by name.
+     * A click {@code lobby+gm} makes through the stage: the seat itself or a control on the seat's card by name.
      */
     private record ProbeClick(double at, String name) {}
 
     /**
-     * {@code lobby+clickids}'s click on the unit ids toggle, then {@code lobby+gm}'s clicks: the seat and Claim, then
+     * {@code lobby+gm}'s clicks: the seat and Claim, then
      * with {@code +step} the seat and Step down once the claim has
      * gone through; with {@code +asked} only Allow (or Deny) on the card the second human's ask opens.
      */
     private static Deque<ProbeClick> gmClicks(GpuLobbyProbe probe) {
         Deque<ProbeClick> clicks = new ArrayDeque<>();
-        if (probe.options().contains("clickids")) {
-            clicks.add(new ProbeClick(PROBE_CLICK_AT, IDS_TOGGLE));
-        }
         if (!probe.options().contains("gm")) {
             return clicks;
         }
@@ -1465,15 +1456,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
             ProbeClick click = gmClicks.removeFirst();
             Actor target = click.name().equals(GM_SEAT) ? gameMasterSeat.button()
-                  : click.name().equals(IDS_TOGGLE) ? forces.idsToggle()
                   : gameMasterSeat.card().findActor(click.name());
             probeClick(target);
-            if (click.name().equals(IDS_TOGGLE)) {
-                LOGGER.info("The lobby probe's unit ids click: ids {}", forces.showIds() ? "shown" : "hidden");
-            } else {
-                LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
-                      window.snapshot().gameMaster());
-            }
+            LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
+                  window.snapshot().gameMaster());
         }
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {

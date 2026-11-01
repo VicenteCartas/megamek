@@ -939,13 +939,10 @@ work for Swing, and item 11 is under investigation.
        - Client Settings opens from the lobby: a gear in the top bar, before Leave, and the client settings key
          (Alt+C), as from the old lobby's menu. It opens over the lobby through `LobbyDialogs`, centred and modal,
          and the lobby takes no input until it closes.
-       - The settings take effect at once, as the Swing lobby's listeners did. Unit ids on the cards
-         (`LobbyShowUnitId`) and the auto resolve panel refresh the lobby; the camo overlay redraws the unit sprites;
-         the GUI scale rescales the stage.
-       - Unit ids: the forces panel has a `#` toggle that shows or hides each card's `#id`. It sets the client
-         setting, which is also a new checkbox in Client Settings › Game Board › General (next to the board's own unit
-         id setting), so either changes the other; it
-         holds across restarts (`LobbyForces.showIds`).
+       - The settings take effect at once, as the Swing lobby's listeners did. The auto resolve panel refreshes the
+         lobby; the camo overlay redraws the unit sprites; the GUI scale rescales the stage.
+       - Unit ids: L14 added a `#` toggle and a `LobbyShowUnitId` setting for them; the review polish below took
+         both out, and the cards always show their ids.
        - Still read and kept: save the lobby on start, the GUI scale, the camo overlay, the auto resolve panel, the
          ruler colours, the custom unit dialog's size (L15) and the odd-sized board nag (L16). The lobby draws the
          warning and my, ally and enemy colours from the tokens now, but the game still reads those settings, so they
@@ -958,11 +955,8 @@ work for Swing, and item 11 is under investigation.
          unit hit location log, the goal player count and the GUI name.
        - Token tooltips (`UiKit.tip(actor, true)`) now fit their text and wrap at the style's width, instead of
          always taking that whole width. A lobby that a Swing dialog blocks hides its tooltips.
-       Checks: `LobbyForcesTest` (the cards follow the setting); the on-demand `LobbyTogglesSmokeTest` clicks the ids
-       toggle (the cards drop and regain their ids, a snapshot that echoes the setting keeps them out, compact rows
-       too) and the top bar's gear. Live, through the stage: the probe's `lobby+clickids` flips the setting, and with
-       the new `+saveprefs` (it saves the settings on quit, as quitting MegaMek does) a second run starts from the
-       saved value and a plain restart shows the ids hidden; `lobby+dialog=settings` clicks the gear and gets Client
+       Checks: the on-demand `LobbyTogglesSmokeTest` clicks the top bar's gear. Live, through the stage: the probe's
+       `+saveprefs` saves the settings on quit, as quitting MegaMek does; `lobby+dialog=settings` clicks the gear and gets Client
        Settings, centred and modal, with lobby input blocked until it closes.
      - ~~L15 Unit dialogs~~. Unit customization and the C3 network manager are native, as centre views that take
        the forces' place (with Back), laid out as game screens rather than forms:
@@ -1103,6 +1097,23 @@ work for Swing, and item 11 is under investigation.
        export writes nothing). Live, through the real Windows dialog: the probe's `lobby+gameoptions`,
        `+playersettings`, `+savelist`, `+loadlist` and `+sprite` with `+click=options-save` and similar; the log
        shows `[LobbyFiles] The system file dialog opens: ...`, the answer, and what was saved or loaded.
+     - ~~Review polish~~. From a live review of the branch:
+       - Top bar: the warnings chip moved into the status chips in the middle, so the right holds only actions, Game
+         Master first and Ready last as the primary one.
+       - Unit ids always show, on cards and compact rows; the `#` toggle, the `LobbyShowUnitId` client setting and
+         its Client Settings checkbox are gone (the board's own unit id setting stays).
+       - Compact rows show as many facts as their width holds, each in a column of its own width so they line up down
+         the list like a roster: tonnage and weight class (`LobbyUnit.weight`), movement, pilot, skills and the most
+         important tag. A narrower list drops the tag first, then the pilot, movement and weight; the skills stay
+         longest.
+       - Readouts (TRO, BV and cost): consecutive table rows share one table, so values line up in columns (the TRO's
+         mass and tonnage, the BV report's results), and the last column takes a shared width instead of wrapping its
+         text (the "rn" at the end of Base Unit BV). Empty report rows are dropped.
+       - The unit menu drops View BV Calculation and View Cost Calculation; the unit's View has both as tabs.
+       Checks: `LobbyForcesTest` (the weight text), `LobbyForcesPanelTest` (how many facts a width holds), the
+       on-demand `LobbyTogglesSmokeTest` (cards and compact rows show their ids; a wide compact row shows every
+       fact, a narrow one keeps the skills and drops the tag). Live: `lobby+compact` at 1920 and 1300 wide, and the
+       new `lobby+readout=tro`, `=bv` and `=cost` pages for the readouts.
      - Still open after #34, for a later round once #33 and #34 are merged:
        - Live checks still to do: a real MekHQ game, a network reconnect and a password-protected game. Saving and
          loading game options, a loadout and a unit list through the real system file dialog was checked (L18);

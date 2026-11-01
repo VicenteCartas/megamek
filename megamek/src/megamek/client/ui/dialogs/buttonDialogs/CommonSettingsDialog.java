@@ -265,8 +265,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
           new JCheckBox(Messages.getString("CommonSettingsDialog.useAverageSkills"));
     private final JCheckBox generateNames = new JCheckBox(Messages.getString("CommonSettingsDialog.generateNames"));
     private final JCheckBox showUnitId = new JCheckBox(Messages.getString("CommonSettingsDialog.showUnitId"));
-    private final JCheckBox lobbyShowUnitId =
-          new JCheckBox(Messages.getString("CommonSettingsDialog.lobbyShowUnitId"));
     private final MMComboBox<LabelDisplayStyle> unitLabelStyle =
           new MMComboBox<>("unitLabelStyle", LabelDisplayStyle.values());
     private final MMComboBox<NameplateMode> nameplateMode = new MMComboBox<>("nameplateMode", NameplateMode.values());
@@ -1229,7 +1227,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
 
         List.of(showDamageLevel, showDamageDecal, showUnitId)
             .forEach(checkBox -> configureCheckBox(checkBox, null));
-        configureCheckBox(lobbyShowUnitId, Messages.getString("CommonSettingsDialog.lobbyShowUnitId.tooltip"));
         configureCheckBox(entityOwnerColor, Messages.getString("CommonSettingsDialog.entityOwnerColor.tooltip"));
         configureCheckBox(useSoftCenter, Messages.getString("CommonSettingsDialog.useSoftCenter.tooltip"));
         configureCheckBox(useAutoCenter, Messages.getString("CommonSettingsDialog.useAutoCenter.tooltip"));
@@ -1243,7 +1240,7 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             "CommonSettingsDialog.colors.UnitSelectedColor"));
         csbUnitSelectedColor.setColour(GUIP.getUnitSelectedColor());
         comps.add(List.of(createGameBoardGroupedOptionGrid("CommonSettingsGameBoardUnitsGrid",
-              List.of(showDamageLevel, showDamageDecal, showUnitId, lobbyShowUnitId, entityOwnerColor,
+              List.of(showDamageLevel, showDamageDecal, showUnitId, entityOwnerColor,
                     useSoftCenter, useAutoCenter, useAutoSelectNext),
             List.of(csbUnitTextColor, csbUnitValidColor, csbUnitSelectedColor))));
 
@@ -2913,7 +2910,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
             useAverageSkills.setSelected(CLIENT_PREFERENCES.useAverageSkills());
             generateNames.setSelected(CLIENT_PREFERENCES.generateNames());
             showUnitId.setSelected(CLIENT_PREFERENCES.getShowUnitId());
-            lobbyShowUnitId.setSelected(CLIENT_PREFERENCES.getLobbyShowUnitId());
             showAutoResolvePanel.setSelected(CLIENT_PREFERENCES.getShowAutoResolvePanel());
             pauseBotGamesAtStart.setSelected(GUIP.getBotCommandsPauseAtStart());
             //            favoritePrincessBehaviorSetting.setSelectedItem(CLIENT_PREFERENCES.getFavoritePrincessBehaviorSetting());
@@ -3426,7 +3422,6 @@ public class CommonSettingsDialog extends AbstractButtonDialog
         CLIENT_PREFERENCES.setUseAverageSkills(useAverageSkills.isSelected());
         CLIENT_PREFERENCES.setGenerateNames(generateNames.isSelected());
         CLIENT_PREFERENCES.setShowUnitId(showUnitId.isSelected());
-        CLIENT_PREFERENCES.setLobbyShowUnitId(lobbyShowUnitId.isSelected());
         CLIENT_PREFERENCES.setShowAutoResolvePanel(showAutoResolvePanel.isSelected());
         GUIP.setBotCommandsPauseAtStart(pauseBotGamesAtStart.isSelected());
         CLIENT_PREFERENCES.setFavoritePrincessBehaviorSetting(

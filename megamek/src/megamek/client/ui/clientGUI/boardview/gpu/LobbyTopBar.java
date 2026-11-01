@@ -32,9 +32,10 @@ import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * The lobby's top bar, over the art without a panel, as the reference's ready bar: the BRIEFING title with where the
- * game runs and its map under it at the start; the ready count and a Battle Value chip per side in the middle, centred
- * on the whole bar, more sides folding into one chip that lists them; at the end the Game Master's seat, the warnings
- * to heed before Ready, the Client Settings gear, then Leave and Ready, Ready last so it holds the edge. Ready turns green with a check once the player is ready, and
+ * game runs and its map under it at the start; the ready count, a Battle Value chip per side and the warnings to heed
+ * before Ready in the middle, centred on the whole bar, more sides folding into one chip that lists them; at the end
+ * only actions: the Game Master's seat, the Client Settings gear, then Leave and Ready, Ready last so it holds the
+ * edge. Ready turns green with a check once the player is ready, and
  * a click on it while a red warning stands lights the red warnings instead.
  */
 final class LobbyTopBar extends WidgetGroup {
@@ -102,7 +103,6 @@ final class LobbyTopBar extends WidgetGroup {
         float width = Math.max(leave.getPrefWidth(), Math.max(ready.getPrefWidth(), done.getPrefWidth()));
         Stack readyFaces = new Stack(ready, done);
         trailing.add(seat).padRight(space("sm"));
-        trailing.add(warnings).padRight(space("sm"));
         trailing.add(settings).padRight(space("sm"));
         trailing.add(leave).minWidth(width).padRight(space("sm"));
         trailing.add(readyFaces).minWidth(width);
@@ -179,6 +179,8 @@ final class LobbyTopBar extends WidgetGroup {
             fillSides();
         }
         fillWarnings();
+        // The warnings stand with the status they qualify, so the end of the bar holds only actions
+        chips.add(warnings).padLeft(shown.readiness().warnings().isEmpty() ? 0 : space("md"));
         refreshTips();
         invalidateHierarchy();
     }

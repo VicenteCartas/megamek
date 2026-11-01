@@ -13,6 +13,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyUnit;
@@ -60,31 +61,18 @@ class LobbyTogglesSmokeTest {
     }
 
     @Test
-    void theIdsToggleHidesTheUnitIdsAsksForTheSettingAndFollowsTheSnapshots() {
+    void theCardsAndTheCompactRowsAlwaysShowTheUnitIds() {
         UiTestStage.run(ui -> {
-            NoForcesActions actions = new NoForcesActions();
-            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, actions, id -> null);
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions(), id -> null);
             forces.attach(ui.stage.getRoot());
             Table panel = place(ui, forces.panel());
-            forces.show(ownedForces(true));
+            forces.show(ownedForces());
             ui.draw();
-            assertTrue(forces.idsToggle().isChecked(), "the toggle starts as the setting has it: on");
             assertTrue(panel.findActor("lobby-unit-id") != null, "the cards show their ids");
 
-            click(ui, forces.idsToggle());
-            assertEquals(List.of(false), actions.idsAsked, "a click asks to hide them");
-            assertFalse(forces.idsToggle().isChecked());
-            assertEquals(null, panel.findActor("lobby-unit-id"), "the cards drop their ids at once");
-
-            forces.show(ownedForces(false));
-            ui.draw();
-            assertEquals(null, panel.findActor("lobby-unit-id"), "the snapshot that echoes the setting keeps them out");
-            forces.compact(true);
-            assertEquals(null, panel.findActor("lobby-unit-id"), "and so do the compact rows");
-
-            click(ui, forces.idsToggle());
-            assertEquals(List.of(false, true), actions.idsAsked, "a second click asks to show them");
-            assertTrue(panel.findActor("lobby-unit-id") != null);
+            click(ui, forces.compactToggle());
+            assertTrue(forces.compact());
+            assertTrue(panel.findActor("lobby-unit-id") != null, "and so do the compact rows");
             panel.remove();
         });
     }
@@ -134,6 +122,49 @@ class LobbyTogglesSmokeTest {
             assertEquals(null, panel.findActor("lobby-unit-sheet"), "a compact row stays one line");
             panel.remove();
         });
+    }
+
+    @Test
+    void aWideCompactRowShowsAllItsFactsAndANarrowOneKeepsTheSkills() {
+        UiTestStage.run(ui -> {
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions(), id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            LobbyUnit.Sheet sheet = new LobbyUnit.Sheet(4, 6, 3, 208, 107, 10, 20, List.of());
+            LobbyUnit unit = new LobbyUnit(1, 1, "Unit 1", "", "Heavy", 65, 1000, "1,000", "Kira Vance", "3/4",
+                  List.of(new LobbyUnit.Tag("Auto-eject off", LobbyUnit.Tone.FLAVOUR)), 0, LobbyUnit.Link.NONE, false,
+                  null, Force.NO_FORCE, true, false, sheet);
+            forces.show(new LobbyForces(List.of(unit), List.of(new LobbyForces.Owner(1, "Owner", true, true, false,
+                  false, 1000, 65, List.of(1))), List.of(), List.of(), List.of(), -1));
+            forces.compact(true);
+            panel.setWidth(1400);
+            panel.validate();
+            ui.draw();
+            assertEquals(List.of("65 t Heavy", "4 / 6 / 3", "Kira Vance", "3/4", "Auto-eject off"),
+                  shownFacts(panel), "a wide row shows every fact");
+
+            panel.setWidth(560);
+            panel.validate();
+            ui.draw();
+            List<String> narrow = shownFacts(panel);
+            assertTrue(narrow.contains("3/4") && !narrow.contains("Auto-eject off") && narrow.size() < 5,
+                  "a narrow row keeps the skills and drops the tag first: " + narrow);
+            panel.remove();
+        });
+    }
+
+    private static List<String> shownFacts(Group group) {
+        List<String> facts = new ArrayList<>();
+        for (Actor actor : group.getChildren()) {
+            if (actor instanceof Label label && LobbyForcesPanel.COMPACT_FACT.equals(label.getName())) {
+                if (label.isVisible() && label.getWidth() > 0) {
+                    facts.add(label.getText().toString());
+                }
+            } else if (actor instanceof Group inner) {
+                facts.addAll(shownFacts(inner));
+            }
+        }
+        return facts;
     }
 
     @Test
@@ -217,11 +248,10 @@ class LobbyTogglesSmokeTest {
     }
 
     /** Units 1 and 2 under their owner, so the units view draws their cards. */
-    private static LobbyForces ownedForces(boolean showIds) {
+    private static LobbyForces ownedForces() {
         LobbyForces.Owner owner = new LobbyForces.Owner(1, "Player", true, true, false, false, 2000, 100,
               List.of(1, 2));
-        return new LobbyForces(List.of(unit(1), unit(2)), List.of(owner), List.of(), List.of(), List.of(), -1,
-              showIds);
+        return new LobbyForces(List.of(unit(1), unit(2)), List.of(owner), List.of(), List.of(), List.of(), -1);
     }
 
     private static final class NoSeatActions implements LobbyGameMasterSeat.SeatActions {
@@ -239,8 +269,6 @@ class LobbyTogglesSmokeTest {
     }
 
     private static final class NoForcesActions implements LobbyForcesPanel.Actions {
-        private final List<Boolean> idsAsked = new ArrayList<>();
-
         @Override
         public void command(LobbyForcesPanel.Command command) {
         }
@@ -265,10 +293,6 @@ class LobbyTogglesSmokeTest {
         public void choose(List<Integer> path) {
         }
 
-        @Override
-        public void showIds(boolean on) {
-            idsAsked.add(on);
-        }
     }
 
     private static final class NoRequisitionActions implements LobbyRequisitionPanel.Actions {
