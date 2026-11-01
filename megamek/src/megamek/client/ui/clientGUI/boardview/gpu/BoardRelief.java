@@ -2729,6 +2729,9 @@ final class BoardRelief {
 
     private record TopEdge(Vector3 a, Vector3 b) { }
 
+    /** {@link #topSplit}'s mark for an edge not looked at yet; never a point of the relief. */
+    private static final Vector3 UNSPLIT = new Vector3();
+
     /** Refine only non-linear interior shading; both sides of a diagonal reuse its decision and sample. */
     private void topTriangle(List<BoardSurface.Face> destination, Vector3 a, Vector3 b, Vector3 c,
           Map<TopEdge, Vector3> splits) {
@@ -2753,7 +2756,9 @@ final class BoardRelief {
 
     private Vector3 topSplit(Vector3 a, Vector3 b, Map<TopEdge, Vector3> splits) {
         TopEdge key = new TopEdge(a, b);
-        if (splits.containsKey(key)) { return splits.get(key); }
+        // One lookup: an edge left whole is held as null.
+        Vector3 held = splits.getOrDefault(key, UNSPLIT);
+        if (held != UNSPLIT) { return held; }
         Vector3 middle = null;
         float spacing = metres(detail.dressing ? 1 : 2);
         if (a.dst2(b) > spacing * spacing) {

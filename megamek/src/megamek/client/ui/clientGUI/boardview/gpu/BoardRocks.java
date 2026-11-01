@@ -12,6 +12,8 @@ final class BoardRocks {
     static final int OUTCROPS = 8;
     /** Rough cover without gravity: bedrock rising from the ground instead of loose boulders (see BoardScene.Tile.lunar). */
     static final String OUTCROP = "rough-outcrop";
+    /** Each rock's kit name, built once: relief and scatter look a rock up for every one they place. */
+    private static final String[] BLOCK_NAMES = names("block-", BLOCKS), BOULDER_NAMES = names("boulder-", BOULDERS);
     private static final BoardKit<Map<String, List<BoardShape>>> ROCKS = new BoardKit<>(BoardRocks::loadRocks);
 
     private BoardRocks() { }
@@ -42,7 +44,13 @@ final class BoardRocks {
     }
 
     static String name(boolean block, int variant) {
-        return (block ? "block-" : "boulder-") + Math.floorMod(variant, block ? BLOCKS : BOULDERS);
+        return block ? BLOCK_NAMES[Math.floorMod(variant, BLOCKS)] : BOULDER_NAMES[Math.floorMod(variant, BOULDERS)];
+    }
+
+    private static String[] names(String prefix, int count) {
+        String[] names = new String[count];
+        for (int variant = 0; variant < count; variant++) { names[variant] = prefix + variant; }
+        return names;
     }
 
     /** A bedrock formation, at the same rock level per sampling tier as the other rocks. */
