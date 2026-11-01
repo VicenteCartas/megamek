@@ -292,8 +292,10 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "")
                   + (renderable.material.has(Impostor.TYPE) && GpuTreeInstances.instanced(renderable)
                         ? "#define impostorFlag\n" : "")
-                  // Only sculpted ground has the biome stage; the marker still keeps the environments' programs apart.
-                  + (!renderable.material.has(Sculpt.TYPE) ? "" : pruning ? GpuBiomeSurface.prefix(renderable)
+                  // Only sculpted ground has the biome stage; the marker still keeps the environments' programs apart. A
+                  // fill draws without an environment and always has it: a field's ground is in its pages, and on a board
+                  // without biomes the stage finds no cover.
+                  + (!renderable.material.has(Sculpt.TYPE) ? "" : pruning && !fill ? GpuBiomeSurface.prefix(renderable)
                         : "#define biomeMaskFlag\n");
             String fragment = renderable.material.has(GpuBuildingCutaway.TYPE)
                   ? GpuBuildingCutaway.fragment(chosen.fragmentShader, "v_cloudPosition.z") : chosen.fragmentShader;
@@ -2785,6 +2787,8 @@ final class GpuTerrain implements Disposable {
         // The ground material cache's first view builds behind the loading stage (ready), once the board and every
         // program are in.
         if (requested == null && rebuild == null && materialsReady()) {
+            // Its fill reads the fields' biomes (cachedField).
+            biomes.update(coverScene);
             materialCache.prewarm(camera, !installedColumns, !fluffHidden, this::drawCacheTops,
                   () -> cacheChunks(camera));
         }
@@ -7939,6 +7943,9 @@ final class GpuTerrain implements Disposable {
         boolean terrain = !installedColumns;
         // What the Tactical View hides (setFluffHidden).
         boolean fluff = !fluffHidden;
+        // Upload before the render context tracks bound texture units for this pass, and before the fill reads the
+        // fields' (cachedField); Classic's ice reads the biomes' too.
+        biomes.update(coverScene);
         // The ground material cache fills the pages this view needs before anything draws (its own passes). Its
         // programs draw only when the warm-up linked every program of this lighting, the direct ones included.
         materialCache.begin(camera, terrain && materialsReady(), view && fluff, this::drawCacheTops);
@@ -7948,8 +7955,6 @@ final class GpuTerrain implements Disposable {
         packKeptProps();
         updateDetail(camera);
         lavaLighting.update(coverScene, terrain);
-        // Upload before the render context tracks bound texture units for this pass; Classic's ice reads the biomes'.
-        biomes.update(coverScene);
         if (terrain) {
             groundDamage.update(coverScene);
             surfaceScars.update(coverScene);

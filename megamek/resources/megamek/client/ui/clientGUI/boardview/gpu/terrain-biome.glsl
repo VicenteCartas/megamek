@@ -64,24 +64,11 @@ int fieldParcel(vec2 p, out float edge) {
     return crop | (biomeHash(ivec2(strip * 3 + 11, cut * 5 + 1)) < .5 ? 0 : normalX > 0.0 ? 1 : 2) << 1;
 }
 
-void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
-      float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout Finish finish,
-      inout float grass, inout vec3 bounce, out float pool, out float damp) {
-    pool = 0.0; damp = 0.0;
-    // Capture every quad derivative before any spatial return/branch. Projection already contains world XYZ.
-    MaterialProjection projection = materialProjection(world, face);
-    vec3 worldDx = vec3(projection.topGradient[0] * vec2(1.0, -1.0), -projection.xGradient[0].y);
-    vec3 worldDy = vec3(projection.topGradient[1] * vec2(1.0, -1.0), -projection.xGradient[1].y);
-    vec2 rippleDx = worldDx.xy * .20, rippleDy = worldDy.xy * .20;
-    if (shore && above <= -1.1) return;
-    // The sculpted waterline can recede well inside the water hex. Reach it with sediment, not a hex-edge stripe.
-    // Both sides of the bank use the same field. A different width/normal gate on water-owned triangles
-    // leaves straight wedges wherever the sculpted shoreline crosses the original hex boundary.
-    vec4 cover, fringe;
-    float tundra;
-    biomeCoverage(world, 14.0, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
-    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, finish, grass, bounce); }
-    if (family(4.0)) return;
+// The biome cover at a face (biomeCoverage) as the stage lays it, gated by slope and water: cover where crops and pools
+// stand, fringe the broader deposits round them.
+void biomeCover(vec3 world, vec3 face, bool shore, float above, float foot, float footprint, out vec4 cover,
+      out vec4 fringe, out float tundra) {
+    biomeCoverage(world, 14.0, footprint, cover, fringe, tundra);
     cover.yzw *= min(3.0, 1.0 / max(dot(cover.yzw, vec3(1.0)), .0001));
     // Broad reach on level ground connects shore patches. On a draining face retain the graded coverage;
     // amplifying it to a solid mask makes isolated peat fingers look pasted onto the neighbouring turf.
@@ -106,6 +93,68 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     fringe = max(fringe, cover);
     cover.yzw *= 1.0 - cover.x;
     fringe.yzw *= (1.0 - fringe.x) * min(1.0, 1.0 / max(dot(fringe.yzw, vec3(1.0)), .0001));
+}
+
+// A field's bounce light: its earth's.
+const vec3 FIELD_BOUNCE = vec3(.17, .15, .065);
+
+// How far the view has thinned a field's plants out (cropPlants): 0 where they stand whole. The hex's projected size is
+// the plants' own, across the screen, where a view tilting away does not foreshorten the ground.
+float cropThinned(vec3 worldDx) { return 1.0 - cropPlants(CROP_HEX_METRES / max(length(worldDx.xy), 1e-4)); }
+
+// How much of a field's ground the stand's own colour from above takes where its plants are thinned out. Standing crops
+// keep clear of the headland by their own reach, and of the broad margin, which is weathered cultivated earth.
+float fieldCanopy(float thinned, float headland, vec4 cover, vec4 fringe) {
+    float soft = max(.4, pixelMetres);
+    return thinned * smoothstep(1.6 - soft, 2.8 + soft, headland) * cover.x / max(fringe.x, .0001) * .95;
+}
+
+// The stand's colour from above (terrain-crops.glsl), as the view tilts. Where it shows, a pixel spans .75 m or more
+// (CROP_FADE): no finer grain.
+vec3 fieldCrop(bool maize, float broad) {
+    float incline = viewDirection().z;
+    return cropCanopy(maize, broad, sqrt(max(0.0, 1.0 - incline * incline)));
+}
+
+// A cached top's field (GpuMaterialCache): the fill holds its tilled ground and the field's share of it (`amount`).
+// Grass and bounce light follow that share, and where the view thins the plants out the stand's colour takes it, as
+// biomeSurface lays them.
+void cachedField(vec3 world, vec3 face, vec3 worldDx, float foot, float amount, inout vec3 color, inout float grass,
+      inout vec3 bounce) {
+    if (amount < .0001) return;
+    grass *= 1.0 - amount;
+    bounce = mix(bounce, FIELD_BOUNCE, amount);
+    float thinned = cropThinned(worldDx);
+    if (thinned <= 0.0) return;
+    float headland;
+    int code = fieldParcel(world.xy, headland);
+    vec4 cover, fringe;
+    float tundra;
+    biomeCover(world, face, false, 99.0, foot, 0.0, cover, fringe, tundra);
+    float canopy = fieldCanopy(thinned, headland, cover, fringe);
+    if (canopy <= 0.0) return;
+    color = mix(color, fieldCrop((code & 1) == 1, biomeNoise(world.xy / 4.7 + 13.0)), canopy * amount);
+}
+
+// `field`: the field's share of the ground (its tilled earth's), which the cache fill keeps for cachedField.
+void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, float rim, float materialHeight, float sand,
+      float deckMud, float region, inout vec3 color, inout vec3 normal, inout float cavity, inout Finish finish,
+      inout float grass, inout vec3 bounce, out float pool, out float damp, out float field) {
+    pool = 0.0; damp = 0.0; field = 0.0;
+    // Capture every quad derivative before any spatial return/branch. Projection already contains world XYZ.
+    MaterialProjection projection = materialProjection(world, face);
+    vec3 worldDx = vec3(projection.topGradient[0] * vec2(1.0, -1.0), -projection.xGradient[0].y);
+    vec3 worldDy = vec3(projection.topGradient[1] * vec2(1.0, -1.0), -projection.xGradient[1].y);
+    vec2 rippleDx = worldDx.xy * .20, rippleDy = worldDy.xy * .20;
+    if (shore && above <= -1.1) return;
+    // The sculpted waterline can recede well inside the water hex. Reach it with sediment, not a hex-edge stripe.
+    // Both sides of the bank use the same field. A different width/normal gate on water-owned triangles
+    // leaves straight wedges wherever the sculpted shoreline crosses the original hex boundary.
+    vec4 cover, fringe;
+    float tundra;
+    biomeCover(world, face, shore, above, foot, length(abs(worldDx.xy) + abs(worldDy.xy)), cover, fringe, tundra);
+    if (!shore) { tundraSurface(world, face, tundra, color, normal, cavity, finish, grass, bounce); }
+    if (family(4.0)) return;
     // Deck mud belongs at the bridge's height, including material sliding over its rock shell. Apply it after
     // ground-mask spreading and slope gates: those would amplify the fade or remove deposits on vertical sides.
     cover.w = max(cover.w, deckMud);
@@ -120,7 +169,6 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         // headlands, their width kept to a pixel at least.
         float headland;
         int code = fieldParcel(world.xy, headland);
-        bool maize = (code & 1) == 1;
         float soft = max(.4, pixelMetres);
         float tilled = smoothstep(1.2 - soft, 1.2 + soft, headland);
         float angle = float(code >> 1) * 1.0471976;
@@ -130,21 +178,19 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float visible = 1.0 - smoothstep(.25, .8, rowWidth);
         float ridge = .5 + .5 * cos(row * 6.2831853);
         // Between the plants the ground is tilled earth. As they fade (cropPlants), it takes the stand's own colour from
-        // above (terrain-crops.glsl), under the billboards too, which fade later. The hex's projected size is the
-        // plants' own, across the screen, where a view tilting away does not foreshorten the ground. Standing crops
-        // keep clear of the headland by their own reach.
-        float canopy = (1.0 - cropPlants(CROP_HEX_METRES / max(length(worldDx.xy), 1e-4)))
-              * smoothstep(1.6 - soft, 2.8 + soft, headland);
-        // The broad field margin is weathered cultivated earth; rows/canopy stay on their supported ground.
-        float planted = cover.x / max(fringe.x, .0001);
+        // above (fieldCanopy), under the billboards too, which fade later; never in the cache's fill, which holds the
+        // ground as the close view shows it.
         vec4 soil = biomePlanar(u_biomeSoilLayer, projection, broad, false);
         vec3 earth = cropEarth(soil.a) * mix(.78, 1.20, grain);
-        float incline = viewDirection().z;
-        vec3 crop = cropCanopy(maize, broad, sqrt(max(0.0, 1.0 - incline * incline))) * mix(.92, 1.08, grain);
         float amount = materialWeights(vec4(1.0 - fringe.x, fringe.x, 0.0, 0.0),
               vec4(materialHeight, soil.a, 0.0, 0.0)).y;
         amount *= tilled;
-        color = mix(color, mix(earth, crop, canopy * planted * .95), amount);
+        field = amount;
+#ifndef materialFillFlag
+        float canopy = fieldCanopy(cropThinned(worldDx), headland, cover, fringe);
+        if (canopy > 0.0) earth = mix(earth, fieldCrop((code & 1) == 1, broad), canopy);
+#endif
+        color = mix(color, earth, amount);
         finish = mixFinish(finish, planarFinish(u_biomeSoilLayer, projection.top, projection.topGradient, u_biomeSoilTile,
               broad), amount);
         if (u_normalMaps > .5) {
@@ -154,7 +200,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         normal = normalize(normal + vec3(direction * sin(row * 6.2831853) * .3 * visible * cover.x * tilled, 0.0));
         cavity *= 1.0 - cover.x * tilled * (1.0 - ridge) * .30 * visible;
         grass *= 1.0 - amount;
-        bounce = mix(bounce, vec3(.17, .15, .065), amount);
+        bounce = mix(bounce, FIELD_BOUNCE, amount);
     }
     float wetland = fringe.y + fringe.z;
     if (wetland > 0.0) {

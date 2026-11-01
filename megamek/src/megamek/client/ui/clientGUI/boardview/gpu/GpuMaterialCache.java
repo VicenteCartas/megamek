@@ -105,8 +105,8 @@ final class GpuMaterialCache {
     /** A wall vertex's place in its chart: world units in the wall region (a generic attribute, no Attribute type). */
     static final String CHART = "a_wallChart";
     /**
-     * Colour and height; the sum of the unit normals with the coverage; cavity, relief and the intrinsic GGX alpha^2.
-     * All premultiplied by the coverage, 8 bits each (12 bytes a texel): the cached ground is dielectric and does not
+     * Colour and height; the sum of the unit normals with the coverage; cavity, relief, the intrinsic GGX alpha^2 and a
+     * field's share (terrain-biome.glsl, cachedField). All premultiplied by the coverage, 8 bits each (12 bytes a texel): the cached ground is dielectric and does not
      * scatter (GpuTerrain.cachesGround).
      */
     private static final String[] SAMPLERS = { "u_cacheColour", "u_cacheMoments", "u_cacheDetail" };
@@ -268,10 +268,10 @@ final class GpuMaterialCache {
 
     /**
      * A face of ground or of a natural bank (a cliff of up to two levels, whose low caprock stands over none of its own
-     * faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), in a hex that no biome cover
-     * reaches: the canonical material holds no biome layer, and its weathering follows the cover. Water over it stays
-     * live (absorption, the column's tint, caustics), its sediment and wet bank canonical: both follow the face's own
-     * water level and palette.
+     * faces; no panel or pit wall) that lies level or slopes gently ({@link #SLOPE_Z}), in a hex that no biome cover but
+     * fields reaches ({@link #uncovered}): the canonical material holds their ground, and its weathering follows the
+     * cover. Water over it stays live (absorption, the column's tint, caustics), its sediment and wet bank canonical:
+     * both follow the face's own water level and palette.
      */
     static boolean top(BoardSurface surface, BoardSurface.Face face, BoardScene scene) {
         if (!uncovered(scene, surface.tile)) { return false; }
@@ -367,16 +367,19 @@ final class GpuMaterialCache {
     }
 
     /**
-     * Whether the biome stage leaves the hex as the material is: no biome or deck mud in it or beside it (their cover
-     * reaches 14 m past a hex, less than a neighbour's width), and in it and beside it no molten or frozen liquid and
-     * water of one palette at most (GpuBiomeSurface.aqueous: the stage mixes nothing in for one palette).
+     * Whether the fill holds what the biome stage makes of the hex: no biome but fields and no deck mud in it or beside
+     * it (their cover reaches 14 m past a hex, less than a neighbour's width), and in it and beside it no molten or
+     * frozen liquid and water of one palette at most (GpuBiomeSurface.aqueous: the stage mixes nothing in for one
+     * palette). A field's ground does not follow the view but for its stand's colour as the plants thin out, which the
+     * cached top lays live from the field's share the fill keeps (terrain-biome.glsl, cachedField).
      */
     private static boolean uncovered(BoardScene scene, BoardScene.Tile tile) {
         int palettes = 0;
         for (int direction = -1; direction < 6; direction++) {
             var near = direction < 0 ? tile : scene.neighbor(tile, direction);
             if (near == null) { continue; }
-            if (BoardBiome.kind(near) != BoardScene.Biome.NONE || near.deckMud()) { return false; }
+            var biome = BoardBiome.kind(near);
+            if (biome != BoardScene.Biome.NONE && biome != BoardScene.Biome.FIELD || near.deckMud()) { return false; }
             if (near.liquid().present()) {
                 if (!GpuBiomeSurface.aqueous(near)) { return false; }
                 palettes |= 1 << GpuWaterShader.palette(near.liquid());
@@ -389,7 +392,7 @@ final class GpuMaterialCache {
 
     /**
      * A natural wall's face the cache can chart: a cliff or bank (CLIFF shade at its corners, no panel),
-     * {@link #steep}, in a hex that no biome cover reaches ({@link #top}).
+     * {@link #steep}, in a hex that no biome cover but fields reaches ({@link #top}).
      */
     static boolean wall(BoardSurface surface, BoardSurface.Face face, BoardScene scene) {
         if (!steep(face.a(), face.b(), face.c()) || !uncovered(scene, surface.tile)) { return false; }
