@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AWTEvent;
 import java.awt.Dialog;
+import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
@@ -578,6 +579,12 @@ public final class GpuStartWindow {
                 if (wasOnTop != null) {
                     dialog.setAlwaysOnTop(wasOnTop);
                 }
+            }
+        } else if (id == ComponentEvent.COMPONENT_SHOWN && dialog instanceof FileDialog) {
+            // The system's file dialog has no window of AWT's to own, place or float; as a modal form it only blocks
+            // the start window's input
+            if (dialog.isModal() && belongsToStart(dialog) && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
+                setStartEnabled(false);
             }
         } else if (id == ComponentEvent.COMPONENT_SHOWN && belongsToStart(dialog)) {
             centre(dialog);

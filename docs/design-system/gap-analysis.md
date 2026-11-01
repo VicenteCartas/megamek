@@ -404,12 +404,14 @@ work for Swing, and item 11 is under investigation.
      Princess bots under their saved names. A save that cannot be read, has no version or comes from another
      version says so in the page instead of a popup. **Scenario** opens the scenario browser: a search field (every
      word must match the name, group or planet) beside a group select (All scenarios or one folder) over a list of
-     names, each with its group and planet, and **Open a file…**. On Windows, Browse files and Open a file use the
-     system's open-file dialog (LWJGL's Native File Dialog, on its own thread, natively owned by the start window
-     so it stays in front); elsewhere, or if it fails, Swing's chooser. Picking a scenario opens the **briefing**:
-     the title, single player or multiplayer, the description and the players, each with a camo swatch that opens
-     the camo chooser (scenarios skip the lobby, so this is the only place to change it; multiplayer sides start in
-     their own colour). In single player you are the first player and the others are bots; in multiplayer each
+     names, each with its group and planet, and **Open a file…**. Browse files and Open a file use the system's
+     open-file dialog: on Windows LWJGL's Native File Dialog, on its own thread and natively owned by the start
+     window so it stays in front, and on macOS and Linux AWT's `FileDialog` (step 5.5). If that fails, or with
+     `-Dmegamek.nativeFileDialog=false`, they use Swing's chooser. Picking a scenario opens the **briefing**:
+     the title, single player or multiplayer, a thumbnail of the map with its deployment zones (step 5.5), the
+     description and the players, each with a camo swatch that opens the camo chooser. Scenarios skip the lobby, so
+     this is the only place to change the camo. Each side starts in its own colour. In single player you are the
+     first player and the others are bots; in multiplayer each
      player has a You | Human | Bot select, the first is You and the rest Bot, an observer name shows when nobody is
      You, and the server password and port show only while a side is Human. **Rules** and **Conditions** lines
      summarise the game options and planetary conditions, with **Change…** opening their Swing dialogs (or "Set by
@@ -418,8 +420,8 @@ work for Swing, and item 11 is under investigation.
      when the server already took it. The load and scenario pages are wider than the menu, so long names fit, and
      their list fills the room left in the column. Ctrl+click on Load game and Scenario still reaches quick load
      and the last scenario. Follow-ups: a **Load anyway** for saves from another version (to propose to the MegaMek
-     team), the map thumbnail and the native dialog on macOS and Linux (step 5.5), and libGDX camo, options and
-     conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
+     team) and libGDX camo, options and conditions pickers with the lobby's dialogs (step 8). The map thumbnail and
+     the system dialog on macOS and Linux are done (step 5.5). To review a page without clicking through it, set
      `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
      `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
@@ -438,13 +440,48 @@ work for Swing, and item 11 is under investigation.
      password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8). The new main menu shows these forms as
      its own pages; the card stays for MekHQ.
   5. ~~The scenario flow~~: the scenario browser and the briefing in the start screen's column (G5 and G6 in step 3).
-  5.5. Start screen follow-ups, before the lobby:
-     - A map thumbnail on the briefing, ideally drawn by the 3D board, so a scenario shows its battlefield before it
-       starts.
-     - The system's file dialog on macOS and Linux. LWJGL's Native File Dialog supports both, but it is only enabled
-       on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
-       open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
-       beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
+  5.5. ~~Start screen follow-ups, before the lobby~~. First done on `design-system-start-followups`, then ported onto
+     the single-window start screen (the briefing in `StartBriefingPage`, the dialogs in `SystemFileDialog`):
+     - ~~A map thumbnail on the briefing~~. Scenarios skip the lobby, so the briefing is the player's first look at
+       the battlefield. The developers chose the minimap's look over a 3D render or a static image: it reads at
+       thumbnail size and costs a few milliseconds. The map sits under the title line, above the description, in a
+       framed panel (`token-panel-plain`) as wide as the column. The frame is 45% of the column's width tall, within
+       140 to 240 px. It is sized by the column alone, never by the map, so the briefing shows the empty frame at
+       once. `StartMapThumbnail` bakes the map off the GPU thread and it fades in (motion medium on the token
+       easing; instant with reduce motion), so nothing moves under the pointer. In a short window the frame gives
+       way first, down to 90 px, and then leaves the map out, so Start never runs into the bottom row. Each hex is
+       filled in the minimap's terrain colour. Each side's deployment zone is tinted in its colour and outlined in a
+       lighter shade; a zone that covers the whole board ("any") is left out. A muted caption under the frame gives
+       the size ("16 × 34 hexes") and, when it applies, "random map" or "first of N maps". A random map is drawn as
+       rolled. If the start fails, the game is rebuilt with a new roll, so the map is baked again. Sides now take
+       MegaMek's player colours in order in single player too, as they already did in multiplayer. A side still in
+       the default blue camo takes its colour's camo, so the zones, the swatches and the deployment rings in game
+       agree. `StartMapFrame` only draws a texture, so a later 3D render can replace the bake without changing the
+       layout.
+     - ~~The system's file dialog on macOS and Linux~~. `SystemFileDialog` picks the dialog for every GPU file
+       chooser, the start screen's and the lobby's (map setup, load and save lists, game options, loadouts), open and
+       save alike:
+       - Windows keeps LWJGL's Native File Dialog (`NativeFileChooser`).
+       - macOS uses AWT's `FileDialog`, which is the system's NSOpenPanel or NSSavePanel. AWT owns the main thread
+         there (GLFW runs on its own thread), so the window should keep drawing while the dialog is open.
+       - Linux uses AWT's `FileDialog` under the X11 toolkit, which is the GTK chooser, unless
+         `sun.awt.disableGtkFileDialogs` is set.
+       - Anything else, a headless session, or a dialog that fails gets Swing's chooser. A failure turns that path
+         off for the rest of the session.
+       - `-Dmegamek.nativeFileDialog=false` forces Swing's chooser everywhere.
+
+       While the dialog is open the window ignores input; the window listeners leave the AWT dialog unplaced and
+       unowned, since it has no window of AWT's. macOS's save panel confirms a replace itself; on Linux the lobby
+       still asks, as AWT may draw its own dialog in place of GTK's. Neither platform has been tried on a real
+       machine yet. To test:
+       - macOS (Intel and Apple Silicon): Browse files and Open a file open the system panel in the right folder,
+         with only saves or scenarios selectable. Cancel works. The panel stays in front of the start window. The
+         embers keep moving. A second open works, including after returning from a game. Check full screen and
+         other Spaces. In the lobby, a save suggests its name and replacing a file asks once.
+       - Linux, on GNOME under Wayland (XWayland) and X11, and on KDE: the GTK chooser opens, not the old
+         Motif-style one, in the right folder with the filter. It stays in front. No GTK warnings appear in the log.
+         A second open works.
+       - Both: the switch brings back Swing's chooser.
   6. ~~The lobby in libGDX~~: a briefing room in game mode, as a scene of the one window, for MegaMek and MekHQ alike (see
      the Lobby decision). The Swing version on `design-system-start-followups` settled the layout: a top bar with the
      title, ready count, a BV chip per side and Ready; players by team on the left, with the chat docked under them;

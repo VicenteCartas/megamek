@@ -5,6 +5,7 @@ import java.awt.AWTEvent;
 import java.awt.BorderLayout;
 import java.awt.Cursor;
 import java.awt.Dialog;
+import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.HeadlessException;
 import java.awt.Toolkit;
@@ -257,6 +258,14 @@ public final class GpuBoardWindow {
             Boolean wasOnTop = dialogOnTop.remove(closed);
             if (wasOnTop != null) {
                 closed.setAlwaysOnTop(wasOnTop);
+            }
+            return;
+        }
+        if (event.getID() == ComponentEvent.COMPONENT_SHOWN && event.getSource() instanceof FileDialog fileDialog) {
+            // The system's file dialog has no window of AWT's to own or float; as a modal dialog it only blocks input
+            if (belongsToClient(fileDialog) && fileDialog.isModal() && modalDialogs.add(fileDialog)
+                  && modalDialogs.size() == 1) {
+                setBoardEnabled(false);
             }
             return;
         }
@@ -838,7 +847,7 @@ public final class GpuBoardWindow {
             // preview is not hidden behind its 3D preview.
             for (Window window : Window.getWindows()) {
                 if (window != swingWindow && window.isShowing() && window instanceof Dialog dialog
-                      && belongsToSwingWindow(dialog)) {
+                      && !(dialog instanceof FileDialog) && belongsToSwingWindow(dialog)) {
                     raise(dialog);
                 }
             }

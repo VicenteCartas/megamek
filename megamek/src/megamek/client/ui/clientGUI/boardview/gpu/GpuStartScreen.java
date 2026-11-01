@@ -130,7 +130,7 @@ final class GpuStartScreen extends ApplicationAdapter {
     final StartScenarioPage scenarioPage = new StartScenarioPage(this);
     final StartBriefingPage briefingPage = new StartBriefingPage(this);
     private final List<String> tips;
-    private final boolean motion;
+    final boolean motion;
     /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
     private final StartScreenProbe probe;
     private boolean shotSaved;
@@ -810,9 +810,27 @@ final class GpuStartScreen extends ApplicationAdapter {
             heights[i] = item instanceof Layout layout ? layout.getPrefHeight() : item.getHeight();
             taken += gapAbove(item) + gapBelow(item, i) + (i == filler ? 0 : heights[i]);
         }
+        float reserved = 32 + bottomRow.getHeight() + 16;
+        float fillerWanted = filler >= 0 ? heights[filler] : 0;
         if (filler >= 0) {
-            float room = h - y - taken - (32 + bottomRow.getHeight() + 16);
+            float room = h - y - taken - reserved;
             heights[filler] = Math.min(heights[filler], Math.max(room, MIN_FILLER));
+            taken += heights[filler];
+        }
+        // The briefing's map gives way before the column runs into the bottom row
+        for (int i = 0; i < column.size(); i++) {
+            if (column.get(i) instanceof StartMapFrame map) {
+                float fitted = StartMapFrame.fitted(heights[i], map.getMinHeight(), y + taken - (h - reserved));
+                taken -= heights[i] - fitted;
+                heights[i] = fitted;
+                if (filler >= 0) {
+                    // The room the map left goes back to the list or description, up to all it would show
+                    float slack = h - reserved - y - taken;
+                    float grown = Math.min(fillerWanted, heights[filler] + Math.max(0, slack));
+                    taken += grown - heights[filler];
+                    heights[filler] = grown;
+                }
+            }
         }
         float offscreen = columnWidth + margin + 40;
         for (int i = 0; i < column.size(); i++) {
@@ -823,7 +841,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             y += gapAbove(item);
             item.setBounds(left + dx, h - y - itemHeight, columnWidth, itemHeight);
             y += itemHeight + gapBelow(item, i);
-            item.setVisible(p > 0);
+            item.setVisible(p > 0 && itemHeight > 0);
         }
         // Like the logo, the bottom row only slides in with the greeting and stays put between pages
         double rowIn = pageShownAt < 0 ? slide(column.size()) : 1;
@@ -1262,5 +1280,6 @@ final class GpuStartScreen extends ApplicationAdapter {
             boardSkin.dispose();
         }
         briefingPage.disposeSwatches();
+        briefingPage.disposeBriefingMap();
     }
 }

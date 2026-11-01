@@ -24,10 +24,10 @@ import org.lwjgl.system.MemoryStack;
 import org.lwjgl.util.nfd.NFDFilterItem;
 
 /**
- * The system's own open and save file dialogs of the GPU windows, through LWJGL's Native File Dialog, on Windows only: on
- * macOS it must run on the main thread, which the window's loop holds, and on Linux it would share GTK with AWT.
- * It runs on a thread of its own, so the window keeps drawing while it is open; where it can't show, the caller
- * falls back to Swing's chooser.
+ * The system's own open and save file dialogs of the GPU windows, through LWJGL's Native File Dialog, on Windows only:
+ * on macOS it must run on AppKit's main thread, which AWT holds, and on Linux it would load a second GTK beside AWT's;
+ * there {@link SystemFileDialog} shows AWT's FileDialog, which is the system's too. It runs on a thread of its own, so
+ * the window keeps drawing while it is open; where it can't show, the caller falls back to Swing's chooser.
  */
 final class NativeFileChooser {
     private static final MMLogger LOGGER = MMLogger.create(NativeFileChooser.class);
