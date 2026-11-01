@@ -53,7 +53,7 @@ coverageIn float v_opacity;
 coverageIn float v_alphaTest;
 #endif
 #endif
-uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal fruiting body, 4 cyan mycelium
+uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal tissue
 uniform float u_metre; // world units per metre
 uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin tissue.
 // How far a crown's leaf normals spread about its envelope normal, as the GGX alpha^2 it adds (twice the projected
@@ -206,8 +206,6 @@ void main() {
 #ifdef modelSurfaceFlag
     emission = emission * u_modelEmission + u_modelGlow;
 #endif
-    // Untextured mycelium is no board material: it glows its own vertex colour.
-    if (u_foliage > 3.5) emission = diffuse.rgb * 1.3;
     // Fungal tissue breathes: its glow swells and fades slowly across a colony.
     if (u_foliage > 2.5) emission *= .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
 #ifdef lightingFlag

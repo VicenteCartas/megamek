@@ -89,7 +89,7 @@ What keeps its own shading:
 - Lava, crust and ice are `ShaderMaterial`s with shaders of their own ([above](#shadermaterials)).
 - A GLB material with no board texture is the GLB's own glTF material: its roughness, metallic and
   emissive factors. On a plant it keeps its role's response (bark .90, snow .95, leaves passing
-  .35 of their light), and untextured mycelium glows its own vertex colour.
+  .35 of their light).
 - Impostor cards draw their plant's baked look; fungal glow breathes slowly across a colony.
 - Marsh sedge, whose artwork is composited at run time, takes its material's finish as the
   means of its maps: a uniform roughness, metallic, scattering and glow. Crop plants have no

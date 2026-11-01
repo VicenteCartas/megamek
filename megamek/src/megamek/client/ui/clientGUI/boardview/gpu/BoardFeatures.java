@@ -9,12 +9,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
 import megamek.common.WoodsClearingTracker;
 import megamek.common.board.BoardDecoration;
+import megamek.common.board.BoardModelBounds;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.BridgeSpan;
@@ -60,6 +62,15 @@ final class BoardFeatures {
     private static final List<String> ORCHARD = List.of("vegetation/orchard-round", "vegetation/orchard-spreading",
           "vegetation/orchard-upright", "vegetation/orchard-vase", "vegetation/orchard-leaning",
           "vegetation/orchard-young");
+    /**
+     * How far from its hex's centre a solid colony may move apart, in hex units: a little past where it is first placed
+     * (22.4), so a hex's colonies stay a clump with ground between the hexes, and crowded ones slim instead.
+     */
+    private static final float APART_REACH = 24;
+    /** The narrowest a crowded solid colony grows, as a share of its authored width. */
+    private static final float SLIMMEST = .8f;
+    /** The share of its distance to the hex's centre a solid colony draws in by each step, while it touches nothing. */
+    private static final float PACKING = .08f;
     static final List<String> MARS_CORALS = List.of("mars/finger-spires", "mars/fan-scalloped", "mars/tube-grove",
           "mars/antler-crown", "mars/plate-terraces", "mars/brain-lobes",
           "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
@@ -206,7 +217,6 @@ final class BoardFeatures {
         // art is left (geysers, rubble, fortified, cleared-rubble paths, elevator plates): BoardTiles draws a hex without
         // the tokens the conversion took, whose objects stand for them.
         for (String asset : scenery.models()) { result.addAll(features(BoardSceneryLayouts.layout(asset), coords, hex)); }
-        int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
         // Terrain levels are the game's collectable limb counts, not damage inferred from nearby units.
         Random limbs = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ 0x41524D534C454753L);
         List<BoardScene.Feature> placedLimbs = new ArrayList<>();
@@ -254,6 +264,22 @@ final class BoardFeatures {
         if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
             add(result, "vegetation/field", 1, 0, 0);
         }
+        result.addAll(woods(hex, coords, board, natural, true));
+        rough(hex, coords, result, board);
+        BoardScatter.capture(hex, coords, result);
+        result.addAll(decorations(hex, coords, board));
+        result.addAll(roadControls(hex, coords, board, true));
+        return List.copyOf(result);
+    }
+
+    /**
+     * The plants of a hex's woods or jungle. Solid colonies (fungal cups, Mars corals) cannot pass through each other as
+     * branches and leaves do: with {@code apart} they move off each other and off the colonies of the neighbouring hexes
+     * ({@link #apart}).
+     */
+    private static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural,
+          boolean apart) {
+        List<BoardScene.Feature> result = new ArrayList<>();
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
         boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
@@ -261,6 +287,7 @@ final class BoardFeatures {
         List<BoardRoad> roads = nearbyWays(vegetation, coords, board);
         float roadX = BoardGeometry.centerX(coords), roadY = BoardGeometry.centerY(coords), roadScale = BoardGeometry.hexScale();
         if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !BoardTreeDistribution.noTrees(hex)) {
+            int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
             // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
             boolean mars = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("mars");
             boolean volcano = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
@@ -333,12 +360,133 @@ final class BoardFeatures {
                       (low ? .9f : crown) * (0.9f + (index % 3) * 0.1f),
                       foliageHeight, 0, BoardScene.FeatureKind.TREE));
             }
+            if (apart && (fungus || mars)) {
+                return apart(result, coords, board, natural, (x, y) -> BoardRoad.distance(roads, roadX + x * roadScale,
+                      roadY + y * roadScale) >= BoardRoad.SHOULDER + 2);
+            }
         }
-        rough(hex, coords, result, board);
-        BoardScatter.capture(hex, coords, result);
-        result.addAll(decorations(hex, coords, board));
-        result.addAll(roadControls(hex, coords, board, true));
-        return List.copyOf(result);
+        return result;
+    }
+
+    /**
+     * Solid colonies pushed apart where their footprints ({@link #footprint}) overlap: each moves by half of what it
+     * overlaps, away from a colony of its hex (which moves the other half) or of a neighbouring hex (whose own
+     * placement moves its colony likewise, away from this hex's colonies as first placed), staying within the hex and
+     * clear of the roads. Where tall, dense woods leave no room, crowded colonies grow slimmer, as crowded fungi and
+     * corals do: narrower about their stalk (down to {@link #SLIMMEST}), their height and so the cover it reads kept.
+     * Then they draw together toward the hex's centre until they touch: a clump, with ground around it.
+     */
+    private static List<BoardScene.Feature> apart(List<BoardScene.Feature> colonies, Coords coords,
+          Function<Coords, Hex> board, boolean natural, BiPredicate<Float, Float> clear) {
+        List<float[]> placed = new ArrayList<>();
+        for (var colony : colonies) { placed.add(new float[] { colony.x(), colony.y(), footprint(colony) }); }
+        List<float[]> others = new ArrayList<>();
+        for (int direction = 0; direction < 6; direction++) {
+            Coords at = coords.translated(direction);
+            Hex neighbour = board.apply(at);
+            if (neighbour == null) { continue; }
+            float dx = HexTile.centerX(at, BoardGeometry.TILE_WIDTH)
+                  - HexTile.centerX(coords, BoardGeometry.TILE_WIDTH);
+            float dy = HexTile.centerY(at, BoardGeometry.TILE_HEIGHT)
+                  - HexTile.centerY(coords, BoardGeometry.TILE_HEIGHT);
+            for (var colony : woods(neighbour, at, board, natural, false)) {
+                if (solid(colony.asset())) {
+                    others.add(new float[] { colony.x() + dx, colony.y() + dy, footprint(colony) });
+                }
+            }
+        }
+        float[] slim = new float[placed.size()];
+        java.util.Arrays.fill(slim, 1);
+        for (int pass = 0; pass < 3; pass++) {
+            for (int round = 0; round < 24; round++) {
+                for (int i = 0; i < placed.size(); i++) {
+                    float[] own = placed.get(i);
+                    float pushX = 0, pushY = 0;
+                    for (int j = 0; j < placed.size() + others.size(); j++) {
+                        float[] other = j < placed.size() ? placed.get(j) : others.get(j - placed.size());
+                        if (other == own) { continue; }
+                        float dx = own[0] - other[0], dy = own[1] - other[1], distance = (float) Math.hypot(dx, dy);
+                        float overlap = own[2] * slim[i] + other[2] * (j < placed.size() ? slim[j] : 1) - distance;
+                        if (overlap <= 0) { continue; }
+                        // Coincident origins part along the colony's own bearing.
+                        double bearing = distance > 1e-3f ? Math.atan2(dy, dx) : i * 2.399963;
+                        pushX += (float) Math.cos(bearing) * overlap * .5f;
+                        pushY += (float) Math.sin(bearing) * overlap * .5f;
+                    }
+                    float x = own[0] + pushX, y = own[1] + pushY, reach = (float) Math.hypot(x, y);
+                    if (reach > APART_REACH) {
+                        x *= APART_REACH / reach;
+                        y *= APART_REACH / reach;
+                    }
+                    if (clear.test(x, y)) {
+                        own[0] = x;
+                        own[1] = y;
+                    }
+                }
+            }
+            // What overlap is left, the colonies take out of their width: both of a hex's pair in proportion to their
+            // reach, half of a pair across the hex edge (the neighbour's placement slims its own for the other half).
+            for (int i = 0; i < placed.size(); i++) {
+                float[] own = placed.get(i);
+                for (int j = 0; j < placed.size() + others.size(); j++) {
+                    float[] other = j < placed.size() ? placed.get(j) : others.get(j - placed.size());
+                    if (other == own) { continue; }
+                    float distance = (float) Math.hypot(own[0] - other[0], own[1] - other[1]);
+                    float reaches = own[2] * slim[i] + other[2] * (j < placed.size() ? slim[j] : 1);
+                    if (reaches <= distance) { continue; }
+                    float kept = j < placed.size() ? distance / reaches
+                          : 1 - (reaches - distance) * .5f / (own[2] * slim[i]);
+                    slim[i] = Math.max(SLIMMEST, slim[i] * kept);
+                    if (j < placed.size()) { slim[j] = Math.max(SLIMMEST, slim[j] * kept); }
+                }
+            }
+        }
+        for (int round = 0; round < 24; round++) {
+            for (int i = 0; i < placed.size(); i++) {
+                float[] own = placed.get(i);
+                float x = own[0] * (1 - PACKING), y = own[1] * (1 - PACKING);
+                if (touchesAnother(placed, others, slim, i, x, y) || !clear.test(x, y)) { continue; }
+                own[0] = x;
+                own[1] = y;
+            }
+        }
+        List<BoardScene.Feature> result = new ArrayList<>();
+        for (int i = 0; i < colonies.size(); i++) {
+            var colony = colonies.get(i);
+            result.add(new BoardScene.Feature(colony.asset(), placed.get(i)[0], placed.get(i)[1], colony.rotation(),
+                  colony.scale(), colony.height(), colony.elevation(), colony.kind(), 0, false, null,
+                  new BoardDecoration.Stretch(slim[i], slim[i], 1), BoardDecoration.Colours.NONE));
+        }
+        return result;
+    }
+
+    /** Whether colony {@code i} at (x, y) would overlap another more than it already does. */
+    private static boolean touchesAnother(List<float[]> placed, List<float[]> others, float[] slim, int i, float x,
+          float y) {
+        float[] own = placed.get(i);
+        for (int j = 0; j < placed.size() + others.size(); j++) {
+            float[] other = j < placed.size() ? placed.get(j) : others.get(j - placed.size());
+            if (other == own) { continue; }
+            float reaches = own[2] * slim[i] + other[2] * (j < placed.size() ? slim[j] : 1);
+            double now = Math.hypot(own[0] - other[0], own[1] - other[1]);
+            if (Math.hypot(x - other[0], y - other[1]) < Math.min(reaches, now)) { return true; }
+        }
+        return false;
+    }
+
+    /** Fungal colonies and Mars corals: solid bodies, fitted to their height with their proportions kept. */
+    static boolean solid(String asset) { return asset.startsWith("fungus/") || asset.startsWith("mars/"); }
+
+    /**
+     * A solid colony's reach on the ground around its origin in hex units: its model's widest extent from the origin
+     * along either axis, scaled as GpuTerrain fits it, alike in all directions, to its height, and by its slimming.
+     */
+    static float footprint(BoardScene.Feature colony) {
+        float[] bounds = BoardModelBounds.bounds(colony.asset());
+        if (bounds == null) { return 0; }
+        float reach = Math.max(Math.max(-bounds[0], bounds[3]), Math.max(-bounds[1], bounds[4]));
+        return reach * colony.height() * BoardGeometry.MODEL_LEVEL_HEIGHT / (bounds[5] - bounds[2])
+              * (float) colony.stretch().x();
     }
 
     /** Captured counterparts of BoardRoad.nearbyWays; no game connection is added for visual overhang. */

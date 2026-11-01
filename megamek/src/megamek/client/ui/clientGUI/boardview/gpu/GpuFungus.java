@@ -26,8 +26,9 @@ final class GpuFungus implements Disposable {
     static Emitter emitter(String asset, BoundingBox bounds) {
         if (!BoardFungus.COVER.contains(asset)) { return null; }
         Vector3 origin = bounds.getCenter(new Vector3());
-        // Start inside the cup/body: opaque gills and the rim naturally hide the birth of each small wisp.
-        origin.z = bounds.min.z + bounds.getDepth() * (BoardFungus.CUPS.contains(asset) ? .8f : .65f);
+        // A cup's wisp starts at its rim, fading in as it rises, so the bowl keeps its own flesh; a spore body's starts
+        // inside it.
+        origin.z = bounds.min.z + bounds.getDepth() * (BoardFungus.CUPS.contains(asset) ? 1 : .65f);
         float radius = Math.max(.25f * BoardGeometry.hexScale(), Math.min(bounds.getWidth(), bounds.getHeight()) * .13f);
         return source(origin, radius, false);
     }

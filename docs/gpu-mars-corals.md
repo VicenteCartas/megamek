@@ -6,10 +6,15 @@ The MARS theme replaces woods and jungle with mineral coral colonies inspired by
 1970s science-fiction miniatures. Snow, pavement, orchard fluff and level-one
 foliage retain Martian corals. Bare ground does not acquire gameplay cover.
 
-`BoardFeatures` selects six authored assets: two ivory finger colonies, two mauve
-perforated fans, and two hollow tube colonies with muted turquoise mouths. Light,
-heavy and ultra-heavy cover use two, four and six colonies. One colony reaches the
-hex's foliage height; its companions are smaller. Selection and placement remain
+`BoardFeatures.MARS_CORALS` holds twelve authored colonies: ivory finger spires,
+finger and antler crowns, spiral whorls and brain lobes, mauve perforated sea fans,
+lattice spires and plate terraces, and hollow tube groves, crowns and organ pipes
+with muted turquoise mouths. Light, heavy and ultra-heavy cover use two, four and
+six colonies. They reach the hex's foliage height, except at most one shorter
+colony in light cover and two in heavier cover, so the woods' height still reads.
+Being solid, colonies keep their footprints off each other and off the neighbouring
+hexes' colonies; crowded ones grow slimmer instead (as fungal colonies do,
+[fungal terrain](gpu-fungus.md)). Selection and placement remain
 deterministic and use the existing road clearance and terrain grounding paths.
 Martian colonies also vary their rotation by hex, avoiding identical fan alignment.
 The original woods/jungle terrain, density and foliage elevation are never changed.
@@ -32,20 +37,23 @@ The sibling `mm-data` repository contains:
 
 | File | Purpose |
 | --- | --- |
-| `data/models/board/mars/*.glb` | Six runtime models. |
-| `data/models/board/textures/vegetation/mars/mars-coral-atlas_albedo.png` | Shared opaque Imagegen atlas: porous ivory, veined mauve, weathered tubes and dusty basal crust. |
+| `data/models/board/mars/*.glb` | Twelve runtime models. |
+| `data/models/board/textures/vegetation/mars/mars-coral-atlas_*` | Shared opaque atlas (Material Maker project `tools/materials/vegetation/mars/mars-coral-atlas`): porous ivory, veined dusty mauve, weathered tubes and dusty basal crust. |
+| `tools/board-models/alien_lods.py` | Builds the mesh levels from the original sculpts in Blender. |
 
 The normal Gradle `stageData` task copies the GLBs and texture into the game's data
 directory.
 
-Each asset targets 16,000 / 4,200 / 1,000 / 240 triangles across four named mesh levels.
-Every level is grounded at local Z=0 and is 30 board units tall. Fans have fewer
-openings at distance, so their topology can simplify while keeping a fan silhouette.
+Each asset was sculpted at 16,000 triangles (the sculpts are kept in mm-data's git
+history). `alien_lods.py` welds each sculpt, opens the sea fans and lattice slightly
+toward the sky, bakes its crevices (Blender's vertex dirt), sun-bleaching and
+regolith dust on top faces into its corner colours, and decimates it to 3,200 / 820
+/ 96 triangles; the fourth level is the baked impostor (`prepare_tree_lods.py`).
+Fans have fewer openings at distance, so their topology can simplify while keeping
+a fan silhouette. Every level is grounded at local Z=0 and is 30 board units tall.
 The near meshes have sculpted mineral pits, irregular fan cells and structural
 veins, curved trumpet bodies with rolled mouths, and encrusted bases. Their atlas
-adds small pores, weathering and Martian dust without changing the shared shader.
-The far level is an opaque mesh, not an impostor card. No performance improvement
-is claimed. Snow uses the same mineral models on snowy ground; this kit does not
+adds small pores, weathering and Martian dust without changing the shared shader. Snow uses the same mineral models on snowy ground; this kit does not
 add separate modeled snow caps or cosmetic cliff/scatter colonies.
 
 `BoardMarsCoralTest` covers theme selection and overrides, densities, deterministic

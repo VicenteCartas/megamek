@@ -214,8 +214,6 @@ class BoardFoliageTest {
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
             for (var material : near.materials) {
-                // The glowing mycelium is its vertex colour alone.
-                if (material.textures == null) { continue; }
                 var image = near.images.get(material.textures.first().fileName);
                 byte[] encoded = image.file() != null ? Files.readAllBytes(Path.of(image.file())) : image.encoded();
                 textures.put(material.id, ImageIO.read(new ByteArrayInputStream(encoded)));

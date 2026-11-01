@@ -22,11 +22,14 @@ import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFungusTest {
     /** Loading a glowing fungal material decodes its emission map with libGDX. */
@@ -102,6 +105,50 @@ class BoardFungusTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = { "fungus", "mars" })
+    void solidColoniesDoNotPassThroughEachOtherWithinOrAcrossHexes(String theme) {
+        // Low woods and light woods at height 2 have room for every colony apart; taller, denser woods slim theirs.
+        for (int density = 1; density <= 3; density++) {
+            assertEquals(0, worstOverlap(theme, density, 1), .5f, theme + " woods " + density + " at height 1");
+        }
+        assertEquals(0, worstOverlap(theme, 1, 2), .5f, theme + " light woods at height 2");
+        Hex crowded = new Hex(0, "woods:3;foliage_elev:3", theme);
+        var colonies = BoardFeatures.capture(crowded, new Coords(6, 6), Map.of(), Set.of(), neighbour -> crowded)
+              .stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
+        assertEquals(6, colonies.size());
+        assertTrue(colonies.stream().anyMatch(f -> f.stretch().x() < 1), "Crowded colonies grow slimmer");
+        assertTrue(colonies.stream().allMatch(f -> f.stretch().x() > .79 && f.stretch().z() == 1
+              && f.height() <= 3), "A colony slims to four fifths of its width at most, its height kept");
+    }
+
+    /**
+     * The worst overlap (in hex units) of two solid colonies' footprints in seven hexes of contiguous woods: a hex and
+     * its neighbours, each placed with the others as its board.
+     */
+    private static float worstOverlap(String theme, int density, int height) {
+        Hex woods = new Hex(0, "woods:" + density + ";foliage_elev:" + height, theme);
+        Coords centre = new Coords(6, 6);
+        List<float[]> colonies = new ArrayList<>();
+        for (int direction = -1; direction < 6; direction++) {
+            Coords at = direction < 0 ? centre : centre.translated(direction);
+            float x = HexTile.centerX(at, BoardGeometry.TILE_WIDTH), y = HexTile.centerY(at, BoardGeometry.TILE_HEIGHT);
+            for (var colony : BoardFeatures.capture(woods, at, Map.of(), Set.of(), neighbour -> woods)) {
+                if (colony.kind() == BoardScene.FeatureKind.TREE) {
+                    colonies.add(new float[] { x + colony.x(), y + colony.y(), BoardFeatures.footprint(colony) });
+                }
+            }
+        }
+        float worst = 0;
+        for (int i = 0; i < colonies.size(); i++) {
+            for (int j = i + 1; j < colonies.size(); j++) {
+                float[] a = colonies.get(i), b = colonies.get(j);
+                worst = Math.max(worst, a[2] + b[2] - (float) Math.hypot(a[0] - b[0], a[1] - b[1]));
+            }
+        }
+        return worst;
+    }
+
     @Test
     void explicitSurfaceOverridesAndOtherThemesKeepTheirAssets() {
         Hex hex = new Hex(0);
@@ -132,6 +179,23 @@ class BoardFungusTest {
             }
             assertTrue(textured, name);
         });
+    }
+
+    @Test
+    void hangingMyceliumGlowsByItsMaterialsEmissionMap() {
+        var root = new File("data/models/board").toPath().toAbsolutePath();
+        var near = RigidGlb.loadLods(new FileHandle(root.resolve("fungus/cliff-mycelium.glb").toFile()), root).getFirst();
+        List<String> emission = new ArrayList<>();
+        for (var material : near.materials) {
+            if (!material.id.equals("mycelium")) { continue; }
+            for (var texture : material.textures) {
+                if (texture.usage == com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_EMISSIVE) {
+                    emission.add(texture.fileName);
+                }
+            }
+        }
+        assertEquals(1, emission.size());
+        assertTrue(emission.getFirst().endsWith("mycelium_emission.png"), emission.getFirst());
     }
 
     @Test

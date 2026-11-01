@@ -1649,7 +1649,7 @@ final class GpuTerrain implements Disposable {
         public BridgeDeck copy() { return new BridgeDeck(value); }
     }
 
-    /** Foliage shading: solid, canopy, snow, fungal fruiting body or cyan mycelium. */
+    /** Foliage shading: solid, canopy, snow or fungal tissue (its fruiting bodies and mycelium). */
     private static final class Foliage extends FloatAttribute {
         static final long TYPE = register("boardFoliage");
 
@@ -1689,7 +1689,7 @@ final class GpuTerrain implements Disposable {
             if (!material.has(Foliage.TYPE)) {
                 boolean solid = material.id.startsWith("bark") || material.id.equals("cactus") || material.id.equals("fruit")
                       || material.id.equals("fungus") || material.id.equals("mycelium") || material.id.equals("coral");
-                material.set(new Foliage(material.id.equals("mycelium") ? 4 : material.id.equals("fungus") ? 3
+                material.set(new Foliage(material.id.equals("fungus") || material.id.equals("mycelium") ? 3
                       : material.id.equals("snow") || material.id.equals("canopy-snow-cutout") ? 2 : solid ? 0 : 1));
             }
             // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.

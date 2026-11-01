@@ -1,8 +1,16 @@
 # Fungal terrain and spores
 
-The `fungus` theme keeps its authored cup, rounded, cliff and scatter GLBs. Woods
-density and the reduced scatter/cliff placement rates remain in `BoardFeatures`,
-`BoardScatter` and `BoardFungus`. Visual effects do not change terrain rules,
+The `fungus` theme keeps its authored cup, rounded, cliff and scatter GLBs. The
+woods colonies (`fungus/cup-*`, `fungus/spore-*`) carry 3,200 / 820 / 96 triangle
+levels and a baked impostor, built from the authored meshes by mm-data's
+`tools/board-models/alien_lods.py`, which also darkens their crevices and turns
+them toward the concept art's orange-red cups (burnt-orange skin, warm brown
+stalks darkening to the foot, dark red-brown bowls, crimson pods). Woods density and the reduced scatter/cliff placement rates remain in
+`BoardFeatures`, `BoardScatter` and `BoardFungus`. Colonies are solid, so they do not
+pass through each other: `BoardFeatures` pushes overlapping footprints apart within
+the hex and away from the neighbouring hexes' colonies, and where tall, dense woods
+leave no room the crowded colonies grow slimmer (down to 70% of their width; their
+height, and the cover it reads, is kept). Mars corals share the rule. Visual effects do not change terrain rules,
 cover, visibility or picking.
 
 ## Living surfaces
@@ -39,10 +47,12 @@ levels keep separate tones down to -6; other materials use the ordinary grade.
 
 ## Bioluminescence and mist
 
-`terrain-foliage.frag` uses the authored atlas quadrants to make lips, gills and
-pores emissive, retaining their texture and opaque stems. Cyan mycelium emits its
-own color. This includes scatter and all mesh LODs. A restrained pulse follows the
-terrain's shared animation clock; the surfaces remain visible at night.
+Fungal tissue glows by its materials' emission maps (their `.tres`): the fungus
+atlas's lips, gills and pores (dimmed and mottled, so lips glow softly instead of
+outlining the cups), and the cyan fibres of the cliffs' hanging `mycelium`; stems
+stay opaque and unlit. This includes scatter and all mesh
+LODs. `terrain-foliage.frag` adds a restrained pulse on the terrain's shared
+animation clock; the surfaces remain visible at night.
 
 All installed fungal models also contribute colored spill through the existing
 `GpuLavaLighting` light list, filtered by the captured field of view. Each lit pixel
