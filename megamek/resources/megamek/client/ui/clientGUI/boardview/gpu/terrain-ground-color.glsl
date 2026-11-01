@@ -20,7 +20,7 @@ vec3 groundFields(sampler2D noiseMap, vec3 world) {
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation
 // treatment, not illumination. Apply after all other pigment gains so no later bound can flatten its detail.
-// The first level below 0 also steps down by a quarter, so a recession reads at a glance; deeper levels ease on as
+// The first level below 0 also steps down by a tenth, so a recession reads at a glance; deeper levels ease on as
 // before. dry fades that step out under water, whose depth already darkens its bed.
 vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     if (level == 0.0) return c;
@@ -45,10 +45,19 @@ vec3 levelGrade(vec3 c, float level, float fungus, float dry) {
     // Map peak p to e*p/(1+(e-1)*p), with positive derivative even at bright texture samples.
     // The one scalar preserves RGB ratios; it does not clamp separate channels or force a new white ceiling.
     c *= exposure / (1.0 + (exposure - 1.0) * peak);
-    return c * (1.0 - mix(.06, .07, fungus) * down) * (1.0 - .25 * dry * clamp(-level, 0.0, 1.0));
+    return c * (1.0 - mix(.06, .07, fungus) * down) * (1.0 - .1 * dry * clamp(-level, 0.0, 1.0));
 }
 
 vec3 levelGrade(vec3 c, float level) { return levelGrade(c, level, 0.0, 1.0); }
+
+// Near-white snow barely lifts uphill under the exposure curve. Downhill it takes the inverse of that lift instead of the
+// common step, so a snowfield changes by the same small amount between levels either way.
+vec3 snowLevelGrade(vec3 c, float level) {
+    vec3 lifted = levelGrade(c, abs(level));
+    if (level >= 0.0) return lifted;
+    const vec3 LUMA = vec3(.2126, .7152, .0722);
+    return c * dot(c, LUMA) / max(dot(lifted, LUMA), 1e-4);
+}
 
 // Broad variations in the ground's tone, so a large field reads neither as one flat colour nor as tiles: patches, the
 // desert's compact ochre earth, loose sand's drifts, a meadow's dry and lush turf. rim and foot weigh the

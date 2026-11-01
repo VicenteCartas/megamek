@@ -834,11 +834,16 @@ void main() {
     // Molten material keeps its own presentation; cliffs use the continuous height set above.
     if (level != 0.0 && volcanic < 1.0) {
         float fungusGrade = family(FUNGUS_FAMILY) ? 1.0 : 0.0;
+        float snowGrade = family(5.0) ? 1.0 : 0.0;
 #ifdef terrainBlendFlag
         // The final material coverage includes height competition and sediment transfer at mixed contacts.
         fungusGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - FUNGUS_FAMILY)));
+        snowGrade = dot(materialCoverage, 1.0 - step(vec4(.5), abs(coverFamilies - 5.0)));
 #endif
-        albedo = mix(levelGrade(albedo, level, fungusGrade, 1.0 - smoothstep(0.0, .25, submerged)), albedo, volcanic);
+        // The snow itself, not the rock or bare ground of a snowfield, grades as snow (snowLevelGrade).
+        snowGrade *= smoothstep(.45, .7, dot(albedo, vec3(.2126, .7152, .0722)));
+        vec3 graded = levelGrade(albedo, level, fungusGrade, 1.0 - smoothstep(0.0, .25, submerged));
+        albedo = mix(mix(graded, snowLevelGrade(albedo, level), snowGrade), albedo, volcanic);
     }
 #ifdef lightingFlag
     vec3 view = -viewDirection();

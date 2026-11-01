@@ -124,9 +124,9 @@ backgrounds. This does not change emission or lens effects in the live board vie
 
 Elevation grading leaves level zero unchanged. Uphill, one scalar exposure curve
 keeps RGB ratios and bright texture variation; valleys darken and warm, and fungus
-has a stronger cue down to level -6. The first level below 0 also steps 25% darker,
-so a recession reads at a glance; the step fades out on beds under
-water. It applies to the completed material colour of ground and Classic column
+has a stronger cue down to level -6. The first level below 0 also steps 10% darker,
+so a recession reads at a glance (snow takes only the inverse of its slight uphill lift);
+the step fades out on beds under water. It applies to the completed material colour of ground and Classic column
 artwork before lighting, and grass blades, crops, sedge and roads share its downhill
 part; magma keeps its own
 shading. It is presentation styling, not a physical claim about altitude.

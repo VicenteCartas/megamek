@@ -112,7 +112,7 @@ class GpuTerrainGradeSmokeTest {
         assertTrue(fungal[0] > ordinary[0] + .005, "Fungus retains its intentionally stronger elevation cue");
         for (float fungus : new float[] { 0, 1 }) {
             var sunk = probe.grade(new float[] { .5f, .5f, .5f }, -1, fungus);
-            assertTrue(sunk[1] < .5f * .75f, "Level -1 reads a clear step darker than level 0 (fungus " + fungus + ")");
+            assertTrue(sunk[1] < .5f * .9f, "Level -1 reads a step darker than level 0 (fungus " + fungus + ")");
         }
     }
 
