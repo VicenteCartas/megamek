@@ -101,5 +101,7 @@ docs/issues/
 docs/Princess/
 docs/design/
 .work/
+work/
+handoff/
 .tmp/
 output/
