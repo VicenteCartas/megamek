@@ -18,6 +18,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.Vector;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
@@ -187,12 +188,13 @@ class LobbyNativeDialogsSmokeTest {
                 }
 
                 @Override
-                public void saveLoadout(MunitionTree tree) {
+                public void saveLoadout(MunitionTree tree, Runnable then) {
+                    then.run();
                 }
 
                 @Override
-                public MunitionTree loadLoadout() {
-                    return null;
+                public void loadLoadout(Consumer<MunitionTree> then) {
+                    then.accept(null);
                 }
 
                 @Override
@@ -430,12 +432,13 @@ class LobbyNativeDialogsSmokeTest {
                 }
 
                 @Override
-                public void save(Vector<IBasicOption> all) {
+                public void save(Vector<IBasicOption> all, Runnable then) {
+                    then.run();
                 }
 
                 @Override
-                public boolean load(GameOptions into) {
-                    return false;
+                public void load(GameOptions into, Consumer<Boolean> then) {
+                    then.accept(false);
                 }
 
                 @Override

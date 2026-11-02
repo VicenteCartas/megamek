@@ -24,8 +24,6 @@ import megamek.client.ui.design.DesignTokens;
  * {@code motion.medium}. Without motion everything shows at once.
  */
 public final class UiArcDiagram extends WidgetGroup {
-    /** The space between arcs, in degrees. */
-    public static final float GAP_DEGREES = 4;
     /** The inner radius as a share of the outer one. */
     public static final float INNER = .55f;
     /** The fill at or over which the value turns text.onAccent. */
@@ -44,6 +42,8 @@ public final class UiArcDiagram extends WidgetGroup {
     private final float duration;
     private final float[] easing;
     private final float gap = space("xs");
+    /** The space between arcs, a band of even width along the line between them. */
+    private final float arcGap = space("md");
     private final float[] quad = new float[20];
     private Label[] names = new Label[0];
     private Label[] values = new Label[0];
@@ -179,6 +179,18 @@ public final class UiArcDiagram extends WidgetGroup {
         return angles;
     }
 
+    /**
+     * The angle, in degrees, that a gap {@code width} wide takes at {@code radius}: twice the angle at which a side of
+     * an arc stands {@code width / 2} off the line between two arcs, so the gap is an even band, its sides straight and
+     * parallel, rather than a wedge that widens outwards.
+     */
+    public static float gapDegrees(float width, float radius) {
+        if (radius <= 0) {
+            return 0;
+        }
+        return 2 * (float) Math.toDegrees(Math.asin(Math.min(1, width / 2 / radius)));
+    }
+
     /** The fill for {@code value} against {@code peak}: 0 for nothing, else from {@code floor} up to 1 at the peak. */
     public static float intensity(double value, double peak, float floor) {
         if (value <= 0 || peak <= 0) {
@@ -267,11 +279,14 @@ public final class UiArcDiagram extends WidgetGroup {
         float cy = getY() + getHeight() / 2;
         for (int i = 0; i < names.length; i++) {
             float shown = shown(i);
-            float[] angles = sliceAngles(i, names.length, GAP_DEGREES, SLICES);
-            wedge(batch, angles, cx, cy, Color.toFloatBits(track.r, track.g, track.b, track.a * alpha * shown));
+            float[] innerAngles = sliceAngles(i, names.length, gapDegrees(arcGap, inner), SLICES);
+            float[] outerAngles = sliceAngles(i, names.length, gapDegrees(arcGap, outer), SLICES);
+            float trackColor = Color.toFloatBits(track.r, track.g, track.b, track.a * alpha * shown);
+            wedge(batch, innerAngles, outerAngles, cx, cy, trackColor);
             float level = fill(i);
             if (level > 0) {
-                wedge(batch, angles, cx, cy, Color.toFloatBits(fill.r, fill.g, fill.b, fill.a * level * alpha * shown));
+                wedge(batch, innerAngles, outerAngles, cx, cy,
+                      Color.toFloatBits(fill.r, fill.g, fill.b, fill.a * level * alpha * shown));
             }
             names[i].getColor().a = shown;
             values[i].getColor().a = shown;
@@ -283,13 +298,16 @@ public final class UiArcDiagram extends WidgetGroup {
         super.draw(batch, parentAlpha);
     }
 
-    private void wedge(Batch batch, float[] angles, float cx, float cy, float color) {
-        for (int i = 0; i + 1 < angles.length; i++) {
-            double a = Math.toRadians(angles[i]);
-            double b = Math.toRadians(angles[i + 1]);
+    /** An arc between its inner edge's angles and its outer edge's, which differ so its sides run straight. */
+    private void wedge(Batch batch, float[] innerAngles, float[] outerAngles, float cx, float cy, float color) {
+        for (int i = 0; i + 1 < innerAngles.length; i++) {
+            double a = Math.toRadians(innerAngles[i]);
+            double b = Math.toRadians(innerAngles[i + 1]);
+            double c = Math.toRadians(outerAngles[i]);
+            double d = Math.toRadians(outerAngles[i + 1]);
             point(0, cx + (float) Math.cos(a) * inner, cy + (float) Math.sin(a) * inner, color);
-            point(1, cx + (float) Math.cos(a) * outer, cy + (float) Math.sin(a) * outer, color);
-            point(2, cx + (float) Math.cos(b) * outer, cy + (float) Math.sin(b) * outer, color);
+            point(1, cx + (float) Math.cos(c) * outer, cy + (float) Math.sin(c) * outer, color);
+            point(2, cx + (float) Math.cos(d) * outer, cy + (float) Math.sin(d) * outer, color);
             point(3, cx + (float) Math.cos(b) * inner, cy + (float) Math.sin(b) * inner, color);
             batch.draw(white, quad, 0, quad.length);
         }

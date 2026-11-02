@@ -180,7 +180,11 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         if (show) {
             GpuStartWindow.open(true);
             // Show licensing/welcome dialog once the greeting has played
-            GpuStartWindow.whenSettled(() -> LicensingDialog.showIfNeeded(frame));
+            GpuStartWindow.whenSettled(() -> {
+                if (!GpuStartWindow.showWelcome()) {
+                    LicensingDialog.showIfNeeded(frame);
+                }
+            });
         }
     }
 

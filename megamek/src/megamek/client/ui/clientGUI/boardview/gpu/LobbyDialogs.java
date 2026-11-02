@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.AWTEvent;
 import java.awt.Dialog;
 import java.awt.Dimension;
+import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.HeadlessException;
 import java.awt.Point;
@@ -105,7 +106,8 @@ final class LobbyDialogs {
     /** Once the native window shows: catches the dialogs that opened before it. */
     void presented() {
         for (Window window : Window.getWindows()) {
-            if (window.isShowing() && window instanceof Dialog dialog && belongs(dialog)) {
+            if (window.isShowing() && window instanceof Dialog dialog && !(dialog instanceof FileDialog)
+                  && belongs(dialog)) {
                 show(dialog);
                 if (dialog.isFocused()) {
                     hadFocus = true;
@@ -120,7 +122,14 @@ final class LobbyDialogs {
         }
         switch (event.getID()) {
             case ComponentEvent.COMPONENT_SHOWN -> {
-                if (!host.closing() && belongs(dialog)) {
+                if (dialog instanceof FileDialog) {
+                    // The system's file dialog has no window of AWT's to own, place or float; as a modal dialog it
+                    // only blocks the lobby's input, and a click on the window brings it to the front
+                    if (!host.closing() && belongs(dialog) && dialog.isModal() && modal.add(dialog)
+                          && modal.size() == 1) {
+                        setBlocked(true);
+                    }
+                } else if (!host.closing() && belongs(dialog)) {
                     show(dialog);
                 }
             }

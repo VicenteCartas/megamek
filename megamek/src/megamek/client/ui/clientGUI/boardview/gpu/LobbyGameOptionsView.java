@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -52,11 +53,14 @@ final class LobbyGameOptionsView {
         /** Swing thread: sends the changed options, when there are any, and saves all of them as the last used. */
         void send(String password, Vector<IBasicOption> changed, Vector<IBasicOption> all);
 
-        /** Swing thread: asks for a file and saves the options to it. */
-        void save(Vector<IBasicOption> all);
+        /** Asks for a file and saves the options to it; {@code then} runs back on the GPU thread once done. */
+        void save(Vector<IBasicOption> all, Runnable then);
 
-        /** Swing thread: asks for a file and loads it into {@code into}; whether one was loaded. */
-        boolean load(GameOptions into);
+        /**
+         * Asks for a file and loads it into {@code into}; {@code then} gets, back on the GPU thread, whether one was
+         * loaded.
+         */
+        void load(GameOptions into, Consumer<Boolean> then);
 
         /** Swing thread: refits the game's units after the BattleArmor grab bars option switched. */
         void grabBars();
@@ -509,7 +513,12 @@ final class LobbyGameOptionsView {
             return;
         }
         Vector<IBasicOption> all = form.allOptions();
-        hold(() -> host.save(all), () -> { });
+        busy = true;
+        refresh();
+        host.save(all, () -> {
+            busy = false;
+            refresh();
+        });
     }
 
     private void loadFile() {
@@ -517,22 +526,14 @@ final class LobbyGameOptionsView {
             return;
         }
         GameOptions copy = form.copyOfOptions();
-        boolean[] loaded = new boolean[1];
-        hold(() -> loaded[0] = host.load(copy), () -> {
-            if (loaded[0]) {
+        busy = true;
+        refresh();
+        host.load(copy, loaded -> {
+            busy = false;
+            if (loaded) {
                 form.load(copy);
                 showAll();
             }
-        });
-    }
-
-    /** Runs {@code work} on the Swing thread with the dialog held, then {@code then} here. */
-    private void hold(Runnable work, Runnable then) {
-        busy = true;
-        refresh();
-        host.edt(work, () -> {
-            busy = false;
-            then.run();
             refresh();
         });
     }

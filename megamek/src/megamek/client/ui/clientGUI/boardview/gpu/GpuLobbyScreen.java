@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -38,6 +39,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
@@ -45,14 +47,17 @@ import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbySnapshot;
+import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
 import megamek.client.lobby.RequisitionLoader;
 import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.design.DesignTokens;
@@ -68,6 +73,7 @@ import megamek.common.alphaStrike.cardDrawer.ASCard;
 import megamek.common.icons.Camouflage;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.OptionsConstants;
+import megamek.common.preference.PreferenceManager;
 import megamek.logging.MMLogger;
 
 /**
@@ -85,12 +91,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     static final String BATTLEFIELD = "battlefield";
     /** The centre view that shows the Requisition, the unit selector. */
     static final String REQUISITION = "requisition";
+    /** The centre's key for the unit bay. */
+    static final String UNIT_BAY = "unitbay";
     /** How many catalogue sprites the Requisition keeps as textures; the least recently shown go first. */
     private static final int REQUISITION_SPRITES = 200;
     /** When the developer switch's clicks run, in seconds after the lobby shows. */
     static final double PROBE_CLICK_AT = 1.5;
     /** The stored behaviour the probe chooses in the bot setup. */
     private static final String PROBE_PRESET = "COWARDLY";
+    /** {@code lobby+gm}'s name for a click on the seat itself rather than on its card. */
+    private static final String GM_SEAT = "seat";
 
     private final GpuLobbyWindow window;
     private final GUIPreferences preferences;
@@ -106,11 +116,18 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private int bh;
 
     private LobbyTopBar topBar;
+    private LobbyGameMasterSeat gameMasterSeat;
     private LobbyPlayersPanel players;
     private LobbyForcesPanel forces;
     private LobbyBattlefieldPanel battlefield;
     private LobbyCentre centre;
     private LobbyRequisitionPanel requisition;
+    /** The map setup, made when it first opens. */
+    private LobbyMapSetupView mapSetupView;
+    /** The C3 network manager, made when it first opens. */
+    private LobbyC3View c3View;
+    /** The unit bay in the forces' place, or null when it is shut. */
+    private @Nullable LobbyUnitBayView unitBay;
     private ExecutorService searchThread;
     /** The dossier's full records and availabilities, each read on its own thread where the newest unit wins. */
     private ExecutorService recordThread;
@@ -137,6 +154,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private int filterClicksPending;
     /** The {@code +setskills} clicks left: Set, then the gunnery's +. */
     private int skillClicksPending;
+    private Deque<ProbeClick> gmClicks = new ArrayDeque<>();
+    /** The developer switch's run through the C3 network manager, or null. */
+    private LobbyC3Probe c3Probe;
+    /** The developer switch's run through the unit bay, or null. */
+    private LobbyUnitBayProbe bayProbe;
+    private LobbyMapSetupProbe mapProbe;
+    private LobbyToolsProbe toolsProbe;
     private String hoverPending;
     /** The developer switch's advanced search steps, from the first; -1 when there are none. */
     private int advancedStep = -1;
@@ -190,6 +214,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
         if (blocked) {
             stage.cancelTouchFocus();
+            TooltipManager.getInstance().hideAll();
         }
         Gdx.input.setInputProcessor(blocked ? null : stage);
     }
@@ -229,6 +254,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               : null;
         advancedStep = probe.options().contains("advanced") ? 0 : -1;
         skillClicksPending = probe.options().contains("setskills") ? 2 : 0;
+        gmClicks = gmClicks(probe);
+        c3Probe = LobbyC3Probe.of(probe);
+        bayProbe = LobbyUnitBayProbe.of(probe);
+        mapProbe = LobbyMapSetupProbe.of(probe);
+        toolsProbe = LobbyToolsProbe.of(probe);
         if (probe.options().contains("compact")) {
             forces.compact(true);
         }
@@ -268,7 +298,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     private void build() {
         boolean motion = !preferences.getReduceMotion();
-        topBar = new LobbyTopBar(kit, window::leave, window::ready, this::goTo);
+        gameMasterSeat = new LobbyGameMasterSeat(kit, new LobbyGameMasterSeat.SeatActions() {
+            @Override
+            public void claim() {
+                window.toggleGameMaster();
+            }
+
+            @Override
+            public void vote(boolean allow) {
+                window.voteGameMaster(allow);
+            }
+
+            @Override
+            public void withdraw() {
+                window.withdrawGameMaster();
+            }
+        }, motion);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, window::leave, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -342,13 +388,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         });
     }
 
-    /** The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, unless a text field has the keys. */
+    /**
+     * The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, and the Client Settings key
+     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, unless a text field has the keys.
+     */
     private boolean readyKey(int keycode) {
         if (stage.getKeyboardFocus() instanceof TextField) {
             return false;
         }
+        int key = GpuBattleView.awtKey(keycode);
+        int modifiers = GpuBattleView.modifiers();
+        KeyCommandBind settings = KeyCommandBind.CLIENT_SETTINGS;
+        if (key == settings.key && modifiers == settings.modifiers) {
+            window.openSettings();
+            return true;
+        }
         KeyCommandBind bind = KeyCommandBind.DONE;
-        if (GpuBattleView.awtKey(keycode) != bind.key || GpuBattleView.modifiers() != bind.modifiers) {
+        if (key != bind.key || modifiers != bind.modifiers) {
             return false;
         }
         window.ready();
@@ -491,6 +547,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             public void choose(List<Integer> path) {
                 window.chooseMenu(path);
             }
+
         };
     }
 
@@ -636,8 +693,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             eldest.remove();
             entry.getValue().getRegion().getTexture().dispose();
             requisition.spriteForgotten(entry.getKey());
+            randomArmySprite(entry.getKey());
         }
         requisition.spriteArrived(key);
+        randomArmySprite(key);
+    }
+
+    /** Shows the random army's cards of the unit {@code key} with its sprite as now drawn, or none. */
+    private void randomArmySprite(String key) {
+        LobbyRandomArmyView army = nativeDialogs == null ? null : nativeDialogs.randomArmyView();
+        if (army != null) {
+            army.spriteArrived(key);
+        }
+    }
+
+    /** The Requisition's sprites drawn so far, by {@link LobbyRequisitionPanel#spriteKey}. */
+    @Nullable TextureRegionDrawable requisitionSprite(String key) {
+        return requisitionSprites.get(key);
     }
 
     /** The battlefield column's actions, which the window runs on the Swing thread. */
@@ -706,6 +778,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
         });
         forces.redraw();
+        if (c3View != null && LobbyC3View.KEY.equals(centre.showing())) {
+            c3View.redraw();
+        }
     }
 
     /** GPU thread: takes the camo pictures of the players' swatches, by {@link LobbySnapshot#camoKey}. */
@@ -788,6 +863,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
+    /** GPU thread: closes the lobby's open menus, then has {@code open} open one of the lobby's libGDX dialogs. */
+    void nativeDialog(Consumer<LobbyNativeDialogs> open) {
+        if (stage != null) {
+            closeMenus();
+            open.accept(nativeDialogs);
+        }
+    }
+
     private void closeMenus() {
         boolean closed = true;
         while (closed) {
@@ -806,6 +889,134 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         rail.setChecked(battlefieldShown);
         if (!battlefieldShown && battlefield.body().getParent() != battlefield.panel()) {
             battlefield.dock();
+        }
+        if (c3View != null && c3View.shown() != null && !LobbyC3View.KEY.equals(showing)) {
+            c3View.closed();
+            window.c3Closed();
+        }
+        if (unitBay != null && !UNIT_BAY.equals(showing)) {
+            unitBay.dispose();
+            unitBay = null;
+        }
+        if (mapSetupView != null && mapSetupView.shown() != null && !LobbyMapSetupView.KEY.equals(showing)) {
+            mapSetupView.closed();
+            mapSetupView.dispose();
+            window.mapSetupClosed();
+        }
+    }
+
+    /** GPU thread: shows the unit bay for the form's units in the forces' place, instead of any bay shown. */
+    void unitBay(UnitConfigForm form, List<BufferedImage> sprites, List<BufferedImage> portraits,
+          LobbyUnitBayView.Host host) {
+        if (stage == null) {
+            return;
+        }
+        closeMenus();
+        LobbyUnitBayView old = unitBay;
+        unitBay = new LobbyUnitBayView(kit, form, sprites, portraits, host);
+        centre.show(UNIT_BAY, Messages.getString("Lobby.bay.title"), unitBay.body());
+        if (old != null) {
+            old.dispose();
+        }
+    }
+
+    /** GPU thread: shuts the unit bay, bringing the forces back. */
+    void closeUnitBay() {
+        if (UNIT_BAY.equals(centre.showing())) {
+            centre.back();
+        }
+    }
+
+    /** GPU thread: opens the map setup in the forces' place; its setup follows from the window. */
+    void openMapSetup() {
+        if (stage == null) {
+            return;
+        }
+        if (mapSetupView == null) {
+            mapSetupView = new LobbyMapSetupView(kit, window.mapSetupHost());
+        }
+        closeMenus();
+        if (!LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.closed();
+            centre.show(LobbyMapSetupView.KEY, Messages.getString("Lobby.map.title"), mapSetupView.body());
+        }
+    }
+
+    /** GPU thread: shows the map setup anew while it shows. */
+    void mapSetup(MapSetupForm.Picture picture, List<MapSetupForm.Theme> themes) {
+        if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.show(picture, themes);
+        }
+    }
+
+    /** GPU thread: a board's picture for the map setup, while it shows. */
+    void mapPicture(String key, BufferedImage image) {
+        if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
+            mapSetupView.picture(key, image);
+        }
+    }
+
+    /** GPU thread: the map setup, for the probe and the tests; null before it first opens. */
+    @Nullable LobbyMapSetupView mapSetupView() {
+        return mapSetupView;
+    }
+
+    /** GPU thread: warns that boards of odd width do not tile; {@code dontShowAgain} runs if asked not to again. */
+    void oddBoardNag(Runnable dontShowAgain) {
+        if (stage != null) {
+            nativeDialogs.oddBoardNag(dontShowAgain);
+        }
+    }
+
+    /** GPU thread: asks {@code text} over the lobby; {@code yes} runs on OK. */
+    void confirmDialog(String title, String text, Runnable yes) {
+        confirmDialog(title, text, yes, () -> { });
+    }
+
+    /** GPU thread: as {@link #confirmDialog(String, String, Runnable)}, running {@code no} when not confirmed. */
+    void confirmDialog(String title, String text, Runnable yes, Runnable no) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.confirm(title, text, yes, no);
+        } else {
+            no.run();
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the random map settings over the lobby. */
+    void randomMapDialog(RandomMapForm form, List<String> themes, LobbyRandomMapView.Host host) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.randomMap(form, themes, host);
+        }
+    }
+
+    /** GPU thread: opens the C3 network manager in the forces' place; its board follows from the window. */    void openC3() {
+        if (stage == null) {
+            return;
+        }
+        if (c3View == null) {
+            c3View = new LobbyC3View(kit, new LobbyC3View.Host() {
+                @Override
+                public void act(Consumer<C3NetworkBoard> action) {
+                    window.c3(action);
+                }
+
+                @Override
+                public void confirm(String title, String text, Runnable yes) {
+                    nativeDialogs.confirm(title, text, yes);
+                }
+            }, spriteDrawables::get);
+        }
+        closeMenus();
+        c3View.closed();
+        centre.show(LobbyC3View.KEY, Messages.getString("C3NetworkManagerDialog.title"), c3View.body());
+    }
+
+    /** GPU thread: shows the C3 network manager's board anew while it shows. */
+    void c3(C3NetworkBoard.Picture picture) {
+        if (c3View != null && LobbyC3View.KEY.equals(centre.showing())) {
+            c3View.show(picture);
         }
     }
 
@@ -840,6 +1051,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     // ---- Size and scale ----
+
+    /** Applies a changed GUI scale setting at once, as a resize would. */
+    void rescale() {
+        if (stage != null) {
+            resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        }
+    }
 
     @Override
     public void resize(int width, int height) {
@@ -1112,6 +1330,42 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         GpuLobbyProbeInput.click(stage, target);
     }
 
+    /** For the developer switch: clicks the actor called {@code name} through the stage, as a pointer would. */
+    void probeClick(String name) {
+        if (stage != null) {
+            probeClick(stage.getRoot().findActor(name));
+        }
+    }
+
+    /**
+     * A click {@code lobby+gm} makes through the stage: the seat itself or a control on the seat's card by name.
+     */
+    private record ProbeClick(double at, String name) {}
+
+    /**
+     * {@code lobby+gm}'s clicks: the seat and Claim, then
+     * with {@code +step} the seat and Step down once the claim has
+     * gone through; with {@code +asked} only Allow (or Deny) on the card the second human's ask opens.
+     */
+    private static Deque<ProbeClick> gmClicks(GpuLobbyProbe probe) {
+        Deque<ProbeClick> clicks = new ArrayDeque<>();
+        if (!probe.options().contains("gm")) {
+            return clicks;
+        }
+        double answerAt = GpuLobbyProbe.SECOND_ACTS_AT + 1;
+        if (probe.options().contains("asked")) {
+            clicks.add(new ProbeClick(answerAt, probe.options().contains("deny") ? "lobby-gm-deny" : "lobby-gm-allow"));
+            return clicks;
+        }
+        clicks.add(new ProbeClick(PROBE_CLICK_AT, GM_SEAT));
+        clicks.add(new ProbeClick(PROBE_CLICK_AT + .5, "lobby-gm-claim"));
+        if (probe.options().contains("step")) {
+            clicks.add(new ProbeClick(answerAt, GM_SEAT));
+            clicks.add(new ProbeClick(answerAt + .5, "lobby-gm-step-down"));
+        }
+        return clicks;
+    }
+
     /** Scrolls the dialog's body so that {@code target} shows in the middle. */
     private static void probeReveal(UiDialog dialog, @Nullable Actor target) {
         if (target == null) {
@@ -1179,6 +1433,33 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (advancedStep >= 0 && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT
               && elapsed > advancedAt) {
             probeAdvanced(probe, elapsed);
+        }
+        if (c3Probe != null) {
+            c3Probe.step(elapsed, stage, () -> window.forcesCommand(LobbyForcesPanel.Command.C3), c3View);
+        }
+        if (mapProbe != null) {
+            LobbyMapSetupProbe run = mapProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeMapSetup(run.random())),
+                  mapSetupView, nativeDialogs.randomMapView(), nativeDialogs.dialog(),
+                  what -> SwingUtilities.invokeLater(() -> window.probeMapSettings(what)));
+        }
+        if (bayProbe != null) {
+            LobbyUnitBayProbe run = bayProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeConfigure(run.multi())),
+                  unitBay);
+        }
+        if (toolsProbe != null) {
+            LobbyToolsProbe run = toolsProbe;
+            run.step(elapsed, stage, () -> SwingUtilities.invokeLater(() -> window.probeTool(run.tool())),
+                  nativeDialogs);
+        }
+        if (!gmClicks.isEmpty() && elapsed > gmClicks.peekFirst().at()) {
+            ProbeClick click = gmClicks.removeFirst();
+            Actor target = click.name().equals(GM_SEAT) ? gameMasterSeat.button()
+                  : gameMasterSeat.card().findActor(click.name());
+            probeClick(target);
+            LOGGER.info("The lobby probe's Game Master click on {}: {}", click.name(),
+                  window.snapshot().gameMaster());
         }
         if (tabPending != null && REQUISITION.equals(centre.showing()) &&         requisition.dossierSettled()
               && elapsed > PROBE_CLICK_AT + tabStep * .5) {
@@ -1317,8 +1598,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             LOGGER.info("Lobby shot saved to {}", probe.shot().getAbsoluteFile());
         }
         if (probe.quit()) {
+            boolean save = probe.options().contains("saveprefs");
             // After the window report, which waits its turn on the same thread
-            SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() -> System.exit(0)));
+            SwingUtilities.invokeLater(() -> SwingUtilities.invokeLater(() -> {
+                if (save) {
+                    PreferenceManager.getInstance().save();
+                    LOGGER.info("The lobby probe saved the client settings");
+                }
+                System.exit(0);
+            }));
         }
     }
 
@@ -1326,6 +1614,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     public void dispose() {
         if (nativeDialogs != null) {
             nativeDialogs.dispose();
+        }
+        if (mapSetupView != null) {
+            mapSetupView.dispose();
+            mapSetupView = null;
+        }
+        if (unitBay != null) {
+            unitBay.dispose();
+            unitBay = null;
         }
         window.disposing();
         camoTextures.values().forEach(Texture::dispose);

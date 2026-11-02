@@ -37,7 +37,7 @@ Agreed so far:
 | Presentation mode | **Final.** Two modes, chosen per screen: **game** and **app**. The mode sets the text case, the [type width](tokens.md#type-width) and the slider thumb (game: hud-v3's thin bar; app: a disc), and later differences join it as whole-screen choices. Game mode puts the short framing labels (one to three words) in upper case; app mode is sentence case. Content is sentence case in both. Game screens to start with: the in-game libGDX HUD, startup and main menus, MekHQ Immersive dialogs and the interstellar map. Everything else starts as app and can move to game when it is reviewed. Weight and size rules are shared; upper-case text uses each style's wider **caps tracking** token (values signed off: display .04, headline .05, title .06, label .08, overline .1 em). Both galleries have a switch between the modes. See [tokens.md](tokens.md#presentation-mode). |
 | Type width | **Final.** Roboto Condensed (`wdth` 75) for game mode's framing roles (display, headline, title, button, tab, overline) and a new `name` role for unit and pilot names (`body.strong`, sentence case), at the same weight (500) and tracking rules; body, small, caption, field labels, tables, values and running text stay regular width, and app mode is all regular width. Condensed packs some 15-20% more into narrow HUD columns and reads as technical and military; it stays off running text, tables and app mode because condensed letters crowd at 10-12 px and tire in long text. hud-v3's wide tracking on mixed case is not adopted: it uses up the space condensed saves. All condensed roles are medium, so Swing needs one more static face, Roboto Condensed Medium. See [tokens.md](tokens.md#type-width). |
 | Panels and rails | **Final.** Ticked frames (panels, dialog cards, status cards) draw their edge only at the top and bottom, a paper roll, since the ticks close the sides. The edge stays the quiet `border.subtle` so busy screens don't fill with lines (revisited and kept). Only the outermost frame has ticks: cards in a card grid stay plain, so a grid doesn't repeat a tick set per card. hud-v3's `panel-rails` (the Tactical View chip) keeps its rails as `token-rails`; `token-frame` is the plain frame. See [tokens.md](tokens.md#panels). |
-| Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. See [tokens.md](tokens.md#dialogs). |
+| Dialog buttons | **Final.** Centred, equal width, main action first, in both presentation modes. hud-v3 puts them in the bottom-right corner, but that is a desktop OS habit, and one rule for both modes means shared dialogs don't move their buttons. Full-screen panels are the exception: they end in a bottom-right command bar with the main action in the corner. See [tokens.md](tokens.md#dialogs). |
 | Segmented control | **Final.** Separate segments, `xs` apart, each with its own edge, instead of a joined frame with hairlines, in both sizes: hud-v3's joined `hud-pill` becomes the compact size, not a second look. See [tokens.md](tokens.md#segmented-control). |
 | Primary button | **Final.** The `surface.inverse` face, hud-v3's cream `hud-main` (dark in light mode), not mint, so mint stays for focus; checked toggles share its look. See [tokens.md](tokens.md#buttons). |
 | Menus and popups | **Final.** A plain popup frame without corner ticks in both modes; ticks frame lasting containers (panels, dialogs, status cards), and submenus would stack them. See [tokens.md](tokens.md#menus). |
@@ -372,7 +372,8 @@ work for Swing, and item 11 is under investigation.
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
      startup path in Swing is going away): a full-window game screen over the battle art
-     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back" greeting and reveal on app launch (an
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back, Commander" greeting ("Welcome,
+     Commander" on the first launch; the player is always Commander, never named) and reveal on app launch (an
      instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
@@ -403,12 +404,14 @@ work for Swing, and item 11 is under investigation.
      Princess bots under their saved names. A save that cannot be read, has no version or comes from another
      version says so in the page instead of a popup. **Scenario** opens the scenario browser: a search field (every
      word must match the name, group or planet) beside a group select (All scenarios or one folder) over a list of
-     names, each with its group and planet, and **Open a file…**. On Windows, Browse files and Open a file use the
-     system's open-file dialog (LWJGL's Native File Dialog, on its own thread, natively owned by the start window
-     so it stays in front); elsewhere, or if it fails, Swing's chooser. Picking a scenario opens the **briefing**:
-     the title, single player or multiplayer, the description and the players, each with a camo swatch that opens
-     the camo chooser (scenarios skip the lobby, so this is the only place to change it; multiplayer sides start in
-     their own colour). In single player you are the first player and the others are bots; in multiplayer each
+     names, each with its group and planet, and **Open a file…**. Browse files and Open a file use the system's
+     open-file dialog: on Windows LWJGL's Native File Dialog, on its own thread and natively owned by the start
+     window so it stays in front, and on macOS and Linux AWT's `FileDialog` (step 5.5). If that fails, or with
+     `-Dmegamek.nativeFileDialog=false`, they use Swing's chooser. Picking a scenario opens the **briefing**:
+     the title, single player or multiplayer, a thumbnail of the map with its deployment zones (step 5.5), the
+     description and the players, each with a camo swatch that opens the camo chooser. Scenarios skip the lobby, so
+     this is the only place to change the camo. Each side starts in its own colour. In single player you are the
+     first player and the others are bots; in multiplayer each
      player has a You | Human | Bot select, the first is You and the rest Bot, an observer name shows when nobody is
      You, and the server password and port show only while a side is Human. **Rules** and **Conditions** lines
      summarise the game options and planetary conditions, with **Change…** opening their Swing dialogs (or "Set by
@@ -417,8 +420,8 @@ work for Swing, and item 11 is under investigation.
      when the server already took it. The load and scenario pages are wider than the menu, so long names fit, and
      their list fills the room left in the column. Ctrl+click on Load game and Scenario still reaches quick load
      and the last scenario. Follow-ups: a **Load anyway** for saves from another version (to propose to the MegaMek
-     team), the map thumbnail and the native dialog on macOS and Linux (step 5.5), and libGDX camo, options and
-     conditions pickers with the lobby's dialogs (step 8). To review a page without clicking through it, set
+     team) and libGDX camo, options and conditions pickers with the lobby's dialogs (step 8). The map thumbnail and
+     the system dialog on macOS and Linux are done (step 5.5). To review a page without clicking through it, set
      `MM_START_PAGE` (such as `host+online+reveal`, `connect+bot`, `load`, `resume`, `scenarios` or `briefing`, with
      `MM_START_SCENARIO` naming the scenario file) before `gradlew :megamek:run`;
      `MM_START_SHOT` saves a PNG from the screen's own frame buffer, `MM_START_SHOT_AT` sets when, and
@@ -437,13 +440,48 @@ work for Swing, and item 11 is under investigation.
      password or port was changed before or one of them is wrong. Bot setup moves with the lobby's dialogs (step 8). The new main menu shows these forms as
      its own pages; the card stays for MekHQ.
   5. ~~The scenario flow~~: the scenario browser and the briefing in the start screen's column (G5 and G6 in step 3).
-  5.5. Start screen follow-ups, before the lobby:
-     - A map thumbnail on the briefing, ideally drawn by the 3D board, so a scenario shows its battlefield before it
-       starts.
-     - The system's file dialog on macOS and Linux. LWJGL's Native File Dialog supports both, but it is only enabled
-       on Windows so far: on macOS it must run on the main thread, which the start window's loop holds (so it would
-       open from that loop and pause drawing while it is open), and on Linux it uses GTK, which needs checking
-       beside AWT. Both need testing on real machines; Swing's chooser stays the fallback.
+  5.5. ~~Start screen follow-ups, before the lobby~~. First done on `design-system-start-followups`, then ported onto
+     the single-window start screen (the briefing in `StartBriefingPage`, the dialogs in `SystemFileDialog`):
+     - ~~A map thumbnail on the briefing~~. Scenarios skip the lobby, so the briefing is the player's first look at
+       the battlefield. The developers chose the minimap's look over a 3D render or a static image: it reads at
+       thumbnail size and costs a few milliseconds. The map sits under the title line, above the description, in a
+       framed panel (`token-panel-plain`) as wide as the column. The frame is 45% of the column's width tall, within
+       140 to 240 px. It is sized by the column alone, never by the map, so the briefing shows the empty frame at
+       once. `StartMapThumbnail` bakes the map off the GPU thread and it fades in (motion medium on the token
+       easing; instant with reduce motion), so nothing moves under the pointer. In a short window the frame gives
+       way first, down to 90 px, and then leaves the map out, so Start never runs into the bottom row. Each hex is
+       filled in the minimap's terrain colour. Each side's deployment zone is tinted in its colour and outlined in a
+       lighter shade; a zone that covers the whole board ("any") is left out. A muted caption under the frame gives
+       the size ("16 × 34 hexes") and, when it applies, "random map" or "first of N maps". A random map is drawn as
+       rolled. If the start fails, the game is rebuilt with a new roll, so the map is baked again. Sides now take
+       MegaMek's player colours in order in single player too, as they already did in multiplayer. A side still in
+       the default blue camo takes its colour's camo, so the zones, the swatches and the deployment rings in game
+       agree. `StartMapFrame` only draws a texture, so a later 3D render can replace the bake without changing the
+       layout.
+     - ~~The system's file dialog on macOS and Linux~~. `SystemFileDialog` picks the dialog for every GPU file
+       chooser, the start screen's and the lobby's (map setup, load and save lists, game options, loadouts), open and
+       save alike:
+       - Windows keeps LWJGL's Native File Dialog (`NativeFileChooser`).
+       - macOS uses AWT's `FileDialog`, which is the system's NSOpenPanel or NSSavePanel. AWT owns the main thread
+         there (GLFW runs on its own thread), so the window should keep drawing while the dialog is open.
+       - Linux uses AWT's `FileDialog` under the X11 toolkit, which is the GTK chooser, unless
+         `sun.awt.disableGtkFileDialogs` is set.
+       - Anything else, a headless session, or a dialog that fails gets Swing's chooser. A failure turns that path
+         off for the rest of the session.
+       - `-Dmegamek.nativeFileDialog=false` forces Swing's chooser everywhere.
+
+       While the dialog is open the window ignores input; the window listeners leave the AWT dialog unplaced and
+       unowned, since it has no window of AWT's. macOS's save panel confirms a replace itself; on Linux the lobby
+       still asks, as AWT may draw its own dialog in place of GTK's. Neither platform has been tried on a real
+       machine yet. To test:
+       - macOS (Intel and Apple Silicon): Browse files and Open a file open the system panel in the right folder,
+         with only saves or scenarios selectable. Cancel works. The panel stays in front of the start window. The
+         embers keep moving. A second open works, including after returning from a game. Check full screen and
+         other Spaces. In the lobby, a save suggests its name and replacing a file asks once.
+       - Linux, on GNOME under Wayland (XWayland) and X11, and on KDE: the GTK chooser opens, not the old
+         Motif-style one, in the right folder with the filter. It stays in front. No GTK warnings appear in the log.
+         A second open works.
+       - Both: the switch brings back Swing's chooser.
   6. ~~The lobby in libGDX~~: a briefing room in game mode, as a scene of the one window, for MegaMek and MekHQ alike (see
      the Lobby decision). The Swing version on `design-system-start-followups` settled the layout: a top bar with the
      title, ready count, a BV chip per side and Ready; players by team on the left, with the chat docked under them;
@@ -865,20 +903,283 @@ work for Swing, and item 11 is under investigation.
         `search=<text>` (underscores for spaces) to pick a given unit. Not seen on screen: an era hidden between two
         shown (the units photographed had none), and a capture of the factions reveal mid-way (its data arrives at a
         varying time).
-     - Still open after #34, for a later round once #33 and #34 are merged:
-       - L14 Settings check: the lobby's part of step 7. Every client and GUI preference the old Swing lobby read or
-         wrote is honoured by the libGDX lobby, persists across restarts and appears in the settings dialog where it
-         did before; preferences with no remaining reader are removed.
-       - L15 Unit dialogs in libGDX: unit customization (`CustomMekDialog`, including the multi-unit edit) and the
-         C3 network setup.
-       - L16 Map setup in libGDX: board selection, map size, random map settings, and loading and saving a map
-         setup.
-       - L17 The other lobby dialogs in libGDX: Victory Conditions, the random army, random skills, random names,
-         the load list, the Princess help, the unit readout and the remaining prompts through `SwingLobbyPrompts`.
-       - L18 File choosers: game options, loadouts, unit lists and map setups open the system file dialog (as the
-         start screen does) instead of a Swing chooser.
-       - Live checks still to do: a real MekHQ game, a network reconnect, saving and loading game options and bot
-         presets through the real file chooser, a password-protected game and a second human player.
+     - ~~No lobby flash before a scenario~~ (reported by exeea after #34). Every client used to open the lobby scene
+       as it initialised, before the server had sent a phase, and the board replaced it once the phase arrived; a
+       scenario, which starts in `STARTING_SCENARIO` and never enters the lounge, showed the lobby for about 0.7 s
+       between the briefing and the board (and its battlefield logged a null-board warning, as no map had arrived).
+       Now `ClientGUI` opens no scene until the server's first phase: the window keeps what it shows (the
+       briefing's "Starting…", or nothing yet for MekHQ), the lounge then opens the lobby and any other phase the
+       board, and between the lounge and the first board phase the lobby stays as before. Checks:
+       `ClientGUIBoardLifecycleTest` (a scenario goes straight to the board, and nothing opens before the first
+       phase). Live: the start screen's `briefing+play` probe (it presses the briefing's Start once the scenario has
+       loaded) on Final Exam goes from the start screen to the board's own loading card with no lobby frame between
+       (window titles and frames captured from MegaMek's window only), with no null-board warning; `lobby+start`
+       still goes from the start screen to the lobby and on to the board. The lobby probe now readies only once the
+       bots' units have reached the game, as a unit arriving later un-readied the player and left the game waiting.
+     - ~~The Game Master seat~~ (Hammer missed ChatLounge's GM buttons). The Game Master is a seat at the table,
+       not a form: the top bar's first control, a special button with the violet shield (`status.gamemaster`), says
+       what the seat is doing. Locked (the game options do not allow a Game Master), open ("Game Master"), a vote
+       ("GM vote" with a ballot pip for each voter: a violet check for yes, a red cross for no, an empty ring for
+       waiting), the player's own (lit, the shield in the lit face's ink), or someone else's ("GM · name"); it
+       flashes when the seat changes hands, unless reduce motion is on. Clicking opens the seat card: what the role
+       can do and Claim when open; the ballot, the threshold and Deny / Allow when the vote waits on the player (the
+       card then opens by itself, once per vote) or Withdraw when it is the player's ask; Step down when it is the
+       player's. The player card's GM chip is violet too (`UiKit.gameMasterChip`, the `gamemaster` chip frame), and
+       the Swing vote and appointed dialogs no longer open while the lobby shows. The model is toolkit-free
+       (`LobbyGameMaster`, read from the game and the client's running poll into `LobbySnapshot.gameMaster`); the
+       window sends `/gm`, `/allowGM`, `/denyGM` and `/cancelGM` (`LobbyCommands`) and refreshes on the client's
+       poll events. Checks: `LobbyGameMasterTest`, `LobbySnapshotTest` (a running vote), `LobbyCommandsTest`; the
+       on-demand `LobbyGameMasterSeatSmokeTest` clicks claim, the card opening by itself with Allow and Deny,
+       Withdraw, Step down, the locked and held faces, and the flash against reduce motion. Live, through the
+       stage with the probe's `lobby+gm` (and a windowless second human with `+second`): claiming alone takes the
+       seat at once; with the second human, the claim becomes a vote they pass; their own ask opens the card by
+       itself, and Allow gives them the seat (held, with their GM chip) while Deny leaves it open; Step down frees
+       it. The in-game Game Master controls stay as they are for now.
+     - ~~L14 Settings check~~. What the Swing lobby read, and where it stands now:
+       - Client Settings opens from the lobby: a gear in the top bar, before Leave, and the client settings key
+         (Alt+C), as from the old lobby's menu. It opens over the lobby through `LobbyDialogs`, centred and modal,
+         and the lobby takes no input until it closes.
+       - The settings take effect at once, as the Swing lobby's listeners did. The auto resolve panel refreshes the
+         lobby; the camo overlay redraws the unit sprites; the GUI scale rescales the stage.
+       - Unit ids: L14 added a `#` toggle and a `LobbyShowUnitId` setting for them; the review polish below took
+         both out, and the cards always show their ids.
+       - Still read and kept: save the lobby on start, the GUI scale, the camo overlay, the auto resolve panel, the
+         ruler colours, the custom unit dialog's size (L15) and the odd-sized board nag (L16). The lobby draws the
+         warning and my, ally and enemy colours from the tokens now, but the game still reads those settings, so they
+         stay. The Swing lobby's unit table columns had already gone with it.
+       - Removed: the unit selector's column toggles (`MekSelectorInclude*` and `MekSelectorShowAdvanced`), which
+         nothing read since the Requisition replaced the selector. MekHQ and MegaMekLab do not read them either.
+       - Other settings no code reads, outside the lobby and left for the step 7 check: the game summary minimap,
+         the entity owner label colour, the minimap colours, scroll sensitivity, the GPU report panel width, the board
+         editor's load sizes, the bot commands size, and in the client settings the data and unit directories, the
+         unit hit location log, the goal player count and the GUI name.
+       - Token tooltips (`UiKit.tip(actor, true)`) now fit their text and wrap at the style's width, instead of
+         always taking that whole width. A lobby that a Swing dialog blocks hides its tooltips.
+       Checks: the on-demand `LobbyTogglesSmokeTest` clicks the top bar's gear. Live, through the stage: the probe's
+       `+saveprefs` saves the settings on quit, as quitting MegaMek does; `lobby+dialog=settings` clicks the gear and gets Client
+       Settings, centred and modal, with lobby input blocked until it closes.
+     - ~~L15 Unit dialogs~~. Unit customization and the C3 network manager are native, as centre views that take
+       the forces' place (with Back), laid out as game screens rather than forms:
+       - The unit bay replaces `CustomMekDialog` in the libGDX lobby. Configure, Configure All, a double-click on a
+         card and the probe all reach it through one hook, `LobbyCommands.setUnitConfigurator`, after the existing
+         checks (owner, permission, `validateUpdate`); with no hook set, as in MekHQ and MegaMekLab, the Swing dialog
+         runs as before, and Battlefield Support Assets keep their prompt. The header shows the unit's sprite, name,
+         BV and tonnage with Prev/Next (the Swing dialog's order); several units show stacked sprites and "N units".
+       - Tabs appear only when they apply, as in the Swing dialog: Pilot (portrait, name and callsign with their
+         random buttons, gunnery and piloting as large steppers, the RPG and LAM skills, toughness, fatigue,
+         aptitudes as chips, commander, backup, unit number swap, personal equipment), Abilities (a searchable grid
+         of ability chips by category, with the specialist choices inline and the Swing dialog's implant,
+         neural interface, prosthetic and wing rules), Equipment (ammo bins as cards with munition, shots,
+         half and hot loading; weapon feeds; a bomb loadout with its point bar; mines, rapid-fire MGs, VRT, AP
+         weapons, BA manipulators, infantry armor and SRMs, small support vehicle munitions; ECM, probe, C3 and comms
+         modes; ejection, searchlight, cockpits, the damage interrupt circuit and the starting sensor), Deployment or
+         State (the zone as a compass grid, custom zones, round, offset and width as steppers, the Any box, stances as
+         chips, aero speed, altitude and fuel, height, starting mode, off board), Quirks (unit and weapon, positive
+         and negative) and Partial Repairs. Several units share only the Deployment tab: the Swing dialog's equipment
+         panel then edits the first unit only, so the bay leaves it out.
+       - The logic is in `megamek.client.lobby`: `UnitConfigForm` reads the units on the EDT and applies them in the
+         Swing dialog's order (crew, abilities, repairs, quirks, equipment, deployment, then the design check), and
+         `UnitEquipmentForm`, `UnitAbilitiesForm` (with `OptionEntry`), `UnitQuirksForm` and `PartialRepairsForm`
+         hold the tabs. A bad number shows inline and disables OK and Apply, instead of a message box.
+       - Differences on purpose: the C3 choice of an unlinked slave opens on "Not connected" (the Swing dialog joins
+         the first network on an untouched OK); two ECM suites in use show an inline keep-one choice rather than a
+         dialog; implant changes reach the equipment only on OK, so Cancel drops them; the Partial Repairs tab is
+         hidden when nothing can be repaired. The Swing dialog's dump box (never shown) and command-detonated mines
+         (not implemented) stay out. The portrait picker is still the Swing `PortraitChooserDialog`, through
+         `LobbyDialogs`.
+       - The C3 network manager replaces `C3NetworkManagerDialog` in the lobby, from the unit and forces menus. Each
+         network is drawn as an org chart (company master, lance masters, slaves, joined by connector lines; C3i, NC3
+         and Nova as a linked row; open slots as ghost chips), the free units sit in a tray grouped as masters,
+         slaves and C3i, and the template buttons, Plan Force, the staged plan cards with Build, Discard and
+         Auto-assign, Form peer network, Disconnect and Reset all apply through `LobbyCommands` as before. Units move by
+         dragging, or by clicking them and then a slot. `C3FormationPlanner` moved to `megamek.client.lobby`, and
+         `C3NetworkBoard` is the toolkit-free model the view draws.
+       Checks: `UnitConfigFormTest`, `UnitEquipmentFormTest` (munitions, bombs, an untouched OK keeps a weapon's feed
+       and a slave's C3 link, the ECM choice), `UnitAbilitiesFormTest`, `C3NetworkBoardTest` and the moved
+       `C3FormationPlannerTest`; the on-demand `UnitBaySmokeTest` (steppers, the zone grid, Next, OK with bad input,
+       stances and ability chips clicked through the stage) and `LobbyC3ManagerSmokeTest`. Live: the probe's
+       `lobby+configure` (`+multi`, `+bayrules`, `+bayclick=...`) opens the bay and clicks through it, and an OK after
+       Next customizes both units; `lobby+c3+c3plan+c3build` plans a ten-unit force into two lances and builds them
+       (two C3 networks, team BV 17,879 to 20,845). MekHQ and MegaMekLab compile.
+     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` and
+       `RandomMapDialog` stay for other callers:
+       - Edit Map and the Battlefield menu open a "war table" centre view (with Back) in place of `MapSetupDialog`:
+         the map type (ground, low altitude, space) as a segmented choice; boards across and down as steppers; the
+         board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
+         slot. The selected slot shows its rotation, theme and level offset (with Reset), and a searchable board
+         browser with a preview that places a board, places it rotated, or makes a random or a surprise board from
+         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, Advanced Search (the Swing
+         `BoardSearchDialog`, through `LobbyDialogs`), the planetary conditions, the map assembly help, the 3D
+         preview and Generate Battlefield sit in the view's header and footer.
+       - Random Map Settings is a native dialog: the normal view sets each feature as None, Low, Medium or High by
+         theme tab; the advanced view shows every generator field as sliders and steppers; the board size and theme
+         sit above. Load, Apply and Save, OK and Cancel send the settings to the server as the Swing dialog does,
+         and the normal or advanced choice is kept in the preferences.
+       - The odd-sized board warning is a native dialog, shown when odd-width boards are joined across; "Don't show
+         again" turns its preference off.
+       - Loading and saving a map setup or random map settings use the system file dialog through
+         `SystemFileDialog`, which wraps the start screen's `NativeFileChooser` (now able to save too); the start
+         screen uses the same helper. Lobby input is blocked while it is open, and saving asks before replacing a
+         file.
+       - The logic is in `megamek.client.lobby`: `MapSetupForm` (size, slots, boards, search, generate, load and
+         save, the odd-board check) and `RandomMapForm` (levels, advanced fields, apply and save).
+       - Differences on purpose: boards are placed by a click (or double-click) rather than drag and drop; the Swing
+         2D preview and its deployment overlay are gone, as the 3D preview stays; positive advanced fields are
+         capped at 999; saving random map settings applies them and closes the dialog. `LobbyDialogEntryPointsTest`
+         learned `HelpDialog`, which takes its owner last.
+       Checks: `MapSetupFormTest`, `RandomMapFormTest`; the on-demand `LobbyMapSetupSmokeTest` (a slot and a board
+       clicked and placed, the map grown, space chosen, a surprise board, random map settings changed and sent, the
+       warning's "Don't show again"). Live: the probe's `lobby+mapsetup` and `lobby+randommap`, with
+       `+mapclick=...` to click named controls; the log shows the setup after each click and the server's map
+       settings at the end. MekHQ and MegaMekLab compile.
+     - ~~L17 Lobby dialogs~~. The other dialogs and prompts the libGDX lobby opened are native, through
+       `LobbyNativeDialogs`, with `GpuLobbyTools` as their EDT controller:
+       - Victory Conditions (the Battlefield column's Change) shows objective cards, one per master switch (Battle
+         Value destroyed and ratio, turn limit, kill count, objectives) with its values, and a General card; a card's
+         switch arms its fields, numbers keep `VictoryOptionLayout`'s bounds, and OK sends the changed options (with
+         the server password) and saves them as the last used ones, as `VictoryConditionsDialog` did.
+       - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
+         the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
+         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. Advanced opens the Swing dialog for
+         its other tabs (BV- and force-generator armies). The tables load on a thread of their own; the lobby waits
+         for them.
+       - Random skills and random names are small cards over the lobby with the Swing dialogs' choices (client,
+         method, type, level, force close; faction, female share, ethnicity), Save and Randomize.
+       - Load list opens the system file dialog through L16's `SystemFileDialog`, and
+         `ClientGUI.loadListFile(Player, File)` loads the list as before.
+       - The unit readout (unit menu View, BV and Cost) is a dossier: the sprite, name and line, tabs for the summary,
+         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help shows the
+         bot documentation as rows in the same view.
+       - `LobbyCommands` asks through `LobbyAsks`, an asynchronous version of `LobbyPrompts` set with
+         `LobbyCommands.asks(...)`, as L15's unit configurator is; with none set, as in MekHQ and MegaMekLab,
+         `LobbyAsks.of(prompts)` answers through the blocking prompts and `SwingLobbyPrompts` runs as before. The
+         libGDX lobby's asks are native for the error and ready-blocked messages, confirmations, force and squadron
+         names (the force name with suggestion chips), a Battlefield Support Asset's crew and damage, and the train
+         order.
+       - Still Swing, through `LobbyDialogs` or `SwingLobbyPrompts`: Add Unit (the Requisition supersedes it), the
+         unit damage editor (`UnitEditorDialog`), the SBF and Alpha Strike stats, the unit's sprite and camo picker,
+         the bot facing and role, the GIF recording consent and the auto-resolve dialogs; the readout has no Alpha
+         Strike card or faction tab and does not update while open.
+       Checks: `VictoryConditionsFormTest`, `RandomArmyFormTest`, `RandomSkillsFormTest`, `RandomNamesFormTest`,
+       `TrainOrderFormTest`, `AssetFormTest` and `LobbyAsksTest`; the on-demand `LobbyDialogsL17SmokeTest` (victory
+       switch and count, roll, keep, discard and add, skills save, readout units, the prompts' suggestion, stepper and
+       order buttons). Live: `lobby+victory`, `+randomarmy`, `+skills`, `+names`, `+readout`, `+princesshelp` and
+       `+prompt=name`, with `+click=name,name` (see `LobbyToolsProbe`).
+     - ~~L18 File choosers~~. Every file chooser the libGDX lobby opens is the system file dialog, through
+       `SystemFileDialog` (as the start screen and the map setups use it). The routes' logic is in the toolkit-free
+       `megamek.client.lobby.LobbyFiles` (which folder, title, filter and default name each route asks with, what is
+       saved or loaded, the error messages), with the dialog injected as a `LobbyFiles.Chooser`:
+       - Game options Save and Load (the native game options view) open in `mmconf` with the "GameOptions" XML
+         filter, instead of `GameOptionsDialog`'s JFileChooser; ".xml" is added to a saved name as before.
+       - Loadouts (Save and Load in the player settings view, the unit menu's Save/Apply configuration) open in the
+         user loadouts folder with the "adf files" filter; an unreadable file gives the ADF read error as before.
+       - Save List opens the system dialog with the player's name as the file name instead of
+         `ClientGUI.saveListFile`'s JFileChooser; Load List (L17) now goes through `LobbyFiles` too. ".mul" is
+         added unless the name ends with ".mul" or ".xml", as the Swing client does.
+       - The unit menu's sprite export asks for a PNG through the system dialog instead of an AWT `FileDialog`.
+       - The game options and player settings views' hosts are asynchronous (they get a callback), so the lobby
+         keeps drawing while the dialog is open; `SwingLobbyUnitActions` takes the `LobbyFiles` to use.
+         `GameOptionsDialog`, `ClientGUI.saveListFile` and the other Swing choosers that MekHQ, MegaMekLab and the
+         in-game screens open are unchanged.
+       - Bot presets have no file chooser: `BotSetupForm`'s named presets are kept in the bot behaviours file, so
+         there is nothing to move.
+       Differences on purpose: the system dialog filters by extension only, so the game options load shows every
+       XML file and refuses one without options with a message (the Swing chooser hid it); the native dialog has no
+       title of its own (the OS shows "Open" or "Save As"; the lobby's title is logged); Windows may open the
+       folder it last used instead of the given one; the unit list folders are remembered while MegaMek runs, not
+       across runs; a save asks before replacing a file; the sprite export opens where the system last saved.
+       Still Swing: the SBF and Alpha Strike stats dialogs' export and Add Unit's advanced search (through their
+       Swing dialogs). Checks: `LobbyFilesTest` (each route's folder, filter and default name, save and load
+       round-trips, a cancel, a non-options XML refused, a file that is no loadout, a unit list that fails to load, the
+       sprite's extension); the on-demand
+       `LobbyFileChoosersSmokeTest` (with a fake chooser: the options view's Save and Load round-trip a game option,
+       the player settings' loadout Save and Load round-trip, a unit list saves and loads back, a cancelled sprite
+       export writes nothing). Live, through the real Windows dialog: the probe's `lobby+gameoptions`,
+       `+playersettings`, `+savelist`, `+loadlist` and `+sprite` with `+click=options-save` and similar; the log
+       shows `[LobbyFiles] The system file dialog opens: ...`, the answer, and what was saved or loaded.
+     - ~~Review polish~~. From a live review of the branch:
+       - Top bar: the warnings chip moved into the status chips in the middle, so the right holds only actions, Game
+         Master first and Ready last as the primary one.
+       - Unit ids always show, on cards and compact rows; the `#` toggle, the `LobbyShowUnitId` client setting and
+         its Client Settings checkbox are gone (the board's own unit id setting stays).
+       - Compact rows show as many facts as their width holds, each in a column of its own width so they line up down
+         the list like a roster: tonnage and weight class (`LobbyUnit.weight`), movement, pilot, skills and the most
+         important tag. A narrower list drops the tag first, then the pilot, movement and weight; the skills stay
+         longest.
+       - Readouts (TRO, BV and cost): consecutive table rows share one table, so values line up in columns (the TRO's
+         mass and tonnage, the BV report's results), and the last column takes a shared width instead of wrapping its
+         text (the "rn" at the end of Base Unit BV). Empty report rows are dropped.
+       - The unit menu drops View BV Calculation and View Cost Calculation; the unit's View has both as tabs.
+       Checks: `LobbyForcesTest` (the weight text), `LobbyForcesPanelTest` (how many facts a width holds), the
+       on-demand `LobbyTogglesSmokeTest` (cards and compact rows show their ids; a wide compact row shows every
+       fact, a narrow one keeps the skills and drops the tag). Live: `lobby+compact` at 1920 and 1300 wide, and the
+       new `lobby+readout=tro`, `=bv` and `=cost` pages for the readouts.
+     - ~~Review polish 2~~. From the second live review:
+       - Pilot tab: the name and callsign fields are the same length (both random buttons share one width), Random
+         Skill sits on the row of skill dials, and the aptitudes list gunnery before piloting, as the numbers do.
+       - One footer order everywhere, as tokens.md says: the main action first, the buttons centred and of one width.
+         `UiDialog` enforces it (`footerButton` puts the main button first whatever the call order); the unit bay's
+         status now sits above OK / Apply / Cancel, and the C3 manager's above its centred actions, the main one
+         first. The Swing dialogs the lobby still opens already put OK first.
+       - Deployment: a picture of the current board (`LobbyZoneMap`) chooses the zone. Its thirds are the compass
+         zones and the middle is the centre; the chosen zone's hexes (`UnitConfigForm.zoneHexes`, from
+         `Board.isLegalDeployment` with the form's offset, width and Any box) are tinted over the terrain and follow
+         every change. Player's start, Any, Edge and custom zones stay as chips beside it. The offset and width
+         steppers only apply to edge zones and Any (as in Swing), and a hint now says so, or that the rules fix the
+         width, instead of leaving them silently disabled. Without a board the old grid of buttons stays.
+       - Nested cards (the unit bay's sections, the equipment bins and the options cards) use the plain frame; only
+         the outer frame has corner ticks.
+       Checks: `UnitConfigFormTest` (the compass thirds, the zone hexes following offset and width), the on-demand
+       `UnitBaySmokeTest` (a click on the picture chooses the zone, the offset steps it in, the hint), and
+       `LobbyC3ManagerSmokeTest`. Live: `lobby+configure+bayclick=bay-tab-deployment,bay-zone-<id>` and `lobby+c3`.
+     - ~~Review polish 3~~. From the third live review:
+       - Start screen welcome: the Swing licensing dialog is now `StartWelcome`, a token card that unfolds from a
+         line at its centre while the screen behind darkens (`UiDialog.unfold`), then reveals its bands: the
+         version, the unofficial-software callout in `body.strong`, overline sections for the open-source rules and
+         for help and community (wiki, Discord), and the trademark line in muted text. "Don't show this again" and
+         Acknowledge keep `NagForReadme`; Quit (and Escape) leave. Without a live start screen the Swing dialog
+         still shows.
+       - Requisition: the category tab (Meks, Vehicles, ...) is kept with the other filters in the
+         `RequisitionFilters` preference (`C:<CATEGORY>;`), so reopening it shows the tab and filters last used.
+       - Readouts: label/value rows share one label column, as wide as the widest label (at most half a
+         `dialog.sm`) and the same as the tables' first column, so values such as the year and the C-bill cost line
+         up with each other and with the tables below. A two-column table (the summary's availability) is label and
+         value pairs, so its values start there too instead of where wider tables put their last column.
+       - Firing arcs: the gaps between sectors are an even `space.md` band, so each sector's sides are straight and
+         parallel to the divider instead of fanning out from the centre.
+       - Pilot tab: Random Skill is top-aligned with the skill dials.
+       - Full panels (unit bay, C3 manager, map setup) end in a game-style command bar: the status on the left, the
+         buttons bottom right with the main one in the corner (Cancel, Apply, OK; the C3 actions then Build). Cards
+         keep their centred footer, main action first.
+       - Map setup: Preview 3D has a cube icon, and closing the preview returns to map setup instead of the lobby.
+         On a 1080-high window the drawer no longer overflows under the command bar: it scrolls, and its board list
+         keeps at least four rows.
+       Checks: `RequisitionCatalogTest` (the kept category), `UiArcDiagramTest` (the even gap), the on-demand
+       `StartWelcomeSmokeTest` (unfold timing, the blocked screen, links, checkbox, Enter, Quit and Escape),
+       `UnitBaySmokeTest`, `LobbyC3ManagerSmokeTest`, `LobbyMapSetupSmokeTest` and `LobbyDossierTabsSmokeTest`.
+       Live: `main+welcome`, `lobby+readout`, `lobby+c3`, `lobby+mapsetup` and the pilot tab.
+     - ~~Random army table browser~~. The random army's table was one select listing all ~8,600 random assignment
+       tables. It is now a browser on the dialog's left, beside the hand:
+       - Folders open one at a time: source, faction, command, unit type. Each folder row shows its years
+         ("3076–3100", taken from the "(3076 - 3100) - FM 3085" folder name) and its table count in aligned columns.
+       - A back arrow goes up a folder, and the line under the open folder's name shows where it is.
+       - A search finds tables across all folders when every word is in the table's name or its folders. A
+         four-digit year also matches every source whose years cover it, so "davion heavy 3067" works. The search
+         shows up to 80 results, each with its path, and counts the rest.
+       - The dialog opens on the folder of the last chosen table. The right side shows the table being rolled on
+         ("Rolling on", with its path) above the count, Roll and the hand.
+       The browsing is the toolkit-free `RatBrowser` in `megamek.client.lobby`, built from the generator's
+       `RatTreeNode` tree.
+       Checks: `RatBrowserTest`, plus the on-demand `LobbyDialogsL17SmokeTest`, which opens a folder, picks a
+       table, goes back, searches, picks a result and ends the search.
+       Live: `lobby+randomarmy`. The probe's click list now takes a `type:text` step that types into the focused
+       field.
+     - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
+       above) is done. Still open:
+       - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
+         player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
+         unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
+         windowless client). Bot presets have no file to save.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).

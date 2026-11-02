@@ -25,6 +25,8 @@ import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
 import megamek.common.units.FighterSquadron;
+import megamek.common.voting.Poll;
+import megamek.common.voting.VoteThreshold;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -266,7 +268,8 @@ class LobbySnapshotTest {
                     3000)), snapshot.sides());
     }
     private static LobbySnapshot snapshotOf(List<LobbySnapshot.TeamGroup> teams) {
-        return new LobbySnapshot(1, false, false, false, teams, List.of(), List.of(), "", "", LobbyForces.EMPTY,
+        return new LobbySnapshot(1, false, false, LobbyGameMaster.OFF, teams, List.of(), List.of(), "", "",
+              LobbyForces.EMPTY,
               LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY, LobbyRequisition.EMPTY);
     }
 
@@ -357,6 +360,21 @@ class LobbySnapshotTest {
         enemy.setGameMaster(false);
         local.setGameMaster(true);
         assertTrue(snapshot().gameMasterAvailable());
+    }
+
+    @Test
+    void showsTheRunningGameMasterVote() {
+        when(options.booleanOption(OptionsConstants.GAME_MASTER_ALLOW)).thenReturn(true);
+        when(game.getPlayer(3)).thenReturn(enemy);
+        when(game.getPlayer(1)).thenReturn(local);
+        when(client.getGameMasterPoll()).thenReturn(new Poll(3, List.of(1, 3), VoteThreshold.UNANIMOUS));
+
+        LobbySnapshot snapshot = snapshot();
+
+        assertEquals(LobbyGameMaster.Seat.VOTE, snapshot.gameMaster().seat());
+        assertEquals("Enemy", snapshot.gameMaster().requester());
+        assertTrue(snapshot.gameMaster().awaitsSelf());
+        assertFalse(snapshot.gameMasterAvailable());
     }
 
     @Test

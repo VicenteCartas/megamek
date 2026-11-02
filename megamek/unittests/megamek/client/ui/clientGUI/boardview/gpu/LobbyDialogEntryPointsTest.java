@@ -27,7 +27,10 @@ class LobbyDialogEntryPointsTest {
     private static final Path SWING_LOBBY = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby");
     private static final Path PROMPTS = SWING_LOBBY.resolve("SwingLobbyPrompts.java");
     /** A dialog or chooser made in the source, and its first argument. */
-    private static final Pattern DIALOG = Pattern.compile("new (\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
+    private static final Pattern DIALOG = Pattern.compile(
+          "new (?!HelpDialog\\()(\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
+    /** A help dialog takes its owner last, after its title and page. */
+    private static final Pattern HELP = Pattern.compile("new HelpDialog\\([^;]*?,\\s*([\\w.]*(?:\\(\\))?)\\)");
     private static final Pattern OPTION_PANE = Pattern.compile("JOptionPane\\.show\\w+\\(\\s*([\\w.]*(?:\\(\\))?)");
     /** The owners a lobby dialog may take: the helper's parent, or the client, whose frame the dialog then uses. */
     private static final List<String> LOBBY_OWNERS = List.of("swingDialogs.parent()", "gui");
@@ -47,6 +50,7 @@ class LobbyDialogEntryPointsTest {
                 String source = Files.readString(file);
                 String name = file.getFileName().toString();
                 owners(name, source, DIALOG, 2, LOBBY_OWNERS, offenders);
+                owners(name, source, HELP, 1, LOBBY_OWNERS, offenders);
                 owners(name, source, OPTION_PANE, 1, List.of(), offenders);
                 if (!name.equals("LobbyDialogs.java") && source.contains("addAWTEventListener")) {
                     offenders.add(name + ": watches the toolkit itself");

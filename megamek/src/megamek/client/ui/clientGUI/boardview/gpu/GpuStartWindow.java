@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.AWTEvent;
 import java.awt.Dialog;
+import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
@@ -23,15 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
-import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationListener;
@@ -52,8 +49,6 @@ import megamek.logging.MMLogger;
  */
 public final class GpuStartWindow {
     private static final MMLogger LOGGER = MMLogger.create(GpuStartWindow.class);
-    private static final int OWN_DIALOG_POLL_MS = 50;
-    private static final int OWN_DIALOG_TRIES = 100;
 
     /** What the start screen asks MegaMek to do; each runs on the Swing thread. */
     public enum Action {
@@ -522,57 +517,12 @@ public final class GpuStartWindow {
      * GPU thread; nothing when they cancel. The start window takes no input while either is open.
      */
     void chooseFile(File directory, String title, FileNameExtensionFilter filter, Consumer<File> chosen) {
-        if (!NativeFileChooser.usable()) {
-            SwingUtilities.invokeLater(() -> swingChooser(directory, title, filter, chosen));
-            return;
-        }
-        AtomicBoolean showing = new AtomicBoolean(true);
-        SwingUtilities.invokeLater(() -> {
-            setStartEnabled(false);
-            ownSystemDialog(showing);
-        });
-        NativeFileChooser.open(directory, filter, file -> SwingUtilities.invokeLater(() -> {
-            showing.set(false);
-            setStartEnabled(true);
-            if (file != null) {
-                post(() -> chosen.accept(file));
-            }
-        }), () -> SwingUtilities.invokeLater(() -> {
-            showing.set(false);
-            setStartEnabled(true);
-            swingChooser(directory, title, filter, chosen);
-        }));
-    }
-
-    /**
-     * Swing thread: the system's file dialog opens without an owner, so clicking this window could bury it; once it
-     * shows, this window becomes its owner, which keeps it in front the way a Swing form is. Gives up after a few
-     * seconds, leaving it ownerless.
-     */
-    private void ownSystemDialog(AtomicBoolean showing) {
-        if (!(nativeOwner instanceof GpuNativeDialogOwner.Win32 owner)) {
-            return;
-        }
-        int[] tries = { 0 };
-        Timer poll = new Timer(OWN_DIALOG_POLL_MS, null);
-        poll.addActionListener(event -> {
-            long dialog = showing.get() ? GpuNativeDialogOwner.Win32.ownerlessSystemDialog() : 0;
-            if (!showing.get() || ++tries[0] > OWN_DIALOG_TRIES || (dialog != 0 && owner.own(dialog))) {
-                poll.stop();
-            }
-        });
-        poll.start();
-    }
-
-    private void swingChooser(File directory, String title, FileFilter filter, Consumer<File> chosen) {
-        JFileChooser chooser = new JFileChooser(directory);
-        chooser.setDialogTitle(title);
-        chooser.setFileFilter(filter);
-        if (chooser.showOpenDialog(anchor) != JFileChooser.APPROVE_OPTION || chooser.getSelectedFile() == null) {
-            return;
-        }
-        File file = chooser.getSelectedFile();
-        post(() -> chosen.accept(file));
+        SystemFileDialog.show(new SystemFileDialog.Request(directory, title, filter, false), () -> nativeOwner,
+              () -> anchor, busy -> setStartEnabled(!busy), choice -> {
+                  if (choice != null) {
+                      post(() -> chosen.accept(choice.file()));
+                  }
+              });
     }
 
     /**
@@ -604,6 +554,21 @@ public final class GpuStartWindow {
         }
     }
 
+    /**
+     * EDT: shows the welcome on the open start screen while the Commander still wants it at each start. True when it
+     * is handled: shown, or not wanted; false when no start screen can show it, so the Swing form should.
+     */
+    public static boolean showWelcome() {
+        if (!GUIPreferences.getInstance().getNagForReadme()) {
+            return true;
+        }
+        GpuStartWindow window = open;
+        if (window == null || !window.live || window.screen == null) {
+            return false;
+        }
+        window.post(() -> window.screen.welcomeAtStart());
+        return true;
+    }
     /** GPU thread: the intro has finished, or was skipped. */
     void settled() {
         SwingUtilities.invokeLater(() -> {
@@ -645,6 +610,12 @@ public final class GpuStartWindow {
                 if (wasOnTop != null) {
                     dialog.setAlwaysOnTop(wasOnTop);
                 }
+            }
+        } else if (id == ComponentEvent.COMPONENT_SHOWN && dialog instanceof FileDialog) {
+            // The system's file dialog has no window of AWT's to own, place or float; as a modal form it only blocks
+            // the start window's input
+            if (dialog.isModal() && belongsToStart(dialog) && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
+                setStartEnabled(false);
             }
         } else if (id == ComponentEvent.COMPONENT_SHOWN && belongsToStart(dialog)) {
             centre(dialog);

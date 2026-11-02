@@ -148,10 +148,17 @@ public class Client extends AbstractClient {
     private TilesetManager tilesetManager;
     /** Set once the tile set has failed to build, so it is not attempted again on every call. */
     private boolean tilesetLoadFailed;
+    /** The Game Master vote the server last shared while it was open; null once it has resolved. */
+    private volatile Poll gameMasterPoll;
 
     public Client(String name, String host, int port) {
         super(name, host, port);
         setSkillGenerator(new ModifiedTotalWarfareSkillGenerator());
+    }
+
+    /** @return the running Game Master vote as the server last shared it, or null when none is running */
+    public @Nullable Poll getGameMasterPoll() {
+        return gameMasterPoll;
     }
 
     /**
@@ -1348,6 +1355,7 @@ public class Client extends AbstractClient {
                     break;
                 case GAME_MASTER_POLL:
                     if (packet.getObject(0) instanceof Poll poll) {
+                        gameMasterPoll = poll.getStatus().isResolved() ? null : poll;
                         game.processGameEvent(new GamePollEvent(this, poll));
                     }
                     break;

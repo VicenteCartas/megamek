@@ -506,6 +506,7 @@ public final class GpuHost {
         }
 
         private void start(Scene scene) {
+            LOGGER.info("Native window scene starts: {}", scene.title());
             resetGl();
             Gdx.input.setInputProcessor(null);
             sceneInput = null;
@@ -528,6 +529,9 @@ public final class GpuHost {
         /** Ends the current scene, with {@code failure} when it failed; a failed scene is not shown again. */
         private void stop(Throwable failure) {
             Scene scene = current;
+            if (scene != null) {
+                LOGGER.info("Native window scene ends: {}", scene.title());
+            }
             ApplicationListener ending = listener;
             listener = null;
             if (ending != null) {

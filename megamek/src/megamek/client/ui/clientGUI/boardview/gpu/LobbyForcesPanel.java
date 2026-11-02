@@ -86,6 +86,7 @@ final class LobbyForcesPanel {
 
         /** Chooses the item at {@code path} of the unit menu that last came back. */
         void choose(List<Integer> path);
+
     }
 
     /** What a drag carries: units or formations. */
@@ -101,6 +102,7 @@ final class LobbyForcesPanel {
     private final Label unitCount;
     private final UiSegmented views;
     private final UiButton compactToggle;
+
     private final UiButton collapseAll;
     private final UiButton expandAll;
     private final Table sortRow = new Table();
@@ -114,6 +116,7 @@ final class LobbyForcesPanel {
 
     private LobbyForces shown = LobbyForces.EMPTY;
     private boolean compact;
+
     private final Set<Integer> collapsed = new HashSet<>();
     private final Set<Integer> selectedUnits = new LinkedHashSet<>();
     private final Set<Integer> selectedFormations = new LinkedHashSet<>();
@@ -159,6 +162,7 @@ final class LobbyForcesPanel {
         kit.tip(compactToggle, true).getActor().setText(Messages.getString("Lobby.forces.compact"));
         // A UiButton never toggles itself, so the click flips the panel's own state and shows it on the button
         UiKit.onChange(compactToggle, () -> compact(!compact));
+
         collapseAll = kit.button("button-icon" + UiTheme.COMPACT, "unfold-less", null, null);
         kit.tip(collapseAll, true).getActor().setText(Messages.getString("Lobby.forces.collapse"));
         UiKit.onChange(collapseAll, () -> {
@@ -175,6 +179,7 @@ final class LobbyForcesPanel {
         viewRow.left();
         viewRow.add(views).left();
         viewRow.add(compactToggle).padLeft(space("sm"));
+
         viewRow.add(collapseAll).padLeft(space("sm"));
         viewRow.add(expandAll).padLeft(space("xs"));
         viewRow.add().growX();
@@ -231,6 +236,7 @@ final class LobbyForcesPanel {
     UiButton compactToggle() {
         return compactToggle;
     }
+
 
     /** For the developer switch: shows the formations. */
     void showFormations() {
@@ -509,10 +515,7 @@ final class LobbyForcesPanel {
         lines.top().left().defaults().left();
         lines.add(nameRow(unit)).growX().minWidth(0);
         if (compact) {
-            card.add(lines).growX().minWidth(0);
-            Label details = kit.typeLabel(unit.hidden() ? "" : compactDetails(unit), "small", "text.secondary");
-            details.setEllipsis(true);
-            card.add(details).minWidth(0).padLeft(space("sm")).right();
+            card.add(new CompactBody(lines, unit)).growX().minWidth(0);
         } else {
             lines.row();
             if (!unit.details().isEmpty()) {
@@ -558,7 +561,7 @@ final class LobbyForcesPanel {
         });
         unitMenuButtons.put(unit.id(), more);
         side.add(more).size(size("control.sm")).right().padLeft(compact ? space("sm") : 0);
-        card.add(side).top().padLeft(space("sm"));
+        card.add(side).top().padLeft(space("sm")).minWidth(sideMin(compact));
 
         unitCards.put(unit.id(), card);
         order.add(new Object[] { false, unit.id() });
@@ -590,6 +593,7 @@ final class LobbyForcesPanel {
         Table block = new Table();
         block.setName("lobby-unit-sheet");
         block.top().left().defaults().left();
+        block.columnDefaults(0).minWidth(sheetLabelWidth());
         sheetRow(block, "Lobby.card.move", sheet.move(), null);
         sheetRow(block, "Lobby.card.armor", sheet.protection(), null);
         if (!sheet.heat().isEmpty()) {
@@ -599,6 +603,23 @@ final class LobbyForcesPanel {
             sheetRow(block, "Lobby.card.weapons", sheet.weaponsSummary(SHEET_WEAPONS), sheet.weaponsAll());
         }
         return block;
+    }
+
+    /** The BV and menu column's least width: wide enough for a five-digit BV, so a shorter BV doesn't shift the sheet. */
+    private float sideMin(boolean compact) {
+        float bv = kit.typeLabel("00,000", "body.strong", "text.primary").getPrefWidth();
+        return compact ? bv + space("sm") + size("control.sm") : Math.max(bv, size("control.sm"));
+    }
+
+    /** The widest sheet label, so the values start at one column even on a card without heat sinks or weapons. */
+    private float sheetLabelWidth() {
+        float widest = 0;
+        for (String key : new String[] { "Lobby.card.move", "Lobby.card.armor", "Lobby.card.heat.sinks",
+              "Lobby.card.weapons" }) {
+            widest = Math.max(widest, kit.roleTypeLabel("overline", Messages.getString(key), "text.muted")
+                  .getPrefWidth());
+        }
+        return widest;
     }
 
     private void sheetRow(Table block, String key, String value, @Nullable String tip) {
@@ -629,8 +650,9 @@ final class LobbyForcesPanel {
             showSheet(false);
         }
 
+        /** Every card's sheet takes the same width, so the sheets and the ids before them line up down the list. */
         private float sheetWidth() {
-            return (sheet == null) ? 0 : Math.min(sheet.getPrefWidth(), sheetMax());
+            return (sheet == null) ? 0 : sheetMax();
         }
 
         private void showSheet(boolean show) {
@@ -697,7 +719,9 @@ final class LobbyForcesPanel {
         Label name = kit.roleTypeLabel("name", unit.name(), role);
         name.setEllipsis(true);
         row.add(name).minWidth(0).growX();
-        row.add(kit.typeLabel("#" + unit.id(), "small", "text.muted")).padLeft(space("xs"));
+        Label id = kit.typeLabel("#" + unit.id(), "small", "text.muted");
+        id.setName("lobby-unit-id");
+        row.add(id).padLeft(space("xs"));
         return row;
     }
 
@@ -713,19 +737,100 @@ final class LobbyForcesPanel {
         return row;
     }
 
-    /** The compact row's one line after the name: weight class, pilot skills and the most important tag. */
-    private static String compactDetails(LobbyUnit unit) {
-        List<String> parts = new ArrayList<>();
-        if (!unit.weightClass().isEmpty()) {
-            parts.add(unit.weightClass());
+    /**
+     * A compact row's name with as many of its facts as its width holds: the skills, then tonnage and weight class,
+     * movement, the pilot and the most important tag. Each fact keeps one width on every row, so they line up down the
+     * list like a roster's columns; a narrower list drops the least important first.
+     */
+    private final class CompactBody extends Table {
+        /** The facts in the order they drop out, the last first. */
+        private final List<Cell<Label>> facts = new ArrayList<>();
+        private final List<Float> widths = new ArrayList<>();
+        private int showing = -1;
+
+        CompactBody(Table name, LobbyUnit unit) {
+            left();
+            add(name).growX().minWidth(0);
+            boolean open = !unit.hidden();
+            LobbyUnit.Sheet sheet = unit.sheet();
+            LobbyUnit.Tag tag = (open && !unit.tags().isEmpty()) ? unit.tags().getFirst() : null;
+            Cell<Label> weightCell = fact(unit.weight(), "text.secondary", weightWidth());
+            Cell<Label> moveCell = fact((open && sheet != null) ? sheet.move() : "", "text.secondary",
+                  textWidth(Messages.getString("Lobby.requisition.moveJump", 12, 18, 12)));
+            Cell<Label> pilotCell = fact(open ? unit.pilot() : "", "text.primary", size("dialog.sm") * 3 / 8);
+            Cell<Label> skillsCell = fact(open ? unit.skills() : "", "text.secondary", textWidth("10/10"));
+            Cell<Label> tagCell = fact((tag == null) ? "" : tag.text(),
+                  (tag == null) ? "text.secondary" : tag.tone().role(), size("dialog.sm") / 3);
+            for (Cell<Label> cell : List.of(skillsCell, weightCell, moveCell, pilotCell, tagCell)) {
+                facts.add(cell);
+                widths.add(cell.getPrefWidth());
+            }
+            showFacts(0);
         }
-        if (!unit.skills().isEmpty()) {
-            parts.add(unit.skills());
+
+        private Cell<Label> fact(String text, String role, float width) {
+            Label label = kit.typeLabel(text, "small", role);
+            label.setName(COMPACT_FACT);
+            label.setEllipsis(true);
+            return add(label).minWidth(0).prefWidth(width).maxWidth(width).padLeft(space("md")).left();
         }
-        if (!unit.tags().isEmpty()) {
-            parts.add(unit.tags().getFirst().text());
+
+        private float textWidth(String text) {
+            return kit.typeLabel(text, "small", "text.secondary").getPrefWidth();
         }
-        return String.join(" \u00B7 ", parts);
+
+        /** Room for a hundred tons and the longest weight class a 'Mek has. */
+        private float weightWidth() {
+            return textWidth(Messages.getString("Lobby.card.weight", Messages.getString("Lobby.card.tons", "100"),
+                  "Super Heavy"));
+        }
+
+        private void showFacts(int count) {
+            if (count == showing) {
+                return;
+            }
+            showing = count;
+            for (int i = 0; i < facts.size(); i++) {
+                boolean show = i < count;
+                Cell<Label> cell = facts.get(i);
+                cell.getActor().setVisible(show);
+                cell.prefWidth(show ? widths.get(i) : 0).maxWidth(show ? widths.get(i) : 0).padLeft(show ? space("md") : 0);
+            }
+            invalidate();
+        }
+
+        @Override
+        protected void sizeChanged() {
+            showFacts(compactFacts(getWidth(), compactNameMin(), space("md"), widths));
+            super.sizeChanged();
+        }
+
+        /** How many facts show, for tests. */
+        int showing() {
+            return showing;
+        }
+    }
+
+    /** The name of a compact row's fact labels, for tests. */
+    static final String COMPACT_FACT = "lobby-compact-fact";
+
+    /** How many of a compact row's facts, {@code widths} wide in order, fit beside a name of {@code nameMin}. */
+    static int compactFacts(float width, float nameMin, float gap, List<Float> widths) {
+        float used = nameMin;
+        int count = 0;
+        for (float factWidth : widths) {
+            used += gap + factWidth;
+            if (used > width) {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    /** The least a compact row's name keeps before its facts step aside. */
+    private static float compactNameMin() {
+        return size("dialog.sm") * 3 / 8;
     }
 
     private Actor chip(LobbyUnit.Tag tag) {
