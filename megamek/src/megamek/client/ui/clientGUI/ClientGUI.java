@@ -415,6 +415,11 @@ public class ClientGUI extends AbstractClientGUI
      * Have we prompted about bing?
      */
     private boolean firstBing = true;
+    /**
+     * Set by {@link #die()}. A game event still being handled then (its prompt's nested event loop closed the game)
+     * asks nothing more: a Swing prompt would outlive the game and block the start screen.
+     */
+    private volatile boolean dead = false;
 
     /**
      * Map each phase to the name of the card for the main display area.
@@ -1785,6 +1790,7 @@ public class ClientGUI extends AbstractClientGUI
 
         if (unitDisplayPanel != null) { unitDisplayPanel.disposeDisplay(); }
 
+        dead = true;
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
@@ -3828,15 +3834,24 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     public void bingMyTurn() {
+        if (dead) {
+            return;
+        }
         if (!GUIP.getSoundPromptSuppress() && firstBing) {
-            promptForSound();
+            // Cleared first: the prompt waits in a nested event loop, where the next turn's bing must not ask again
             firstBing = false;
+            promptForSound();
         }
         audioService.playSound(SoundType.BING_MY_TURN);
     }
 
     public void bingOthersTurn() {
         audioService.playSound(SoundType.BING_OTHERS_TURN);
+    }
+
+    /** Whether {@link #die()} has run: the game is closed and its prompts are answered as closed, unseen. */
+    public boolean isDead() {
+        return dead;
     }
 
     private void setWeaponOrderPrefs(boolean prefChange) {

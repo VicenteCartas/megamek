@@ -1186,6 +1186,16 @@ work for Swing, and item 11 is under investigation.
        highlighted, and other players' cards are ignored. "Add a new team" became "Add opponent on a new team",
        because it adds a bot; the server can't hold an empty team, so there is no client-only placeholder.
        Checks: `LobbyRecipientSmokeTest`. Live: `lobby+requisition+atlas+pick+pickbot` with `MM_LOBBY_BOTS=1`.
+     - Illiani's bug, loaded save: after closing a game loaded from the start screen, the start screen took no
+       input and couldn't be closed. The save's first phase changes asked their questions (turn sound, GIF
+       recording) about a second before the board was presented. They fell back to app-modal Swing dialogs that
+       stacked inside each other and outlived the game. Now `GpuBoardWindow.route` waits in a nested event loop,
+       for at most a minute, while the client's board is starting, so those questions are asked in the board. A
+       client GUI that has died answers any remaining question as closed, without showing it: the event whose
+       question closed the game would otherwise go on to its next listener and ask in Swing over the start
+       screen. The turn-sound and GIF questions also stop asking twice when a phase change arrives while they're
+       open. Checks: `GpuDialogRoutingTest` (a startup prompt asked natively, a dead client's prompt) and
+       `GpuChoiceRoutingTest`. Live: Illiani's save, closed from the board, back to a working start screen.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
