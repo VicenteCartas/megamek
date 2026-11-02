@@ -162,7 +162,7 @@ final class GpuAtmosphere implements Disposable {
     private int displayWidth = 1;
     private int displayHeight = 1;
     private boolean resampled;
-    /** The window's SMAA after the composite, made while enabled; offscreen targets never use it. */
+    /** The display's SMAA after the composite, made while enabled; exports never use it. */
     private boolean antiAliasing;
     private GpuSmaa smaa;
     /** Scales a resampled window's composite up to its pixels. */
@@ -468,7 +468,7 @@ final class GpuAtmosphere implements Disposable {
     }
 
     /**
-     * SMAA on the window's composite (not on offscreen targets); turning it off releases its targets and keeps its
+     * SMAA on the display composite (not on exports); turning it off releases its targets and keeps its
      * programs, which the warm-up's SMAA frame links (GpuBattleView).
      */
     void setAntiAliasing(boolean enabled) {
@@ -527,6 +527,11 @@ final class GpuAtmosphere implements Disposable {
      */
     void begin(int width, int height, float scale, float delta) {
         int pixelsWide = Math.max(1, HdpiUtils.toBackBufferX(width)), pixelsHigh = Math.max(1, HdpiUtils.toBackBufferY(height));
+        beginDisplayPixels(pixelsWide, pixelsHigh, scale, delta);
+    }
+
+    /** A display region in physical pixels, including an embedded preview, uses the same render resolution. */
+    void beginDisplayPixels(int pixelsWide, int pixelsHigh, float scale, float delta) {
         beginPixels(scaled(pixelsWide, scale), scaled(pixelsHigh, scale), delta);
         displayWidth = pixelsWide;
         displayHeight = pixelsHigh;
@@ -642,13 +647,24 @@ final class GpuAtmosphere implements Disposable {
     /** Offscreen editor samples use the board's color grading, without changing the main view's targets. */
     void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
           GpuFieldOfView fieldOfView, boolean glareEnabled, FrameBuffer target) {
+        end(camera, terrain, board, bottom, fieldOfView, glareEnabled, target, false);
+    }
+
+    /** An embedded display keeps SMAA and FSR, while exports and editor samples keep their exact requested pixels. */
+    void endDisplay(Camera camera, GpuTerrain terrain, BoardScene board, FrameBuffer target) {
+        end(camera, terrain, board, 0, null, true, target, true);
+    }
+
+    private void end(Camera camera, GpuTerrain terrain, BoardScene board, int bottom,
+          GpuFieldOfView fieldOfView, boolean glareEnabled, FrameBuffer target, boolean display) {
         boolean fovActive = fieldOfView != null && fieldOfView.active();
-        boolean antiAliased = target == null && antiAliasing;
-        boolean upscaled = target == null && resampled;
+        boolean displayOutput = target == null || display;
+        boolean antiAliased = displayOutput && antiAliasing;
+        boolean upscaled = displayOutput && resampled;
         // Before any texture binding below: its lookup tables bind the active unit while they upload.
         if (antiAliased && smaa == null) { smaa = new GpuSmaa(quad); }
         if (upscaled && fsr == null) { fsr = new GpuFsr(quad); }
-        else if (!upscaled && target == null && fsr != null) { fsr.disposeTargets(); }
+        else if (!upscaled && displayOutput && fsr != null) { fsr.disposeTargets(); }
         sceneColor.end();
         if (hasScattering()) {
             renderFog(camera, terrain, board);
@@ -670,9 +686,9 @@ final class GpuAtmosphere implements Disposable {
         }
         // The window's composite and SMAA run at the scene's size, which only FSR's upscale leaves.
         FrameBuffer upscale = upscaled ? fsr.input(sceneColor.getWidth(), sceneColor.getHeight()) : null;
-        if (target != null) { target.begin(); }
-        else if (antiAliased) { smaa.begin(sceneColor.getWidth(), sceneColor.getHeight()); }
+        if (antiAliased) { smaa.begin(sceneColor.getWidth(), sceneColor.getHeight()); }
         else if (upscale != null) { upscale.begin(); }
+        else if (target != null) { target.begin(); }
         else { HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight); }
         screenState();
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -773,9 +789,9 @@ final class GpuAtmosphere implements Disposable {
         quad.render(compositeShader, GL20.GL_TRIANGLES);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+        if (antiAliased) { smaa.end(upscale == null ? target : upscale, sceneDepth, camera, bottom); }
+        if (upscale != null) { fsr.end(sceneDepth, camera, bottom, displayWidth, displayHeight, target); }
         if (target != null) { target.end(); }
-        else if (antiAliased) { smaa.end(upscale, sceneDepth, camera, bottom); }
-        if (upscale != null) { fsr.end(sceneDepth, camera, bottom, displayWidth, displayHeight); }
     }
 
     /** A distant light follows the viewing angle and perspective FOV, independently of camera position. */

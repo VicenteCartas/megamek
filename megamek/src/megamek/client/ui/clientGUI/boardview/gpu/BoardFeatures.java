@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.geom.Area;
 import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -301,7 +300,7 @@ final class BoardFeatures {
         var prepared = new HashMap<BoardPlantFootprint.Key, BoardPlantFootprint>();
         int limit = BoardTreeCoverage.limit(layout.colonies() ? 3 : layout.density, false);
         float target = layout.colonies() ? 1 : BoardTreeCoverage.target(layout.density);
-        int failed = 0, cacti = 0, spores = 0;
+        int failed = 0, cacti = 0, spores = 0, bareTrees = 0;
         for (int index = 0; index < 128 && trunks.size() < limit; index++) {
             int plantIndex = layout.understory ? index * 2 : index;
             var random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ index * 83_492_791L);
@@ -311,12 +310,13 @@ final class BoardFeatures {
             List<String> choices = sporeSlot ? BoardFungus.SPORES : layout.fungus ? BoardFungus.CUPS : layout.species;
             String asset = natural ? BoardTreeDistribution.species(choices, coords, origin[0], origin[1], random.nextLong())
                   : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, choices.size()));
-            boolean cactus = asset.startsWith("vegetation/cactus"), rigid = layout.colonies() || cactus;
+            boolean cactus = asset.startsWith("vegetation/cactus"), bare = BoardTreeCoverage.bare(asset), rigid = layout.colonies() || cactus;
             if (cactus && cacti >= BoardTreeCoverage.limit(layout.density, true)) { break; }
+            if (bare && bareTrees >= BoardTreeCoverage.bareLimit(layout.density)) { break; }
             float rotation = natural ? random.nextFloat() * 360 : index * 137.5f;
             BoardScene.Feature best = null;
             BoardPlantFootprint bestFootprint = null;
-            BitSet addition = new BitSet();
+            BoardTreeCoverage.Addition addition = null;
             double bestScore = 0;
             // Shared milestones keep the sequence stable across densities, while avoiding a large early overshoot.
             float milestone = coverage.fraction() < .27f ? .3f : coverage.fraction() < .57f ? .6f : .9f;
@@ -328,7 +328,7 @@ final class BoardFeatures {
             for (int fit = 0; fit < sizes * widths; fit++) {
                 float slim = COLONY_WIDTHS[fit % widths];
                 float bodyHeight = height * (fit < widths ? 1 : layout.mars ? .5f : .65f);
-                for (int attempt = 0; attempt < (layout.colonies() ? 64 : rigid ? 72 : 8); attempt++) {
+                for (int attempt = 0; attempt < (layout.colonies() ? 64 : rigid ? 72 : bare ? 32 : 8); attempt++) {
                     float[] at = coverPosition(index * 73 + attempt, phase, layout.colonies() ? 40 : 31);
                     if (!clear.test(at[0], at[1]) || !layout.colonies()
                           && trunks.stream().anyMatch(tree -> Math.hypot(tree.x() - at[0], tree.y() - at[1]) < 5)) {
@@ -341,10 +341,11 @@ final class BoardFeatures {
                           BoardDecoration.Colours.NONE);
                     var footprint = layout.colonies() ? BoardPlantFootprint.of(candidate, prepared) : rigid ? BoardPlantFootprint.of(candidate) : null;
                     if (rigid && (!footprint.inside() || solids.stream().anyMatch(footprint::overlaps))) { continue; }
-                    BitSet gain = coverage.addition(candidate);
+                    var gain = coverage.addition(candidate);
                     // Rigid bodies start near the rim, leaving room for further bodies at the same natural height.
-                    double score = rigid ? gain.cardinality() + Math.hypot(at[0], at[1]) * .7
-                          : 1 - Math.abs(coverage.with(gain) - milestone);
+                    double score = rigid ? gain.pixels().cardinality() + Math.hypot(at[0], at[1]) * .7
+                          : bare ? trunks.stream().mapToDouble(tree -> Math.hypot(tree.x() - at[0], tree.y() - at[1])).min().orElse(1)
+                                : 1 - Math.abs(coverage.with(gain) - milestone);
                     if (!gain.isEmpty() && score > bestScore) {
                         best = candidate; bestFootprint = footprint; addition = gain; bestScore = score;
                     }
@@ -361,6 +362,7 @@ final class BoardFeatures {
             result.add(best);
             trunks.add(best);
             if (cactus) { cacti++; }
+            if (bare) { bareTrees++; }
             if (BoardFungus.SPORES.contains(asset)) { spores++; }
             coverage.add(addition);
             if (rigid) { solids.add(bestFootprint); }

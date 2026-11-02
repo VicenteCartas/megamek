@@ -769,21 +769,15 @@ class GpuBattleView extends ApplicationAdapter {
         // The Tactical View has clear air and its one fixed light: no clouds, fog, haze or weather.
         atmosphere.configure(boardCamera.tactical() ? BoardAtmosphere.DEFAULTS : atmosphereSettings);
         atmosphere.setOptions(tuning.atmosphereOptions());
-        atmosphere.setAntiAliasing(tuning.antiAliasing());
+        tuning.displaySettings().apply(terrain, atmosphere, ambientOcclusion,
+              Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight(), boardCamera.tactical());
         // Material readiness includes live lighting/cloud flags, before any visible terrain is submitted.
         atmosphere.updateLight(boardCamera);
-        // Before the light binds: its first map takes this scene's size.
-        terrain.setShadowScene(Math.max(Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight())
-              * BoardCamera.renderScale, tuning.highShadows());
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
-        ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
-        terrain.setTessellation(tuning.tessellation());
         // The temporary close-up only discovers programs. Baking pages for it would evict the user's view.
         terrain.setMaterialCache(tuning.terrainCache() && warmUp != WarmUp.CLOSE);
         terrain.setMaterialCacheDebug(tuning.terrainCacheDebug());
-        atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
-        atmosphere.setVignette(tuning.vignette());
         // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
         skyVisibility.update(terrain.environment(), scene, 1);
         terrain.setGravity(atmosphereSettings.gravity());
@@ -853,8 +847,6 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setWind(atmosphereSettings.effects());
         // The board's pressure already reads as vacuum in space or at zero gravity.
         attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
-        terrain.setNormalMaps(tuning.normalMaps());
-        terrain.setTerrainParallax(tuning.terrainParallax());
         // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
         terrain.setFluffHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());

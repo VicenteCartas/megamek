@@ -87,8 +87,8 @@ final class LobbyMapSetupView {
         /** Replaces the set of browser thumbnails wanted by the current viewport. */
         void previews(List<String> boards);
 
-        /** Loads the inspected board as an immutable scene and returns it on the GPU thread; null on failure. */
-        void inspect(String board, Consumer<BoardScene> ready);
+        /** Loads an EDT-owned map source and delivers it on the GPU thread; the view closes it. Null on failure. */
+        void inspect(String board, Consumer<BoardSource> ready);
 
         void run(Action action);
     }
@@ -399,9 +399,7 @@ final class LobbyMapSetupView {
     // ---- Showing the setup ----
 
     /** Shows the setup anew; the themes are those any slot can take. */
-    void show(Picture picture, List<Theme> themes, BoardAtmosphere.Settings atmosphere) {
-        // Conditions can change while the setup itself (and an open inspection) stays the same.
-        inspection.atmosphere(atmosphere);
+    void show(Picture picture, List<Theme> themes) {
         // Unrelated lobby events also refresh this view. Keep its live controls and open dropdowns when nothing changed.
         if (picture.equals(shown) && themes.equals(this.themes)) {
             return;
@@ -760,9 +758,11 @@ final class LobbyMapSetupView {
         inspection.setVisible(true);
         inspection.loading(entry.label());
         showPicks();
-        host.inspect(entry.name(), scene -> {
+        host.inspect(entry.name(), source -> {
             if (ticket == inspectionTicket && shown != null) {
-                inspection.show(scene);
+                inspection.show(source);
+            } else if (source != null) {
+                source.close();
             }
         });
     }

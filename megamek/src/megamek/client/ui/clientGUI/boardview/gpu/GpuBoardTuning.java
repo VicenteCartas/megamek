@@ -1239,6 +1239,13 @@ final class GpuBoardTuning {
         displayModeChange.accept(displayMode.getSelectedIndex() == 1);
     }
 
+    /** The Display page's effective rendering choices. */
+    BoardDisplaySettings displaySettings() {
+        return new BoardDisplaySettings(BoardCamera.renderScale, antiAliasing(), highShadows(),
+              specularAntialiasing.isChecked(), normalMaps(), terrainParallax(), tessellation(), ambientOcclusion(),
+              depthCues(), vignette());
+    }
+
     /** SMAA on the window's 3D scene. */
     boolean antiAliasing() {
         return antiAliasing.getSelectedIndex() == 1;

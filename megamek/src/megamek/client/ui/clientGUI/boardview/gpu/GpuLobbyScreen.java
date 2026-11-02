@@ -1006,9 +1006,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /** GPU thread: shows the map setup anew while it shows. */
-    void mapSetup(MapSetupForm.Picture picture, List<MapSetupForm.Theme> themes, BoardAtmosphere.Settings atmosphere) {
+    void mapSetup(MapSetupForm.Picture picture, List<MapSetupForm.Theme> themes) {
         if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
-            mapSetupView.show(picture, themes, atmosphere);
+            mapSetupView.show(picture, themes);
         }
     }
 

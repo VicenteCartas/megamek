@@ -18,9 +18,11 @@ import megamek.common.board.ConcreteFit;
 import megamek.logging.MMLogger;
 
 /**
- * Ground coverage of the actual chosen plants, measured once when a scene is captured, independent of camera and LOD.
+ * Visual cover of the chosen plants, measured once when a scene is captured, independent of camera and LOD.
  * The existing impostor's third panel is an unlit top projection baked from LOD0. Its alpha retains large crown gaps;
  * closing two-percent gaps groups tiny leaf holes into a crown. Cacti use their rotated model XY box instead.
+ * Bare trees contribute about fifteen percent visual cover at their normal width; neither twig pixels nor their
+ * entire branch envelope gives a readable population. Their contributions accumulate instead of filling twig gaps.
  */
 final class BoardTreeCoverage {
     private static final MMLogger LOGGER = MMLogger.create(BoardTreeCoverage.class);
@@ -30,6 +32,11 @@ final class BoardTreeCoverage {
     private static final Map<File, Crown> CROWNS = new ConcurrentHashMap<>();
     private final BitSet available = new BitSet(GRID * GRID);
     private final BitSet covered = new BitSet(GRID * GRID);
+    private float branches;
+
+    record Addition(BitSet pixels, float branches) {
+        boolean isEmpty() { return pixels.isEmpty() && branches == 0; }
+    }
 
     /** Reload both source geometry and its matching top projection before the next scene capture. */
     static void reload() { BoardModelBounds.reload(); CROWNS.clear(); BoardPlantFootprint.reload(); }
@@ -50,15 +57,22 @@ final class BoardTreeCoverage {
         return cactus ? (density >= 3 ? 20 : density == 2 ? 12 : 6) : (density >= 3 ? 36 : density == 2 ? 20 : 8);
     }
 
-    float fraction() { return fraction(covered.cardinality()); }
-    float with(BitSet addition) { return fraction(covered.cardinality() + addition.cardinality()); }
-    private float fraction(int count) { return available.isEmpty() ? 0 : (float) count / available.cardinality(); }
-    void add(BitSet addition) { covered.or(addition); }
+    static boolean bare(String asset) { return asset.startsWith("vegetation/tree-dead"); }
+    static int bareLimit(int density) { return Math.clamp(density, 1, 3) * 2; }
 
-    /** Only new coverage inside the hex's plantable ground; overlapping crowns are counted once. */
-    BitSet addition(BoardScene.Feature plant) {
-        Crown crown = crown(plant.asset());
+    float fraction() { return fraction(covered.cardinality(), branches); }
+    float with(Addition addition) { return fraction(covered.cardinality() + addition.pixels.cardinality(), branches + addition.branches); }
+    private float fraction(int count, float bare) { return available.isEmpty() ? 0 : Math.min(1, (float) count / available.cardinality() + bare); }
+    void add(Addition addition) { covered.or(addition.pixels); branches += addition.branches; }
+
+    /** Leafy crowns count only new ground inside the hex; bare trees use a bounded visual contribution. */
+    Addition addition(BoardScene.Feature plant) {
         var result = new BitSet(GRID * GRID);
+        if (bare(plant.asset())) {
+            float width = plant.scale() / 1.7f;
+            return new Addition(result, available.isEmpty() ? 0 : .15f * width * width * (float) (plant.stretch().x() * plant.stretch().y()));
+        }
+        Crown crown = crown(plant.asset());
         float scale = scale(plant, crown.bounds[5] - crown.bounds[2]);
         double angle = Math.toRadians(plant.rotation()), cos = Math.cos(angle), sin = Math.sin(angle);
         for (int i = available.nextSetBit(0); i >= 0; i = available.nextSetBit(i + 1)) {
@@ -68,7 +82,7 @@ final class BoardTreeCoverage {
             float y = (float) ((dy * cos - dx * sin) / (scale * plant.stretch().y()));
             if (crown.contains(x, y)) { result.set(i); }
         }
-        return result;
+        return new Addition(result, 0);
     }
 
     /** XY scale in model hex units, shared with the renderer; Mars embeds six percent of its source height. */

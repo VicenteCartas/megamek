@@ -47,6 +47,11 @@ final class GpuFsr implements Disposable {
 
     /** EASU into a {@code width} by {@code height} target, then RCAS into the window at {@code bottom}. */
     void end(Texture sceneDepth, Camera camera, int bottom, int width, int height) {
+        end(sceneDepth, camera, bottom, width, height, null);
+    }
+
+    /** The final display may be the window or an embedded preview's full-resolution framebuffer. */
+    void end(Texture sceneDepth, Camera camera, int bottom, int width, int height, FrameBuffer target) {
         if (upscaled == null || upscaled.getWidth() != width || upscaled.getHeight() != height) {
             if (upscaled != null) { upscaled.dispose(); upscaled = null; }
             upscaled = GpuSmaa.target(width, height, GL30.GL_RGBA8, GL20.GL_RGBA);
@@ -57,8 +62,11 @@ final class GpuFsr implements Disposable {
         easu.bind();
         easu.setUniformi("u_color", 0);
         quad.render(easu, GL20.GL_TRIANGLES);
-        FrameBuffer.unbind();
-        HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+        if (target != null) { target.begin(); }
+        else {
+            FrameBuffer.unbind();
+            HdpiUtils.glViewport(0, bottom, (int) camera.viewportWidth, (int) camera.viewportHeight);
+        }
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_ALWAYS);
         Gdx.gl.glDepthMask(true);

@@ -6,27 +6,79 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import java.awt.image.BufferedImage;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
 import megamek.client.lobby.MapSetupForm;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDimensions;
+import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
+import megamek.common.options.OptionsConstants;
+import megamek.common.planetaryConditions.Light;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import megamek.common.util.BoardUtilities;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class LobbyMapSetupControllerTest {
+    @Test
+    void inspectionUsesLiveLobbyConditionsAndReleasesItsSource(@TempDir Path directory) throws Exception {
+        var boards = Configuration.boardsDir();
+        BoardFile.save(Board.createEmptyBoard(6, 5), directory.resolve("inspection.board2"));
+        MapSettings settings = MapSettings.getInstance();
+        MapSetupForm form = new MapSetupForm(() -> settings, Set::of,
+              mock(MapSetupForm.Commands.class), name -> "", List::of);
+        Game game = new Game();
+        var conditions = new PlanetaryConditions();
+        conditions.setLight(Light.FULL_MOON);
+        game.setPlanetaryConditions(conditions);
+        game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_LOS1).setValue(true);
+        LinkedBlockingQueue<BoardSource> loaded = new LinkedBlockingQueue<>();
+        LobbyMapSetupController controller = new LobbyMapSetupController(form, () -> game,
+              (setup, themes) -> { }, (key, image) -> { });
+        try {
+            Configuration.setBoardsDir(directory.toFile());
+            SwingUtilities.invokeAndWait(() -> controller.inspect("inspection.board2", loaded::add));
+            BoardSource source = loaded.poll(15, TimeUnit.SECONDS);
+            assertNotNull(source);
+            assertEquals(6, source.takeFrame().scene().width());
+            assertEquals(0, BoardAtmosphere.lighting(source.takeFrame().scenarioAtmosphere()).daylight(), .001f);
+            source.changeRuler(source.takeFrame().boardGeneration(), RulerModel::open);
+            SwingUtilities.invokeAndWait(() -> { });
+            assertEquals("Diagrammed LOS", source.takeFrame().panels().los().mode());
+            SwingUtilities.invokeAndWait(() -> {
+                var updated = new PlanetaryConditions();
+                updated.setLight(Light.DAY);
+                game.setPlanetaryConditions(updated);
+                game.getOptions().getOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_LOS1).setValue(false);
+                controller.refresh();
+            });
+            assertTrue(BoardAtmosphere.lighting(source.takeFrame().scenarioAtmosphere()).daylight() > .9f,
+                  "unchanged map settings still update the already-open inspection");
+            assertEquals("Standard LOS", source.takeFrame().panels().los().mode(), "LOS follows the lobby's current rules");
+            SwingUtilities.invokeAndWait(controller::dispose);
+            assertTrue(source.isClosed(), "leaving the lobby releases the inspection's preference and board listeners");
+        } finally {
+            SwingUtilities.invokeAndWait(controller::dispose);
+            Configuration.setBoardsDir(boards);
+        }
+    }
+
     @Test
     void sheetsUseTheServersTerrainAndAccountForOddWidthPadding() {
         MapSettings settings = MapSettings.getInstance();
@@ -58,9 +110,10 @@ class LobbyMapSetupControllerTest {
         settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
         MapSetupForm form = new MapSetupForm(() -> settings, () -> Set.of(new BoardDimensions(16, 17)),
               mock(MapSetupForm.Commands.class), name -> "", List::of);
-        AtomicReference<Board> board = new AtomicReference<>(Board.createEmptyBoard(16, 17));
+        Game game = new Game();
+        game.setBoard(Board.createEmptyBoard(16, 17));
         LinkedBlockingQueue<BufferedImage> images = new LinkedBlockingQueue<>();
-        LobbyMapSetupController controller = new LobbyMapSetupController(form, board::get, (setup, themes) -> { },
+        LobbyMapSetupController controller = new LobbyMapSetupController(form, () -> game, (setup, themes) -> { },
               (key, image) -> {
                   if (image != null) {
                       images.add(image);
@@ -68,12 +121,11 @@ class LobbyMapSetupControllerTest {
               });
         try {
             SwingUtilities.invokeAndWait(controller::refresh);
-            assertImage(board.get(), images.poll(10, TimeUnit.SECONDS));
+            assertImage(game.getBoard(), images.poll(10, TimeUnit.SECONDS));
             Board regenerated = Board.createEmptyBoard(16, 17);
             regenerated.getHex(4, 5).addTerrain(new Terrain(Terrains.WATER, 2));
             regenerated.getHex(7, 8).setLevel(4);
-            board.set(regenerated);
-            SwingUtilities.invokeAndWait(controller::refresh);
+            SwingUtilities.invokeAndWait(() -> { game.setBoard(regenerated); controller.refresh(); });
             assertImage(regenerated, images.poll(10, TimeUnit.SECONDS));
         } finally {
             SwingUtilities.invokeAndWait(controller::dispose);
@@ -87,7 +139,7 @@ class LobbyMapSetupControllerTest {
         MapSetupForm form = new MapSetupForm(() -> settings, () -> Set.of(new BoardDimensions(16, 17)),
               mock(MapSetupForm.Commands.class), name -> "", List::of);
         LinkedBlockingQueue<String> painted = new LinkedBlockingQueue<>();
-        LobbyMapSetupController controller = new LobbyMapSetupController(form, Board::new, (setup, themes) -> { },
+        LobbyMapSetupController controller = new LobbyMapSetupController(form, Game::new, (setup, themes) -> { },
               (key, image) -> painted.add(key));
         try {
             SwingUtilities.invokeAndWait(() -> {

@@ -97,6 +97,31 @@ class BoardTreeCoverageTest {
     }
 
     @Test
+    void bareStandsUseTwoFourSixTreesSpreadAcrossTheHex() {
+        for (boolean natural : new boolean[] { false, true }) {
+            for (int height : new int[] { 2, 3 }) {
+                for (var at : List.of(new Coords(3, 3), new Coords(11, 7), new Coords(19, 14))) {
+                    List<BoardScene.Feature> previous = List.of();
+                    for (int density = 1; density <= 3; density++) {
+                        var trees = BoardTreeDistributionTest.capture(new Hex(0,
+                              "woods:" + density + ";foliage_elev:" + height, "lunar", at), at, natural);
+                        assertEquals(density * 2, trees.size(), "Bare branches need a readable stand, not twig-gap infill");
+                        assertEquals(previous, trees.subList(0, previous.size()));
+                        assertEquals(BoardTreeCoverage.target(density), coverage(trees), .04f);
+                        for (int i = 0; i < trees.size(); i++) {
+                            for (int j = i + 1; j < trees.size(); j++) {
+                                assertTrue(Math.hypot(trees.get(i).x() - trees.get(j).x(), trees.get(i).y() - trees.get(j).y()) > 12,
+                                      "Bare crowns must spread across the hex instead of piling into a knot");
+                            }
+                        }
+                        previous = trees;
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void ordinaryDensityAddsPlantsWithoutMovingOrShrinkingExistingOnes() {
         for (String theme : List.of("", "snow", "volcanic", "desert", "lunar", "tropical", "fungus", "mars")) {
             for (int height = 1; height <= 3; height++) {
@@ -115,6 +140,8 @@ class BoardTreeCoverageTest {
                         assertTrue(canopy <= cap, "A sparse crown cannot produce unbounded plants");
                         assertTrue(trees.stream().filter(t -> t.asset().startsWith("vegetation/cactus")).count()
                               <= BoardTreeCoverage.limit(density, true), "Cactus caps also apply in mixed stands");
+                        assertTrue(trees.stream().filter(t -> BoardTreeCoverage.bare(t.asset())).count()
+                              <= BoardTreeCoverage.bareLimit(density), "Bare-tree caps also apply in mixed stands");
                         assertTrue(trees.stream().allMatch(t -> BoardFeatures.solid(t.asset())
                               ? t.stretch().x() >= .799 && t.stretch().y() >= .799 && t.stretch().z() == 1
                               : t.stretch().x() == 1 && t.stretch().y() == 1));

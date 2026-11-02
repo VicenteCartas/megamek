@@ -1297,7 +1297,8 @@ class GpuHudInputTest {
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
         return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds,
               BoardGraphics.ENHANCED, GpuBoardSource.UiPreferences.Overlays.DEFAULTS,
-              GpuBoardSource.UiPreferences.capture().movementColors(), NameplateMode.HOLD);
+              GpuBoardSource.UiPreferences.capture().movementColors(), NameplateMode.HOLD,
+              GpuBoardSource.UiPreferences.capture().display());
     }
 
     /**

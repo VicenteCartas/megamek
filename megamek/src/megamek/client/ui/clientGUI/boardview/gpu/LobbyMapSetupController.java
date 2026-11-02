@@ -24,7 +24,10 @@ import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.util.BoardUtilities;
 import megamek.common.util.fileUtils.MegaMekFile;
 import megamek.logging.MMLogger;
@@ -40,7 +43,7 @@ final class LobbyMapSetupController {
     static final int PICTURE_SIDE = LobbyMapThumbnail.LONG_SIDE / 2;
 
     private final MapSetupForm form;
-    private final Supplier<Board> battlefield;
+    private final Supplier<Game> game;
     private final BiConsumer<MapSetupForm.Picture, List<MapSetupForm.Theme>> show;
     private final BiConsumer<String, BufferedImage> picture;
     private final Set<String> requested = new HashSet<>();
@@ -49,6 +52,10 @@ final class LobbyMapSetupController {
     private boolean browserPainting;
     private Board generatedBoard;
     private int generation;
+    /** EDT-owned inspection: the normal map source owns its captures, preferences listener and LOS model. */
+    private Game inspectionGame;
+    private GpuMapSource inspection;
+    private int inspectionTicket;
     private volatile boolean disposed;
     private final ExecutorService painter = Executors.newSingleThreadExecutor(work -> {
         Thread thread = new Thread(work, "Lobby map setup boards");
@@ -60,11 +67,11 @@ final class LobbyMapSetupController {
      * @param show    hands a picture of the setup, with the themes any slot can take, to the GPU thread
      * @param picture hands a board's picture, by {@link #pictureKey}, to the GPU thread
      */
-    LobbyMapSetupController(MapSetupForm form, Supplier<Board> battlefield,
+    LobbyMapSetupController(MapSetupForm form, Supplier<Game> game,
           BiConsumer<MapSetupForm.Picture, List<MapSetupForm.Theme>> show,
           BiConsumer<String, BufferedImage> picture) {
         this.form = form;
-        this.battlefield = battlefield;
+        this.game = game;
         this.show = show;
         this.picture = picture;
     }
@@ -118,27 +125,47 @@ final class LobbyMapSetupController {
         if (!MapSetupForm.sameSetup(before, form.settings())) {
             clearGenerated();
             // This board belongs to the setup before the edit. Wait for its server replacement.
-            generatedBoard = battlefield.get();
+            generatedBoard = game.get().getBoard();
         }
         send();
     }
 
-    /** Captures a private read-only scene on the painter, never a mutable game board on the GPU thread. */
-    void inspect(String name, Consumer<BoardScene> ready) {
+    /** Loads privately on the painter, then gives the inspection the same EDT-owned source as a full map preview. */
+    void inspect(String name, Consumer<BoardSource> ready) {
+        int ticket = ++inspectionTicket;
+        if (inspection != null) { inspection.close(); inspection = null; }
         painter.execute(() -> {
-            BoardScene scene = null;
+            Board board = null;
             try {
                 File file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
-                Board board = GpuBoardWindow.loadPreview(file);
-                scene = new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
-                      List.of(), List.of(), -1, "", List.of());
+                board = GpuBoardWindow.loadPreview(file);
             } catch (RuntimeException failure) {
                 LOGGER.warn(failure, "The map setup could not inspect the board {}", name);
             }
-            if (!disposed) {
-                ready.accept(scene);
-            }
+            Board loaded = board;
+            SwingUtilities.invokeLater(() -> {
+                if (disposed || ticket != inspectionTicket) { return; }
+                if (loaded == null) { ready.accept(null); return; }
+                try {
+                    inspectionGame = new Game();
+                    inspectionGame.setPhase(GamePhase.LOUNGE);
+                    inspectionGame.setBoard(loaded);
+                    inspectionConditions();
+                    inspection = new GpuMapSource(inspectionGame, null, null);
+                } catch (RuntimeException failure) {
+                    LOGGER.warn(failure, "The map setup could not prepare the board {}", name);
+                }
+                ready.accept(inspection);
+            });
         });
+    }
+
+    private void inspectionConditions() {
+        inspectionGame.setPlanetaryConditions(new PlanetaryConditions(game.get().getPlanetaryConditions()));
+        // LOS comparisons temporarily change rules: the inspection must own those options, too.
+        for (var option : game.get().getOptions().getOptionsList()) {
+            inspectionGame.getOptions().getOption(option.getName()).setValue(option.getValue());
+        }
     }
 
     /** EDT: replaces the browser's demand. Only one browser thumbnail is ever in flight. */
@@ -188,6 +215,10 @@ final class LobbyMapSetupController {
     }
 
     private void send() {
+        if (inspection != null && !inspection.isClosed()) {
+            inspectionConditions();
+            inspection.refresh();
+        }
         MapSetupForm.Picture setup;
         List<MapSetupForm.Theme> themes;
         try {
@@ -215,7 +246,7 @@ final class LobbyMapSetupController {
 
     /** The server publishes a new board after generation. Slice that exact result into the generated slots. */
     private void generated(MapSetupForm.Picture setup) {
-        Board board = battlefield.get();
+        Board board = game.get().getBoard();
         if (board == generatedBoard) {
             return;
         }
@@ -318,6 +349,7 @@ final class LobbyMapSetupController {
     /** As the map setup closes: stops the painter. */
     void dispose() {
         disposed = true;
+        if (inspection != null) { inspection.close(); inspection = null; }
         painter.shutdownNow();
     }
 

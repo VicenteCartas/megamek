@@ -10,9 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -22,12 +26,15 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Board;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
+import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
 import megamek.common.planetaryConditions.Fog;
 import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -50,6 +57,9 @@ class LobbyBoardPreviewSmokeTest {
         UiTestStage.onGl(configuration, () -> {
             GpuGlsl.detect();
             UiTheme theme = new UiTheme(UiTestStage.FONTS);
+            theme.worldFont("default-font", "Noto Sans/NotoSans-Regular.ttf", 15, 0);
+            theme.worldFont(GpuBoardSkin.OUTLINE_FONT, "Noto Sans/NotoSans-Regular.ttf", 15,
+                  15f * GpuBoardSkin.OUTLINE / GpuBoardSkin.FONT_RESOLUTION);
             Stage stage = new Stage(new ScreenViewport());
             stage.getViewport().update(960, 720, true);
             LobbyBoardPreview preview = new LobbyBoardPreview(new UiKit(theme.skin), () -> { });
@@ -62,9 +72,9 @@ class LobbyBoardPreviewSmokeTest {
                 BoardSceneryLayouts.convert(board);
                 var conditions = new PlanetaryConditions();
                 conditions.setLight(Light.FULL_MOON);
-                preview.atmosphere(BoardAtmosphere.fromScenario(conditions, false, .4));
+                Inspection inspection = inspection(board, conditions);
                 preview.loading("Inspection test");
-                preview.show(scene(board));
+                preview.show(inspection.source());
                 GpuLoadingPanel loading = preview.findActor("board-loading-panel");
                 assertTrue(loading.isVisible());
                 assertNotNull(loading.findActor("board-loading-grid"));
@@ -78,7 +88,8 @@ class LobbyBoardPreviewSmokeTest {
                 GpuBoardTestUi.assertHorizontalBounds(preview, preview);
                 UiTestStage.capture("map-embedded-inspection", 960, 720).dispose();
                 BoardCamera camera = checkCameraInput(stage, preview, theme);
-                checkConditions(stage, preview, camera, conditions);
+                checkConditions(stage, preview, camera, inspection);
+                checkDisplayPreferences(stage, preview, camera, inspection);
                 camera.setIsometric(false);
                 camera.zoom(.3f);
                 camera.pan(90, 60);
@@ -86,9 +97,12 @@ class LobbyBoardPreviewSmokeTest {
                 board = Board.createEmptyBoard(6, 5);
                 board.getHex(1, 1).setLevel(3);
                 BoardSceneryLayouts.convert(board);
-                BoardScene replacement = scene(board);
+                Inspection replacementSource = inspection(board, new PlanetaryConditions());
+                BoardScene replacement = replacementSource.source().takeFrame().scene();
                 preview.loading("Another board");
-                preview.show(replacement);
+                preview.show(replacementSource.source());
+                SwingUtilities.invokeAndWait(() -> assertTrue(inspection.source().isClosed(),
+                      "replacing a preview releases its listeners and LOS model"));
                 assertTrue(loading.isVisible());
                 assertNull(image.getDrawable(), "the previous map must disappear as soon as another is requested");
                 var terrainField = LobbyBoardPreview.class.getDeclaredField("terrain");
@@ -114,6 +128,7 @@ class LobbyBoardPreviewSmokeTest {
                 awaitImage(stage, preview);
                 GpuBoardTestUi.assertHorizontalBounds(preview, preview);
                 UiTestStage.capture("map-embedded-inspection-small", 960, 720).dispose();
+                checkLineOfSight(stage, preview, camera, replacementSource);
                 preview.dispose();
                 assertNull(((Image) preview.findActor("map-inspection-image")).getDrawable());
                 assertNull(stage.getKeyboardFocus());
@@ -126,8 +141,117 @@ class LobbyBoardPreviewSmokeTest {
         });
     }
 
+    private static void checkLineOfSight(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
+          Inspection inspection) throws Exception {
+        click(stage, preview.findActor("map-view-top"));
+        click(stage, preview.findActor("map-view-fit"));
+        click(stage, preview.findActor("map-inspection-los"));
+        SwingUtilities.invokeAndWait(() -> { });
+        awaitImage(stage, preview);
+        assertTrue(inspection.source().takeFrame().panels().los().open());
+        Image image = preview.findActor("map-inspection-image");
+        Coords from = new Coords(0, 3), to = new Coords(5, 3);
+        clickHex(stage, image, camera, from);
+        SwingUtilities.invokeAndWait(() -> { });
+        awaitImage(stage, preview);
+        assertEquals(from, inspection.source().takeFrame().panels().los().start().coords(),
+              "picking is local to the resized embedded viewport");
+        clickHex(stage, image, camera, to);
+        SwingUtilities.invokeAndWait(() -> { });
+        awaitImage(stage, preview);
+        var result = inspection.source().takeFrame().panels().los();
+        assertEquals(to, result.end().coords());
+        assertEquals(from.distance(to), result.distance());
+        assertNotNull(result.ruler(), "the shared model publishes the visible LOS ray");
+        assertTrue(preview.findActor("los-panel").isVisible());
+        UiTestStage.capture("map-embedded-inspection-los", 960, 720).dispose();
+        click(stage, preview.findActor("los-close"));
+        SwingUtilities.invokeAndWait(() -> { });
+        awaitImage(stage, preview);
+        assertFalse(inspection.source().takeFrame().panels().los().open());
+    }
+
+    private static void clickHex(Stage stage, Image image, BoardCamera camera, Coords coords) {
+        Vector3 point = camera.camera.project(BoardGeometry.center(coords, 0), 0, 0,
+              camera.camera.viewportWidth, camera.camera.viewportHeight);
+        Vector2 at = screen(stage, image, point.x * image.getWidth() / camera.camera.viewportWidth,
+              point.y * image.getHeight() / camera.camera.viewportHeight);
+        stage.touchDown(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+        stage.touchUp(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+    }
+
+    private static void checkDisplayPreferences(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
+          Inspection inspection) throws Exception {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        float resolution = preferences.getBoardRenderResolution();
+        String aa = preferences.getBoardAntiAliasing();
+        boolean tessellation = preferences.getBoardTessellation(), normals = preferences.getBoardNormalMaps();
+        boolean coords = preferences.getCoordsEnabled(), types = preferences.getHexTypesEnabled();
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardRenderResolution(.5f);
+                preferences.setBoardAntiAliasing("SMAA");
+                preferences.setBoardTessellation(true);
+                preferences.setBoardNormalMaps(false);
+                preferences.setCoordsEnabled(true);
+                preferences.setHexTypesEnabled(true);
+                inspection.source().refresh();
+            });
+            camera.setIsometric(false);
+            camera.fit(inspection.source().takeFrame().scene());
+            awaitImage(stage, preview);
+            var atmosphere = (GpuAtmosphere) field(preview, "atmosphere");
+            FrameBuffer scene = (FrameBuffer) field(atmosphere, "sceneColor");
+            FrameBuffer target = (FrameBuffer) field(preview, "target");
+            assertEquals(target.getWidth() / 2, scene.getWidth());
+            assertEquals(target.getHeight() / 2, scene.getHeight());
+            assertNotNull(field(atmosphere, "smaa"), "SMAA runs on the embedded composite");
+            assertNotNull(field(atmosphere, "fsr"), "the embedded image uses the same upscaler as gameplay");
+            var terrain = field(preview, "terrain");
+            assertEquals(true, field(terrain, "installedTessellation"));
+            assertEquals(false, field(terrain, "normalMaps"));
+            var tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
+            assertTrue(tile.text().stream().anyMatch(text -> text.text().equals("0101")));
+            var labels = field(preview, "hexText");
+            assertFalse(((List<?>) field(labels, "pages")).isEmpty(), "enabled labels reach the GPU");
+            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            UiTestStage.capture("map-embedded-inspection-display", 960, 720).dispose();
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardRenderResolution(1);
+                preferences.setBoardAntiAliasing("OFF");
+                preferences.setBoardTessellation(false);
+                preferences.setCoordsEnabled(false);
+                preferences.setHexTypesEnabled(false);
+                inspection.source().refresh();
+            });
+            awaitImage(stage, preview);
+            assertEquals(target.getWidth(), ((FrameBuffer) field(atmosphere, "sceneColor")).getWidth());
+            assertEquals(false, field(terrain, "installedTessellation"));
+            tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
+            assertTrue(tile.text().isEmpty(), "disabling hex text refreshes the open preview's capture");
+            UiTestStage.capture("map-embedded-inspection-top-grid", 960, 720).dispose();
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardRenderResolution(resolution);
+                preferences.setBoardAntiAliasing(aa);
+                preferences.setBoardTessellation(tessellation);
+                preferences.setBoardNormalMaps(normals);
+                preferences.setCoordsEnabled(coords);
+                preferences.setHexTypesEnabled(types);
+                inspection.source().refresh();
+            });
+            awaitImage(stage, preview);
+        }
+    }
+
+    private static Object field(Object owner, String name) throws Exception {
+        var field = owner.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(owner);
+    }
+
     private static void checkConditions(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
-          PlanetaryConditions conditions) throws Exception {
+          Inspection inspection) throws Exception {
         var field = LobbyBoardPreview.class.getDeclaredField("atmosphere");
         field.setAccessible(true);
         GpuAtmosphere atmosphere = (GpuAtmosphere) field.get(preview);
@@ -136,13 +260,17 @@ class LobbyBoardPreviewSmokeTest {
         Vector3 focus = camera.focus.cpy();
         Image image = preview.findActor("map-inspection-image");
         var drawable = image.getDrawable();
+        var conditions = new PlanetaryConditions();
         conditions.setLight(Light.DAY);
         conditions.setWeather(Weather.HEAVY_RAIN);
         conditions.setFog(Fog.FOG_HEAVY);
         conditions.setWind(Wind.STRONG_GALE);
         conditions.setWindDirection(WindDirection.NORTH);
-        var settings = BoardAtmosphere.fromScenario(conditions, false, .4);
-        preview.atmosphere(settings);
+        SwingUtilities.invokeAndWait(() -> {
+            inspection.game().setPlanetaryConditions(conditions);
+            inspection.source().refresh();
+        });
+        var settings = inspection.source().takeFrame().scenarioAtmosphere();
         awaitImage(stage, preview);
         assertSame(atmosphere, field.get(preview), "a conditions update reuses the open renderer");
         assertTrue(atmosphere.lighting().daylight() > .9f);
@@ -158,7 +286,10 @@ class LobbyBoardPreviewSmokeTest {
         assertEquals(zoom, camera.camera.zoom, .001f);
         assertTrue(focus.epsilonEquals(camera.focus, .001f), "conditions preserve the user's camera position");
         UiTestStage.capture("map-embedded-inspection-weather", 960, 720).dispose();
-        preview.atmosphere(BoardAtmosphere.DEFAULTS);
+        SwingUtilities.invokeAndWait(() -> {
+            inspection.game().setPlanetaryConditions(new PlanetaryConditions());
+            inspection.source().refresh();
+        });
         awaitImage(stage, preview);
         assertFalse(weatherField.getBoolean(atmosphere), "returning to clear weather removes the precipitation");
     }
@@ -262,9 +393,18 @@ class LobbyBoardPreviewSmokeTest {
         stage.touchUp(Math.round(at.x + 60), Math.round(at.y + 20), 0, button);
     }
 
-    private static BoardScene scene(Board board) {
-        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
-              List.of(), List.of(), -1, "", List.of());
+    private record Inspection(Game game, GpuMapSource source) { }
+
+    private static Inspection inspection(Board board, PlanetaryConditions conditions) throws Exception {
+        AtomicReference<Inspection> created = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            Game game = new Game();
+            game.setPhase(GamePhase.LOUNGE);
+            game.setBoard(board);
+            game.setPlanetaryConditions(conditions);
+            created.set(new Inspection(game, new GpuMapSource(game, null, null)));
+        });
+        return created.get();
     }
 
     private static void awaitImage(Stage stage, LobbyBoardPreview preview) throws InterruptedException {
@@ -280,7 +420,7 @@ class LobbyBoardPreviewSmokeTest {
                 UiTestStage.capture("map-embedded-inspection-loading", 960, 720).dispose();
                 captured = true;
             }
-            if (image.getDrawable() != null) {
+            if (image.getDrawable() != null && !loading.isVisible()) {
                 Gdx.gl.glFinish();
                 return;
             }

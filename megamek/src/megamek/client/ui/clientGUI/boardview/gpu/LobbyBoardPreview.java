@@ -11,9 +11,11 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
@@ -30,20 +32,27 @@ import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.Scaling;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiModal;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.logging.MMLogger;
 
 /** An embedded, read-only board inspection using the game's terrain, atmosphere and camera implementations. */
 final class LobbyBoardPreview extends Table implements Disposable {
     private static final MMLogger LOGGER = MMLogger.create(LobbyBoardPreview.class);
+    private final UiKit kit;
     private final Label title;
     private final GpuLoadingPanel loading;
     private final Image image = new Image();
+    private final Stack stack = new Stack();
+    private final UiButton measure;
     private final BoardCamera camera = new BoardCamera();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final UiCursorCapture cursor = new UiCursorCapture();
@@ -56,15 +65,24 @@ final class LobbyBoardPreview extends Table implements Disposable {
         }
     };
     private BoardScene scene;
+    private BoardSource source;
+    private BoardSource.Frame frame;
+    private GpuLosPanel los;
+    private UiPopover menu;
     private GpuTerrain terrain;
     private GpuAtmosphere atmosphere;
-    /** Immutable lobby conditions, published on the GPU thread even while a board is loading. */
-    private BoardAtmosphere.Settings conditions = BoardAtmosphere.DEFAULTS;
+    private GpuAmbientOcclusion ambientOcclusion;
+    private GpuSkyVisibility skyVisibility;
+    private GpuHexGrid hexGrid;
+    private GpuHexText hexText;
+    private GpuTactical tactical;
+    private SpriteBatch annotations;
     private FrameBuffer target;
     private boolean installed;
     private boolean loadingDrawn;
 
     LobbyBoardPreview(UiKit kit, Runnable close) {
+        this.kit = kit;
         setName("map-inspection-panel");
         setBackground(kit.skin.getDrawable("token-panel-plain"));
         pad(0);
@@ -92,6 +110,13 @@ final class LobbyBoardPreview extends Table implements Disposable {
         GpuUtilityBar.cameraButtons(kit, controls, camera, () -> {
             if (scene != null) { camera.fit(scene); }
         });
+        measure = GpuUtilityBar.iconButton(kit, "locate", Messages.getString("GpuBoard.map.lineOfSight"),
+              "map-inspection-los");
+        measure.setDisabled(true);
+        controls.add(measure).size(GpuUtilityBar.HEIGHT).padLeft(gap);
+        UiKit.onChange(measure, () -> {
+            if (source != null && frame != null) { source.changeRuler(frame.boardGeneration(), RulerModel::open); }
+        });
         // The shared utility buttons clear the previous field's focus; this view then takes camera keys.
         UiKit.onChange(controls, this::focus);
         header.add(controls).padLeft(gap);
@@ -106,7 +131,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         hint.setTouchable(Touchable.disabled);
         hint.getStyle().fontColor = Color.WHITE;
         overlay.add(hint).growX().minWidth(0).pad(5, 8, 5, 8).left();
-        add(new Stack(image, loading, overlay)).grow().minWidth(0).minHeight(0);
+        stack.add(image);
+        stack.add(loading);
+        stack.add(overlay);
+        add(stack).grow().minWidth(0).minHeight(0);
         image.addListener(input);
         image.addListener(new FocusListener() {
             @Override
@@ -149,6 +177,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private final class PreviewInput extends InputListener {
         private float lastX, lastY, startX, startY;
         private int button = -1;
+        private int modifiers;
         private boolean dragged, orbiting;
 
         void clear() {
@@ -165,6 +194,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
             lastX = startX = x;
             lastY = startY = y;
             button = pressed;
+            modifiers = GpuBattleView.modifiers();
             dragged = false;
             // Inspection has no unit-selection drag: left also takes the game's right-button gesture.
             orbiting = BoardCameraControls.orbits(pressed == Input.Buttons.LEFT ? Input.Buttons.RIGHT : pressed,
@@ -194,6 +224,9 @@ final class LobbyBoardPreview extends Table implements Disposable {
         @Override
         public void touchUp(InputEvent event, float x, float y, int pointer, int released) {
             if (event.isTouchFocusCancel() || released == button) {
+                if (!event.isTouchFocusCancel() && interactive() && !dragged) {
+                    boardClick(x, y, released, modifiers);
+                }
                 cursor.release();
                 button = -1;
                 dragged = false;
@@ -223,6 +256,12 @@ final class LobbyBoardPreview extends Table implements Disposable {
             if (!interactive() || getStage().getKeyboardFocus() != image) { return false; }
             int awt = GpuBattleView.awtKey(keycode);
             int modifiers = GpuBattleView.modifiers();
+            if (keycode == Input.Keys.ESCAPE && (menu.cancel() || los.cancel())) { return true; }
+            var binds = KeyCommandBind.getAllBindsByKey(awt, modifiers);
+            if (binds.contains(KeyCommandBind.LOS_SETTING) || binds.contains(KeyCommandBind.HEX_COORDS)) {
+                source.key(awt, true, modifiers);
+                return true;
+            }
             // As in game, Shift accelerates a held camera bind instead of selecting a different command.
             if (modifiers == java.awt.event.InputEvent.SHIFT_DOWN_MASK
                   && KeyCommandBind.getAllBindsByKey(awt, 0).stream().anyMatch(BoardCameraControls::held)) {
@@ -243,6 +282,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
 
     void loading(String name) {
         unfocus();
+        closeSource();
         title.setText(name);
         scene = null;
         installed = false;
@@ -257,14 +297,53 @@ final class LobbyBoardPreview extends Table implements Disposable {
         focus();
     }
 
-    void show(@Nullable BoardScene board) {
-        scene = board;
+    void show(@Nullable BoardSource board) {
+        source = board;
+        frame = board == null ? null : board.takeFrame();
+        scene = frame == null ? null : frame.scene();
         installed = false;
         if (board == null) { loading.reset(Messages.getString("Lobby.map.inspectUnavailable")); }
+        else {
+            los = new GpuLosPanel(kit, getStage(), source, camera);
+            stack.add(los.actor());
+            menu = new UiPopover(kit);
+            getStage().addActor(menu);
+        }
     }
 
-    void atmosphere(BoardAtmosphere.Settings settings) {
-        conditions = settings;
+    /** Same picked surface and model commands as the full map preview; drags remain camera gestures. */
+    private void boardClick(float x, float y, int button, int modifiers) {
+        float px = x * camera.camera.viewportWidth / image.getWidth();
+        // Camera.unproject flips against the window height, even for a smaller, offscreen viewport.
+        float py = Gdx.graphics.getHeight() - y * camera.camera.viewportHeight / image.getHeight();
+        var ray = camera.camera.getPickRay(px, py, 0, 0, camera.camera.viewportWidth, camera.camera.viewportHeight);
+        var hit = terrain.selectionHit(scene, ray);
+        if (hit == null) { return; }
+        var floor = terrain.walkableHit(scene, ray);
+        float z = floor != null && floor.coords().equals(hit.coords())
+              ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(floor.distance())).z : Float.NaN;
+        if (button == Input.Buttons.LEFT) { source.measure(hit.coords(), modifiers, z); }
+        else if (button == Input.Buttons.RIGHT) {
+            UiMenuList list = new UiMenuList(kit);
+            long generation = frame.boardGeneration();
+            Integer height = Float.isNaN(z) ? null : GpuLosResult.pointedHeight(scene.tile(hit.coords()).elevation(), z);
+            list.item(Messages.getString("GpuBoard.map.lineOfSight"), Messages.getString("GpuBoard.hud.mouse.altClick"),
+                  null, false, true, () -> {
+                      menu.cancel();
+                      source.changeRuler(generation, model -> { model.clear(); model.addPoint(hit.coords(), height); });
+                  }).setName("map-line-of-sight");
+            menu.header(Messages.getString("GpuBoard.hud.context.hex", hit.coords().getBoardNum()), null).content(list);
+            Vector2 at = image.localToStageCoordinates(new Vector2(x, y));
+            menu.showAt(at.x, at.y);
+        }
+    }
+
+    private void closeSource() {
+        measure.setDisabled(true);
+        if (los != null) { los.dispose(); los.actor().remove(); los = null; }
+        if (menu != null) { menu.cancel(); menu.remove(); menu = null; }
+        if (source != null) { source.close(); source = null; }
+        frame = null;
     }
 
     @Override
@@ -278,7 +357,9 @@ final class LobbyBoardPreview extends Table implements Disposable {
     public void act(float delta) {
         super.act(delta);
         if (!ascendantsVisible()) { unfocus(); return; }
-        if (scene == null || getStage() == null || !loadingDrawn) { return; }
+        if (source == null || source.isClosed() || getStage() == null || !loadingDrawn) { return; }
+        frame = source.takeFrame();
+        scene = frame.scene();
         if (UiModal.active(getStage()) != null) { unfocus(); }
         validate();
         if (image.getWidth() < 1 || image.getHeight() < 1) { return; }
@@ -303,13 +384,26 @@ final class LobbyBoardPreview extends Table implements Disposable {
         float scale = Gdx.graphics.getBackBufferWidth() / getStage().getViewport().getWorldWidth();
         int width = Math.max(1, Math.round(image.getWidth() * scale));
         int height = Math.max(1, Math.round(image.getHeight() * scale));
+        var conditions = frame.scenarioAtmosphere();
+        var preferences = source.uiPreferences();
+        var display = preferences.display();
+        BoardCamera.renderScale = display.resolution();
         if (terrain == null) {
             terrain = new GpuTerrain();
             atmosphere = new GpuAtmosphere(conditions, GpuAtmosphere.Options.DEFAULTS);
             atmosphere.prepare();
             terrain.prepareEffects();
+            ambientOcclusion = new GpuAmbientOcclusion();
+            skyVisibility = new GpuSkyVisibility();
+            hexGrid = new GpuHexGrid();
+            hexText = new GpuHexText();
+            tactical = new GpuTactical();
+            annotations = new SpriteBatch();
         }
         atmosphere.configure(conditions);
+        display.apply(terrain, atmosphere, ambientOcclusion, width, height, false);
+        skyVisibility.update(terrain.environment(), scene, 1);
+        terrain.setColumns(preferences.graphics() == BoardGraphics.CLASSIC);
         terrain.setGravity(conditions.gravity());
         terrain.setVacuum(conditions.pressure().isVacuum());
         if (target == null || target.getWidth() != width || target.getHeight() != height) {
@@ -335,19 +429,32 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (!terrain.ready(scene)) {
             loading.update(terrain);
             loading.setVisible(true);
+            measure.setDisabled(true);
+            los.actor().setVisible(false);
             return;
         }
         try (TerrainSettings.Scope ignored = TerrainSettings.use(terrain.settings())) {
-            atmosphere.updateLight(camera.camera);
-            terrain.setAtmosphere(atmosphere.lighting());
             atmosphere.prepareClouds(terrain, scene, delta);
             terrain.animate(delta, List.of());
             terrain.renderShadows(camera.camera, List.of());
-            atmosphere.beginPixels(width, height, delta);
-            terrain.render(camera.camera);
+            atmosphere.beginDisplayPixels(width, height, display.resolution(), delta);
+            terrain.render(camera.camera, () -> { },
+                  () -> ambientOcclusion.render(camera.camera, terrain, atmosphere.depthTexture()));
+            ambientOcclusion.end();
             terrain.renderTransparent(camera.camera);
             atmosphere.renderWeather(camera.camera, scene);
-            atmosphere.end(camera.camera, terrain, scene, 0, null, false, target);
+            atmosphere.endDisplay(camera.camera, terrain, scene, target);
+            atmosphere.prepareContrast(camera.camera, scene, 0);
+            // The display-sized target keeps labels and LOS sharp even when the scene renders at a lower resolution.
+            target.begin();
+            hexGrid.render(camera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE, false, atmosphere);
+            var overlays = preferences.overlays();
+            hexText.update(scene, kit.skin.getFont("default-font"), kit.skin.getFont(GpuBoardSkin.OUTLINE_FONT),
+                  terrain::roofBounds, false, overlays.hexTypes(), overlays.hexLabelOutline());
+            hexText.render(annotations, camera, atmosphere.depthTexture(), null, 0, atmosphere);
+            tactical.update(scene);
+            tactical.renderLabels(camera.camera);
+            target.end();
         }
         if (image.getDrawable() == null) {
             TextureRegion region = new TextureRegion(target.getColorBufferTexture());
@@ -355,11 +462,16 @@ final class LobbyBoardPreview extends Table implements Disposable {
             image.setDrawable(new TextureRegionDrawable(region));
         }
         loading.setVisible(false);
+        measure.setDisabled(false);
+        los.update(new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, null, preferences,
+              GpuHud.Metrics.of(image.getWidth(), image.getHeight()), List.of()));
+        if (UiModal.active(getStage()) != null) { los.actor().setVisible(false); los.dismiss(); menu.cancel(); }
     }
 
     @Override
     public void dispose() {
         unfocus();
+        closeSource();
         scene = null;
         installed = false;
         image.setDrawable(null);
@@ -375,5 +487,11 @@ final class LobbyBoardPreview extends Table implements Disposable {
             target.dispose();
             target = null;
         }
+        if (ambientOcclusion != null) { ambientOcclusion.dispose(); ambientOcclusion = null; }
+        if (skyVisibility != null) { skyVisibility.dispose(); skyVisibility = null; }
+        if (hexGrid != null) { hexGrid.dispose(); hexGrid = null; }
+        if (hexText != null) { hexText.dispose(); hexText = null; }
+        if (tactical != null) { tactical.dispose(); tactical = null; }
+        if (annotations != null) { annotations.dispose(); annotations = null; }
     }
 }

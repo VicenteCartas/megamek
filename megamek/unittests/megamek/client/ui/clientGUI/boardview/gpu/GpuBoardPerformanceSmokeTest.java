@@ -22,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
@@ -274,7 +275,9 @@ class GpuBoardPerformanceSmokeTest {
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
         boolean compareCache = Boolean.getBoolean("megamek.gpu.performanceCompareMaterialCache");
-        boolean waitForCache = compareCache || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");
+        Map<String, String> shaderBaseline = shaderSources(System.getProperty("megamek.gpu.performanceCompareShaders"));
+        boolean compareShaders = !shaderBaseline.isEmpty();
+        boolean waitForCache = compareCache || compareShaders || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");
         // The 3D Graphics of the run's variants, the first also loads the board (for example CLASSIC,ENHANCED); none
         // keeps the saved choice. Each variant runs every scenario, the first variant's before the second's: the one
         // switch rebuilds the terrain behind the loading stage, within the second variant's first overview warm-up
@@ -283,10 +286,11 @@ class GpuBoardPerformanceSmokeTest {
         // The Tactical View's overview, close and moving scenarios after the 3D view's, in the same JVM.
         int views = Boolean.getBoolean("megamek.gpu.performanceOverviewOnly") ? 1
               : Boolean.getBoolean("megamek.gpu.performanceTactical") ? 6 : 3;
-        if ((comparePages || compareCache) && graphics.size() > 1 || comparePages && compareCache) {
-            throw new IllegalArgumentException("One comparison per run: terrain pages, material cache or graphics");
+        int comparisons = (comparePages ? 1 : 0) + (compareCache ? 1 : 0) + (compareShaders ? 1 : 0);
+        if (comparisons > 1 || comparisons > 0 && graphics.size() > 1) {
+            throw new IllegalArgumentException("One comparison per run: terrain pages, material cache, shaders or graphics");
         }
-        int variants = comparePages || compareCache ? 2 : Math.max(1, graphics.size());
+        int variants = compareShaders ? 4 : comparePages || compareCache ? 2 : Math.max(1, graphics.size());
         var preferences = GUIPreferences.getInstance();
         BoardGraphics savedGraphics = preferences.getBoardGraphics();
         String savedAa = preferences.getBoardAntiAliasing();
@@ -355,6 +359,7 @@ class GpuBoardPerformanceSmokeTest {
                 String currentStage;
                 BoardAtmosphere.Settings measuredAtmosphere;
                 BoardScene benchmarkScene;
+                int shaderVariant = -1;
                 @Override
                 boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) { return true; }
 
@@ -457,6 +462,12 @@ class GpuBoardPerformanceSmokeTest {
                         // Every scenario of the first variant, then every scenario of the second.
                         int variant = frame / (scenarioFrames * views);
                         int view = frame / scenarioFrames % views;
+                        if (compareShaders && shaderVariant != variant) {
+                            // ABBA in one GL context: the editor rebuilds the installed programs, retaining meshes,
+                            // material families and draw order. Compilation precedes every warm-up, never a sample.
+                            applyShaders(this, variant == 0 || variant == 3 ? shaderBaseline : Map.of());
+                            shaderVariant = variant;
+                        }
                         // Overview, close and moving: in the 3D view, then (views 3-5) in the Tactical View.
                         int shot = view % 3;
                         if (comparePages && phase == 0) { setPages(this, variant == 1); }
@@ -498,6 +509,9 @@ class GpuBoardPerformanceSmokeTest {
                         String scenario = (view >= 3 ? "tactical-" : "") + (shot == 0 ? "overview" : shot == 1 ? "close" : "moving");
                         if (comparePages) { scenario += variant == 0 ? "-original" : "-pages"; }
                         if (compareCache) { scenario += variant == 0 ? "-cache-off" : "-cache-on"; }
+                        if (compareShaders) {
+                            scenario += (variant == 0 || variant == 3 ? "-baseline-" : "-candidate-") + variant;
+                        }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
@@ -755,18 +769,42 @@ class GpuBoardPerformanceSmokeTest {
     private static void shaderOverrides() {
         String folder = System.getProperty("megamek.gpu.performanceShaderDirectory");
         if (folder == null) { return; }
-        try (var files = Files.list(new File(folder).toPath())) {
+        try {
             var field = GpuShaderSource.class.getDeclaredField("DISK");
             field.setAccessible(true);
             Map<String, String> disk = (Map<String, String>) field.get(null);
-            for (var file : files.filter(Files::isRegularFile).toList()) {
-                String name = file.getFileName().toString();
-                disk.put(Configuration.dataDir().getPath() + '\n' + name, Files.readString(file));
-                System.out.println("PERF diagnostic shader=" + file);
+            for (var entry : shaderSources(folder).entrySet()) {
+                disk.put(Configuration.dataDir().getPath() + '\n' + entry.getKey(), entry.getValue());
+                System.out.println("PERF diagnostic shader=" + new File(folder, entry.getKey()));
             }
-        } catch (IOException | ReflectiveOperationException error) {
+        } catch (ReflectiveOperationException error) {
             throw new IllegalStateException("Diagnostic shader substitution", error);
         }
+    }
+
+    /** A saved set of shader files, read once before the GL run; no checkout or installed files are changed. */
+    private static Map<String, String> shaderSources(String folder) {
+        if (folder == null) { return Map.of(); }
+        var sources = new TreeMap<String, String>();
+        try (var files = Files.list(new File(folder).toPath())) {
+            for (var file : files.filter(Files::isRegularFile).sorted().toList()) {
+                sources.put(file.getFileName().toString(), Files.readString(file));
+            }
+        } catch (IOException error) { throw new IllegalStateException("Diagnostic shader sources", error); }
+        if (sources.isEmpty()) { throw new IllegalArgumentException("No diagnostic shaders in " + folder); }
+        return sources;
+    }
+
+    private static void applyShaders(GpuBattleView view, Map<String, String> sources) throws Exception {
+        var field = GpuBattleView.class.getDeclaredField("shaderEdits");
+        field.setAccessible(true);
+        var session = (GpuShaderManager) field.get(view);
+        session.run(() -> {
+            var result = session.apply(sources);
+            assertTrue(result.success(), () -> "Shader comparison must compile: " + result);
+            System.out.println("PERF shader comparison " + result);
+        });
+        terrain(view).shadersChanged();
     }
 
     /** Chooses the 3D Graphics on the Swing thread, as the menus do; the view applies it in its next frame. */

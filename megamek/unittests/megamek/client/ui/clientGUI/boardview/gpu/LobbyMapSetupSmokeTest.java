@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -35,8 +37,6 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.board.BoardDimensions;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MapSetup;
-import megamek.common.planetaryConditions.Light;
-import megamek.common.planetaryConditions.PlanetaryConditions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -49,23 +49,17 @@ class LobbyMapSetupSmokeTest {
     private MapSettings server;
 
     @Test
-    void conditionsRefreshReachesAnOpenInspectionEvenWhenTheMapSetupIsUnchanged() {
+    void unchangedMapSetupRefreshKeepsTheInspectionOpen() {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
             try {
                 click(ui, fixture.body.findActor("map-board-inspect-1"));
                 LobbyBoardPreview preview = fixture.body.findActor("map-inspection-panel");
                 var picture = fixture.view.shown();
-                var conditions = new PlanetaryConditions();
-                conditions.setLight(Light.FULL_MOON);
-                var atmosphere = BoardAtmosphere.fromScenario(conditions, false, .4);
-                fixture.view.show(picture, fixture.form.themes(-1), atmosphere);
-                var field = LobbyBoardPreview.class.getDeclaredField("conditions");
-                field.setAccessible(true);
-                assertEquals(atmosphere, field.get(preview));
+                fixture.view.show(picture, fixture.form.themes(-1));
                 assertTrue(preview.isVisible());
                 assertSame(picture, fixture.view.shown());
-                assertEquals(1, fixture.inspections.size(), "conditions must not reload the inspected board");
+                assertEquals(1, fixture.inspections.size(), "a refresh must not reload the inspected board");
                 assertEquals(List.of(0), fixture.view.pickedSlots());
             } finally {
                 fixture.view.dispose();
@@ -116,7 +110,7 @@ class LobbyMapSetupSmokeTest {
             click(ui, theme);
             List<MapSetupForm.Theme> themes = new ArrayList<>(fixture.form.themes(-1));
             themes.add(new MapSetupForm.Theme("test-theme", "Test theme"));
-            fixture.view.show(fixture.form.picture(), themes, BoardAtmosphere.DEFAULTS);
+            fixture.view.show(fixture.form.picture(), themes);
             ui.draw();
             assertFalse(theme.isOpen(), "changed options dismiss the obsolete list");
 
@@ -155,7 +149,7 @@ class LobbyMapSetupSmokeTest {
             assertEquals(6, fixture.view.shown().slots().size());
             int listeners = body.findActor("map-generate").getListeners().size;
             for (int refresh = 0; refresh < 20; refresh++) {
-                fixture.view.show(fixture.form.picture(), fixture.form.themes(-1), BoardAtmosphere.DEFAULTS);
+                fixture.view.show(fixture.form.picture(), fixture.form.themes(-1));
             }
             assertEquals(listeners, body.findActor("map-generate").getListeners().size,
                   "refreshing the setup reuses Generate's tooltip rather than stacking new ones");
@@ -408,7 +402,7 @@ class LobbyMapSetupSmokeTest {
                 for (int mode = 0; mode < 2; mode++) {
                     List<String> placed = List.copyOf(fixture.form.settings().getBoardsSelectedVector());
                     click(ui, fixture.body.findActor("map-board-inspect-1"));
-                    Consumer<BoardScene> previous = fixture.inspections.getLast();
+                    Consumer<BoardSource> previous = fixture.inspections.getLast();
                     calls.clear();
                     Entry next = fixture.view.shown().boards().get(2);
                     click(ui, fixture.body.findActor("map-board-2"));
@@ -421,7 +415,9 @@ class LobbyMapSetupSmokeTest {
                     assertFalse(fixture.body.findActor("map-layout-panel").isVisible());
                     GpuLoadingPanel loading = fixture.body.findActor("board-loading-panel");
                     assertTrue(loading.isVisible());
-                    previous.accept(null);
+                    BoardSource stale = mock(BoardSource.class);
+                    previous.accept(stale);
+                    verify(stale).close();
                     assertEquals(next.label(), fixture.body.<Label>findActor("map-inspection-title").getText().toString());
                     assertEquals(Messages.getString("GpuBoard.previewLoading"),
                           loading.<Label>findActor("board-loading-message").getText().toString(),
@@ -498,7 +494,7 @@ class LobbyMapSetupSmokeTest {
         final MapSetupForm form;
         final LobbyMapSetupView view;
         final Table body;
-        final List<Consumer<BoardScene>> inspections = new ArrayList<>();
+        final List<Consumer<BoardSource>> inspections = new ArrayList<>();
         final List<List<String>> previewRequests = new ArrayList<>();
 
         Fixture(UiTestStage ui) {
@@ -514,7 +510,7 @@ class LobbyMapSetupSmokeTest {
         }
 
         private void show() {
-            view.show(form.picture(), form.themes(-1), BoardAtmosphere.DEFAULTS);
+            view.show(form.picture(), form.themes(-1));
             body.validate();
         }
 
@@ -543,7 +539,7 @@ class LobbyMapSetupSmokeTest {
         }
 
         @Override
-        public void inspect(String board, Consumer<BoardScene> ready) {
+        public void inspect(String board, Consumer<BoardSource> ready) {
             calls.add("inspect " + board);
             inspections.add(ready);
         }

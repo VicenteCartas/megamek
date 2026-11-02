@@ -31,7 +31,7 @@ interface BoardSource extends AutoCloseable {
     public record UiPreferences(float scale, String reportKeywords, String reportFilterKeywords,
           boolean minimapEnabled, boolean contactsEnabled, boolean conditionsVisible, boolean turnDetails,
           List<Bind> binds, BoardGraphics graphics, Overlays overlays, Map<GpuMovePlan.Band, Integer> movementColors,
-          NameplateMode nameplates) {
+          NameplateMode nameplates, BoardDisplaySettings display) {
         public UiPreferences {
             binds = List.copyOf(binds);
             movementColors = Map.copyOf(movementColors);
@@ -75,7 +75,7 @@ interface BoardSource extends AutoCloseable {
                         GpuMovePlan.Band.SPRINT, gui.getMoveSprintColor().getRGB(),
                         GpuMovePlan.Band.JUMP, gui.getMoveJumpColor().getRGB(),
                         GpuMovePlan.Band.ILLEGAL, gui.getMoveIllegalColor().getRGB()),
-                  gui.getNameplateMode());
+                  gui.getNameplateMode(), BoardDisplaySettings.capture(gui));
         }
     }
 

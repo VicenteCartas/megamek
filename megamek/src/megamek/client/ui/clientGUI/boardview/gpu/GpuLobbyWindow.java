@@ -19,7 +19,6 @@ import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -155,8 +154,6 @@ public final class GpuLobbyWindow {
     private static ClientGUI previewedFromMapSetup;
 
     private final ClientGUI gui;
-    /** One visual time sample for this lobby's inspections, stable across board and conditions updates. */
-    private final double mapPreviewTimeSample = ThreadLocalRandom.current().nextDouble();
     private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
         @Override
         public JFrame frame() {
@@ -1298,14 +1295,8 @@ public final class GpuLobbyWindow {
                 LOGGER.error(failure, "The lobby could not read the map settings");
                 return;
             }
-            mapSetup = new LobbyMapSetupController(form, () -> client.getGame().getBoard(),
-                  (picture, themes) -> {
-                      // Read on the EDT; only immutable visual settings cross to the preview's render thread.
-                      var atmosphere = BoardAtmosphere.fromScenario(
-                            new PlanetaryConditions(client.getGame().getPlanetaryConditions()), picture.space(),
-                            mapPreviewTimeSample);
-                      onScreen(shown -> shown.mapSetup(picture, themes, atmosphere));
-                  },
+            mapSetup = new LobbyMapSetupController(form, client::getGame,
+                  (picture, themes) -> onScreen(shown -> shown.mapSetup(picture, themes)),
                   (key, image) -> onScreen(shown -> shown.mapPicture(key, image)));
         }
         onScreen(GpuLobbyScreen::openMapSetup);
@@ -1348,8 +1339,8 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void inspect(String board, Consumer<BoardScene> ready) {
-                mapSetup(controller -> controller.inspect(board, scene -> GpuHost.post(() -> ready.accept(scene))));
+            public void inspect(String board, Consumer<BoardSource> ready) {
+                mapSetup(controller -> controller.inspect(board, source -> GpuHost.post(() -> ready.accept(source))));
             }
 
             @Override
