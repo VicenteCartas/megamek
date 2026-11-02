@@ -283,6 +283,45 @@ class UiGallerySmokeTest {
         });
     }
 
+    /**
+     * A list inside another scrolling pane, such as a tree in a dialog's body, takes the wheel anywhere over its rows,
+     * not the pane round it; a list with nothing to scroll leaves the wheel to the pane round it.
+     */
+    @Test
+    void aListInsideAScrollingPaneTakesTheWheelOverItsRows() {
+        UiTestStage.run(ui -> {
+            Table list = new Table();
+            for (int item = 0; item < 30; item++) {
+                list.add(row(ui.kit, "Row " + item)).growX().row();
+            }
+            ScrollPane inner = ui.kit.scrollList(list, true);
+            Table shortList = new Table();
+            shortList.add(row(ui.kit, "Only row")).growX();
+            ScrollPane still = ui.kit.scrollList(shortList, true);
+            Table body = new Table();
+            body.add(inner).size(240, 200).row();
+            body.add(still).size(240, 80).row();
+            body.add().height(400);
+            ScrollPane outer = ui.kit.scrollList(body, true, false);
+            Table frame = new Table();
+            frame.add(outer).size(300, 360);
+            place(ui.window, frame, 100, 100);
+            ui.draw();
+            Stage stage = ui.stage;
+
+            Rectangle area = UiTestStage.bounds(inner);
+            move(ui, new Vector2(area.x + area.width / 3, area.y + area.height - 12));
+            assertSame(inner, stage.getScrollFocus(), "a row of the inner list takes the wheel");
+            assertTrue(stage.scrolled(0, 1) && inner.getScrollY() > 0, "the wheel scrolls the inner list");
+            move(ui, new Vector2(area.x + area.width / 3, area.y + 12));
+            assertSame(inner, stage.getScrollFocus(), "another row keeps it");
+
+            Rectangle shortArea = UiTestStage.bounds(still);
+            move(ui, new Vector2(shortArea.x + shortArea.width / 3, shortArea.y + shortArea.height - 12));
+            assertSame(outer, stage.getScrollFocus(), "a list that cannot scroll leaves the wheel to the pane round it");
+        });
+    }
+
     @Test
     void dialogPadsItsFrameAndHeaderAndItsCloseButtonRunsTheAction() {
         UiTestStage.run(ui -> {

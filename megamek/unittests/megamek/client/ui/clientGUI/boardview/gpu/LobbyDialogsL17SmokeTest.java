@@ -117,10 +117,19 @@ class LobbyDialogsL17SmokeTest {
             RatBrowser.Folder source = new RatBrowser.Folder("(3039) - War of 39", List.of(davion), List.of());
             RatBrowser browser = new RatBrowser(new RatBrowser.Folder("RATs", List.of(source), List.of("Table")));
             List<String> said = new ArrayList<>();
+            boolean[] hold = {false};
+            List<Runnable> held = new ArrayList<>();
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
             dialogs.randomArmy(form, browser, key -> null, new LobbyRandomArmyView.Host() {
                 @Override
                 public void edt(Runnable work, Runnable then) {
+                    if (hold[0]) {
+                        held.add(() -> {
+                            work.run();
+                            then.run();
+                        });
+                        return;
+                    }
                     work.run();
                     then.run();
                 }
@@ -170,6 +179,20 @@ class LobbyDialogsL17SmokeTest {
             MekSummary kept = form.cards().get(0).unit();
             click(ui, find(ui, "army-roll"));
             assertEquals(kept, form.cards().get(0).unit(), "a kept card survives the roll");
+            // While a reroll runs on the Swing thread, nothing else may change the hand under it
+            hold[0] = true;
+            click(ui, find(ui, "army-reroll-1"));
+            assertEquals(1, held.size(), "the reroll waits on the Swing thread");
+            for (String name : List.of("army-keep-0", "army-discard-0", "army-discard-1", "army-clear")) {
+                assertTrue(((UiButton) find(ui, name)).isDisabled(), name + " is disabled while rolling");
+                click(ui, find(ui, name));
+            }
+            assertEquals(2, form.cards().size(), "nothing was discarded or cleared mid-roll");
+            assertTrue(form.cards().get(0).kept(), "the kept card stayed kept mid-roll");
+            hold[0] = false;
+            held.remove(0).run();
+            assertFalse(((UiButton) find(ui, "army-discard-1")).isDisabled(), "the hand opens again after the roll");
+            assertEquals(kept, form.cards().get(0).unit());
             click(ui, find(ui, "army-discard-1"));
             assertEquals(1, form.cards().size(), "Discard drops the card");
             click(ui, find(ui, "army-add"));

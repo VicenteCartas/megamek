@@ -35,8 +35,12 @@ package megamek.client.bot.ui.swing;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
 
+import megamek.MMConstants;
+import megamek.MegaMek;
 import megamek.client.bot.BotClient;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuLobbyWindow;
 import megamek.client.ui.dialogs.buttonDialogs.BotReadmeNagDialog;
 import megamek.client.ui.dialogs.helpDialogs.BotHelpDialog;
 import megamek.common.event.*;
@@ -59,9 +63,16 @@ public record BotGUI(JFrame frame, BotClient bot) implements GameListener {
     @Override
     public void gamePhaseChange(GamePhaseChangeEvent e) {
         if (bot.getGame().getPhase().isLounge() || bot.getGame().getPhase().isStartingScenario()) {
-            if (NAGGED.compareAndSet(false, true) && new BotReadmeNagDialog(frame()).showDialog().isConfirmed()) {
-                new BotHelpDialog(frame).setVisible(true);
+            if (MegaMek.getMMOptions().getNagDialogIgnore(MMConstants.NAG_BOT_README)
+                  || !NAGGED.compareAndSet(false, true)) {
+                return;
             }
+            // Over a libGDX lobby the question is asked there; otherwise in Swing, as ever
+            SwingUtilities.invokeLater(() -> {
+                if (!GpuLobbyWindow.nagBotReadme() && new BotReadmeNagDialog(frame()).showDialog().isConfirmed()) {
+                    new BotHelpDialog(frame).setVisible(true);
+                }
+            });
         }
     }
 

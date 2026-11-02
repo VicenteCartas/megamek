@@ -8,6 +8,7 @@ import java.awt.Dialog;
 import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.HeadlessException;
+import java.awt.SecondaryLoop;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
@@ -157,6 +158,8 @@ public final class GpuBoardWindow {
     /** The planar compatibility layer omits wreck sprites when the shared unit renderer supplies them. */
     public static boolean modelsEnabled() { return GpuUnitModels.ENABLED; }
     private static final MMLogger LOGGER = MMLogger.create(GpuBoardWindow.class);
+    /** The longest a prompt asked while the board starts waits for it before Swing asks instead. */
+    private static final long STARTUP_PROMPT_WAIT_MS = 60_000;
     /** Volatile so that {@link #ask} and {@link #dialogPendingFor} read it without the class monitor. */
     private static volatile GpuBoardWindow active;
     /**
@@ -1246,10 +1249,47 @@ public final class GpuBoardWindow {
 
     /**
      * EDT: the entry point of the client's prompt chokepoints. Like {@link #ask}, but null (use Swing) while this
-     * client's native window does not draw dialogs.
+     * client's native window does not draw dialogs. A prompt asked while that window is still starting, as a loaded
+     * save's first phase does, first waits for it ({@link #awaitStartup}). A dead client's prompt, asked by a game event
+     * that its own prompt's nested event loop outlived, is answered as closed without showing anything.
      */
     public static DialogAnswer route(ClientGUI gui, DialogRequest request) {
+        if (gui.isDead()) {
+            return DialogAnswer.cancelled(request);
+        }
+        awaitStartup(gui);
         return drawsDialogsFor(gui) ? ask(gui, request) : null;
+    }
+
+    /**
+     * EDT: while this client's native window is starting, waits in a nested event loop, as a modal dialog does, until
+     * it asks prompts itself, closes, or {@link #STARTUP_PROMPT_WAIT_MS} pass. Asked in Swing meanwhile, the prompt
+     * would be a modal dialog the board never draws; it could outlive the game and leave the start screen blocked.
+     * Returns at once off the EDT, while the caller holds this class's monitor, or when no such window starts.
+     */
+    private static void awaitStartup(ClientGUI gui) {
+        if (!SwingUtilities.isEventDispatchThread() || Thread.holdsLock(GpuBoardWindow.class) || !startingFor(gui)) {
+            return;
+        }
+        long deadline = System.nanoTime() + STARTUP_PROMPT_WAIT_MS * 1_000_000L;
+        SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+        Timer check = new Timer(50, event -> {
+            if (!startingFor(gui) || System.nanoTime() > deadline) {
+                loop.exit();
+            }
+        });
+        check.start();
+        try {
+            loop.enter();
+        } finally {
+            check.stop();
+        }
+    }
+
+    /** Any thread, no monitor: whether this client's native window is open but does not ask its prompts yet. */
+    private static boolean startingFor(ClientGUI gui) {
+        GpuBoardWindow window = active;
+        return window != null && window.gui == gui && !window.closing && !window.asksPrompts();
     }
 
     /**

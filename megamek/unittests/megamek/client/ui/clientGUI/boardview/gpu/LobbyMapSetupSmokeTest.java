@@ -60,6 +60,12 @@ class LobbyMapSetupSmokeTest {
             assertNotNull(body.findActor("map-slot-2"), "a new tile shows");
             click(ui, body.findActor("map-height-up"));
             assertEquals(6, fixture.view.shown().slots().size());
+            int listeners = body.findActor("map-generate").getListeners().size;
+            for (int refresh = 0; refresh < 20; refresh++) {
+                fixture.view.show(fixture.form.picture(), fixture.form.themes(-1));
+            }
+            assertEquals(listeners, body.findActor("map-generate").getListeners().size,
+                  "refreshing the setup reuses Generate's tooltip rather than stacking new ones");
 
             click(ui, body.findActor("map-load"));
             click(ui, body.findActor("map-random-settings"));

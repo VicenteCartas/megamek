@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -855,6 +856,8 @@ final class LobbyForcesPanel {
 
     /** Selects on a click and opens the unit menu on a right click, selecting the card first unless it is. */
     private void listen(Table row, boolean formation, int id) {
+        // A table takes only its children's hits; the whole card takes clicks, not only its labels
+        row.setTouchable(Touchable.enabled);
         row.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {

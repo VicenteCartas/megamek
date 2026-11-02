@@ -405,10 +405,20 @@ final class LobbyGameOptionsView {
             }
         }
         input.setName(name);
-        if (!row.tooltip().isBlank()) {
-            kit.tip(input, true).getActor().setText(plain(row.tooltip()));
+        String tooltip = plain(row.tooltip());
+        if (form.locked(row.name())) {
+            String reason = Messages.getString("GameOptionsDialog.lockedByScenario");
+            tooltip = tooltip.isBlank() ? reason : tooltip + "\n\n" + reason;
+        }
+        if (!tooltip.isBlank()) {
+            kit.tip(input, true).getActor().setText(tooltip);
         }
         Table marks = new Table();
+        if (form.locked(row.name())) {
+            Actor lock = kit.chip(Messages.getString("Lobby.gameOptions.lockedMark"), UiKit.Tone.NORMAL, true);
+            kit.tip(lock, true).getActor().setText(Messages.getString("GameOptionsDialog.lockedByScenario"));
+            marks.add(lock).padLeft(space("sm"));
+        }
         if (row.important()) {
             Actor important = kit.chip(Messages.getString("Lobby.gameOptions.importantMark"), UiKit.Tone.NORMAL, true);
             kit.tip(important, true).getActor().setText(Messages.getString("GameOptionsDialog.legend.important"));

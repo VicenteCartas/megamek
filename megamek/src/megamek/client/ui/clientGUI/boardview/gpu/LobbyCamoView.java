@@ -252,6 +252,8 @@ final class LobbyCamoView {
         kit.tip(refresh, true).getActor().setText(Messages.getString("RefreshDirectory.toolTipText"));
 
         category = catalog.categoryOf(choice.selected());
+        // Categories start folded: only the root and the way to the current camo are open
+        tree.collapseAll();
         tree.expand(TREE_PREFIX, true);
         tree.select(TREE_PREFIX + category);
         refreshValues();

@@ -212,6 +212,11 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * so the player is asked only once even in multi-board games with several minimap panels.
      */
     private static final Map<String, Boolean> GIF_RECORDING_DECISIONS = new ConcurrentHashMap<>();
+    /**
+     * The games whose recording question is open. The question waits in a nested event loop, where the next phase
+     * change would otherwise ask it again over itself.
+     */
+    private static final Set<String> GIF_RECORDING_ASKING = ConcurrentHashMap.newKeySet();
 
     private GifWriterThread gifWriterThread;
     private volatile boolean ownsSummaryGif = false;
@@ -531,6 +536,29 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
+     * @return whether readying up in {@code game} would ask about recording the summary GIF: the preference is
+     *       {@link GifRecordingMode#ASK} and the game has no answer yet. A lobby that asks itself uses this, then
+     *       {@link #recordGifRecordingDecision}.
+     */
+    public static boolean needsGifRecordingConsent(Game game) {
+        return GUIPreferences.getInstance().getGifGameSummaryRecording() == GifRecordingMode.ASK
+              && !GIF_RECORDING_DECISIONS.containsKey(game.getUUIDString());
+    }
+
+    /**
+     * Keeps the player's answer about recording {@code game}'s summary GIF, as the Swing question does; when
+     * {@code remember}, it also becomes the preference ({@link GifRecordingMode#ALWAYS} or
+     * {@link GifRecordingMode#NEVER}).
+     */
+    public static void recordGifRecordingDecision(Game game, boolean record, boolean remember) {
+        GIF_RECORDING_DECISIONS.putIfAbsent(game.getUUIDString(), record);
+        if (remember) {
+            GUIPreferences.getInstance().setGifGameSummaryRecording(record ? GifRecordingMode.ALWAYS
+                  : GifRecordingMode.NEVER);
+        }
+    }
+
+    /**
      * Returns {@code true} when the combat-summary GIF should be recorded for this game. With
      * {@link GifRecordingMode#ASK} (the default) the answer normally comes from the lobby prompt
      * ({@link #promptForGifRecordingConsent(Game, Component)}); this asks lazily only as a fallback for a game
@@ -551,8 +579,8 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
      * dialog is deliberately shown outside any map computation: blocking on the EDT while holding a map lock could
      * deadlock if the EDT itself entered this code for another board's panel.
      *
-     * @return {@code true} if this game should be recorded; {@code false} also when the dialog could not be shown
-     *       (in that case no decision is stored, so the player is asked again at the next frame)
+     * @return {@code true} if this game should be recorded; {@code false} also when the dialog could not be shown or
+     *       is already open (in that case no decision is stored, so the player is asked again at the next frame)
      */
     private boolean recallOrAskRecordingDecision() {
         String gameId = game.getUUIDString();
@@ -560,7 +588,15 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
         if (existingDecision != null) {
             return existingDecision;
         }
-        Boolean answer = askWhetherToRecordGifOnEdt();
+        if (!GIF_RECORDING_ASKING.add(gameId)) {
+            return false;
+        }
+        Boolean answer;
+        try {
+            answer = askWhetherToRecordGifOnEdt();
+        } finally {
+            GIF_RECORDING_ASKING.remove(gameId);
+        }
         if (answer == null) {
             return false;
         }

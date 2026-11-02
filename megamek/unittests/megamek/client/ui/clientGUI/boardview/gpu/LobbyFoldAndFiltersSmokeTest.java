@@ -118,10 +118,10 @@ class LobbyFoldAndFiltersSmokeTest {
             requisition.opened(LobbyForces.EMPTY);
             ui.draw();
             click(ui, chip(body, Messages.getString("Lobby.requisition.weight.heavy")));
-            assertEquals("W:HEAVY;B:;L:", actions.kept, "a weight chip's click is kept");
+            assertEquals("C:ALL;W:HEAVY;B:;L:", actions.kept, "a weight chip's click is kept");
             body.remove();
 
-            RequisitionActions next = new RequisitionActions("W:HEAVY;B:CLAN;L:");
+            RequisitionActions next = new RequisitionActions("C:ALL;W:HEAVY;B:CLAN;L:");
             LobbyRequisitionPanel again = new LobbyRequisitionPanel(ui.kit, next, key -> null, false);
             Table nextBody = place(ui, again.body());
             again.opened(LobbyForces.EMPTY);
@@ -132,7 +132,7 @@ class LobbyFoldAndFiltersSmokeTest {
                   && button.getText().toString().equalsIgnoreCase(Messages.getString("Lobby.requisition.clear")));
             assertNotNull(clear, "the kept tech base shows as a tag with Clear filters");
             click(ui, clear);
-            assertEquals("W:HEAVY;B:;L:", next.kept, "Clear filters clears the kept tech base, keeping the weight");
+            assertEquals("C:ALL;W:HEAVY;B:;L:", next.kept, "Clear filters clears the kept tech base, keeping the weight");
             nextBody.remove();
         });
     }

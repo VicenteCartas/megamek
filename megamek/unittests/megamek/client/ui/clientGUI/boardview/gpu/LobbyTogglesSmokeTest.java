@@ -220,6 +220,61 @@ class LobbyTogglesSmokeTest {
         return table;
     }
 
+    /** A right click anywhere on a unit's card opens its menu, over its text and sheet as much as at its ends. */
+    @Test
+    void aRightClickAnywhereOnACardOpensItsMenu() {
+        UiTestStage.run(ui -> {
+            int[] menus = new int[1];
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions() {
+                @Override
+                public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+                    menus[0]++;
+                }
+            }, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            LobbyUnit.Sheet sheet = new LobbyUnit.Sheet(4, 6, 0, 208, 107, 10, 20,
+                  List.of(new RequisitionDossier.Line("Medium Laser", 2), new RequisitionDossier.Line("PPC", 1),
+                        new RequisitionDossier.Line("SRM 6", 1), new RequisitionDossier.Line("AC/20", 1)));
+            LobbyUnit unit = new LobbyUnit(1, 1, "Unit 1", "50 t", "Medium", 50, 1000, "1,000", "Pilot", "4/5",
+                  List.of(), 0, LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false, sheet);
+            forces.show(new LobbyForces(List.of(unit), List.of(new LobbyForces.Owner(1, "Owner", true, true, false,
+                  false, 1000, 50, List.of(1))), List.of(), List.of(), List.of(), -1));
+            ui.draw();
+            Actor card = panel.findActor("lobby-unit-1");
+            List<String> missed = new ArrayList<>();
+            for (int step = 1; step < 20; step++) {
+                for (float height : new float[] { 0.25f, 0.5f, 0.75f }) {
+                    float x = card.getWidth() * step / 20;
+                    float y = card.getHeight() * height;
+                    Actor hit = card.hit(x, y, true);
+                    if (hit != null && hit.isDescendantOf(card) && hit instanceof com.badlogic.gdx.scenes.scene2d.ui
+                          .Button) {
+                        continue;
+                    }
+                    int before = menus[0];
+                    rightClick(ui, card, x, y);
+                    if (menus[0] == before) {
+                        missed.add(Math.round(x) + "," + Math.round(y) + " on " + (hit == null ? "nothing"
+                              : hit.getClass().getSimpleName() + " " + hit.getName()));
+                    }
+                }
+            }
+            assertTrue(missed.isEmpty(), "a right click opens the menu everywhere on the card: missed " + missed);
+            panel.remove();
+        });
+    }
+
+    private static void rightClick(UiTestStage ui, Actor actor, float localX, float localY) {
+        Vector2 point = ui.stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(localX, localY)));
+        int x = Math.round(point.x);
+        int y = Math.round(point.y);
+        ui.stage.mouseMoved(x, y);
+        ui.stage.touchDown(x, y, 0, Input.Buttons.RIGHT);
+        ui.stage.touchUp(x, y, 0, Input.Buttons.RIGHT);
+        ui.draw();
+    }
+
     private static void run(UiTestStage ui, float seconds) {
         for (float t = 0; t < seconds; t += 1 / 60f) {
             ui.stage.act(1 / 60f);
@@ -268,7 +323,7 @@ class LobbyTogglesSmokeTest {
         }
     }
 
-    private static final class NoForcesActions implements LobbyForcesPanel.Actions {
+    private static class NoForcesActions implements LobbyForcesPanel.Actions {
         @Override
         public void command(LobbyForcesPanel.Command command) {
         }

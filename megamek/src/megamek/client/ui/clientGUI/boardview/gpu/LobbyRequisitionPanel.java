@@ -150,6 +150,11 @@ final class LobbyRequisitionPanel {
 
         /** Keeps the category tab, weights, tech bases and rules levels as {@code Filters.kept(Category)} wrote them. */
         default void keptFilters(String kept) { }
+
+        /** Player {@code id}'s camo or colour, for the swatch beside the recipient; null when unknown. */
+        default @Nullable Drawable swatch(int id) {
+            return null;
+        }
     }
 
     /** The pause on a unit before its full record is read. */
@@ -206,6 +211,7 @@ final class LobbyRequisitionPanel {
     private @Nullable UiButton advancedButton;
     private final Table ownerGroup = new Table();
     private UiSelect owner;
+    private final Image ownerSwatch = new Image((Drawable) null, Scaling.fill);
     private final UiSegmented skillsMode;
     private final UiStepper gunnery;
     private final UiStepper piloting;
@@ -480,6 +486,9 @@ final class LobbyRequisitionPanel {
         }
         if (recipientsChanged) {
             refreshOwners();
+        } else {
+            // A camo drawn since shows on the swatch
+            refreshSwatch();
         }
         if (!current.equals(forces)) {
             forces = current;
@@ -1844,17 +1853,17 @@ final class LobbyRequisitionPanel {
         strip.setName("lobby-requisition-strip");
         strip.add(kit.solid("border.subtle")).growX().height(size("border")).colspan(2).padBottom(space("sm")).row();
         HorizontalGroup controls = stripControls;
-        // Each group (owner, skills, the steppers) stands the group space from the next, wrapping whole when narrow
+        // Each group (skills, the steppers) stands the group space from the next, wrapping whole when narrow
         controls.wrap(true).space(STRIP_GROUP_GAP).wrapSpace(space("xs")).rowLeft();
-        controls.addActor(ownerGroup);
         Table skillsGroup = new Table();
         skillsGroup.add(caption("Lobby.requisition.skills")).padRight(UiStepper.gap());
         skillsGroup.add(skillsMode);
         controls.addActor(skillsGroup);
         strip.add(controls).growX().minWidth(0).left();
-        // The quantity goes with Add at the row's end, a group's space after the skills; a narrow strip wraps the
-        // owner and skills before it
+        // Who the units go to stands with the quantity and Add at the row's end, so the recipient is read at the
+        // moment of adding; a narrow strip wraps the skills before it
         Table adding = new Table();
+        adding.add(ownerGroup);
         adding.add(quantity);
         adding.add(add).width(kit.faceWidth(add, Messages.getString("Lobby.requisition.add"),
               Messages.getString("Lobby.requisition.addMany", LobbyRequisitionController.MAX_QUANTITY),
@@ -1918,11 +1927,44 @@ final class LobbyRequisitionPanel {
             }
         }
         select.select(index);
-        UiKit.onChange(select, () -> ownerId = recipients.get(Math.max(0, select.getSelectedIndex())).id());
+        UiKit.onChange(select, () -> {
+            ownerId = recipients.get(Math.max(0, select.getSelectedIndex())).id();
+            refreshSwatch();
+        });
+        select.setName("lobby-requisition-owner");
         kit.tip(select, true).getActor().setText(Messages.getString("Lobby.requisition.ownerTip"));
         ownerGroup.add(caption("Lobby.requisition.owner")).padRight(UiStepper.gap());
-        ownerGroup.add(select).minWidth(size("dialog.sm") / 4);
+        float swatchSize = size("icon.md");
+        ownerGroup.add(ownerSwatch).size(swatchSize).padRight(space("xs"));
+        ownerGroup.add(select).minWidth(size("dialog.sm") / 4).padRight(STRIP_GROUP_GAP);
         owner = select;
+        refreshSwatch();
+    }
+
+    /** Shows the recipient's camo or colour beside the picker. */
+    private void refreshSwatch() {
+        ownerSwatch.setDrawable(ownerId < 0 ? null : actions.swatch(ownerId));
+    }
+
+    /** The player the units go to; -1 when there is no one to add for. */
+    int recipient() {
+        return ownerId;
+    }
+
+    /** Sends the units to player {@code id} when they may receive them; whether they now do. */
+    boolean recipient(int id) {
+        List<LobbyRequisition.Recipient> recipients = requisition.recipients();
+        for (int i = 0; i < recipients.size(); i++) {
+            if (recipients.get(i).id() == id) {
+                ownerId = id;
+                if (owner != null) {
+                    owner.select(i);
+                }
+                refreshSwatch();
+                return true;
+            }
+        }
+        return false;
     }
 
     private void skills(RequisitionSkills next) {
