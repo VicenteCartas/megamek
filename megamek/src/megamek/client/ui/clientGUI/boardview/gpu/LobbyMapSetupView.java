@@ -24,6 +24,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -125,6 +126,7 @@ final class LobbyMapSetupView {
     private final UiButton advancedSearch;
     private final UiButton preview3D;
     private final UiButton generate;
+    private final TextTooltip generateTip;
     private final Map<String, Texture> textures = new HashMap<>();
     private final Map<String, Drawable> drawables = new HashMap<>();
     private final Map<String, UiButton> rows = new HashMap<>();
@@ -310,6 +312,7 @@ final class LobbyMapSetupView {
         generate = kit.button("button-primary" + UiTheme.COMPACT, "play",
               Messages.getString("ChatLounge.GenerateBattlefield"), null);
         generate.setName("map-generate");
+        generateTip = kit.tip(generate, true);
         UiKit.onChange(generate, () -> host.act(MapSetupForm::generate));
         footer.add(generate);
         body.add(footer).growX().padTop(space("md")).row();
@@ -387,7 +390,7 @@ final class LobbyMapSetupView {
         save.setDisabled(space);
         advancedSearch.setDisabled(!picture.advancedSearch());
         generate.setDisabled(!picture.generable());
-        kit.tip(generate, true).getActor().setText(plain(picture.generateTip()));
+        generateTip.getActor().setText(plain(picture.generateTip()));
         drawerScroll.setVisible(!space);
         drawerCell.width(space ? 0 : size("dialog.sm")).padLeft(space ? 0 : space("md"));
         drawerScroll.invalidateHierarchy();

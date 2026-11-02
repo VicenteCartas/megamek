@@ -76,7 +76,10 @@ final class LobbyRandomArmyView {
     private final Label totals;
     private final UiButton add;
     private final UiButton roll;
+    private final UiButton clear;
     private final List<Image> images = new ArrayList<>();
+    /** Every card's keep, reroll and discard buttons, which must not change the hand while a roll runs. */
+    private final List<UiButton> cardControls = new ArrayList<>();
     private boolean busy;
     private boolean syncing;
 
@@ -203,10 +206,14 @@ final class LobbyRandomArmyView {
             close.run();
             host.advanced();
         }).setName("army-advanced");
-        dialog.secondary(Messages.getString("RandomArmyDialog.Clear"), () -> {
+        clear = dialog.secondary(Messages.getString("RandomArmyDialog.Clear"), () -> {
+            if (busy) {
+                return;
+            }
             form.clear();
             rebuild();
-        }).setName("army-clear");
+        });
+        clear.setName("army-clear");
         add = dialog.primary(Messages.getString("Lobby.randomArmy.add"), this::confirm);
         add.setName("army-add");
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("army-cancel");
@@ -353,6 +360,7 @@ final class LobbyRandomArmyView {
     private void rebuild() {
         hand.clearChildren();
         images.clear();
+        cardControls.clear();
         List<RandomArmyForm.Card> cards = form.cards();
         if (cards.isEmpty()) {
             Label empty = kit.typeLabel(Messages.getString(form.canRoll() ? "Lobby.randomArmy.empty"
@@ -394,7 +402,9 @@ final class LobbyRandomArmyView {
         keep.setProgrammaticChangeEvents(false);
         keep.setChecked(card.kept());
         UiKit.onChange(keep, () -> {
-            form.keep(index, !form.cards().get(index).kept());
+            if (!busy) {
+                form.keep(index, !form.cards().get(index).kept());
+            }
             keep.setChecked(form.cards().get(index).kept());
         });
         UiButton reroll = kit.button("button-quiet-compact", "replay", null, null);
@@ -405,9 +415,15 @@ final class LobbyRandomArmyView {
         discard.setName("army-discard-" + index);
         kit.tip(discard, true).getActor().setText(Messages.getString("Lobby.randomArmy.discard"));
         UiKit.onChange(discard, () -> {
+            if (busy) {
+                return;
+            }
             form.discard(index);
             rebuild();
         });
+        cardControls.add(keep);
+        cardControls.add(reroll);
+        cardControls.add(discard);
         actions.add(keep).left().expandX();
         actions.add(reroll).padLeft(space("xs"));
         actions.add(discard).padLeft(space("xs"));
@@ -424,6 +440,8 @@ final class LobbyRandomArmyView {
               format(form.tonnage())));
         add.setDisabled(busy || form.cards().isEmpty() || form.playerName() == null);
         roll.setDisabled(busy || !form.canRoll());
+        clear.setDisabled(busy);
+        cardControls.forEach(control -> control.setDisabled(busy));
     }
 
     /** A unit's sprite has been drawn: shows it on its cards. */
