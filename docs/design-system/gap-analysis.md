@@ -1174,12 +1174,83 @@ work for Swing, and item 11 is under investigation.
        table, goes back, searches, picks a result and ends the search.
        Live: `lobby+randomarmy`. The probe's click list now takes a `type:text` step that types into the focused
        field.
+     - Review fix after #35: while a roll ran on the Swing thread, the random army's Keep, Discard and Clear
+       could still change the hand, so discarding mid-reroll threw in `RandomArmyForm.reroll()`. They are now
+       disabled and ignored while busy. The map setup no longer attaches a new tooltip to Generate on every
+       refresh.
+       Checks: `LobbyDialogsL17SmokeTest`, which holds a reroll on the Swing thread and clicks the locked
+       controls, and `LobbyMapSetupSmokeTest`, which refreshes 20 times and counts Generate's listeners.
+     - Drake's review: the Requisition's "For" picker moved from the source row to stand beside Add, with the
+       recipient's camo or colour as a swatch. While the Requisition is open, the roster and the picker follow
+       each other: clicking your own card or your bot's card makes it the recipient, the recipient's card is
+       highlighted, and other players' cards are ignored. "Add a new team" became "Add opponent on a new team",
+       because it adds a bot; the server can't hold an empty team, so there is no client-only placeholder.
+       Checks: `LobbyRecipientSmokeTest`. Live: `lobby+requisition+atlas+pick+pickbot` with `MM_LOBBY_BOTS=1`.
+     - Illiani's bug, loaded save: after closing a game loaded from the start screen, the start screen took no
+       input and couldn't be closed. The save's first phase changes asked their questions (turn sound, GIF
+       recording) about a second before the board was presented. They fell back to app-modal Swing dialogs that
+       stacked inside each other and outlived the game. Now `GpuBoardWindow.route` waits in a nested event loop,
+       for at most a minute, while the client's board is starting, so those questions are asked in the board. A
+       client GUI that has died answers any remaining question as closed, without showing it: the event whose
+       question closed the game would otherwise go on to its next listener and ask in Swing over the start
+       screen. The turn-sound and GIF questions also stop asking twice when a phase change arrives while they're
+       open. Checks: `GpuDialogRoutingTest` (a startup prompt asked natively, a dead client's prompt) and
+       `GpuChoiceRoutingTest`. Live: Illiani's save, closed from the board, back to a working start screen.
+     - More Swing dialogs made native:
+       - The lobby's own questions:
+         - The GIF recording consent at Ready is now a native yes/no card (`LobbyNativeDialogs.yesNo`) with its
+           "remember" box. The answer is recorded (`MinimapPanel.recordGifRecordingDecision`), then Ready goes
+           on. Escape now cancels the Ready and records nothing; Swing's close counted as No.
+         - The bot readme nag, when a bot joins, asks natively over the lobby (`GpuLobbyWindow.nagBotReadme`),
+           and Yes opens the native Princess help. It no longer blocks the bot's thread. Without a lobby on show,
+           the Swing nag stays.
+         - A lobby that fails leaves its message for the start screen, which shows it as a native notice
+           (`GpuStartWindow.notice`). When MegaMek exits, or no start screen exists (under MekHQ), the Swing
+           alert stays.
+       - The start screen briefing's Swing dialogs:
+         - The camo chooser is the lobby's native one.
+         - The game options are the lobby's native dialog. A scenario's locked options show greyed with a
+           Locked chip and take no change (`GameOptionsForm.lock`). As before, no options are saved as last used.
+           Save and load go through the system file dialog.
+         - The planetary conditions are the lobby's native dialog.
+       Checks: `GameOptionsFormTest` (locked options), `LobbyNativeDialogsSmokeTest` (the yes/no card's box and
+       Escape, a locked option that takes no click) and `GpuDialogRoutingTest`. Live: `briefing+rules`,
+       `+conditions` and `+camo` (with `MM_START_SCENARIO` pointing at a scenario that leaves them open), and
+       `main+notice`.
+     - Lanceman's round:
+       - The wheel scrolls a list anywhere over its rows, not only over its bar. A list inside another scrolling
+         pane (the camo tree and grid in the dialog's body, the board list in the map setup's drawer) lost the
+         wheel to the pane round it, which took the scroll focus last as the enter bubbled up.
+         `UiKit.wheelWhileHovered` now leaves the focus with the innermost pane that can scroll.
+       - A right click (and a click) anywhere on a unit's card, or a player's card, reaches it. A `Table` takes
+         only its children's hits by default, so a press between the labels went nowhere.
+       - The camo picker's categories start folded; only the way to the current camo is open.
+       Checks: `UiGallerySmokeTest.aListInsideAScrollingPaneTakesTheWheelOverItsRows` and
+       `LobbyTogglesSmokeTest.aRightClickAnywhereOnACardOpensItsMenu`. Live: `briefing+camo`, the wheel over the
+       tree.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
-       above) is done. Still open:
+       above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
          player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
+       - The last Swing dialogs the lobby opens, to move into libGDX:
+         - the portrait chooser (`PortraitChooserDialog`), next to the native camo chooser;
+         - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
+         - the map assembly help (`HelpDialog`);
+         - the random army's Advanced Search, which still opens the Swing random army dialog;
+         - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
+         Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
+         go.
+       - The unit dialogs still in Swing, from the lobby and the board:
+         - the unit damage editor (`UnitEditorDialog`);
+         - the SBF and Alpha Strike stats dialogs, with their export;
+         - the auto-resolve dialogs: the chance of winning, the progress and the log.
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), and the map editor's Client
+         Settings and About.
+       - A Swing modal that a dead client leaves open could still block the start screen; the routing above
+         covers the questions found so far.
+       - The settings check across the startup path, step 7 below.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).

@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.GeneratedMesh.clip;
+
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -25,8 +27,6 @@ import megamek.common.board.BoardGenerator;
 import megamek.common.board.Coords;
 import megamek.common.board.HexTile;
 import megamek.logging.MMLogger;
-
-import static megamek.client.ui.clientGUI.boardview.gpu.GeneratedMesh.clip;
 
 /**
  * Domed multi-hex buildings ({@code models/buildings/README.md}): one design generated over a whole building instead of

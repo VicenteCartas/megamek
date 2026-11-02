@@ -15,6 +15,7 @@ import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.RETURNS_DEFAULTS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.when;
 
 import java.awt.Component;
 import java.awt.Container;
@@ -123,6 +124,49 @@ class GpuDialogRoutingTest {
                 assertEquals("The Mek can no longer hold on\nand will fall & take damage", shown.request().message(),
                       "Swing's HTML text is shown as plain text");
                 assertEquals(1, shown.request().buttons().size());
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    @Test
+    void aPromptAskedWhileTheWindowStartsWaitsForItAndIsAskedNatively() throws Exception {
+        ClientGUI gui = routingClient();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            GpuBoardWindow window = present(gui, fixture.view, fixture.source);
+            try {
+                set(window, "presented", false);
+                Thread presenter = new Thread(() -> {
+                    try {
+                        Thread.sleep(300);
+                        set(window, "presented", true);
+                    } catch (Exception exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                });
+                presenter.start();
+                // A loaded save's first phase asks before its board is presented: no Swing dialog meanwhile
+                assertEquals(JOptionPane.YES_OPTION, ask(fixture.source, () -> gui.confirm("Record?", "GIF",
+                      JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE), 0, false).result());
+                presenter.join();
+            } finally {
+                dismiss();
+            }
+        }
+    }
+
+    @Test
+    void aDeadClientsPromptIsAnsweredClosedWithoutAskingNativelyOrInSwing() throws Exception {
+        ClientGUI gui = routingClient();
+        when(gui.isDead()).thenReturn(true);
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            present(gui, fixture.view, fixture.source);
+            try {
+                // A Swing dialog would wait for a click here, or fail headless
+                assertEquals(JOptionPane.CLOSED_OPTION, onSwing(() -> gui.confirm("Record?", "GIF",
+                      JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE)));
+                assertNull(fixture.source.dialog(), "a closed game asks nothing in its window");
             } finally {
                 dismiss();
             }
@@ -281,8 +325,9 @@ class GpuDialogRoutingTest {
             GpuBoardWindow window = present(gui, fixture.view, fixture.source);
             try {
                 set(window, "presented", false);
+                set(window, "closing", true);
                 assertEquals(List.of(JOptionPane.NO_OPTION, 2), onSwing(() -> swingAnswers(gui, fixture.source)),
-                      "The native window is not presented yet");
+                      "The native window is closing before it was presented");
                 set(null, "active", null);
                 assertEquals(List.of(JOptionPane.NO_OPTION, 2), onSwing(() -> swingAnswers(gui, fixture.source)),
                       "No native window for this client");

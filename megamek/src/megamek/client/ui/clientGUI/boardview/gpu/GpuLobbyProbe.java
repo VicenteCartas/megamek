@@ -122,6 +122,9 @@ import org.lwjgl.glfw.GLFW;
  *     {@code +hoverbar} puts it on the bar instead.</li>
  *     <li>{@code lobby+requisition+setskills}: clicks the adding strip's Set skills, then the gunnery's +, through the
  *     stage.</li>
+ *     <li>{@code lobby+requisition+pickbot}: with {@code MM_LOBBY_BOTS}, clicks the first local bot's roster card
+ *     through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, making it the units' recipient, and logs the
+ *     recipient and the roster's mark.</li>
  *     <li>{@code lobby+requisition+pick+tab=name}: once the picked unit's dossier shows, clicks its tab through the
  *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
  *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its

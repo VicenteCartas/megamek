@@ -1,6 +1,12 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.EXTEND;
+import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.H;
+import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.R;
+import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
+import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -9,12 +15,6 @@ import java.util.Set;
 
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Matrix4;
-
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.EXTEND;
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.H;
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.R;
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
 
 /**
  * A generated kit laid from bays ({@link GeneratedKit}, style "bays", a variant's {@link Spec}): the light building's and

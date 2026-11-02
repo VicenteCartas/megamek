@@ -15,6 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -94,6 +95,9 @@ final class LobbyPlayersPanel {
         /** Keeps whether the chat dock is open or folded (a client preference). */
         default void chatOpen(boolean open) { }
 
+        /** Player {@code id}'s card was clicked: while units are being added, they go to that player if they may. */
+        default void pick(int id) { }
+
         /** The picture of the camo {@link LobbySnapshot#camoKey} names, once it has been drawn; else null. */
         default @Nullable Drawable camo(String key) {
             return null;
@@ -123,6 +127,8 @@ final class LobbyPlayersPanel {
     /** Each shown player's menu button, by player id. */
     private final Map<Integer, Actor> menuButtons = new HashMap<>();
     private LobbySnapshot shown = LobbySnapshot.EMPTY;
+    /** The player whose card is marked as receiving the units being added; -1 for none. */
+    private int recipient = -1;
     /** Whether the chat scrolls to its end on its next lines, as after sending one. */
     private boolean followChat = true;
     private int chatEndFrames;
@@ -270,7 +276,41 @@ final class LobbyPlayersPanel {
         card.setBackground(kit.skin.getDrawable("token-card-selected"));
         card.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence(
               com.badlogic.gdx.scenes.scene2d.actions.Actions.delay(REVEAL_SECONDS),
-              com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> card.setBackground(kit.skin.getDrawable("token-card")))));
+              com.badlogic.gdx.scenes.scene2d.actions.Actions.run(() -> card.setBackground(cardBackground(id)))));
+    }
+
+    /** Marks player {@code id}'s card as receiving the units being added; -1 marks none. */
+    void recipient(int id) {
+        if (id == recipient) {
+            return;
+        }
+        int was = recipient;
+        recipient = id;
+        for (int changed : new int[] { was, id }) {
+            if (playerList.findActor("lobby-player-" + changed) instanceof Table card) {
+                card.setBackground(cardBackground(changed));
+            }
+        }
+    }
+
+    int recipient() {
+        return recipient;
+    }
+
+    /** For the developer switch: the first local bot's card, or null before one shows. */
+    @Nullable Actor probeBotCard() {
+        for (TeamGroup team : shown.teams()) {
+            for (PlayerRow player : team.players()) {
+                if (player.bot() && player.local()) {
+                    return playerList.findActor("lobby-player-" + player.id());
+                }
+            }
+        }
+        return null;
+    }
+
+    private Drawable cardBackground(int id) {
+        return kit.skin.getDrawable(id == recipient ? "token-card-selected" : "token-card");
     }
 
     /** Draws the cards again as the camo pictures their swatches wait for arrive. */
@@ -334,6 +374,7 @@ final class LobbyPlayersPanel {
     private Table card(PlayerRow player) {
         Table card = kit.card();
         card.setName("lobby-player-" + player.id());
+        card.setBackground(cardBackground(player.id()));
         card.top().left();
 
         Drawable camo = player.camo().isEmpty() ? null : actions.camo(player.camo());
@@ -372,22 +413,26 @@ final class LobbyPlayersPanel {
         side.add(more).size(size("control.sm"));
         card.add(side).top().padLeft(space("xs"));
 
+        // A table takes only its children's hits; the whole card takes clicks, not only its labels
+        card.setTouchable(Touchable.enabled);
         card.addListener(new ClickListener(Input.Buttons.RIGHT) {
             @Override
             public void clicked(InputEvent event, float x, float y) {
                 openMenuAt(player.id(), event.getStageX(), event.getStageY(), null);
             }
         });
-        if (player.local()) {
-            card.addListener(new ClickListener() {
-                @Override
-                public void clicked(InputEvent event, float x, float y) {
-                    if (getTapCount() == 2 && !inButton(event.getTarget())) {
-                        actions.playerSettings(player.id());
-                    }
+        card.addListener(new ClickListener() {
+            @Override
+            public void clicked(InputEvent event, float x, float y) {
+                if (inButton(event.getTarget()) || event.getTarget() == swatch) {
+                    return;
                 }
-            });
-        }
+                actions.pick(player.id());
+                if (player.local() && getTapCount() == 2) {
+                    actions.playerSettings(player.id());
+                }
+            }
+        });
         return card;
     }
 

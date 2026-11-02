@@ -485,6 +485,7 @@ class GpuChoiceRoutingTest {
             GpuBoardWindow window = present(gui, fixture.view, fixture.source);
             try {
                 GpuDialogRoutingTest.set(window, "presented", false);
+                GpuDialogRoutingTest.set(window, "closing", true);
                 assertEquals("Hunchback", onSwing(() -> {
                     try (MockedStatic<JOptionPane> swing = mockStatic(JOptionPane.class)) {
                         swing.when(() -> JOptionPane.showInputDialog(any(), any(), any(), anyInt(), any(), any(),

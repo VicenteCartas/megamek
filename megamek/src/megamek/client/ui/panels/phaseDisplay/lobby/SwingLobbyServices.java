@@ -25,6 +25,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitRecipients;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow;
 import megamek.client.ui.dialogs.abstractDialogs.AutoResolveChanceDialog;
 import megamek.client.ui.dialogs.abstractDialogs.AutoResolveProgressDialog;
 import megamek.client.ui.dialogs.buttonDialogs.SkillGenerationDialog;
@@ -132,8 +133,12 @@ public final class SwingLobbyServices {
      * opened in MegaMek's own run, no screen can show, and MegaMek ends.
      */
     public static void sceneFailed(ClientGUI clientGUI, Throwable failure, boolean exit) {
-        JOptionPane.showMessageDialog(null, Messages.getString("Lobby.failure", String.valueOf(failure)),
-              Messages.getString("Lobby.windowTitle"), JOptionPane.ERROR_MESSAGE);
+        String text = Messages.getString("Lobby.failure", String.valueOf(failure));
+        String title = Messages.getString("Lobby.windowTitle");
+        // The start screen that comes back says why, natively; without one, only Swing can
+        if (exit || !GpuStartWindow.notice(title, text)) {
+            JOptionPane.showMessageDialog(null, text, title, JOptionPane.ERROR_MESSAGE);
+        }
         if (exit) {
             System.exit(1);
         }

@@ -389,15 +389,26 @@ public final class UiKit {
     /**
      * Gives {@code actor} the stage's scroll focus while the pointer is over it, so the wheel reaches it without a
      * click, and gives the focus back when the pointer leaves it and its children, so the wheel then reaches what lies
-     * there, such as the view's camera.
+     * there, such as the view's camera. A pane inside it that can scroll and holds the pointer, such as a list in a
+     * dialog's scrolling body, keeps the wheel: the enter reaches it first, and the pane round it leaves it there.
      */
     public static void wheelWhileHovered(Actor actor) {
         actor.addListener(new InputListener() {
             @Override
             public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
-                if (actor.getStage() != null) {
-                    actor.getStage().setScrollFocus(actor);
+                Stage stage = actor.getStage();
+                if (stage == null) {
+                    return;
                 }
+                if (actor instanceof ScrollPane pane && !pane.isScrollX() && !pane.isScrollY()) {
+                    return;
+                }
+                Actor focus = stage.getScrollFocus();
+                if (focus != null && focus != actor && focus.isDescendantOf(actor)
+                      && event.getTarget().isDescendantOf(focus)) {
+                    return;
+                }
+                stage.setScrollFocus(actor);
             }
 
             @Override

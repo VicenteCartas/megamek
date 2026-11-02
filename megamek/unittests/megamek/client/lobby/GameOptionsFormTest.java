@@ -3,6 +3,7 @@ package megamek.client.lobby;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -227,5 +228,32 @@ class GameOptionsFormTest {
         GameOptionsForm viewOnly = new GameOptionsForm(options, Set.of(VICTORY), false);
         assertFalse(viewOnly.editable());
         assertFalse(viewOnly.editable(OptionsConstants.BASE_FRIENDLY_FIRE));
+    }
+
+    @Test
+    void lockedOptionsKeepTheirValueWhateverChangesThem() {
+        boolean fire = options.booleanOption(OptionsConstants.BASE_FRIENDLY_FIRE);
+        form.bool(OptionsConstants.INIT_INF_MOVE_EVEN, true);
+        form.lock(Set.of(OptionsConstants.BASE_FRIENDLY_FIRE, OptionsConstants.BASE_BRIDGE_CF,
+              OptionsConstants.INIT_INF_MOVE_EVEN));
+        assertTrue(form.locked(OptionsConstants.BASE_FRIENDLY_FIRE));
+        assertFalse(form.editable(OptionsConstants.BASE_FRIENDLY_FIRE));
+        assertFalse(form.editable(OptionsConstants.BASE_BRIDGE_CF));
+        assertTrue(form.editable(OptionsConstants.BASE_DUMPING_FROM_ROUND));
+
+        form.bool(OptionsConstants.BASE_FRIENDLY_FIRE, !fire);
+        form.text(OptionsConstants.BASE_BRIDGE_CF, "300");
+        // Individual initiative would clear the movement order option it locks out
+        form.bool(OptionsConstants.RPG_INDIVIDUAL_INITIATIVE, true);
+        assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE));
+        assertNotEquals("300", form.text(OptionsConstants.BASE_BRIDGE_CF));
+        assertTrue(form.bool(OptionsConstants.INIT_INF_MOVE_EVEN));
+
+        GameOptions loaded = form.copyOfOptions();
+        loaded.getOption(OptionsConstants.BASE_FRIENDLY_FIRE).setValue(!fire);
+        form.load(loaded);
+        form.defaults();
+        assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE));
+        assertTrue(form.bool(OptionsConstants.INIT_INF_MOVE_EVEN));
     }
 }

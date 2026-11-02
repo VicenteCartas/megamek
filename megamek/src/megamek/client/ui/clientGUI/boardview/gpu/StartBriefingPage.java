@@ -12,7 +12,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.Vector;
+import java.util.function.Consumer;
 import javax.swing.ImageIcon;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -22,14 +25,17 @@ import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Align;
+import jakarta.annotation.Nullable;
 import megamek.MMConstants;
+import megamek.client.lobby.CamoCatalog;
+import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.LobbyFiles;
+import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartScreen.Page;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.Role;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow.ScenarioRequest;
-import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
-import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
-import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSelect;
@@ -41,6 +47,7 @@ import megamek.common.game.Game;
 import megamek.common.game.IGame;
 import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.PlanetaryConditionsUsing;
+import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.IOption;
 import megamek.common.planetaryConditions.PlanetaryConditions;
@@ -276,29 +283,58 @@ final class StartBriefingPage {
         return button;
     }
 
-    /** Opens the camouflage chooser for side {@code index}, then shows what was chosen. */
+    /** Opens the camouflage chooser for side {@code index} over the screen, then shows what was chosen. */
     private void chooseCamo(int index) {
         Player player = briefing.game().getPlayersList().get(index);
         Briefing asked = briefing;
-        screen.window.onSwing(frame -> {
-            CamoChooserDialog dialog = new CamoChooserDialog(frame, player.getCamouflage());
-            try {
-                if (!dialog.showDialog().isConfirmed()) {
-                    return null;
-                }
-                player.setCamouflage(dialog.getSelectedItem());
-                return swatch(player);
-            } finally {
-                dialog.dispose();
+        LobbyCamoView.Source source = new LobbyCamoView.Source() {
+            @Override
+            public CamoCatalog catalog(boolean refresh) {
+                return GpuLobbyWindow.camoCatalog(refresh);
             }
-        }, chosen -> {
-            if (chosen == null || briefing != asked || screen.page != Page.BRIEFING) {
+
+            @Override
+            public @Nullable BufferedImage thumbnail(Camouflage camo, int size) {
+                return GpuLobbyWindow.camoPicture(camo, size);
+            }
+
+            @Override
+            public List<BufferedImage> preview(Camouflage camo) {
+                BufferedImage picture = GpuLobbyWindow.camoPicture(camo, GpuLobbyWindow.CAMO_PREVIEW);
+                return picture == null ? List.of() : List.of(picture);
+            }
+        };
+        // The directory is read on the Swing thread, as the lobby reads it
+        screen.window.onSwing(frame -> GpuLobbyWindow.camoCatalog(false), catalog -> {
+            if (!current(asked)) {
                 return;
             }
-            Texture texture = GpuStartScreen.texture(chosen, false);
-            swatchTextures.set(index, texture).dispose();
-            swatches.get(index).setDrawable(new TextureRegionDrawable(texture));
+            screen.dialogs.camo(source, catalog, new CamoChoice(player.getCamouflage(), false), false,
+                  camo -> screen.window.onSwing(frame -> {
+                      player.setCamouflage(camo);
+                      return swatch(player);
+                  }, chosen -> {
+                      if (!current(asked)) {
+                          return;
+                      }
+                      Texture texture = GpuStartScreen.texture(chosen, false);
+                      swatchTextures.set(index, texture).dispose();
+                      swatches.get(index).setDrawable(new TextureRegionDrawable(texture));
+                  }));
         });
+    }
+
+    /** GPU thread: whether the briefing that asked something still shows, so its answer still applies. */
+    private boolean current(Briefing asked) {
+        return !screen.disposed && briefing == asked && screen.page == Page.BRIEFING;
+    }
+
+    /** Runs {@code work} on the Swing thread, then {@code then} back on the GPU thread, for the native dialogs. */
+    private void edt(Runnable work, Runnable then) {
+        screen.window.onSwing(frame -> {
+            work.run();
+            return Boolean.TRUE;
+        }, done -> then.run());
     }
 
     void disposeSwatches() {
@@ -399,54 +435,78 @@ final class StartBriefingPage {
         return String.join(", ", parts);
     }
 
-    /** Opens the game options the scenario leaves open; confirming them sets them on the briefing's game. */
+    /**
+     * Opens the game options the scenario leaves open over the screen, the scenario's own locked; OK sets them on the
+     * briefing's game.
+     */
     private void changeRules() {
         Briefing asked = briefing;
         Game game = (Game) briefing.game();
-        Set<String> locked = briefing.scenario().lockedGameOptions();
-        screen.window.onSwing(frame -> {
-            GameOptionsDialog dialog = new GameOptionsDialog(frame, game.getOptions(), false);
-            try {
-                dialog.update(game.getOptions());
-                dialog.setEditable(true);
-                // The options the scenario calls its mission stay as written; the rest are the player's
-                dialog.lockOptions(locked);
-                return dialog.showDialog().isConfirmed() ? List.copyOf(dialog.getOptions()) : null;
-            } finally {
-                dialog.dispose();
+        GameOptionsForm form = new GameOptionsForm(game.getOptions(), Set.of(), true);
+        // The options the scenario calls its mission stay as written; the rest are the player's
+        form.lock(briefing.scenario().lockedGameOptions());
+        LobbyFiles files = screen.window.files();
+        screen.dialogs.gameOptions(form, new LobbyGameOptionsView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                StartBriefingPage.this.edt(work, then);
             }
-        }, chosen -> {
-            if (chosen == null || briefing != asked) {
-                return;
+
+            @Override
+            public void send(String password, Vector<IBasicOption> changed, Vector<IBasicOption> all) {
+                // Not a server's options: the briefing's game takes them, on the screen's thread that reads them
+                GpuHost.post(() -> {
+                    if (!current(asked)) {
+                        return;
+                    }
+                    for (IBasicOption option : changed) {
+                        IOption rule = game.getOptions().getOption(option.getName());
+                        if (rule != null) {
+                            rule.setValue(option.getValue());
+                        }
+                    }
+                    describeSettings();
+                });
             }
-            for (IBasicOption option : chosen) {
-                IOption rule = game.getOptions().getOption(option.getName());
-                if (rule != null) {
-                    rule.setValue(option.getValue());
-                }
+
+            @Override
+            public void save(Vector<IBasicOption> all, Runnable then) {
+                SwingUtilities.invokeLater(() -> files.saveGameOptions(all, () -> GpuHost.post(then)));
             }
-            describeSettings();
+
+            @Override
+            public void load(GameOptions into, Consumer<Boolean> then) {
+                SwingUtilities.invokeLater(() -> files.loadGameOptions(into,
+                      loaded -> GpuHost.post(() -> then.accept(loaded))));
+            }
+
+            @Override
+            public void grabBars() {
+                // No client's units to refit here, as in the Swing dialog the briefing opened without one
+            }
         });
     }
 
-    /** Opens the planetary conditions; confirming them sets them on the briefing's game. */
+    /** Opens the planetary conditions over the screen; OK sets them on the briefing's game. */
     private void changeConditions() {
         Briefing asked = briefing;
         PlanetaryConditionsUsing game = (PlanetaryConditionsUsing) briefing.game();
-        PlanetaryConditions current = game.getPlanetaryConditions();
-        screen.window.onSwing(frame -> {
-            PlanetaryConditionsDialog dialog = new PlanetaryConditionsDialog(frame, current);
-            try {
-                return dialog.showDialog() ? dialog.getConditions() : null;
-            } finally {
-                dialog.dispose();
+        PlanetaryConditionsForm form = new PlanetaryConditionsForm(game.getPlanetaryConditions());
+        screen.dialogs.conditions(form, new LobbyConditionsView.Host() {
+            @Override
+            public void send(PlanetaryConditions conditions) {
+                GpuHost.post(() -> {
+                    if (current(asked)) {
+                        game.setPlanetaryConditions(conditions);
+                        describeSettings();
+                    }
+                });
             }
-        }, chosen -> {
-            if (chosen == null || briefing != asked) {
-                return;
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                StartBriefingPage.this.edt(work, then);
             }
-            game.setPlanetaryConditions(chosen);
-            describeSettings();
         });
     }
 
@@ -517,6 +577,22 @@ final class StartBriefingPage {
     /** Whether the briefing has loaded and its Start button may be pressed. */
     boolean canStart() {
         return startButton != null && !startButton.isDisabled();
+    }
+
+    /**
+     * The developer switch's {@code briefing+rules}, {@code +conditions} or {@code +camo}: opens that dialog of the
+     * loaded briefing, when the scenario leaves it to the player.
+     */
+    void probeDialog(StartScreenProbe probe) {
+        Scenario scenario = briefing.scenario();
+        if (probe.has("rules") && !scenario.hasFixedGameOptions() && briefing.game() instanceof Game) {
+            changeRules();
+        } else if (probe.has("conditions") && !scenario.hasFixedPlanetaryConditions()
+              && briefing.game() instanceof PlanetaryConditionsUsing) {
+            changeConditions();
+        } else if (probe.has("camo") && !briefing.game().getPlayersList().isEmpty()) {
+            chooseCamo(0);
+        }
     }
 
     /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
