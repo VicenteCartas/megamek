@@ -431,7 +431,7 @@ final class GpuBoardTuning {
         terrainCacheDetails.addListener(new TextTooltip("GPU allocation is estimated from texture formats, mip levels,"
               + " build targets and page tables; driver overhead and other terrain resources are excluded. Occupied"
               + " slots include spare pages used during rebuilds. Progress counts current pages admitted for this view,"
-              + " not the whole board or elapsed rebuild time. A terrain batch uses the cache only when all its pages"
+              + " not the whole board or elapsed rebuild time. A terrain chunk uses the cache only when all its pages"
               + " are readable. Pages outside capacity or table coverage draw directly."
               + " Stale pages outside the view wait until needed again.", skin, "menu"));
         rows.add(terrainCacheDetails).colspan(3).growX().row();
@@ -1212,15 +1212,15 @@ final class GpuBoardTuning {
                     status.admitted(), status.requested(), status.level(), pages.prefetchPending()) : "";
         if (status.wallsOutside() > 0) { coverage += "\nWall pages outside table: " + status.wallsOutside(); }
         if (status.active()) {
-            coverage += String.format(Locale.ROOT, "\nBatches using cache: tops %d / %d · walls %d / %d",
-                  status.cachedTopBatches(), status.topBatches(), status.cachedWallBatches(), status.wallBatches());
+            coverage += String.format(Locale.ROOT, "\nChunks using cache: tops %d / %d · walls %d / %d",
+                  status.cachedTopChunks(), status.topChunks(), status.cachedWallChunks(), status.wallChunks());
         }
         terrainCacheDetails.setText(String.format(Locale.ROOT,
               "GPU allocation (est.): %.1f MiB\nPage storage: %.1f MiB · occupied: %.1f MiB"
-                    + "\nSlots: %d / %d · stale: %d · building: %d%s",
+                    + "\nSlots: %d / %d · stale: %d · building: %d\nCapacity: %s%s",
               status.allocatedBytes() / 1048576.0, pages.capacity() * status.pageBytes() / 1048576.0,
               pages.occupied() * status.pageBytes() / 1048576.0, pages.occupied(), pages.capacity(),
-              pages.stale(), pages.building(), coverage));
+              pages.stale(), pages.building(), status.capacityReason(), coverage));
     }
 
     /** The view switches the window when the user picks a display mode: true for Fullscreen. */

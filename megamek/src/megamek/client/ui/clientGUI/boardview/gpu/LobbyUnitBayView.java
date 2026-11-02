@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Future;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import com.badlogic.gdx.graphics.Texture;
@@ -70,8 +72,8 @@ final class LobbyUnitBayView {
         /** GPU thread: closes the bay, showing the forces again. */
         void close();
 
-        /** The board's terrain for the zone picture, as {@link LobbyMapThumbnail#bake} draws it; null for none. */
-        default @Nullable BufferedImage boardPicture() {
+        /** Starts the zone terrain image in the background; calls {@code ready} on the GPU thread. */
+        default @Nullable Future<?> boardPicture(Consumer<BufferedImage> ready) {
             return null;
         }
     }
@@ -95,6 +97,8 @@ final class LobbyUnitBayView {
     private final List<Runnable> refreshers = new ArrayList<>();
     private final List<Texture> textures = new ArrayList<>();
     private @Nullable LobbyZoneMap zoneMap;
+    private @Nullable Future<?> boardPicture;
+    private boolean disposed;
     private final Map<Integer, Image> portraits = new HashMap<>();
     private final Map<String, Actor> named = new HashMap<>();
     private UiTabs tabs;
@@ -177,6 +181,11 @@ final class LobbyUnitBayView {
         body.add(footer()).padTop(space("lg")).row();
         showPage();
         refresh();
+        if (zoneMap != null) {
+            boardPicture = host.boardPicture(image -> {
+                if (!disposed) { zoneMap.picture(image); }
+            });
+        }
     }
 
     private static @Nullable BufferedImage slot(List<BufferedImage> pictures, int slot) {
@@ -794,7 +803,7 @@ final class LobbyUnitBayView {
             picture.top().left();
             picture.add(kit.typeLabel(Messages.getString("Lobby.bay.mapZone"), "small", "text.secondary")).left()
                   .row();
-            zoneMap = new LobbyZoneMap(kit, host.boardPicture(), board.getWidth(), board.getHeight(),
+            zoneMap = new LobbyZoneMap(kit, null, board.getWidth(), board.getHeight(),
                   size("control.lg") * ZONE_MAP_SIDE, form::zone, form::zoneHexes, id -> {
                       form.zone(id);
                       refresh();
@@ -1200,6 +1209,8 @@ final class LobbyUnitBayView {
 
     /** GPU thread, once the bay has left the centre: gives the pictures back. */
     void dispose() {
+        disposed = true;
+        if (boardPicture != null) { boardPicture.cancel(true); }
         textures.forEach(Texture::dispose);
         textures.clear();
         if (zoneMap != null) {

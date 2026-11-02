@@ -38,6 +38,10 @@ public final class TilesetScenery {
     private static volatile TilesetMatcher tileset;
     /** The structure models the tileset names that do not exist, each reported once. */
     private static final Set<String> MISSING = ConcurrentHashMap.newKeySet();
+    /** File decisions belong to one data root and asset-reload generation, shared by capture and model readers. */
+    private record BuildingFile(File custom, boolean customExists, boolean legacyExists) { }
+    private record BuildingFiles(File root, Map<String, BuildingFile> files) { }
+    private static volatile BuildingFiles buildingFiles;
 
     /** The terrains whose tileset art is scenery: a layer matching one of them is classified ({@link #resolve}). */
     public static final List<Integer> SCENERY_TERRAINS = List.of(Terrains.FLUFF, Terrains.GROUND_FLUFF,
@@ -128,6 +132,9 @@ public final class TilesetScenery {
     /** Rereads the 3D board's tileset after an artist edits it (the 3D views' asset reload); returns the new one. */
     public static synchronized TilesetMatcher reload() {
         tileset = load();
+        buildingFiles = null;
+        VARIANTS.clear();
+        MISSING.clear();
         return tileset;
     }
 
@@ -149,16 +156,39 @@ public final class TilesetScenery {
      * pieces follow the hex's exits.
      */
     public static File customBuildingFile(String asset) {
+        return buildingFile(asset).custom();
+    }
+
+    private static BuildingFile buildingFile(String asset) {
+        File root = Configuration.dataDir();
+        BuildingFiles files = buildingFiles;
+        if (files == null || !files.root().equals(root)) {
+            synchronized (TilesetScenery.class) {
+                files = buildingFiles;
+                if (files == null || !files.root().equals(root)) {
+                    buildingFiles = files = new BuildingFiles(root, new ConcurrentHashMap<>());
+                }
+            }
+        }
+        File directory = files.root();
+        return files.files().computeIfAbsent(asset, key -> buildingFile(directory, key));
+    }
+
+    private static BuildingFile buildingFile(File root, String asset) {
         String relative = asset.substring("buildings/".length()).replaceFirst("@.*$", "");
         if (relative.startsWith("saxarba/")) { relative = relative.substring("saxarba/".length()); }
-        File exact = new File(Configuration.dataDir(), "models/buildings/" + relative + ".glb");
-        File design = new File(Configuration.dataDir(), "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
+        File exact = new File(root, "models/buildings/" + relative + ".glb");
+        File design = new File(root, "models/buildings/" + relative.replaceFirst("_[0-9]{2}$", "") + ".glb");
         // A kit generated from its JSON spec stands for both its footprints (the asset's -square names the Square one),
         // all its variants (@ and a variant's name, kitVariant) and, as the design does, every exit value.
-        File generated = new File(Configuration.dataDir(), "models/buildings/"
+        File generated = new File(root, "models/buildings/"
               + relative.replaceFirst("-square$", "").replaceFirst("_[0-9]{2}$", "") + ".json");
-        if (!exact.isFile() && !design.isFile() && generated.isFile()) { return generated; }
-        return exact.isFile() || !design.isFile() ? exact : design;
+        boolean exists = exact.isFile();
+        File custom = exact;
+        if (!exists && !design.equals(exact) && design.isFile()) { custom = design; exists = true; }
+        if (!exists && generated.isFile()) { custom = generated; exists = true; }
+        boolean legacy = new File(root, "models/board/" + asset + ".glb").isFile();
+        return new BuildingFile(custom, exists, legacy);
     }
 
     /** Whether the asset's kit is generated from a JSON spec, which holds both footprints ({@link #customBuildingFile}). */
@@ -264,7 +294,7 @@ public final class TilesetScenery {
             var variant = BoardEditorBlueprint.get().variant(design.variant());
             String asset = design.asset() != null ? design.asset() : variant == null ? null : variant.model(hex);
             if (asset != null && !asset.isBlank() && (BoardGenerator.exists(asset, terrain)
-                  || asset.startsWith("buildings/") && customBuildingFile(asset).isFile())) { models.put(terrain, asset); }
+                  || asset.startsWith("buildings/") && buildingFile(asset).customExists())) { models.put(terrain, asset); }
         }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
@@ -272,8 +302,8 @@ public final class TilesetScenery {
             for (TilesetMatcher.Pick image : images) {
                 String model = image == null ? "" : image.key();
                 if (model.startsWith("buildings/")) {
-                    boolean glb = new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile();
-                    boolean custom = customBuildingFile(model).isFile();
+                    BuildingFile file = buildingFile(model);
+                    boolean glb = file.legacyExists(), custom = file.customExists();
                     // A generated asset counts only for the structure its generator builds (BoardGenerator).
                     var generator = BoardGenerator.of(model);
                     // An entry that names only the key has no art to fall back to.

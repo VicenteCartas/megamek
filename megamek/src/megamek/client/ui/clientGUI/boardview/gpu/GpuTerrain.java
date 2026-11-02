@@ -21,6 +21,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -92,6 +93,8 @@ final class GpuTerrain implements Disposable {
     /** Whether {@link #assets} belong to another terrain ({@link #GpuTerrain(GpuTerrain)}). */
     private final boolean borrowedAssets;
     private final BoardSurface.Cache pickingSurfaces = new BoardSurface.Cache();
+    /** Root support stays at canonical detail, so zooming never rerolls a rigid colony's collision retries. */
+    private final BoardSurface.Cache plantSurfaces = new BoardSurface.Cache();
     private final GpuRoads.Masks roadMaskData = new GpuRoads.Masks();
     private final boolean liquidShaderAnimation;
     private final boolean proceduralWater;
@@ -1718,7 +1721,7 @@ final class GpuTerrain implements Disposable {
             }
             // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.
             // They draw as opaque (unblended, sorted with the solid trees), so they too hide the ground beneath first.
-            if (material.id.equals("impostor")) {
+            if (material.id.equals("impostor") && !material.has(Impostor.TYPE)) {
                 BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
                 if (!material.has(FloatAttribute.AlphaTest)) {
                     material.set(FloatAttribute.createAlphaTest(.5f));
@@ -2824,8 +2827,8 @@ final class GpuTerrain implements Disposable {
             }
             familySession = familyPrograms.pending() > 0;
         }
-        // The ground material cache's first view builds behind the loading stage (ready), once the board and every
-        // program are in.
+        // Once geometry and programs are ready, give the material cache a bounded head start. Interactive frames
+        // continue baking it; complete direct terrain can already display the map.
         if (requested == null && rebuild == null && materialsReady()) {
             // Its fill reads the fields' biomes (cachedField).
             biomes.update(coverScene);
@@ -3134,7 +3137,7 @@ final class GpuTerrain implements Disposable {
         // A level edit that moves the chunk's wall charts (GpuMaterialCache.Charts) rebuilds every hex: a reused one
         // would keep its walls' old places.
         if (rebuilding && source != null && source.lod == buildLod && (onlyPaint
-              || settings.call(() -> new GpuMaterialCache.Charts(scene, x, y).sameLayout(source.charts)))) {
+              || settings.call(() -> new GpuMaterialCache.Charts(scene, x, y, bottom).sameLayout(source.charts)))) {
             for (Coords coords : source.tileMeshes.keySet()) {
                 if (atlasTileChanges.contains(coords)) { continue; }
                 if (!rebuild.plan.changedTiles().contains(coords)) { reuse.add(coords); }
@@ -3328,6 +3331,11 @@ final class GpuTerrain implements Disposable {
         }
         installedColumns = rebuild.request.columns();
         installedTessellation = rebuild.request.tessellated();
+        // The startup camera no longer builds hidden full-detail chunks just to discover the grass program.
+        if (!installedColumns && (editable || scene.tiles().stream().anyMatch(tile ->
+              BoardBiome.kind(tile) == BoardScene.Biome.FIELD || GpuGroundCover.grows(scene, tile)))) {
+            GpuGroundCover.prepareMaterials(this::prepareTerrainMaterial);
+        }
         floor = plan.floor();
         coast = plan.coast();
         currents = plan.currents();
@@ -3343,6 +3351,7 @@ final class GpuTerrain implements Disposable {
         decals.publish();
         terrainBatch.clear();
         pickingSurfaces.clear();
+        plantSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
         // The ground material cache refills what a build changed before the new relief draws, the whole board after a
         // load, which also takes the view's storage.
@@ -3610,6 +3619,7 @@ final class GpuTerrain implements Disposable {
         }
         terrainBatch.clear();
         pickingSurfaces.clear();
+        plantSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
         // A refined chunk casts its terrain at finer detail. The cached shadow serves until refinement settles
         // (GpuTerrainShadows.render): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
@@ -3746,7 +3756,7 @@ final class GpuTerrain implements Disposable {
      * What a road's paint mask depends on (GpuRoads.Masks#mask): its hex, the tiles its road and paint read
      * ({@link #roadInputs}), the graphics and its place among the hex's patches.
      */
-    private record RoadMaskKey(Coords source, List<BoardScene.Tile> inputs, boolean columns, int patch) { }
+    private record RoadMaskKey(Coords source, List<BoardScene.Tile> inputs, boolean columns, int patch, int density) { }
 
     /**
      * The tiles a road's paint can read: its own hex's and those within three hexes, which take in its neighbours' roads,
@@ -3793,9 +3803,11 @@ final class GpuTerrain implements Disposable {
                     check.run();
                     road.clipPaint(patch.shape());
                     var triangles = GpuRoads.drape(source, surface, patch);
-                    var key = new RoadMaskKey(source.coords(), inputs, columns, index++);
+                    // Distant wear fields need fewer samples; paint and closer levels retain their original density.
+                    int maskDensity = columns ? 4 : GpuRoads.maskDensity(patch, lod);
+                    var key = new RoadMaskKey(source.coords(), inputs, columns, index++, maskDensity);
                     if (!triangles.isEmpty() && !patch.shape().isEmpty()) {
-                        var mask = masks.mask(key, () -> GpuRoads.mask(road, patch), check);
+                        var mask = masks.mask(key, () -> GpuRoads.mask(road, patch, maskDensity), check);
                         float scale = BoardGeometry.hexScale();
                         mask = new GpuRoads.MaskData(mask.pixels(),
                               mask.x() + (BoardGeometry.centerX(source.coords()) - BoardGeometry.centerX(tile.coords())) / scale,
@@ -4310,6 +4322,9 @@ final class GpuTerrain implements Disposable {
                   || f.authoredPlacement() || f.decoration() != null)).toList();
         }
         List<Prop> supports = new ArrayList<>();
+        List<BoardPlantFootprint> colonies = new ArrayList<>();
+        var colonyShapes = new HashMap<BoardPlantFootprint.Key, BoardPlantFootprint>();
+        var colonyWays = features.stream().anyMatch(f -> BoardFeatures.solid(f.asset())) ? BoardRoad.nearbyWays(scene, tile) : List.<BoardRoad>of();
         for (BoardScene.Feature feature : features) {
             if (build.preview != null && !routeFeature(tile, feature)) { continue; }
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
@@ -4416,36 +4431,70 @@ final class GpuTerrain implements Disposable {
                     }
                 }
             }
-            BoundingBox bounds = instance.calculateBoundingBox(new BoundingBox());
+            // Ordinary placements copy the same unchanged model nodes. Scan its vertices once per build and copy
+            // the local box before transforming it; assembled buildings retain their instance-specific node bounds.
+            BoundingBox bounds = building != null ? instance.calculateBoundingBox(new BoundingBox())
+                  : new BoundingBox(build.modelBounds.computeIfAbsent(model,
+                        unused -> instance.calculateBoundingBox(new BoundingBox())));
             boolean coral = feature.asset().startsWith("mars/");
             // Coral colonies have wide, uneven mineral roots. Embed that root layer while preserving cover height.
             float rootInset = coral ? bounds.getDepth() * .06f : 0;
             float coralScale = coral ? feature.height() * BoardGeometry.level() / (bounds.getDepth() - rootInset) : 0;
             float plantingRadius = coral ? build.coralRootRadii.computeIfAbsent(model,
                   key -> coralRootRadius(key, bounds.min.z + rootInset)) * coralScale : BoardRelief.metres(.8f);
-            float px = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
-            float py = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
-            if (feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement() || fungusScatter) {
-                // A tree stands on its hex's own ground, never over a receding rim or a transition's slope.
-                // Roadside cover keeps its captured route clearance instead of being pulled toward the carriageway.
-                float[] spot = surface.relief.settle(px, py,
-                      coral && tile.road() != BoardRoad.Kind.NONE ? BoardRelief.metres(.8f) : plantingRadius);
-                px = spot[0];
-                py = spot[1];
-            }
-            float base = ground.height(px, py);
-            if (coral) {
-                // Sample the drawn terrain around the roots; a high point must not suspend the rest of the base.
-                for (int sample = 0; sample < 8; sample++) {
-                    double angle = sample * Math.PI / 4;
-                    float x = px + plantingRadius * (float) Math.cos(angle);
-                    float y = py + plantingRadius * (float) Math.sin(angle);
-                    var receiving = BoardGeometry.tile(scene, x, y);
-                    var support = receiving == null ? surface : surfaces.getOrDefault(receiving.coords(), surface);
-                    base = Math.min(base, support.height(x, y));
+            boolean packedColony = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()
+                  && feature.decoration() == null && BoardFeatures.solid(feature.asset());
+            var colony = packedColony ? BoardPlantFootprint.of(feature, colonyShapes) : null;
+            boolean naturalPlant = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement() || fungusScatter;
+            if (naturalPlant) { plantSurfaces.columns(build.chunk.columns); }
+            // Plant anchors follow terrain edits, never the camera-dependent tessellation of a rendered chunk.
+            var plantingSurface = naturalPlant ? plantSurfaces.get(scene, tile) : surface;
+            float unit = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
+            float px = 0, py = 0, base = 0;
+            boolean planted = false;
+            for (int attempt = 0; attempt < (packedColony ? 129 : 1); attempt++) {
+                px = cx + feature.x() * unit;
+                py = cy + feature.y() * unit;
+                if (attempt > 0) {
+                    float reach = 32 * unit * (float) Math.sqrt(attempt / 128f);
+                    double angle = Math.toRadians(feature.rotation()) + attempt * 2.399963;
+                    px += reach * (float) Math.cos(angle); py += reach * (float) Math.sin(angle);
                 }
-                base -= (bounds.min.z + rootInset) * coralScale;
+                if (naturalPlant) {
+                    // A tree stands on its hex's own ground, never over a receding rim or a transition's slope.
+                    // Roadside cover keeps its captured route clearance instead of being pulled toward the carriageway.
+                    float[] spot = plantingSurface.relief.settle(px, py,
+                          coral && tile.road() != BoardRoad.Kind.NONE ? BoardRelief.metres(.8f) : plantingRadius);
+                    px = spot[0]; py = spot[1];
+                }
+                base = naturalPlant ? plantingSurface.height(px, py) : ground.height(px, py);
+                if (coral) {
+                    // Sample the drawn terrain around the roots; a high point must not suspend the rest of the base.
+                    for (int sample = 0; sample < 8; sample++) {
+                        double angle = sample * Math.PI / 4;
+                        float x = px + plantingRadius * (float) Math.cos(angle);
+                        float y = py + plantingRadius * (float) Math.sin(angle);
+                        var receiving = BoardGeometry.tile(scene, x, y);
+                        var support = receiving == null ? plantingSurface : naturalPlant ? plantSurfaces.get(scene, receiving)
+                              : surfaces.getOrDefault(receiving.coords(), surface);
+                        base = Math.min(base, support.height(x, y));
+                    }
+                    base -= (bounds.min.z + rootInset) * coralScale;
+                }
+                if (packedColony) {
+                    // Cliff support can pull separately packed anchors together. Recheck the actual drawn XYZ,
+                    // trying nearby supported positions without changing species, dimensions or earlier members.
+                    float z = base + (coral ? (bounds.min.z + rootInset) * coralScale : 0)
+                          - tile.elevation() * BoardGeometry.level();
+                    var body = colony.at((px - cx) / unit, (py - cy) / unit, z / unit);
+                    if (!body.inside() || BoardRoad.distance(colonyWays, px, py) < BoardRoad.SHOULDER + 2
+                          || colonies.stream().anyMatch(body::overlaps)) { continue; }
+                    colonies.add(body);
+                }
+                planted = true;
+                break;
             }
+            if (!planted) { continue; }
             if (BoardRail.route(feature)) {
                 instance.transform.setToTranslation(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()),
                             BoardRail.level(tile, feature) * BoardGeometry.level())
@@ -4498,7 +4547,8 @@ final class GpuTerrain implements Disposable {
                             ? feature.height() * BoardGeometry.level() / sourceHeight
                       : BoardGeometry.level() / GpuBuilding.LEVEL_HEIGHT;
                 // Authored colonies and understory retain their proportions when fitted to the foliage height.
-                float horizontalScale = fungus || coral
+                float horizontalScale = feature.kind() == BoardScene.FeatureKind.TREE
+                      ? BoardTreeCoverage.scale(feature, sourceHeight) * BoardGeometry.hexScale() : fungus || coral
                       || feature.asset().startsWith("vegetation/foliage-") ? verticalScale
                       : feature.scale() * BoardGeometry.hexScale();
                 instance.transform.setToTranslation(px, py,
@@ -4886,6 +4936,7 @@ final class GpuTerrain implements Disposable {
         Material scatterMaterial;
         // Derived once per model while preparing a chunk; no extra model data survives construction.
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
+        final Map<Model, BoundingBox> modelBounds = new IdentityHashMap<>();
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();
         List<MeshBatch> meshes;
@@ -4907,7 +4958,7 @@ final class GpuTerrain implements Disposable {
             chunk.lod = lod;
             chunk.columns = columns;
             chunk.tessellated = tessellated;
-            chunk.charts = new GpuMaterialCache.Charts(scene, x, y);
+            chunk.charts = new GpuMaterialCache.Charts(scene, x, y, floor);
             chunk.charts.keep(source == null ? null : source.charts, prepared.reused());
             chunk.paintOnlyUpdate = prepared.paintOnly();
             if (chunk.paintOnlyUpdate) { progress.begin("paint", width * height); return; }
@@ -5184,9 +5235,8 @@ final class GpuTerrain implements Disposable {
                     }
                     var glow = GpuFungus.light(scene.height(), prop.coords(), prop.treeAsset, prop.bounds());
                     if (glow != null) { chunk.fungalLights.add(glow); }
-                    GpuFungus.Emitter emitter = GpuFungus.emitter(prop.treeAsset, prop.bounds());
-                    if (emitter != null) {
-                        chunk.spores.add(emitter);
+                    chunk.spores.addAll(GpuFungus.emitters(prop.treeAsset, prop.instance().transform));
+                    if (BoardFungus.COVER.contains(prop.treeAsset)) {
                         fungalHexes.computeIfAbsent(prop.coords(), at -> new BoundingBox().inf()).ext(prop.bounds());
                     }
                 } else {
@@ -5661,7 +5711,8 @@ final class GpuTerrain implements Disposable {
      */
     private static void chartedFaces(Supplier<MeshPartBuilder> triangles, BoardSurface surface,
           List<BoardSurface.Face> faces, List<float[]> places, float shore) {
-        record Corner(Vector3 point, float x, float y) { }
+        // Cut sides can meet at the same position with distinct face normals or fixed texture frames.
+        record Corner(Vector3 point, BoardRelief.Shade shade, float x, float y) { }
         Map<Corner, Short> indices = new HashMap<>();
         MeshPartBuilder previous = null;
         short[] corners = new short[3];
@@ -5678,8 +5729,9 @@ final class GpuTerrain implements Disposable {
             for (int k = 0; k < 3; k++) {
                 Vector3 p = points[k];
                 float x = place[2 * k], y = place[2 * k + 1];
-                corners[k] = indices.computeIfAbsent(new Corner(p, x, y),
-                      key -> chartedVertex(mesh, sculptVertex(p, surface.relief.shade(p), shore, surface), x, y));
+                var shade = surface.relief.shade(p);
+                corners[k] = indices.computeIfAbsent(new Corner(p, shade, x, y),
+                      key -> chartedVertex(mesh, sculptVertex(p, shade, shore, surface), x, y));
             }
             mesh.triangle(corners[0], corners[1], corners[2]);
         }
@@ -7997,10 +8049,10 @@ final class GpuTerrain implements Disposable {
         for (int chunkIndex = 0; chunkIndex < chunks.size(); chunkIndex++) {
             Chunk chunk = chunks.get(chunkIndex);
             if (chunk.topRenderables.isEmpty()) { continue; }
-            materialCache.chunk(terrainPage(chunkIndex), chunk.topBounds,
+            materialCache.chunk(chunkIndex, chunk.topBounds,
                   camera.frustum.boundsInFrustum(chunk.topBounds), chunk.cacheSince);
             if (chunk.wallBounds.isValid()) {
-                materialCache.walls(terrainPage(chunkIndex), chunk.charts,
+                materialCache.walls(chunkIndex, chunk.charts,
                       camera.frustum.boundsInFrustum(chunk.wallWorld), chunk.cacheSince);
             }
         }
@@ -8074,7 +8126,7 @@ final class GpuTerrain implements Disposable {
             // The 3D relief, or the Classic columns, in the chunk's opaque layer.
             int page = terrainPage(chunkIndex);
             terrainPages.add(chunk.terrainRenderables, page, visible && hidden.ground() == null);
-            topPages.add(chunk.topRenderables, page, visible && hidden.ground() == null);
+            topPages.add(chunk.topRenderables, page, chunkIndex, visible && hidden.ground() == null);
             if (visible && hidden.ground() != null) { renderRetained(hidden.ground(), batch, environment); }
             int propPage = propPage(chunkIndex);
             // Hover/occupancy changes only this chunk's presentation, not its static page membership.
@@ -8107,7 +8159,7 @@ final class GpuTerrain implements Disposable {
         long pageDeadline = System.nanoTime() + GpuMeshPage.BUILD_NANOS;
         propBatch.render(batch, environment, pageDeadline);
         terrainPages.render(batch, environment, pageDeadline);
-        // A page's tops take their cached twins once the cache has filled every page under them.
+        // Each chunk's covered tops/walls take their cached twins; equal adjacent ranges still share one draw.
         topPages.render(batch, environment, pageDeadline, materialCache::material);
         // The depth pre-pass: hidden colour fragments then fail the depth test before they shade. Not in the Tactical View
         // or on the Classic columns. The gather, the draw order and both flushes stay as they were.
@@ -8718,9 +8770,14 @@ final class GpuTerrain implements Disposable {
         kindScenes.clear();
         meshGeneration++;
         detailWorker.shutdownNow();
-        // Workers borrow chunk/asset data. Join them before freeing it; a slow cancellation or an interrupted
-        // closing thread must not abandon GL cleanup. ExecutorService.close also restores the caller's interrupt.
-        detailWorker.close();
+        // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after
+        // shutdownNow; wait for actual termination before freeing those resources, even if closing is interrupted.
+        boolean interrupted = false;
+        while (!detailWorker.isTerminated()) {
+            try { detailWorker.awaitTermination(1, TimeUnit.DAYS); }
+            catch (InterruptedException ignored) { interrupted = true; }
+        }
+        if (interrupted) { Thread.currentThread().interrupt(); }
         familyPrograms.dispose();
         if (terrainMaterialPreparation != null) { terrainMaterialPreparation.dispose(); }
         terrainMaterialSamples.forEach(sample -> sample.meshPart.mesh.dispose());
@@ -8754,6 +8811,7 @@ final class GpuTerrain implements Disposable {
         waterPages.dispose();
         trees.dispose();
         pickingSurfaces.clear();
+        plantSurfaces.clear();
         chunks.forEach(Chunk::dispose);
         chunks.clear();
         ground.dispose();

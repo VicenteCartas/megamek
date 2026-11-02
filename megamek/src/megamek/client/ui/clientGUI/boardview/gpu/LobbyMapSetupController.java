@@ -300,10 +300,9 @@ final class LobbyMapSetupController {
         if (!boardFile.exists()) {
             return Board.createEmptyBoard(width, height);
         }
-        Board board = new Board(16, 17);
         // Continues on rules errors, as the Swing dialog's pictures do
         try (InputStream in = new FileInputStream(boardFile)) {
-            board.load(in, null, true);
+            Board board = BoardFile.readTerrain(in);
             BoardUtilities.flip(board, rotated, rotated);
             return board;
         } catch (IOException failure) {

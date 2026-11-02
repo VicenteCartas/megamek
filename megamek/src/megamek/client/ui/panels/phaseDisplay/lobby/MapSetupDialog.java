@@ -1187,7 +1187,7 @@ public final class MapSetupDialog extends JDialog implements IMapSettingsObserve
         }
         Board board = lobbyBoard(clientGUI);
         PREVIEWED.put(clientGUI, board);
-        GpuBoardWindow.openPreview(clientGUI.getFrame(), board);
+        GpuBoardWindow.openPreview(clientGUI.getFrame(), board, clientGUI.getClient().getGame().getPlanetaryConditions());
     }
 
     /**
@@ -1195,6 +1195,8 @@ public final class MapSetupDialog extends JDialog implements IMapSettingsObserve
      * shows the new board, as the map setup does when it is open.
      */
     public static void refreshClosedPreview(ClientGUI clientGUI) {
+        // Conditions are independent of the map setup, including while its dialog is open.
+        GpuBoardWindow.updatePreviewConditions(clientGUI.getFrame(), clientGUI.getClient().getGame().getPlanetaryConditions());
         Board shown = PREVIEWED.get(clientGUI);
         if ((shown == null) || OPEN.containsKey(clientGUI)) {
             return;
@@ -1205,7 +1207,9 @@ public final class MapSetupDialog extends JDialog implements IMapSettingsObserve
         }
         Board board = lobbyBoard(clientGUI);
         PREVIEWED.put(clientGUI, board);
-        GpuBoardWindow.updatePreview(clientGUI.getFrame(), board);
+        if (board != shown) {
+            GpuBoardWindow.updatePreview(clientGUI.getFrame(), board);
+        }
     }
 
     /** The server-built battlefield, or else a roll of the map settings. */
@@ -1234,7 +1238,7 @@ public final class MapSetupDialog extends JDialog implements IMapSettingsObserve
         if (previewBV == null) {
             boardPreviewGame.setBoard(getBoardForPreview());
         }
-        GpuBoardWindow.openPreview(clientgui.getFrame(), boardPreviewGame.getBoard());
+        GpuBoardWindow.openPreview(clientgui.getFrame(), boardPreviewGame.getBoard(), game().getPlanetaryConditions());
     }
 
     /** Changed map settings or a new server board: a new roll in each open preview, opening none. */

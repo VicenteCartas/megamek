@@ -18,6 +18,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.lobby.MapSetupForm;
@@ -26,6 +27,7 @@ import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RandomMapForm.Feature;
 import megamek.client.lobby.RandomMapForm.Level;
 import megamek.client.lobby.RandomMapForm.Param;
+import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
@@ -33,6 +35,8 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.board.BoardDimensions;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MapSetup;
+import megamek.common.planetaryConditions.Light;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -43,6 +47,32 @@ class LobbyMapSetupSmokeTest {
 
     private final List<String> calls = new ArrayList<>();
     private MapSettings server;
+
+    @Test
+    void conditionsRefreshReachesAnOpenInspectionEvenWhenTheMapSetupIsUnchanged() {
+        UiTestStage.run(ui -> {
+            Fixture fixture = new Fixture(ui);
+            try {
+                click(ui, fixture.body.findActor("map-board-inspect-1"));
+                LobbyBoardPreview preview = fixture.body.findActor("map-inspection-panel");
+                var picture = fixture.view.shown();
+                var conditions = new PlanetaryConditions();
+                conditions.setLight(Light.FULL_MOON);
+                var atmosphere = BoardAtmosphere.fromScenario(conditions, false, .4);
+                fixture.view.show(picture, fixture.form.themes(-1), atmosphere);
+                var field = LobbyBoardPreview.class.getDeclaredField("conditions");
+                field.setAccessible(true);
+                assertEquals(atmosphere, field.get(preview));
+                assertTrue(preview.isVisible());
+                assertSame(picture, fixture.view.shown());
+                assertEquals(1, fixture.inspections.size(), "conditions must not reload the inspected board");
+                assertEquals(List.of(0), fixture.view.pickedSlots());
+            } finally {
+                fixture.view.dispose();
+                fixture.body.remove();
+            }
+        });
+    }
 
     @Test
     void unchangedRefreshesKeepDropdownsOpenAndChoicesStillReachTheForm() {
@@ -86,7 +116,7 @@ class LobbyMapSetupSmokeTest {
             click(ui, theme);
             List<MapSetupForm.Theme> themes = new ArrayList<>(fixture.form.themes(-1));
             themes.add(new MapSetupForm.Theme("test-theme", "Test theme"));
-            fixture.view.show(fixture.form.picture(), themes);
+            fixture.view.show(fixture.form.picture(), themes, BoardAtmosphere.DEFAULTS);
             ui.draw();
             assertFalse(theme.isOpen(), "changed options dismiss the obsolete list");
 
@@ -125,7 +155,7 @@ class LobbyMapSetupSmokeTest {
             assertEquals(6, fixture.view.shown().slots().size());
             int listeners = body.findActor("map-generate").getListeners().size;
             for (int refresh = 0; refresh < 20; refresh++) {
-                fixture.view.show(fixture.form.picture(), fixture.form.themes(-1));
+                fixture.view.show(fixture.form.picture(), fixture.form.themes(-1), BoardAtmosphere.DEFAULTS);
             }
             assertEquals(listeners, body.findActor("map-generate").getListeners().size,
                   "refreshing the setup reuses Generate's tooltip rather than stacking new ones");
@@ -370,6 +400,60 @@ class LobbyMapSetupSmokeTest {
     }
 
     @Test
+    void doubleClicksSwitchInspectionUntilReturningToTheLayoutInBothBrowserViews() {
+        UiTestStage.run(ui -> {
+            Fixture fixture = new Fixture(ui);
+            try {
+                click(ui, fixture.body.findActor("map-slot-1"));
+                for (int mode = 0; mode < 2; mode++) {
+                    List<String> placed = List.copyOf(fixture.form.settings().getBoardsSelectedVector());
+                    click(ui, fixture.body.findActor("map-board-inspect-1"));
+                    Consumer<BoardScene> previous = fixture.inspections.getLast();
+                    calls.clear();
+                    Entry next = fixture.view.shown().boards().get(2);
+                    click(ui, fixture.body.findActor("map-board-2"));
+                    click(ui, fixture.body.findActor("map-board-2"));
+                    assertEquals(List.of("inspect " + next.name()),
+                          calls.stream().filter(call -> !call.startsWith("preview ")).toList());
+                    assertEquals(placed, fixture.form.settings().getBoardsSelectedVector(),
+                          "double-clicking while inspecting must never assign a board");
+                    assertEquals(List.of(1), fixture.view.pickedSlots());
+                    assertFalse(fixture.body.findActor("map-layout-panel").isVisible());
+                    GpuLoadingPanel loading = fixture.body.findActor("board-loading-panel");
+                    assertTrue(loading.isVisible());
+                    previous.accept(null);
+                    assertEquals(next.label(), fixture.body.<Label>findActor("map-inspection-title").getText().toString());
+                    assertEquals(Messages.getString("GpuBoard.previewLoading"),
+                          loading.<Label>findActor("board-loading-message").getText().toString(),
+                          "a previous inspection's late result must not replace the current loading screen");
+
+                    calls.clear();
+                    click(ui, fixture.body.findActor("map-board-0"));
+                    click(ui, fixture.body.findActor("map-board-0"));
+                    assertTrue(calls.stream().allMatch(call -> call.startsWith("preview ")),
+                          "Generated has no saved board to inspect and must not be assigned by a double-click here");
+                    assertEquals(placed, fixture.form.settings().getBoardsSelectedVector());
+
+                    fixture.view.pick(next, false);
+                    click(ui, fixture.body.findActor("map-place"));
+                    assertEquals(next.name(), fixture.form.settings().getBoardsSelectedVector().get(1),
+                          "Place still explicitly assigns a board while inspecting");
+                    click(ui, fixture.body.findActor("map-inspection-close"));
+                    Entry assigned = fixture.view.shown().boards().get(3);
+                    click(ui, fixture.body.findActor("map-board-3"));
+                    click(ui, fixture.body.findActor("map-board-3"));
+                    assertEquals(assigned.name(), fixture.form.settings().getBoardsSelectedVector().get(1),
+                          "returning to the layout restores double-click placement");
+                    click(ui, fixture.body.findActor("map-board-view"));
+                }
+            } finally {
+                fixture.view.dispose();
+                fixture.body.remove();
+            }
+        });
+    }
+
+    @Test
     void scrollingToTheEndRequestsOnlyTheVisibleThumbnailsInBothViews() {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
@@ -430,7 +514,7 @@ class LobbyMapSetupSmokeTest {
         }
 
         private void show() {
-            view.show(form.picture(), form.themes(-1));
+            view.show(form.picture(), form.themes(-1), BoardAtmosphere.DEFAULTS);
             body.validate();
         }
 

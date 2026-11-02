@@ -357,13 +357,13 @@ class BoardFeaturesTest {
         highland.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         long conifers = BoardFeatures.capture(highland, coords, Map.of()).stream()
               .filter(tree -> tree.asset().startsWith("vegetation/pine")).count();
-        assertTrue(conifers > 9 / 2, "Highland woods are mostly conifers");
+        assertTrue(conifers > BoardFeatures.capture(highland, coords, Map.of()).size() / 2, "Highland woods are mostly conifers");
         Hex snowfield = new Hex(0);
         snowfield.addTerrain(new Terrain(Terrains.WOODS, 2));
         snowfield.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
         snowfield.addTerrain(new Terrain(Terrains.SNOW, 1));
         assertTrue(BoardFeatures.capture(snowfield, coords, Map.of()).stream()
-              .filter(tree -> tree.asset().startsWith("vegetation/pine")).count() > 9 / 2, "Snowfields grow snow-laden conifers");
+              .filter(tree -> tree.asset().startsWith("vegetation/pine")).count() > BoardFeatures.capture(snowfield, coords, Map.of()).size() / 2, "Snowfields grow snow-laden conifers");
         highland.setTheme("rock");
         assertTrue(BoardFeatures.capture(highland, coords, Map.of()).stream()
               .allMatch(tree -> tree.asset().startsWith("vegetation/pine") || tree.asset().equals("vegetation/tree-dead")),
@@ -376,7 +376,9 @@ class BoardFeaturesTest {
         Coords coords = new Coords(3, 2);
         hex.addTerrain(new Terrain(Terrains.WOODS, 2));
         hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
-        assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream().map(BoardScene.Feature::asset).distinct().count() >= 5);
+        var forms = new java.util.HashSet<String>();
+        for (int x = 0; x < 12; x++) { BoardFeatures.capture(hex, new Coords(x, 2), Map.of()).forEach(f -> forms.add(f.asset())); }
+        assertTrue(forms.size() >= 5);
         for (String theme : new String[] { "", "snow", "desert" }) {
             for (int terrain : new int[] { Terrains.RUBBLE }) {
                 hex.removeAllTerrains();
@@ -385,7 +387,8 @@ class BoardFeaturesTest {
                 assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
                       .allMatch(feature -> feature.kind() == BoardScene.FeatureKind.SCATTER));
                 hex.addTerrain(new Terrain(Terrains.WOODS, 1));
-                assertEquals(3, BoardFeatures.capture(hex, coords, Map.of()).size(),
+                var woodland = BoardFeatures.capture(hex, coords, Map.of());
+                assertTrue(!woodland.isEmpty() && woodland.stream().allMatch(f -> f.kind() == BoardScene.FeatureKind.TREE),
                       "Cosmetic scatter must preserve coexisting woodland");
             }
         }

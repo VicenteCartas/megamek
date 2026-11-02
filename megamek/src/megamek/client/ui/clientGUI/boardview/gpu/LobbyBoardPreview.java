@@ -7,6 +7,7 @@ import java.util.Map;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -57,6 +58,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private BoardScene scene;
     private GpuTerrain terrain;
     private GpuAtmosphere atmosphere;
+    /** Immutable lobby conditions, published on the GPU thread even while a board is loading. */
+    private BoardAtmosphere.Settings conditions = BoardAtmosphere.DEFAULTS;
     private FrameBuffer target;
     private boolean installed;
     private boolean loadingDrawn;
@@ -80,9 +83,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         title = kit.typeLabel("", "body.strong", "text.primary");
         title.setName("map-inspection-title");
         title.setEllipsis(true);
-        Table name = badge(kit, title);
+        title.setTouchable(Touchable.disabled);
+        title.getStyle().fontColor = Color.WHITE;
         Table header = new Table();
-        header.add(name).minWidth(0).maxWidth(Value.percentWidth(.4f, overlay)).left();
+        header.add(title).minWidth(0).maxWidth(Value.percentWidth(.4f, overlay)).pad(5, 8, 5, 8).left();
         header.add().growX();
         Table controls = new Table();
         GpuUtilityBar.cameraButtons(kit, controls, camera, () -> {
@@ -99,7 +103,9 @@ final class LobbyBoardPreview extends Table implements Disposable {
         Label hint = kit.typeLabel(Messages.getString("Lobby.map.inspectControls"), "small", "text.primary");
         hint.setName("map-inspection-controls");
         hint.setWrap(true);
-        overlay.add(badge(kit, hint)).growX().minWidth(0).left();
+        hint.setTouchable(Touchable.disabled);
+        hint.getStyle().fontColor = Color.WHITE;
+        overlay.add(hint).growX().minWidth(0).pad(5, 8, 5, 8).left();
         add(new Stack(image, loading, overlay)).grow().minWidth(0).minHeight(0);
         image.addListener(input);
         image.addListener(new FocusListener() {
@@ -108,15 +114,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
                 if (!focused) { input.clear(); }
             }
         });
-    }
-
-    private static Table badge(UiKit kit, Label label) {
-        Table badge = new Table();
-        badge.setBackground(kit.skin.getDrawable("token-panel-plain"));
-        badge.setTouchable(Touchable.disabled);
-        badge.pad(5, 8, 5, 8);
-        badge.add(label).growX().minWidth(0);
-        return badge;
     }
 
     @Override
@@ -249,6 +246,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         title.setText(name);
         scene = null;
         installed = false;
+        // Every inspection replaces the board, even when its ID and dimensions match the previous one.
+        // The renderer otherwise treats it as an edit and keeps showing the old terrain while rebuilding.
+        if (terrain != null) { terrain.boardChanged(); }
+        if (atmosphere != null) { atmosphere.resetContrast(); }
         loadingDrawn = false;
         image.setDrawable(null);
         loading.reset(Messages.getString("GpuBoard.previewLoading"));
@@ -260,6 +261,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         scene = board;
         installed = false;
         if (board == null) { loading.reset(Messages.getString("Lobby.map.inspectUnavailable")); }
+    }
+
+    void atmosphere(BoardAtmosphere.Settings settings) {
+        conditions = settings;
     }
 
     @Override
@@ -300,11 +305,13 @@ final class LobbyBoardPreview extends Table implements Disposable {
         int height = Math.max(1, Math.round(image.getHeight() * scale));
         if (terrain == null) {
             terrain = new GpuTerrain();
-            atmosphere = new GpuAtmosphere();
-            atmosphere.configure(BoardAtmosphere.DEFAULTS);
+            atmosphere = new GpuAtmosphere(conditions, GpuAtmosphere.Options.DEFAULTS);
             atmosphere.prepare();
             terrain.prepareEffects();
         }
+        atmosphere.configure(conditions);
+        terrain.setGravity(conditions.gravity());
+        terrain.setVacuum(conditions.pressure().isVacuum());
         if (target == null || target.getWidth() != width || target.getHeight() != height) {
             image.setDrawable(null);
             if (target != null) { target.dispose(); }
@@ -313,18 +320,17 @@ final class LobbyBoardPreview extends Table implements Disposable {
             camera.resize(width, height, scene, scale);
         }
         if (!installed) {
-            camera.setIsometric(true);
-            camera.fit(scene);
-            atmosphere.updateLight(camera.camera);
-            terrain.setAtmosphere(atmosphere.lighting());
-            atmosphere.configureClouds(terrain, scene);
-            terrain.update(scene, camera.camera);
+            camera.reset(scene);
             installed = true;
         }
         camera.advance(delta);
         if (interactive() && getStage().getKeyboardFocus() == image) {
             BoardCameraControls.move(camera, cameraKeys.values(), delta * BoardCameraControls.speed(GpuBattleView.modifiers()));
         }
+        atmosphere.updateLight(camera.camera);
+        terrain.setAtmosphere(atmosphere.lighting());
+        atmosphere.configureClouds(terrain, scene);
+        terrain.update(scene, camera.camera);
         terrain.refine(camera.camera);
         if (!terrain.ready(scene)) {
             loading.update(terrain);
@@ -340,6 +346,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
             atmosphere.beginPixels(width, height, delta);
             terrain.render(camera.camera);
             terrain.renderTransparent(camera.camera);
+            atmosphere.renderWeather(camera.camera, scene);
             atmosphere.end(camera.camera, terrain, scene, 0, null, false, target);
         }
         if (image.getDrawable() == null) {

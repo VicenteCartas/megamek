@@ -142,7 +142,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               BoardRoad.deck(hex), hex.containsTerrain(Terrains.BRIDGE_ROAD) ? hex.getTerrain(Terrains.BRIDGE_ROAD).getExits() & 63 : 0,
               hex.deckMud(hex.terrainLevel(Terrains.BRIDGE_ELEV)) != null, RailRoute.groundSides(hex),
               RailRoute.corridor(hex, pixels.coords(), board), RailRoute.corridor(hex, pixels.coords(), board, true),
-              BoardBackdrop.capture(hex));
+              BoardBackdrop.capture(hex), MinimapTerrain.capture(hex));
     }
 
     /**
@@ -322,6 +322,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * the road its bridge deck carries ({@link Terrains#BRIDGE_ROAD}), NONE and 0 on a clean deck. {@code deckMud}: its
      * raised deck is muddy ({@link megamek.common.Hex#deckMud}); a natural deck shows it.
      * {@code railBed}: the sides of its ground rails, a destroyed rail's too ({@link megamek.common.board.RailRoute#groundSides}).
+     * {@code minimap}: the terrain-only snapshot captured with this tile, shared with thumbnails. Cosmetic labels
+     * and feature overlays retain it; a recaptured hex replaces it with the rest of its terrain.
      */
     record Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface,
           Pixels decals, Pixels decalsWithoutLimbs,
@@ -331,7 +333,21 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
           java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
           BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
-          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop) {
+          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, MinimapTerrain minimap) {
+        Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface,
+              Pixels decals, Pixels decalsWithoutLimbs,
+              List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
+              boolean detailedGround, BoardRoad.Kind road, BoardFireSmoke fireSmoke, Biome biome, boolean impassable,
+              boolean blackIce, int cliffTopExits, boolean bare, BoardSurfaceBlend.Cover groundCover,
+              boolean ultraSublevel, Pixels tilesetDecals, Pixels tilesetScenery,
+              java.util.Map<String, megamek.common.board.HexAppearance> appearance, Cover cover, boolean barren,
+              BoardRoad.Kind deckRoad, int deckRoadExits, boolean deckMud, int railBed,
+              RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop) {
+            this(coords, elevation, waterDepth, frozen, roadExits, surface, decals, decalsWithoutLimbs, features,
+                  text, liquid, tileset, detailedGround, road, fireSmoke, biome, impassable, blackIce, cliffTopExits,
+                  bare, groundCover, ultraSublevel, tilesetDecals, tilesetScenery, appearance, cover, barren,
+                  deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, null);
+        }
         Tile(Coords coords, int elevation, int waterDepth, boolean frozen, int roadExits, Surface surface,
               Pixels decals, Pixels decalsWithoutLimbs,
               List<Feature> features, List<BoardHexText> text, BoardLiquid liquid, Pixels tileset,
@@ -505,7 +521,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, decals,
                   decalsWithoutLimbs, features, labels, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
+                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, minimap);
         }
 
         /** This tile with other features: the editor preview's tile of a route stroke's next step. */
@@ -513,7 +529,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, decals,
                   decalsWithoutLimbs, List.copyOf(shown), text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
+                  cover, barren, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, minimap);
         }
 
         /** Burned presentation only: remove decorative vegetation and prevent field shrubs replacing it. */
@@ -523,7 +539,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return new Tile(coords, elevation, waterDepth, frozen, roadExits, surface, decals,
                   decalsWithoutLimbs, kept, text, liquid, tileset, detailedGround, road, fireSmoke, biome,
                   impassable, blackIce, cliffTopExits, bare, groundCover, ultraSublevel, tilesetDecals, tilesetScenery, appearance,
-                  cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop);
+                  cover, true, deckRoad, deckRoadExits, deckMud, railBed, corridor, deckCorridor, backdrop, minimap);
         }
 
         /**
@@ -609,7 +625,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   null, null, kept, BoardHexText.settled(labels, text),
                   weightless ? BoardLiquid.NONE : liquid, null, true, road, fireSmoke, Biome.NONE, impassable, false,
                   cliffTopExits, weightless, BoardSurfaceBlend.solid(airlessSurface), ultraSublevel, null, null,
-                  appearance, cover, true, deckRoad, deckRoadExits, false, railBed, corridor, deckCorridor, backdrop);
+                  appearance, cover, true, deckRoad, deckRoadExits, false, railBed, corridor, deckCorridor, backdrop,
+                  minimap.withSurface(level, weightless ? -1 : waterDepth, iced, airlessSurface,
+                        weightless ? BoardLiquid.Kind.NONE : liquid.kind(), Biome.NONE));
         }
 
         Tile {
@@ -619,6 +637,10 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             cover = Objects.requireNonNullElse(cover, Cover.NONE);
             deckRoad = Objects.requireNonNullElse(deckRoad, BoardRoad.Kind.NONE);
             backdrop = Objects.requireNonNullElse(backdrop, BoardBackdrop.NONE);
+            if (minimap == null) {
+                minimap = MinimapTerrain.captured(elevation, waterDepth, frozen, surface, liquid, cover, biome, road,
+                      features);
+            }
         }
 
         boolean water() {

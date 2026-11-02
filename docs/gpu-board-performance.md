@@ -20,7 +20,7 @@ and cliffs by the material actually submitted: red means direct rendering; cache
 levels 0–6 are green, cyan, blue, violet, magenta, yellow and orange. Water surfaces,
 objects and other passes are not tinted, although tinted beds show through water.
 The tint is applied after material evaluation and never written into cache fills.
-The Display panel includes a legend and counts of terrain batches actually using
+The Display panel includes a legend and counts of terrain chunks actually using
 the cache. “Admitted pages built” measures completion of admitted texture pages,
 not the fraction of the board rendered from them.
 
@@ -36,7 +36,7 @@ or 4,096 times that of L6, before page-edge rounding. Keeping Citadel entirely a
 L0 would therefore require several GiB for material pages alone, while the far
 view cannot display most of that detail.
 
-### Reproduction and measurements
+### Initial reproduction and measurements, before admission changes
 
 The full-view benchmark loaded `data/boards/buildingsnobasement/citadel.board`
 (50×50) on an NVIDIA GeForce RTX 4070 Laptop GPU. Its physical framebuffer was
@@ -66,11 +66,11 @@ versus 420 in the screenshot. Cross-run FPS is affected by CPU scheduling and GP
 clocks; the limited-cache GPU measurements and identical draw paths demonstrate
 no useful rendering benefit, rather than a meaningful 66-to-68 FPS improvement.
 
-### Why the toggle can do nothing
+### Why the original toggle did nothing at 94 slots
 
-`GpuMaterialCache.plan` reserves eight slots, then admits top pages nearest the view
-centre before wall pages. At capacity 94, 86 pages fit out of 180 requested top pages
-and 241 wall pages. Its final selection requires every needed page of a terrain
+The original `GpuMaterialCache.plan` reserved eight slots, then admitted top pages
+nearest the view centre before wall pages. At capacity 94, 86 pages fit out of 180
+requested top pages and 241 wall pages. Its final selection required every needed page of a terrain
 mesh batch to be readable before any of that batch's tops (or walls) draw cached.
 Citadel spans four such batches. None is completely covered at this budget:
 `cached=[]`, `wallsCached=[]`, despite every admitted page being current. The debug
@@ -88,11 +88,9 @@ The cache replaces material evaluation, not geometry, lighting or these other pa
 
 Automatic capacity uses half of driver-reported free GPU memory when allocating,
 subject to texture-array limits and the scene's estimated need; a startup MiB
-override replaces that budget. The memory limit is retained until reallocation.
+override replaces that budget. Originally the memory limit stayed fixed until reallocation.
 The screenshot alone cannot establish why its initial capacity was only 94 slots.
-This change adds diagnostics, not a new allocation policy. A focused optimization
-would admit complete terrain batches or allow smaller independently cached draws;
-simply admitting more scattered pages need not yield any cached rendering.
+These initial results motivated the admission and allocation changes below.
 
 Reproduce with `gpuBoardBenchmark --tests '*GpuBoardPerformanceSmokeTest.measuresTheCompleteBoardViewWithLiveCapture'`
 and these `-Dmegamek.gpu.` properties: `performanceFullView=true`,
@@ -116,6 +114,245 @@ when Debug is disabled, and fills containing no diagnostic tint. Checkstyle and
 Spotless passed for the changed Java files. The final run compiled into an isolated
 directory and reused the already-staged assets to avoid shared build-output and
 mapped-font conflicts; its log is `work/citadel-cache-isolated-final.log`.
+
+### Coverage and allocation improvements
+
+The planner now admits all required pages of a chunk's visible tops or walls
+together, charging shared pages only once. Readable regions retain priority while
+visible; remaining regions are ordered by distance, with tops and walls competing
+together. A region that cannot fit is skipped in favour of another complete one.
+Wall regions outside the page table are excluded before admission, and an
+unaddressable top window does not spend time building unusable pages.
+
+Material selection uses chunk IDs independently of the 4×4-chunk mesh pages.
+`GpuMeshPage` selects cached/direct materials over its existing source index
+ranges, merging adjacent ranges with the same material. Mixed coverage adds draws
+where needed; complete coverage retains merged draws. Camera motion and changing
+cache coverage do not rebuild buffers or mutate the original materials. Unmerged,
+oversized and replacement sources use the same material selection.
+
+The initial allocation still uses the render-size estimate. Later growth follows
+observed demand plus 25% for prefetch and eight rebuild slots, retaining capacity
+across camera movements at the same render size. A driver-limited shortfall lasting
+300 unchanged, settled frames triggers a fresh memory query. The query credits the
+current arrays before taking half the available pool. Growth must be at least 25%
+(or eight slots), or sufficient to fit the view; a changed allocation target must
+then persist for 30 frames. Fixed configured/default budgets do not grow through
+this reassessment. Temporary decreases do not evict a useful allocation; a settled
+render-resolution change can resize it. Display reports the reason for capacity:
+driver/configured/default memory budget, array limit, board extent or view estimate.
+
+The native regression fixture exercises limited coverage and recovery from a
+controlled low driver budget. The mesh-page fixture compares mixed-material pixels
+against unmerged draws, checks merged draw counts at full coverage, then replaces
+and hides sources and checks that coverage changes never rebuild geometry.
+
+The final overview-only comparisons retain the camera and framebuffer above and
+wait for geometry, admitted cache pages **and mesh-page merging** before timing.
+The larger run explicitly uses `materialCacheMiB=544` to hold capacity at 552 slots
+rather than let other applications change the budget. Each row is an independent
+off/on pair with identical submitted terrain geometry.
+
+| Capacity | Cached top / wall chunks | Median GPU frame, off → on | Median opaque terrain, off → on | Terrain draws, off → on |
+|---|---:|---:|---:|---:|
+| 94 slots | 4 / 49 tops; 6 / 36 walls | 13.63 → 13.17 ms | 9.90 → 9.46 ms | 381 → 383 |
+| 552 slots | 49 / 49 tops; 36 / 36 walls | 13.86 → 10.85 ms | 10.06 → 6.87 ms | 387 → 387 |
+
+The small allocation still admits 86 of 421 requested texture pages, but now those
+pages enable real cached draws. Its GPU-frame reduction is about 3.4%; the larger
+allocation's is about 21.7%. The small budget does not make close views broadly
+cacheable: the separate close/moving diagnostic stayed near 21/23 ms GPU time with
+either toggle. Moving GPU p95 was 24.46 ms off and 24.32 ms on, while median CPU
+submission rose from 12.24 to 14.96 ms as pages were planned and filled. These
+results support an overview improvement, not a general close-view or motion gain.
+
+Final validation passed 18 native tests (all tuning-panel, material-cache and
+terrain-page tests, plus the debug rendering check), the mesh-page unit test, and
+Checkstyle/Spotless. The memory fixture also verifies that reducing render
+resolution releases excess storage. The benchmark's `performanceCacheCoverage`
+property asserts `partial` or `full` overview coverage as appropriate. Native
+pixel comparisons cover mixed materials, culling, source replacement and ownership.
+
+Reproduction commands and captures are under `work/citadel-cache-improve/`:
+`benchmark.ps1 -Label limited-settled -OverviewOnly` and
+`benchmark.ps1 -Budget 544 -Label full-settled -Coverage full -OverviewOnly`.
+The corresponding `*-profile.log` files contain GPU timestamps, draw audits and
+coverage reports; the same-named directories contain normal/debug screenshots and
+timing tables. `final-checks.log` and `benchmark-style.log` record final verification.
+
+### Hex-label batching
+
+Cosmetic scatter does not change the captured hex elevation. Its visual height
+previously split the labels at one elevation into separate font groups, because
+the relief allowance was a uniform for each group. `GpuHexText` now carries that
+allowance per glyph in the unused third component of its existing owner attribute.
+In this first measured change, the vertex size remained 36 bytes and groups retained their elevation and overlay mode;
+outline/text ordering, atlas-page ordering, chunk culling and bounded index buffers
+are preserved. Camera framing, indirect-fire arc clearance and effect ray hits
+retain their previous scatter behavior.
+
+That native label regression included 576 tiles with different scatter heights:
+one atlas required just two draws (outline and ink), with exact pixel parity
+against the font-cache reference. Existing checks cover relief, foreground cliffs,
+unit occlusion, roof labels, adaptive contrast, filtering, incremental atlas pages,
+offscreen culling and resource disposal. The contrast fixture explicitly selects
+its original .2 threshold, because its history samples assume that value rather
+than the current .04 application default.
+
+Citadel before/after on the RTX 4070 Laptop GPU, 3840×2259, ENHANCED, cache off,
+normal maps and tessellation on, parallax off: 60 warmup and 180 measured frames,
+without `glFinish`. The overview uses the exact camera above; close uses span
+1129.50 at (1600.16, -1872, 0), with the same azimuth and tilt.
+
+| View | Label draws, before → after | Median label CPU, before → after | Median label GPU, before → after |
+|---|---:|---:|---:|
+| Overview | 1,050 → 442 | 1.58 → 0.56 ms | 0.081 → 0.071 ms |
+| Close | 707 → 312 | 1.04 → 0.61 ms | 0.097 → 0.097 ms |
+| Moving close | 722 → 318 | 0.99 → 0.38 ms | 0.099 → 0.098 ms |
+
+This removes CPU submission work, not the close view's terrain GPU bottleneck.
+Complete close GPU time was 20.62 → 20.54 ms, with identical terrain submissions
+(1,408 draws and 7,115,046 indices). The merged groups' conservative chunk bounds
+submitted 96,876 label vertices instead of 93,894 near the viewport edge; their GPU
+time stayed the same. Overview frame intervals were 14.30 → 14.31 ms. No overall
+FPS gain is claimed from this pair. Other stages' CPU time varied between runs.
+
+The isolated original/fixed comparisons, timings and captures are
+`work/citadel-fps/hex-before.log`, `hex-after.log` and their matching directories.
+`hex-test.log` records both passing native label suites; `final-style.log` records
+the scoped Checkstyle and Spotless checks. The stage profiler now separates hex
+grid, hex labels and later overlay labels from the surrounding tactical overlays.
+
+### Instanced labels and Tidewater loading
+
+The next text change combines elevations, outlines, ink and font atlas pages in
+ordered instance buffers. Each glyph takes 64 bytes, replacing four 36-byte
+vertices and six indices. A batch borrows up to eight existing font textures;
+it does not copy or repack their images. One shared quad draws the instances,
+with a 262,144-glyph limit per buffer. Chunk visibility changes compact the
+visible instances in their original order; stationary frames upload nothing.
+Mip gradients are calculated before selecting a font sampler. Relief allowance,
+roof and unit occlusion, contrast, atlas updates and outline order remain intact.
+
+In the approximate Tidewater screenshot view (isometric, span 1900, centre
+5616/-5256/18, 3840×2259, ENHANCED), labels went from 292 draws to one. Median
+label submission was 0.471 ms before and 0.137–0.156 ms after; GPU label time
+was 0.161 ms before and 0.145–0.148 ms after. The whole view remained around
+21–22 ms per frame. These label results remove CPU work; they do not establish
+a corresponding whole-frame FPS gain.
+
+Citadel also uses one label draw in the original overview, uncached close view
+(span 1129.50, centre 1600.16/-1872/0), and moving view. Against the preceding
+headroom-batched implementation, median label CPU submission was respectively
+0.559 → 0.065 ms, 0.611 → 0.070 ms, and 0.375 → 0.055 ms. GPU times remained
+about 0.06–0.09 ms. These runs use the same 3840×2259 NVIDIA settings with the
+terrain cache disabled; `work/tidewater/citadel-instanced.log` contains the
+camera, draw-count and timing reports. They establish a label CPU improvement,
+not an isolated whole-scene FPS comparison against other concurrent changes.
+
+The impassable label is part of that same text batch. Its red border and stripes
+share retained tactical geometry, packed into pages of at most 10,000 triangles,
+not one draw per hex. Citadel fits all those markings into one page. The ordinary
+grid is an instanced draw in top view; relief also evaluates its grid in the
+terrain/cover shaders, without an additional terrain draw. Other tactical layers
+can use more pages, materials and passes; they are not all one global draw.
+
+The isolated `terrain markers` stage in `work/tidewater/citadel-markers-top.log`
+measured the following medians at 3840×2259 on the RTX 4070 Laptop GPU, ENHANCED,
+terrain cache off. Each entry used one draw in overview, close and moving views:
+
+| Top-view pass | Close CPU | Close GPU | Moving GPU |
+|---|---:|---:|---:|
+| Impassable borders and stripes | 0.040 ms | 0.020 ms | 0.017 ms |
+| Hex grid overlay | 0.032 ms | 0.109 ms | 0.115 ms |
+| All hex labels | 0.073 ms | 0.065 ms | 0.070 ms |
+
+These overlays were not the limiting passes: the close view's opaque terrain
+took 14.545 ms GPU, against 17.592 ms for the complete GPU frame and a 17.701 ms
+median frame interval. Opaque terrain submitted 907 draws and 4,762,731 indices
+(before instance multiplication or tessellation). These are steady rendering
+measurements; changing an impassable flag, highlighted hex or terrain geometry
+can rebuild retained marker pages and is not covered by these pass medians.
+
+The screenshots' disappearing cache coverage had a concrete cause: increasing
+texture-array capacity discarded every existing page. Growth now copies every
+layer and mip, retaining page ownership, content generations, stale pages and
+unfinished builds. The copy preserves encoded sRGB bytes and GL framebuffer,
+scissor, colour-mask and sRGB state. Shrinking after a real render-resolution
+change can still release storage. Memory-limited partial coverage remains valid:
+unadmitted terrain uses the direct renderer.
+
+Tidewater's initial CPU profile placed most terrain preparation work in repeated
+road-path sampling for road masks. Immutable bounds over consecutive segments
+now let the shared `BoardRoad` sampler visit nearby branches first and discard
+branches unable to improve either centre-line distance or road-edge distance.
+Exact segment arithmetic and original ordering for equal-distance ties are
+retained, including variable widths and open ends. Both road masks and scenery
+clearance use this one implementation. The 24×24 Tidewater region at (80,56)
+retained checksums `038805db` (COARSE) and `047be856` (FULL), covering geometry
+and every generated mask pixel. A separate numerical regression compares bounded
+and exhaustive sampling, including path endpoints and degenerate segments.
+The pavement wear mask now shares one finite-curve search between wheel heading
+and lane position. Endpoint projections are also shared, evaluating a second
+distance only where the bounded and extended positions differ.
+Unbounded road ends are sampled before the finite bounds rather than preventing
+those bounds from pruning. Adjacent workers also share an in-progress road-mask
+build; reload generations, failures and a cancelled request cannot poison the
+shared result. The numerical and concurrent-sharing tests cover these boundaries.
+Large masks split independent row groups within the existing terrain worker pool,
+with captured settings and a private colour scratch per group; they allocate no
+additional executor. Serial/parallel pixel parity is covered separately.
+
+The map also waited behind the loading screen for optional cache baking after
+all geometry and shaders were ready. Cache prewarm now gets a 250 ms head start
+(plus the current fill step), then interactive frames continue the build within
+the existing frame budget. Unfinished cache regions draw complete direct terrain.
+Camera-specific detail refinement continues after opening. The benchmark records
+the first usable map separately from settled geometry and cache timing.
+The temporary close-up used to discover startup shaders no longer queues terrain
+refinement or bakes cache pages for its camera. Grass shaders prepare from their
+actual blade layout without planting a hidden full-detail chunk. Ordinary zooms
+still refine the same terrain and restore its detailed geometry.
+The cancellation/reopen smoke test also exposed `ForkJoinPool.close()` returning
+after termination started. Disposal now waits for actual worker termination
+before releasing the chunks and assets those workers borrow.
+
+Building-file resolution is centralized in `TilesetScenery`, with one shared
+result per asset and data-directory/reload generation. It retains exact GLB,
+design GLB, generated JSON and legacy fallback behavior. `Reload Assets` clears
+positive and missing-file decisions; changing the data directory replaces the
+cache. Generated-kit variant metadata retains its modification checks.
+
+The controlled Urbanruins comparison uses the same current production classes
+except for original versus optimized `BoardRoad`/`TilesetScenery`. Java 21,
+headless, 4 GiB generational ZGC, one unrotated 50×50 sheet: first scene capture
+was 8.855 → 3.800 seconds; median of three warm captures was 3.384 → 1.158 seconds
+(66% lower). All 2,500 tiles and 8,356 features retained the same asset and
+placement checksum `db925a41f4b9993e59afa73151ca2648a91f8602c8ea75c29b87be1ff2182c1b`.
+This CPU capture measurement excludes GPU preparation and is separate from map
+opening time. The original handoff evidence remains untouched under
+`megamek/build/urban-conversion-profile-20261102`; controlled runs and the harness
+are under `work/tidewater/urban/` and `work/tidewater/UrbanLoadProfile.java`.
+
+A later controlled capture profile, with the same feature checksum, reduced
+sampled road-distance stacks from 150 samples to below the top 22 stacks; native
+file-attribute leaf samples fell from 45 to 8. The profiled capture was 3.346 →
+2.545 seconds; two subsequent unrecorded captures were 2.719/2.709 seconds before
+and 1.359/1.095 seconds after. Sampling counts are diagnostic rather than exact
+time attribution. `urban/final-profile-summary.txt` retains both profiles;
+remaining capture costs include tree coverage work outside this change.
+
+Validation for this stage passed 20 focused tests: 12 native tests covering text,
+cache growth and GL state, startup and worker cancellation/reopening; eight CPU
+tests covering exact road sampling, concurrent mask sharing, parallel pixel
+parity and asset lookup/reload. The final road-region comparison retained both
+geometry/pixel checksums, with COARSE preparation 18.089 → 9.138 seconds and FULL
+14.916 → 6.240 seconds on four workers. Scoped Checkstyle and Spotless passed.
+These are not an all-project test result. Two wider road fixtures fail equally
+with the original road implementation: the shared-roundabout curb assertion and
+the rough/woods tree-count assertion. Their original-code reproduction is in
+`work/tidewater/original-road-regressions.log`; focused results are in
+`final-tests.log`, `shared-ends-tests.log` and `roads-shared-ends.log`.
 
 ## Preparation and replacement
 

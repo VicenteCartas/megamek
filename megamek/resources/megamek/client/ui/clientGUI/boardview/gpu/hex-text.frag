@@ -13,18 +13,34 @@ in vec4 v_color;
 in vec2 v_uv;
 in vec2 v_board;
 flat in float v_ink;
-uniform sampler2D u_texture;
+flat in float v_headroom;
+flat in vec3 v_surface;
+uniform sampler2D u_texture; // SpriteBatch's first texture, followed by seven more borrowed atlas pages.
+uniform sampler2D u_fonts[7]; // GpuHexText.TEXTURES; each retains its own filtering and mipmaps.
 uniform sampler2D u_depth;
 uniform sampler2D u_units;
 uniform vec2 u_unitOptions; // This frame has a borrowed unit capture; matching-depth tolerance.
 uniform vec4 u_viewport;
-uniform vec2 u_surface; // Captured label plane and its own tile's maximum decorative height.
-uniform int u_overlay; // 0: ground relief only; 1: HEIGHT through its own hex; 2: top-view ground overlay.
+uniform int u_topView;
 // GROUND_LAYER
+// Constant sampler indices also work on GL 3.3; the page choice is flat across each glyph.
+vec4 glyph() {
+    // Derivatives precede the per-glyph branch, so mip selection does not depend on divergent sampler choices.
+    vec2 dx = dFdx(v_uv), dy = dFdy(v_uv);
+    int page = int(v_surface.z);
+    if (page == 0) return textureGrad(u_texture, v_uv, dx, dy);
+    if (page == 1) return textureGrad(u_fonts[0], v_uv, dx, dy);
+    if (page == 2) return textureGrad(u_fonts[1], v_uv, dx, dy);
+    if (page == 3) return textureGrad(u_fonts[2], v_uv, dx, dy);
+    if (page == 4) return textureGrad(u_fonts[3], v_uv, dx, dy);
+    if (page == 5) return textureGrad(u_fonts[4], v_uv, dx, dy);
+    if (page == 6) return textureGrad(u_fonts[5], v_uv, dx, dy);
+    return textureGrad(u_fonts[6], v_uv, dx, dy);
+}
 void main() {
-    fragColor = v_color * texture(u_texture, v_uv);
+    fragColor = v_color * glyph();
     if (v_ink >= 0.0) { fragColor.rgb = vec3(v_ink); }
-    if (u_overlay == 2) {
+    if (u_topView != 0 && v_surface.y == 0.0) {
         DEPTH = 0.0;
         return;
     }
@@ -41,9 +57,9 @@ void main() {
     bool ownHex = depth < 1.0 && distance(owner, occluder) < 0.1;
     float unit = u_unitOptions.x > 0.5 ? texture(u_units, screen).r : 1.0;
     bool onUnit = unit < 1.0 && behind(depth, unit, u_unitOptions.y) < 0.5;
-    bool decoration = !onUnit && u_surface.y > 0.0 && ownHex
-          && position.z >= u_surface.x - u_groundBoard.z * 0.001
-          && position.z <= u_surface.x + u_surface.y;
+    bool decoration = !onUnit && v_headroom > 0.0 && ownHex
+          && position.z >= v_surface.x - u_groundBoard.z * 0.001
+          && position.z <= v_surface.x + v_headroom;
     // HEIGHT can pierce any local content, including units, but other hexes still occlude it.
-    DEPTH = (u_overlay == 1 && ownHex) || decoration ? min(gl_FragCoord.z, depth) : gl_FragCoord.z;
+    DEPTH = (v_surface.y != 0.0 && ownHex) || decoration ? min(gl_FragCoord.z, depth) : gl_FragCoord.z;
 }

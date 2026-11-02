@@ -100,6 +100,19 @@ class GpuTerrainPagesSmokeTest {
             parity(batch, pages, camera, current, -1);
             assertEquals(2, pages.rebuilds(), "Partial visibility and returning to overview cannot rebuild geometry");
 
+            Material cachedMaterial = new Material(ColorAttribute.createDiffuse(Color.GREEN));
+            GpuTerrainPages.Materials mixed = (region, material) -> region < 2 ? cachedMaterial : material;
+            GpuTerrainPages.Materials allCached = (region, material) -> cachedMaterial;
+            parity(batch, pages, camera, current, -1, mixed);
+            rawDraws(batch, pages, camera, current, -1, profiler, 3, mixed);
+            rawDraws(batch, pages, camera, current, -1, profiler, 2, allCached);
+            rawDraws(batch, pages, camera, current, 0b00001011, profiler, 2, mixed);
+            for (Source source : current) {
+                assertEquals(Color.YELLOW, source.parts().first().material.get(ColorAttribute.class,
+                      ColorAttribute.Diffuse).color, "Selecting a cache material never mutates a source");
+            }
+            assertEquals(2, pages.rebuilds(), "Cache coverage changes neither buffers nor merge ownership");
+
             camera.zoom(.1f);
             parity(batch, pages, camera, current, -1);
             rawDraws(batch, pages, camera, current, -1, profiler, 2);
@@ -110,6 +123,7 @@ class GpuTerrainPagesSmokeTest {
             owned.add(replacement);
             current.set(0, replacement);
             parity(batch, pages, camera, current, -1);
+            parity(batch, pages, camera, current, -1, mixed);
             settle(batch, pages, camera, current, -1);
             assertEquals(3, pages.rebuilds(), "Only the edited chunk's page rebuilds");
             Source hiddenReplacement = source(4, 24);
@@ -127,6 +141,7 @@ class GpuTerrainPagesSmokeTest {
             unindexed.parts().first().meshPart.mesh.setIndices(new short[0]);
             unindexed.parts().first().meshPart.size = 3;
             current.set(1, unindexed);
+            parity(batch, pages, camera, current, -1, mixed);
             byte[] beforeDispose = parity(batch, pages, camera, current, -1);
             pages.dispose();
             pages.setEnabled(false);
@@ -143,11 +158,16 @@ class GpuTerrainPagesSmokeTest {
 
     private static byte[] parity(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
           List<Source> sources, int visible) {
+        return parity(batch, pages, camera, sources, visible, null);
+    }
+
+    private static byte[] parity(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
+          List<Source> sources, int visible, GpuTerrainPages.Materials materials) {
         pages.setEnabled(false);
-        draw(batch, pages, camera, sources, visible);
+        draw(batch, pages, camera, sources, visible, materials);
         byte[] original = ScreenUtils.getFrameBufferPixels(0, 0, 640, 480, false);
         pages.setEnabled(true);
-        draw(batch, pages, camera, sources, visible);
+        draw(batch, pages, camera, sources, visible, materials);
         assertArrayEquals(original, ScreenUtils.getFrameBufferPixels(0, 0, 640, 480, false));
         return original;
     }
@@ -162,26 +182,36 @@ class GpuTerrainPagesSmokeTest {
 
     private static void draw(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
           List<Source> sources, int visible) {
+        draw(batch, pages, camera, sources, visible, null);
+    }
+
+    private static void draw(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
+          List<Source> sources, int visible, GpuTerrainPages.Materials materials) {
         Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(.05f, .05f, .05f, 1, true);
         pages.begin(camera.camera);
         for (int i = 0; i < sources.size(); i++) {
-            pages.add(sources.get(i).parts(), i / 4, visible < 0 || (visible & (1 << i)) != 0);
+            pages.add(sources.get(i).parts(), i / 4, i, visible < 0 || (visible & (1 << i)) != 0);
         }
         batch.begin(camera.camera);
         // No wall clock: a settled page merges within the frame.
-        pages.render(batch, null, Long.MAX_VALUE);
+        pages.render(batch, null, Long.MAX_VALUE, materials);
         batch.end();
     }
 
     private static void rawDraws(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
           List<Source> sources, int visible, GLProfiler profiler, int expected) {
-        parity(batch, pages, camera, sources, visible);
+        rawDraws(batch, pages, camera, sources, visible, profiler, expected, null);
+    }
+
+    private static void rawDraws(ModelBatch batch, GpuTerrainPages pages, BoardCamera camera,
+          List<Source> sources, int visible, GLProfiler profiler, int expected, GpuTerrainPages.Materials materials) {
+        parity(batch, pages, camera, sources, visible, materials);
         GL20 originalGl = Gdx.gl20;
         profiler.enable();
         profiler.reset();
         try {
-            draw(batch, pages, camera, sources, visible);
+            draw(batch, pages, camera, sources, visible, materials);
             assertEquals(expected, profiler.getDrawCalls(), "Only consecutive visible ranges can share a draw");
         } finally { GpuStageTimings.stopCounting(profiler, originalGl); }
     }

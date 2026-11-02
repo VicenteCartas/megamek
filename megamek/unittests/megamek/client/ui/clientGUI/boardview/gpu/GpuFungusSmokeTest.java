@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -16,6 +15,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Hex;
@@ -180,14 +180,15 @@ class GpuFungusSmokeTest {
             camera.camera.zoom = .08f;
             camera.center(new Vector3(0, 0, 30));
             var bounds = new BoundingBox(new Vector3(-10, -10, 0), new Vector3(10, 10, 30));
-            for (String asset : BoardFungus.CLIFF) { assertNull(GpuFungus.emitter(asset, bounds)); }
-            for (String asset : BoardFungus.SCATTER) { assertNull(GpuFungus.emitter(asset, bounds)); }
+            for (String asset : BoardFungus.CLIFF) { assertTrue(GpuFungus.emitters(asset, new Matrix4()).isEmpty()); }
+            for (String asset : BoardFungus.SCATTER) { assertTrue(GpuFungus.emitters(asset, new Matrix4()).isEmpty()); }
             for (String asset : BoardFungus.CUPS) {
-                var cup = GpuFungus.emitter(asset, bounds);
-                assertTrue(bounds.contains(cup.origin()) && cup.origin().z < bounds.max.z,
-                      asset + " must emit below the rim, inside the bowl");
+                for (var cup : GpuFungus.emitters(asset, new Matrix4())) {
+                    assertTrue(bounds.contains(cup.origin()) && cup.origin().z < bounds.max.z,
+                          asset + " must emit below the rim, inside the bowl");
+                }
             }
-            var source = GpuFungus.emitter(BoardFungus.CUPS.getFirst(), bounds);
+            var source = GpuFungus.emitters(BoardFungus.CUPS.getFirst(), new Matrix4()).getFirst();
             for (int step = 0; step < 2; step++) {
                 output.begin(0, 0, 0, 1);
                 mist.begin();

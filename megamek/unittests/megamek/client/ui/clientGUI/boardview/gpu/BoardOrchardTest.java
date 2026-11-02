@@ -31,7 +31,7 @@ class BoardOrchardTest {
         for (int height : new int[] { 1, 2, 3 }) {
             hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, height));
             var trees = BoardFeatures.capture(hex, coords, Map.of());
-            assertEquals(6, trees.size());
+            assertEquals(4, trees.size());
             assertTrue(trees.stream().allMatch(tree -> FORMS.contains(
                   tree.asset().replace("vegetation/orchard-", "").replace("-snow", ""))));
             for (var tree : trees) {
@@ -69,6 +69,7 @@ class BoardOrchardTest {
         for (int density = 3; density >= 1; density--) {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var trees = BoardFeatures.capture(hex, coords, Map.of());
+            assertEquals(new int[] { 0, 4, 6, 9 }[density], trees.size());
             assertTrue(trees.size() < previous);
             assertTrue(trees.stream().allMatch(tree -> tree.asset().startsWith("vegetation/orchard-")));
             previous = trees.size();
@@ -96,7 +97,7 @@ class BoardOrchardTest {
         var road = BoardRoad.clearance(coords, 9);
         var trees = BoardFeatures.capture(hex, coords, Map.of()).stream()
               .filter(tree -> tree.kind() == BoardScene.FeatureKind.TREE).toList();
-        assertEquals(6, trees.size());
+        assertEquals(4, trees.size());
         for (var tree : trees) {
             assertTrue(tree.asset().startsWith("vegetation/orchard-") && tree.asset().endsWith("-snow"));
             assertTrue(road.distance(tree.x(), tree.y()) >= BoardRoad.SHOULDER + 2);

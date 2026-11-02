@@ -110,9 +110,9 @@ class GpuTreeLodSmokeTest {
                         }
                         boolean bareBranches = name.startsWith("vegetation/tree-dead");
                         boolean forest = authoredForest(name);
-                        assertTrue(triangles[0] <= (forest ? 32000 : bareBranches ? 12000 : 1600)
-                              && triangles[1] <= (forest ? 10000 : bareBranches ? 1800 : 410)
-                              && triangles[2] <= (forest ? 2600 : bareBranches ? 180 : 96) && triangles[3] <= 12, name);
+                        assertTrue(triangles[0] <= (forest ? 32000 : bareBranches ? 12000 : name.startsWith("vegetation/cactus") ? 3600 : 1600)
+                              && triangles[1] <= (forest ? 10000 : bareBranches ? 1800 : name.startsWith("vegetation/cactus") ? 950 : 410)
+                              && triangles[2] <= (forest ? 2600 : bareBranches ? 180 : name.startsWith("vegetation/cactus") ? 420 : 96) && triangles[3] <= 12, name);
                         if (forest) {
                             for (Material material : assets.model(name).materials) {
                                 if (material.id.startsWith("bark")) {

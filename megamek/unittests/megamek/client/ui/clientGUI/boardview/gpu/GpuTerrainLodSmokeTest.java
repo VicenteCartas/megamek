@@ -19,6 +19,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.BufferUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
@@ -28,6 +29,55 @@ import org.lwjgl.opengl.GL11;
 /** Real GL ownership across asynchronous detail changes, cache reuse, and an edit superseding an in-flight job. */
 @Tag("on-demand")
 class GpuTerrainLodSmokeTest {
+    @Test
+    void repeatedPlantPlacementsKeepIndependentWorldBounds() {
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(640, 480);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                try {
+                    List<BoardScene.Tile> tiles = new ArrayList<>();
+                    for (int x = 0; x < 4; x++) {
+                        for (int y = 0; y < 4; y++) {
+                            var feature = new BoardScene.Feature(x % 2 == 0 ? "vegetation/pine" : "vegetation/tree",
+                                  0, 0, x * 37 + y * 23, 1, 1 + (x + y) % 3, 0, BoardScene.FeatureKind.TREE);
+                            tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS,
+                                  null, List.of(feature), List.of()));
+                        }
+                    }
+                    BoardScene scene = new BoardScene(0, 4, 4, tiles, List.of(), List.of(), -1, "", List.of());
+                    terrain.update(scene);
+                    var models = java.util.Collections.newSetFromMap(
+                          new java.util.IdentityHashMap<com.badlogic.gdx.graphics.g3d.Model, Boolean>());
+                    var boxes = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<BoundingBox, Boolean>());
+                    int placements = 0;
+                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) field(chunk, "props")) {
+                            if (field(prop, "treeAsset") == null) { continue; }
+                            ModelInstance instance = (ModelInstance) field(prop, "instance");
+                            BoundingBox expected = new ModelInstance(instance.model).calculateBoundingBox(new BoundingBox())
+                                  .mul(instance.transform);
+                            BoundingBox actual = (BoundingBox) field(prop, "bounds");
+                            assertEquals(expected.min, actual.min, "Placement must retain the exhaustive vertex bounds");
+                            assertEquals(expected.max, actual.max, "Scaling and rotation must not mutate another plant's box");
+                            assertTrue(boxes.add(actual), "Every placement owns its transformed box");
+                            models.add(instance.model);
+                            placements++;
+                        }
+                    }
+                    assertEquals(16, placements);
+                    assertEquals(2, models.size(), "Several differently transformed plants share each source mesh");
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Shared model placement bounds", failure.get()); }
+    }
+
     @Test
     void closingDuringPreparationStopsTheWorkerAndAllowsReopening() {
         AtomicReference<Throwable> failure = new AtomicReference<>();

@@ -80,6 +80,8 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
+import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -89,6 +91,11 @@ import megamek.common.board.BoardFile;
 import megamek.common.board.BoardLocation;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.game.Game;
+import megamek.common.planetaryConditions.Fog;
+import megamek.common.planetaryConditions.Light;
+import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.planetaryConditions.Weather;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrains;
 import megamek.utilities.BoardClassifier;
@@ -506,6 +513,88 @@ class GpuBoardWindowSmokeTest {
             assertTrue(third.isClosed());
         } finally {
             onSwing(() -> { browser.getOwner().dispose(); return null; });
+        }
+    }
+
+    @Test
+    void lobbyPreviewUsesAndFollowsPlanetaryConditionsWithoutReplacingItsBoard() throws Exception {
+        JFrame owner = onSwing(() -> {
+            var frame = new JFrame("Lobby preview conditions");
+            frame.setSize(600, 400);
+            frame.setVisible(true);
+            return frame;
+        });
+        Game game = new Game();
+        game.setPhase(GamePhase.LOUNGE);
+        Board board = Board.createEmptyBoard(6, 5);
+        game.setBoard(board);
+        Client client = mock(Client.class);
+        ClientGUI gui = mock(ClientGUI.class);
+        when(client.getGame()).thenReturn(game);
+        when(gui.getClient()).thenReturn(client);
+        when(gui.getFrame()).thenReturn(owner);
+        try {
+            Application previous = Gdx.app;
+            onSwing(() -> {
+                var conditions = new PlanetaryConditions();
+                conditions.setLight(Light.FULL_MOON);
+                game.setPlanetaryConditions(conditions);
+                SwingLobbyServices.of(gui);
+                MapSetupDialog.preview3D(gui);
+                return null;
+            });
+            await(() -> Gdx.app != null && Gdx.app != previous);
+            await(() -> previewSource() != null);
+            BoardSource source = previewSource();
+            await(() -> previewReady(source));
+            awaitNavigation();
+            var night = source.takeFrame().scenarioAtmosphere();
+            assertTrue(night.hour() >= 20 || night.hour() <= 4, "the full-map preview starts with the lobby's night");
+            long generation = source.takeFrame().boardGeneration();
+            BoardCamera camera = onGl(() -> {
+                BoardCamera result = ((GpuBattleView) GpuHost.sceneListener()).boardCamera;
+                result.setIsometric(false);
+                result.zoom(.7f);
+                result.pan(20, 15);
+                return result;
+            });
+            float zoom = onGl(() -> camera.camera.zoom);
+            Vector3 focus = onGl(() -> camera.focus.cpy());
+            onSwing(() -> {
+                var conditions = new PlanetaryConditions(game.getPlanetaryConditions());
+                conditions.setLight(Light.DAY);
+                conditions.setWeather(Weather.HEAVY_RAIN);
+                conditions.setFog(Fog.FOG_HEAVY);
+                // The same game event as the server's conditions packet drives the lobby services' refresh.
+                game.setPlanetaryConditions(conditions);
+                return null;
+            });
+            await(() -> source.takeFrame().scenarioAtmosphere().effects().rain() > 0);
+            await(() -> onGl(() -> {
+                var field = GpuBattleView.class.getDeclaredField("atmosphere");
+                field.setAccessible(true);
+                var atmosphere = (GpuAtmosphere) field.get(GpuHost.sceneListener());
+                return atmosphere.lighting().daylight() > .9f;
+            }));
+            var changed = source.takeFrame().scenarioAtmosphere();
+            assertTrue(changed.fog() > 0);
+            assertEquals(0, night.effects().rain(), "previous render snapshots remain immutable");
+            assertEquals(generation, source.takeFrame().boardGeneration(), "conditions don't replace the map");
+            assertTrue(onSwing(() -> GpuBoardWindow.showsPreview(owner, board)));
+            onGl(() -> {
+                assertEquals(0, camera.tilt(), .001f);
+                assertEquals(zoom, camera.camera.zoom, .001f);
+                assertTrue(focus.epsilonEquals(camera.focus, .001f), "live conditions preserve the camera");
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                return null;
+            });
+        } finally {
+            onSwing(() -> {
+                SwingLobbyServices.forget(gui);
+                owner.dispose();
+                return null;
+            });
+            await(() -> !GpuBoardWindow.isActiveFor(null));
         }
     }
 

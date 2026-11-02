@@ -1417,15 +1417,6 @@ final class BoardRoad {
     List<Join> joins() { return joins; }
 
     /**
-     * How far a point lies from the centre line of its lane, whichever side, its lanes closed in on the course by
-     * {@code merged} where a paved arm nears the loose road it meets, whose one lane its traffic drives (#merged).
-     */
-    private float laneOffset(float x, float y, float merged) {
-        PathSample nearest = pathSample(x, y, paintPaths(), ALL_ENDS);
-        return Math.abs(nearest.distance() - laneCenter(nearest.width()) * (1 - merged));
-    }
-
-    /**
      * How far a paved road's traffic has merged into the single lane of a loose road it meets (#meet): 1 on their
      * border, where both its lanes' wheel paths run on in the loose road's, easing to 0 MERGE back along the arm.
      */
@@ -1444,9 +1435,13 @@ final class BoardRoad {
      * a two-way road's middle or kerb, so its wheel paths lie at WHEEL_OFFSET of that.
      */
     float wearLane(float x, float y) {
+        return wearLane(pathSample(x, y, paintPaths(), ALL_ENDS), merged(x, y));
+    }
+
+    private float wearLane(PathSample nearest, float merged) {
         // Where the lanes merge, the asphalt beside the one lane lies untrodden, short of the kerb's grit.
-        float merged = merged(x, y);
-        return Math.min(1 - .2f * merged, laneOffset(x, y, merged) / (Kind.PAVED.halfWidth / 2));
+        float offset = Math.abs(nearest.distance() - laneCenter(nearest.width()) * (1 - merged));
+        return Math.min(1 - .2f * merged, offset / (Kind.PAVED.halfWidth / 2));
     }
 
     /**
@@ -1851,7 +1846,141 @@ final class BoardRoad {
         return new Vector2(sample.dx(), sample.dy()).nor();
     }
 
-    private record PathSample(float distance, float edge, float dx, float dy, float width) { }
+    /** Wheel heading and lane position share their finite curve search, differing only at the open end segments. */
+    Track pavedWear(float x, float y) {
+        var paths = paintPaths();
+        byte[] ends = pathEnds();
+        PathSample closed = new PathSample(x, y, false);
+        sampleInterior(closed, paths, ends, ALL_ENDS, -1, sampleBounds());
+        PathSample open = new PathSample(closed);
+        sampleEnds(open, paths, ends, ALL_ENDS, -1, closed);
+        return new Track(new Vector2(closed.dx(), closed.dy()).nor(), wearLane(open, merged(x, y)));
+    }
+
+    /** One query's scratch/result; nearer branches may be visited first, but equal distances retain source order. */
+    private static final class PathSample {
+        private final float x, y, margin;
+        private final boolean edgeNeeded;
+        private float distance = Float.POSITIVE_INFINITY, edge = Float.POSITIVE_INFINITY, dx, dy = 1, width;
+        private int nearestPath = Integer.MAX_VALUE, nearestSegment = Integer.MAX_VALUE;
+
+        PathSample(float x, float y) { this(x, y, true); }
+
+        PathSample(float x, float y, boolean edgeNeeded) {
+            this.x = x; this.y = y;
+            this.edgeNeeded = edgeNeeded;
+            // Conservative slack for the rounding of bounds versus the original projection arithmetic.
+            margin = .0001f * (1 + Math.abs(x) + Math.abs(y));
+        }
+
+        PathSample(PathSample source) {
+            x = source.x; y = source.y; margin = source.margin;
+            edgeNeeded = source.edgeNeeded;
+            distance = source.distance; edge = source.edge; dx = source.dx; dy = source.dy; width = source.width;
+            nearestPath = source.nearestPath; nearestSegment = source.nearestSegment;
+        }
+
+        float distance() { return distance; }
+        float edge() { return edge; }
+        float dx() { return dx; }
+        float dy() { return dy; }
+        float width() { return width; }
+
+        void segment(Point a, Point b, int path, int segment, boolean before, boolean after) {
+            segment(a, b, path, segment, before, after, null);
+        }
+
+        /** The bounded wheel heading and extended lane position share their projection and, usually, distance. */
+        void segment(Point a, Point b, int path, int segment, boolean before, boolean after, PathSample closed) {
+            float sx = b.x - a.x, sy = b.y - a.y;
+            float along = ((x - a.x) * sx + (y - a.y) * sy) / (sx * sx + sy * sy);
+            float t = before ? along : Math.max(0, along);
+            if (!after) { t = Math.min(1, t); }
+            float ex = x - a.x - t * sx, ey = y - a.y - t * sy;
+            float near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
+            float bounded = Math.min(1, Math.max(0, t));
+            accept(a, b, sx, sy, bounded, near, path, segment);
+            if (closed != null) {
+                if (t != bounded) {
+                    ex = x - a.x - bounded * sx; ey = y - a.y - bounded * sy;
+                    near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
+                }
+                closed.accept(a, b, sx, sy, bounded, near, path, segment);
+            }
+        }
+
+        private void accept(Point a, Point b, float sx, float sy, float t, float near, int path, int segment) {
+            if (edgeNeeded) { edge = Math.min(edge, near - a.width - t * (b.width - a.width)); }
+            if (near < distance || near < Float.POSITIVE_INFINITY && near == distance
+                  && (path < nearestPath || path == nearestPath && segment < nearestSegment)) {
+                distance = near; dx = sx; dy = sy; width = a.width + t * (b.width - a.width);
+                nearestPath = path; nearestSegment = segment;
+            }
+        }
+    }
+
+    private record SampleBounds(int start, int end, float minX, float minY, float maxX, float maxY, float width,
+          SampleBounds left, SampleBounds right) {
+        float lower(float x, float y) {
+            float dx = Math.max(0, Math.max(minX - x, x - maxX)), dy = Math.max(0, Math.max(minY - y, y - maxY));
+            return dx * dx + dy * dy;
+        }
+
+        void sample(PathSample sample, List<Point> path, int p, boolean first, boolean last) {
+            float lower = lower(sample.x, sample.y);
+            float reach = (sample.edgeNeeded ? Math.max(sample.distance, sample.edge + width) : sample.distance) + sample.margin;
+            if (lower > reach * reach) { return; }
+            if (left != null) {
+                SampleBounds a = left, b = right;
+                if (a.lower(sample.x, sample.y) > b.lower(sample.x, sample.y)) { a = right; b = left; }
+                a.sample(sample, path, p, first, last);
+                b.sample(sample, path, p, first, last);
+            } else {
+                for (int i = start; i < end; i++) {
+                    // Open end segments were sampled as rays before this finite tree; do not measure them twice.
+                    if (first && i == 1 || last && i == path.size() - 1) { continue; }
+                    sample.segment(path.get(i - 1), path.get(i), p, i, false, false);
+                }
+            }
+        }
+    }
+    /** Immutable bounds over consecutive curve segments; all mask texels share these derived values. */
+    private volatile SampleBounds[] sampleBounds;
+
+    private SampleBounds[] sampleBounds() {
+        SampleBounds[] result = sampleBounds;
+        if (result == null) { sampleBounds = result = sampleBounds(paths); }
+        return result;
+    }
+
+    private static SampleBounds[] sampleBounds(List<List<Point>> paths) {
+        SampleBounds[] result = new SampleBounds[paths.size()];
+        for (int p = 0; p < paths.size(); p++) {
+            result[p] = sampleBounds(paths.get(p), 1, paths.get(p).size());
+        }
+        return result;
+    }
+
+    private static SampleBounds sampleBounds(List<Point> path, int start, int end) {
+        if (end - start > 8) {
+            int middle = (start + end) / 2;
+            SampleBounds a = sampleBounds(path, start, middle), b = sampleBounds(path, middle, end);
+            return new SampleBounds(start, end, Math.min(a.minX, b.minX), Math.min(a.minY, b.minY),
+                  Math.max(a.maxX, b.maxX), Math.max(a.maxY, b.maxY), Math.max(a.width, b.width), a, b);
+        }
+        float minX = Float.POSITIVE_INFINITY, minY = minX, maxX = -minX, maxY = -minX, width = 0;
+        for (int i = start - 1; i < end; i++) {
+            Point point = path.get(i);
+            minX = Math.min(minX, point.x); minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
+            width = Math.max(width, point.width);
+            // Preserve the exhaustive sampler's NaN edge for a zero-length segment.
+            if (i >= start && point.x == path.get(i - 1).x && point.y == path.get(i - 1).y) {
+                width = Float.POSITIVE_INFINITY;
+            }
+        }
+        return new SampleBounds(start, end, minX, minY, maxX, maxY, width, null, null);
+    }
 
     /** Single circulating lanes keep one axle; two-way roads place an axle on each side of their divider or median. */
     private float laneCenter(float width) {
@@ -1902,31 +2031,54 @@ final class BoardRoad {
      * or its prefix.
      */
     private PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, int open) {
-        return pathSample(x, y, sampledPaths, open == 0 ? null : pathEnds(), open, -1);
+        return pathSample(x, y, sampledPaths, open == 0 ? null : pathEnds(), open, -1, sampleBounds());
     }
 
     /** {@link #pathSample} with each path's {@code ends}; only path {@code only}, unless that is -1. */
     private static PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, byte[] ends, int open,
           int only) {
-        float distance = Float.POSITIVE_INFINITY, edge = Float.POSITIVE_INFINITY, alongX = 0, alongY = 1, width = 0;
+        return pathSample(x, y, sampledPaths, ends, open, only, null);
+    }
+
+    private static PathSample pathSample(float x, float y, List<List<Point>> sampledPaths, byte[] ends, int open,
+          int only, SampleBounds[] bounds) {
+        PathSample sample = new PathSample(x, y);
+        // Unbounded rays have no finite AABB. Their distance can prune the finite interior, without forcing every
+        // ancestor of an open end to be traversed for every texel.
+        sampleEnds(sample, sampledPaths, ends, open, only, null);
+        sampleInterior(sample, sampledPaths, ends, open, only, bounds);
+        return sample;
+    }
+
+    private static void sampleEnds(PathSample sample, List<List<Point>> sampledPaths, byte[] ends, int open,
+          int only, PathSample closed) {
+        if (ends == null) { return; }
+        for (int p = Math.max(0, only); p < (only < 0 ? sampledPaths.size() : only + 1); p++) {
+            var path = sampledPaths.get(p);
+            int end = path.size() - 1;
+            if (end < 1) { continue; }
+            boolean first = (ends[p] & open) != 0, last = (ends[p] & open << 1) != 0;
+            if (first || end == 1 && last) {
+                sample.segment(path.get(0), path.get(1), p, 1, first, last && end == 1, closed);
+            }
+            if (last && end > 1) { sample.segment(path.get(end - 1), path.get(end), p, end, false, true, closed); }
+        }
+    }
+
+    private static void sampleInterior(PathSample sample, List<List<Point>> sampledPaths, byte[] ends, int open,
+          int only, SampleBounds[] bounds) {
         for (int p = Math.max(0, only); p < (only < 0 ? sampledPaths.size() : only + 1); p++) {
             var path = sampledPaths.get(p);
             boolean first = ends != null && (ends[p] & open) != 0, last = ends != null && (ends[p] & open << 1) != 0;
-            for (int i = 1; i < path.size(); i++) {
-                Point a = path.get(i - 1), b = path.get(i);
-                float dx = b.x - a.x, dy = b.y - a.y;
-                float along = ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy);
-                float t = Math.clamp(along, first && i == 1 ? Float.NEGATIVE_INFINITY : 0,
-                      last && i == path.size() - 1 ? Float.POSITIVE_INFINITY : 1);
-                float ex = x - a.x - t * dx, ey = y - a.y - t * dy;
-                // Not Math.hypot, which runs in software: a road's paint samples this for every texel and segment.
-                float near = (float) Math.sqrt((double) ex * ex + (double) ey * ey);
-                t = Math.clamp(t, 0, 1);
-                edge = Math.min(edge, near - a.width - t * (b.width - a.width));
-                if (near < distance) { distance = near; alongX = dx; alongY = dy; width = a.width + t * (b.width - a.width); }
+            if (bounds != null && bounds[p].left != null) {
+                bounds[p].sample(sample, path, p, first, last);
+            } else {
+                for (int i = 1; i < path.size(); i++) {
+                    if (first && i == 1 || last && i == path.size() - 1) { continue; }
+                    sample.segment(path.get(i - 1), path.get(i), p, i, false, false);
+                }
             }
         }
-        return new PathSample(distance, edge, alongX, alongY, width);
     }
 
     /**
@@ -2295,7 +2447,8 @@ final class BoardRoad {
                 int samples = Math.max(1, (int) Math.ceil(frame.outer - inner));
                 for (int sample = 0; sample <= samples; sample++) {
                     float across = inner + (frame.outer - inner) * sample / samples;
-                    if (pathSample(frame.x - frame.ny * across, frame.y + frame.nx * across, other).edge() <= 0) {
+                    if (pathSample(frame.x - frame.ny * across, frame.y + frame.nx * across,
+                          other, null, 0, -1).edge() <= 0) {
                         conflict = true;
                         break;
                     }

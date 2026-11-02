@@ -82,7 +82,8 @@ class GpuHexTextSmokeTest {
 
     private static void checkLabels() {
         GpuTerrain terrain = new GpuTerrain();
-        GpuAtmosphere atmosphere = new GpuAtmosphere();
+        // The contrast/history fixtures below straddle .2, independently of the player's default threshold.
+        GpuAtmosphere atmosphere = new GpuAtmosphere(.2f);
         GpuHexText labels = new GpuHexText();
         GpuBoardSkin skin = new GpuBoardSkin();
         SpriteBatch batch = new SpriteBatch();
@@ -161,6 +162,7 @@ class GpuHexTextSmokeTest {
             checkTopGrid(camera, scene);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Overlay drawing must leave valid GL state");
             checkStaticMeshes(batch);
+            checkManyAtlases(batch);
             checkContrast(terrain, atmosphere, batch, font, outline);
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
         } finally {
@@ -202,7 +204,9 @@ class GpuHexTextSmokeTest {
                                 if (depth != null) { assertArrayEquals(depth, contrastDepth(), "Adaptive ink cannot change depth"); }
                                 double ink = contrastInk(background, reference, adaptive, false);
                                 assertTrue(source == 0 ? ink > 245 : ink < 10,
-                                      "Actual neutral ink must contrast dark, mid-gray and HDR colored surfaces: " + ink);
+                                      "Actual neutral ink must contrast dark, mid-gray and HDR colored surfaces: " + ink
+                                            + ", perspective=" + perspective + ", isometric=" + isometric
+                                            + ", outlined=" + outlined + ", source=" + source);
                                 if (outlined) {
                                     double ring = contrastInk(background, reference, adaptive, true);
                                     assertTrue(source == 0 ? ring < 10 : ring > 245,
@@ -756,6 +760,7 @@ class GpuHexTextSmokeTest {
             assertEquals(1, font.getRegions().size);
             labels.update(scene, font, font, coords -> null);
             assertEquals(2, font.getRegions().size, "Later chunks introduce another incremental font atlas page");
+            assertEquals(1, pages(labels).size(), "Alternating atlas textures must share the same ordered batch");
             List<LegacyChunk> legacy = legacy(scene, font, true);
             assertVertices(labels, legacy, font);
             // Client Settings > Hex label outline off: the text alone, one run of glyphs instead of outline then text.
@@ -784,12 +789,11 @@ class GpuHexTextSmokeTest {
             assertTrue(visible > 0 && visible < legacy.size(), "The close view must contain culled chunk ranges");
             parity(labels, legacy, batch, camera, depth);
 
-            // One font page over many chunks crosses both signed-short and unsigned-short index boundaries (each
-            // label's eight glyphs are drawn twice, its outline then its text, each over every chunk).
-            BoardScene large = textScene(48, "AAAAAAAA");
+            // More than 65,535 glyph instances still use only the shared quad's six unsigned-short indices.
+            BoardScene large = textScene(72, "AAAAAAAA");
             labels.update(large, font, font, coords -> null);
             List<Object> pages = pages(labels);
-            assertEquals(4, pages.size(), "Consecutive chunks share bounded pages instead of individual draw calls");
+            assertEquals(1, pages.size(), "Glyph count no longer fragments draws at the 16-bit vertex limit");
             assertVertices(labels, legacy(large, font, true), font);
             labels.update(large, font, font, coords -> { throw new AssertionError("Unchanged labels must keep their meshes"); });
             assertSame(pages.getFirst(), pages(labels).getFirst());
@@ -799,11 +803,23 @@ class GpuHexTextSmokeTest {
                 ScreenUtils.clear(.1f, .2f, .3f, 1, true);
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
-                assertEquals(4, profiler.getDrawCalls(), "All visible ranges merge into one draw per static mesh page");
+                assertEquals(1, profiler.getDrawCalls(), "All visible glyphs share one instanced draw");
                 camera.center(new com.badlogic.gdx.math.Vector3(-10000, 10000, 0));
                 profiler.reset();
                 labels.render(batch, camera, depth, 0);
                 assertEquals(0, profiler.getDrawCalls(), "An off-board view must submit no glyph meshes");
+            } finally { profiler.disable(); }
+            // Individual scatter heights change glyph occlusion, but must not fragment the same elevation's font draws.
+            BoardScene varied = textScene(24, "AAAA", true);
+            labels.update(varied, font, font, coords -> null);
+            camera.fit(varied);
+            assertVertices(labels, legacy(varied, font, true), font);
+            parity(labels, legacy(varied, font, true), batch, camera, depth);
+            profiler.enable();
+            try {
+                profiler.reset();
+                labels.render(batch, camera, depth, 0);
+                assertEquals(1, profiler.getDrawCalls(), "Different scatter heights share one ordered outline/ink batch");
             } finally { profiler.disable(); }
             labels.update(textScene(1, ""), font, font, coords -> null);
             assertEquals(meshesBefore, Mesh.getManagedStatus(), "Replacing text releases all old static meshes");
@@ -818,15 +834,46 @@ class GpuHexTextSmokeTest {
         assertEquals(meshesBefore, Mesh.getManagedStatus());
     }
 
+    /** More than the bound sampler count must split safely without reordering overlapping transparent glyphs. */
+    private static void checkManyAtlases(SpriteBatch batch) {
+        var textures = new ArrayList<Texture>();
+        var regions = new Array<TextureRegion>();
+        var data = new BitmapFont.BitmapFontData();
+        data.lineHeight = 16; data.capHeight = 14; data.down = -16; data.spaceXadvance = 7;
+        for (int index = 0; index < 10; index++) {
+            Texture texture = texture((20 + index * 21) << 24 | (230 - index * 20) << 16 | 0x8050);
+            textures.add(texture);
+            regions.add(new TextureRegion(texture));
+            data.setGlyph('A' + index, glyph((char) ('A' + index), index));
+        }
+        BitmapFont font = new BitmapFont(data, regions, false);
+        Texture depth = texture(0xffffffff);
+        GpuHexText labels = new GpuHexText();
+        try {
+            BoardScene scene = textScene(16, "ABCDEFGHIJ");
+            labels.update(scene, font, font, coords -> null);
+            assertTrue(pages(labels).size() > 1, "This fixture must cross the sampler budget");
+            assertVertices(labels, legacy(scene, font, true), font);
+            BoardCamera camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            camera.setIsometric(false);
+            camera.fit(scene);
+            parity(labels, legacy(scene, font, true), batch, camera, depth);
+        } finally {
+            labels.dispose(); font.dispose(); depth.dispose();
+            textures.forEach(Texture::dispose);
+        }
+    }
+
     private static void parity(GpuHexText labels, List<LegacyChunk> legacy, SpriteBatch batch, BoardCamera camera,
           Texture depth) {
         ScreenUtils.clear(.1f, .2f, .3f, 1, true);
         labels.render(batch, camera, depth, 0);
         Pixmap actual = pixels();
-        // The unchanged text shader/depth uniforms were just set by render. Only the submission path differs.
+        // Independent SpriteBatch reference: these authored glyphs have no occluder or adaptive contrast.
         ScreenUtils.clear(.1f, .2f, .3f, 1, true);
         ShaderProgram previous = batch.getShader();
-        batch.setShader(field(labels, "shader"));
+        batch.setShader(null);
         batch.setProjectionMatrix(camera.camera.combined);
         batch.setTransformMatrix(new Matrix4().setToTranslation(0, 0, .6f * BoardGeometry.HEX_SCALE));
         batch.begin();
@@ -866,26 +913,25 @@ class GpuHexTextSmokeTest {
         int glyph = 0;
         for (Object page : pages(labels)) {
             Mesh mesh = field(page, "mesh");
-            assertTrue(mesh.getNumVertices() <= 65_532);
-            assertEquals(mesh.getNumVertices() / 4 * 6, mesh.getNumIndices());
-            assertEquals(36, mesh.getVertexSize(), "Position/color/UV, role, and one static owning hex");
-            float[] vertices = new float[mesh.getNumVertices() * 9];
-            mesh.getVertices(vertices);
-            for (int vertex = 0; vertex < vertices.length; vertex += 9) {
-                actual.addAll(vertices, vertex, 5);
-                assertEquals(0, vertices[vertex + 5], 0, "These authored pink glyphs and rings must retain their color");
-                for (int component = 6; component < 9; component++) {
-                    assertEquals(vertices[vertex / 36 * 36 + component], vertices[vertex + component],
-                          "Every glyph corner retains the same owning tile, independent of its position");
+            assertEquals(4, mesh.getNumVertices());
+            assertEquals(6, mesh.getNumIndices());
+            assertTrue(mesh.isInstanced());
+            assertEquals(64, mesh.getInstancedAttributes().vertexSize, "One compact record replaces four glyph vertices");
+            float[] instances = field(page, "instances");
+            List<Texture> bound = field(page, "textures");
+            for (int at = 0; at < instances.length; at += 16) {
+                // Reconstruct the independent font-cache quad to check exact positions, UVs, colors and drawing order.
+                for (int corner = 0; corner < 4; corner++) {
+                    boolean right = corner >= 2, top = corner == 1 || corner == 2;
+                    actual.add(instances[at + (right ? 2 : 0)], instances[at + (top ? 3 : 1)], instances[at + 4]);
+                    actual.add(instances[at + (right ? 7 : 5)], instances[at + (top ? 8 : 6)]);
                 }
+                assertEquals(0, instances[at + 9], 0, "These authored glyphs and rings must retain their color");
+                assertSame(textures.get(glyph++), bound.get((int) instances[at + 15]));
             }
             short[] indices = new short[mesh.getNumIndices()];
             mesh.getIndices(indices);
-            int[] quad = { 0, 1, 2, 2, 3, 0 };
-            for (int i = 0; i < indices.length; i++) {
-                assertEquals(i / 6 * 4 + quad[i % 6], Short.toUnsignedInt(indices[i]), "SpriteBatch quad winding");
-            }
-            for (int i = 0; i < vertices.length / 36; i++) { assertSame(textures.get(glyph++), field(page, "texture")); }
+            assertArrayEquals(new short[] { 0, 1, 2, 2, 3, 0 }, indices, "SpriteBatch quad winding");
         }
         assertEquals(expected.size, actual.size);
         for (int i = 0; i < expected.size; i++) {
@@ -936,6 +982,10 @@ class GpuHexTextSmokeTest {
     }
 
     private static BoardScene textScene(int size, String text) {
+        return textScene(size, text, false);
+    }
+
+    private static BoardScene textScene(int size, String text, boolean variedHeadroom) {
         Font font = new Font(Font.SANS_SERIF, Font.PLAIN, GpuBoardSkin.FONT_RESOLUTION);
         List<BoardHexText> labels = text.isEmpty() ? List.of()
               : List.of(new BoardHexText(text, 22, font, 0xafff70ff, true, 0));
@@ -944,8 +994,11 @@ class GpuHexTextSmokeTest {
         List<BoardScene.Tile> tiles = new ArrayList<>();
         for (int x = 0; x < size; x++) {
             for (int y = 0; y < size; y++) {
+                List<BoardScene.Feature> features = variedHeadroom
+                      ? List.of(new BoardScene.Feature("scatter-rock", 0, 0, 0, 1, (x * size + y) * .01f, 0,
+                            BoardScene.FeatureKind.SCATTER)) : List.of();
                 tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null,
-                      List.of(), x < size / 2 ? firstPage : labels));
+                      features, x < size / 2 ? firstPage : labels));
             }
         }
         return new BoardScene(0, size, size, tiles, List.of(), List.of(), -1, "", List.of());
@@ -987,8 +1040,7 @@ class GpuHexTextSmokeTest {
     }
 
     private static List<Object> pages(GpuHexText labels) {
-        Map<?, List<Object>> groups = field(labels, "groups");
-        return groups.values().stream().flatMap(List::stream).toList();
+        return List.copyOf(field(labels, "pages"));
     }
 
     @SuppressWarnings("unchecked")

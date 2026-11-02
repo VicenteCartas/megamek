@@ -1,9 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
@@ -39,38 +37,6 @@ final class GpuMinimap implements GpuHud.Component {
     private static final Color ROUTE = Color.valueOf("D4FFF0");
     private static final Color FRUSTUM = new Color(1, 1, 1, .85f);
     private static final Color DESTROYED = Color.valueOf("555555");
-    /** The terrain palette: muted map colours, one per terrain, independent of the tileset's art. */
-    private static final Map<BoardScene.Surface, Color> SURFACES = new EnumMap<>(Map.ofEntries(
-          Map.entry(BoardScene.Surface.GRASS, Color.valueOf("7E8D41")),
-          Map.entry(BoardScene.Surface.TROPICAL, Color.valueOf("5E8A3A")),
-          Map.entry(BoardScene.Surface.DIRT, Color.valueOf("8A7350")),
-          Map.entry(BoardScene.Surface.SAND, Color.valueOf("C2AE7A")),
-          Map.entry(BoardScene.Surface.DESERT, Color.valueOf("CDB27A")),
-          Map.entry(BoardScene.Surface.ROCK, Color.valueOf("8A867C")),
-          Map.entry(BoardScene.Surface.CONCRETE, Color.valueOf("9C9C98")),
-          Map.entry(BoardScene.Surface.SNOW, Color.valueOf("E2E7EC")),
-          Map.entry(BoardScene.Surface.LUNAR, Color.valueOf("8E8E8C")),
-          Map.entry(BoardScene.Surface.FUNGUS, Color.valueOf("7E6A8E")),
-          Map.entry(BoardScene.Surface.MARS, Color.valueOf("A0583A")),
-          Map.entry(BoardScene.Surface.VOLCANO, Color.valueOf("4A4440"))));
-    /** Light, heavy and ultra-heavy woods. */
-    private static final Color[] WOODS = { Color.valueOf("4E7A34"), Color.valueOf("3C6428"), Color.valueOf("2C4E1E") };
-    private static final Color JUNGLE = Color.valueOf("3E7A3A");
-    private static final Color FIELD = Color.valueOf("A8A050");
-    private static final Color MARSH = Color.valueOf("4E6B45");
-    private static final Color MUD = Color.valueOf("6E5A3E");
-    private static final Color TUNDRA = Color.valueOf("9AA08A");
-    private static final Color ROUGH = Color.valueOf("8F8160");
-    private static final Color BUILDING = Color.valueOf("B0ADA6");
-    private static final Color WATER = Color.valueOf("4A8CA6");
-    private static final Color DEEP_WATER = Color.valueOf("33688F");
-    private static final Color ICE = Color.valueOf("C8DCEB");
-    private static final Color MAGMA = Color.valueOf("E0581E");
-    private static final Color MAGMA_CRUST = Color.valueOf("5A2A1C");
-    private static final Color ROAD = Color.valueOf("5A5A5E");
-    private static final Color BRIDGE = Color.valueOf("7A5A3C");
-    /** Each elevation level lightens (below 0, darkens) a hex by this share. */
-    private static final float ELEVATION_SHADE = .05f;
     /** The map's height: the panel keeps the prototype's 210 units (#minimap, y 90-300) with its 2-unit rails. */
     private static final float CANVAS_HEIGHT = 206;
     /** The map's height when the window is 800 or less tall: the prototype's 180-unit panel. */
@@ -163,61 +129,7 @@ final class GpuMinimap implements GpuHud.Component {
      * it; lighter the higher it stands.
      */
     static int colour(BoardScene.Tile tile) {
-        Color colour = new Color(ground(tile));
-        if (tile.road() != BoardRoad.Kind.NONE) {
-            colour.lerp(ROAD, .4f);
-        }
-        if (BoardBridge.feature(tile) != null) {
-            colour.lerp(BRIDGE, .6f);
-        }
-        colour.mul(MathUtils.clamp(1 + ELEVATION_SHADE * tile.elevation(), .7f, 1.3f));
-        colour.a = 1;
-        return Color.rgba8888(colour);
-    }
-
-    private static Color ground(BoardScene.Tile tile) {
-        BoardLiquid liquid = tile.liquid();
-        if (tile.frozen()) {
-            return ICE;
-        }
-        if (liquid.kind() == BoardLiquid.Kind.MAGMA) {
-            return MAGMA;
-        }
-        if (liquid.kind() == BoardLiquid.Kind.MAGMA_CRUST) {
-            return MAGMA_CRUST;
-        }
-        if (liquid.present()) {
-            Color water = tile.waterDepth() > 1 ? DEEP_WATER : WATER;
-            return liquid.kind() == BoardLiquid.Kind.HAZARDOUS ? water.cpy().mul(BoardLiquid.HAZARDOUS_TINT) : water;
-        }
-        if (tile.building()) {
-            return BUILDING;
-        }
-        BoardScene.Cover cover = tile.cover();
-        if (cover.woods() > 0) {
-            return cover.jungle() ? JUNGLE : WOODS[Math.min(cover.woods(), WOODS.length) - 1];
-        }
-        switch (tile.biome()) {
-            case FIELD -> {
-                return FIELD;
-            }
-            case MARSH -> {
-                return MARSH;
-            }
-            case QUICKSAND, MUD -> {
-                return MUD;
-            }
-            case TUNDRA -> {
-                return TUNDRA;
-            }
-            default -> {
-            }
-        }
-        if (tile.features().stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.ROUGH
-              || feature.kind() == BoardScene.FeatureKind.BOULDER)) {
-            return ROUGH;
-        }
-        return SURFACES.get(tile.surface());
+        return tile.minimap().colour();
     }
 
     @Override

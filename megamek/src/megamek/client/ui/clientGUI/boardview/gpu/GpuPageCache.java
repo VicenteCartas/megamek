@@ -226,6 +226,85 @@ final class GpuPageCache implements Disposable {
         Gdx.gl.glBindBuffer(GL31.GL_UNIFORM_BUFFER, 0);
     }
 
+    /** Larger arrays retain every layer, mip and in-progress build; page tables and page ownership stay valid. */
+    void grow(int capacity) {
+        int previousCapacity = layers.length;
+        if (capacity <= previousCapacity) { return; }
+        if (previousCapacity == 0) { allocate(capacity); return; }
+        GLTexture[] larger = new GLTexture[arrays.length];
+        IntBuffer state = BufferUtils.newIntBuffer(16);
+        Gdx.gl.glGetIntegerv(GL30.GL_READ_FRAMEBUFFER_BINDING, state);
+        int previousRead = state.get(0);
+        Gdx.gl.glGetIntegerv(GL30.GL_DRAW_FRAMEBUFFER_BINDING, state);
+        int previousDraw = state.get(0);
+        boolean scissor = Gdx.gl.glIsEnabled(GL20.GL_SCISSOR_TEST);
+        boolean srgb = Gdx.gl.glIsEnabled(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+        ByteBuffer mask = BufferUtils.newByteBuffer(4);
+        Gdx.gl.glGetBooleanv(GL20.GL_COLOR_WRITEMASK, mask);
+        FloatBuffer clear = BufferUtils.newFloatBuffer(4);
+        Gdx.gl.glGetFloatv(GL20.GL_COLOR_CLEAR_VALUE, clear);
+        int read = Gdx.gl.glGenFramebuffer(), draw = Gdx.gl.glGenFramebuffer();
+        try {
+            for (int i = 0; i < formats.length; i++) { larger[i] = new PageArray(formats[i], texels, levels, capacity); }
+            checkGrowth();
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, read);
+            Gdx.gl30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, draw);
+            state.clear(); state.put(GL30.GL_COLOR_ATTACHMENT0).flip();
+            Gdx.gl30.glDrawBuffers(1, state);
+            Gdx.gl.glDisable(GL20.GL_SCISSOR_TEST);
+            // The sRGB page already stores encoded bytes. Copy them without another transfer-function round trip.
+            Gdx.gl.glDisable(GpuLinearOverlay.FRAMEBUFFER_SRGB);
+            Gdx.gl.glColorMask(true, true, true, true);
+            Gdx.gl.glClearColor(0, 0, 0, 0);
+            for (int layer = 0; layer < capacity; layer++) {
+                for (int level = 0; level < levels; level++) {
+                    int size = texels >> level;
+                    for (int i = 0; i < arrays.length; i++) {
+                        Gdx.gl30.glFramebufferTextureLayer(GL30.GL_DRAW_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0,
+                              larger[i].getTextureObjectHandle(), level, layer);
+                        if (layer == 0 && level == 0
+                              && Gdx.gl.glCheckFramebufferStatus(GL30.GL_DRAW_FRAMEBUFFER) != GL20.GL_FRAMEBUFFER_COMPLETE) {
+                            throw new IllegalStateException("Page cache growth framebuffer incomplete");
+                        }
+                        if (layer < previousCapacity) {
+                            Gdx.gl30.glFramebufferTextureLayer(GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0,
+                                  arrays[i].getTextureObjectHandle(), level, layer);
+                            Gdx.gl30.glBlitFramebuffer(0, 0, size, size, 0, 0, size, size,
+                                  GL20.GL_COLOR_BUFFER_BIT, GL20.GL_NEAREST);
+                        } else {
+                            Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+                        }
+                    }
+                }
+            }
+            checkGrowth();
+        } catch (RuntimeException | Error failure) {
+            for (GLTexture array : larger) { if (array != null) { array.dispose(); } }
+            throw failure;
+        } finally {
+            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, previousRead);
+            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, previousDraw);
+            Gdx.gl.glDeleteFramebuffer(read); Gdx.gl.glDeleteFramebuffer(draw);
+            if (scissor) { Gdx.gl.glEnable(GL20.GL_SCISSOR_TEST); }
+            if (srgb) { Gdx.gl.glEnable(GpuLinearOverlay.FRAMEBUFFER_SRGB); }
+            Gdx.gl.glColorMask(mask.get(0) != 0, mask.get(1) != 0, mask.get(2) != 0, mask.get(3) != 0);
+            Gdx.gl.glClearColor(clear.get(0), clear.get(1), clear.get(2), clear.get(3));
+        }
+        for (int i = 0; i < arrays.length; i++) { arrays[i].dispose(); arrays[i] = larger[i]; }
+        layers = Arrays.copyOf(layers, capacity);
+        for (int layer = previousCapacity; layer < capacity; layer++) { free.add(layer); }
+        changes++;
+    }
+
+    /** Allocation can fail at a non-base mip even when the first framebuffer attachment is complete. */
+    private static void checkGrowth() {
+        int error = Gdx.gl.glGetError();
+        if (error != GL20.GL_NO_ERROR) {
+            throw new IllegalStateException("Page cache growth OpenGL error 0x" + Integer.toHexString(error));
+        }
+    }
+
     /** Attaches mip {@code level} of {@code layer} of every array to the bound framebuffer. */
     void attach(int layer, int level) {
         for (int i = 0; i < formats.length; i++) {

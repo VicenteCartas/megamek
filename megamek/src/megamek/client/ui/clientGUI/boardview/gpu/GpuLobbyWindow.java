@@ -16,7 +16,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -152,6 +155,8 @@ public final class GpuLobbyWindow {
     private static ClientGUI previewedFromMapSetup;
 
     private final ClientGUI gui;
+    /** One visual time sample for this lobby's inspections, stable across board and conditions updates. */
+    private final double mapPreviewTimeSample = ThreadLocalRandom.current().nextDouble();
     private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
         @Override
         public JFrame frame() {
@@ -1294,7 +1299,13 @@ public final class GpuLobbyWindow {
                 return;
             }
             mapSetup = new LobbyMapSetupController(form, () -> client.getGame().getBoard(),
-                  (picture, themes) -> onScreen(shown -> shown.mapSetup(picture, themes)),
+                  (picture, themes) -> {
+                      // Read on the EDT; only immutable visual settings cross to the preview's render thread.
+                      var atmosphere = BoardAtmosphere.fromScenario(
+                            new PlanetaryConditions(client.getGame().getPlanetaryConditions()), picture.space(),
+                            mapPreviewTimeSample);
+                      onScreen(shown -> shown.mapSetup(picture, themes, atmosphere));
+                  },
                   (key, image) -> onScreen(shown -> shown.mapPicture(key, image)));
         }
         onScreen(GpuLobbyScreen::openMapSetup);
@@ -1950,15 +1961,6 @@ public final class GpuLobbyWindow {
         for (UnitConfigForm.Member member : form.members()) {
             portraits.add(portraitPicture(member.portrait()));
         }
-        BufferedImage boardPicture = null;
-        if (form.board() != null) {
-            try {
-                boardPicture = LobbyMapThumbnail.bake(form.board(), List.of(), null, ZONE_PICTURE);
-            } catch (RuntimeException failure) {
-                LOGGER.warn(failure, "The unit bay could not draw the board");
-            }
-        }
-        BufferedImage terrain = boardPicture;
         LobbyUnitBayView.Host host = new LobbyUnitBayView.Host() {
             @Override
             public void edt(Runnable work, Runnable then) {
@@ -2016,8 +2018,11 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public @Nullable BufferedImage boardPicture() {
-                return terrain;
+            public Future<?> boardPicture(Consumer<BufferedImage> ready) {
+                // The form owns this preview board; it is not the mutable game board.
+                return bakeUnitBayMap(form.board(), image -> GpuHost.post(() -> {
+                    if (!closing) { ready.accept(image); }
+                }));
             }
         };
         GpuHost.post(() -> {
@@ -2026,6 +2031,31 @@ public final class GpuLobbyWindow {
                 shown.unitBay(form, sprites, portraits, host);
             }
         });
+    }
+
+    /** Starts the private preview board's image off the UI threads; completion runs on the EDT. */
+    static SwingWorker<BufferedImage, Void> bakeUnitBayMap(Board board, Consumer<BufferedImage> ready) {
+        SwingWorker<BufferedImage, Void> worker = new SwingWorker<>() {
+            @Override
+            protected BufferedImage doInBackground() {
+                return LobbyMapThumbnail.bake(board, List.of(), null, ZONE_PICTURE);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ready.accept(get());
+                } catch (CancellationException ignored) {
+                    // The bay closed or another unit replaced it.
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                } catch (ExecutionException failure) {
+                    LOGGER.warn(failure.getCause(), "The unit bay could not draw the board");
+                }
+            }
+        };
+        worker.execute();
+        return worker;
     }
 
     /** The portrait's picture, {@value #PORTRAIT_PICTURE} pixels square, or null; any thread. */

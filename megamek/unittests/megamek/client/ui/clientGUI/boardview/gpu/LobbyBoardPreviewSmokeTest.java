@@ -27,6 +27,13 @@ import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Board;
 import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.Coords;
+import megamek.common.planetaryConditions.Fog;
+import megamek.common.planetaryConditions.Light;
+import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.planetaryConditions.Weather;
+import megamek.common.planetaryConditions.Wind;
+import megamek.common.planetaryConditions.WindDirection;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
@@ -53,6 +60,9 @@ class LobbyBoardPreviewSmokeTest {
                 board.getHex(2, 2).setLevel(2);
                 board.getHex(2, 2).addTerrain(new Terrain(Terrains.WOODS, 1));
                 BoardSceneryLayouts.convert(board);
+                var conditions = new PlanetaryConditions();
+                conditions.setLight(Light.FULL_MOON);
+                preview.atmosphere(BoardAtmosphere.fromScenario(conditions, false, .4));
                 preview.loading("Inspection test");
                 preview.show(scene(board));
                 GpuLoadingPanel loading = preview.findActor("board-loading-panel");
@@ -67,15 +77,41 @@ class LobbyBoardPreviewSmokeTest {
                 assertEquals(0, image.getY(), .01f, "title, controls and hints must overlay the full preview");
                 GpuBoardTestUi.assertHorizontalBounds(preview, preview);
                 UiTestStage.capture("map-embedded-inspection", 960, 720).dispose();
-                checkCameraInput(stage, preview, theme);
-                preview.setSize(720, 600);
-                board = Board.createEmptyBoard(4, 3);
+                BoardCamera camera = checkCameraInput(stage, preview, theme);
+                checkConditions(stage, preview, camera, conditions);
+                camera.setIsometric(false);
+                camera.zoom(.3f);
+                camera.pan(90, 60);
+                // Most catalogue boards have identical dimensions and the preview scene's board ID is always 0.
+                board = Board.createEmptyBoard(6, 5);
                 board.getHex(1, 1).setLevel(3);
                 BoardSceneryLayouts.convert(board);
+                BoardScene replacement = scene(board);
                 preview.loading("Another board");
-                preview.show(scene(board));
+                preview.show(replacement);
+                assertTrue(loading.isVisible());
+                assertNull(image.getDrawable(), "the previous map must disappear as soon as another is requested");
+                var terrainField = LobbyBoardPreview.class.getDeclaredField("terrain");
+                terrainField.setAccessible(true);
+                GpuTerrain terrain = (GpuTerrain) terrainField.get(preview);
+                assertFalse(terrain.ready(replacement), "same-sized maps are replacements, not edits shown over old terrain");
+                stage.act(1 / 60f);
+                assertTrue(loading.isVisible(), "the loading screen must get a frame before the new build starts");
+                assertNull(image.getDrawable());
                 awaitImage(stage, preview);
+                assertFalse(loading.isVisible());
+                assertEquals(45, camera.azimuth(), .001f, "a new preview resets the camera bearing");
+                assertEquals(BoardCamera.ISOMETRIC_TILT, camera.tilt(), .001f, "a new preview starts in ISO");
+                float fittedZoom = camera.camera.zoom;
+                Vector3 fittedFocus = camera.focus.cpy();
+                click(stage, preview.findActor("map-view-fit"));
+                assertEquals(fittedZoom, camera.camera.zoom, .001f, "a new preview is already fitted to the panel");
+                assertTrue(fittedFocus.epsilonEquals(camera.focus, .001f), "a new preview is already centered");
+                assertEquals(3, terrain.presentation(replacement).tile(new Coords(1, 1)).elevation(),
+                      "the first presented image belongs to the replacement map");
                 assertEquals("Another board", preview.<Label>findActor("map-inspection-title").getText().toString());
+                preview.setSize(720, 600);
+                awaitImage(stage, preview);
                 GpuBoardTestUi.assertHorizontalBounds(preview, preview);
                 UiTestStage.capture("map-embedded-inspection-small", 960, 720).dispose();
                 preview.dispose();
@@ -90,8 +126,45 @@ class LobbyBoardPreviewSmokeTest {
         });
     }
 
+    private static void checkConditions(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
+          PlanetaryConditions conditions) throws Exception {
+        var field = LobbyBoardPreview.class.getDeclaredField("atmosphere");
+        field.setAccessible(true);
+        GpuAtmosphere atmosphere = (GpuAtmosphere) field.get(preview);
+        assertEquals(0, atmosphere.lighting().daylight(), .001f, "the first frame uses the lobby's moonlit night");
+        float azimuth = camera.azimuth(), tilt = camera.tilt(), zoom = camera.camera.zoom;
+        Vector3 focus = camera.focus.cpy();
+        Image image = preview.findActor("map-inspection-image");
+        var drawable = image.getDrawable();
+        conditions.setLight(Light.DAY);
+        conditions.setWeather(Weather.HEAVY_RAIN);
+        conditions.setFog(Fog.FOG_HEAVY);
+        conditions.setWind(Wind.STRONG_GALE);
+        conditions.setWindDirection(WindDirection.NORTH);
+        var settings = BoardAtmosphere.fromScenario(conditions, false, .4);
+        preview.atmosphere(settings);
+        awaitImage(stage, preview);
+        assertSame(atmosphere, field.get(preview), "a conditions update reuses the open renderer");
+        assertTrue(atmosphere.lighting().daylight() > .9f);
+        var settingsField = GpuAtmosphere.class.getDeclaredField("settings");
+        settingsField.setAccessible(true);
+        assertEquals(settings, settingsField.get(atmosphere), "fog, precipitation and wind reach the shared renderer");
+        var weatherField = GpuAtmosphere.class.getDeclaredField("weatherDrawn");
+        weatherField.setAccessible(true);
+        assertTrue(weatherField.getBoolean(atmosphere), "the embedded view actually draws the weather layer");
+        assertSame(drawable, image.getDrawable(), "conditions do not unload the board image");
+        assertEquals(azimuth, camera.azimuth(), .001f);
+        assertEquals(tilt, camera.tilt(), .001f);
+        assertEquals(zoom, camera.camera.zoom, .001f);
+        assertTrue(focus.epsilonEquals(camera.focus, .001f), "conditions preserve the user's camera position");
+        UiTestStage.capture("map-embedded-inspection-weather", 960, 720).dispose();
+        preview.atmosphere(BoardAtmosphere.DEFAULTS);
+        awaitImage(stage, preview);
+        assertFalse(weatherField.getBoolean(atmosphere), "returning to clear weather removes the precipitation");
+    }
+
     /** Real stage events exercise focus, shared camera buttons and all six mouse gestures. */
-    private static void checkCameraInput(Stage stage, LobbyBoardPreview preview, UiTheme theme) throws Exception {
+    private static BoardCamera checkCameraInput(Stage stage, LobbyBoardPreview preview, UiTheme theme) throws Exception {
         var field = LobbyBoardPreview.class.getDeclaredField("camera");
         field.setAccessible(true);
         BoardCamera camera = (BoardCamera) field.get(preview);
@@ -169,6 +242,7 @@ class LobbyBoardPreviewSmokeTest {
         click(stage, outside);
         assertNull(stage.getKeyboardFocus());
         outside.remove();
+        return camera;
     }
 
     private static Vector2 screen(Stage stage, Actor actor, float x, float y) {

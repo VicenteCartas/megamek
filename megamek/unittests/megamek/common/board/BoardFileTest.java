@@ -2,6 +2,7 @@
 package megamek.common.board;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mockStatic;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -20,6 +21,34 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void terrainPreviewsReadBothFormatsWithoutResolvingVisualAssets() throws Exception {
+        String nativeBoard = """
+              {"format":"megamek-board","version":2,"size":{"width":1,"height":1},"hexes":[
+                {"at":[1,1],"elevation":2,"terrain":"water:2;road:1:9","theme":"mars",
+                 "appearance":{"building":{"asset":"buildings/missing","uid":"missing-building-id"}},
+                 "decorations":[{"id":"object","kind":"prop","asset":"missing/object","uid":"missing-object-id"}]}
+              ]}
+              """;
+        String legacyBoard = "size 1 1\nhex 0101 2 \"water:2;road:1:9\" \"mars\"\nend\n";
+        try (var models = mockStatic(BoardModelIds.class)) {
+            for (String text : List.of(nativeBoard, legacyBoard)) {
+                Board preview = BoardFile.readTerrain(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)));
+                Hex hex = preview.getHex(0, 0);
+                assertEquals(1, preview.getWidth());
+                assertEquals(1, preview.getHeight());
+                assertEquals(2, hex.getLevel());
+                assertEquals(2, hex.terrainLevel(Terrains.WATER));
+                assertEquals(9, hex.getTerrain(Terrains.ROAD).getExits());
+                assertEquals("mars", hex.getTheme());
+                assertTrue(hex.getAppearance().isEmpty());
+                assertTrue(hex.getDecorations().isEmpty());
+            }
+            models.verifyNoInteractions();
+        }
+        assertThrows(java.io.IOException.class, () -> BoardFile.readTerrain(new ByteArrayInputStream(
+              nativeBoard.replace("water:2", "unknown_terrain:2").getBytes(StandardCharsets.UTF_8))));
+    }
+
     @Test void legacyRoadSelectorsNormalizeBeforeEitherFormatIsResaved() throws Exception {
         for (int selector : new int[] { -42, 0, 1, 2, 3, 4, 5, 6, 7, 34, 90, Integer.MAX_VALUE }) {
             int expected = selector == 0 ? Terrain.LEVEL_NONE : selector >= 1 && selector <= 4 ? selector : 1;

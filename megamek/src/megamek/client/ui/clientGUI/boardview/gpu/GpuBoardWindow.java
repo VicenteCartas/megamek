@@ -68,6 +68,7 @@ import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
 import megamek.logging.MMLogger;
 
@@ -325,7 +326,7 @@ public final class GpuBoardWindow {
             reportPreviewFailure(owner, failure);
             return;
         }
-        openPreview(owner, board, boardFile);
+        openPreview(owner, board, boardFile, new PlanetaryConditions());
     }
 
     /**
@@ -342,22 +343,29 @@ public final class GpuBoardWindow {
 
     /** The preview owns a temporary game; the shared renderer supplies all terrain and camera controls. */
     public static synchronized void openPreview(Window owner, Board board) {
-        openPreview(owner, board, null);
+        openPreview(owner, board, new PlanetaryConditions());
     }
 
-    private static synchronized void openPreview(Window owner, Board board, File file) {
+    /** The lobby supplies its current conditions; the preview's temporary game owns a copy. */
+    public static synchronized void openPreview(Window owner, Board board, PlanetaryConditions conditions) {
+        openPreview(owner, board, null, conditions);
+    }
+
+    private static synchronized void openPreview(Window owner, Board board, File file, PlanetaryConditions conditions) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU preview on the Swing event thread");
         }
         Objects.requireNonNull(owner);
+        var snapshot = new PlanetaryConditions(conditions);
         if (active != null) {
             if (isPreviewOf(owner)) {
+                updatePreviewConditions(owner, snapshot);
                 active.replacePreview(board, file, true);
             } else if (active.preview || active.closing) {
                 active.close(false);
                 active.afterClose = () -> {
                     if (owner.isShowing()) {
-                        openPreview(owner, board, file);
+                        openPreview(owner, board, file, snapshot);
                     }
                 };
             } else {
@@ -369,6 +377,8 @@ public final class GpuBoardWindow {
             Game game = new Game();
             game.setBoard(board);
             game.setPhase(GamePhase.LOUNGE);
+            // Entering the lounge resets the temporary game's conditions, so apply the lobby copy afterwards.
+            game.setPlanetaryConditions(snapshot);
             GpuBoardWindow window = new GpuBoardWindow(null, null, () -> null, owner, null, game);
             window.previewFile = file;
             start(window);
@@ -389,6 +399,13 @@ public final class GpuBoardWindow {
     public static synchronized void updatePreview(Window owner, Board board) {
         if (isPreviewOf(owner)) {
             active.replacePreview(board, null, false);
+        }
+    }
+
+    /** EDT: follow lobby conditions without replacing the preview board or resetting its camera. */
+    public static synchronized void updatePreviewConditions(Window owner, PlanetaryConditions conditions) {
+        if (isPreviewOf(owner)) {
+            active.mapGame.setPlanetaryConditions(new PlanetaryConditions(conditions));
         }
     }
 
@@ -515,7 +532,7 @@ public final class GpuBoardWindow {
     private static void showLegacy2DPreview(Window owner, Game game, File file) {
         JDialog dialog = boardWindow2D(owner, previewTitle(game.getBoard()), "board-preview-2d", game,
               (window, view) -> previewMenu2D(window, view, game, file, () -> {
-                  openPreview(owner, game.getBoard(), file);
+                  openPreview(owner, game.getBoard(), file, game.getPlanetaryConditions());
                   if (active != null && active.preview && active.swingWindow == owner
                         && active.mapGame.getBoard() == game.getBoard()) { window.dispose(); }
               }));

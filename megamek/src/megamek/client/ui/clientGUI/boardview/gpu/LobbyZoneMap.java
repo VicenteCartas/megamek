@@ -52,6 +52,7 @@ final class LobbyZoneMap extends Stack {
     private final Supplier<boolean[][]> hexes;
     private final float width;
     private final float height;
+    private final Image base;
     private final Image overlay = new Image();
     private final Color light = UiTheme.tokenColor("accent.primary");
     private final Color shade = UiTheme.tokenColor("surface.base");
@@ -78,13 +79,9 @@ final class LobbyZoneMap extends Stack {
         float aspect = (columns * .75f + .25f) / Math.max(1, (rows + .5f) * HEX_HEIGHT);
         width = aspect >= 1 ? side : side * aspect;
         height = aspect >= 1 ? side / aspect : side;
-        Image base;
-        if (picture != null) {
-            terrain = GpuStartScreen.texture(picture, false);
-            base = new Image(new TextureRegionDrawable(terrain), Scaling.stretch);
-        } else {
-            base = kit.solid("surface.base");
-        }
+        base = kit.solid("surface.base");
+        base.setScaling(Scaling.stretch);
+        if (picture != null) { picture(picture); }
         add(base);
         overlay.setScaling(Scaling.stretch);
         add(overlay);
@@ -119,6 +116,14 @@ final class LobbyZoneMap extends Stack {
                 choose.accept(zoneAt(x, y));
             }
         });
+    }
+
+    /** GPU thread: installs the background image without rebuilding the zone controls or selection. */
+    void picture(BufferedImage picture) {
+        Texture next = GpuStartScreen.texture(picture, false);
+        if (terrain != null) { terrain.dispose(); }
+        terrain = next;
+        base.setDrawable(new TextureRegionDrawable(terrain));
     }
 
     private int zoneAt(float x, float y) {

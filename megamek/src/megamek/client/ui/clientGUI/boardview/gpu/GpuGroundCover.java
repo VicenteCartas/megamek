@@ -7,12 +7,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Material;
@@ -466,7 +468,7 @@ final class GpuGroundCover implements Disposable {
                 if (count > capacity) {
                     if (capacity > 0) { mesh.disableInstancedRendering(); }
                     capacity = Math.max(count, Math.max(256, capacity * 2));
-                    mesh.enableInstancedRendering(false, capacity, new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot"));
+                    mesh.enableInstancedRendering(false, capacity, instanceAttribute());
                 }
                 mesh.setInstanceData(data.items, 0, data.size);
                 uploads++;
@@ -547,6 +549,20 @@ final class GpuGroundCover implements Disposable {
             mesh = null; instance = null; capacity = 0;
             begin(); previous.clear(); data.clear(); starts.clear();
         }
+    }
+
+    private static VertexAttribute instanceAttribute() {
+        return new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
+    }
+
+    /** Prepare the actual blade layout without planting a full-detail chunk for a hidden close-up. */
+    static void prepareMaterials(BiConsumer<Material, Mesh> consumer) {
+        Batch sample = new Batch(GRASS[0]);
+        try {
+            sample.build();
+            sample.mesh.enableInstancedRendering(true, 1, instanceAttribute());
+            consumer.accept(sample.instance.materials.first(), sample.mesh);
+        } finally { sample.dispose(); }
     }
 
     /**

@@ -183,7 +183,29 @@ final class RigidGlb {
     }
 
     /** The root groups a model may hold beside its levels, which the board reads as data ({@link BoardGroundCut}). */
-    static final String CUT = "cut", STANDS = "stands";
+    static final String CUT = "cut", STANDS = "stands", SPORES = "spores";
+
+    /** Authored empty nodes inside fungal bowls; their scale is the model-space plume radius. No textures are loaded. */
+    static List<Matrix4> sporeVents(File file) {
+        try (var input = Files.newInputStream(file.toPath())) {
+            var binary = (GltfAssetV2) new GltfAssetReader().readWithoutReferences(input);
+            binary.getImageReferences().forEach(image -> image.getTarget().accept(ByteBuffer.allocate(0)));
+            var model = GltfModelCreatorV2.create(binary);
+            var frames = new java.util.TreeMap<String, Matrix4>();
+            for (var root : model.getSceneModels().get(binary.getGltf().getScene()).getNodeModels()) {
+                if (!SPORES.equals(root.getName())) { continue; }
+                require(root.getMeshModels().isEmpty(), "Spore anchors must be empty nodes");
+                for (var anchor : root.getChildren()) {
+                    require(anchor.getMeshModels().isEmpty() && anchor.getChildren().isEmpty(), "Spore anchors must be leaf empties");
+                    require(anchor.getName() != null && !frames.containsKey(anchor.getName()), "Spore anchors need unique names");
+                    frames.put(anchor.getName(), new Matrix4(Z_UP).mul(new Matrix4(anchor.computeGlobalTransform(null))).mul(Y_UP));
+                }
+            }
+            return List.copyOf(frames.values());
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read spore anchors from " + file + ": " + error.getMessage(), error);
+        }
+    }
 
     /**
      * A model's {@link #CUT} triangles and the numbered part each belongs to ({@link #part}, -1 for none), the frames of
@@ -245,6 +267,23 @@ final class RigidGlb {
                   java.util.Arrays.copyOf(hull.items, Math.max(0, hull.size - 2)));
         } catch (IOException | RuntimeException error) {
             throw new IllegalArgumentException("Cannot read the ground work of " + file + ": " + error.getMessage(), error);
+        }
+    }
+
+    /** Opaque plant geometry across the three mesh LODs, without loading textures or the billboard level. */
+    static List<Vector3[]> plantTriangles(File file) {
+        try (var input = Files.newInputStream(file.toPath())) {
+            var binary = (GltfAssetV2) new GltfAssetReader().readWithoutReferences(input);
+            binary.getImageReferences().forEach(image -> image.getTarget().accept(ByteBuffer.allocate(0)));
+            var model = GltfModelCreatorV2.create(binary);
+            List<Vector3[]> result = new ArrayList<>();
+            for (var root : model.getSceneModels().get(binary.getGltf().getScene()).getNodeModels()) {
+                if (root.getName() != null && root.getName().matches(".*-lod[012]")) { triangles(root, result); }
+            }
+            require(!result.isEmpty(), "Expected plant mesh levels in " + file);
+            return result;
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Cannot read plant geometry " + file + ": " + error.getMessage(), error);
         }
     }
 
@@ -488,7 +527,7 @@ final class RigidGlb {
         // Every level is named, so which mesh draws at a given size is always visible in the file itself: a group's name
         // ends with its level, whatever precedes it, so a renamed or moved file keeps its levels.
         for (var group : roots) {
-            if (CUT.equals(group.getName()) || STANDS.equals(group.getName())) { continue; }
+            if (CUT.equals(group.getName()) || STANDS.equals(group.getName()) || SPORES.equals(group.getName())) { continue; }
             int level = MeshLod.level(group.getName());
             require(level >= 0 && level < LEVELS, "Unexpected LOD group in " + file.name() + ": " + group.getName()
                   + " (name the levels' groups ...-lod0, and optionally ...-lod1 to ...-lod" + (LEVELS - 1) + ")");

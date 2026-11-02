@@ -126,6 +126,20 @@ public final class BoardFile {
     }
 
     /**
+     * Reads terrain for a flat thumbnail using the same format parser, tolerating rules errors as lobby pictures do.
+     * Native appearance and decoration fields are omitted, so no model IDs, assets or scenery are resolved. The result
+     * is a private preview board, not a document to save or a board to play.
+     */
+    public static Board readTerrain(InputStream stream) throws IOException {
+        byte[] content = stream.readAllBytes();
+        String text = new String(content, StandardCharsets.UTF_8);
+        if (looksNative(text)) { return readNative(text, true, false); }
+        Board board = new Board();
+        board.load(new ByteArrayInputStream(content), null, true);
+        return board;
+    }
+
+    /**
      * The one load of a map sheet wherever a sheet becomes (part of) a board to play or to look at: the game start
      * ({@code TWBoardTransformer}), the lobby's preview of that board ({@code ServerBoardHelper}), scenarios and the file
      * preview. It loads the file, converts its legacy scenery ({@link BoardSceneryLayouts#convert}) and flips it both
@@ -153,6 +167,10 @@ public final class BoardFile {
      * IDs) is checked either way.
      */
     public static Board readNative(String text, boolean continueOnError) throws IOException {
+        return readNative(text, continueOnError, true);
+    }
+
+    private static Board readNative(String text, boolean continueOnError, boolean visuals) throws IOException {
         try {
             JsonNode root = JSON.readTree(text.startsWith("\uFEFF") ? text.substring(1) : text);
             only(root, "format", "version", "size", "hexes", "name", "description", "tags", "boardType", "options", "notes", "sourceHeader");
@@ -179,7 +197,7 @@ public final class BoardFile {
                 String terrain = string(entry, "terrain", "");
                 validateTerrain(terrain);
                 Hex hex = new Hex(integer(entry, "elevation", 0), terrain, string(entry, "theme", null), coords);
-                readVisuals(entry, hex);
+                if (visuals) { readVisuals(entry, hex); }
                 for (BoardDecoration decoration : hex.getDecorations()) {
                     require(ids.add(decoration.id()), "Duplicate board object ID: " + decoration.id());
                 }

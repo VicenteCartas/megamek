@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.nio.IntBuffer;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -40,54 +41,89 @@ import megamek.common.board.Coords;
  * structures' construction factors ({@link BoardHexText#tactical}).
  */
 final class GpuHexText implements Disposable {
-    /** Four vertices per glyph, with unsigned 16-bit indices. */
-    private static final int PAGE_GLYPHS = 16_383;
-    private static final int GLYPH_FLOATS = 36;
-    private record Plane(int elevation, float headroom, boolean overlay) { }
-    /** A chunk's glyph vertices, one array per page of the outline font and of the text font, in drawing order. */
+    /** Bounded 16 MiB instance buffers; all glyphs share the same four vertices and six indices. */
+    private static final int PAGE_GLYPHS = 262_144;
+    private static final int GLYPH_FLOATS = 16;
+    /** Eight borrowed font pages, plus depth, unit depth and contrast, fit the GL 3.3 minimum of sixteen units. */
+    private static final int TEXTURES = 8;
+    private record Plane(int elevation, boolean overlay) { }
+    /** A chunk's glyph instances, one array per page of the outline font and of the text font, in drawing order. */
     private record Chunk(List<FloatArray> outlines, List<FloatArray> pages, BoundingBox bounds) {
-        static void add(List<FloatArray> pages, BitmapFontCache glyphs, float contrast, BoardScene.Tile tile) {
+        static void add(List<FloatArray> pages, BitmapFontCache glyphs, float contrast, Coords tile, float headroom, Plane plane) {
             for (int page = 0; page < glyphs.getPageCount(); page++) {
                 if (pages.size() == page) { pages.add(new FloatArray()); }
                 float[] vertices = glyphs.getVertices(page);
-                for (int at = 0; at < glyphs.getVertexCount(page); at += 5) {
-                    pages.get(page).addAll(vertices, at, 5);
-                    pages.get(page).add(contrast);
-                    pages.get(page).add(tile.coords().getX(), tile.coords().getY(), tile.elevation());
+                FloatArray instances = pages.get(page);
+                for (int at = 0; at < glyphs.getVertexCount(page); at += 20) {
+                    instances.add(vertices[at], vertices[at + 1], vertices[at + 10], vertices[at + 11]);
+                    instances.add(vertices[at + 2]);
+                    instances.add(vertices[at + 3], vertices[at + 4], vertices[at + 13], vertices[at + 14]);
+                    instances.add(contrast);
+                    instances.add(tile.getX(), tile.getY(), headroom);
+                    instances.add(plane.elevation() * BoardGeometry.level(), plane.overlay() ? 1 : 0, 0);
                 }
             }
         }
     }
     private record Range(BoundingBox bounds, int offset, int count) { }
-    /** Owns the static mesh; the font owns the texture. Ranges keep the original chunk/page drawing order. */
-    private record Page(Texture texture, Mesh mesh, List<Range> ranges) {
-        void render(Camera camera, ShaderProgram shader) {
-            boolean bound = false;
-            int start = 0, count = 0;
+    /** Owns the quad/instance buffer, borrowing the fonts' live textures, including their incremental glyph updates. */
+    private static final class Page {
+        private final List<Texture> textures;
+        private final Mesh mesh;
+        private final float[] instances;
+        private final List<Range> ranges;
+        private final BitSet visible = new BitSet();
+        private final FloatArray compacted = new FloatArray();
+        private boolean uploaded;
+
+        Page(List<Texture> textures, float[] instances, List<Range> ranges) {
+            this.textures = List.copyOf(textures);
+            this.instances = instances;
+            this.ranges = List.copyOf(ranges);
+            mesh = new Mesh(true, 4, 6, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
             try {
-                for (Range range : ranges) {
-                    if (camera.frustum.boundsInFrustum(range.bounds())) {
-                        if (!bound) {
-                            texture.bind(0);
-                            mesh.bind(shader);
-                            bound = true;
-                        }
-                        if (count == 0) { start = range.offset(); }
-                        count += range.count();
-                    } else if (count > 0) {
-                        mesh.render(shader, GL20.GL_TRIANGLES, start, count, false);
-                        count = 0;
-                    }
-                }
-                if (count > 0) { mesh.render(shader, GL20.GL_TRIANGLES, start, count, false); }
-            } finally {
-                if (bound) { mesh.unbind(shader); }
+                mesh.setVertices(new float[] { 0, 0, 0, 1, 1, 1, 1, 0 });
+                mesh.setIndices(new short[] { 0, 1, 2, 2, 3, 0 });
+                mesh.enableInstancedRendering(false, instances.length / GLYPH_FLOATS,
+                      new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_bounds"),
+                      new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, "a_color"),
+                      new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_uv"),
+                      new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_contrast"),
+                      new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_hex"),
+                      new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_surface"));
+            } catch (RuntimeException | Error failure) {
+                mesh.dispose();
+                throw failure;
             }
         }
+
+        void render(Camera camera, ShaderProgram shader) {
+            boolean changed = !uploaded;
+            for (int index = 0; index < ranges.size(); index++) {
+                boolean shown = camera.frustum.boundsInFrustum(ranges.get(index).bounds());
+                if (visible.get(index) != shown) { visible.set(index, shown); changed = true; }
+            }
+            if (changed) {
+                // Keep source order, compacting only when a chunk enters/leaves the view. Stationary frames upload nothing.
+                compacted.clear();
+                for (int index = visible.nextSetBit(0); index >= 0; index = visible.nextSetBit(index + 1)) {
+                    Range range = ranges.get(index);
+                    compacted.addAll(instances, range.offset(), range.count());
+                }
+                if (compacted.size > 0) { mesh.setInstanceData(compacted.items, 0, compacted.size); }
+                uploaded = true;
+            }
+            if (compacted.size == 0) { return; }
+            for (int index = 0; index < textures.size(); index++) { textures.get(index).bind(index); }
+            for (int index = 0; index < TEXTURES; index++) {
+                shader.setUniformi(index == 0 ? "u_texture" : "u_fonts[" + (index - 1) + "]",
+                      index < textures.size() ? index : 0);
+            }
+            Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+            mesh.render(shader, GL20.GL_TRIANGLES);
+        }
     }
-    private final Map<Plane, List<Page>> groups = new TreeMap<>(Comparator.comparing(Plane::overlay)
-          .thenComparingInt(Plane::elevation)
-          .thenComparingDouble(Plane::headroom));
+    private final List<Page> pages = new ArrayList<>();
     private ShaderProgram shader;
     private final Matrix4 transform = new Matrix4();
     private final IntBuffer viewport = BufferUtils.newIntBuffer(4);
@@ -139,12 +175,14 @@ final class GpuHexText implements Disposable {
         // One label at a time: a font's cache grows its arrays to the exact size at every text it adds, so a chunk's
         // labels in one cache would copy them over and over (quadratic in the chunk's glyphs).
         BitmapFontCache glyphs = new BitmapFontCache(font, false), rings = new BitmapFontCache(outline, false);
-        Map<Plane, Map<Coords, Chunk>> next = new HashMap<>();
+        Map<Plane, Map<Coords, Chunk>> next = new TreeMap<>(Comparator.comparing(Plane::overlay)
+              .thenComparingInt(Plane::elevation));
         Map<Coords, BoundingBox> nextRoofs = new HashMap<>();
         try {
             for (BoardScene.Tile tile : scene.tiles()) {
                 for (BoardHexText label : labels(tile, tactical, types, units.contains(tile.coords()))) {
-                    Plane plane = new Plane(tile.elevation() + label.elevation(), headroom(tile, label), label.elevation() > 0);
+                    Plane plane = new Plane(tile.elevation() + label.elevation(), label.elevation() > 0);
+                    float headroom = headroom(tile, label);
                     Coords cell = new Coords(tile.coords().getX() / GpuTerrain.CHUNK_SIZE,
                           tile.coords().getY() / GpuTerrain.CHUNK_SIZE);
                     Chunk chunk = next.computeIfAbsent(plane, key -> new HashMap<>())
@@ -185,11 +223,11 @@ final class GpuHexText implements Disposable {
                         rings.clear();
                         rings.addText(new GlyphLayout(outline, label.text(), ringColor, 0, Align.left, false),
                               left - GpuBoardSkin.OUTLINE * outline.getData().scaleX, top);
-                        Chunk.add(chunk.outlines(), rings, -contrast, tile);
+                        Chunk.add(chunk.outlines(), rings, -contrast, tile.coords(), headroom, plane);
                     }
                     glyphs.clear();
                     glyphs.addText(layout, left, top);
-                    Chunk.add(chunk.pages(), glyphs, contrast, tile);
+                    Chunk.add(chunk.pages(), glyphs, contrast, tile.coords(), headroom, plane);
                 }
             }
         } finally {
@@ -197,21 +235,15 @@ final class GpuHexText implements Disposable {
             outline.getData().setScale(outlineX, outlineY);
             font.setColor(color);
         }
-        Map<Plane, List<Page>> uploaded = new HashMap<>();
-        try {
-            next.forEach((plane, chunks) -> {
-                List<Chunk> planeChunks = List.copyOf(chunks.values());
-                // All of a plane's outlines under all of its text, so that no outline covers a neighbour's letters.
-                List<Page> pages = new ArrayList<>(upload(planeChunks, outline, Chunk::outlines));
-                uploaded.put(plane, pages);
-                pages.addAll(upload(planeChunks, font, Chunk::pages));
-            });
-        } catch (RuntimeException | Error failure) {
-            uploaded.values().forEach(pages -> pages.forEach(page -> page.mesh().dispose()));
-            throw failure;
+        List<Glyphs> ordered = new ArrayList<>();
+        for (var chunks : next.values()) {
+            // Keep the existing order: all of a plane's outlines, its text, then the next elevation/overlay plane.
+            for (Chunk chunk : chunks.values()) { ordered.add(new Glyphs(chunk.outlines(), chunk.bounds(), outline)); }
+            for (Chunk chunk : chunks.values()) { ordered.add(new Glyphs(chunk.pages(), chunk.bounds(), font)); }
         }
+        List<Page> uploaded = upload(ordered);
         clear();
-        groups.putAll(uploaded);
+        pages.addAll(uploaded);
         roofs.clear();
         roofs.putAll(nextRoofs);
         tiles = scene.tiles();
@@ -255,84 +287,60 @@ final class GpuHexText implements Disposable {
         return BoardHexText.tactical(tile.text(), depth, cf, tile.cover().height(), covered);
     }
 
-    /**
-     * Upload the exact SpriteBatch vertices of the chunks' {@code glyphs} in {@code font}, joining only consecutive
-     * draws with the same font texture.
-     */
-    private static List<Page> upload(List<Chunk> chunks, BitmapFont font, Function<Chunk, List<FloatArray>> glyphs) {
+    private record Glyphs(List<FloatArray> regions, BoundingBox bounds, BitmapFont font) { }
+
+    /** Ordered glyphs share a bounded instance buffer and up to eight font textures, without repacking their atlas. */
+    private static List<Page> upload(List<Glyphs> glyphs) {
         List<Page> pages = new ArrayList<>();
         FloatArray vertices = new FloatArray();
         List<Range> ranges = new ArrayList<>();
-        Texture texture = null;
+        List<Texture> textures = new ArrayList<>();
         try {
-            for (Chunk chunk : chunks) {
+            for (Glyphs chunk : glyphs) {
                 // Incremental fonts can gain atlas pages after an earlier chunk was completed.
-                List<FloatArray> regions = glyphs.apply(chunk);
+                List<FloatArray> regions = chunk.regions();
                 for (int region = 0; region < regions.size(); region++) {
                     FloatArray quads = regions.get(region);
                     int remaining = quads.size;
-                    Texture next = font.getRegions().get(region).getTexture();
+                    Texture next = chunk.font().getRegions().get(region).getTexture();
                     int offset = 0;
                     while (remaining > 0) {
-                        if (vertices.size > 0 && (texture != next || vertices.size == PAGE_GLYPHS * GLYPH_FLOATS)) {
-                            pages.add(page(texture, vertices, ranges));
+                        int texture = textures.indexOf(next);
+                        if (vertices.size == PAGE_GLYPHS * GLYPH_FLOATS || texture < 0 && textures.size() == TEXTURES) {
+                            pages.add(new Page(textures, vertices.toArray(), ranges));
                             vertices.clear();
                             ranges.clear();
+                            textures.clear();
+                            texture = -1;
                         }
-                        texture = next;
+                        if (texture < 0) { texture = textures.size(); textures.add(next); }
                         int count = Math.min(remaining, PAGE_GLYPHS * GLYPH_FLOATS - vertices.size);
-                        ranges.add(new Range(chunk.bounds(), vertices.size / GLYPH_FLOATS * 6,
-                              count / GLYPH_FLOATS * 6));
+                        ranges.add(new Range(chunk.bounds(), vertices.size, count));
                         vertices.addAll(quads.items, offset, count);
+                        for (int at = vertices.size - count + 15; at < vertices.size; at += GLYPH_FLOATS) {
+                            vertices.items[at] = texture;
+                        }
                         offset += count;
                         remaining -= count;
                     }
                 }
             }
-            if (vertices.size > 0) { pages.add(page(texture, vertices, ranges)); }
+            if (vertices.size > 0) { pages.add(new Page(textures, vertices.toArray(), ranges)); }
             return List.copyOf(pages);
         } catch (RuntimeException | Error failure) {
-            pages.forEach(page -> page.mesh().dispose());
-            throw failure;
-        }
-    }
-
-    private static Page page(Texture texture, FloatArray vertices, List<Range> ranges) {
-        int glyphs = vertices.size / GLYPH_FLOATS;
-        short[] indices = new short[glyphs * 6];
-        for (int glyph = 0, at = 0; glyph < glyphs; glyph++) {
-            int vertex = glyph * 4;
-            indices[at++] = (short) vertex;
-            indices[at++] = (short) (vertex + 1);
-            indices[at++] = (short) (vertex + 2);
-            indices[at++] = (short) (vertex + 2);
-            indices[at++] = (short) (vertex + 3);
-            indices[at++] = (short) vertex;
-        }
-        Mesh mesh = new Mesh(true, glyphs * 4, indices.length,
-              new VertexAttribute(VertexAttributes.Usage.Position, 2, ShaderProgram.POSITION_ATTRIBUTE),
-              new VertexAttribute(VertexAttributes.Usage.ColorPacked, 4, ShaderProgram.COLOR_ATTRIBUTE),
-              new VertexAttribute(VertexAttributes.Usage.TextureCoordinates, 2, ShaderProgram.TEXCOORD_ATTRIBUTE + "0"),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 1, "a_contrast"),
-              new VertexAttribute(VertexAttributes.Usage.Generic, 3, "a_hex"));
-        try {
-            mesh.setVertices(vertices.items, 0, vertices.size);
-            mesh.setIndices(indices);
-            return new Page(texture, mesh, List.copyOf(ranges));
-        } catch (RuntimeException | Error failure) {
-            mesh.dispose();
+            pages.forEach(page -> page.mesh.dispose());
             throw failure;
         }
     }
 
     private void clear() {
-        groups.values().forEach(pages -> pages.forEach(page -> page.mesh().dispose()));
-        groups.clear();
+        pages.forEach(page -> page.mesh.dispose());
+        pages.clear();
     }
 
     private static float headroom(BoardScene.Tile tile, BoardHexText label) {
         if (label.elevation() > 0 || tile.liquid().present()) { return 0; }
-        // Whole world units keep differently sized scatter in a small number of font batches.
+        // Keep the existing relief envelope; each glyph carries it without splitting the plane into font batches.
         return (float) Math.ceil(BoardRelief.decoration(tile) / BoardGeometry.hexScale()) * BoardGeometry.hexScale();
     }
 
@@ -352,11 +360,12 @@ final class GpuHexText implements Disposable {
 
     void render(SpriteBatch batch, BoardCamera boardCamera, Texture depth, Texture unitDepth, int bottom,
           GpuAtmosphere atmosphere, boolean wireframe) {
-        if (groups.isEmpty()) { return; }
+        if (pages.isEmpty()) { return; }
         Camera camera = boardCamera.camera;
         ShaderProgram previous = batch.getShader();
         batch.setShader(shader);
         batch.setProjectionMatrix(camera.combined);
+        batch.setTransformMatrix(transform.setToTranslation(0, 0, .6f * BoardGeometry.hexScale()));
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
         Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
         batch.begin();
@@ -372,12 +381,12 @@ final class GpuHexText implements Disposable {
                 Gdx.gl.glDisable(GL20.GL_BLEND);
             }
             shader.setUniformf("u_contrastEnabled", !tactical && wireframe ? -1 : 0);
-            if (!tactical && !wireframe && atmosphere != null) { atmosphere.bindContrast(shader, 3); }
-            depth.bind(1);
-            if (unitDepth != null) { unitDepth.bind(2); }
+            if (!tactical && !wireframe && atmosphere != null) { atmosphere.bindContrast(shader, TEXTURES + 2); }
+            depth.bind(TEXTURES);
+            if (unitDepth != null) { unitDepth.bind(TEXTURES + 1); }
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-            shader.setUniformi("u_depth", 1);
-            shader.setUniformi("u_units", unitDepth == null ? 1 : 2);
+            shader.setUniformi("u_depth", TEXTURES);
+            shader.setUniformi("u_units", unitDepth == null ? TEXTURES : TEXTURES + 1);
             shader.setUniformf("u_unitOptions", unitDepth == null ? 0 : 1,
                   .05f * BoardGeometry.hexScale());
             shader.setUniformf("u_projectionDepth", camera.projection.val[Matrix4.M22], camera.projection.val[Matrix4.M23],
@@ -388,13 +397,8 @@ final class GpuHexText implements Disposable {
             Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, viewport);
             shader.setUniformf("u_viewport", viewport.get(0), viewport.get(1), viewport.get(2), viewport.get(3));
             shader.setUniformf("u_groundBoard", 0, 0, BoardGeometry.width(), BoardGeometry.height());
-            for (var group : groups.entrySet()) {
-                float z = group.getKey().elevation() * BoardGeometry.level();
-                batch.setTransformMatrix(transform.setToTranslation(0, 0, z + .6f * BoardGeometry.hexScale()));
-                shader.setUniformf("u_surface", z, group.getKey().headroom());
-                shader.setUniformi("u_overlay", group.getKey().overlay() ? 1 : boardCamera.isTopDown() ? 2 : 0);
-                for (Page page : group.getValue()) { page.render(camera, shader); }
-            }
+            shader.setUniformi("u_topView", boardCamera.isTopDown() ? 1 : 0);
+            for (Page page : pages) { page.render(camera, shader); }
         } finally {
             batch.end();
             batch.setTransformMatrix(transform.idt());

@@ -16,8 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
@@ -66,6 +68,7 @@ final class GpuRoads {
          * first, past {@link #RECENT_TEXELS} or {@link #RECENT_MASKS} (each key holds its scene's tiles).
          */
         private final LinkedHashMap<Object, MaskData> recent = new LinkedHashMap<>(64, .75f, true);
+        private final Map<Object, CompletableFuture<MaskData>> pending = new HashMap<>();
         private long recentTexels;
         private static final long RECENT_TEXELS = 16L << 20;
         private static final int RECENT_MASKS = 1024;
@@ -73,33 +76,51 @@ final class GpuRoads {
         private int epoch;
 
         /**
-         * The mask {@code key} names, built once: the key must hold all its mask depends on. Two workers may both build
-         * one the first time; either result is the same. A build its job's {@code check} finds stale, or one that
-         * outlived a {@link #forget}, is not kept.
+         * The mask {@code key} names, built once even when neighbouring terrain workers request it together. Waiters
+         * join outside the lock; the fork-join pool can keep working. The key holds all inputs, so a completed mask is
+         * reusable even if its first requester became stale. Each requester still checks its own job before using it.
          */
         MaskData mask(Object key, Supplier<MaskData> build, Runnable check) {
+            check.run();
             int started;
+            CompletableFuture<MaskData> future;
+            boolean owner;
             synchronized (this) {
                 MaskData hit = recent.get(key);
                 if (hit != null) { return hit; }
                 started = epoch;
+                future = pending.get(key);
+                owner = future == null;
+                if (owner) { future = new CompletableFuture<>(); pending.put(key, future); }
             }
-            MaskData built = share(build.get());
-            check.run();
-            synchronized (this) {
-                if (epoch == started && recent.putIfAbsent(key, built) == null) { recentTexels += texels(built); }
-                for (var masks = recent.values().iterator(); (recentTexels > RECENT_TEXELS || recent.size() > RECENT_MASKS)
-                      && masks.hasNext(); ) {
-                    recentTexels -= texels(masks.next());
-                    masks.remove();
+            if (owner) {
+                try {
+                    MaskData built = share(build.get());
+                    synchronized (this) {
+                        if (epoch == started && recent.putIfAbsent(key, built) == null) { recentTexels += texels(built); }
+                        for (var masks = recent.values().iterator(); (recentTexels > RECENT_TEXELS || recent.size() > RECENT_MASKS)
+                              && masks.hasNext(); ) {
+                            recentTexels -= texels(masks.next());
+                            masks.remove();
+                        }
+                    }
+                    future.complete(built);
+                } catch (RuntimeException | Error failure) {
+                    future.completeExceptionally(failure);
+                    throw failure;
+                } finally {
+                    synchronized (this) { pending.remove(key, future); }
                 }
             }
+            MaskData built = future.join();
+            check.run();
             return built;
         }
 
         /** Forgets the recent masks: something outside their keys that they depend on changed. */
         synchronized void forget() {
             recent.clear();
+            pending.clear();
             recentTexels = 0;
             epoch++;
         }
@@ -859,7 +880,17 @@ final class GpuRoads {
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
     static MaskData mask(BoardRoad road, Patch patch) {
-        return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch));
+        return mask(road, patch, 4);
+    }
+
+    static MaskData mask(BoardRoad road, Patch patch, int density) {
+        return mask(patch, (x, y, scratch) -> color(road, patch, x, y, scratch), density);
+    }
+
+    /** Only the broad paved wear field can become coarse. Thin paint and markings retain their original coverage. */
+    static int maskDensity(Patch patch, TerrainLod lod) {
+        return (lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT)
+              && asphalt(patch) && patch.fade() != null && patch.fade().wheels() ? 1 : 4;
     }
 
     /**
@@ -914,13 +945,16 @@ final class GpuRoads {
 
     /** Ground treatments share the same soft mask carrier and original surface material maps as road coats. */
     static MaskData mask(Patch patch, MaskColor color) {
+        return mask(patch, color, 4);
+    }
+
+    private static MaskData mask(Patch patch, MaskColor color, int density) {
         // The supporting terrain already clips the paint. Its fitted edge can extend beyond the original hex box.
         var bounds = patch.shape().getBounds2D();
         int x = (int) Math.floor(bounds.getMinX()) - 1;
         int y = (int) Math.floor(bounds.getMinY()) - 1;
         int w = Math.max(1, (int) Math.ceil(bounds.getMaxX()) - x + 1);
         int h = Math.max(1, (int) Math.ceil(bounds.getMaxY()) - y + 1);
-        int density = 4;
         var image = new BufferedImage(w * density, h * density, BufferedImage.TYPE_INT_ARGB);
         var graphics = image.createGraphics();
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -935,22 +969,33 @@ final class GpuRoads {
         // carry it too. The atlas has no mipmaps, so no texel farther out is ever read.
         int[] covered = track(patch) || spill(patch) || carried(patch) ? pixels.clone() : null;
         int width = image.getWidth(), height = image.getHeight();
-        Color scratch = new Color();
-        for (int py = 0; py < height; py++) {
-            for (int px = 0; px < width; px++) {
-                int i = py * width + px;
-                float alpha = (pixels[i] >>> 24) / 255f;
-                boolean read = alpha > 0;
-                for (int ny = Math.max(0, py - 1); covered != null && !read && ny <= Math.min(height - 1, py + 1); ny++) {
-                    for (int nx = Math.max(0, px - 1); !read && nx <= Math.min(width - 1, px + 1); nx++) {
-                        read = covered[ny * width + nx] >>> 24 != 0;
+        // Large shared masks can otherwise leave one worker rasterizing while its neighbours wait for the result.
+        // Split independent rows within the existing terrain pool, carrying its settings and a private colour scratch.
+        TerrainSettings settings = TerrainSettings.current();
+        IntStream rows = IntStream.range(0, (height + 31) / 32);
+        if (Thread.currentThread() instanceof TerrainSettings.Worker && (long) width * height >= 65536) {
+            rows = rows.parallel();
+        }
+        rows.forEach(group -> {
+            try (TerrainSettings.Scope ignored = TerrainSettings.use(settings)) {
+                Color scratch = new Color();
+                for (int py = group * 32; py < Math.min(height, (group + 1) * 32); py++) {
+                    for (int px = 0; px < width; px++) {
+                        int i = py * width + px;
+                        float alpha = (pixels[i] >>> 24) / 255f;
+                        boolean read = alpha > 0;
+                        for (int ny = Math.max(0, py - 1); covered != null && !read && ny <= Math.min(height - 1, py + 1); ny++) {
+                            for (int nx = Math.max(0, px - 1); !read && nx <= Math.min(width - 1, px + 1); nx++) {
+                                read = covered[ny * width + nx] >>> 24 != 0;
+                            }
+                        }
+                        Color tint = read ? color.at(x + (px + .5f) / density, y + (py + .5f) / density, scratch) : patch.tint();
+                        pixels[i] = Math.round(alpha * tint.a * 255) << 24 | Math.round(tint.r * 255) << 16
+                              | Math.round(tint.g * 255) << 8 | Math.round(tint.b * 255);
                     }
                 }
-                Color tint = read ? color.at(x + (px + .5f) / density, y + (py + .5f) / density, scratch) : patch.tint();
-                pixels[i] = Math.round(alpha * tint.a * 255) << 24 | Math.round(tint.r * 255) << 16
-                      | Math.round(tint.g * 255) << 8 | Math.round(tint.b * 255);
             }
-        }
+        });
         return new MaskData(new BoardScene.Pixels(image).compact(), x, y, w, h);
     }
 
@@ -1245,12 +1290,13 @@ final class GpuRoads {
             tint.g = Math.round(128 + (float) Math.sin(phase) * 127) / 255f;
             tint.b = slab == null ? .5f : .5f + .5f * slab[1];
         } else if (patch.fade() != null && patch.fade().wheels()) {
-            var direction = road.wheelDirection(x, y);
+            var wear = road.pavedWear(x, y);
+            var direction = wear.heading();
             // Paved wear's heading, as a track's; B is its lane position (BoardRoad#wearHub, #wearLane).
             float length = 1 - .5f * road.wearHub(x, y);
             tint.r = Math.round(128 + direction.x * 127 * length) / 255f;
             tint.g = Math.round(128 - direction.y * 127 * length) / 255f;
-            tint.b = road.wearLane(x, y);
+            tint.b = wear.across();
         }
         return tint;
     }

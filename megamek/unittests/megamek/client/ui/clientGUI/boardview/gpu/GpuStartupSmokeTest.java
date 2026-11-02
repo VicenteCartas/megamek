@@ -3,11 +3,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -15,6 +17,8 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import megamek.client.ui.clientGUI.BoardGraphics;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardMarker;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -30,11 +34,14 @@ class GpuStartupSmokeTest {
     @Test
     void loadingScreenTransfersItsSkinAndMapOnlyFramesNeedNoGameplayMarkers() throws Exception {
         AtomicReference<GpuMapSource> source = new AtomicReference<>();
+        var preferences = GUIPreferences.getInstance();
+        BoardGraphics savedGraphics = preferences.getBoardGraphics();
         SwingUtilities.invokeAndWait(() -> {
-            Hex[] tiles = new Hex[12];
+            preferences.setBoardGraphics(BoardGraphics.ENHANCED);
+            Hex[] tiles = new Hex[24 * 24];
             Arrays.setAll(tiles, ignored -> new Hex(0));
             Game game = new Game();
-            game.setBoard(new Board(4, 3, tiles));
+            game.setBoard(new Board(24, 24, tiles));
             game.setPhase(GamePhase.LOUNGE);
             BoardSceneryLayouts.convert(game.getBoard());
             source.set(new GpuMapSource(game, null, null));
@@ -44,6 +51,7 @@ class GpuStartupSmokeTest {
             new Lwjgl3Application(new GpuBattleView(null) {
                 private GpuBoardSkin theme;
                 private int ticks;
+                private List<?> probeChunks;
 
                 @Override
                 public void create() {
@@ -60,9 +68,19 @@ class GpuStartupSmokeTest {
                 public void render() {
                     if (failure.get() != null) { return; }
                     try {
+                        var terrain = field(GpuBattleView.class, this, "terrain");
+                        boolean probing = field(GpuBattleView.class, this, "warmUp").toString().equals("CLOSE");
+                        if (probing && probeChunks == null) {
+                            probeChunks = List.copyOf((List<?>) field(GpuTerrain.class, terrain, "chunks"));
+                        }
                         super.render();
+                        if (probing) {
+                            assertEquals(probeChunks, field(GpuTerrain.class, terrain, "chunks"),
+                                  "A hidden shader probe must preserve the terrain built for the user's camera");
+                        }
                         assertTrue(++ticks < 10000, "The loading-to-board handoff must finish");
                         if (frames() < 3) { return; }
+                        assertNotNull(probeChunks, "Exercise the close shader probe before the map becomes interactive");
                         var markers = (GpuMarkers) field(GpuBattleView.class, this, "markers");
                         assertTrue(((Map<?, ?>) field(GpuMarkers.class, markers, "models")).isEmpty(),
                               "A map-only frame must not build gameplay symbol geometry");
@@ -74,7 +92,10 @@ class GpuStartupSmokeTest {
                 }
             }, GpuBoardWindow.configuration(false));
         } finally {
-            SwingUtilities.invokeAndWait(source.get()::close);
+            SwingUtilities.invokeAndWait(() -> {
+                source.get().close();
+                preferences.setBoardGraphics(savedGraphics);
+            });
         }
         if (failure.get() != null) { throw new AssertionError("Native startup ownership", failure.get()); }
     }

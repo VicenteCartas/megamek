@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -12,17 +13,42 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.Configuration;
 
 /** Authored fungal cover and cosmetic colonies mounted on the shared, finished cliff mesh. */
 final class BoardFungus {
     static final List<String> COVER = List.of("fungus/cup-chalice", "fungus/cup-trumpet", "fungus/cup-frilled",
           "fungus/cup-forked", "fungus/spore-round", "fungus/spore-pear", "fungus/spore-cluster");
     static final List<String> CUPS = COVER.subList(0, 4);
+    static final List<String> SPORES = COVER.subList(4, COVER.size());
     static final List<String> SCATTER = List.of("fungus/scatter-cups", "fungus/scatter-buds",
           "fungus/scatter-spores", "fungus/scatter-mixed");
     static final List<String> CLIFF = List.of("fungus/cliff-shelf", "fungus/cliff-tiered",
           "fungus/cliff-cups", "fungus/cliff-mycelium");
     private static final BoardKit<Map<String, Mount>> MOUNTS = new BoardKit<>(BoardFungus::loadMounts);
+    private static final BoardKit<Map<String, List<Vent>>> VENTS = new BoardKit<>(BoardFungus::loadVents);
+
+    /** Model-space cup outlets from GLB empties; shared by every geometry LOD. */
+    record Vent(Vector3 origin, float radius) { }
+
+    static List<Vent> vents(String asset) { return CUPS.contains(asset) ? VENTS.get().get(asset) : List.of(); }
+
+    private static Map<String, List<Vent>> loadVents() {
+        var result = new LinkedHashMap<String, List<Vent>>();
+        File root = new File(Configuration.dataDir(), "models/board");
+        for (String asset : CUPS) {
+            var vents = new ArrayList<Vent>();
+            for (var frame : RigidGlb.sporeVents(new File(root, asset + ".glb"))) {
+                var scale = frame.getScale(new Vector3());
+                float radius = Math.min(scale.x, scale.y);
+                if (!(radius > 0 && Float.isFinite(radius))) { throw new IllegalArgumentException("Invalid spore radius: " + asset); }
+                vents.add(new Vent(frame.getTranslation(new Vector3()), radius));
+            }
+            if (vents.isEmpty()) { throw new IllegalArgumentException("Fungus has no authored spore outlets: " + asset); }
+            result.put(asset, List.copyOf(vents));
+        }
+        return Map.copyOf(result);
+    }
 
     /** The authored attachment side is local Y >= 0; outward growth faces -Y. No duplicated asset dimensions. */
     private record Mount(List<Vector3> roots, float reach) { }
@@ -47,7 +73,7 @@ final class BoardFungus {
 
     static boolean asset(String name) { return name.startsWith("fungus/"); }
 
-    static void reload() { MOUNTS.reload(); }
+    static void reload() { MOUNTS.reload(); VENTS.reload(); }
 
     record Placement(String asset, Matrix4 transform) { }
 

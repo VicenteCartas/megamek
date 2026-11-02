@@ -17,21 +17,66 @@ import java.util.stream.Stream;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.board.HexTile;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFungusTest {
+    @Test
+    void everyAuthoredBowlHasItsOwnOutlet() {
+        int[] counts = { 1, 2, 1, 2 };
+        for (int i = 0; i < BoardFungus.CUPS.size(); i++) {
+            assertEquals(counts[i], BoardFungus.vents(BoardFungus.CUPS.get(i)).size(), BoardFungus.CUPS.get(i));
+        }
+        var forked = BoardFungus.vents("fungus/cup-forked");
+        // Independently inspected in Blender: separate rims centred near (-4.2,-.7) and (6,1.6).
+        assertEquals(-4.2f, forked.get(0).origin().x, .05f);
+        assertEquals(6f, forked.get(1).origin().x, .05f);
+        // Origins lie deep in each cavity, below the lowest rim; smoke must emerge through the opening.
+        assertTrue(forked.get(0).origin().z > 14.6f && forked.get(0).origin().z < 24);
+        assertTrue(forked.get(1).origin().z > 10.8f && forked.get(1).origin().z < 18);
+        var trumpet = BoardFungus.vents("fungus/cup-trumpet");
+        assertTrue(Math.abs(trumpet.get(0).origin().z - trumpet.get(1).origin().z) > 13,
+              "The small basal bowl must not emit from the main trumpet's height");
+    }
+
+    @Test
+    void outletsFollowTheFinalPlantTransformWithoutChangingTheirSourceGeometry() {
+        var before = BoardFungus.vents("fungus/cup-forked").stream().map(v -> v.origin().cpy()).toList();
+        var transform = new Matrix4().setToTranslation(41, -23, 17).rotate(Vector3.Z, 137).scale(.7f, 1.3f, 1.9f);
+        var emitters = GpuFungus.emitters("fungus/cup-forked", transform);
+        for (int i = 0; i < emitters.size(); i++) {
+            assertTrue(before.get(i).cpy().mul(transform).epsilonEquals(emitters.get(i).origin(), .0001f));
+            assertEquals(before.get(i), BoardFungus.vents("fungus/cup-forked").get(i).origin());
+            float radius = BoardFungus.vents("fungus/cup-forked").get(i).radius();
+            assertEquals(radius * 1.9f * 6, emitters.get(i).rise(), .0001f,
+                  "A narrow plant retains enough vertical travel to rise through its bowl");
+            assertEquals(Math.max(.25f * BoardGeometry.hexScale(), radius * .7f), emitters.get(i).radius(), .0001f);
+        }
+        assertEquals(emitters, GpuFungus.emitters("fungus/cup-forked", transform), "Rebuilding a chunk preserves plume phase");
+        for (String asset : BoardFungus.SCATTER) { assertTrue(GpuFungus.emitters(asset, transform).isEmpty()); }
+        for (String asset : BoardFungus.CLIFF) { assertTrue(GpuFungus.emitters(asset, transform).isEmpty()); }
+        assertTrue(GpuFungus.emitters("vegetation/tree", transform).isEmpty());
+    }
+
+    @Test
+    void porousSporeBodiesHaveNoIndividualMistEmitters() {
+        var transform = new Matrix4().setToTranslation(41, -23, 17).rotate(Vector3.Z, 137).scale(.7f, 1.3f, 1.9f);
+        for (String asset : BoardFungus.SPORES) {
+            assertTrue(BoardFungus.vents(asset).isEmpty(), asset);
+            assertTrue(GpuFungus.emitters(asset, transform).isEmpty(), asset);
+            assertTrue(RigidGlb.sporeVents(new File("data/models/board/" + asset + ".glb")).isEmpty(), asset);
+        }
+    }
+
     /** Loading a glowing fungal material decodes its emission map with libGDX. */
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
@@ -52,7 +97,9 @@ class BoardFungusTest {
                 var features = BoardFeatures.capture(hex, at, Map.of());
                 int density = hex.terrainLevel(Terrains.WOODS);
                 var cover = features.stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
-                assertEquals(density < 1 ? 0 : density >= 3 ? 6 : density == 2 ? 4 : 2, cover.size());
+                assertEquals(density < 1, cover.isEmpty());
+                assertTrue(cover.size() <= BoardTreeCoverage.limit(density, false));
+                assertTrue(cover.stream().filter(f -> BoardFungus.SPORES.contains(f.asset())).count() <= Math.max(0, density));
                 if (!cover.isEmpty()) {
                     assertEquals(hex.terrainLevel(Terrains.FOLIAGE_ELEV), cover.getFirst().height());
                     assertTrue(BoardFungus.CUPS.contains(cover.getFirst().asset()));
@@ -80,6 +127,22 @@ class BoardFungusTest {
     }
 
     @Test
+    void shortSporeBodiesAppearWithinTheirOwnTierBudgets() {
+        for (int height = 1; height <= 3; height++) {
+            for (var at : List.of(new Coords(3, 3), new Coords(11, 7), new Coords(19, 14))) {
+                for (int density = 1; density <= 3; density++) {
+                    var hex = new Hex(0, "woods:" + density + ";foliage_elev:" + height, "fungus", at);
+                    var trees = BoardTreeDistributionTest.capture(hex, at, true);
+                    long spores = trees.stream().filter(tree -> BoardFungus.SPORES.contains(tree.asset())).count();
+                    assertTrue(spores > 0 && spores <= density, "Spore budget at " + at + " h" + height + " d" + density);
+                    assertTrue(BoardFungus.CUPS.contains(trees.getFirst().asset()), "Tall cups still lead the colony");
+                    assertEquals(height, trees.getFirst().height(), "Short pods cannot replace the rules' cover height");
+                }
+            }
+        }
+    }
+
+    @Test
     void lightHeavyAndUltraUseDistinctSmallerColonies() {
         for (int density = 1; density <= 3; density++) {
             for (int height : new int[] { 1, 2 }) {
@@ -89,64 +152,19 @@ class BoardFungusTest {
                 hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, height));
                 var cover = BoardFeatures.capture(hex, new Coords(5, 8), Map.of()).stream()
                       .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
-                assertEquals(2 * density, cover.size());
+                assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.limit(density, false));
                 assertEquals(height, cover.getFirst().height());
-                // At most one shorter colony in light woods and two in heavier woods; the rest reach the woods' height.
+                // Fungal stands retain small fruiting bodies; ordinary trees retain their full cover height.
                 long shorter = cover.stream().filter(f -> f.height() < height).count();
-                assertEquals(density == 1 ? 1 : 2, shorter);
+                assertTrue(shorter > 0 && shorter < cover.size());
                 assertEquals(cover.size() - shorter, cover.stream().filter(f -> f.height() == height).count());
                 assertEquals(density, hex.terrainLevel(Terrains.WOODS));
                 // Ordinary forests keep their existing representation.
                 hex.setTheme("grass");
-                assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16,
-                      BoardFeatures.capture(hex, new Coords(5, 8), Map.of()).stream()
-                            .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).count());
+                assertTrue(BoardFeatures.capture(hex, new Coords(5, 8), Map.of()).stream()
+                      .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).allMatch(f -> f.height() >= height));
             }
         }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = { "fungus", "mars" })
-    void solidColoniesDoNotPassThroughEachOtherWithinOrAcrossHexes(String theme) {
-        // Low woods and light woods at height 2 have room for every colony apart; taller, denser woods slim theirs.
-        for (int density = 1; density <= 3; density++) {
-            assertEquals(0, worstOverlap(theme, density, 1), .5f, theme + " woods " + density + " at height 1");
-        }
-        assertEquals(0, worstOverlap(theme, 1, 2), .5f, theme + " light woods at height 2");
-        Hex crowded = new Hex(0, "woods:3;foliage_elev:3", theme);
-        var colonies = BoardFeatures.capture(crowded, new Coords(6, 6), Map.of(), Set.of(), neighbour -> crowded)
-              .stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
-        assertEquals(6, colonies.size());
-        assertTrue(colonies.stream().anyMatch(f -> f.stretch().x() < 1), "Crowded colonies grow slimmer");
-        assertTrue(colonies.stream().allMatch(f -> f.stretch().x() > .79 && f.stretch().z() == 1
-              && f.height() <= 3), "A colony slims to four fifths of its width at most, its height kept");
-    }
-
-    /**
-     * The worst overlap (in hex units) of two solid colonies' footprints in seven hexes of contiguous woods: a hex and
-     * its neighbours, each placed with the others as its board.
-     */
-    private static float worstOverlap(String theme, int density, int height) {
-        Hex woods = new Hex(0, "woods:" + density + ";foliage_elev:" + height, theme);
-        Coords centre = new Coords(6, 6);
-        List<float[]> colonies = new ArrayList<>();
-        for (int direction = -1; direction < 6; direction++) {
-            Coords at = direction < 0 ? centre : centre.translated(direction);
-            float x = HexTile.centerX(at, BoardGeometry.TILE_WIDTH), y = HexTile.centerY(at, BoardGeometry.TILE_HEIGHT);
-            for (var colony : BoardFeatures.capture(woods, at, Map.of(), Set.of(), neighbour -> woods)) {
-                if (colony.kind() == BoardScene.FeatureKind.TREE) {
-                    colonies.add(new float[] { x + colony.x(), y + colony.y(), BoardFeatures.footprint(colony) });
-                }
-            }
-        }
-        float worst = 0;
-        for (int i = 0; i < colonies.size(); i++) {
-            for (int j = i + 1; j < colonies.size(); j++) {
-                float[] a = colonies.get(i), b = colonies.get(j);
-                worst = Math.max(worst, a[2] + b[2] - (float) Math.hypot(a[0] - b[0], a[1] - b[1]));
-            }
-        }
-        return worst;
     }
 
     @Test

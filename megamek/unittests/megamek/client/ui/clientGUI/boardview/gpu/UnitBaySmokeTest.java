@@ -6,13 +6,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
@@ -287,8 +293,15 @@ class UnitBaySmokeTest {
 
         UiTestStage.run(ui -> {
             List<String> said = new ArrayList<>();
+            AtomicReference<Consumer<BufferedImage>> pictureReady = new AtomicReference<>();
+            CompletableFuture<Void> pictureJob = new CompletableFuture<>();
+            LobbyUnitBayView.Host host = spy(host(said));
+            doAnswer(call -> {
+                pictureReady.set(call.getArgument(0));
+                return pictureJob;
+            }).when(host).boardPicture(any());
             LobbyUnitBayView bay = new LobbyUnitBayView(ui.kit, form,
-                  List.of(new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB)), List.of(), host(said));
+                  List.of(new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB)), List.of(), host);
             bay.body().setBounds(100, 100, 1100, 900);
             ui.window.addActor(bay.body());
             bay.body().validate();
@@ -300,6 +313,12 @@ class UnitBaySmokeTest {
             click(ui, control(bay, "bay-zone-" + Board.START_S));
             assertEquals(Board.START_S, form.zone(), "a click on the board's south third chooses the south");
             assertTrue(form.zoneHexes()[5][16]);
+            assertNotNull(pictureReady.get(), "the bay requests its picture without waiting for it");
+            int textures = UiTestStage.liveTextures().size();
+            BufferedImage terrain = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+            pictureReady.get().accept(terrain);
+            assertEquals(textures + 1, UiTestStage.liveTextures().size(), "the arriving image gets a texture");
+            assertEquals(Board.START_S, form.zone(), "the arriving image preserves the selection");
             assertTrue(form.enabled(UnitConfigForm.Field.OFFSET), "an edge takes an offset");
             assertEquals(!form.enabled(UnitConfigForm.Field.WIDTH), control(bay, "bay-edge-only").isVisible(),
                   "the hint stays only to say the rules fix the width");
@@ -313,6 +332,10 @@ class UnitBaySmokeTest {
             assertEquals(Board.START_EDGE, form.zone(), "the chips below choose the rest");
             assertTrue(((Button) control(bay, "bay-zone-" + Board.START_EDGE)).isChecked());
             bay.dispose();
+            assertTrue(pictureJob.isCancelled(), "closing the bay cancels its outstanding picture");
+            textures = UiTestStage.liveTextures().size();
+            pictureReady.get().accept(terrain);
+            assertEquals(textures, UiTestStage.liveTextures().size(), "a late result creates no texture after close");
         });
     }
 

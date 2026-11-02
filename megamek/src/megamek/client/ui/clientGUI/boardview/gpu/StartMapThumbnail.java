@@ -60,12 +60,7 @@ final class StartMapThumbnail {
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
         double radius = unit / 2;
-        for (BoardScene.Tile tile : BoardTiles.captureAll(board)) {
-            Coords coords = tile.coords();
-            int rgba = GpuMinimap.colour(tile);
-            g.setColor(new Color(rgba >>> 24, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF));
-            g.fill(hex(centreX(coords, unit), centreY(coords, unit), radius * HEX_FILL));
-        }
+        LobbyMapThumbnail.paintTerrain(g, board, unit);
         g.setStroke(new BasicStroke((float) Math.max(1.5, unit * ZONE_EDGE), BasicStroke.CAP_ROUND,
               BasicStroke.JOIN_ROUND));
         for (Player player : players) {

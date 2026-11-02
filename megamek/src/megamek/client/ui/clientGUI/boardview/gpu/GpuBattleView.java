@@ -624,6 +624,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void captureReloadedAssets(Application application) {
         SwingUtilities.invokeLater(() -> {
             try {
+                BoardTreeCoverage.reload();
                 source.reloadAssets();
                 application.postRunnable(() -> shaderEdits.run(() -> {
                     if (disposed || source.isClosed()) { return; }
@@ -778,7 +779,8 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         terrain.setTessellation(tuning.tessellation());
-        terrain.setMaterialCache(tuning.terrainCache());
+        // The temporary close-up only discovers programs. Baking pages for it would evict the user's view.
+        terrain.setMaterialCache(tuning.terrainCache() && warmUp != WarmUp.CLOSE);
         terrain.setMaterialCacheDebug(tuning.terrainCacheDebug());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
         atmosphere.setVignette(tuning.vignette());
@@ -791,7 +793,8 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setColumns(source.uiPreferences().graphics() == BoardGraphics.CLASSIC);
         terrain.present(playback.transition(), playback.transitionProgress());
         terrain.update(scene, boardCamera.camera);
-        boolean detailChanged = terrain.refine(boardCamera.camera, source.isEditor());
+        // Keep draining preparation, but do not build another terrain level for the shader probe's temporary camera.
+        boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera, source.isEditor());
         settings.set(terrain.settings());
         tuning.terrainProgress(terrain.buildProgress());
         if (!terrain.ready(scene)) {
@@ -1067,13 +1070,17 @@ class GpuBattleView extends ApplicationAdapter {
             editorPreview.render(boardCamera.camera, scene, terrain, ghosts);
         }
         fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
+        renderStage("terrain markers");
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
               source.uiPreferences().overlays());
+        renderStage("hex grid");
         // Outside the Tactical View the grid over the finished scene; inside it, the ground layer drew it.
         if (!boardCamera.tactical()) {
             hexGrid.render(boardCamera, scene, terrain.columns(), false, GpuBattleStatus.Arc.NONE, false, atmosphere);
         }
+        renderStage("hex labels");
         renderHexText(wireframeView);
+        renderStage("overlay labels and ghosts");
         overlay.renderGhost(boardCamera.camera, shownUnit);
         overlay.renderGhosts(boardCamera.camera, unitGhosts);
         fireControl.renderLabels(boardCamera.camera);

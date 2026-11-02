@@ -4,9 +4,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.graphics.g3d.Environment;
+import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.utils.Array;
@@ -118,9 +121,27 @@ final class GpuMeshPage implements Disposable {
 
     /** The exact same culled ranges can feed a depth pass without copying or rebuilding the page. */
     void forEachVisible(Consumer<Renderable> submit) {
+        forEachVisible((part, material) -> submit.accept(part), null);
+    }
+
+    /**
+     * Select a material per source range, keeping adjacent ranges with the same selection merged. Coverage changes
+     * only the submitted ranges, never the stored geometry or the source materials. With no selector the whole-page
+     * fast path also serves depth, water and the ordinary terrain passes.
+     */
+    void forEachVisible(BiConsumer<Renderable, Material> submit,
+          BiFunction<Renderable, Material, Material> materials) {
         if (visible.isEmpty()) { return; }
-        if (cached.isEmpty()) { visible.forEach(submit); return; }
-        if (prepared && visible.size == current.size) { cached.forEach(submit); return; }
+        if (cached.isEmpty()) {
+            for (Renderable part : visible) {
+                submit.accept(part, materials == null ? part.material : materials.apply(part, part.material));
+            }
+            return;
+        }
+        if (materials == null && prepared && visible.size == current.size) {
+            for (Renderable part : cached) { submit.accept(part, part.material); }
+            return;
+        }
 
         // A partial or outdated page keeps only its visible merged sources. Adjacent ranges of the same material/mesh
         // form one draw. Reuse the small renderable pool; no vertex or index buffers change during a pan.
@@ -129,21 +150,26 @@ final class GpuMeshPage implements Disposable {
         Renderable combined = null;
         for (Range range : ranges) {
             if (!visibleSet.contains(range.source())) { run = null; continue; }
+            Material material = materials == null ? range.combined().material
+                  : materials.apply(range.source(), range.combined().material);
             if (run != null && combined == range.combined()
-                  && run.meshPart.offset + run.meshPart.size == range.offset()) {
+                  && run.material == material && run.meshPart.offset + run.meshPart.size == range.offset()) {
                 run.meshPart.size += range.size();
             } else {
                 if (used == runs.size) { runs.add(new Renderable()); }
                 run = runs.get(used++);
                 run.set(combined = range.combined());
+                run.material = material;
                 run.meshPart.offset = range.offset();
                 run.meshPart.size = range.size();
             }
         }
-        for (int i = 0; i < used; i++) { submit.accept(runs.get(i)); }
+        for (int i = 0; i < used; i++) { submit.accept(runs.get(i), runs.get(i).material); }
         // Sources the page does not hold yet, such as a refined chunk's, draw as they are.
         for (Renderable part : visible) {
-            if (!merged.contains(part)) { submit.accept(part); }
+            if (!merged.contains(part)) {
+                submit.accept(part, materials == null ? part.material : materials.apply(part, part.material));
+            }
         }
     }
 

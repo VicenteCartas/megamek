@@ -399,7 +399,9 @@ final class LobbyMapSetupView {
     // ---- Showing the setup ----
 
     /** Shows the setup anew; the themes are those any slot can take. */
-    void show(Picture picture, List<Theme> themes) {
+    void show(Picture picture, List<Theme> themes, BoardAtmosphere.Settings atmosphere) {
+        // Conditions can change while the setup itself (and an open inspection) stays the same.
+        inspection.atmosphere(atmosphere);
         // Unrelated lobby events also refresh this view. Keep its live controls and open dropdowns when nothing changed.
         if (picture.equals(shown) && themes.equals(this.themes)) {
             return;
@@ -567,7 +569,11 @@ final class LobbyMapSetupView {
                           || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT));
                     pick(entry, several);
                     if (getTapCount() == 2 && !several) {
-                        placePicked();
+                        if (inspection.isVisible()) {
+                            if (!entry.generated()) { inspect(entry); }
+                        } else {
+                            placePicked();
+                        }
                     }
                 }
             });
@@ -636,7 +642,8 @@ final class LobbyMapSetupView {
               MessageFormat.format(Messages.getString("Lobby.map.surprise"), picks.size())));
         random.setDisabled(!target || !several);
         surprise.setDisabled(!target || !several);
-        pickHint.setText(!target ? Messages.getString("Lobby.map.noSlot")
+        pickHint.setText(inspection.isVisible() ? Messages.getString("Lobby.map.inspectHint")
+              : !target ? Messages.getString("Lobby.map.noSlot")
               : several ? "" : Messages.getString("Lobby.map.pickHint"));
     }
 
@@ -752,6 +759,7 @@ final class LobbyMapSetupView {
         tablePanel.setVisible(false);
         inspection.setVisible(true);
         inspection.loading(entry.label());
+        showPicks();
         host.inspect(entry.name(), scene -> {
             if (ticket == inspectionTicket && shown != null) {
                 inspection.show(scene);
@@ -764,6 +772,7 @@ final class LobbyMapSetupView {
         inspection.setVisible(false);
         inspection.dispose();
         tablePanel.setVisible(true);
+        showPicks();
     }
 
     // ---- Helpers ----

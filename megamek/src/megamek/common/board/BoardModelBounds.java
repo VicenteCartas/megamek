@@ -31,6 +31,9 @@ public final class BoardModelBounds {
 
     private BoardModelBounds() { }
 
+    /** Discard file-derived bounds before artwork is recaptured after an asset reload. */
+    public static void reload() { BOUNDS.clear(); }
+
     /**
      * The GLB under {@code root} that holds {@code asset}, a model's path there without {@code .glb}: its own file, or
      * for a tree's winter form without one ({@code <species>-snow}), the bare species' file.
@@ -38,7 +41,7 @@ public final class BoardModelBounds {
     public static File file(File root, String asset) {
         File own = new File(root, asset + ".glb");
         File bare = asset.endsWith("-snow") ? new File(root, asset.substring(0, asset.length() - "-snow".length()) + ".glb") : null;
-        return !own.isFile() && bare != null && bare.isFile() ? bare : own;
+        return bare != null && !own.isFile() && bare.isFile() ? bare : own;
     }
 
     /** The model's bounds (min x, y, z, max x, y, z), read once per file; null when it is missing or unreadable. */
