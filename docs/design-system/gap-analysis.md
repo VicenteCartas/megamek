@@ -1217,6 +1217,17 @@ work for Swing, and item 11 is under investigation.
        Escape, a locked option that takes no click) and `GpuDialogRoutingTest`. Live: `briefing+rules`,
        `+conditions` and `+camo` (with `MM_START_SCENARIO` pointing at a scenario that leaves them open), and
        `main+notice`.
+     - Lanceman's round:
+       - The wheel scrolls a list anywhere over its rows, not only over its bar. A list inside another scrolling
+         pane (the camo tree and grid in the dialog's body, the board list in the map setup's drawer) lost the
+         wheel to the pane round it, which took the scroll focus last as the enter bubbled up.
+         `UiKit.wheelWhileHovered` now leaves the focus with the innermost pane that can scroll.
+       - A right click (and a click) anywhere on a unit's card, or a player's card, reaches it. A `Table` takes
+         only its children's hits by default, so a press between the labels went nowhere.
+       - The camo picker's categories start folded; only the way to the current camo is open.
+       Checks: `UiGallerySmokeTest.aListInsideAScrollingPaneTakesTheWheelOverItsRows` and
+       `LobbyTogglesSmokeTest.aRightClickAnywhereOnACardOpensItsMenu`. Live: `briefing+camo`, the wheel over the
+       tree.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

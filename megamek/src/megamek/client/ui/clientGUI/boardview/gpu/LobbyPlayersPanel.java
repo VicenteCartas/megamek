@@ -15,6 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
@@ -412,6 +413,8 @@ final class LobbyPlayersPanel {
         side.add(more).size(size("control.sm"));
         card.add(side).top().padLeft(space("xs"));
 
+        // A table takes only its children's hits; the whole card takes clicks, not only its labels
+        card.setTouchable(Touchable.enabled);
         card.addListener(new ClickListener(Input.Buttons.RIGHT) {
             @Override
             public void clicked(InputEvent event, float x, float y) {
