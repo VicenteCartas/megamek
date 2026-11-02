@@ -115,10 +115,10 @@ final class GpuAttackEffects implements Disposable {
      *                a minefield dispenser
      */
     record Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress,
-          boolean opening) {
+          boolean opening, boolean infantryFigure) {
         Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact) { this(origin, forward, target, impact, target, 1); }
         Trace(Vector3 origin, Vector3 forward, Vector3 target, boolean impact, Vector3 aim, float progress) {
-            this(origin, forward, target, impact, aim, progress, false);
+            this(origin, forward, target, impact, aim, progress, false, false);
         }
         Vector3 position(float at, boolean arc, Vector3 result) {
             return at >= 1 ? result.set(target) : UnitAttack.projectile(origin, aim, at * progress, arc, result);
@@ -242,36 +242,6 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
-    /**
-     * Remaining world distance of the final arriving projectile, using the same captured flight as drawing. Earlier
-     * rounds in an MG burst cannot trigger a killing blow's slowdown. Infinity means no final projectile is in flight.
-     */
-    float distanceToImpact(UnitAttack shot) {
-        if (!shot.shot() || !shot.event.result().hit() || shot.defensive()
-              || shot.seconds < UnitAttack.ANTICIPATION_SECONDS) { return Float.POSITIVE_INFINITY; }
-        if (shot.seconds >= shot.contactSeconds) { return 0; }
-        prepare(shot);
-        float distance = -1;
-        for (int index = 0; index < muzzleCount; index++) {
-            if (emitted[index] == null || !impacts[index]
-                  || !("bullet".equals(effects[index]) || "energy".equals(effects[index]))) { continue; }
-            float contact = contactSeconds(index);
-            if (Math.abs(contact - shot.contactSeconds) > .0001f) { continue; }
-            float start = UnitAttack.ANTICIPATION_SECONDS + roundDelays[index];
-            float progress = (shot.seconds - start) / Math.max(.0001f, contact - start);
-            distance = Math.max(distance, emitted[index].position(progress, arcs[index], point).dst(endpoints[index]));
-        }
-        for (var launch : launches.getOrDefault(shot, Map.of()).values()) {
-            for (int index = 0; index < launch.missiles(); index++) {
-                float progress = GpuMissileEffects.progress(launch, index, shot.seconds);
-                if (!launch.hit(index) || launch.opened(index) || progress < 0
-                      || Math.abs(launch.endSeconds(index) - shot.contactSeconds) > .0001f) { continue; }
-                distance = Math.max(distance, GpuMissileEffects.position(launch, index, progress, point).dst(launch.targets()[index]));
-            }
-        }
-        return distance < 0 ? Float.POSITIVE_INFINITY : distance;
-    }
-
     private static int missileCount(ResolvedAttack.Shot profile, String effect) {
         return profile != null && profile.missiles() > 0 ? profile.missiles()
               : "missile".equals(effect) || "cluster".equals(effect) ? 1 : 0;
@@ -310,7 +280,7 @@ final class GpuAttackEffects implements Disposable {
             var contact = missed && !isBeam
                   ? attack.landscapeContact(t -> UnitAttack.projectile(start, aim, (float) t, arc, new Vector3()), arc ? 32 : 1) : null;
             trace = new Trace(start, forwards[muzzleCount].cpy(), contact == null ? finish : contact.point(), impact,
-                  aim, contact == null ? 1 : contact.progress());
+                  aim, contact == null ? 1 : contact.progress(), false, attack.hitsInfantryFigure(victim, key.hashCode()));
             trace = openInTheAir(trace, profile, arc);
             paths.put(key, trace);
         }
@@ -345,7 +315,7 @@ final class GpuAttackEffects implements Disposable {
         }
         Vector3 opening = UnitAttack.projectile(trace.origin(), trace.aim(), progress, arc, new Vector3());
         LOGGER.debug("[ArtilleryBlast] shell opens in the air {} of the way along its flight, at {}", progress, opening);
-        return new Trace(trace.origin(), trace.forward(), opening, trace.impact(), trace.aim(), progress, true);
+        return new Trace(trace.origin(), trace.forward(), opening, trace.impact(), trace.aim(), progress, true, trace.infantryFigure());
     }
 
     private static boolean firingEmitter(UnitModelDescriptor.Emitter emitter) {
@@ -496,6 +466,10 @@ final class GpuAttackEffects implements Disposable {
     }
 
     void render(Camera camera, GpuEffectDepth depth) {
+        render(camera, depth, List.of());
+    }
+
+    void render(Camera camera, GpuEffectDepth depth, List<MeepleCasualties.Casualty> casualties) {
         interceptionBeams.clear();
         airbursts = 0;
         explosions.begin();
@@ -504,14 +478,17 @@ final class GpuAttackEffects implements Disposable {
         flames.begin();
         beams.begin();
         projectiles.begin();
-        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty()) { return; }
+        if (volley.isEmpty() && artilleryBlasts.size() == 0 && minefields.isEmpty() && casualties.isEmpty()) { return; }
         this.camera = camera;
+        casualties.forEach(casualty -> casualty.explosions(explosions));
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
             if (shot.seconds < (shot.death() ? 0 : UnitAttack.ANTICIPATION_SECONDS) && !shot.chargingPpc()
                   || shot.seconds >= shot.duration) { continue; }
             prepare(shot);
-            renderShot();
+            boolean infantryMeeples = shot.death() && casualties.stream()
+                  .anyMatch(casualty -> casualty.unit.id() == shot.event.entityId() && casualty.infantryMeeples());
+            renderShot(infantryMeeples);
         }
         renderInterceptions();
         artilleryBlasts.emit(explosions);
@@ -602,9 +579,9 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
-    private void renderShot() {
+    private void renderShot(boolean infantryMeeples) {
         if (attack.death()) {
-            if (!attack.event.result().crewLoss()) {
+            if (!attack.event.result().crewLoss() && !infantryMeeples) {
                 explosions.burst(target, 18, attack.deathProgress(), attack.event.result().id().hashCode());
             }
             return;
@@ -647,7 +624,8 @@ final class GpuAttackEffects implements Disposable {
                               && (profiles[index] == null || profiles[index].impact() == null);
                         ballisticImpact(start, target, flash, profiles[index], attack.event.result().id().hashCode() ^ index * 31, targetHit);
                     } else if ("energy".equals(effect)) { glow(target, 1.5f + (1 - flash) * 3, ENERGY_GLOW, 1 - flash, flash); }
-                    else {
+                    else if (!"laser".equals(effect) || !emitted[index].infantryFigure()) {
+                        // A soldier carbonizes under a laser without a fireball; armor and vehicles keep their impact flash.
                         Trace flight = emitted[index];
                         boolean opened = (flight != null) && flight.opening();
                         impact(target, opened ? flight.aim() : target, flash, profiles[index]);

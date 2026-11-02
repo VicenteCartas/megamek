@@ -139,7 +139,7 @@ import org.lwjgl.glfw.GLFW;
  *     stage, one every {@value LobbyMapSetupProbe#CLICK_GAP} s, logging the setup after each and the server's map
  *     settings once done: such as {@code map-slot-1}, {@code map-board-2} and {@code map-place},
  *     {@code map-width-up} (and {@code nag-dont-show}, {@code nag-ok} of the odd-sized board warning),
- *     {@code map-medium-space}, {@code map-rotate}, {@code map-level-offset-up}, {@code map-generate}; or
+ *     {@code map-medium-space}, {@code map-slot-rotate-0}, {@code map-level-offset-0-up}, {@code map-generate}; or
  *     {@code random-advanced}, {@code random-tab-water}, {@code random-lakes-high}, {@code random-ok} (see
  *     {@link LobbyMapSetupProbe}).</li> *     <li>{@code lobby+configure}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the unit bay for the player's
  *     first unit, as the unit menu's Configure does; with {@code +multi} for all their units at once. With

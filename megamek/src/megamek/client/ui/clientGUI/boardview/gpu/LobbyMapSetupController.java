@@ -13,13 +13,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import javax.swing.SwingUtilities;
 
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
 import megamek.common.loaders.MapSettings;
 import megamek.common.util.BoardUtilities;
 import megamek.common.util.fileUtils.MegaMekFile;
@@ -36,9 +40,16 @@ final class LobbyMapSetupController {
     static final int PICTURE_SIDE = LobbyMapThumbnail.LONG_SIDE / 2;
 
     private final MapSetupForm form;
+    private final Supplier<Board> battlefield;
     private final BiConsumer<MapSetupForm.Picture, List<MapSetupForm.Theme>> show;
     private final BiConsumer<String, BufferedImage> picture;
     private final Set<String> requested = new HashSet<>();
+    private final Set<String> generatedKeys = new HashSet<>();
+    private List<String> visibleBoards = List.of();
+    private boolean browserPainting;
+    private Board generatedBoard;
+    private int generation;
+    private volatile boolean disposed;
     private final ExecutorService painter = Executors.newSingleThreadExecutor(work -> {
         Thread thread = new Thread(work, "Lobby map setup boards");
         thread.setDaemon(true);
@@ -49,9 +60,11 @@ final class LobbyMapSetupController {
      * @param show    hands a picture of the setup, with the themes any slot can take, to the GPU thread
      * @param picture hands a board's picture, by {@link #pictureKey}, to the GPU thread
      */
-    LobbyMapSetupController(MapSetupForm form, BiConsumer<MapSetupForm.Picture, List<MapSetupForm.Theme>> show,
+    LobbyMapSetupController(MapSetupForm form, Supplier<Board> battlefield,
+          BiConsumer<MapSetupForm.Picture, List<MapSetupForm.Theme>> show,
           BiConsumer<String, BufferedImage> picture) {
         this.form = form;
+        this.battlefield = battlefield;
         this.show = show;
         this.picture = picture;
     }
@@ -67,8 +80,11 @@ final class LobbyMapSetupController {
               + '|' + offset;
     }
 
-    /** The key of a slot's picture, or null when it has no board file to draw. */
+    /** The key of a slot's picture, or null when it has no visible board to draw. */
     static @Nullable String pictureKey(MapSetupForm.Slot slot, MapSetupForm.Picture setup) {
+        if (slot.kind() == MapSetupForm.Kind.GENERATED && !setup.space()) {
+            return "generated:" + slot.index() + '|' + setup.boardWidth() + 'x' + setup.boardHeight();
+        }
         if (slot.file().isBlank() || setup.space()) {
             return null;
         }
@@ -79,7 +95,11 @@ final class LobbyMapSetupController {
     /** EDT: takes the server's settings again, if it sent others, and sends the picture. */
     void refresh() {
         try {
+            MapSettings before = MapSettings.getInstance(form.settings());
             form.reloadIfNew();
+            if (!MapSetupForm.sameSetup(before, form.settings())) {
+                clearGenerated();
+            }
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The map setup could not read the map settings");
             return;
@@ -89,19 +109,76 @@ final class LobbyMapSetupController {
 
     /** EDT: runs one of the view's actions on the form, then sends the picture. */
     void act(Consumer<MapSetupForm> action) {
+        MapSettings before = MapSettings.getInstance(form.settings());
         try {
             action.accept(form);
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The map setup action failed");
         }
+        if (!MapSetupForm.sameSetup(before, form.settings())) {
+            clearGenerated();
+            // This board belongs to the setup before the edit. Wait for its server replacement.
+            generatedBoard = battlefield.get();
+        }
         send();
     }
 
-    /** EDT: draws the picture of a board of the list, unless it is drawn or being drawn. */
-    void preview(String board) {
+    /** Captures a private read-only scene on the painter, never a mutable game board on the GPU thread. */
+    void inspect(String name, Consumer<BoardScene> ready) {
+        painter.execute(() -> {
+            BoardScene scene = null;
+            try {
+                File file = new MegaMekFile(Configuration.boardsDir(), BoardFile.fileName(name)).getFile();
+                Board board = GpuBoardWindow.loadPreview(file);
+                scene = new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
+                      List.of(), List.of(), -1, "", List.of());
+            } catch (RuntimeException failure) {
+                LOGGER.warn(failure, "The map setup could not inspect the board {}", name);
+            }
+            if (!disposed) {
+                ready.accept(scene);
+            }
+        });
+    }
+
+    /** EDT: replaces the browser's demand. Only one browser thumbnail is ever in flight. */
+    void previews(List<String> boards) {
+        visibleBoards = List.copyOf(boards);
+        paintNextVisible();
+    }
+
+    private void paintNextVisible() {
+        if (disposed || browserPainting) {
+            return;
+        }
         MapSettings settings = form.settings();
-        if (!board.startsWith(MapSettings.BOARD_GENERATED)) {
-            paint(board, false, settings.getBoardWidth(), settings.getBoardHeight(), null, 0, -1);
+        int width = settings.getBoardWidth(), height = settings.getBoardHeight();
+        for (String file : visibleBoards) {
+            String key = pictureKey(file, false, width, height, null, 0);
+            if (file.startsWith(MapSettings.BOARD_GENERATED) || !requested.add(key)) {
+                continue;
+            }
+            browserPainting = true;
+            painter.execute(() -> {
+                BufferedImage image = null;
+                try {
+                    image = LobbyMapThumbnail.bake(load(file, false, width, height), List.of(), null, PICTURE_SIDE);
+                } catch (RuntimeException failure) {
+                    LOGGER.warn(failure, "The map setup could not draw the board {}", file);
+                }
+                BufferedImage finished = image;
+                SwingUtilities.invokeLater(() -> {
+                    browserPainting = false;
+                    if (!disposed) {
+                        if (finished != null) {
+                            picture.accept(key, finished);
+                        }
+                        // Choose from the current viewport, not the rows that were visible when this job started.
+                        paintNextVisible();
+                    }
+                });
+            });
+            return;
         }
     }
 
@@ -121,12 +198,76 @@ final class LobbyMapSetupController {
             return;
         }
         for (MapSetupForm.Slot slot : setup.slots()) {
-            if (pictureKey(slot, setup) != null) {
+            if (!slot.file().isBlank() && !setup.space()) {
                 paint(slot.file(), slot.rotated() && slot.canRotate(), setup.boardWidth(), setup.boardHeight(),
                       slot.theme(), slot.levelOffset(), slot.index());
             }
         }
         show.accept(setup, themes);
+        generated(setup);
+    }
+
+    private void clearGenerated() {
+        generation++;
+        generatedKeys.forEach(key -> picture.accept(key, null));
+        generatedKeys.clear();
+    }
+
+    /** The server publishes a new board after generation. Slice that exact result into the generated slots. */
+    private void generated(MapSetupForm.Picture setup) {
+        Board board = battlefield.get();
+        if (board == generatedBoard) {
+            return;
+        }
+        generatedBoard = board;
+        clearGenerated();
+        MapSettings settings = MapSettings.getInstance(form.settings());
+        int ticket = generation;
+        for (MapSetupForm.Slot slot : setup.slots()) {
+            if (slot.kind() != MapSetupForm.Kind.GENERATED || setup.space()) {
+                continue;
+            }
+            String key = pictureKey(slot, setup);
+            generatedKeys.add(key);
+            painter.execute(() -> {
+                Board sheet = sheet(board, settings, slot.index());
+                if (sheet != null) {
+                    BufferedImage image = LobbyMapThumbnail.bake(sheet, List.of(), null, PICTURE_SIDE);
+                    SwingUtilities.invokeLater(() -> {
+                        if (!disposed && ticket == generation) {
+                            picture.accept(key, image);
+                        }
+                    });
+                }
+            });
+        }
+    }
+
+    /** Copies a sheet from the assembled board, including the padding between odd-width columns. */
+    static @Nullable Board sheet(@Nullable Board board, MapSettings settings, int slot) {
+        int width = settings.getBoardWidth(), height = settings.getBoardHeight();
+        int across = settings.getMapWidth(), down = settings.getMapHeight();
+        if (board == null || slot < 0 || slot >= across * down || board.getHeight() != height * down
+              || board.getWidth() < width * across) {
+            return null;
+        }
+        int padding = across > 1 ? (board.getWidth() - width * across) / (across - 1) : 0;
+        if (board.getWidth() != width * across + padding * (across - 1)
+              || width % 2 == 0 && padding != 0) {
+            return null;
+        }
+        int left = slot % across * (width + padding), top = slot / across * height;
+        Hex[] hexes = new Hex[width * height];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                hexes[y * width + x] = board.getHex(left + x, top + y).duplicate();
+                hexes[y * width + x].setCoords(new Coords(x, y));
+            }
+        }
+        Board result = new Board();
+        result.copyMetadataFrom(board);
+        result.newData(width, height, hexes, null);
+        return result;
     }
 
     /** Draws a board file's picture on the painter's thread, the slot's theme and offset applied when it has one. */
@@ -143,7 +284,10 @@ final class LobbyMapSetupController {
                 if (slot >= 0 && slot < settings.getMapWidth() * settings.getMapHeight()) {
                     settings.applyBoardOverrides(board, slot);
                 }
-                picture.accept(key, LobbyMapThumbnail.bake(board, List.of(), null, PICTURE_SIDE));
+                BufferedImage image = LobbyMapThumbnail.bake(board, List.of(), null, PICTURE_SIDE);
+                if (!disposed) {
+                    picture.accept(key, image);
+                }
             } catch (RuntimeException failure) {
                 LOGGER.warn(failure, "The map setup could not draw the board {}", file);
             }
@@ -174,6 +318,7 @@ final class LobbyMapSetupController {
 
     /** As the map setup closes: stops the painter. */
     void dispose() {
+        disposed = true;
         painter.shutdownNow();
     }
 

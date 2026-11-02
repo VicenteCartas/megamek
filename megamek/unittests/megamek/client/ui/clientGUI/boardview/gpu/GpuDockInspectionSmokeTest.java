@@ -6,7 +6,9 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuUnitPanelFixture.TANK
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -23,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import org.junit.jupiter.api.Tag;
@@ -41,6 +44,7 @@ class GpuDockInspectionSmokeTest {
             GpuHudTestStage.run(harness -> {
                 GpuBoardSource source = mock(GpuBoardSource.class);
                 when(source.record()).thenReturn(mock(GpuUnitRecord.class));
+                when(source.fire()).thenReturn(mock(GpuFireOrders.class));
                 SpriteBatch batch = new SpriteBatch();
                 GpuHud hud = new GpuHud(source, harness.theme.skin, batch, new BoardCamera(),
                       mock(GpuBoardTuning.class), new GpuPlaybackHistory(new UnitPlayback()));
@@ -69,6 +73,31 @@ class GpuDockInspectionSmokeTest {
                             Actor minimap = find(hud, "minimap");
                             if (minimap.isVisible() && minimap.getParent().isVisible()) {
                                 harness.assertLayout(minimap, bounds(column), bounds(secondary));
+                            }
+                            if (!phase.isReport()) {
+                                // A lone weapon cannot sort-drag out of the panel or free space for the minimap.
+                                Rectangle beforeDrag = bounds(column);
+                                boolean mapVisible = minimap.getParent().isVisible();
+                                int weapon = frame.panels().fire().weapons().getFirst().eqNum();
+                                Actor name = find(hud, "weapons-name-" + weapon);
+                                Vector2 start = hud.stage.stageToScreenCoordinates(name.localToStageCoordinates(
+                                      new Vector2(name.getWidth() / 2, name.getHeight() - 8)));
+                                assertTrue(hud.stage.touchDown(Math.round(start.x), Math.round(start.y), 0,
+                                      Input.Buttons.LEFT));
+                                hud.stage.touchDragged(Math.round(start.x), Math.round(start.y + 20 / density), 0);
+                                show(hud, frame);
+                                assertTrue(name.isDescendantOf(column), "a single weapon must not lift for sorting");
+                                assertEquals(beforeDrag, bounds(column), "dragging must not move or resize the panel");
+                                assertEquals(mapVisible, minimap.getParent().isVisible(),
+                                      "dragging must not make room for the minimap");
+                                hud.stage.cancelTouchFocus();
+                                hud.stage.touchUp(Math.round(start.x), Math.round(start.y + 20 / density), 0,
+                                      Input.Buttons.LEFT);
+                                UiTestStage.settle(hud.stage);
+                                show(hud, frame);
+                                click(hud, name);
+                                verify(source.fire()).selectWeapon(weapon);
+                                clearInvocations(source.fire());
                             }
                             assertEquals(ATLAS, hud.state.ownCardUnit());
                             assertEquals(TANK, hud.state.otherCardUnit());
@@ -125,7 +154,8 @@ class GpuDockInspectionSmokeTest {
           BoardScene scene, GamePhase phase) {
         GpuBattleStatus.Snapshot status = enemy.status();
         GpuFireOrders.Snapshot fire = phase.isReport() ? GpuFireOrders.Snapshot.EMPTY
-              : new GpuFireOrders.Snapshot(true, true, ATLAS, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
+              : new GpuFireOrders.Snapshot(true, true, ATLAS, GpuFireOrders.Focus.NONE, -1,
+                    List.of(GpuWeaponsPanelSmokeTest.shot05().weapons().getFirst()), List.of(),
                     List.of(), 0, false, false, "", null, null, null, List.of(), null, Map.of(), 1, 0, null);
         GpuHudData p = enemy.panels();
         GpuHudData panels = new GpuHudData(p.phase(), p.move(), fire, p.physical(), p.record(), p.preview(),

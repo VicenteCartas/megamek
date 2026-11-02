@@ -38,6 +38,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrders.WeaponRow;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFlow;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiList;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
@@ -76,7 +77,11 @@ final class GpuWeaponsPanel implements GpuHud.Component {
      */
     private record View(boolean editable, int actorId, GpuFireOrders.Focus focus, int selected,
           List<WeaponRow> weapons, List<Target> targets, List<Attack> attacks, GpuFireOrders.Heat heat, int armed,
-          Map<Integer, String> names) { }
+          Map<Integer, String> names) {
+        boolean sortable() {
+            return editable && weapons.size() > 1;
+        }
+    }
 
     private final GpuHudKit kit;
     private final UiKit ui;
@@ -91,7 +96,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
     private final UiFlow assign;
     private final Container<UiFlow> assignBox;
     private final Cell<Actor> assignCell;
-    private final Table list = new Table();
+    private final UiList list;
     private final ScrollPane scroll;
     private final Table heatSection = new Table();
     private final Cell<Actor> heatCell;
@@ -166,7 +171,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         assignCell = root.add((Actor) null).growX();
         root.row();
         root.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
-        list.top();
+        list = new UiList(ui);
         scroll = ui.scrollList(list);
         scroll.setName("weapons-list");
         root.add(scroll).grow().minHeight(0).row();
@@ -211,41 +216,56 @@ final class GpuWeaponsPanel implements GpuHud.Component {
 
     /** The fixed controls and at least one weapon row must fit below the minimap. */
     float minimumHeight() {
-        return root.getMinHeight() + (list.hasChildren()
-              ? ((Table) list.getChildren().first()).getPrefHeight() + ROW_GAP : 0);
+        // The dragged row is temporarily on the stage, but still reserves its place in the panel.
+        Table first = shown != null && shown.editable() && !shown.weapons().isEmpty()
+              ? rows.get(shown.weapons().getFirst().eqNum())
+              : list.hasChildren() ? (Table) list.getChildren().first() : null;
+        return root.getMinHeight() + (first == null ? 0 : first.getPrefHeight());
     }
 
     @Override
     public void update(GpuHud.Inputs inputs) {
         GpuFireOrders.Snapshot next = inputs.frame().panels().fire();
+        boolean visible = next.active() && !state.logOpen() && !state.overview;
+        if (next.actorId() != actorId || next.editable() != fire.editable() || !visible) {
+            // A drag belongs to one unit's editable declaration; abandoning it never posts a move.
+            list.clearChildren();
+            rows.clear();
+            shown = null;
+        }
         if (next.actorId() != actorId || !next.editable() || row(next.weapons(), state.armedWeapon) == null) {
             // A weapon stays armed only within its own unit's declaration (H16).
             state.armedWeapon = -1;
         }
         actorId = next.actorId();
         fire = next;
-        if (!next.active()) {
-            // The HUD shows the contacts in this column then.
+        if (!visible) {
             return;
         }
-        View view = new View(next.editable(), next.actorId(), next.focus(), next.selectedWeapon(), next.weapons(),
-              next.targets(), next.attacks(), next.heat(), state.armedWeapon, names(next));
-        // H39: a newly selected row scrolls into view; a selected row in view stays there when the rebuilt panel
-        // moves it (a target pill more wraps the pills onto another line)
-        boolean scrollTo = next.selectedWeapon() != selected;
-        if (!view.equals(shown)) {
-            scrollTo |= selectedInView();
-            shown = view;
-            rebuild();
-        }
-        selected = next.selectedWeapon();
-        if (scrollTo && selected >= 0) {
-            // once the HUD placed this frame's panels, before drawing
-            root.addAction(Actions.run(this::scrollToSelected));
+        if (!list.busy()) {
+            View view = new View(next.editable(), next.actorId(), next.focus(), next.selectedWeapon(), next.weapons(),
+                  next.targets(), next.attacks(), next.heat(), state.armedWeapon, names(next));
+            // H39: a newly selected row scrolls into view; a selected row in view stays there when rebuilt.
+            boolean scrollTo = next.selectedWeapon() != selected;
+            if (!view.equals(shown)) {
+                scrollTo |= selectedInView();
+                shown = view;
+                rebuild();
+            }
+            selected = next.selectedWeapon();
+            if (scrollTo && selected >= 0) {
+                // once the HUD placed this frame's panels, before drawing
+                root.addAction(Actions.run(this::scrollToSelected));
+            }
         }
         // Laid out at the column's width now, so its wrapped pills and lines give the HUD its height this frame.
         root.setWidth(inputs.metrics().right());
         root.validate();
+    }
+
+    /** A dragged row goes home before Esc closes any of the HUD's panels. */
+    boolean cancelDrag() {
+        return list.cancel();
     }
 
     /**
@@ -311,10 +331,12 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             }
             showAssign(view);
             for (WeaponRow weapon : view.weapons()) {
-                Table row = weaponRow(weapon, view);
-                rows.put(weapon.eqNum(), row);
-                list.add(row).growX().minWidth(0).pad(ROW_GAP, 10, 0, 10).row();
+                Table entry = entry(weaponRow(weapon, view));
+                rows.put(weapon.eqNum(), entry);
+                list.add(entry, view.sortable() ? entry : null);
             }
+            list.reorderable((from, to) -> source.fire().moveWeapon(view.actorId(), view.weapons().get(from).eqNum(),
+                  view.weapons().get(to).eqNum()));
         } else {
             // H33: another player's turn shows the focus unit's draft, which waits for its own turn
             count.setText(text("GpuBoard.hud.weapons.drafted", view.names().getOrDefault(view.actorId(), ""),
@@ -322,7 +344,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
             pillCell.setActor(null);
             assignCell.setActor(null);
             for (Attack attack : view.attacks()) {
-                list.add(draftRow(attack, view)).growX().minWidth(0).pad(ROW_GAP, 10, 0, 10).row();
+                list.add(entry(draftRow(attack, view)), null);
             }
         }
         showHeat(view.editable() ? view.heat() : null);
@@ -334,6 +356,13 @@ final class GpuWeaponsPanel implements GpuHud.Component {
                   return attack != null ? !attack.target().equals(focus)
                         : weapon.usable() && weapon.target().equals(focus) && weapon.reason().isEmpty();
               }));
+    }
+
+    /** The row and its spacing travel together while dragging. */
+    private static Table entry(Table row) {
+        Table entry = new Table();
+        entry.add(row).growX().minWidth(0).pad(ROW_GAP, 10, 0, 10);
+        return entry;
     }
 
     /**
@@ -415,7 +444,8 @@ final class GpuWeaponsPanel implements GpuHud.Component {
                 }
             }
         });
-        ui.tip(name).getActor().setText(text("GpuBoard.hud.weapons.nameTip"));
+        ui.tip(name).getActor().setText(text(view.sortable() ? "GpuBoard.hud.weapons.nameSortTip"
+              : "GpuBoard.hud.weapons.nameTip"));
         Table row = row(name, roll(!weapon.target().equals(TargetKey.NONE), weapon.value(), weapon.odds()),
               slot(weapon, attack(view.attacks(), eqNum), view), view.selected() == eqNum, view.armed() == eqNum);
         row.setName("weapons-row-" + eqNum);
@@ -463,6 +493,9 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         };
         row.setBackground(selected ? rowSelected : rowPlain);
         row.pad(8, 11, 8, 9);
+        if (shown.sortable()) {
+            row.add(ui.icon("grip", 12, UiTheme.MUTED)).size(12, 16).padRight(6);
+        }
         row.add(name).growX().minWidth(0);
         row.add(roll).minWidth(40).right().padLeft(10);
         if (slot != null) {
@@ -638,7 +671,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
         Table row = rows.get(selected);
         if (row != null) {
             root.validate();
-            scroll.scrollTo(row.getX(), row.getTop() + ROW_GAP, row.getWidth(), row.getHeight() + ROW_GAP);
+            scroll.scrollTo(row.getX(), row.getTop(), row.getWidth(), row.getHeight());
         }
     }
 

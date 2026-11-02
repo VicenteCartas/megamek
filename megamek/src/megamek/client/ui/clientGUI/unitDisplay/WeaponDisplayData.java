@@ -989,6 +989,17 @@ public final class WeaponDisplayData {
         }
     }
 
+    /** Moves a listed weapon to another listed weapon's position, preserving the order of the rest. */
+    public static void moveWeapon(Entity entity, WeaponMounted weapon, WeaponMounted destination) {
+        List<WeaponMounted> order = new ArrayList<>(listedWeapons(entity));
+        int from = order.indexOf(weapon);
+        int to = order.indexOf(destination);
+        if (from >= 0 && to >= 0 && from != to) {
+            order.add(to, order.remove(from));
+            setCustomWeaponOrder(entity, order);
+        }
+    }
+
     /**
      * Makes the given weapon order the unit's custom order and switches the unit to the custom sort order; the list
      * drag's action. Like the drag, it only marks the order as changed: the phase displays send it when they next

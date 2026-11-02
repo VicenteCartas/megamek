@@ -66,7 +66,9 @@ and native fungal prop lights are omitted from Tactical View.
 `GpuFungus` derives emitter anchors once from the installed large cover prop bounds
 when a chunk is assembled. Each occupied hex receives one broad, low violet cloud,
 regardless of woods density, plus a small wisp starting inside each large cup or
-spore body. Cliff and scatter fungi do not emit mist, but retain their glow.
+spore body. Cup wisps start one wisp radius below the upper rim and rise through
+the opening, expanding and fading as they clear it. Cliff and scatter fungi do
+not emit mist, but retain their glow.
 Replacing the chunk replaces its emitters, so board edits and scene changes retire
 the old clouds. Both native camera projections use those same emitters and clock.
 

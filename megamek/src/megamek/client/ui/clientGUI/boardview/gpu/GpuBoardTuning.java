@@ -108,6 +108,8 @@ final class GpuBoardTuning {
     private final CheckBox normalMaps;
     private final CheckBox terrainParallax;
     private final CheckBox terrainCache;
+    private final CheckBox terrainCacheDebug;
+    private final Label terrainCacheLegend;
     private final Label terrainCacheState;
     private final Label terrainCacheDetails;
     private Supplier<GpuMaterialCache.Status> terrainCacheStatus = () -> null;
@@ -248,14 +250,13 @@ final class GpuBoardTuning {
         vsync = checkbox(skin, "VSync", "tuning-vsync");
         // The window's own preference, shown once here and then left to the user; Defaults never touches it.
         vsync.setChecked(GpuBoardWindow.DEFAULT_VSYNC);
-        vsync.addListener(new TextTooltip("Synchronize with the monitor's refresh rate. FPS stays capped at 60.",
+        vsync.addListener(new TextTooltip("Synchronize with the monitor's refresh rate. Off leaves rendering uncapped.",
               skin, "menu"));
         vsync.addListener(new ChangeListener() {
             @Override
             public void changed(ChangeEvent event, Actor actor) {
                 Gdx.graphics.setVSync(vsync.isChecked());
                 Gdx.graphics.setForegroundFPS(0);
-                // Gdx.graphics.setForegroundFPS(vsync.isChecked() ? 0 : 60);
             }
         });
         renderResolution = controls(skin, List.of(new Knob("Render resolution", 50, 100, 10, "%.0f%%")),
@@ -409,7 +410,14 @@ final class GpuBoardTuning {
             updateGraphicsCard();
         }
         section(skin, "Terrain cache");
-        terrainCache = checkbox(skin, "Enable terrain cache", "tuning-terrain-cache");
+        terrainCache = newCheckbox(skin, "Enable terrain cache", "tuning-terrain-cache");
+        rows.add(terrainCache).colspan(2).left().height(20);
+        terrainCacheDebug = newCheckbox(skin, "Debug", "tuning-terrain-cache-debug");
+        rows.add(terrainCacheDebug).left().height(20).row();
+        terrainCacheDebug.addListener(new TextTooltip("Tint sculpted ground by the material actually drawn: red"
+              + " means direct rendering; other colours identify the cache level. L0 is finest; each next level doubles"
+              + " the ground texel size. Water surfaces and objects keep their normal appearance. This switch starts"
+              + " off and is never saved.", skin, "menu"));
         terrainCache.setChecked(GpuMaterialCache.ENABLED && GpuMaterialCache.SPLIT);
         terrainCache.setDisabled(!GpuMaterialCache.ENABLED || !GpuMaterialCache.SPLIT);
         terrainCache.addListener(new TextTooltip("Live A/B comparison: off draws ground materials directly and pauses"
@@ -423,9 +431,13 @@ final class GpuBoardTuning {
         terrainCacheDetails.addListener(new TextTooltip("GPU allocation is estimated from texture formats, mip levels,"
               + " build targets and page tables; driver overhead and other terrain resources are excluded. Occupied"
               + " slots include spare pages used during rebuilds. Progress counts current pages admitted for this view,"
-              + " not the whole board or elapsed rebuild time. Pages outside capacity or table coverage draw directly."
+              + " not the whole board or elapsed rebuild time. A terrain batch uses the cache only when all its pages"
+              + " are readable. Pages outside capacity or table coverage draw directly."
               + " Stale pages outside the view wait until needed again.", skin, "menu"));
         rows.add(terrainCacheDetails).colspan(3).growX().row();
+        terrainCacheLegend = new Label("", skin, "small");
+        terrainCacheLegend.setName("tuning-terrain-cache-legend");
+        rows.add(terrainCacheLegend).colspan(3).growX().row();
         rows = general;
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
@@ -878,11 +890,16 @@ final class GpuBoardTuning {
     }
 
     private CheckBox checkbox(Skin skin, String label, String name) {
+        CheckBox checkbox = newCheckbox(skin, label, name);
+        rows.add(checkbox).colspan(3).left().height(20).row();
+        return checkbox;
+    }
+
+    private static CheckBox newCheckbox(Skin skin, String label, String name) {
         CheckBox checkbox = new CheckBox(label, skin, "menu");
         checkbox.setName(name);
         checkbox.getImage().setScaling(Scaling.fit);
         checkbox.getImageCell().size(14).padRight(5);
-        rows.add(checkbox).colspan(3).left().height(20).row();
         return checkbox;
     }
 
@@ -1165,11 +1182,17 @@ final class GpuBoardTuning {
 
     boolean terrainCache() { return terrainCache.isChecked(); }
 
+    boolean terrainCacheDebug() { return terrainCacheDebug.isChecked(); }
+
     /** The current renderer, resolved on the render thread so an asset reload cannot leave a disposed cache here. */
     void terrainCacheStatus(Supplier<GpuMaterialCache.Status> status) { terrainCacheStatus = status; }
 
     /** Called only while Display is visible, after the frame's rendering; these labels never drive cache state. */
     void showTerrainCacheStatus() {
+        terrainCacheLegend.setText(terrainCacheDebug() ? "Ground: red = direct rendering\n"
+              + "Cached: L0 green · L1 cyan · L2 blue\n"
+              + "L3 violet · L4 magenta · L5 yellow · L6 orange\n"
+              + "Water surfaces and objects are not tinted." : "");
         var status = terrainCacheStatus.get();
         if (status == null) {
             shownTerrainCache = null;
@@ -1181,13 +1204,17 @@ final class GpuBoardTuning {
         shownTerrainCache = status;
         var pages = status.pages();
         String progress = status.active() && pages.needed() > 0
-              ? String.format(Locale.ROOT, "\nView build: %d%% (%d / %d pages current)",
+              ? String.format(Locale.ROOT, "\nAdmitted pages built: %d%% (%d / %d pages current)",
                     100L * pages.current() / pages.needed(), pages.current(), pages.needed()) : "";
         terrainCacheState.setText(status.state() + progress);
         String coverage = status.active()
               ? String.format(Locale.ROOT, "\nView: %d / %d pages admitted · level %d\nPrefetch pending: %d",
                     status.admitted(), status.requested(), status.level(), pages.prefetchPending()) : "";
         if (status.wallsOutside() > 0) { coverage += "\nWall pages outside table: " + status.wallsOutside(); }
+        if (status.active()) {
+            coverage += String.format(Locale.ROOT, "\nBatches using cache: tops %d / %d · walls %d / %d",
+                  status.cachedTopBatches(), status.topBatches(), status.cachedWallBatches(), status.wallBatches());
+        }
         terrainCacheDetails.setText(String.format(Locale.ROOT,
               "GPU allocation (est.): %.1f MiB\nPage storage: %.1f MiB · occupied: %.1f MiB"
                     + "\nSlots: %d / %d · stale: %d · building: %d%s",

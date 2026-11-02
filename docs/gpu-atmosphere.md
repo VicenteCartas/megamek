@@ -338,8 +338,15 @@ The fog pass reconstructs world positions from that depth and the camera.
 It integrates the height-dependent layer at reduced resolution, then
 depth-aware upsampling avoids leaking foreground fog into unrelated surfaces.
 
-Fog and blowing sand share the ground-layer height, measured from the board's
-lowest terrain level. Cloud altitude is separate. Spatial density/height
+Fog and blowing sand share the ground-layer height control. Fog measures it
+from the board's lowest terrain level. Sand uses the lowest nonnegative level
+when at least 75% of the border hexes are level 0 or higher; otherwise it uses
+the lowest level. Each border hex counts once, including corners. Ultra-sublevels
+never supply the sand baseline. The selected baseline is also the bottom of the
+sand volume: sublevels beneath it are sheltered. A view from above can still see
+the storm over a depression's opening, but no sand is integrated below the baseline.
+Plinth rejection remains relative to the actual terrain minimum.
+Cloud altitude is separate. Spatial density/height
 variation forms banks, and an integrated wind/calm-drift offset moves them
 without a phase jump when wind changes. Ground fog's opacity is capped.
 

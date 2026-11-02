@@ -204,9 +204,14 @@ final class RigidGlb {
 
     /** A file's {@link Groundwork}, read without its images; a file without those groups is never read beyond its JSON. */
     static Groundwork groundwork(File file) {
+        return groundwork(file, false);
+    }
+
+    /** Also reads the footprint when requested for scenery, such as rubble, without a cut or stands. */
+    static Groundwork groundwork(File file, boolean footprint) {
         try {
             var names = rootNames(document(file));
-            if (!names.contains(CUT) && !names.contains(STANDS)) { return Groundwork.NONE; }
+            if (!footprint && !names.contains(CUT) && !names.contains(STANDS)) { return Groundwork.NONE; }
         } catch (IOException | RuntimeException error) {
             throw new IllegalArgumentException("Cannot read the ground work of " + file + ": " + error.getMessage(), error);
         }

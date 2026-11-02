@@ -276,7 +276,7 @@ final class GpuTuningPanel implements GpuHud.Component {
                 var shown = checkbox(box.getName(), box.getText().toString(), tooltip(box), box::isChecked,
                       value -> { if (!box.isDisabled()) { box.setChecked(value); } });
                 shows.add(() -> shown.getColor().a = box.isDisabled() ? .5f : 1);
-                page.add(shown).colspan(span).left().pad(5, 0, 5, 0);
+                page.add(shown).colspan(span).minWidth(shown.getPrefWidth()).left().pad(5, 0, 5, 0);
             } else if (model instanceof TextButton toggle) {
                 var buttonCell = page.add(toggle(toggle)).colspan(span).left().pad(2, 0, 2, 0);
                 if (span > 1) { buttonCell.growX(); } else { buttonCell.width(NAME_WIDTH); }

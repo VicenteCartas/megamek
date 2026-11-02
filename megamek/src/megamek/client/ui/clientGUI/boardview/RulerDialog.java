@@ -583,7 +583,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
             bv.drawRuler(null);
         } else if (end == null) {
             int height = (int) height1.getValue() + (atAltitude1 ? 0 : game.getBoard().getHex(start).getLevel());
-            bv.drawRuler(new BoardTactical.Ruler(start, null, height, 0, null, startColor.getRGB(), endColor.getRGB()));
+            bv.drawRuler(new BoardTactical.Ruler(start, null, height, 0, null, null, startColor.getRGB(), endColor.getRGB()));
         }
     }
 
@@ -1199,7 +1199,7 @@ public class RulerDialog extends JDialog implements BoardViewListener {
         diagramPanel.setData(diagramData);
         bv.drawRuler(new BoardTactical.Ruler(diagramData.attackPos(), diagramData.targetPos(),
               diagramData.attackerAbsHeight(), diagramData.targetAbsHeight(), diagramData.blockingHex(),
-              startColor.getRGB(), endColor.getRGB()));
+              losEffects.getModifierHex(), startColor.getRGB(), endColor.getRGB()));
     }
 
     private void toggleDiagram() {

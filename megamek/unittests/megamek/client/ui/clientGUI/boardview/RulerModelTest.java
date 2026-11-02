@@ -170,11 +170,13 @@ class RulerModelTest {
         assertEquals(3, result.ruler().startHeight());
         assertEquals(5, result.ruler().endHeight());
         assertEquals("+2 · 2 intervening light woods", result.modifierSummary());
+        assertEquals(new Coords(8, 3), result.ruler().modifierAt());
         assertTrue(result.forward().contains("2 intervening light woods"));
         assertEquals(result.forward(), result.reverse());
         assertEquals(result.forward(), result.comparison().getFirst().forward());
         assertEquals(result.reverse(), result.comparison().getFirst().reverse());
         ruler.flip();
+        assertEquals(new Coords(7, 2), ruler.capture().ruler().modifierAt());
         assertEquals(result.reverse(), ruler.capture().forward());
         assertEquals(result.forward(), ruler.capture().reverse());
 
@@ -182,6 +184,7 @@ class RulerModelTest {
         var raised = ruler.capture();
         assertTrue(raised.clear());
         assertTrue(raised.modifierSummary().isEmpty());
+        assertNull(raised.ruler().modifierAt());
         assertEquals(raised.forward(), raised.reverse());
         assertEquals(raised.forward(), raised.comparison().getFirst().forward());
     }
@@ -199,6 +202,7 @@ class RulerModelTest {
         ruler.addPoint(START, endpointHeight); ruler.addPoint(END, endpointHeight);
         var result = ruler.capture();
         assertEquals(expectedModifier >= 0, result.clear());
+        assertEquals(expectedModifier > 0 ? woods : null, result.ruler().modifierAt());
         assertEquals(result.forward(), result.reverse());
         if (expectedModifier < 0) {
             assertEquals(woods, result.ruler().blockedAt());
@@ -242,6 +246,7 @@ class RulerModelTest {
         RulerModel ruler = new RulerModel(game, 0, null);
         ruler.measure(START, END, Entity.NONE, null);
         assertEquals("+2 · target in heavy woods", ruler.capture().modifierSummary());
+        assertNull(ruler.capture().ruler().modifierAt(), "Target terrain is not an intervening obstacle");
         ruler.flip();
         assertTrue(ruler.capture().modifierSummary().isEmpty(), "The woods are now at the start, not the target");
         ruler.flip(); ruler.height(false, 3);
@@ -274,6 +279,7 @@ class RulerModelTest {
             assertEquals(target.relHeight() + 1, result.end().height());
             assertEquals(target.relHeight() + 1, result.ruler().endHeight());
             assertTrue(result.forward().contains("1 intervening light woods"));
+            assertEquals(new Coords(0, 3), result.ruler().modifierAt());
             assertEquals(LOSModifierCalculator.computeEntityBasedModifiers(game, attacker, target), result.forward());
             assertEquals(result.forward(), result.comparison().getFirst().forward());
         }

@@ -582,7 +582,7 @@ final class LobbyRequisitionPanel {
     /** Draws the rows again, as after the sprite of {@code key} arrived. */
     void spriteArrived(String key) {
         list.rebind();
-        if (dossierOpen && picked != null && spriteKey(picked).equals(key)) {
+        if (dossierOpen && picked != null && previewKey(picked).equals(key)) {
             showDossier();
         }
     }
@@ -590,6 +590,15 @@ final class LobbyRequisitionPanel {
     /** The sprite of {@code key} was let go, so it is asked for again when its row shows. */
     void spriteForgotten(String key) {
         spriteAsked.remove(key);
+        spriteArrived(key);
+    }
+
+    /** Rebinds both previews to the current recipient and lets their missing sprites be requested again. */
+    private void refreshSprites() {
+        spriteAsked.clear();
+        spriteWanted.clear();
+        list.rebind();
+        showDossier();
     }
 
     // ---- Searching ----
@@ -690,10 +699,10 @@ final class LobbyRequisitionPanel {
             loadRecord();
         }
         for (RequisitionRow row : list.inView()) {
-            String key = spriteKey(row.unit());
-            if (sprites.apply(key) == null && spriteAsked.add(key)) {
-                spriteWanted.add(row.unit());
-            }
+            wantSprite(row.unit());
+        }
+        if (dossierOpen && picked != null) {
+            wantSprite(picked);
         }
         if (!spriteWanted.isEmpty()) {
             actions.sprites(List.copyOf(spriteWanted));
@@ -704,6 +713,18 @@ final class LobbyRequisitionPanel {
     /** The key of a catalogue unit's sprite. */
     static String spriteKey(MekSummary unit) {
         return unit.getName();
+    }
+
+    private String previewKey(MekSummary unit) {
+        LobbyRequisition.Recipient recipient = requisition.recipient(ownerId);
+        return LobbyRequisition.spriteKey(spriteKey(unit), recipient == null ? "" : recipient.camouflage());
+    }
+
+    private void wantSprite(MekSummary unit) {
+        String key = previewKey(unit);
+        if (sprites.apply(key) == null && spriteAsked.add(key)) {
+            spriteWanted.add(unit);
+        }
     }
 
     // ---- Filters ----
@@ -1175,10 +1196,10 @@ final class LobbyRequisitionPanel {
         // The AS card is drawn from the catalogue alone, so a record read later does not draw it again
         List<Object> key = Arrays.asList(picked, (next == RequisitionDossier.Tab.AS_CARD) ? null : record,
               switch (next) {
-                  case OVERVIEW -> sprites.apply(spriteKey(picked)) != null;
+                  case OVERVIEW -> sprites.apply(previewKey(picked));
                   case READOUT -> readoutTro;
                   case FACTIONS -> factions;
-                  case DAMAGE -> List.of(gunnery(), sprites.apply(spriteKey(picked)) != null);
+                  case DAMAGE -> Arrays.asList(gunnery(), sprites.apply(previewKey(picked)));
                   case AS_CARD -> null;
               });
         Built made = built.get(next);
@@ -1278,7 +1299,7 @@ final class LobbyRequisitionPanel {
         Table top = new Table();
         top.top().left();
         float spriteSize = size("control.lg") * 2;
-        Drawable drawable = sprites.apply(spriteKey(picked));
+        Drawable drawable = sprites.apply(previewKey(picked));
         Actor sprite = (drawable == null) ? kit.icon("unit", size("icon.lg"), UiTheme.tokenColor("text.muted"))
               : new Image(drawable, Scaling.fit);
         top.add(sprite).size(spriteSize).top().padRight(space("md"));
@@ -1722,7 +1743,7 @@ final class LobbyRequisitionPanel {
                 peak = Math.max(peak, (float) value);
             }
         }
-        Drawable sprite = sprites.apply(spriteKey(picked));
+        Drawable sprite = sprites.apply(previewKey(picked));
         UiArcDiagram diagram = kit.arcDiagram().centre((sprite != null) ? new Image(sprite, Scaling.fit)
               : new Container<>(kit.icon("unit", size("icon.lg"), UiTheme.tokenColor("text.muted"))));
         diagram.setName("lobby-requisition-damage-arcs");
@@ -1913,6 +1934,7 @@ final class LobbyRequisitionPanel {
         if (recipients.stream().noneMatch(recipient -> recipient.id() == ownerId)) {
             ownerId = recipients.isEmpty() ? -1 : recipients.get(0).id();
         }
+        refreshSprites();
         if (recipients.size() < 2) {
             return;
         }
@@ -1927,10 +1949,7 @@ final class LobbyRequisitionPanel {
             }
         }
         select.select(index);
-        UiKit.onChange(select, () -> {
-            ownerId = recipients.get(Math.max(0, select.getSelectedIndex())).id();
-            refreshSwatch();
-        });
+        UiKit.onChange(select, () -> recipient(recipients.get(Math.max(0, select.getSelectedIndex())).id()));
         select.setName("lobby-requisition-owner");
         kit.tip(select, true).getActor().setText(Messages.getString("Lobby.requisition.ownerTip"));
         ownerGroup.add(caption("Lobby.requisition.owner")).padRight(UiStepper.gap());
@@ -1956,11 +1975,15 @@ final class LobbyRequisitionPanel {
         List<LobbyRequisition.Recipient> recipients = requisition.recipients();
         for (int i = 0; i < recipients.size(); i++) {
             if (recipients.get(i).id() == id) {
+                boolean changed = ownerId != id;
                 ownerId = id;
                 if (owner != null) {
                     owner.select(i);
                 }
                 refreshSwatch();
+                if (changed) {
+                    refreshSprites();
+                }
                 return true;
             }
         }
@@ -2198,7 +2221,7 @@ final class LobbyRequisitionPanel {
             }
             value.setText(showPv ? String.valueOf(row.pv())
                   : NumberFormat.getIntegerInstance().format(skills.bv(row.bv())));
-            Drawable drawable = sprites.apply(spriteKey(row.unit()));
+            Drawable drawable = sprites.apply(previewKey(row.unit()));
             if (drawable == null) {
                 sprite.setActor(placeholder);
                 sprite.size(size("icon.md"));

@@ -1,4 +1,4 @@
-/* Scratch (ground material cache, worktree only, never committed): cached tops against direct and the close view. */
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;

@@ -261,9 +261,6 @@ final class BoardFeatures {
             result.addAll(roadControls(hex, coords, board, true));
             return List.copyOf(result);
         }
-        if (hex.containsTerrain(Terrains.FIELDS) && !detailedGround(hex, structureModels, blankTerrains)) {
-            add(result, "vegetation/field", 1, 0, 0);
-        }
         result.addAll(woods(hex, coords, board, natural, true));
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
@@ -279,94 +276,114 @@ final class BoardFeatures {
      */
     private static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural,
           boolean apart) {
-        List<BoardScene.Feature> result = new ArrayList<>();
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
-        boolean jungle = vegetation.containsTerrain(Terrains.JUNGLE);
-        // Trees keep off the road and the rails on the ground.
-        List<BoardRoad> roads = nearbyWays(vegetation, coords, board);
-        float roadX = BoardGeometry.centerX(coords), roadY = BoardGeometry.centerY(coords), roadScale = BoardGeometry.hexScale();
-        if ((jungle || vegetation.containsTerrain(Terrains.WOODS)) && !BoardTreeDistribution.noTrees(hex)) {
-            int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
-            // Snow/pavement change the ground, not the planet's vegetation (including low cover and jungle).
-            boolean mars = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("mars");
-            boolean volcano = vegetation.getTheme() != null && vegetation.getTheme().toLowerCase(Locale.ROOT).contains("volcan");
-            boolean orchard = !mars && !volcano && orchard(vegetation);
-            boolean fungus = surface(vegetation) == BoardScene.Surface.FUNGUS;
-            int density = vegetation.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
-            int count = fungus || mars ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
-                  : density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
-            // Foliage reaches its rules height. Level-one cover uses proportioned shrubs; taller woods keep
-            // broad tree crowns so the canopy reads as an obstacle. Light woods have the broadest tree crowns.
-            float height = Math.max(1, vegetation.terrainLevel(Terrains.FOLIAGE_ELEV));
-            float crown = orchard ? (density >= 3 ? .62f : .82f)
-                  : density >= 3 ? 1.35f : density == 2 ? 1.45f : 1.7f;
-            List<String> species = mars ? MARS_CORALS
-                  : volcano ? (height == 1 ? shrubVariants("vegetation/foliage-volcano") : VOLCANO_TREES)
-                  : fungus ? BoardFungus.COVER : orchard ? orchardSpecies(vegetation)
-                  : height == 1 ? shrubVariants(shrub(vegetation, jungle)) : species(vegetation, jungle);
-            // Cosmetic understory shares the canopy's placement, road clearance, grounding and tree LODs.
-            boolean understory = surface(vegetation) == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
-            if (understory) { count *= 2; }
-            Random treeRandom = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
-            for (int index = 0; index < count; index++) {
-                boolean low = understory && index % 2 == 1;
-                double angle = index * (density >= 2 ? 2.399963 : 2 * Math.PI / count) + variant;
-                // Space light foliage around the centre; dense foliage fills an equal-area spiral.
-                float radius = density >= 2 ? 28 * (float) Math.sqrt(index / (count - 1f))
-                      : 20 + index * 2;
-                // Keep the density and bounded footprint, but break identical per-vegetation spirals.
-                if (natural) {
-                    angle += treeRandom.nextFloat() * .7f - .35f;
-                    radius = Math.min(28, radius) * (.86f + treeRandom.nextFloat() * .14f);
-                }
-                if (fungus || mars) { radius *= .8f; }
-                float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
-                if (orchard) {
-                    // Light orchard rows align across the staggered lattice: three to a column's three-quarter hex.
-                    int columns = density >= 3 ? 4 : 3;
-                    int rows = count / columns;
-                    float spacing = density >= 3 ? 15 : BoardGeometry.TILE_WIDTH / 4;
-                    x = (index % columns - (columns - 1) * .5f) * spacing;
-                    y = (index / columns - (rows - 1) * .5f) * (density == 1 ? 36 : spacing);
-                }
-                // Relocate trunks to a clear verge, including a neighbouring road's overhanging footprint.
-                for (int attempt = 0; BoardRoad.distance(roads, roadX + x * roadScale, roadY + y * roadScale)
-                      < BoardRoad.SHOULDER + 2 && attempt < 24; attempt++) {
-                    angle += 2.399963;
-                    x = (float) Math.cos(angle) * 29;
-                    y = (float) Math.sin(angle) * 29;
-                }
-                if (BoardRoad.distance(roads, roadX + x * roadScale, roadY + y * roadScale) < BoardRoad.SHOULDER + 2) {
-                    continue;
-                }
-                // Every biome uses the same distribution. Eligibility and size still describe its vegetation.
-                // Height is the woods' rule: every woods may grow one shorter plant in light woods and two in
-                // heavier woods, the rest (mature fungal cups among them) reaching cover height, so a hex never reads
-                // lower than its woods. Tropical understory adds its low plants between the trees.
-                int speciesIndex = understory ? index / 2 : index;
-                boolean shorter = !low && speciesIndex >= 1 && speciesIndex <= (density == 1 ? 1 : 2);
-                List<String> choices = low ? shrubVariants("vegetation/foliage-jungle")
-                      : fungus && !shorter ? BoardFungus.CUPS : species;
-                String tree = natural ? BoardTreeDistribution.species(choices, coords, x, y, treeRandom.nextLong())
-                      : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
-                float foliageHeight = low ? .4f + (index % 3) * .06f
-                      : shorter ? height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f
-                            : .7f + (index % 3) * .1f)
-                      : fungus || mars ? height : height * (1f + (index % 3) * .05f);
-                result.add(new BoardScene.Feature(tree, x,
-                      y, natural ? treeRandom.nextFloat() * 360
-                            : index * 137.5f + (mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0),
-                      (low ? .9f : crown) * (0.9f + (index % 3) * 0.1f),
-                      foliageHeight, 0, BoardScene.FeatureKind.TREE));
-            }
-            if (apart && (fungus || mars)) {
-                return apart(result, coords, board, natural, (x, y) -> BoardRoad.distance(roads, roadX + x * roadScale,
-                      roadY + y * roadScale) >= BoardRoad.SHOULDER + 2);
-            }
+        if (BoardTreeDistribution.noTrees(hex)
+              || !vegetation.containsTerrain(Terrains.WOODS) && !vegetation.containsTerrain(Terrains.JUNGLE)) {
+            return List.of();
         }
-        return result;
+        WoodsLayout layout = woodsLayout(vegetation);
+        List<BoardRoad> roads = nearbyWays(vegetation, coords, board);
+        float originX = BoardGeometry.centerX(coords), originY = BoardGeometry.centerY(coords), scale = BoardGeometry.hexScale();
+        BiPredicate<Float, Float> clear = (x, y) -> BoardRoad.distance(roads, originX + x * scale, originY + y * scale)
+              >= BoardRoad.SHOULDER + 2;
+        int variant = Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
+        Random random = natural ? new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L) : null;
+        List<BoardScene.Feature> result = new ArrayList<>();
+        for (int index = 0; index < layout.count; index++) {
+            float[] position = woodsPosition(layout, index, variant, random, clear);
+            if (position == null) { continue; }
+            int speciesIndex = layout.understory ? index / 2 : index;
+            List<String> choices = layout.low(index) ? shrubVariants("vegetation/foliage-jungle")
+                  : layout.fungus && !layout.shorter(index) ? BoardFungus.CUPS : layout.species;
+            String tree = natural ? BoardTreeDistribution.species(choices, coords, position[0], position[1], random.nextLong())
+                  : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + speciesIndex, choices.size()));
+            float rotation = natural ? random.nextFloat() * 360
+                  : index * 137.5f + (layout.mars ? Math.floorMod(coords.getX() * 97 + coords.getY() * 53, 360) : 0);
+            result.add(new BoardScene.Feature(tree, position[0], position[1], rotation,
+                  woodsCrown(layout, tree, index), woodsHeight(layout, tree, index), 0, BoardScene.FeatureKind.TREE));
+        }
+        return apart && layout.colonies() ? apart(result, coords, board, natural, clear) : result;
     }
+
+    /** Local visual choices derived from the hex; terrain density and cover height remain game state. */
+    private record WoodsLayout(List<String> species, int density, float height, int count, boolean orchard,
+          boolean fungus, boolean mars, boolean understory) {
+        boolean colonies() { return fungus || mars; }
+        boolean low(int index) { return understory && index % 2 == 1; }
+        boolean shorter(int index) {
+            int tree = understory ? index / 2 : index;
+            return fungus && !low(index) && tree >= 1 && tree <= (density == 1 ? 1 : 2);
+        }
+    }
+
+    private static WoodsLayout woodsLayout(Hex hex) {
+        boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
+        String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
+        boolean mars = theme.contains("mars"), volcano = theme.contains("volcan");
+        boolean orchard = !mars && !volcano && orchard(hex);
+        BoardScene.Surface ground = surface(hex);
+        boolean fungus = ground == BoardScene.Surface.FUNGUS;
+        int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
+        float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
+        List<String> plants;
+        if (mars) { plants = MARS_CORALS; }
+        else if (volcano) { plants = height == 1 ? shrubVariants("vegetation/foliage-volcano") : VOLCANO_TREES; }
+        else if (fungus) { plants = BoardFungus.COVER; }
+        else if (orchard) { plants = orchardSpecies(hex); }
+        else { plants = height == 1 ? shrubVariants(shrub(hex, jungle)) : species(hex, jungle); }
+        int count = fungus || mars ? (density >= 3 ? 6 : density == 2 ? 4 : 2)
+              : density >= 3 ? 16 : density == 2 ? 9 : orchard ? 6 : 3;
+        boolean understory = ground == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
+        return new WoodsLayout(plants, density, height, understory ? count * 2 : count, orchard, fungus, mars, understory);
+    }
+
+    /** A ring for light woods, a spiral for dense woods, rows for orchards; every trunk clears roads and rails. */
+    private static float[] woodsPosition(WoodsLayout layout, int index, int variant, Random random,
+          BiPredicate<Float, Float> clear) {
+        double angle = index * (layout.density >= 2 ? 2.399963 : 2 * Math.PI / layout.count) + variant;
+        float radius = layout.density >= 2 ? 28 * (float) Math.sqrt(index / (layout.count - 1f)) : 20 + index * 2;
+        if (random != null) {
+            angle += random.nextFloat() * .7f - .35f;
+            radius = Math.min(28, radius) * (.86f + random.nextFloat() * .14f);
+        }
+        if (layout.colonies()) { radius *= .8f; }
+        float x = (float) Math.cos(angle) * radius, y = (float) Math.sin(angle) * radius;
+        if (layout.orchard) {
+            int columns = layout.density >= 3 ? 4 : 3, rows = layout.count / columns;
+            float spacing = layout.density >= 3 ? 15 : BoardGeometry.TILE_WIDTH / 4;
+            x = (index % columns - (columns - 1) * .5f) * spacing;
+            y = (index / columns - (rows - 1) * .5f) * (layout.density == 1 ? 36 : spacing);
+        }
+        for (int attempt = 0; !clear.test(x, y) && attempt < 24; attempt++) {
+            angle += 2.399963;
+            x = (float) Math.cos(angle) * 29;
+            y = (float) Math.sin(angle) * 29;
+        }
+        return clear.test(x, y) ? new float[] { x, y } : null;
+    }
+
+    private static float woodsCrown(WoodsLayout layout, String tree, int index) {
+        float crown;
+        if (layout.low(index)) { crown = .9f; }
+        else if (tree.startsWith("vegetation/birch") || tree.startsWith("vegetation/willow")
+              || tree.startsWith("vegetation/tree") && !tree.startsWith("vegetation/tree-dead")) {
+            // Counts and placement express density; each tree retains its crown size.
+            crown = .9f;
+            if (layout.height >= 3) { crown *= 1.2f; }
+        } else { crown = layout.orchard ? .82f : 1.7f; }
+        return crown * (.9f + (index % 3) * .1f);
+    }
+
+    /** Trees reach cover height; only fungal stands mix in short fruiting bodies. Tropical understory stays low. */
+    private static float woodsHeight(WoodsLayout layout, String tree, int index) {
+        if (layout.low(index)) { return .4f + (index % 3) * .06f; }
+        if (layout.shorter(index)) {
+            return layout.height * (tree.startsWith("fungus/spore-") ? .46f + (index % 3) * .08f : .7f + (index % 3) * .1f);
+        }
+        return layout.colonies() ? layout.height : layout.height * (1f + (index % 3) * .05f);
+    }
+
 
     /**
      * Solid colonies pushed apart where their footprints ({@link #footprint}) overlap: each moves by half of what it
@@ -1324,7 +1341,4 @@ final class BoardFeatures {
         return "vegetation/foliage-" + family;
     }
 
-    private static void add(List<BoardScene.Feature> result, String asset, float height, float elevation, float rotation) {
-        result.add(new BoardScene.Feature(asset, 0, 0, rotation, 1, height, elevation));
-    }
 }

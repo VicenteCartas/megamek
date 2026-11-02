@@ -13,6 +13,7 @@ import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.common.Player;
 import megamek.common.eras.Era;
 import megamek.common.game.Game;
+import megamek.common.icons.Camouflage;
 import megamek.common.preference.PreferenceManager;
 
 /**
@@ -28,8 +29,20 @@ import megamek.common.preference.PreferenceManager;
 public record LobbyRequisition(RequisitionCatalog.Rules rules, List<Recipient> recipients, boolean randomSkills,
       List<RequisitionCatalog.YearSpan> eras) {
 
-    /** A player units may be added for. */
-    public record Recipient(int id, String name, boolean self, boolean bot) { }
+    /** A player units may be added for, with the appearance key of their unit camouflage. */
+    public record Recipient(int id, String name, boolean self, boolean bot, String camouflage) { }
+
+    /** Identifies how units wear the camouflage, including its rotation, scale and overlay. */
+    public static String camouflageKey(Camouflage camouflage) {
+        return LobbySnapshot.camoKey(camouflage) + '|' + camouflage.getRotationAngle() + '|'
+              + camouflage.getScale() + '|' + camouflage.getOverlayStyle() + '|'
+              + camouflage.getOverlayDirection() + '|' + camouflage.getOverlayColor().getRGB();
+    }
+
+    /** Catalogue sprites are shared only when both the unit and its camouflage match. */
+    public static String spriteKey(String unit, String camouflage) {
+        return camouflage + '\0' + unit;
+    }
 
     /** Nothing to requisition yet, as before the client has its game. */
     public static final LobbyRequisition EMPTY = new LobbyRequisition(RequisitionCatalog.Rules.OPEN, List.of(), false,
@@ -58,7 +71,7 @@ public record LobbyRequisition(RequisitionCatalog.Rules rules, List<Recipient> r
             for (Player player : UnitRecipients.availableTo(local, game.getPlayersList(), localBotNames, false,
                   null)) {
                 recipients.add(new Recipient(player.getId(), player.getName(), player.getId() == local.getId(),
-                      player.isBot()));
+                      player.isBot(), camouflageKey(player.getCamouflage())));
             }
         }
         return new LobbyRequisition(RequisitionCatalog.Rules.of(game.getOptions()), recipients,

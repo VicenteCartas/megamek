@@ -34,10 +34,12 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -205,7 +207,7 @@ class GpuWeaponsPanelSmokeTest {
             UiButton slot = column.find("weapons-slot-" + REAR);
             assertTrue(slot.isDisabled());
             assertEquals("rear arc only", tooltip(slot));
-            assertEquals(Messages.getString("GpuBoard.hud.weapons.nameTip"),
+            assertEquals(Messages.getString("GpuBoard.hud.weapons.nameSortTip"),
                   tooltip(column.find("weapons-name-" + AC20)));
             assertTrue(column.weapons.actor().getHeight() < column.weaponsSlot.getHeight() + .5f);
 
@@ -532,7 +534,7 @@ class GpuWeaponsPanelSmokeTest {
 
     /**
      * Over a real FiringDisplay (E3b, E3c): target-first ("+" on a row after the board focused the Archer),
-     * weapon-first (a name arms, then the Archer's pill or the Crab's menu item assigns), letters that stay when the
+     * weapon-first (a name arms, then the Archer's pill or the shared target action assigns), letters that stay when the
      * primary changes, a slot that retargets, one that removes, one that cannot shoot, and the ammunition select that
      * picks the second of the AC/20's two bins with one label.
      */
@@ -563,11 +565,10 @@ class GpuWeaponsPanelSmokeTest {
                 click(hud, column.find("weapons-pill-" + archer));
                 show(hud, column, settled(firing));
                 assertEquals(-1, column.state.armedWeapon);
-                // ... and the left arm's laser by the Crab's menu item, as a click on the Crab would.
+                // ... and the left arm's laser by the shared target action used by board clicks and menus.
                 click(hud, column.find("weapons-name-" + left));
                 show(hud, column, settled(firing));
-                column.menu.open(crab.getPosition(), crab.getId(), 900, 600);
-                click(hud, find(column.popover(), "Assign armed Medium Laser here"));
+                GpuContextMenu.focusTarget(firing.board.source, column.state, TargetKey.unit(crab.getId()));
                 show(hud, column, settled(firing));
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
                       GpuFireOrdersTest.queue(firing));
@@ -643,6 +644,103 @@ class GpuWeaponsPanelSmokeTest {
         }
     }
 
+    @Test
+    void draggingWeaponsSavesTheirOrderWithoutSelectingOrAssigningThem() throws Exception {
+        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            firing.board.source.fire().assign(cannon, TargetKey.unit(firing.ahead.getId()));
+            GpuBoardSource.Frame initial = settled(firing);
+            List<Integer> before = initial.panels().fire().weapons().stream()
+                  .map(GpuFireOrders.WeaponRow::eqNum).toList();
+            List<Integer> expected = new ArrayList<>(before);
+            expected.add(2, expected.removeFirst());
+            var attacks = onSwing(firing.display::getAttacks);
+            GpuHudTestStage.run(hud -> {
+                Column column = new Column(hud, firing.board.source);
+                show(hud, column, initial);
+
+                // Escape cancels the drag before disarming or deselecting a weapon.
+                Vector2 end = dragWeapon(hud, column, before.getFirst(), before.get(2));
+                assertTrue(column.weapons.cancelDrag());
+                hud.stage.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+                UiTestStage.settle(hud.stage);
+                show(hud, column, settled(firing));
+                assertEquals(before, weaponOrder(firing));
+
+                // Leaving the declaration while holding a row abandons it without posting a stale move.
+                end = dragWeapon(hud, column, before.getFirst(), before.get(2));
+                column.update(hud, initial.status(), GpuFireOrders.Snapshot.EMPTY);
+                hud.stage.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+                UiTestStage.settle(hud.stage);
+                show(hud, column, settled(firing));
+                assertEquals(before, weaponOrder(firing));
+
+                // The overview hides this panel; a lifted row must leave the stage with it.
+                end = dragWeapon(hud, column, before.getFirst(), before.get(2));
+                column.state.overview = true;
+                column.update(hud, initial.status(), initial.panels().fire());
+                hud.stage.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+                UiTestStage.settle(hud.stage);
+                column.state.overview = false;
+                show(hud, column, settled(firing));
+                assertEquals(before, weaponOrder(firing));
+
+                end = dragWeapon(hud, column, before.getFirst(), before.get(2));
+                // Fresh target/to-hit data must not rebuild a row out from under the pointer.
+                firing.board.source.fire().focusTarget(TargetKey.unit(firing.left.getId()));
+                show(hud, column, settled(firing));
+                hud.stage.touchUp((int) end.x, (int) end.y, 0, Input.Buttons.LEFT);
+                UiTestStage.settle(hud.stage);
+                GpuBoardSource.Frame ordered = settled(firing);
+                show(hud, column, ordered);
+                assertEquals(expected, weaponOrder(firing));
+                assertEquals(expected, ordered.panels().fire().weapons().stream()
+                      .map(GpuFireOrders.WeaponRow::eqNum).toList());
+                assertTrue(onSwing(() -> firing.attacker.getWeaponSortOrder().isCustom()));
+                assertEquals(initial.panels().fire().selectedWeapon(), ordered.panels().fire().selectedWeapon());
+                assertEquals(-1, column.state.armedWeapon, "Dragging a name must not click-to-arm it");
+                assertEquals(attacks, onSwing(firing.display::getAttacks), "List order does not reorder attacks");
+                for (int index = 1; index < 3; index++) {
+                    assertTrue(GpuHudTestStage.bounds(column.find("weapons-row-" + expected.get(index - 1))).y
+                          > GpuHudTestStage.bounds(column.find("weapons-row-" + expected.get(index))).y);
+                }
+                hud.capture("weapons-custom-order").dispose();
+
+                // Rebuilding the panel and refreshing the frame both read back the unit's saved order.
+                column.update(hud, initial.status(), GpuFireOrders.Snapshot.EMPTY);
+                show(hud, column, settled(firing));
+                assertEquals(expected, weaponOrder(firing));
+            });
+            onSwing(() -> {
+                firing.display.ready();
+                verify(firing.client).sendEntityWeaponOrderUpdate(firing.attacker);
+                return null;
+            });
+        }
+    }
+
+    private static List<Integer> weaponOrder(GpuFiringFixture firing) throws Exception {
+        return onSwing(() -> WeaponDisplayData.listedWeapons(firing.attacker).stream()
+              .map(firing.attacker::getEquipmentNum).toList());
+    }
+
+    /** Drags a weapon by its name onto another row, leaving the pointer held for refresh/cancel checks. */
+    private static Vector2 dragWeapon(GpuHudTestStage hud, Column column, int weapon, int destination) {
+        Actor name = column.find("weapons-name-" + weapon);
+        reveal(hud, name);
+        Vector2 start = hud.stage.stageToScreenCoordinates(
+              name.localToStageCoordinates(new Vector2(name.getWidth() / 2, name.getHeight() - 8)));
+        Actor target = column.find("weapons-row-" + destination);
+        Vector2 end = hud.stage.stageToScreenCoordinates(
+              target.localToStageCoordinates(new Vector2(target.getWidth() / 2, target.getHeight() / 2)));
+        hud.stage.touchDown((int) start.x, (int) start.y, 0, Input.Buttons.LEFT);
+        for (int step = 1; step <= 10; step++) {
+            hud.stage.touchDragged((int) (start.x + (end.x - start.x) * step / 10),
+                  (int) (start.y + (end.y - start.y) * step / 10), 0);
+        }
+        return end;
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** The local declaration of shot 05, the Atlas acting in round 3. */
@@ -659,7 +757,7 @@ class GpuWeaponsPanelSmokeTest {
      * Shot 05's orders: five attacks on A (Timber Wolf, primary, focused) and B (BattleMaster); the AC/20 selected
      * with its solution; heat 0 to 24, 4 at the end.
      */
-    private static GpuFireOrders.Snapshot shot05() {
+    static GpuFireOrders.Snapshot shot05() {
         List<GpuFireOrders.Attack> attacks = List.of(attack(AC20, TIMBER_WOLF, "AC/20", "RT", "", 7, 58.3),
               attack(SRM, TIMBER_WOLF, "SRM 6", "LT", "", 7, 58.3),
               attack(LASER_LA, TIMBER_WOLF, "Medium Laser", "LA", "", 7, 58.3),
@@ -894,21 +992,6 @@ class GpuWeaponsPanelSmokeTest {
         } else if (actor instanceof Group group) {
             for (Actor child : group.getChildren()) {
                 UiMenuList found = findList(child);
-                if (found != null) {
-                    return found;
-                }
-            }
-        }
-        return null;
-    }
-
-    /** The open menu's item with this text. */
-    private static UiButton find(Actor actor, String text) {
-        if (actor instanceof UiButton item && item.getText().toString().equals(text)) {
-            return item;
-        } else if (actor instanceof Group group && !(actor instanceof UiButton)) {
-            for (Actor child : group.getChildren()) {
-                UiButton found = find(child, text);
                 if (found != null) {
                     return found;
                 }

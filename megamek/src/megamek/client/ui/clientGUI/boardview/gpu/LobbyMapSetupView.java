@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Consumer;
@@ -15,15 +16,19 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton.TextButtonStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -42,9 +47,7 @@ import megamek.client.lobby.MapSetupForm.Theme;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
-import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiPictureCard;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepper;
@@ -55,11 +58,11 @@ import megamek.common.loaders.MapSettings;
 
 /**
  * The lobby's map setup, in the forces' place: a war table of the map's board slots, drawn as the boards they hold,
- * with the map's size in boards and the boards' size above it, and a drawer beside it with the picked slot's rotation,
- * theme and level offset over a searchable board browser with a preview. A click picks a slot (Ctrl-click several), a
- * click on a board previews it and Place, or a double-click, puts it in the picked slots; Ctrl-clicked boards make a
- * random or a surprise board. Map type, load and save, the random map settings and generating the battlefield are in the
- * toolbar and the footer, as the Swing {@code MapSetupDialog} has them.
+ * with the size controls at its top and load, save, preview and regeneration at its foot. The drawer beside it holds
+ * a searchable board browser of thumbnails or rows, with Advanced beside the Boards heading. Each slot's compact
+ * rotation, theme and level controls sit above its full preview. A click picks a slot (Ctrl-click several),
+ * and Place, or a double-click, puts a board in the picked slots; Ctrl-clicked boards make a random or surprise board.
+ * Map type and random map settings remain in the toolbar above both panels.
  * <p>
  * GPU thread. Every change runs on the Swing thread through the {@link Host}, and the window sends the setup anew.
  */
@@ -81,8 +84,11 @@ final class LobbyMapSetupView {
         /** Sets the custom board width, warning of odd-sized boards when due. */
         void boardWidth(int width);
 
-        /** Draws a listed board's picture for the preview. */
-        void preview(String board);
+        /** Replaces the set of browser thumbnails wanted by the current viewport. */
+        void previews(List<String> boards);
+
+        /** Loads the inspected board as an immutable scene and returns it on the GPU thread; null on failure. */
+        void inspect(String board, Consumer<BoardScene> ready);
 
         void run(Action action);
     }
@@ -99,26 +105,37 @@ final class LobbyMapSetupView {
     private final UiButton randomMap;
     private final UiStepper mapWidth;
     private final UiStepper mapHeight;
-    private final Table sizeBar = new Table();
+    private final HorizontalGroup sizeBar = new HorizontalGroup();
     private final Table sizeCell = new Table();
     private UiSelect sizeSelect;
     private List<BoardDimensions> sizesShown = List.of();
     private final UiStepper boardWidth;
     private final UiStepper boardHeight;
     private final WarTable table = new WarTable();
+    private final Table tablePanel = new Table();
+    private final LobbyBoardPreview inspection;
+    private int inspectionTicket;
     private final Label spaceHint;
     private final Table drawer = new Table();
     private final ScrollPane drawerScroll;
     private Cell<ScrollPane> drawerCell;
     private final Table inspector = new Table();
+    private final UiButton viewToggle;
+    private final TextTooltip viewTip;
     private final Label boardCount;
     private final UiKit.TokenSearch search;
-    private final Table list = new Table();
+    private final Table list = new Table() {
+        @Override
+        public void draw(Batch batch, float parentAlpha) {
+            // ScrollPane has now installed this frame's culling area, including a scroll-bar jump.
+            validate();
+            requestVisibleBoards();
+            super.draw(batch, parentAlpha);
+        }
+    };
     private final ScrollPane listScroll;
-    private final UiPictureCard preview;
     private final Label pickHint;
     private final UiButton place;
-    private final UiButton placeRotated;
     private final UiButton random;
     private final UiButton surprise;
     private final UiButton load;
@@ -129,14 +146,17 @@ final class LobbyMapSetupView {
     private final TextTooltip generateTip;
     private final Map<String, Texture> textures = new HashMap<>();
     private final Map<String, Drawable> drawables = new HashMap<>();
-    private final Map<String, UiButton> rows = new HashMap<>();
+    private final Map<String, BoardEntry> rows = new HashMap<>();
     private final Set<Integer> slots = new TreeSet<>();
     private final Set<String> picks = new LinkedHashSet<>();
     private List<Theme> themes = List.of();
     private List<Entry> listed = List.of();
-    private @Nullable String focus;
+    private @Nullable List<String> requestedBoards;
+    private int requestedWidth;
+    private int requestedHeight;
     private @Nullable Picture shown;
     private boolean syncing;
+    private boolean thumbnails = true;
 
     LobbyMapSetupView(UiKit kit, Host host) {
         this.kit = kit;
@@ -212,15 +232,15 @@ final class LobbyMapSetupView {
                 host.act(form -> form.boardHeight(height));
             }
         });
-        sizeBar.left();
-        body.add(sizeBar).growX().padTop(space("md")).row();
+        sizeBar.wrap().left().rowLeft().space(space("lg")).wrapSpace(space("sm"));
 
         Table main = new Table();
-        Stack tableStack = new Stack();
-        Table tablePanel = new Table();
+        tablePanel.setName("map-layout-panel");
         tablePanel.setBackground(kit.skin.getDrawable("token-panel-plain"));
-        tablePanel.add(table).grow().pad(space("lg"));
-        tableStack.add(tablePanel);
+        tablePanel.pad(space("md"), space("lg"), space("md"), space("lg"));
+        tablePanel.add(sizeBar).growX().minWidth(0).left().row();
+        Stack tableStack = new Stack();
+        tableStack.add(table);
         spaceHint = kit.typeLabel(Messages.getString("Lobby.map.spaceHint"), "body", "text.secondary");
         spaceHint.setWrap(true);
         spaceHint.setAlignment(Align.center);
@@ -228,19 +248,34 @@ final class LobbyMapSetupView {
         hintLayer.setTouchable(Touchable.disabled);
         hintLayer.add(spaceHint).width(size("dialog.sm"));
         tableStack.add(hintLayer);
-        main.add(tableStack).grow().minWidth(0).minHeight(0);
+        tablePanel.add(tableStack).grow().minWidth(0).minHeight(0).padTop(space("md")).row();
+        inspection = new LobbyBoardPreview(kit, this::closeInspection);
+        inspection.setVisible(false);
+        main.add(new Stack(tablePanel, inspection)).grow().minWidth(0).minHeight(0);
 
         drawer.top();
         drawer.setName("map-drawer");
         drawer.setBackground(kit.skin.getDrawable("token-panel-plain"));
         drawer.pad(space("md"), space("lg"), space("md"), space("lg"));
+        viewToggle = kit.button("button-icon" + UiTheme.COMPACT, "list", null, null);
+        viewToggle.setName("map-board-view");
+        viewTip = kit.tip(viewToggle, true);
+        UiKit.onChange(viewToggle, () -> {
+            thumbnails = !thumbnails;
+            fillList();
+            showPicks();
+        });
         inspector.top().left();
         drawer.add(inspector).growX().row();
         Table browserHead = new Table();
         browserHead.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.map.boards"), "text.secondary"))
               .left();
         boardCount = kit.typeLabel("", "small", "text.muted");
-        browserHead.add(boardCount).left().padLeft(space("sm")).growX();
+        boardCount.setEllipsis(true);
+        browserHead.add(boardCount).left().padLeft(space("sm")).growX().minWidth(0);
+        advancedSearch = toolButton("button-quiet", "search", "Lobby.map.advanced",
+              "map-advanced-search", Action.ADVANCED_SEARCH);
+        browserHead.add(advancedSearch).right().padLeft(space("sm"));
         drawer.add(browserHead).growX().padTop(space("lg")).row();
         search = kit.tokenSearch(Messages.getString("Lobby.map.search"), true);
         search.setName("map-search");
@@ -260,22 +295,13 @@ final class LobbyMapSetupView {
         // A few boards at least: on a short window the drawer scrolls rather than squeezing the list away
         float listMinimum = 4 * size("control.md");
         drawer.add(listScroll).grow().minHeight(listMinimum).prefHeight(listMinimum).padTop(space("sm")).row();
-        preview = kit.pictureCard("", 1);
-        preview.setName("map-preview");
-        preview.maxHeight(size("dialog.sm") / 3);
-        drawer.add(preview).growX().padTop(space("md")).row();
         pickHint = kit.typeLabel("", "small", "text.secondary");
         pickHint.setWrap(true);
         drawer.add(pickHint).growX().padTop(space("sm")).row();
         Table placing = new Table();
         place = kit.button("button-primary" + UiTheme.COMPACT, null, Messages.getString("Lobby.map.place"), null);
         place.setName("map-place");
-        UiKit.onChange(place, () -> placePicked(false));
-        placeRotated = kit.button("button-secondary" + UiTheme.COMPACT, "twist-right",
-              Messages.getString("Lobby.map.placeRotated"), null);
-        placeRotated.setName("map-place-rotated");
-        tip(placeRotated, Messages.getString("ChatLounge.MapPreviewButton.rotateTooltip"));
-        UiKit.onChange(placeRotated, () -> placePicked(true));
+        UiKit.onChange(place, this::placePicked);
         random = kit.button("button-secondary" + UiTheme.COMPACT, null, "", null);
         random.setName("map-random");
         tip(random, Messages.getString("Lobby.map.randomTip"));
@@ -285,8 +311,7 @@ final class LobbyMapSetupView {
         tip(surprise, Messages.getString("Lobby.map.surpriseTip"));
         UiKit.onChange(surprise, this::placeSurprise);
         placing.defaults().growX().uniformX();
-        placing.add(place).padRight(space("xs"));
-        placing.add(placeRotated).row();
+        placing.add(place).colspan(2).row();
         placing.add(random).padRight(space("xs")).padTop(space("xs"));
         placing.add(surprise).padTop(space("xs"));
         drawer.add(placing).growX().padTop(space("sm")).row();
@@ -296,26 +321,44 @@ final class LobbyMapSetupView {
         drawerCell = main.add(drawerScroll).width(size("dialog.sm")).growY().minHeight(0).padLeft(space("md"));
         body.add(main).grow().minHeight(0).padTop(space("md")).row();
 
-        Table footer = new Table();
         load = footButton("button-quiet", null, "Lobby.battlefield.loadMapSetup", "map-load", Action.LOAD);
         save = footButton("button-quiet", null, "Lobby.battlefield.saveMapSetup", "map-save", Action.SAVE);
         tip(save, Messages.getString("ChatLounge.map.saveMapSetupTip"));
-        advancedSearch = footButton("button-quiet", "search", "AdvancedSearchMapDialog.title",
-              "map-advanced-search", Action.ADVANCED_SEARCH);
-        footer.add(load).padRight(space("xs"));
-        footer.add(save).padRight(space("xs"));
-        footer.add(advancedSearch);
-        footer.add().growX();
+        Table files = new Table();
+        files.add(load).padRight(space("xs"));
+        files.add(save);
         preview3D = footButton("button-secondary", "cube", "BoardSelectionDialog.ViewGameBoard3D",
               "map-preview-3d", Action.PREVIEW_3D);
-        footer.add(preview3D).padRight(space("sm"));
         generate = kit.button("button-primary" + UiTheme.COMPACT, "play",
-              Messages.getString("ChatLounge.GenerateBattlefield"), null);
+              Messages.getString("Lobby.map.regenerate"), null);
         generate.setName("map-generate");
         generateTip = kit.tip(generate, true);
         UiKit.onChange(generate, () -> host.act(MapSetupForm::generate));
-        footer.add(generate);
-        body.add(footer).growX().padTop(space("md")).row();
+        Table previewActions = new Table();
+        previewActions.add(preview3D).padRight(space("sm"));
+        previewActions.add(generate);
+        Table footer = new Table() {
+            private boolean stacked;
+
+            @Override
+            public void layout() {
+                boolean narrow = getWidth() < files.getPrefWidth() + previewActions.getPrefWidth() + space("md");
+                if (narrow != stacked) {
+                    stacked = narrow;
+                    clearChildren();
+                    add(files).left().expandX();
+                    if (stacked) {
+                        row();
+                    }
+                    add(previewActions).right().expandX().padLeft(stacked ? 0 : space("md"))
+                          .padTop(stacked ? space("sm") : 0);
+                }
+                super.layout();
+            }
+        };
+        footer.add(files).left().expandX();
+        footer.add(previewActions).right().expandX().padLeft(space("md"));
+        tablePanel.add(footer).growX().minWidth(0).padTop(space("md"));
     }
 
     private UiButton toolButton(String style, String icon, String key, String name, Action action) {
@@ -357,9 +400,18 @@ final class LobbyMapSetupView {
 
     /** Shows the setup anew; the themes are those any slot can take. */
     void show(Picture picture, List<Theme> themes) {
+        // Unrelated lobby events also refresh this view. Keep its live controls and open dropdowns when nothing changed.
+        if (picture.equals(shown) && themes.equals(this.themes)) {
+            return;
+        }
         boolean first = shown == null;
         shown = picture;
         this.themes = themes;
+        if (picture.space()) {
+            closeInspection();
+            host.previews(List.of());
+            requestedBoards = null;
+        }
         int count = picture.slots().size();
         slots.removeIf(slot -> slot >= count);
         if (first && count > 0 && slots.isEmpty()) {
@@ -442,18 +494,17 @@ final class LobbyMapSetupView {
         }
         sizeBar.clearChildren();
         if (!picture.space()) {
-            sizeBar.add(mapWidth).padRight(space("lg"));
-            sizeBar.add(mapHeight).padRight(space("xl"));
-            sizeBar.add(sizeCell).padRight(space("lg"));
+            sizeBar.addActor(mapWidth);
+            sizeBar.addActor(mapHeight);
+            sizeBar.addActor(sizeCell);
         }
         if (picture.space() || picture.customSize()) {
-            sizeBar.add(boardWidth).padRight(space("lg"));
-            sizeBar.add(boardHeight);
+            sizeBar.addActor(boardWidth);
+            sizeBar.addActor(boardHeight);
         }
-        sizeBar.add().growX();
     }
 
-    /** The drawer's head: the picked slots, with the one slot's rotation, theme and level offset. */
+    /** The drawer's head: the picked slots and the browser's view toggle. */
     private void fillInspector() {
         inspector.clearChildren();
         Picture picture = shown;
@@ -470,86 +521,8 @@ final class LobbyMapSetupView {
         titleLabel.setEllipsis(true);
         titleLabel.setName("map-inspector-title");
         head.add(titleLabel).growX().minWidth(0).left();
-        UiButton all = kit.button("button-quiet" + UiTheme.COMPACT, null, Messages.getString("Lobby.map.selectAll"),
-              null);
-        all.setName("map-select-all");
-        UiKit.onChange(all, () -> {
-            for (int index = 0; index < picture.slots().size(); index++) {
-                slots.add(index);
-            }
-            refreshSelection();
-        });
-        all.setDisabled(picture.slots().size() < 2 || picked.size() == picture.slots().size());
-        head.add(all).padLeft(space("sm"));
+        head.add(viewToggle).padLeft(space("sm"));
         inspector.add(head).growX().row();
-        List<Slot> adjustable = picked.stream().filter(Slot::adjustable).toList();
-        if (adjustable.isEmpty()) {
-            return;
-        }
-        Slot lead = adjustable.get(0);
-        Table grid = new Table();
-        grid.left();
-        List<Slot> turnable = picked.stream().filter(Slot::canRotate).toList();
-        UiChoice rotate = kit.check(Messages.getString("ChatLounge.MapPreviewButton.rotate"),
-              !turnable.isEmpty() && turnable.get(0).rotated());
-        rotate.setName("map-rotate");
-        rotate.setDisabled(turnable.isEmpty());
-        tip(rotate, Messages.getString("ChatLounge.MapPreviewButton.rotateTooltip"));
-        UiKit.onChange(rotate, () -> {
-            if (syncing) {
-                return;
-            }
-            boolean on = rotate.isChecked();
-            List<Integer> indices = turnable.stream().filter(slot -> slot.rotated() != on).map(Slot::index)
-                  .toList();
-            host.act(form -> indices.forEach(form::toggleRotation));
-        });
-        grid.add(rotate).colspan(2).left().row();
-
-        List<Theme> offered = new ArrayList<>(themes);
-        if (lead.theme() != null && offered.stream().noneMatch(theme -> lead.theme().equals(theme.theme()))) {
-            offered.add(new Theme(lead.theme(), BoardEditorBlueprint.themeLabel(lead.theme())));
-        }
-        String[] labels = offered.stream().map(Theme::label).toArray(String[]::new);
-        UiSelect theme = kit.tokenSelect(true, labels);
-        theme.setName("map-theme");
-        for (int index = 0; index < offered.size(); index++) {
-            String value = offered.get(index).theme();
-            if (value == null ? lead.theme() == null : value.equals(lead.theme())) {
-                theme.select(index);
-            }
-        }
-        List<Integer> indices = adjustable.stream().map(Slot::index).toList();
-        UiKit.onChange(theme, () -> {
-            String chosen = offered.get(theme.getSelectedIndex()).theme();
-            host.act(form -> indices.forEach(index -> form.theme(index, chosen)));
-        });
-        grid.add(kit.typeLabel(Messages.getString("ChatLounge.MapPreviewButton.theme"), "small", "text.secondary"))
-              .left().padTop(space("sm")).padRight(space("md"));
-        grid.add(theme).growX().padTop(space("sm")).row();
-
-        UiStepper offset = kit.stepper(null, lead.levelOffset(), MapSettings.MIN_BOARD_LEVEL_OFFSET,
-              MapSettings.MAX_BOARD_LEVEL_OFFSET);
-        name(offset, "map-level-offset");
-        tip(offset, MessageFormat.format(Messages.getString("ChatLounge.MapPreviewButton.levelOffsetHelp"),
-              MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET));
-        UiKit.onChange(offset, () -> {
-            int value = offset.value();
-            host.act(form -> indices.forEach(index -> form.levelOffset(index, value)));
-        });
-        UiButton reset = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
-              Messages.getString("ChatLounge.MapPreviewButton.resetLevelOffset"), null);
-        reset.setName("map-level-offset-reset");
-        reset.setDisabled(adjustable.stream().allMatch(slot -> slot.levelOffset() == 0));
-        UiKit.onChange(reset, () -> host.act(form -> indices.forEach(index -> form.levelOffset(index, 0))));
-        Table offsetRow = new Table();
-        offsetRow.add(offset);
-        offsetRow.add(reset).padLeft(space("sm"));
-        offsetRow.add().growX();
-        grid.add(kit.typeLabel(Messages.getString("Lobby.map.levelOffset"), "small", "text.secondary")).left()
-              .padTop(space("sm")).padRight(space("md"));
-        grid.add(offsetRow).growX().padTop(space("sm")).row();
-        inspector.add(grid).growX().padTop(space("sm")).row();
     }
 
     private String slotName(Slot slot) {
@@ -569,42 +542,72 @@ final class LobbyMapSetupView {
         return slots.stream().filter(index -> index < picture.slots().size()).map(picture.slots()::get).toList();
     }
 
-    /** The board list, one row a board, Generated first. */
+    /** The board browser, in thumbnail tiles or rows, Generated first. */
     private void fillList() {
+        requestedBoards = null;
         list.clearChildren();
         rows.clear();
+        viewToggle.icons.forEach(icon -> ((Image) icon).setDrawable(kit.skin.getDrawable(
+              thumbnails ? "icon-list" : "icon-grid")));
+        viewTip.getActor().setText(Messages.getString(thumbnails ? "Lobby.map.listView" : "Lobby.map.thumbnailView"));
         for (int index = 0; index < listed.size(); index++) {
             Entry entry = listed.get(index);
-            UiButton row = kit.button(UiTheme.TOKEN_ROW, null, entry.label(), null);
+            BoardEntry row = new BoardEntry(entry);
             row.setName("map-board-" + index);
-            row.getLabel().setAlignment(Align.left);
-            row.getLabel().setEllipsis(true);
-            row.getCell(row.getLabel()).growX().minWidth(0);
-            if (!entry.folder().isBlank()) {
-                Label folder = kit.typeLabel(entry.folder(), "small", "text.muted");
-                folder.setEllipsis(true);
-                row.add(folder).padLeft(space("sm")).maxWidth(size("dialog.sm") / 3).minWidth(0);
+            if (row.inspect != null) {
+                row.inspect.setName("map-board-inspect-" + index);
             }
             row.addListener(new ClickListener() {
                 @Override
                 public void clicked(InputEvent event, float x, float y) {
+                    if (row.inspect != null && event.getTarget().isDescendantOf(row.inspect)) {
+                        return;
+                    }
                     boolean several = Gdx.input != null && (Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)
                           || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT));
                     pick(entry, several);
                     if (getTapCount() == 2 && !several) {
-                        placePicked(false);
+                        placePicked();
                     }
                 }
             });
             rows.put(entry.name(), row);
-            list.add(row).growX().row();
+            Cell<BoardEntry> cell = list.add(row).growX().minWidth(0);
+            if (thumbnails) {
+                cell.uniformX().space(space("sm"));
+            }
+            if (!thumbnails || index % 2 == 1) {
+                list.row();
+            }
         }
         if (listed.isEmpty()) {
             kit.empty(list, Messages.getString("Lobby.map.noBoards"), true);
         }
     }
 
-    /** A click on a board: previews it, and picks it alone or, with {@code several}, along with the others. */
+    private void requestVisibleBoards() {
+        Picture picture = shown;
+        Rectangle visible = list.getCullingArea();
+        if (picture == null || picture.space() || visible == null) {
+            return;
+        }
+        List<String> wanted = new ArrayList<>();
+        for (Actor child : list.getChildren()) {
+            if (child instanceof BoardEntry row && !row.entry.generated()
+                  && row.getY() + row.getHeight() >= visible.y && row.getY() <= visible.y + visible.height) {
+                wanted.add(row.entry.name());
+            }
+        }
+        if (!wanted.equals(requestedBoards) || requestedWidth != picture.boardWidth()
+              || requestedHeight != picture.boardHeight()) {
+            requestedBoards = List.copyOf(wanted);
+            requestedWidth = picture.boardWidth();
+            requestedHeight = picture.boardHeight();
+            host.previews(requestedBoards);
+        }
+    }
+
+    /** A click on a board: picks it alone or, with {@code several}, along with the others. */
     void pick(Entry entry, boolean several) {
         if (several) {
             if (!picks.remove(entry.name())) {
@@ -614,24 +617,19 @@ final class LobbyMapSetupView {
             picks.clear();
             picks.add(entry.name());
         }
-        focus = entry.name();
-        if (!entry.generated()) {
-            host.preview(entry.name());
-        }
         showPicks();
     }
 
-    /** The rows' picked look, the preview of the focused board and which placing actions apply. */
+    /** The entries' picked look and pictures, and which placing actions apply. */
     private void showPicks() {
-        rows.forEach((name, row) -> row.pressed(picks.contains(name)));
+        rows.forEach((name, row) -> {
+            row.pressed(picks.contains(name));
+            row.showPicture();
+        });
         Picture picture = shown;
         boolean target = !slots.isEmpty() && picture != null && !picture.space();
         String one = picks.size() == 1 ? picks.iterator().next() : null;
-        Entry entry = one == null ? null : listed.stream().filter(e -> e.name().equals(one)).findFirst()
-              .orElse(null);
         place.setDisabled(!target || one == null);
-        placeRotated.setDisabled(!target || entry == null || entry.generated() || picture == null
-              || picture.boardWidth() % 2 != 0);
         boolean several = picks.size() > 1;
         random.setText(kit.cased("button", MessageFormat.format(Messages.getString("Lobby.map.random"), picks.size())));
         surprise.setText(kit.cased("button",
@@ -640,26 +638,6 @@ final class LobbyMapSetupView {
         surprise.setDisabled(!target || !several);
         pickHint.setText(!target ? Messages.getString("Lobby.map.noSlot")
               : several ? "" : Messages.getString("Lobby.map.pickHint"));
-        showPreview();
-    }
-
-    private void showPreview() {
-        Picture picture = shown;
-        String board = focus;
-        if (board == null || picture == null) {
-            preview.picture(null, 1, Messages.getString("Lobby.map.previewHint"));
-            return;
-        }
-        Entry entry = listed.stream().filter(e -> e.name().equals(board)).findFirst().orElse(null);
-        String label = entry == null ? board : entry.label();
-        if (entry != null && entry.generated()) {
-            preview.picture(null, aspect(picture), Messages.getString("BoardSelectionDialog.GeneratedMapSettings"));
-            return;
-        }
-        Drawable drawable = drawables.get(LobbyMapSetupController.pictureKey(board, false, picture.boardWidth(),
-              picture.boardHeight(), null, 0));
-        preview.picture(drawable, aspect(picture), drawable == null ? Messages.getString(
-              "Lobby.battlefield.drawing") : label);
     }
 
     private static float aspect(Picture picture) {
@@ -668,19 +646,18 @@ final class LobbyMapSetupView {
 
     // ---- Placing boards ----
 
-    private void placePicked(boolean rotated) {
+    private void placePicked() {
         if (picks.size() != 1 || slots.isEmpty()) {
             return;
         }
         String board = picks.iterator().next();
         List<Integer> targets = List.copyOf(slots);
-        host.act(form -> targets.forEach(slot -> {
-            if (rotated) {
-                form.assignRotated(slot, board);
-            } else {
-                form.assign(slot, board);
+        host.act(form -> {
+            targets.forEach(slot -> form.assign(slot, board));
+            if (MapSettings.BOARD_GENERATED.equals(board)) {
+                form.generate();
             }
-        }));
+        });
     }
 
     private void placeRandom() {
@@ -729,36 +706,64 @@ final class LobbyMapSetupView {
     // ---- Pictures ----
 
     /** Takes a board's picture, by {@link LobbyMapSetupController#pictureKey}, and shows it where it is due. */
-    void picture(String key, BufferedImage image) {
-        Texture texture = GpuStartScreen.texture(image, true);
-        texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-        Texture old = textures.put(key, texture);
+    void picture(String key, @Nullable BufferedImage image) {
+        Texture old = textures.remove(key);
+        drawables.remove(key);
         if (old != null) {
             old.dispose();
         }
-        drawables.put(key, new TextureRegionDrawable(texture));
+        if (image != null) {
+            Texture texture = GpuStartScreen.texture(image, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            textures.put(key, texture);
+            drawables.put(key, new TextureRegionDrawable(texture));
+        }
         Picture picture = shown;
         if (picture != null) {
             table.show(picture);
-            showPreview();
+            rows.values().forEach(BoardEntry::showPicture);
         }
     }
 
-    /** The view left the centre: forgets the picks; the pictures stay until {@link #dispose}. */
+    /** The view left the centre: closes inspection and forgets the picks; pictures stay until {@link #dispose}. */
     void closed() {
+        closeInspection();
+        host.previews(List.of());
+        requestedBoards = null;
         shown = null;
         slots.clear();
         picks.clear();
-        focus = null;
         listed = List.of();
     }
 
     /** Gives the pictures' textures back. */
     void dispose() {
+        closeInspection();
         textures.values().forEach(Texture::dispose);
         textures.clear();
         drawables.clear();
         table.clearChildren();
+        list.clearChildren();
+        rows.clear();
+    }
+
+    private void inspect(Entry entry) {
+        int ticket = ++inspectionTicket;
+        tablePanel.setVisible(false);
+        inspection.setVisible(true);
+        inspection.loading(entry.label());
+        host.inspect(entry.name(), scene -> {
+            if (ticket == inspectionTicket && shown != null) {
+                inspection.show(scene);
+            }
+        });
+    }
+
+    private void closeInspection() {
+        inspectionTicket++;
+        inspection.setVisible(false);
+        inspection.dispose();
+        tablePanel.setVisible(true);
     }
 
     // ---- Helpers ----
@@ -785,6 +790,81 @@ final class LobbyMapSetupView {
         return DesignTokens.shipped().size().get(name);
     }
 
+    /** A browser entry keeps its click listener while its preview arrives, so a double-click stays one gesture. */
+    private final class BoardEntry extends UiButton {
+        private final Entry entry;
+        private final Image image = new Image();
+        private final Table placeholder = new Table();
+        private final @Nullable UiButton inspect;
+
+        BoardEntry(Entry entry) {
+            super(kit, UiTheme.TOKEN_ROW);
+            this.entry = entry;
+            image.setScaling(Scaling.fit);
+            image.setName("map-board-picture");
+            placeholder.add(kit.icon(entry.generated() ? "hex" : "map", size("icon.lg"),
+                  UiTheme.tokenColor("text.muted")));
+            Stack face = new Stack(image, placeholder);
+            inspect = entry.generated() ? null : kit.button("button-icon" + UiTheme.COMPACT, "cube", null, null);
+            if (inspect != null) {
+                tip(inspect, Messages.getString("Lobby.map.inspect"));
+                UiKit.onChange(inspect, () -> inspect(entry));
+            }
+            Label label = getLabel();
+            label.setText(entry.label());
+            label.setEllipsis(true);
+            if (thumbnails) {
+                TextButtonStyle style = new TextButtonStyle(getStyle());
+                style.up = kit.skin.getDrawable("token-card");
+                style.over = kit.skin.getDrawable("token-card-over");
+                style.down = style.over;
+                style.checked = kit.skin.getDrawable("token-card-selected");
+                style.checkedOver = style.checked;
+                style.checkedDown = style.checked;
+                setStyle(style);
+                pad(space("sm"));
+                if (inspect != null) {
+                    Table inspectLayer = new Table();
+                    inspectLayer.top().right().add(inspect);
+                    face.add(inspectLayer);
+                }
+                add(face).growX().minWidth(0).prefWidth(0).height(size("dialog.sm") / 3).row();
+                label.setAlignment(Align.center);
+                add(label).growX().minWidth(0).padTop(space("sm"));
+            } else {
+                add(face).size(size("control.lg")).padRight(space("sm"));
+                Table text = new Table();
+                label.setAlignment(Align.left);
+                text.add(label).growX().minWidth(0).row();
+                if (!entry.folder().isBlank()) {
+                    Label folder = kit.typeLabel(entry.folder(), "small", "text.muted");
+                    folder.setEllipsis(true);
+                    text.add(folder).growX().minWidth(0).padTop(space("xxs"));
+                }
+                add(text).growX().minWidth(0);
+                if (inspect != null) {
+                    add(inspect).padLeft(space("xs"));
+                }
+            }
+            tip(this, entry.folder().isBlank() ? entry.label() : entry.folder() + "/" + entry.label());
+            showPicture();
+        }
+
+        private @Nullable String pictureKey() {
+            Picture picture = shown;
+            return picture == null || entry.generated() ? null
+                  : LobbyMapSetupController.pictureKey(entry.name(), false, picture.boardWidth(),
+                        picture.boardHeight(), null, 0);
+        }
+
+        void showPicture() {
+            Drawable drawable = drawables.get(pictureKey());
+            image.setDrawable(drawable);
+            placeholder.setVisible(drawable == null);
+        }
+
+    }
+
     /**
      * The war table: the map's board slots in their columns and rows, as large as the room allows at the boards'
      * shape, each a card drawn as its board.
@@ -793,22 +873,31 @@ final class LobbyMapSetupView {
         private int columns = 1;
         private int lines = 1;
         private float aspect = 1;
+        private boolean space;
 
         void show(Picture picture) {
-            clearChildren();
             columns = Math.max(1, picture.mapWidth());
             lines = Math.max(1, picture.mapHeight());
             aspect = aspect(picture);
+            if (space != picture.space() || getChildren().size != (picture.space() ? 1 : picture.slots().size())) {
+                clearChildren();
+            }
+            space = picture.space();
             if (picture.space()) {
                 columns = 1;
                 lines = 1;
-                Table tile = new Table();
-                tile.setBackground(kit.skin.getDrawable("token-card"));
-                tile.setName("map-space");
-                addActor(tile);
+                if (getChildren().isEmpty()) {
+                    Table tile = new Table();
+                    tile.setBackground(kit.skin.getDrawable("token-card"));
+                    tile.setName("map-space");
+                    addActor(tile);
+                }
             } else {
                 for (Slot slot : picture.slots()) {
-                    addActor(tile(slot, picture));
+                    if (slot.index() >= getChildren().size) {
+                        addActor(new SlotTile(slot.index()));
+                    }
+                    ((SlotTile) getChildren().get(slot.index())).show(slot, picture);
                 }
             }
             invalidate();
@@ -819,8 +908,26 @@ final class LobbyMapSetupView {
             float gap = space("sm");
             float width = Math.max(0, getWidth() - gap * (columns - 1));
             float height = Math.max(0, getHeight() - gap * (lines - 1));
-            float tileWidth = Math.min(width / columns, height / lines * aspect);
+            float tileWidth = width / columns;
             float tileHeight = tileWidth / aspect;
+            if (space) {
+                tileWidth = Math.min(tileWidth, height / lines * aspect);
+                tileHeight = tileWidth / aspect;
+            } else {
+                // Fit the image and the controls, remeasuring when a narrower header wraps onto another line.
+                for (int pass = 0; pass < 4; pass++) {
+                    float chrome = 0;
+                    for (Actor child : getChildren()) {
+                        chrome = Math.max(chrome, ((SlotTile) child).chromeHeight(tileWidth));
+                    }
+                    float inset = 2 * space("xs");
+                    tileHeight = Math.max(1, tileWidth - inset) / aspect + chrome;
+                    if (tileHeight <= height / lines || pass == 3) {
+                        break;
+                    }
+                    tileWidth = Math.max(inset + 1, (height / lines - chrome) * aspect + inset);
+                }
+            }
             float totalWidth = tileWidth * columns + gap * (columns - 1);
             float totalHeight = tileHeight * lines + gap * (lines - 1);
             float left = (getWidth() - totalWidth) / 2;
@@ -839,68 +946,153 @@ final class LobbyMapSetupView {
         }
     }
 
-    /** A slot's card: its board's picture, or what it holds, its name and its marks. */
-    private Table tile(Slot slot, Picture picture) {
-        Table tile = new Table();
-        tile.setName("map-slot-" + slot.index());
-        boolean picked = slots.contains(slot.index());
-        tile.setBackground(kit.skin.getDrawable(picked ? "token-card-selected"
-              : slot.kind() == Kind.EMPTY ? "token-row-slot" : "token-card"));
-        tile.pad(space("xs"));
-        String key = LobbyMapSetupController.pictureKey(slot, picture);
-        Drawable drawable = key == null ? null : drawables.get(key);
-        Stack face = new Stack();
-        if (drawable != null) {
-            Image image = new Image(drawable, Scaling.fit);
-            if (slot.kind() == Kind.SURPRISE) {
-                image.getColor().a = .35f;
-            }
-            face.add(image);
-        }
-        String icon = switch (slot.kind()) {
-            case EMPTY -> "add";
-            case GENERATED -> "hex";
-            case SURPRISE -> "hidden";
-            case FIXED -> drawable == null ? "map" : null;
-        };
-        if (icon != null) {
-            Table mark = new Table();
-            mark.add(kit.icon(icon, size("icon.lg"), UiTheme.tokenColor("text.secondary")));
-            face.add(mark);
-        }
-        tile.add(face).grow().minHeight(0).row();
-        Table caption = new Table();
-        Label name = kit.typeLabel(slotName(slot), "small", slot.kind() == Kind.EMPTY ? "text.muted"
-              : "text.primary");
-        name.setEllipsis(true);
-        caption.add(name).growX().minWidth(0).left();
-        if (slot.rotated() && slot.canRotate()) {
-            caption.add(kit.icon("twist-right", size("icon.sm"), UiTheme.tokenColor("text.secondary")))
-                  .padLeft(space("xxs"));
-        }
-        if (slot.theme() != null) {
-            caption.add(kit.icon("palette", size("icon.sm"), UiTheme.tokenColor("text.secondary")))
-                  .padLeft(space("xxs"));
-        }
-        if (slot.levelOffset() != 0) {
-            caption.add(kit.typeLabel((slot.levelOffset() > 0 ? "+" : "") + slot.levelOffset(), "small",
-                  "text.secondary")).padLeft(space("xxs"));
-        }
-        tile.add(caption).growX().padTop(space("xxs"));
-        if (slot.kind() == Kind.FIXED && LobbyMapSetupController.serverSide(slot.file())) {
-            tip(tile, Messages.getString("Lobby.map.serverSide"));
-        } else if (slot.kind() == Kind.SURPRISE) {
-            tip(tile, String.join("\n", slot.surprise()));
-        }
-        tile.setTouchable(Touchable.enabled);
-        tile.addListener(new ClickListener() {
+    /** A slot keeps its controls during image arrivals and server echoes, including an open theme dropdown. */
+    private final class SlotTile extends Table {
+        private final Image image = new Image();
+        private final Table placeholder = new Table();
+        private final Label caption = kit.typeLabel("", "small", "text.primary");
+        private final UiButton rotate;
+        private final UiStepper offset;
+        private final UiButton reset;
+        private final HorizontalGroup controls = new HorizontalGroup();
+        private final Table bar = new Table();
+        private final Table themeBox = new Table() {
             @Override
-            public void clicked(InputEvent event, float x, float y) {
-                boolean several = Gdx.input != null && (Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)
-                      || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT));
-                pickSlot(slot.index(), several);
+            public float getPrefWidth() {
+                return Math.min(156, Math.max(40, SlotTile.this.getWidth() - size("control.sm") - 6 * space("xs")));
             }
-        });
-        return tile;
+        };
+        private UiSelect theme;
+        private TextTooltip detail;
+        private List<Theme> offered = List.of();
+
+        SlotTile(int index) {
+            setName("map-slot-" + index);
+            pad(space("xs"));
+            image.setScaling(Scaling.fit);
+            image.setName("map-slot-picture-" + index);
+            Stack face = new Stack(image, placeholder);
+            rotate = kit.button("button-icon" + UiTheme.COMPACT, "twist-right", null, null);
+            rotate.setName("map-slot-rotate-" + index);
+            tip(rotate, Messages.getString("ChatLounge.MapPreviewButton.rotateTooltip"));
+            UiKit.onChange(rotate, () -> host.act(form -> form.toggleRotation(index)));
+            controls.wrap().left().rowLeft().space(space("xs"));
+            controls.addActor(rotate);
+            controls.addActor(themeBox);
+            offset = kit.stepper(Messages.getString("Lobby.map.level"), 0, MapSettings.MIN_BOARD_LEVEL_OFFSET,
+                  MapSettings.MAX_BOARD_LEVEL_OFFSET);
+            name(offset, "map-level-offset-" + index);
+            tip(offset, MessageFormat.format(Messages.getString("ChatLounge.MapPreviewButton.levelOffsetHelp"),
+                  MapSettings.MIN_BOARD_LEVEL_OFFSET, MapSettings.MAX_BOARD_LEVEL_OFFSET));
+            UiKit.onChange(offset, () -> {
+                int value = offset.value();
+                host.act(form -> form.levelOffset(index, value));
+            });
+            reset = kit.button("button-icon" + UiTheme.COMPACT, "undo", null, null);
+            reset.setName("map-level-offset-reset-" + index);
+            tip(reset, Messages.getString("ChatLounge.MapPreviewButton.resetLevelOffset"));
+            UiKit.onChange(reset, () -> host.act(form -> form.levelOffset(index, 0)));
+            Table level = new Table();
+            level.add(offset);
+            level.add(reset);
+            controls.addActor(level);
+            bar.setBackground(kit.skin.getDrawable("token-panel-plain"));
+            bar.pad(space("xxs"));
+            bar.add(controls).growX().minWidth(0);
+            add(bar).growX().minWidth(0).padBottom(space("xxs")).row();
+            add(face).grow().minWidth(0).minHeight(0).row();
+            caption.setEllipsis(true);
+            add(caption).growX().minWidth(0).left().padTop(space("xxs"));
+            setTouchable(Touchable.enabled);
+            addListener(new ClickListener() {
+                @Override
+                public void clicked(InputEvent event, float x, float y) {
+                    if (event.getTarget().isDescendantOf(bar)) {
+                        return;
+                    }
+                    boolean several = Gdx.input != null && (Gdx.input.isKeyPressed(Input.Keys.CONTROL_LEFT)
+                          || Gdx.input.isKeyPressed(Input.Keys.CONTROL_RIGHT));
+                    pickSlot(index, several);
+                }
+            });
+        }
+
+        float chromeHeight(float width) {
+            setWidth(width);
+            controls.setWidth(Math.max(1, width - getPadLeft() - getPadRight() - bar.getPadLeft() - bar.getPadRight()));
+            controls.invalidate();
+            bar.invalidate();
+            return getPadTop() + getPadBottom() + bar.getPrefHeight() + caption.getPrefHeight() + 2 * space("xxs");
+        }
+
+        @Override
+        protected void sizeChanged() {
+            super.sizeChanged();
+            if (controls != null) {
+                controls.invalidate();
+                themeBox.invalidateHierarchy();
+            }
+        }
+
+        void show(Slot slot, Picture picture) {
+            setBackground(kit.skin.getDrawable(slots.contains(slot.index()) ? "token-card-selected"
+                  : slot.kind() == Kind.EMPTY ? "token-row-slot" : "token-card"));
+            Drawable drawable = drawables.get(LobbyMapSetupController.pictureKey(slot, picture));
+            image.setDrawable(drawable);
+            image.getColor().a = slot.kind() == Kind.SURPRISE ? .35f : 1;
+            placeholder.clearChildren();
+            String icon = switch (slot.kind()) {
+                case EMPTY -> "add";
+                case SURPRISE -> "hidden";
+                case GENERATED -> drawable == null ? "hex" : null;
+                case FIXED -> drawable == null ? "map" : null;
+            };
+            if (icon != null) {
+                placeholder.add(kit.icon(icon, size("icon.lg"), UiTheme.tokenColor("text.secondary")));
+            }
+            caption.setText(slotName(slot));
+            String hint = slot.kind() == Kind.SURPRISE ? String.join("\n", slot.surprise())
+                  : slot.kind() == Kind.FIXED && LobbyMapSetupController.serverSide(slot.file())
+                        ? Messages.getString("Lobby.map.serverSide") : "";
+            if (!hint.isEmpty()) {
+                if (detail == null) {
+                    detail = kit.tip(this, true);
+                }
+                detail.getActor().setText(hint);
+            } else if (detail != null) {
+                detail.hide();
+                removeListener(detail);
+                detail = null;
+            }
+            rotate.setDisabled(!slot.canRotate());
+            rotate.pressed(slot.rotated());
+            offset.value(slot.levelOffset());
+            offset.down().setDisabled(!slot.adjustable() || slot.levelOffset() <= MapSettings.MIN_BOARD_LEVEL_OFFSET);
+            offset.up().setDisabled(!slot.adjustable() || slot.levelOffset() >= MapSettings.MAX_BOARD_LEVEL_OFFSET);
+            reset.setDisabled(!slot.adjustable() || slot.levelOffset() == 0);
+            List<Theme> choices = new ArrayList<>(themes);
+            if (slot.theme() != null && choices.stream().noneMatch(value -> slot.theme().equals(value.theme()))) {
+                choices.add(new Theme(slot.theme(), BoardEditorBlueprint.themeLabel(slot.theme())));
+            }
+            if (theme == null || !offered.equals(choices)) {
+                offered = List.copyOf(choices);
+                themeBox.clearChildren();
+                theme = kit.tokenSelectInline(offered.stream().map(value -> value.theme() == null
+                      ? Messages.getString("Lobby.map.defaultTheme") : value.label()).toArray(String[]::new));
+                theme.setName("map-theme-" + slot.index());
+                tip(theme, Messages.getString("ChatLounge.MapPreviewButton.theme"));
+                UiKit.onChange(theme, () -> {
+                    String chosen = offered.get(theme.getSelectedIndex()).theme();
+                    host.act(form -> form.theme(slot.index(), chosen));
+                });
+                themeBox.add(theme).growX().minWidth(0);
+            }
+            for (int index = 0; index < offered.size(); index++) {
+                if (Objects.equals(offered.get(index).theme(), slot.theme())) {
+                    theme.select(index);
+                }
+            }
+            theme.setDisabled(!slot.adjustable());
+        }
     }
 }

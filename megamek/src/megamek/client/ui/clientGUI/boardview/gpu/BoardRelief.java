@@ -428,15 +428,18 @@ final class BoardRelief {
     /**
      * Conservative inset for a formation on this top, measured from the original hex edge to its innermost rim
      * sample. The rendered rim already includes river-shifted corners, slope room and cliff notches. Keeping every
-     * footprint inside these six limits also keeps it inside the top's star-shaped outline.
+     * footprint inside these six limits also keeps it inside the top's star-shaped outline. Dry scenery needs that
+     * same boundary before the surface has emitted its rim triangles.
      */
     float topInset(int e) {
-        if (rims[e] == null) { return reach(e); }
+        if (rims[e] == null && (!sculpted || self.liquid())) { return reach(e); }
+        List<Vector3> boundary = topOutline();
         Vector3 a = BoardGeometry.corner(tile.coords(), 0, e);
         Vector3 b = BoardGeometry.corner(tile.coords(), 0, e + 1);
         float dx = b.x - a.x, dy = b.y - a.y, length = (float) Math.hypot(dx, dy);
         float inset = 0;
-        for (Vector3 point : rims[e]) {
+        for (int i = outlineStarts[e]; i <= outlineStarts[e + 1]; i++) {
+            Vector3 point = boundary.get(i % boundary.size());
             inset = Math.max(inset, (dx * (point.y - a.y) - dy * (point.x - a.x)) / length);
         }
         return inset;

@@ -15,6 +15,7 @@ final class LobbyColumns extends WidgetGroup {
     private final Actor rail;
     private final float gutter;
     private boolean fold;
+    private boolean expanded;
 
     LobbyColumns(Actor players, Actor centre, Actor battlefield, Actor rail, float gutter) {
         this.players = players;
@@ -36,13 +37,23 @@ final class LobbyColumns extends WidgetGroup {
         }
     }
 
+    /** Lets a centre view use the battlefield column's space until it closes. */
+    void expandCentre(boolean expand) {
+        if (expanded != expand) {
+            expanded = expand;
+            invalidate();
+        }
+    }
+
     @Override
     public void layout() {
         LobbyLayout.Columns columns = LobbyLayout.columns(getWidth(), getHeight(), gutter, fold);
         place(players, columns.players());
-        place(centre, columns.centre());
-        place(battlefield, columns.battlefield());
-        place(rail, columns.rail());
+        LobbyLayout.Box middle = columns.centre();
+        place(centre, expanded ? new LobbyLayout.Box(middle.x(), middle.y(),
+              Math.max(0, getWidth() - middle.x()), middle.height()) : middle);
+        place(battlefield, expanded ? null : columns.battlefield());
+        place(rail, expanded ? null : columns.rail());
     }
 
     private static void place(Actor actor, LobbyLayout.Box box) {

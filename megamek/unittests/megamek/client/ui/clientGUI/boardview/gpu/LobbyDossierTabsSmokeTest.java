@@ -171,7 +171,7 @@ class LobbyDossierTabsSmokeTest {
             ui.window.addActor(body);
             body.setBounds(20, 20, 1400, 900);
             requisition.show(new LobbyRequisition(RequisitionCatalog.Rules.OPEN,
-                  List.of(new LobbyRequisition.Recipient(1, "Probe", true, false)), false, List.of()),
+                  List.of(new LobbyRequisition.Recipient(1, "Probe", true, false, "")), false, List.of()),
                   LobbyForces.EMPTY);
             requisition.opened(LobbyForces.EMPTY);
             requisition.probePick();

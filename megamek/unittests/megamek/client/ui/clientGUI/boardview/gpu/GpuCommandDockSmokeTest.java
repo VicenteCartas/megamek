@@ -492,8 +492,8 @@ class GpuCommandDockSmokeTest {
             assertEquals("DEPLOY", button(dock, "dock-main").getText().toString());
             clickAndShow(hud, dock, deploy, "dock-command-deployUnload", "dock-main");
             assertEquals(List.of("deployUnload", DONE), ran);
-            assertEquals(List.of("Load", "Assault drop", "Hull down"), dock.dock().more().commands().stream()
-                  .map(BoardScene.Command::label).toList());
+            assertNull(dock.dock().more(), "Disabled deployment actions do not open an empty drawer");
+            assertNull(dock.find("dock-more"));
             // A display whose Done also skips shows it once.
             Shot generic = withInfo(nonPlanner(), DONE, DONE);
             show(hud, dock, generic);
@@ -876,12 +876,12 @@ class GpuCommandDockSmokeTest {
 
     /**
      * TARGETING with an observed unit beyond the west edge (plan P7; GpuTargetingFixture: a real targeting display
-     * whose Long Tom faces west): the generic dock leads its option row with the edge whose arrow the Legacy 2D board
-     * shows, at 1920 x 1080 and 1280 x 720. A click on it queues the Long Tom's attack on that unit through the
-     * display: the edge leaves the row with the fired Long Tom, Fire turns on, and the display's Done sends it.
+     * whose Long Tom faces west): the firing dock offers the edge whose arrow the Legacy 2D board shows in More,
+     * at 1920 x 1080 and 1280 x 720. A click queues the Long Tom's attack through the display: the edge leaves
+     * More with the fired Long Tom, Fire turns on, and the display's Done sends it.
      */
     @Test
-    void theTargetingDockLeadsWithTheOffBoardTargetAndItsClickQueuesTheAttack() throws Exception {
+    void theTargetingDockOffersTheOffBoardTargetInMoreAndItsClickQueuesTheAttack() throws Exception {
         try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
             Entity archer = onSwing(() -> {
                 targeting.battery("Crab CRB-20.mtf", 44, OffBoardDirection.EAST);
@@ -897,17 +897,21 @@ class GpuCommandDockSmokeTest {
                     hud.size(size[0], size[1]);
                     Dock dock = dock(hud, offBoard);
                     show(hud, dock, offBoard);
-                    assertEquals("dock-command-offboard.WEST", names(dock.root(), "dock-command-").getFirst());
-                    assertEquals("OFF-BOARD WEST", button(dock, "dock-command-offboard.WEST").getText().toString());
+                    click(hud, button(dock, "dock-more"));
+                    show(hud, dock, offBoard);
+                    UiButton target = dock.drawer().findActor("dock-more-offboard.WEST");
+                    assertNotNull(target, "The firing dock keeps the off-board attack in More");
+                    assertEquals("OFF-BOARD WEST", target.getText().toString());
                     hud.capture("g6-targeting-offboard-" + size[0] + "x" + size[1]).dispose();
                     if (size[0] == 1280) {
-                        clickAndShow(hud, dock, offBoard, "dock-command-offboard.WEST");
+                        click(hud, target);
                         GpuBoardSource.Frame fired = onSwing(() -> {
                             targeting.source.refresh();
                             return targeting.source.takeFrame();
                         });
                         show(hud, dock, new Shot(fired.status(), fired.panels(), fired.scene().commands()));
-                        assertEquals(List.of(), names(dock.root(), "dock-command-offboard."));
+                        assertTrue(dock.dock().more() == null || dock.dock().more().commands().stream()
+                              .noneMatch(command -> command.id().startsWith("offboard.")));
                         assertFalse(button(dock, "dock-main").isDisabled(), "Fire sends the queued attack");
                         hud.capture("g6-targeting-offboard-fired-1280x720").dispose();
                     }

@@ -136,7 +136,7 @@ class BoardLunarTest {
               feature("vegetation/foliage-temperate", BoardScene.FeatureKind.TREE),
               feature("scatter-plant", BoardScene.FeatureKind.SCATTER),
               feature("scatter-rock", BoardScene.FeatureKind.SCATTER),
-              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("vegetation/field", BoardScene.FeatureKind.PROP));
+              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH));
         for (var kind : BoardLiquid.Kind.values()) {
             for (var family : BoardScene.Surface.values()) {
                 var lunar = tile(0, -1, new BoardLiquid(kind, "", 2), family, features, true).lunar(true);
@@ -173,7 +173,7 @@ class BoardLunarTest {
               feature("vegetation/foliage-temperate", BoardScene.FeatureKind.TREE),
               feature("scatter-plant", BoardScene.FeatureKind.SCATTER), stone,
               feature(BoardFungus.SCATTER.getFirst(), BoardScene.FeatureKind.SCATTER),
-              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH), feature("vegetation/field", BoardScene.FeatureKind.PROP));
+              feature("rough/felled-trunk", BoardScene.FeatureKind.ROUGH));
         for (var kind : BoardLiquid.Kind.values()) {
             for (var family : BoardScene.Surface.values()) {
                 var liquid = new BoardLiquid(kind, "", 2);

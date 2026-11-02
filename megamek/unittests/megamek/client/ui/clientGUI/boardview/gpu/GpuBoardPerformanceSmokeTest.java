@@ -33,6 +33,8 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import jdk.jfr.Event;
@@ -269,17 +271,19 @@ class GpuBoardPerformanceSmokeTest {
         }
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
+        boolean compareCache = Boolean.getBoolean("megamek.gpu.performanceCompareMaterialCache");
         // The 3D Graphics of the run's variants, the first also loads the board (for example CLASSIC,ENHANCED); none
         // keeps the saved choice. Each variant runs every scenario, the first variant's before the second's: the one
         // switch rebuilds the terrain behind the loading stage, within the second variant's first overview warm-up
         // frame (its detail-settle).
         List<BoardGraphics> graphics = graphics();
         // The Tactical View's overview, close and moving scenarios after the 3D view's, in the same JVM.
-        int views = Boolean.getBoolean("megamek.gpu.performanceTactical") ? 6 : 3;
-        if (comparePages && graphics.size() > 1) {
-            throw new IllegalArgumentException("One comparison per run: the terrain pages or the graphics");
+        int views = Boolean.getBoolean("megamek.gpu.performanceOverviewOnly") ? 1
+              : Boolean.getBoolean("megamek.gpu.performanceTactical") ? 6 : 3;
+        if ((comparePages || compareCache) && graphics.size() > 1 || comparePages && compareCache) {
+            throw new IllegalArgumentException("One comparison per run: terrain pages, material cache or graphics");
         }
-        int variants = comparePages ? 2 : Math.max(1, graphics.size());
+        int variants = comparePages || compareCache ? 2 : Math.max(1, graphics.size());
         var preferences = GUIPreferences.getInstance();
         BoardGraphics savedGraphics = preferences.getBoardGraphics();
         String savedAa = preferences.getBoardAntiAliasing();
@@ -293,7 +297,7 @@ class GpuBoardPerformanceSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 preferences.setBoardAntiAliasing("OFF");
                 preferences.setBoardSpecularAntiAliasing(true);
-                preferences.setBoardAmbientOcclusion(false);
+                preferences.setBoardAmbientOcclusion(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"));
                 preferences.setBoardUiScale(1);
             });
             GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
@@ -377,7 +381,7 @@ class GpuBoardPerformanceSmokeTest {
                         assertEquals(1, BoardCamera.renderScale);
                         assertEquals(false, tuning.antiAliasing());
                         assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
-                        assertEquals(false, tuning.ambientOcclusion());
+                        assertEquals(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"), tuning.ambientOcclusion());
                         assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
                               GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
                     }
@@ -436,7 +440,11 @@ class GpuBoardPerformanceSmokeTest {
                         // Overview, close and moving: in the 3D view, then (views 3-5) in the Tactical View.
                         int shot = view % 3;
                         if (comparePages && phase == 0) { setPages(this, variant == 1); }
-                        BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(variant);
+                        if (compareCache && phase == 0) {
+                            CheckBox cache = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-terrain-cache");
+                            cache.setChecked(variant == 1);
+                        }
+                        BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(Math.min(variant, graphics.size() - 1));
                         if (variant > 0 && view == 0 && phase == 0) {
                             // The next variant starts from the 3D view's fitted overview, as the first did.
                             setTacticalView(false);
@@ -448,6 +456,9 @@ class GpuBoardPerformanceSmokeTest {
                         if (frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
+                        }
+                        if (shot == 0 && (frame == 1 || variant > 0 && phase == 0)) {
+                            overviewCamera(boardCamera);
                         }
                         if (view == 3 && phase == 0) {
                             // T: the locked top view with meeples and the ground layer, framed as the 3D overview.
@@ -466,6 +477,7 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         String scenario = (view >= 3 ? "tactical-" : "") + (shot == 0 ? "overview" : shot == 1 ? "close" : "moving");
                         if (comparePages) { scenario += variant == 0 ? "-original" : "-pages"; }
+                        if (compareCache) { scenario += variant == 0 ? "-cache-off" : "-cache-on"; }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
@@ -541,8 +553,10 @@ class GpuBoardPerformanceSmokeTest {
                         // three idle frames avoid mistaking the gap between two chunk jobs for completion.
                         // The moving scenario intentionally includes refinement during panning.
                         if (phase < drawCountFrame && shot != 2
-                              && (phase == 0 || detailFrames > 0 || detailPending(this, benchmarkScene))) {
-                            detailQuietFrames = detailPending(this, benchmarkScene) ? 0 : detailQuietFrames + 1;
+                              && (phase == 0 || detailFrames > 0 || detailPending(this, benchmarkScene)
+                                    || compareCache && cachePending(terrain(this)))) {
+                            detailQuietFrames = detailPending(this, benchmarkScene)
+                                  || compareCache && cachePending(terrain(this)) ? 0 : detailQuietFrames + 1;
                             detailFrames++;
                             detailSubmissions.add((submitted - start) / 1e6);
                             boolean withinDeadline = System.nanoTime() - detailStarted < settleNanos;
@@ -594,6 +608,8 @@ class GpuBoardPerformanceSmokeTest {
                             System.out.print(report);
                             Files.writeString(new File(output, "performance-full-" + scenario + "-timings.txt").toPath(), report);
                             memory(this, scenario);
+                            System.out.println("PERF " + boardCamera.readout());
+                            System.out.println("PERF " + terrain(this).materialCacheReport());
                             if (familyFrames > 0 && shot != 2) {
                                 // No query wrappers, attribution work or readbacks enter the normal measured frames.
                                 measuring = false;
@@ -611,6 +627,16 @@ class GpuBoardPerformanceSmokeTest {
                                     Files.writeString(new File(output, "performance-full-" + scenario + "-families.txt").toPath(),
                                           attribution);
                                 } finally { drawAudit = null; }
+                            }
+                            if (compareCache) {
+                                // Readback and debug frames stay outside both timing and draw-count samples.
+                                measuring = timingFrame = false;
+                                CheckBox debug = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this),
+                                      "tuning-terrain-cache-debug");
+                                debug.setChecked(true);
+                                super.render();
+                                GpuBoardTestUi.capture(new File(output, "performance-full-" + scenario + "-debug.png"));
+                                debug.setChecked(false);
                             }
                             if (view == 2 && Boolean.getBoolean("megamek.gpu.performanceFarPan")) {
                                 // Extra visual regression capture, after all performance samples are complete.
@@ -705,6 +731,24 @@ class GpuBoardPerformanceSmokeTest {
         var method = pages.getClass().getDeclaredMethod("setEnabled", boolean.class);
         method.setAccessible(true);
         method.invoke(pages, enabled);
+    }
+
+    /** Optional reproducible camera readout: span and viewport-centre world position, at the isometric preset. */
+    private static void overviewCamera(BoardCamera camera) {
+        String span = System.getProperty("megamek.gpu.performanceSpan");
+        String at = System.getProperty("megamek.gpu.performanceAt");
+        if (span == null || at == null) { return; }
+        String[] xyz = at.split(",");
+        camera.camera.zoom = Float.parseFloat(span) / camera.camera.viewportHeight;
+        Vector3 centre = new Vector3(Float.parseFloat(xyz[0]), Float.parseFloat(xyz[1]), Float.parseFloat(xyz[2]));
+        camera.center(centre);
+        Vector3 shown = new Vector3(camera.camera.position).mulAdd(camera.camera.direction, camera.camera.pivotDepth);
+        camera.center(new Vector3(camera.focus).add(centre).sub(shown));
+    }
+
+    private static boolean cachePending(GpuTerrain terrain) {
+        var status = terrain.materialCacheStatus();
+        return status.active() && status.pages().current() < status.pages().needed();
     }
 
     private static boolean detailPending(GpuBattleView view, BoardScene scene) throws Exception {

@@ -274,6 +274,12 @@ final class UnitDamageDisplay implements Disposable {
         node.getChildren().forEach(UnitDamageDisplay::wreck);
     }
 
+    /** A dying infantry figure borrows the same burnt armor artwork, without changing its living formation. */
+    void carbonize(Node node, int unitId) {
+        wreck(node);
+        applyTexture(node, unitId);
+    }
+
     private void applyTexture(Node node, int unitId) {
         for (NodePart part : node.parts) {
             if (part.enabled && part.material.id.endsWith(WRECKED_SUFFIX)) {

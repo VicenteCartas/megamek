@@ -83,7 +83,7 @@ class GpuMeepleDeathSmokeTest {
                         // The Atlas was just hit from the west for 30 damage; nothing is known of the tank's hit.
                         @SuppressWarnings("unchecked")
                         var hits = (Map<Integer, GpuBattleView.Hit>) field(view, "hits");
-                        hits.put(1, new GpuBattleView.Hit(new Vector3(30, 0, 0), (float) field(view, "hoverClock")));
+                        hits.put(1, new GpuBattleView.Hit(new Vector3(30, 0, 0), (float) field(view, "hoverClock"), null));
                         SwingUtilities.invokeAndWait(() -> {
                             units.get(0).setDoomed(true);
                             units.get(1).setDoomed(true);

@@ -15,6 +15,7 @@ import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
@@ -22,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.DragAndDrop;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -81,6 +83,9 @@ final class LobbyForcesPanel {
         void configure(int unitId);
 
         void drop(List<Integer> unitIds, List<Integer> formationIds, Target target);
+
+        /** Deletes the selection through the same command and confirmation as the unit menu. */
+        void delete(List<Integer> unitIds, List<Integer> formationIds);
 
         /** Asks for the unit menu of these units and formations, which comes back through {@link #showMenu}. */
         void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView);
@@ -197,6 +202,17 @@ final class LobbyForcesPanel {
         dropStrip.add(kit.typeLabel(Messages.getString("Lobby.forces.dropTop"), "small", "text.secondary"));
         dropStrip.setVisible(false);
         panel.add(dropStrip).growX().padTop(space("xs"));
+        panel.addListener(new InputListener() {
+            @Override
+            public boolean keyDown(InputEvent event, int keycode) {
+                if (event.isHandled() || keycode != Input.Keys.FORWARD_DEL || event.getTarget() instanceof TextField
+                      || (selectedUnits.isEmpty() && selectedFormations.isEmpty())) {
+                    return false;
+                }
+                actions.delete(List.copyOf(selectedUnits), List.copyOf(selectedFormations));
+                return true;
+            }
+        });
         refreshViewTools();
     }
 
@@ -879,6 +895,10 @@ final class LobbyForcesPanel {
     }
 
     private void select(boolean unit, int id, boolean toggle, boolean range) {
+        if (panel.getStage() != null) {
+            // Keep focus on the stable panel so rebuilding cards does not lose the selection's keyboard actions.
+            panel.getStage().setKeyboardFocus(panel);
+        }
         Integer key = unit ? id : -id - 1;
         if (range && anchor != null) {
             int from = indexOf(anchor);

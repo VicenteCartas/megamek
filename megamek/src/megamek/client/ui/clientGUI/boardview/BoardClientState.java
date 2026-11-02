@@ -1379,7 +1379,7 @@ public final class BoardClientState implements BoardGlyphContext, AutoCloseable 
         drawRuler(startCoords == null ? null : new BoardTactical.Ruler(startCoords, endCoords,
               getBoard().getHex(startCoords).getLevel() + 1,
               endCoords == null ? 0 : getBoard().getHex(endCoords).getLevel() + 1,
-              null, startColor.getRGB(), endColor.getRGB()));
+              null, null, startColor.getRGB(), endColor.getRGB()));
     }
 
     public void drawRuler(BoardTactical.Ruler measurement) {

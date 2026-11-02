@@ -80,9 +80,15 @@ public class LosEffects {
 
     /** Optional ruler diagnostics, produced by the same calculation as the LOS result. */
     private Coords blockingHex;
+    private Coords modifierHex;
 
     public @Nullable Coords getBlockingHex() {
         return blockingHex;
+    }
+
+    /** First hex where intervening terrain adds a positive modifier, before LOS becomes blocked. */
+    public @Nullable Coords getModifierHex() {
+        return modifierHex;
     }
 
     private record HexLos(Coords coords, LosEffects effects) { }
@@ -110,6 +116,7 @@ public class LosEffects {
         public boolean targetEntity = true;
         public boolean targetInfantry;
         public boolean targetIsMek;
+        public boolean targetIsOversized;
         public boolean attackerIsMek;
         public boolean attOffBoard;
         public Coords attackPos;
@@ -829,11 +836,11 @@ public class LosEffects {
             ai.attackPos = ai.targetPos;
         }
 
+        ai.targetIsOversized = ai.targetEntity && ((Entity) target).hasQuirk(OptionsConstants.QUIRK_NEG_OVERSIZED);
         final LosEffects finalLoS = calculateLos(game, ai, trace);
         finalLoS.setMinimumWaterDepth(ai.minimumWaterDepth);
         finalLoS.targetLoc = target.getPosition();
-        finalLoS.targetIsOversized = ai.targetEntity &&
-              ((Entity) target).hasQuirk(OptionsConstants.QUIRK_NEG_OVERSIZED);
+        finalLoS.targetIsOversized = ai.targetIsOversized;
         return finalLoS;
     }
 
@@ -897,11 +904,11 @@ public class LosEffects {
         ai.targetOnLand = false;
         ai.underWaterCombat = false;
 
+        ai.targetIsOversized = ai.targetEntity && ((Entity) target).hasQuirk(OptionsConstants.QUIRK_NEG_OVERSIZED);
         final LosEffects finalLoS = calculateLos(game, ai, trace);
         finalLoS.setMinimumWaterDepth(ai.minimumWaterDepth);
         finalLoS.targetLoc = target.getPosition();
-        finalLoS.targetIsOversized = ai.targetEntity &&
-              ((Entity) target).hasQuirk(OptionsConstants.QUIRK_NEG_OVERSIZED);
+        finalLoS.targetIsOversized = ai.targetIsOversized;
         return finalLoS;
     }
 
@@ -970,10 +977,9 @@ public class LosEffects {
         // own hexes, so those endpoints are handled here.
         addEruptingGeyserEndpointBlock(game, ai, finalLoS);
 
+        finalLoS.targetIsOversized = ai.targetIsOversized;
         finalLoS.hasLoS = finalLoS.hasLineOfSight();
-        if (trace && !finalLoS.hasLoS) {
-            finalLoS.blockingHex = firstBlockingHex(game, ai, path);
-        }
+        if (trace) { finalLoS.tracePath(game, ai, path); }
 
         int combinedWoodsSmoke = (finalLoS.lightWoods + finalLoS.lightSmoke)
               + ((finalLoS.heavyWoods + finalLoS.heavySmoke) * 2)
@@ -995,6 +1001,7 @@ public class LosEffects {
         if (deadZoneResult != null) {
             // A direct obstruction can precede the hill responsible for the dead-zone shadow.
             deadZoneResult.blockingHex = finalLoS.hasLoS ? deadZoneHex : finalLoS.blockingHex;
+            deadZoneResult.modifierHex = finalLoS.modifierHex;
             return deadZoneResult;
         }
         return finalLoS;
@@ -1005,22 +1012,32 @@ public class LosEffects {
               && lightWoods + lightSmoke + (heavyWoods + heavySmoke) * 2 + ultraWoods * 3 < 3;
     }
 
-    private static Coords firstBlockingHex(Game game, AttackInfo ai, List<HexLos> path) {
+    private void tracePath(Game game, AttackInfo ai, List<HexLos> path) {
         if (!ai.underWaterCombat && isEngulfedByEruptingGeyser(game, ai.boardId, ai.attackPos, ai.attackAbsHeight)) {
-            return ai.attackPos;
+            blockingHex = ai.attackPos;
+            return;
         }
         // Divided LOS evaluates common hexes before the chosen side; present them in travel order instead.
         path.sort(Comparator.comparingInt(hex -> ai.attackPos.distance(hex.coords())));
         LosEffects accumulated = new LosEffects();
+        accumulated.targetIsOversized = targetIsOversized;
         for (HexLos hex : path) {
             accumulated.add(hex.effects());
-            if (!accumulated.hasLineOfSight()) { return hex.coords(); }
-            if (ai.underWaterCombat && !hex.coords().equals(ai.attackPos) && !hex.coords().equals(ai.targetPos)
+            boolean shallowWater = ai.underWaterCombat
+                  && !hex.coords().equals(ai.attackPos) && !hex.coords().equals(ai.targetPos)
                   && game.getBoard(ai.boardId).contains(hex.coords())
-                  && game.getHex(hex.coords(), ai.boardId).depth() < 1) { return hex.coords(); }
+                  && game.getHex(hex.coords(), ai.boardId).depth() < 1;
+            if (!hasLoS && (!accumulated.hasLineOfSight() || shallowWater)) {
+                blockingHex = hex.coords();
+                return;
+            }
+            if (modifierHex == null) {
+                int modifier = accumulated.losModifiers(game).getValue();
+                if (modifier > 0 && modifier != TargetRoll.IMPOSSIBLE) { modifierHex = hex.coords(); }
+            }
         }
         // Endpoint effects (e.g. a target engulfed by a geyser) are applied after intervening terrain.
-        return ai.targetPos;
+        if (!hasLoS) { blockingHex = ai.targetPos; }
     }
 
     /**

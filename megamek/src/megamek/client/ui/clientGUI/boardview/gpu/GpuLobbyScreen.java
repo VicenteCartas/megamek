@@ -46,6 +46,7 @@ import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyReadiness;
+import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
@@ -138,7 +139,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private ExecutorService cardThread;
     private RequisitionLoader cardLoader;
     private RequisitionSearch search;
-    /** The Requisition's sprites by catalogue unit, the least recently shown first. */
+    /** The Requisition's sprites by catalogue unit and camouflage, the least recently shown first. */
     private final LinkedHashMap<String, TextureRegionDrawable> requisitionSprites = new LinkedHashMap<>(64, .75f,
           true);
     private LobbyColumns columns;
@@ -215,11 +216,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         if (blocked) {
-            stage.cancelTouchFocus();
+            focusLost();
             TooltipManager.getInstance().hideAll();
         }
         Gdx.input.setInputProcessor(blocked ? null : stage);
     }
+
+    /** End held preview gestures before a native dialog or another window takes their releases. */
+    void focusLost() {
+        if (stage != null) {
+            stage.cancelTouchFocus();
+            stage.setKeyboardFocus(null);
+            stage.setScrollFocus(null);
+        }
+    }
+
+    @Override
+    public void pause() { focusLost(); }
 
     @Override
     public void create() {
@@ -518,6 +531,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             public Drawable camo(String key) {
                 return camoDrawables.get(key);
             }
+
+            @Override
+            public Drawable sprite(int id) {
+                return spriteDrawables.get(id);
+            }
         };
     }
 
@@ -546,6 +564,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
                 window.dropForces(unitIds, formationIds, target);
+            }
+
+            @Override
+            public void delete(List<Integer> unitIds, List<Integer> formationIds) {
+                window.deleteForces(unitIds, formationIds);
             }
 
             @Override
@@ -590,7 +613,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
             @Override
             public void sprites(List<MekSummary> units) {
-                window.requisitionSprites(units);
+                window.requisitionSprites(units, requisition.recipient());
             }
 
             @Override
@@ -691,13 +714,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         requisition.opened(shown == null ? LobbyForces.EMPTY : shown.forces());
     }
 
-    /** GPU thread: takes the sprite the window drew of the catalogue unit {@code key}. */
-    void requisitionSprite(String key, BufferedImage image) {
+    /** GPU thread: caches the sprite under the appearance actually drawn, even after a recipient change. */
+    void requisitionSprite(String unit, String camouflage, BufferedImage image) {
         if (stage == null) {
             return;
         }
         Texture texture = GpuStartScreen.texture(image, true);
         texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        String key = LobbyRequisition.spriteKey(unit, camouflage);
         TextureRegionDrawable old = requisitionSprites.put(key, new TextureRegionDrawable(texture));
         if (old != null) {
             old.getRegion().getTexture().dispose();
@@ -708,10 +732,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             eldest.remove();
             entry.getValue().getRegion().getTexture().dispose();
             requisition.spriteForgotten(entry.getKey());
-            randomArmySprite(entry.getKey());
+            randomArmySprite(entry.getKey().substring(entry.getKey().indexOf('\0') + 1));
         }
         requisition.spriteArrived(key);
-        randomArmySprite(key);
+        randomArmySprite(unit);
     }
 
     /** Shows the random army's cards of the unit {@code key} with its sprite as now drawn, or none. */
@@ -722,9 +746,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
-    /** The Requisition's sprites drawn so far, by {@link LobbyRequisitionPanel#spriteKey}. */
+    /** The local player's catalogue sprite, for the random army dialog. */
     @Nullable TextureRegionDrawable requisitionSprite(String key) {
-        return requisitionSprites.get(key);
+        if (shown == null) {
+            return null;
+        }
+        LobbyRequisition.Recipient local = shown.requisition().recipients().stream()
+              .filter(LobbyRequisition.Recipient::self).findFirst().orElse(null);
+        return local == null ? null : requisitionSprites.get(LobbyRequisition.spriteKey(key, local.camouflage()));
     }
 
     /** The battlefield column's actions, which the window runs on the Swing thread. */
@@ -793,6 +822,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
         });
         forces.redraw();
+        players.imagesArrived();
         if (c3View != null && LobbyC3View.KEY.equals(centre.showing())) {
             c3View.redraw();
         }
@@ -812,7 +842,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             camoDrawables.put(key, new TextureRegionDrawable(texture));
         });
-        players.camosArrived();
+        players.imagesArrived();
     }
 
     /** Player {@code id}'s camo picture once drawn, else their colour; null when they are not shown. */
@@ -917,6 +947,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     /** The battlefield's body goes back to its column whenever another view, or the forces, take the centre. */
     private void centreChanged(String showing) {
+        columns.expandCentre(LobbyMapSetupView.KEY.equals(showing));
         boolean battlefieldShown = BATTLEFIELD.equals(showing);
         rail.setChecked(battlefieldShown);
         if (!battlefieldShown && battlefield.body().getParent() != battlefield.panel()) {
@@ -982,7 +1013,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /** GPU thread: a board's picture for the map setup, while it shows. */
-    void mapPicture(String key, BufferedImage image) {
+    void mapPicture(String key, @Nullable BufferedImage image) {
         if (mapSetupView != null && LobbyMapSetupView.KEY.equals(centre.showing())) {
             mapSetupView.picture(key, image);
         }

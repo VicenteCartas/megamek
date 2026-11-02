@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -15,12 +16,14 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.force.Force;
@@ -265,6 +268,68 @@ class LobbyTogglesSmokeTest {
         });
     }
 
+    @Test
+    void deleteUsesTheSelectionWhileTheForcesHaveKeyboardFocus() {
+        UiTestStage.run(ui -> {
+            List<List<Integer>> deleted = new ArrayList<>();
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions() {
+                @Override
+                public void delete(List<Integer> unitIds, List<Integer> formationIds) {
+                    assertTrue(formationIds.isEmpty());
+                    deleted.add(unitIds);
+                }
+            }, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            forces.show(ownedForces());
+            ui.draw();
+
+            ui.stage.setKeyboardFocus(panel);
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertTrue(deleted.isEmpty(), "Delete without a selection does nothing");
+
+            TextField chat = ui.kit.input("abc", false);
+            ui.window.addActor(chat);
+            chat.setBounds(1100, 100, 200, 40);
+            ui.stage.setKeyboardFocus(chat);
+            click(ui, panel.findActor("lobby-unit-1"));
+            assertSame(panel, ui.stage.getKeyboardFocus(), "selecting a card takes focus out of chat");
+            ui.stage.keyDown(Input.Keys.BACKSPACE);
+            assertTrue(deleted.isEmpty(), "Backspace is not the Delete shortcut");
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(List.of(List.of(1)), deleted);
+
+            forces.redraw();
+            ui.draw();
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(List.of(List.of(1), List.of(1)), deleted, "refreshing cards retains keyboard selection");
+
+            ui.stage.setKeyboardFocus(chat);
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(2, deleted.size(), "editing chat never deletes a selected unit");
+            click(ui, panel.findActor("lobby-unit-2"));
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(List.of(2), deleted.getLast(), "the current selection is used");
+
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { });
+            dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(3, deleted.size(), "a dialog keeps Delete away from the forces behind it");
+            dialog.close();
+
+            LobbyCentre centre = new LobbyCentre(ui.kit, panel, false);
+            ui.window.addActor(centre);
+            centre.setBounds(100, 100, 900, 800);
+            ui.stage.setKeyboardFocus(panel);
+            centre.show("map", "Map setup", new Table());
+            ui.stage.keyDown(Input.Keys.FORWARD_DEL);
+            assertEquals(3, deleted.size(), "another centre view cannot delete the hidden selection");
+            centre.remove();
+            chat.remove();
+        });
+    }
+
     private static void rightClick(UiTestStage ui, Actor actor, float localX, float localY) {
         Vector2 point = ui.stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(localX, localY)));
         int x = Math.round(point.x);
@@ -338,6 +403,10 @@ class LobbyTogglesSmokeTest {
 
         @Override
         public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
+        }
+
+        @Override
+        public void delete(List<Integer> unitIds, List<Integer> formationIds) {
         }
 
         @Override

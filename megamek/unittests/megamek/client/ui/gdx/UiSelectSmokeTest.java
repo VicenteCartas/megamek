@@ -76,6 +76,35 @@ class UiSelectSmokeTest {
     }
 
     @Test
+    void movingQuicklyFromTheFaceThroughTheListDoesNotChooseOrClose() {
+        UiTestStage.run(ui -> {
+            UiSelect select = place(ui, ui.kit.tokenSelect(false, ITEMS));
+            AtomicInteger changes = count(select);
+            click(ui, select);
+            UiListPopup list = select.popup();
+            Vector2 start = select.localToStageCoordinates(new Vector2(select.getWidth() / 2, select.getHeight() / 2));
+            Vector2 end = list.label(ITEMS.length - 1).localToStageCoordinates(new Vector2(5, 5));
+            ui.stage.stageToScreenCoordinates(start);
+            ui.stage.stageToScreenCoordinates(end);
+            for (int step : new int[] { 1, 30, 300 }) {
+                ui.stage.mouseMoved(Math.round(start.x), Math.round(start.y));
+                ui.draw();
+                for (int y = Math.round(start.y); y < Math.round(end.y); y += step) {
+                    ui.stage.mouseMoved(Math.round(end.x), y);
+                    ui.draw();
+                    assertTrue(select.isOpen(), "pointer motion across the face, gap and rows must keep the list open");
+                }
+                ui.stage.mouseMoved(Math.round(end.x), Math.round(end.y));
+                ui.draw();
+                assertTrue(select.isOpen());
+                assertEquals(ITEMS.length - 1, list.active());
+                assertEquals(0, select.getSelectedIndex());
+                assertEquals(0, changes.get());
+            }
+        });
+    }
+
+    @Test
     void theKeyboardOpensMovesChoosesAndReturnsFocus() {
         UiTestStage.run(ui -> {
             UiSelect select = place(ui, ui.kit.tokenSelect(true, ITEMS));

@@ -90,7 +90,7 @@ class BoardBiomeTest {
     }
 
     @Test
-    void capturedSpecialGroundReplacesFieldPropsButPreservesUnsupportedArtworkAndQuicksand() {
+    void fieldsUseCropBiomeWithoutLegacyPropsAndWetGroundKeepsItsOwnBiome() {
         Hex hex = new Hex(0);
         hex.addTerrain(new Terrain(Terrains.FIELDS, 1));
         assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
@@ -99,7 +99,7 @@ class BoardBiomeTest {
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().noneMatch(f -> f.asset().equals("vegetation/field")));
         hex.addTerrain(new Terrain(Terrains.FORTIFIED, 1));
         assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
-        assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().anyMatch(f -> f.asset().equals("vegetation/field")));
+        assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream().noneMatch(f -> f.asset().equals("vegetation/field")));
         hex.removeAllTerrains();
         for (int level = 1; level <= 3; level++) {
             hex.addTerrain(new Terrain(Terrains.SWAMP, level));

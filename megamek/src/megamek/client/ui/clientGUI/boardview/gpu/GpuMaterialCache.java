@@ -178,7 +178,8 @@ final class GpuMaterialCache {
 
     /** Read-only render-thread snapshot for Tuning; bytes describe requested GPU storage, not driver overhead. */
     record Status(String state, boolean active, long allocatedBytes, long pageBytes, GpuPageCache.Status pages,
-          int level, int requested, int admitted, int wallsOutside) { }
+          int level, int requested, int admitted, int wallsOutside,
+          int topBatches, int cachedTopBatches, int wallBatches, int cachedWallBatches) { }
 
     /** A page of any level, hashed as the page cache keys it: a record's own hash repeats along nearby rows. */
     private record PageKey(int at, int x, int y) {
@@ -200,6 +201,12 @@ final class GpuMaterialCache {
     private final int[] coarseTargets = new int[FORMATS.length];
     private ShaderProgram means, sharpen;
     private boolean active, usable = true, enabled = ENABLED, prewarmed = true, hasWalls;
+    /** Render-thread diagnostic only; never persisted or baked into the cached material. */
+    private boolean debug;
+    private static final float[][] DEBUG_LEVELS = {
+          { .05f, 1, .1f }, { .05f, 1, 1 }, { .08f, .2f, 1 }, { .5f, .1f, 1 },
+          { 1, .05f, 1 }, { 1, 1, .05f }, { 1, .4f, .03f }
+    };
     // The board's extent (world units), its world metre, and the pages the context allows (read once).
     private final BoundingBox board = new BoundingBox();
     private float metre = 1;
@@ -842,6 +849,8 @@ final class GpuMaterialCache {
     /** Live A/B switch: off, tops and walls draw directly; storage stays allocated for switching back. */
     void setEnabled(boolean value) { enabled = ENABLED && value; }
 
+    void setDebug(boolean value) { debug = value; }
+
     Status status() {
         // A still frame reuses its plan without calling need(): retain that plan's diagnostic counts too.
         var counts = pages.allocated() && filling && last != null && pages.changes() == lastChanges
@@ -859,7 +868,8 @@ final class GpuMaterialCache {
         else { state = exact ? "Ready" : "Ready - partial coverage"; }
         return new Status(state, active && enabled && usable && pages.allocated(),
               pages.allocatedBytes() + buildBytes(), pages.pageBytes(), counts,
-              level, under + walled, admitted, wallsOutside);
+              level, under + walled, admitted, wallsOutside,
+              shownPages(visible), cachedPages.size, shownPages(walls), cachedWalls.size);
     }
 
     /** Nominal storage of the fill's textures and renderbuffers, including their mips and multisample targets. */
@@ -1756,6 +1766,21 @@ final class GpuMaterialCache {
     }
 
     // ---- Programs ----
+
+    /** Tint the selected draw path, not page residency: a partly covered terrain page still draws directly. */
+    void registerDebug(DefaultShader shader, boolean cached) {
+        shader.register("u_materialCacheDebug", new BaseShader.GlobalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                if (cached) {
+                    float[] colour = DEBUG_LEVELS[Math.clamp(level, 0, TOP_LEVEL)];
+                    target.set(id, colour[0], colour[1], colour[2], debug ? .72f : 0);
+                } else {
+                    target.set(id, 1f, .025f, .025f, debug ? .72f : 0);
+                }
+            }
+        });
+    }
 
     /** A fill program's texel (fillTexel). Its creation (a load, or a shader edit) rebuilds every page. */
     void registerFill(DefaultShader shader) {

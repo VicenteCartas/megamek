@@ -2,37 +2,25 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
-import java.util.function.ToDoubleFunction;
 
 import com.badlogic.gdx.math.MathUtils;
 
-/** Presentation-only battle-clock scale: approaching lethal projectiles or one extra real second of a lethal beam. */
+/** Presentation-only battle-clock scale, approaching a ranged death's scheduled start. */
 final class UnitSlowMotion {
-    static final float DEATH_DISTANCE_HEXES = 4;
+    /** Final .36 seconds at normal playback, stretched to about one real second by the easing curve. */
+    static final float DEATH_LEAD_SECONDS = .18f;
     static final float DEATH_RATE = .1f;
-    static final float BEAM_EXTRA_SECONDS = 1;
     private static final float BULLET_TIME_RATE = .25f, BULLET_TIME_LEAD_SECONDS = .25f;
 
     /** Derived from the current presentation; no recovery clock survives the impact or a disabled checkbox. */
-    static float scale(List<UnitAttack> attacks, ToDoubleFunction<UnitAttack> distanceToImpact,
-          double playbackRate, boolean dramaticDeath) {
+    static float scale(List<UnitAttack> attacks, boolean dramaticDeath) {
         float approach = 1, bulletRate = 1;
         for (var attack : attacks) {
             if (GpuBattleView.BULLET_TIME && attack.landing(BULLET_TIME_LEAD_SECONDS)) { bulletRate = BULLET_TIME_RATE; }
-            if (!dramaticDeath || !attack.death() || attack.seconds >= 0
+            if (!dramaticDeath || !attack.death() || attack.seconds >= 0 || attack.event.result().crewLoss()
                   || attack.cause == null || !attack.cause.shot()) { continue; }
-            var cause = attack.cause;
-            if (cause.continuousBeam()) {
-                if (cause.seconds >= UnitAttack.ANTICIPATION_SECONDS) {
-                    // Stretch only the lit beam: duration / rate becomes duration / rate + one real second.
-                    approach = Math.min(approach,
-                          (float) (cause.flightSeconds / (cause.flightSeconds + playbackRate * BEAM_EXTRA_SECONDS)));
-                }
-            } else {
-                float distance = (float) distanceToImpact.applyAsDouble(cause);
-                float outside = UnitAttack.smooth(distance / (DEATH_DISTANCE_HEXES * BoardGeometry.height()));
-                approach = Math.min(approach, MathUtils.lerp(DEATH_RATE, 1, outside));
-            }
+            float remaining = -attack.seconds / DEATH_LEAD_SECONDS;
+            approach = Math.min(approach, MathUtils.lerp(DEATH_RATE, 1, UnitAttack.smooth(remaining)));
         }
         return Math.min(bulletRate, approach);
     }

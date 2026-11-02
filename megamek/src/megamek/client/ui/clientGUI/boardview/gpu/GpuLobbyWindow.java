@@ -49,6 +49,7 @@ import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
+import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.LobbyUnitMenu;
@@ -228,6 +229,11 @@ public final class GpuLobbyWindow {
 
         @Override
         public void gameSettingsChange(GameSettingsChangeEvent event) {
+            // Client packets arrive on the EDT. Observe every map echo before the general refresh coalesces them,
+            // including repeated values from several quick rotations of the same board.
+            if (event.isMapSettingsOnlyChange() && SwingUtilities.isEventDispatchThread() && mapSetup != null) {
+                mapSetup.refresh();
+            }
             queueRefresh();
             if (!event.isMapSettingsOnlyChange()) {
                 gameOptionsChanged();
@@ -314,6 +320,11 @@ public final class GpuLobbyWindow {
         }
 
         @Override
+        public void focusLost() {
+            if (screen != null) { screen.focusLost(); }
+        }
+
+        @Override
         public void ended(Throwable failure) {
             SwingUtilities.invokeLater(() -> finished(failure));
         }
@@ -345,8 +356,10 @@ public final class GpuLobbyWindow {
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
     /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
-    private final LobbySpriteWorker<MekSummary> sprites = new LobbySpriteWorker<>("Requisition sprites",
+    private final LobbySpriteWorker<RequisitionSprite> sprites = new LobbySpriteWorker<>("Requisition sprites",
           this::drawRequisitionSprite);
+    /** The EDT captures a private camo copy for a queued drawing; it is never changed by the worker. */
+    private record RequisitionSprite(MekSummary unit, Camouflage camouflage) { }
     private Map<Integer, String> sentSprites = Map.of();
     /** Set when a new screen needs every sprite again. */
     private volatile boolean spritesStale;
@@ -358,6 +371,8 @@ public final class GpuLobbyWindow {
 
     /** EDT: set when the lobby comes back from a 3D preview the map setup opened, to show the map setup again. */
     private boolean reopenMapSetup;
+    /** EDT: includes construction, before Swing has announced the modal dialog. */
+    private boolean advancedMapSearchOpen;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -902,20 +917,33 @@ public final class GpuLobbyWindow {
     }
 
     /**
-     * Any thread: draws the sprites of catalogue {@code units} in the local player's camouflage and hands each to the
-     * screen. The files are read on a thread of their own, the latest asked first, as the newest rows are those in view.
+     * Any thread: draws catalogue sprites for the local player, as used by the random army dialog.
      */
     void requisitionSprites(List<MekSummary> units) {
-        if (!closing) {
-            sprites.request(units);
-        }
+        requisitionSprites(units, -1);
+    }
+
+    /** Any thread: captures the recipient's camouflage, then queues the newest visible units first. */
+    void requisitionSprites(List<MekSummary> units, int ownerId) {
+        SwingUtilities.invokeLater(() -> {
+            if (closing) {
+                return;
+            }
+            Player owner = ownerId < 0 ? gui.getClient().getLocalPlayer()
+                  : gui.getClient().getGame().getPlayer(ownerId);
+            if (owner != null) {
+                Camouflage camouflage = owner.getCamouflage().clone();
+                sprites.request(units.stream().map(unit -> new RequisitionSprite(unit, camouflage)).toList());
+            }
+        });
     }
 
     /** The Requisition sprites' thread: draws one unit's sprite on the Swing thread and hands it to the screen. */
-    private void drawRequisitionSprite(MekSummary unit) {
+    private void drawRequisitionSprite(RequisitionSprite request) {
         if (closing) {
             return;
         }
+        MekSummary unit = request.unit();
         Entity entity = LobbyRequisitionController.FILES.read(unit);
         if (entity == null) {
             return;
@@ -924,13 +952,12 @@ public final class GpuLobbyWindow {
         try {
             // The tileset and its images are Swing's
             SwingUtilities.invokeAndWait(() -> {
-                Player local = gui.getClient().getLocalPlayer();
-                BufferedImage image = (local == null) ? null : sprite(entity, local.getCamouflage());
+                BufferedImage image = sprite(entity, request.camouflage());
                 if (image != null) {
                     GpuHost.post(() -> {
                         GpuLobbyScreen shown = screen;
                         if (shown != null) {
-                            shown.requisitionSprite(key, image);
+                            shown.requisitionSprite(key, LobbyRequisition.camouflageKey(request.camouflage()), image);
                         }
                     });
                 }
@@ -1132,6 +1159,11 @@ public final class GpuLobbyWindow {
         forces(controller -> controller.drop(unitIds, formationIds, target));
     }
 
+    /** Any thread: deletes the selected units and formations through the unit menu's confirmation and checks. */
+    void deleteForces(List<Integer> unitIds, List<Integer> formationIds) {
+        forces(controller -> controller.delete(unitIds, formationIds));
+    }
+
     /**
      * Any thread: builds the unit menu for these units and formations and sends its items to the screen; the menu stays
      * here until one is chosen.
@@ -1261,7 +1293,7 @@ public final class GpuLobbyWindow {
                 LOGGER.error(failure, "The lobby could not read the map settings");
                 return;
             }
-            mapSetup = new LobbyMapSetupController(form,
+            mapSetup = new LobbyMapSetupController(form, () -> client.getGame().getBoard(),
                   (picture, themes) -> onScreen(shown -> shown.mapSetup(picture, themes)),
                   (key, image) -> onScreen(shown -> shown.mapPicture(key, image)));
         }
@@ -1296,8 +1328,17 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void preview(String board) {
-                mapSetup(controller -> controller.preview(board));
+            public void previews(List<String> boards) {
+                SwingUtilities.invokeLater(() -> {
+                    if (!closing && mapSetup != null) {
+                        mapSetup.previews(boards);
+                    }
+                });
+            }
+
+            @Override
+            public void inspect(String board, Consumer<BoardScene> ready) {
+                mapSetup(controller -> controller.inspect(board, scene -> GpuHost.post(() -> ready.accept(scene))));
             }
 
             @Override
@@ -1349,13 +1390,26 @@ public final class GpuLobbyWindow {
                 }
             }
             case ADVANCED_SEARCH -> {
-                AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
-                if (search.showDialog().isConfirmed() && mapSetup != null) {
-                    String path = search.getPath();
-                    if (path != null) {
-                        mapSetup.act(form -> form.singleBoard(path));
-                        refreshSoon();
+                if (advancedMapSearchOpen || swingDialogs.blocked()) {
+                    swingDialogs.frontModal();
+                    return;
+                }
+                advancedMapSearchOpen = true;
+                try {
+                    AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
+                    try {
+                        if (search.showDialog().isConfirmed() && mapSetup != null && !closing) {
+                            String path = search.getPath();
+                            if (path != null) {
+                                mapSetup.act(form -> form.singleBoard(path));
+                                refreshSoon();
+                            }
+                        }
+                    } finally {
+                        search.dispose();
                     }
+                } finally {
+                    advancedMapSearchOpen = false;
                 }
             }
         }

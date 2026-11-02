@@ -77,4 +77,9 @@ record UnitRig(String family, String type, String container, Map<String, String>
     boolean transport() {
         return "infantry-transport".equals(family);
     }
+
+    /** Also includes a combined motorcycle/rider meeple, placed as a vehicle by GpuUnitModels.singleMeeple. */
+    boolean vehicle() {
+        return transport() || container != null && container.startsWith("vehicle-");
+    }
 }

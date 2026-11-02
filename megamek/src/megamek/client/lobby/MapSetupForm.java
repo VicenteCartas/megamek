@@ -172,6 +172,8 @@ public final class MapSetupForm {
     private final Map<String, String> tags = new HashMap<>();
     private MapSettings settings;
     private MapSettings seen;
+    /** Sent setups awaiting their echoes, in send order; an older echo must not undo later edits. */
+    private final List<MapSettings> pending = new ArrayList<>();
     private String search = "";
     private boolean customSize;
 
@@ -201,6 +203,7 @@ public final class MapSetupForm {
     public void reload() {
         seen = server.get();
         settings = MapSettings.getInstance(seen);
+        pending.clear();
     }
 
     /**
@@ -209,10 +212,49 @@ public final class MapSetupForm {
      * @return whether it did
      */
     public boolean reloadIfNew() {
-        if (server.get() == seen) {
+        MapSettings received = server.get();
+        if (received == seen) {
             return false;
         }
-        reload();
+        int acknowledged = -1;
+        for (int index = 0; index < pending.size(); index++) {
+            if (sameSetup(received, pending.get(index))) {
+                acknowledged = index;
+                break;
+            }
+        }
+        boolean unchanged = sameSetup(received, seen);
+        seen = received;
+        if (acknowledged >= 0) {
+            pending.subList(0, acknowledged + 1).clear();
+        } else if (!unchanged) {
+            // An unrelated server edit is authoritative; do not hold it behind an unacknowledged local change.
+            pending.clear();
+        }
+        if (pending.isEmpty()) {
+            settings = MapSettings.getInstance(received);
+        } else {
+            settings.setBoardsAvailableVector(received.getBoardsAvailableVector());
+        }
+        return true;
+    }
+
+    private void sent() {
+        pending.add(MapSettings.getInstance(settings));
+    }
+
+    /** Compares the setup, excluding the server's catalogue of available boards. */
+    public static boolean sameSetup(MapSettings first, MapSettings second) {
+        if (!first.equalMapGenParameters(second)
+              || !first.getBoardsSelectedVector().equals(second.getBoardsSelectedVector())) {
+            return false;
+        }
+        for (int slot = 0; slot < first.getMapWidth() * first.getMapHeight(); slot++) {
+            if (!Objects.equals(first.getBoardTheme(slot), second.getBoardTheme(slot))
+                  || first.getBoardLevelOffset(slot) != second.getBoardLevelOffset(slot)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -377,6 +419,7 @@ public final class MapSetupForm {
     public void medium(int medium) {
         if (medium != settings.getMedium()) {
             commands.medium(settings, medium);
+            sent();
         }
     }
 
@@ -391,6 +434,7 @@ public final class MapSetupForm {
             return false;
         }
         commands.resizeMap(settings, width, settings.getMapHeight());
+        sent();
         return (width > old) && oddBoardNagDue();
     }
 
@@ -398,6 +442,7 @@ public final class MapSetupForm {
         if ((height != settings.getMapHeight()) && (height >= LobbyCommands.MIN_MAP_SIZE)
               && (height <= LobbyCommands.MAX_MAP_SIZE)) {
             commands.resizeMap(settings, settings.getMapWidth(), height);
+            sent();
         }
     }
 
@@ -411,6 +456,7 @@ public final class MapSetupForm {
         customSize = false;
         if (!size.equals(settings.getBoardSize())) {
             commands.resizeBoards(settings, size.width(), size.height());
+            sent();
         }
     }
 
@@ -430,6 +476,7 @@ public final class MapSetupForm {
             return false;
         }
         commands.resizeBoards(settings, width, settings.getBoardHeight());
+        sent();
         return oddBoardNagDue();
     }
 
@@ -437,6 +484,7 @@ public final class MapSetupForm {
         if ((height != settings.getBoardHeight()) && (height >= LobbyCommands.MIN_BOARD_SIZE)
               && (height <= LobbyCommands.MAX_BOARD_SIZE)) {
             commands.resizeBoards(settings, settings.getBoardWidth(), height);
+            sent();
         }
     }
 
@@ -452,19 +500,8 @@ public final class MapSetupForm {
     public void assign(int slot, String board) {
         if (validSlot(slot) && !board.isBlank()) {
             commands.changeBoard(settings, slot, board);
+            sent();
         }
-    }
-
-    /** Puts a board into a slot turned by 180 degrees; only boards of even width can be. */
-    public void assignRotated(int slot, String board) {
-        if (evenBoardWidth() && isBoardFile(board)) {
-            assign(slot, Board.BOARD_REQUEST_ROTATION + unrotated(board));
-        }
-    }
-
-    /** Whether boards can be put in rotated: the board width is even. */
-    public boolean canRotate() {
-        return evenBoardWidth();
     }
 
     /** Puts one of the boards, picked now and not shown to the others, into a slot. */
@@ -491,6 +528,7 @@ public final class MapSetupForm {
             String board = current.rotated() ? unrotated(current.board())
                   : Board.BOARD_REQUEST_ROTATION + current.board();
             commands.changeBoard(settings, slot, board);
+            sent();
         }
     }
 
@@ -519,6 +557,7 @@ public final class MapSetupForm {
     public void theme(int slot, @Nullable String theme) {
         if (validSlot(slot) && !Objects.equals(theme, settings.getBoardTheme(slot))) {
             commands.theme(settings, slot, theme);
+            sent();
         }
     }
 
@@ -526,6 +565,7 @@ public final class MapSetupForm {
         if (validSlot(slot) && (offset >= MapSettings.MIN_BOARD_LEVEL_OFFSET)
               && (offset <= MapSettings.MAX_BOARD_LEVEL_OFFSET) && (offset != settings.getBoardLevelOffset(slot))) {
             commands.levelOffset(settings, slot, offset);
+            sent();
         }
     }
 
@@ -541,6 +581,7 @@ public final class MapSetupForm {
             return false;
         }
         commands.selectSingleBoard(settings, BoardFile.selectionName(path).replace("\\", "/"), size);
+        sent();
         return true;
     }
 
@@ -594,6 +635,7 @@ public final class MapSetupForm {
             throw new IOException(failure);
         }
         commands.applySetup(settings, setup);
+        sent();
     }
 
     // endregion

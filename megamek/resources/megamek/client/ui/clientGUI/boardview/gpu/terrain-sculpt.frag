@@ -37,6 +37,7 @@ const float RELIEF_METRES = .2;
 const float FRAY_METRES = .25;
 uniform float u_normalMaps;
 uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
+uniform vec4 u_materialCacheDebug; // draw-path tint; alpha is zero unless the session's Debug switch is on
 uniform float u_groundResponse;
 uniform float u_sculptFamily; // BoardScene.Surface: GRASS 0, DIRT 1, SAND 2, ROCK 3, CONCRETE 4, SNOW 5, LUNAR 6
 // A draw's families are compile-time constants in its family program (GpuFamilyPrograms), so the compiler
@@ -895,5 +896,8 @@ void main() {
         float light = smoothstep(0.0, .9 * u_levelHeight / u_metre, surfaceUV.x);
         result *= light * light;
     }
+    // The fill returned above: diagnostics must never change stored material or its later cached lighting.
+    // Rocks and plants also use this shader, but are outside the terrain material cache.
+    if (ground || cliff || abyss) result = mix(result, u_materialCacheDebug.rgb, u_materialCacheDebug.a);
     fragColor = vec4(result, 1.0);
 }

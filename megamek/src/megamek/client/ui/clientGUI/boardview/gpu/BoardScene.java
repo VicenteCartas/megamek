@@ -551,7 +551,6 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                     case SCATTER -> { if (!weightless && BoardScatter.stone(feature.asset())) { kept.add(feature); } }
                     // Felled timber goes with the other vegetation; Dragon's Teeth are concrete.
                     case ROUGH -> { if (feature.asset().equals("rough/dragon-tooth")) { kept.add(feature); } }
-                    case PROP -> { if (!feature.asset().equals("vegetation/field")) { kept.add(feature); } }
                     // Nothing lies loose without gravity. Rough is bedrock breaking the surface: every third boulder
                     // becomes an outcrop three times its size, its height a bound. A repeated presentation keeps them.
                     case BOULDER -> {

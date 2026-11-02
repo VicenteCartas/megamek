@@ -654,8 +654,8 @@ final class GpuHud implements GpuBoardHud {
      * CANCEL, which would clear declared attacks; elsewhere the last step forwards it to the phase display.
      */
     private boolean escape() {
-        // A row dragged in a list (a target card's attacks, the sheet's weapons) goes home first.
-        if (targetCards.cancelDrag() || recordSheet.cancelDrag()) {
+        // A row dragged in a list (attacks or weapons) goes home first.
+        if (targetCards.cancelDrag() || recordSheet.cancelDrag() || weapons.cancelDrag()) {
             return true;
         }
         GamePhase phase = inputs.frame().status().phase();

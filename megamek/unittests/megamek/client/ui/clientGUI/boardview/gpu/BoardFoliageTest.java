@@ -171,7 +171,8 @@ class BoardFoliageTest {
                 }
             }
             assertTrue(triangles > 0 && triangles < previous);
-            assertTrue(triangles <= List.of(480, 240, 96, 12).get(lod));
+            boolean authored = !family.equals("desert") && !family.equals("jungle");
+            assertTrue(triangles <= (authored ? List.of(24000, 8000, 2200, 12) : List.of(480, 240, 96, 12)).get(lod));
             assertEquals(0, low, .001f, "All detail levels remain grounded");
             assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
             if (lod == 0) { assertEquals(18, high - low, .001f); }
@@ -185,7 +186,7 @@ class BoardFoliageTest {
                     assertTrue(image != null && image.file() != null && Files.isRegularFile(Path.of(image.file())), file);
                 }
                 if (material.id.endsWith("-cutout")) {
-                    assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id));
+                    assertEquals(authored ? .3f : .5f, ((RigidGlb.Data) data).alphaTests.get(material.id));
                 }
             }
             previous = triangles;

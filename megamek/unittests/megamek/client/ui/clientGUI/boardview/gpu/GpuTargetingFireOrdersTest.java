@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
@@ -19,7 +20,9 @@ import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.AmmoType;
+import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -155,6 +158,39 @@ class GpuTargetingFireOrdersTest {
             assertEquals(longTom, attack.getWeaponId());
             assertEquals(TARGET_HEX, attack.getTarget(targeting.board.game).getPosition());
             assertEquals(1, orders.attacks().size(), "The panel lists the queued attack");
+        }
+    }
+
+    @Test
+    void reorderingArtilleryKeepsTheHiddenWeaponsAndRejectsStaleUnits() throws Exception {
+        try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
+            List<WeaponMounted> before = onSwing(() -> {
+                targeting.attacker.addEquipment(EquipmentType.get("ISLongTom"), Mek.LOC_RIGHT_ARM);
+                List<WeaponMounted> order = new ArrayList<>(WeaponDisplayData.listedWeapons(targeting.attacker));
+                order.remove(targeting.longTom);
+                order.addFirst(targeting.longTom);
+                WeaponDisplayData.setCustomWeaponOrder(targeting.attacker, order);
+                return order;
+            });
+            GpuFireOrders.Snapshot initial = capture(targeting);
+            assertEquals(2, initial.weapons().size());
+            int first = initial.weapons().getFirst().eqNum();
+            int last = initial.weapons().getLast().eqNum();
+            int unit = targeting.attacker.getId();
+            targeting.source.fire().moveWeapon(unit + 1, first, last);
+            assertEquals(initial.weapons(), capture(targeting).weapons(), "A stale unit cannot reorder the actor");
+            int hidden = targeting.attacker.getEquipmentNum(before.get(1));
+            targeting.source.fire().moveWeapon(unit, first, hidden);
+            assertEquals(initial.weapons(), capture(targeting).weapons(), "Only shown weapons are drag destinations");
+
+            targeting.source.fire().moveWeapon(unit, first, last);
+            GpuFireOrders.Snapshot ordered = capture(targeting);
+            assertEquals(List.of(last, first), ordered.weapons().stream().map(GpuFireOrders.WeaponRow::eqNum).toList());
+            List<WeaponMounted> expected = new ArrayList<>(before);
+            expected.add(expected.removeFirst());
+            assertEquals(expected, onSwing(() -> WeaponDisplayData.listedWeapons(targeting.attacker)),
+                  "The drop uses equipment numbers across weapons hidden in this phase");
+            assertEquals(initial.selectedWeapon(), ordered.selectedWeapon());
         }
     }
 

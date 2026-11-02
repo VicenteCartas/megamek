@@ -5,7 +5,6 @@ import java.awt.Toolkit;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,9 +45,6 @@ import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.ScreenUtils;
@@ -87,26 +83,19 @@ class GpuBattleView extends ApplicationAdapter {
     static final boolean HIDE_TARGET_ARROWS_DURING_ATTACKS = true;
     /** Slow motion as a shot that hits comes in, just before its impact. */
     static final boolean BULLET_TIME = false;
-    /** Slow a killing projectile's last four hexes, or a melee kill at impact; infantry dies with its last trooper. */
+    /** Slow the lead-in to a ranged death; infantry dies with its last trooper. */
     static final boolean DRAMATIC_DEATH = true;
     /** unit's screen rectangle is .55 of a hex wide. */
     private static final float UNIT_RECT_WIDTH = .55f;
     /** Floating units are tied to their hex with this faint solid stem; solid, so it needs no blending state. */
     private static final Color TETHER_COLOR = Color.valueOf("A9B8B8");
-    private static final float PAN_PIXELS_PER_SECOND = 750;
     /** How near the board area's edge (unscaled window pixels) a route's drag scrolls the board ({@link #edgePan}). */
     private static final float EDGE_PAN_MARGIN = 48;
     private static final float FLIGHT_HEXES_PER_SECOND = 1.5f;
-    private static final float CAMERA_SPEED_BOOST = 4;
-    private static final float TILT_DEGREES_PER_SECOND = 60;
-    /** A held CAMERA_ROTATE bind turns the 3D camera at this rate (rebuild plan A.17 Q9). */
-    private static final float ROTATE_DEGREES_PER_SECOND = 90;
     /** The zoom factor of one ZOOM_IN or ZOOM_OUT bind; the Menu's View zoom items use it as well. */
     static final float ZOOM_STEP = 1.2f;
-    /** A pointer that moved this far, times the layout scale, drags: the camera moves and no click follows (C.4). */
-    private static final float DRAG_THRESHOLD = 6;
     /** Degrees a middle drag orbits the camera per layout unit, on the board and on the minimap (C.4). */
-    static final float ORBIT_DEGREES = .3f;
+    static final float ORBIT_DEGREES = BoardCameraControls.ORBIT_DEGREES;
     /** The editor's rotation handle on screen, times the layout scale: its line's length and its circle's radius. */
     private static final float HANDLE_LENGTH = 28, HANDLE_RADIUS = 7;
     private static final MMLogger LOGGER = MMLogger.create(GpuBattleView.class);
@@ -115,12 +104,7 @@ class GpuBattleView extends ApplicationAdapter {
     private BoardSource source;
     private Stage loadingStage;
     private GpuBoardSkin loadingTheme;
-    private Label loadingLabel;
-    private Label loadingDetails;
-    private GpuLoadingGrid loadingGrid;
-    private Label loadingWaiting, loadingActive, loadingReady;
-    /** The shader bar (showShaders), under the section legend. */
-    private UiKit.Progress loadingShaders;
+    private GpuLoadingPanel loadingPanel;
     private volatile String loadingMessage = Messages.getString("ClientGUI.waitingOnTheServer");
     private final GpuDisplayScale displayScale = new GpuDisplayScale();
     final BoardCamera boardCamera = new BoardCamera();
@@ -147,16 +131,15 @@ class GpuBattleView extends ApplicationAdapter {
     private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
     private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
     /**
-     * The hits last played against a unit: away from them, as long as the damage they dealt ({@link #hitPush}), at
-     * {@link #hoverClock}. Its dying meeples fly that way.
+     * The hits last played against a unit: their push and latest landed attack, at {@link #hoverClock}. Its dying
+     * meeples fly that way; infantry figures react to that attack's weapon and damage per hit.
      */
-    record Hit(Vector3 push, float clock) { }
+    record Hit(Vector3 push, float clock, UnitAttack cause) { }
     /** A hit is forgotten this long after it played: a later death without one bursts out evenly. */
     private static final float HIT_MEMORY_SECONDS = 10;
     /** The damage a nuclear blast stands for: more than any meeple's pieces can take. */
     private static final float NUCLEAR_DAMAGE = 200;
     private final Map<Integer, Hit> hits = new HashMap<>();
-    private final MeepleCasualties casualties = new MeepleCasualties();
     private final MeepleDebris.Ground debrisGround = this::debrisHeight;
     /** The units seen dead, in either camera: a meeple explodes only as its unit first shows dead. */
     private final Set<String> deadUnits = new HashSet<>();
@@ -166,6 +149,7 @@ class GpuBattleView extends ApplicationAdapter {
     private static final float GHOST_FADE_SECONDS = .25f;
     private final GpuUnitModels unitModels = GpuUnitModels.ENABLED ? new GpuUnitModels() : null;
     private final UnitDamageDisplay damageDisplay = new UnitDamageDisplay();
+    private final MeepleCasualties casualties = new MeepleCasualties(damageDisplay);
     private final GpuJumpJets jumpJets = new GpuJumpJets();
     private final GpuPilotFlames pilotFlames = new GpuPilotFlames();
     private final GpuUnitCamouflage camouflage = new GpuUnitCamouflage();
@@ -388,63 +372,14 @@ class GpuBattleView extends ApplicationAdapter {
         if (theme == null && loadingTheme == null) { loadingTheme = GpuBoardSkin.forScene(); }
         var skin = theme != null ? theme.skin : loadingTheme.skin;
         loadingStage = new Stage(new ScreenViewport(), new SpriteBatch(1000, sprites()));
-        Table content = new Table();
-        content.setFillParent(true);
-        Value edge = Value.percentHeight(.06f, content);
-        content.pad(edge, Value.zero, edge, Value.zero);
-        loadingLabel = new Label(loadingMessage, skin, "hud-phase");
-        loadingLabel.setName("board-loading-message");
-        loadingLabel.setWrap(true);
-        loadingLabel.setAlignment(Align.center);
-        loadingDetails = new Label("", skin, "hud-title");
-        loadingDetails.setName("board-loading-details");
-        loadingDetails.setWrap(true);
-        loadingDetails.setAlignment(Align.top | Align.center);
-        loadingGrid = new GpuLoadingGrid(skin);
-        Table legend = new Table();
-        loadingWaiting = new Label("", skin);
-        loadingActive = new Label("", skin);
-        loadingReady = new Label("", skin);
-        loadingWaiting.setName("board-loading-waiting");
-        loadingActive.setName("board-loading-active");
-        loadingReady.setName("board-loading-ready");
-        loadingWaiting.setColor(UiTheme.MUTED);
-        loadingActive.setColor(GpuLoadingGrid.LOADING);
-        loadingReady.setColor(GpuLoadingGrid.READY);
-        for (Label entry : List.of(loadingWaiting, loadingActive, loadingReady)) {
-            legend.add(entry).padLeft(12).padRight(12);
-        }
-        // Hidden while no program is left to link; a hidden bar keeps its row, so the tasks below never move.
-        loadingShaders = new UiKit(skin).progress(Messages.getString("GpuBoard.loadingShaders"));
-        loadingShaders.setName("board-loading-shaders");
-        loadingShaders.setVisible(false);
-        content.add(new Label("MEGAMEK", skin, "hud-small")).padBottom(12).row();
-        content.add(loadingLabel).width(Value.percentWidth(.9f, content)).maxWidth(900)
-              .height(loadingLabel.getStyle().font.getLineHeight() * 2).row();
-        if (GpuGlsl.intelCacheFull()) {
-            // The player clears the driver's folder; MegaMek only reads its file sizes.
-            var notice = new Label(Messages.getString("GpuBoard.intelShaderCacheFull", GpuProgramCache.INTEL_CACHE),
-                  skin);
-            notice.setName("board-loading-notice");
-            notice.setWrap(true);
-            notice.setAlignment(Align.center);
-            notice.setColor(UiTheme.AMBER);
-            content.add(notice).width(Value.percentWidth(.9f, content)).maxWidth(900).padTop(6).row();
-        }
-        // The header keeps the top and the progress the bottom; the honeycomb centers in the space between and shrinks
-        // its hexes to fit. The tasks keep room for every worker, so a change in their count never moves a row.
-        content.add(loadingGrid).width(Value.percentWidth(.9f, content)).growY().padTop(14).row();
-        content.add(legend).padTop(10).row();
-        content.add(loadingShaders).width(Value.percentWidth(.9f, content)).maxWidth(420).padTop(14).row();
-        content.add(loadingDetails).width(Value.percentWidth(.9f, content)).maxWidth(900)
-              .height(loadingDetails.getStyle().font.getLineHeight() * GpuTerrain.BUILD_JOBS).padTop(14);
-        loadingStage.addActor(content);
+        loadingPanel = new GpuLoadingPanel(skin, loadingMessage);
+        loadingPanel.setFillParent(true);
+        loadingStage.addActor(loadingPanel);
     }
 
     /** The shader bar shows the share of the programs the load needs that have linked, while any is left to link. */
     static void showShaders(UiKit.Progress bar, TerrainLoadProgress.Shaders shaders) {
-        bar.setVisible(shaders.linked() < shaders.total());
-        if (bar.isVisible()) { bar.set((float) shaders.linked() / shaders.total()); }
+        GpuLoadingPanel.showShaders(bar, shaders);
     }
 
     /** The loading screen at the HUD's display scale, read each frame since a monitor change keeps the window size. */
@@ -749,7 +684,7 @@ class GpuBattleView extends ApplicationAdapter {
     private void renderFrame(TerrainSettings.Scope settings) {
         if (source == null) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
-            loadingLabel.setText(loadingMessage);
+            loadingPanel.message(loadingMessage);
             drawLoadingStage();
             return;
         }
@@ -805,6 +740,8 @@ class GpuBattleView extends ApplicationAdapter {
         playback.gravityOverride = tuning.gravityOverride();
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = history.speed() == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
+        // Instant has no animation clock: finish existing casualties before their models or markers are drawn again.
+        if (history.speed() == UnitMotion.Speed.INSTANT) { casualties.dispose(); }
         updateSlowMotion();
         history.advance(Gdx.graphics.getDeltaTime() * timeScale, state -> preparePlaybackCamera(state, scene));
         // The impact frame's explosion and debris already use full speed, without waiting for the next frame.
@@ -842,6 +779,7 @@ class GpuBattleView extends ApplicationAdapter {
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         terrain.setTessellation(tuning.tessellation());
         terrain.setMaterialCache(tuning.terrainCache());
+        terrain.setMaterialCacheDebug(tuning.terrainCacheDebug());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
         atmosphere.setVignette(tuning.vignette());
         // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
@@ -859,20 +797,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (!terrain.ready(scene)) {
             ScreenUtils.clear(.045f, .065f, .075f, 1, true);
             createLoadingStage();
-            // A finished build (-1) still installs behind the stage: it shows as complete, not 0.
-            int built = terrain.buildProgress();
-            loadingLabel.setText(Messages.getString("GpuBoard.loadingOverall", built < 0 ? 100 : built));
-            var sections = terrain.buildSections();
-            loadingGrid.update(sections);
-            loadingWaiting.setText(Messages.getString("GpuBoard.loadingLegend.waiting",
-                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.WAITING)));
-            loadingActive.setText(Messages.getString("GpuBoard.loadingLegend.active",
-                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.LOADING)));
-            loadingReady.setText(Messages.getString("GpuBoard.loadingLegend.ready",
-                  Collections.frequency(sections.states(), TerrainLoadProgress.SectionState.READY), sections.states().size()));
-            showShaders(loadingShaders, terrain.shaderProgress());
-            loadingDetails.setText(terrain.buildDetails().stream().map(TerrainLoadProgress.Status::text)
-                  .collect(Collectors.joining("\n")));
+            loadingPanel.update(terrain);
             drawLoadingStage();
             renderStage(null);
             // Each loading stage readies what may change programs, a lighting switch included: probe again.
@@ -943,30 +868,14 @@ class GpuBattleView extends ApplicationAdapter {
         // The first visible frame's delta may still include the hidden window's loading time.
         boardCamera.advance(entranceStarting ? 0 : Gdx.graphics.getDeltaTime());
         entranceStarting = false;
-        float cameraSpeed = (modifiers() & InputEvent.SHIFT_DOWN_MASK) != 0 ? CAMERA_SPEED_BOOST : 1;
+        float cameraSpeed = BoardCameraControls.speed(modifiers());
         if (ui.isTextEditing() || ui.isModal()) {
             // Text editing and modal dialogs suspend held camera movement.
             cameraKeys.clear();
         } else if (boardCamera.firstPerson()) {
             advanceFirstPerson(Gdx.graphics.getDeltaTime(), cameraSpeed);
         } else {
-            float elapsed = Gdx.graphics.getDeltaTime() * cameraSpeed;
-            float distance = PAN_PIXELS_PER_SECOND * elapsed;
-            float inclination = TILT_DEGREES_PER_SECOND * elapsed;
-            float rotation = ROTATE_DEGREES_PER_SECOND * elapsed;
-            for (KeyCommandBind command : cameraKeys.values()) {
-                switch (command) {
-                    case SCROLL_NORTH -> boardCamera.pan(0, distance);
-                    case SCROLL_SOUTH -> boardCamera.pan(0, -distance);
-                    case SCROLL_EAST -> boardCamera.pan(-distance, 0);
-                    case SCROLL_WEST -> boardCamera.pan(distance, 0);
-                    case CAMERA_TILT_UP -> boardCamera.tilt(-inclination);
-                    case CAMERA_TILT_DOWN -> boardCamera.tilt(inclination);
-                    case CAMERA_ROTATE_LEFT -> boardCamera.orbit(-rotation, 0);
-                    case CAMERA_ROTATE_RIGHT -> boardCamera.orbit(rotation, 0);
-                    default -> { }
-                }
-            }
+            BoardCameraControls.move(boardCamera, cameraKeys.values(), Gdx.graphics.getDeltaTime() * cameraSpeed);
             boardInput.autoPan(Gdx.graphics.getDeltaTime());
         }
         if (changedTiles || hoverCameraRevision != boardCamera.revision()) {
@@ -1126,7 +1035,7 @@ class GpuBattleView extends ApplicationAdapter {
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
         pilotFlames.render(boardCamera.camera);
-        attackEffects.render(boardCamera.camera, effectDepth);
+        attackEffects.render(boardCamera.camera, effectDepth, casualties.casualties());
         designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
@@ -1652,9 +1561,11 @@ class GpuBattleView extends ApplicationAdapter {
         unitDamage.keySet().retainAll(unitInstances.keySet());
         equipmentAppearance.keySet().retainAll(unitInstances.keySet());
         hits.keySet().retainAll(scene.units().stream().map(BoardScene.Unit::id).collect(Collectors.toSet()));
+        hits.values().removeIf(hit -> hoverClock - hit.clock() > HIT_MEMORY_SECONDS);
         for (BoardScene.Unit unit : scene.units()) {
-            var push = hitPush(unit);
-            if (push != null) { hits.put(unit.id(), new Hit(push, hoverClock)); }
+            var hit = hit(unit);
+            if (hit != null) { hits.put(unit.id(), hit); }
+            var recent = recentHit(unit);
             Vector3 position = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
             playback.placeDisplacement(unit, position);
             float facing = unit.location().facing() * 60;
@@ -1710,9 +1621,9 @@ class GpuBattleView extends ApplicationAdapter {
             boolean destroyed = death == null ? dead : death.seconds >= 0;
             boolean dying = destroyed && deadUnits.add(key);
             if (!destroyed && deadUnits.remove(key)) { casualties.revived(unit); }
-            if (!destroyed && visual.meeple() && death != null && !death.event.result().crewLoss()
+            if (!destroyed && death != null && !death.event.result().crewLoss()
                   && instance instanceof GpuUnitInstance standing
-                  && MeepleVisual.isMeeple(standing) && history.speed() != UnitMotion.Speed.INSTANT) {
+                  && history.speed() != UnitMotion.Speed.INSTANT) {
                 // Its death waits for the hit that causes it: its meeple is cut meanwhile, off this thread, for the
                 // explosion only to make meshes.
                 casualties.prepare(death, standing, unit);
@@ -1724,7 +1635,8 @@ class GpuBattleView extends ApplicationAdapter {
                 if (dying || ghost == 0) { unitInstances.remove(key); }
                 if (dying && instance instanceof GpuUnitInstance standing
                       && history.speed() != UnitMotion.Speed.INSTANT) {
-                    casualties.died(standing, unit, recentHit(unit), death,
+                    casualties.died(standing, unit, recent == null ? null : recent.push(), death,
+                          death != null && death.cause != null ? death.cause : recent == null ? null : recent.cause(),
                           new UnitFootprint.Pose(placement, position, footprintFacing));
                 }
                 if (ghost == 0) { continue; }
@@ -1739,7 +1651,7 @@ class GpuBattleView extends ApplicationAdapter {
                 if (previous instanceof GpuUnitInstance shown && shown.visual() != null && shown.visual().infantry()
                       && authored && visual.infantry() && displayMode().meeple(unit.model()) && UnitAnimator.troops(unit)
                       && unit.attachment() == null && history.speed() != UnitMotion.Speed.INSTANT) {
-                    casualties.lost(shown, visual, unit, recentHit(unit));
+                    casualties.lost(shown, visual, unit, recent == null ? null : recent.push(), recent == null ? null : recent.cause());
                 }
             }
             BoardScene.LocationDamage shownDamage = unitDamage.getOrDefault(key, BoardScene.LocationDamage.NONE);
@@ -1924,19 +1836,26 @@ class GpuBattleView extends ApplicationAdapter {
      * How the hits playing against {@code unit} drive it, horizontal: away from each attacker, from an artillery round
      * landing in its hex or from a nuclear blast's centre, each by the damage it dealt; null when none is playing.
      */
-    private Vector3 hitPush(BoardScene.Unit unit) {
+    private Hit hit(BoardScene.Unit unit) {
         var at = BoardGeometry.center(unit.location().coords(), unit.location().elevation());
         var push = new Vector3();
+        UnitAttack cause = null;
         for (var attack : playback.attacks()) {
             var target = attack.event.target();
             boolean blast = attack.event.result().shot() != null && attack.event.result().shot().artillery();
             var landing = attack.event.destination();
-            if (blast && landing.coords().equals(unit.location().coords())) {
+            boolean affected = blast ? landing.coords().equals(unit.location().coords()) : target != null && target.id() == unit.id();
+            if (affected && blast) {
                 push.mulAdd(away(at, BoardGeometry.center(landing.coords(), landing.elevation())), damage(attack));
-            } else if (!blast && target != null && target.id() == unit.id()) {
+            } else if (affected) {
                 var attacker = attack.event.attacker();
                 push.mulAdd(away(at, UnitAttack.center(unitInstances.get(attacker.id() + ":" + attacker.part()),
                       attacker.location(), new Vector3())), damage(attack));
+            }
+            if (affected && !attack.death() && !attack.defensive() && attack.event.result().hit()
+                  && attack.seconds >= attack.contactSeconds
+                  && (cause == null || attack.seconds - attack.contactSeconds <= cause.seconds - cause.contactSeconds)) {
+                cause = attack;
             }
         }
         var detonation = playback.detonation();
@@ -1944,7 +1863,10 @@ class GpuBattleView extends ApplicationAdapter {
             push.mulAdd(away(at, BoardGeometry.center(detonation.result().coords(), detonation.result().elevation())),
                   NUCLEAR_DAMAGE);
         }
-        return push.isZero(1e-6f) ? null : push;
+        if (push.isZero(1e-6f) && cause == null) { return null; }
+        var recent = recentHit(unit);
+        return new Hit(push.isZero(1e-6f) ? null : push, hoverClock,
+              cause != null ? cause : recent == null ? null : recent.cause());
     }
 
     /** The damage an attack dealt, as its impacts report it, or its rounds' when it reports none (an area blast). */
@@ -1956,9 +1878,9 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /** The hits that played against {@code unit} in the last {@link #HIT_MEMORY_SECONDS}, or null. */
-    private Vector3 recentHit(BoardScene.Unit unit) {
+    private Hit recentHit(BoardScene.Unit unit) {
         var hit = hits.get(unit.id());
-        return hit == null || hoverClock - hit.clock() > HIT_MEMORY_SECONDS ? null : hit.push();
+        return hit == null || hoverClock - hit.clock() > HIT_MEMORY_SECONDS ? null : hit;
     }
 
     /** The horizontal direction from {@code source} to {@code at}; none where they coincide. */
@@ -2231,8 +2153,8 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * A shot that hits can slow before landing ({@link #BULLET_TIME}). A killing blow ({@link #DRAMATIC_DEATH}) slows
-     * over its final four hexes to 0.1, or extends a continuous beam by one real second. Impact restores full speed
-     * immediately. Physical attacks and deaths without a ranged cause never trigger the effect.
+     * to 0.1 just before its scheduled death effect. Impact restores full speed immediately.
+     * Physical attacks, crew loss and deaths without a ranged cause never trigger the effect.
      * The camera and the HUD keep real time.
      */
     private void updateSlowMotion() {
@@ -2240,8 +2162,7 @@ class GpuBattleView extends ApplicationAdapter {
             timeScale = 1;
             return;
         }
-        timeScale = UnitSlowMotion.scale(playback.attacks(), attackEffects::distanceToImpact,
-              history.speed().rate, tuning.dramaticDeath());
+        timeScale = UnitSlowMotion.scale(playback.attacks(), tuning.dramaticDeath());
     }
 
     private boolean hasInfantryTransports(BoardScene.Unit unit) {
@@ -2695,7 +2616,7 @@ class GpuBattleView extends ApplicationAdapter {
             }
         }
         float elapsed = MathUtils.clamp(seconds, 0, .1f) * speed;
-        if (pitch != 0) { boardCamera.look(0, pitch * TILT_DEGREES_PER_SECOND * elapsed); }
+        if (pitch != 0) { boardCamera.look(0, pitch * BoardCameraControls.TILT_DEGREES_PER_SECOND * elapsed); }
         boardCamera.fly(forward, sideways, vertical, BoardGeometry.height() * FLIGHT_HEXES_PER_SECOND * elapsed);
     }
 
@@ -3007,10 +2928,8 @@ class GpuBattleView extends ApplicationAdapter {
                   && gestureModifiers == 0 && Gdx.input.isKeyPressed(Input.Keys.B);
             gestureBoardGeneration = boardGeneration;
             dragged = false;
-            panning = button == Input.Buttons.RIGHT || button == Input.Buttons.MIDDLE;
-            boolean shiftDown = (gestureModifiers & InputEvent.SHIFT_DOWN_MASK) != 0;
-            // Right drags pan and middle drags orbit or look around; Shift at the press swaps them in every mode.
-            orbiting = panning && (button == Input.Buttons.MIDDLE) != shiftDown;
+            panning = BoardCameraControls.cameraButton(button);
+            orbiting = BoardCameraControls.orbits(button, gestureModifiers);
             ui.boardPress();
             if (button == Input.Buttons.LEFT && source.isEditor() && !measurementGesture && !brushPickerGesture) {
                 // A press on the selection's rotation handle turns the selection.
@@ -3039,7 +2958,7 @@ class GpuBattleView extends ApplicationAdapter {
                 return false;
             }
             if (source.isEditor() && gestureButton == Input.Buttons.LEFT && !measurementGesture && !brushPickerGesture) {
-                if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) { return true; }
+                if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD * layoutScale) { return true; }
                 dragged = true;
                 dragX = x;
                 dragY = y;
@@ -3051,7 +2970,7 @@ class GpuBattleView extends ApplicationAdapter {
                 }
                 return true;
             }
-            if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < DRAG_THRESHOLD * layoutScale) {
+            if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD * layoutScale) {
                 return true;
             }
             // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4). An orbit
@@ -3063,10 +2982,9 @@ class GpuBattleView extends ApplicationAdapter {
                 Vector2 at = cursorCapture.trusted(x, y);
                 x = (int) at.x;
                 y = (int) at.y;
-                boardCamera.orbit((x - dragX) * ORBIT_DEGREES / layoutScale,
-                      (y - dragY) * ORBIT_DEGREES / layoutScale);
-            } else if (panning) {
-                boardCamera.pan(x - dragX, y - dragY);
+            }
+            if (panning) {
+                BoardCameraControls.drag(boardCamera, orbiting, x - dragX, y - dragY, layoutScale);
             }
             dragX = x;
             dragY = y;
@@ -3180,7 +3098,8 @@ class GpuBattleView extends ApplicationAdapter {
             if (!dragged || ui == null || !drawingRoute() || ui.hit(dragX, dragY)) { return; }
             // The drag's last pointer, which stays where it is while the board scrolls under it.
             Vector2 pan = edgePan(dragX, dragY, ui.framingLeft(), ui.framingTop(), ui.framingLeft() + ui.framingWidth(),
-                  Gdx.graphics.getHeight() - ui.framingBottom(), EDGE_PAN_MARGIN * layoutScale, PAN_PIXELS_PER_SECOND * seconds);
+                  Gdx.graphics.getHeight() - ui.framingBottom(), EDGE_PAN_MARGIN * layoutScale,
+                  BoardCameraControls.PAN_PIXELS_PER_SECOND * seconds);
             if (pan.isZero()) { return; }
             boardCamera.pan(pan.x, pan.y);
             editorPointer(dragX, dragY, true);
@@ -3316,7 +3235,7 @@ class GpuBattleView extends ApplicationAdapter {
             List<GpuBoardSource.Bind> captured = source.uiPreferences().binds();
             int bindModifiers = modifiers;
             if (modifiers == InputEvent.SHIFT_DOWN_MASK
-                  && GpuHud.binds(captured, awt, 0).stream().anyMatch(GpuBattleView::heldCameraCommand)) {
+                  && GpuHud.binds(captured, awt, 0).stream().anyMatch(BoardCameraControls::held)) {
                 bindModifiers = 0;
             }
             // While a route is drawn by hand only the camera takes keys: a hotkey or an editor command (Undo, a tool
@@ -3420,14 +3339,6 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** How deep (0 to 1) a point lies {@code into} a margin of {@code margin}. */
     private static float depth(float into, float margin) { return MathUtils.clamp(into / margin, 0, 1); }
-
-    private static boolean heldCameraCommand(KeyCommandBind command) {
-        return switch (command) {
-            case SCROLL_NORTH, SCROLL_SOUTH, SCROLL_EAST, SCROLL_WEST,
-                 CAMERA_ROTATE_LEFT, CAMERA_ROTATE_RIGHT, CAMERA_TILT_UP, CAMERA_TILT_DOWN -> true;
-            default -> false;
-        };
-    }
 
     /**
      * The board's pointer at x, y (input coordinates): a hand over the unit a click there takes, and over the editor's

@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -22,19 +23,23 @@ import com.badlogic.gdx.utils.Disposable;
 
 /**
  * Meeples dying where they stood, after the view stopped drawing them for their unit: a destroyed unit's meeple and a
- * formation's lost vehicle explode into pieces ({@link MeepleShatter}, {@link MeepleDebris}); a formation's lost
- * soldier turns to the hit, is knocked back and falls on its back. A fallen soldier lies a moment, and the pieces fly
- * and settle, then they fade away: a wreck has no gameplay. View-owned and presentation only.
+ * formation's lost vehicle explode into pieces ({@link MeepleShatter}, {@link MeepleDebris}). Infantry figures fall
+ * after light hits, shatter after heavy hits, or carbonize after heat weapons. All fade away: a wreck has no gameplay.
+ * View-owned and presentation only.
  */
 final class MeepleCasualties implements Disposable {
     static final float FALL_SECONDS = .9f;
     static final float LIE_SECONDS = 1.5f;
     /** Thrown pieces start to fade ({@link UnitAttack#FADE_SECONDS}) this long after their explosion, at rest or flying. */
     static final float DEBRIS_SECONDS = 3;
+    /** One second at normal playback, held fully visible before carbonized figures start fading. */
+    static final float BURN_HOLD_SECONDS = (float) UnitMotion.Speed.NORMAL.rate;
     /** How far a soldier is knocked back, and how high it is thrown, in its standing heights. */
     private static final float KNOCKBACK = .6f, THROW = .18f;
     /** A destroyed unit's meeple breaks along this many planes, into up to sixteen pieces; a lost vehicle into four. */
     private static final int TOKEN_CUTS = 4, VEHICLE_CUTS = 2;
+    /** Cosmetic break thresholds per projectile, so a large rifle volley still leaves fallen figures. */
+    private static final float INFANTRY_SHATTER_DAMAGE = 2;
 
     /**
      * The instance the view drew for the unit until it died, holding only what is dying, and the unit as it was then
@@ -47,6 +52,8 @@ final class MeepleCasualties implements Disposable {
         final UnitFootprint.Pose pose;
         private final List<Soldier> soldiers = new ArrayList<>();
         private final List<Debris> debris = new ArrayList<>();
+        private final List<Blast> blasts = new ArrayList<>();
+        private boolean carbonized;
         private float seconds;
 
         private Casualty(GpuUnitInstance instance, BoardScene.Unit unit, UnitFootprint.Pose pose) {
@@ -58,6 +65,19 @@ final class MeepleCasualties implements Disposable {
         }
 
         float opacity() { return ((GpuUnitShader.Shown) instance.userData).opacity; }
+
+        /** Infantry transports have internal explosions; infantry figures never do. */
+        void explosions(GpuExplosionEffects effects) {
+            for (var blast : blasts) {
+                effects.burst(blast.center(), blast.radius(), UnitAttack.smooth(seconds / UnitAttack.DEATH_SECONDS), blast.seed());
+            }
+        }
+
+        boolean infantryMeeples() {
+            return MeepleVisual.isMeeple(instance) && UnitAnimator.troops(unit)
+                  || instance.visual() != null && instance.visual().infantry()
+                        && instance.visual().rigs().stream().anyMatch(rig -> rig.meeple() || rig.vehicle());
+        }
 
         @Override
         public void dispose() { debris.forEach(pieces -> pieces.model().dispose()); }
@@ -73,9 +93,15 @@ final class MeepleCasualties implements Disposable {
     /** Thrown pieces and the model that owns their meshes. */
     private record Debris(Model model, MeepleDebris pieces) { }
 
+    private record Blast(Vector3 center, float radius, int seed) { }
+
     private final List<Casualty> casualties = new ArrayList<>();
+    /** Borrowed from the view, which owns its textures. */
+    private final UnitDamageDisplay damage;
     /** Meeples cut ahead of their deaths ({@link #prepare}), by death: dropped with the playback's. */
-    private final Map<UnitAttack, CompletableFuture<MeepleShatter.Cut>> prepared = new WeakHashMap<>();
+    private final Map<UnitAttack, Map<String, CompletableFuture<MeepleShatter.Cut>>> prepared = new WeakHashMap<>();
+
+    MeepleCasualties(UnitDamageDisplay damage) { this.damage = damage; }
 
     List<Casualty> casualties() { return casualties; }
 
@@ -95,32 +121,57 @@ final class MeepleCasualties implements Disposable {
      * @param standing the meeple as the view draws it
      */
     void prepare(UnitAttack death, GpuUnitInstance standing, BoardScene.Unit unit) {
+        if (prepared.containsKey(death)) { return; }
+        Map<String, CompletableFuture<MeepleShatter.Cut>> cuts = new HashMap<>();
         Node meeple = standing.getNode(MeepleVisual.ROOT);
-        if (meeple == null || prepared.containsKey(death)) { return; }
-        prepared.put(death, GpuAssets.pooled(cutter(standing, meeple, TOKEN_CUTS, unit.id())));
+        if (meeple != null) {
+            int count = UnitAnimator.troops(unit) ? infantryCuts(death.cause) : TOKEN_CUTS;
+            if (count > 0) { cuts.put(meeple.id, GpuAssets.pooled(cutter(standing, meeple, count, unit.id()))); }
+        } else if (standing.visual() != null && standing.visual().infantry()) {
+            for (var rig : standing.visual().rigs()) {
+                int count = rig.vehicle() ? VEHICLE_CUTS : rig.meeple() ? infantryCuts(death.cause) : 0;
+                Node figure = standing.getNode(rig.container());
+                Node drawn = figure == null || count == 0 ? null : drawn(figure);
+                if (drawn != null) {
+                    cuts.put(figure.id, GpuAssets.pooled(cutter(standing, drawn, count, unit.id() * 31 + figure.id.hashCode())));
+                }
+            }
+        }
+        prepared.put(death, cuts);
     }
 
     /**
-     * Takes over a destroyed unit's last drawn pose. Crew loss fades that pose unchanged; otherwise a token shatters,
-     * a formation's figures fall, and other models fade where the death's explosion plays.
+     * Takes over a destroyed unit's last drawn pose. Crew loss fades that pose unchanged; infantry figures and tokens
+     * react to the killing hit, other tokens shatter, and other models fade where the death's explosion plays.
      *
      * @param standing the meeple as the view last drew it, which it no longer draws
      * @param hit      horizontal, away from the hits, as long as the damage they dealt; null to burst out evenly
      * @param death    the death playing, whose cut {@link #prepare} may have made; null for a death that did not play
      */
-    void died(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 hit, UnitAttack death, UnitFootprint.Pose pose) {
+    void died(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 hit, UnitAttack death, UnitAttack cause,
+          UnitFootprint.Pose pose) {
         var casualty = new Casualty(standing, unit, pose);
+        var cuts = death == null ? null : prepared.remove(death);
         Node meeple = standing.getNode(MeepleVisual.ROOT);
         if (death == null || !death.event.result().crewLoss()) {
             if (meeple != null) {
-                standing.nodes.clear();
-                shatter(casualty, meeple, TOKEN_CUTS, unit.id(), hit, death == null ? null : prepared.remove(death));
+                int count = UnitAnimator.troops(unit) ? infantryCuts(cause) : TOKEN_CUTS;
+                if (count > 0) {
+                    standing.nodes.clear();
+                    shatter(casualty, meeple, count, unit.id(), hit, cuts == null ? null : cuts.get(meeple.id));
+                } else if (cause != null && cause.burnsInfantry()) {
+                    damage.carbonize(meeple, unit.id());
+                    casualty.carbonized = true;
+                } else {
+                    standing.nodes.clear();
+                    fall(casualty, meeple, hit == null ? null : hit.cpy().nor(), new UnitPicking());
+                }
             } else if (standing.visual() != null && standing.visual().infantry()) {
                 List<Node> figures = new ArrayList<>();
                 for (Node node : standing.nodes) {
                     if (standing.visual().rigs().stream().anyMatch(rig -> node.id.equals(rig.container()))) { figures.add(node); }
                 }
-                fall(casualty, figures, hit);
+                figures(casualty, figures, hit, cause, cuts);
             }
         }
         casualties.add(casualty);
@@ -134,7 +185,7 @@ final class MeepleCasualties implements Disposable {
      * @param hit      horizontal, away from the hits, as long as the damage they dealt; null when unknown: soldiers
      *                 then fall out of their formation, clear of the survivors, and vehicles burst out evenly
      */
-    void lost(GpuUnitInstance previous, GpuUnitModel next, BoardScene.Unit unit, Vector3 hit) {
+    void lost(GpuUnitInstance previous, GpuUnitModel next, BoardScene.Unit unit, Vector3 hit, UnitAttack cause) {
         var was = previous.visual();
         Set<String> kept = new HashSet<>();
         next.instance.nodes.forEach(node -> kept.add(node.id));
@@ -144,11 +195,12 @@ final class MeepleCasualties implements Disposable {
         }
         if (lost.isEmpty()) { return; }
         var casualty = new Casualty(previous, unit, null);
-        fall(casualty, lost, hit);
+        figures(casualty, lost, hit, cause, null);
         casualties.add(casualty);
     }
 
-    private static void fall(Casualty casualty, List<Node> lost, Vector3 hit) {
+    private void figures(Casualty casualty, List<Node> lost, Vector3 hit, UnitAttack cause,
+          Map<String, CompletableFuture<MeepleShatter.Cut>> prepared) {
         var previous = casualty.instance;
         var was = previous.visual();
         var middle = previous.transform.getTranslation(new Vector3());
@@ -160,18 +212,42 @@ final class MeepleCasualties implements Disposable {
             var outward = UnitBounds.subtree(node).mul(previous.transform).getCenter(new Vector3()).sub(middle);
             outward.z = 0;
             var away = hit != null ? new Vector3(hit).nor() : outward.len2() < 1e-4f ? null : outward.nor();
-            Node drawn = rig.transport() ? drawn(node) : null;
-            if (drawn == null) {
-                var points = surfaces.vertices(previous, node);
-                if (!points.isEmpty()) {
-                    previous.nodes.add(node);
-                    casualty.soldiers.add(soldier(previous, node, away, points.toArray(Vector3[]::new)));
+            boolean vehicle = rig.vehicle();
+            int cuts = vehicle ? VEHICLE_CUTS : rig.meeple() ? infantryCuts(cause) : 0;
+            Node drawn = cuts == 0 ? null : drawn(node);
+            if (drawn != null) {
+                int seed = casualty.unit.id() * 31 + node.id.hashCode();
+                if (vehicle) {
+                    var bounds = UnitBounds.subtree(drawn).mul(previous.transform);
+                    casualty.blasts.add(new Blast(bounds.getCenter(new Vector3()),
+                          bounds.getDimensions(new Vector3()).len() * .4f, seed));
                 }
+                shatter(casualty, drawn, cuts, seed, hit, prepared == null ? null : prepared.get(node.id));
+            } else if (rig.meeple() && !vehicle && cause != null && cause.burnsInfantry()) {
+                previous.nodes.add(node);
+                damage.carbonize(node, casualty.unit.id());
+                casualty.carbonized = true;
             } else {
-                shatter(casualty, drawn, VEHICLE_CUTS, casualty.unit.id() * 31 + node.id.hashCode(), hit, null);
+                fall(casualty, node, away, surfaces);
             }
         }
         previous.calculateTransforms();
+    }
+
+    /** GLB figures and Tactical artwork tokens share the same surface-based fall and fade. */
+    private static void fall(Casualty casualty, Node node, Vector3 away, UnitPicking surfaces) {
+        var points = surfaces.vertices(casualty.instance, node);
+        if (!points.isEmpty()) {
+            casualty.instance.nodes.add(node);
+            casualty.soldiers.add(soldier(casualty.instance, node, away, points.toArray(Vector3[]::new)));
+        }
+    }
+
+    /** Up to four, eight or sixteen pieces; fire leaves a carbonized figure instead of fragments. */
+    static int infantryCuts(UnitAttack cause) {
+        if (cause == null || cause.burnsInfantry()) { return 0; }
+        double damage = cause.infantryHitDamage();
+        return damage < INFANTRY_SHATTER_DAMAGE ? 0 : damage < 5 ? 2 : damage < 10 ? 3 : TOKEN_CUTS;
     }
 
     /**
@@ -239,6 +315,7 @@ final class MeepleCasualties implements Disposable {
             float time = casualty.seconds += seconds;
             float fade = Math.max(casualty.soldiers.isEmpty() ? 0 : FALL_SECONDS + LIE_SECONDS,
                   casualty.debris.isEmpty() ? 0 : DEBRIS_SECONDS);
+            if (casualty.carbonized) { fade = Math.max(fade, BURN_HOLD_SECONDS); }
             casualty.debris.forEach(debris -> debris.pieces().advance(seconds, ground, gravity));
             if (time >= fade + UnitAttack.FADE_SECONDS) {
                 casualty.dispose();

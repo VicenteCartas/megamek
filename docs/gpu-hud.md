@@ -224,7 +224,7 @@ forces grid its own width, and the dock's band still starts after the column. Th
 content: a long list ends 12 units above the unit card and scrolls.
 
 Height <= 800 is the low-height layout. The layers, bottom to top: board labels (the Tactical View's north mark,
-guides, traces and leaders, nameplates, other board labels, target cards), panels, chat, forces overview,
+guides, traces and leaders, nameplates, other board labels, target cards), panels, forces overview, chat and the More drawer,
 popovers (the unit card's hover card, the sheet's slot popover, the context menu), dialogs (Help, Menu, Players, Tuning),
 toasts, and the modal dialog.
 
@@ -261,11 +261,17 @@ whether the nameplate key shows every nameplate, the log's open state and the pl
   preview and selection stay together, while unit commands are unavailable. Explicit inspection remains possible.
 - **Own units outside the local turn.** A click on an own unit (board, row or card) makes it the focus, shown and
   selected in mint; its menu's "Inspect" item only inspects it. Enemy units are inspected.
-- **Cleared selection.** The card's ✕, on the selected unit as on an inspected one, ends the inspection and clears
+- **Inspectors.** The own unit stays at bottom left; an inspected enemy or ally appears in a second instance of
+  `GpuUnitCard` at bottom right. Its height reserves space under the log, contacts and weapons panels; the minimap
+  shrinks when needed. The last explicit own inspection stays visible during playback, with a visible own unit as
+  fallback when the report has no focus. The EDT captures `panels.ownRecord()` alongside the inspected record using
+  the same `GpuUnitRecord` implementation, and both records wait for the same playback boundary. Closing the right
+  inspector only ends that inspection.
+- **Cleared selection.** The own card's ✕ ends the inspection and clears
   the selection (`GpuHudState.clearSelection`; the user's decisions of 2026-10-02): no card and no highlighted unit.
   In the local turn no unit is then selected at all. MegaMek's phase display keeps its current unit (it has no
   selection without one), but the HUD presents the turn without it (`GpuHudState.presented`, used by the HUD and the
-  board overlay): no acting unit, no dock, no route or envelope, no fire orders, preview or physical options, no map
+  board overlay): no acting unit, no unit commands in the dock, no route or envelope, no fire orders, preview or physical options, no map
   menu. No input reaches that unit: a hex click does nothing, a unit click selects (an own unit that can act) or
   inspects (any other, which keeps the selection cleared), and the HUD keeps every key from MegaMek except the menu
   bar's binds (`KeyCommandBind.isMenuBar`) and `GpuHud.UNITLESS_BINDS` (camera, chat, pause, report keys, turn timer,
@@ -413,7 +419,7 @@ held camera keys work with non-modal panels open and pause while a text field ha
 CANCEL (Esc by default) takes one step per press:
 
 1. a pending dialog or dock confirmation: its cancel button;
-2. a row dragged in a list (a target card's attack, a weapon of the sheet): it glides home and nothing moves;
+2. a row dragged in a list (a target card's attack, a weapon of the sheet or declaration panel): it glides home and nothing moves;
 3. a keyboard focus outside the context menu, the sheet's popover and an open dialog: dropped;
 4. the context menu or a select list: closed;
 5. Help, Menu, Players or Tuning: closed, with the focus inside it;
@@ -452,7 +458,7 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | --- | --- | --- | --- |
 | `GpuPhaseHeader` | top left | round, phase ring, phase name, whose turn; in movement the activation ribbon (hidden under double blind); the playback speeds in the frame's top right corner as one pill of sections (0.5x, 1x, 2x, 4x, I for Instant), in every phase and turn; the round shortens to its number ("01") only where the line has no room for "Round 01" | the playback history's speed |
 | `GpuForcesPanel` | left column | own and allied units, or the contacts, as grouped rows or a grid with search, grouping and filter | selection rule, unit menu, the phase's next-unit command |
-| `GpuUnitCard` | bottom left | the inspected unit, else the focus unit: paperdoll, vitals, chips; the mini card while the sheet is open; the contact card for a sensor contact | "Unit record", Locate |
+| `GpuUnitCard` | bottom left and bottom right | own unit on the left, inspected enemy or ally on the right: shared paperdoll, vitals and chips; the left mini card while the sheet is open; anonymous contact card for a sensor contact | "Unit record", Locate |
 | `GpuRecordSheet` | left, at the grid's width | the unit sheet (section 7) | the record service's unit actions |
 | `GpuConditionsCard` | beside the left column | the planetary conditions overlay's lines while its View preference is on | its close button runs that View item |
 | `GpuUtilityBar` | top right | "Tactical view", "Wireframe" (an open grid icon: three lines each way, no border), "Map", "Log" (amber count of the round's reviewable events the board has presented), "Help", "Menu"; the Tactical View chip and north mark | the camera's Tactical View, the tuning model's wireframe view (without the cosmetic scatter), View > minimap, the HUD's toggles |
@@ -460,12 +466,12 @@ view changes (open panels, the camera) stay on the GL thread. Names in quotes ar
 | `GpuMinimap` | under the utilities | the board in its tileset colours, units at their animated positions, the planned route, the camera's ground area; its close button straight on the panel's corner | a left press or drag centres the camera, a middle drag orbits it and the wheel zooms it as on the board, about the view's centre; no order changes |
 | `GpuTacticalOverlays` | Tactical View only: top right, left of the right column's top panel (the minimap, else the contacts, weapons or log panel that moves up in its place), level with its top; at the right edge when the right column is empty | "OVERLAYS" and a chevron; one column of twelve checkboxes in four groups, each with a tooltip: Units (Status badges, Links), Combat (Envelope, Rear arcs, LOS shading, Sensor ranges), ECM (Fields, Jamming), Map (Coordinates, Type, Level shading, Distance rings). Collapsed: the header only, same place and width. The layout shows it collapsed for the frame while the window is too short for its rows or the solution or initiative card beside the right column needs the room | a row runs its View-menu item (Unit Links, Movement Envelope, FOV darken, Sensor Range, Hex Coordinates, Hex Types, FOV highlight) or toggles its client setting on Swing (`TacticalStatusBadges`, `TacticalRearArcs`, `BoardEcmTacticalFields`, `BoardEcmTacticalHatch`, `TacticalLevelShading`); the header and H toggle `TacticalOverlaysOpen` |
 | `GpuContactsPanel` | right column | enemy units; with the movement fire preview, where the unit fires from, each enemy's best salvo both ways and the guide toggles | selection rule, unit menu |
-| `GpuWeaponsPanel` | right column, local weapon declaration | target pills with wrapping names, one row per weapon with its roll and slots (an assigned slot in its target's colour); a fixed footer holds HEAT IF FIRED and ALPHA STRIKE, which assigns or retargets all available weapons to the focused target; only the weapon list scrolls, and the minimap shrinks in short windows to leave a complete weapon row visible; no assign line while a weapon is armed, which its row shows selected; on another player's turn the focus unit's draft, read-only. Declaring never ends the turn by default: MegaMek's auto-end firing (`GUIPreferences.AUTO_END_FIRING`, now stored as `AutoEndFiringAfterLastWeapon` so that the old `AutoEndFiring` value is ignored) defaults to off, so FIRE WEAPONS sends the attacks | fire orders |
+| `GpuWeaponsPanel` | right column, local weapon declaration | target pills with wrapping names, one row per weapon with its roll and slots (an assigned slot in its target's colour); editable rows drag through `UiList` into the unit's saved custom weapon order, shared with the record sheet, without changing queued attack order; a fixed footer holds HEAT IF FIRED and ALPHA STRIKE, which assigns or retargets all available weapons to the focused target; only the weapon list scrolls, and the minimap shrinks in short windows to leave a complete weapon row visible; no assign line while a weapon is armed, which its row shows selected; on another player's turn the focus unit's draft, read-only. Declaring never ends the turn by default: MegaMek's auto-end firing (`GUIPreferences.AUTO_END_FIRING`, now stored as `AutoEndFiringAfterLastWeapon` so that the old `AutoEndFiring` value is ignored) defaults to off, so FIRE WEAPONS sends the attacks | fire orders |
 | `GpuSolutionCard` | under or beside the right column | the selected weapon's shot: roll, range brackets, arc, modifiers, or why there is no shot; a long target name ends in an ellipsis, the roll after it stays whole | close deselects the weapon |
 | `GpuLogPanel` | right column, log width | the round's events as cards, Summary and Full log, filters, search, totals, earlier rounds, report keywords, copy, artillery in flight | review a step, locate, replay |
 | `GpuCommandDock` | bottom centre | one variant per phase and turn: initiative, movement plan, waiting, weapon fire, physical, no physical attack, playback, generic; in the local TARGETING turn the generic option row leads with the off-board targets ("Off-board West"), the edges whose arrows `OffBoardTargetOverlay` shows; the playback transport has no speeds (the phase header holds them) | phase commands (an off-board target runs the overlay's own click), movement, fire and physical services, the playback, the Follow camera toggle |
 | `GpuHintLine` | above the dock (hidden at W <= 1350); there a bot order's hex pick shows in its chip above the dock; the dock keeps the shared window-edge margin below it | what a left click does now ("Plan move · a unit out of reach: select or inspect" while planning, "Choose target" in the charge, DFA and ram gears), the gestures and their keys; the pick's instructions and picked hexes | the chip's Done and Cancel end the pick |
-| `GpuChatPanel` | bottom right, with its button | chat lines, the field and Send, an unread dot on the button | the board chat's send, which keeps its history |
+| `GpuChatPanel` | anchored above the command dock, at its width with the standard 12-unit panel gap | chat replaces the hint line; drag the top grip to resize vertically; the icon-only mini button is always last in the dock footer, including when no unit commands are available, with an unread dot | the board chat's send, which keeps its history |
 | `GpuToastStack` | centre, above the dock | MegaMek's toasts: at most 5, levels INFO, SUCCESS, WARNING, ERROR, GAMEMASTER | presses pass through |
 | `GpuForceOverview` | over the board; the panels it covers are hidden (the prototype blurs them) | a card for every presented unit, grouped, filtered and searchable | locate, selection rule, unit menu |
 | `GpuHelpDialog` | centred | Compact "Controls": category sidebar, action rows and current key badges; mouse gestures have their own category | none |
@@ -708,7 +714,7 @@ Tests:
 ## 7. Unit panel and paperdolls
 
 The unit panel replaces Swing's Unit Display window in GPU mode.
-- **Card** (`GpuUnitCard`, bottom left): the inspected unit, else the focus unit. It shows the paperdoll with a
+- **Cards** (`GpuUnitCard`): the own unit at bottom left and the inspected enemy or ally at bottom right. Each shows the paperdoll with a
   number per location (a Mek's rear armor in a strip under it), four vitals rows by unit family, one line of chips
   for what the doll cannot show, and the "Unit record" and Locate buttons. Hovering the doll shows a hover card. An
   card has a ✕ that clears the selection (the cleared selection, section 1.8).
@@ -923,7 +929,9 @@ inspector is created only when requested with the Legacy 2D board and renders th
   Native heights are LOS levels above each hex: zero is the surface, and the ray and calculation use the same
   absolute level. Actual units use the game's entity LOS path, including in rule comparison. The Legacy 2D ruler's
   one-based TW height convention is converted only at its calculation boundary.
-  The ray is a six-pixel green/red stroke without a black outline, shared by both native cameras. Both elevated
+  The ray is a six-pixel stroke without a black outline, shared by both native cameras: green until the first
+  intervening terrain modifier, solid yellow from that hex's entry edge onward, and dashed red after a blocker.
+  Both transitions come from the engine's chosen LOS path and update with Flip and height changes. Both elevated
   endpoints have the same vertical ground tethers as airborne units, drawn in the same depth-tested pass. The Swing
   `RulerDialog` and elevation diagram are constructed only for the Legacy 2D board and disposed on switching to native.
 - The frame carries no Swing overlay layers, so each toast shows once, in the native stack.
@@ -992,11 +1000,23 @@ A developer and tester tool, to be removed before release.
 
 | Page | Sections |
 | --- | --- |
-| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (applied when the drag is released), Anti-aliasing Off/SMAA, Specular anti-aliasing, Normal maps (on until chosen), Ambient occlusion (off until chosen), the detected graphics and the Graphics card choice with its in-use and pending notes. Resolution, UI scale, both anti-aliasing choices, normal maps and ambient occlusion are saved across sessions; Defaults leaves the whole Display page alone |
+| Display | Display mode Windowed/Fullscreen, VSync, Render resolution 50-100% with its scene size, UI scale 50-100% (applied when the drag is released), Anti-aliasing Off/SMAA, Specular anti-aliasing, Normal maps (on until chosen), Ambient occlusion (off until chosen), the detected graphics and the Graphics card choice with its in-use and pending notes, Terrain cache with its live A/B switch and status. Resolution, UI scale, both anti-aliasing choices, normal maps and ambient occlusion are saved across sessions; Defaults leaves the whole Display page alone |
 | Board | Geometry (with Unit display), Unit family sizes, Zoom-out unit scaling, Route pulse (on/off, speed, intensity), Unit visibility, Outside field of view, Outside sensor range, Unit damage |
 | Atmosphere | Atmosphere presets with "Planetary conditions…" (the Swing editor), Lighting (time of day, exposure, moonlight, fixed sun, the lighting environment and Show lighting sky, not saved, which shows the sky that lights the scene, or its image, as the backdrop), Planet properties, Clouds and ground air, Weather effects, Light and fog effects |
 | Terrain | Terrain build progress, Hex joins (Hex transitions, Hex padding), Water (Cliffs directly into water), Terrain detail (Grass blades, Water effects). Terrain and object detail levels are always on |
 | Camera | Fixed sun/moon, framing on selection, framing on movement (combat framing is the dock's Follow toggle); the model's camera rows: Free Flight, the thermal wireframe view, the Free Flight field of view; the live view as one line with Copy (`BoardCamera.readout`: `cam ortho\|persp\|fly fov az tilt span at x,y,z hex`) |
+
+The Terrain cache section reports the ground material cache's render-thread state: building/rebuilding, prefetching,
+ready, partial coverage, inactive, disabled or unavailable. Its percentage is the share of **admitted view pages**
+that are current, including walls; it is not a whole-board or time estimate. The readout also shows requested/admitted
+pages, cache level, occupied/allocated slots, stale and partly built pages, pending prefetches and any wall pages
+outside the page table. Off-view stale pages wait until needed, and prefetches can remain pending when storage is full.
+GPU allocation is an estimate from texture formats and mip levels, fill targets and page-table buffers; it excludes
+driver overhead and unrelated terrain resources. Page storage and its occupied share are shown separately, including
+rebuild spares. Turning the checkbox off uses direct rendering and pauses fills while retaining storage and pages;
+turning it back on resumes the cache without a geometry rebuild. The choice lasts for this window, survives asset
+reloads, and respects startup cache-disable flags. Diagnostics refresh only while Display is open, resolve the current
+renderer after asset reloads, and retain the completed plan's counts when an unchanged frame skips cache planning.
 
 **Removing it before release:**
 1. Delete `GpuTuningPanel`, `GpuTuningPanelSmokeTest` and `BoardCamera.readout`.

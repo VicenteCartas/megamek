@@ -86,6 +86,7 @@ final class GpuTactical implements Disposable {
     private final ShapeRenderer rulerShapes;
     /** Luminance differs as well as hue; the blocked section also has a dash pattern. */
     static final int RULER_CLEAR = 0x64D8A2FF;
+    static final int RULER_MODIFIED = 0xF4D35EFF;
     static final int RULER_BLOCKED = 0xD84959FF;
     private final GpuHexMasks hexMasks = new GpuHexMasks();
     private final GpuHexMasks deploymentTint = new GpuHexMasks();
@@ -634,18 +635,21 @@ final class GpuTactical implements Disposable {
         // Avoid projecting a point behind the near plane while the camera is inside the board.
         if (camera.frustum.planes[0].distance(start) < 0
               || end != null && camera.frustum.planes[0].distance(end) < 0) { return; }
-        Vector3 split = end == null ? null : new Vector3(start).lerp(end, rulerBlockedFrom(ruler));
+        Vector3 blocked = end == null ? null : new Vector3(start).lerp(end, rulerBlockedFrom(ruler));
+        Vector3 modified = end == null ? null : new Vector3(start).lerp(end, rulerModifierFrom(ruler));
         camera.project(start, 0, 0, camera.viewportWidth, camera.viewportHeight);
         if (end != null) {
             camera.project(end, 0, 0, camera.viewportWidth, camera.viewportHeight);
-            camera.project(split, 0, 0, camera.viewportWidth, camera.viewportHeight);
+            camera.project(blocked, 0, 0, camera.viewportWidth, camera.viewportHeight);
+            camera.project(modified, 0, 0, camera.viewportWidth, camera.viewportHeight);
         }
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         rulerShapes.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, camera.viewportWidth, camera.viewportHeight));
         rulerShapes.begin(ShapeRenderer.ShapeType.Filled);
         if (end != null) {
-            rulerStroke(start, split, RULER_CLEAR, false);
-            rulerStroke(split, end, RULER_BLOCKED, true);
+            rulerStroke(start, modified, RULER_CLEAR, false);
+            rulerStroke(modified, blocked, RULER_MODIFIED, false);
+            rulerStroke(blocked, end, RULER_BLOCKED, true);
             rulerCrosshair(end, ruler.endArgb());
         }
         rulerCrosshair(start, ruler.startArgb());
@@ -654,9 +658,18 @@ final class GpuTactical implements Disposable {
 
     /** Enter the engine's first blocking hex; the remainder stays blocked even after the ray leaves it. */
     static float rulerBlockedFrom(BoardTactical.Ruler ruler) {
-        if (ruler.blockedAt() == null || ruler.end() == null) { return 1; }
+        return rulerEnters(ruler, ruler.blockedAt());
+    }
+
+    /** Yellow starts at the first modifier's entry edge; a blocker always takes precedence. */
+    static float rulerModifierFrom(BoardTactical.Ruler ruler) {
+        return Math.min(rulerBlockedFrom(ruler), rulerEnters(ruler, ruler.modifierAt()));
+    }
+
+    private static float rulerEnters(BoardTactical.Ruler ruler, Coords coords) {
+        if (coords == null || ruler.end() == null) { return 1; }
         float[] interval = BoardFiringGeometry.crossing(BoardGeometry.center(ruler.start(), ruler.startHeight()),
-              BoardGeometry.center(ruler.end(), ruler.endHeight()), ruler.blockedAt());
+              BoardGeometry.center(ruler.end(), ruler.endHeight()), coords);
         return interval == null ? 0 : interval[0];
     }
 

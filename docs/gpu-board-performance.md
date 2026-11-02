@@ -12,6 +12,111 @@ landscapes in the main renderer's top and isometric views and times settled
 terrain frames separately from loading and whole-game FPS.
 Older dated reports below apply to their recorded revisions and fixtures.
 
+## Citadel material cache diagnosis (2026-11-02)
+
+Display → Terrain cache has an inline **Debug** switch. It starts off for each view,
+is never saved, and remains usable with the cache disabled. It tints sculpted ground
+and cliffs by the material actually submitted: red means direct rendering; cached
+levels 0–6 are green, cyan, blue, violet, magenta, yellow and orange. Water surfaces,
+objects and other passes are not tinted, although tinted beds show through water.
+The tint is applied after material evaluation and never written into cache fills.
+The Display panel includes a legend and counts of terrain batches actually using
+the cache. “Admitted pages built” measures completion of admitted texture pages,
+not the fraction of the board rendered from them.
+
+With the default 0.1 m base texel, each level doubles the texel's world size.
+The 240×240 usable texels of a page cover 24×24 m at L0, 96×96 m at L2, and
+1,536×1,536 m at L6. Every page has the same storage cost, about 0.984 MiB for its
+three material arrays and three mip levels. A frame selects one cache level to
+match its pixel footprint; the colours do not indicate separate caching systems.
+These are alternative resolutions, not seven successive rendering passes. Fewer
+levels would make the resolution and memory changes between levels larger.
+For equal world coverage, L0 needs nominally 16 times the texture storage of L2,
+or 4,096 times that of L6, before page-edge rounding. Keeping Citadel entirely at
+L0 would therefore require several GiB for material pages alone, while the far
+view cannot display most of that detail.
+
+### Reproduction and measurements
+
+The full-view benchmark loaded `data/boards/buildingsnobasement/citadel.board`
+(50×50) on an NVIDIA GeForce RTX 4070 Laptop GPU. Its physical framebuffer was
+3840×2259, render scale 100%, Enhanced graphics, AA off, specular AA and AO on.
+VSync and the application's FPS limiter were disabled. The camera readout matched:
+
+`cam ortho fov 45.0 az 45.00 tilt 54.74 span 2977.81 at 1568.98,-1818.00,-54.00 hex 2727`
+
+The fixture includes one Atlas and the game HUD, with a fixed clear 13:00 atmosphere;
+it is a hidden window with the screenshot's framebuffer dimensions, not the user's
+original fullscreen/editor session. Each variant settled its geometry and admitted
+cache pages, warmed for 60 frames, and sampled 180 frames without `glFinish`.
+GPU timestamps were collected separately from frame intervals. Debug captures,
+draw counting and 32-frame shader-family attribution ran outside those samples.
+
+| Allocation / toggle | Admitted view pages | Cached top / wall batches | Median GPU frame | Median opaque terrain | Average FPS |
+|---|---:|---:|---:|---:|---:|
+| 94 slots, off | — | 0 / 0 | 13.81 ms | 10.07 ms | 66.1 |
+| 94 slots, on | 86 / 421 | 0 of 4 / 0 of 4 | 14.03 ms | 10.22 ms | 68.0 |
+| Automatic 552 slots, off | — | 0 / 0 | 14.12 ms | 10.35 ms | 69.1 |
+| Automatic 552 slots, on | 421 / 421 | 4 of 4 / 4 of 4 | 11.17 ms | 7.22 ms | 86.9 |
+
+The 94-slot run used `-Dmegamek.gpu.materialCacheMiB=93` to reproduce the screenshot's
+92.5 MiB page storage and 97.2 MiB estimated total allocation. The automatic run
+allocated about 543 MiB of pages. Requested coverage was 421 pages in this fixture
+versus 420 in the screenshot. Cross-run FPS is affected by CPU scheduling and GPU
+clocks; the limited-cache GPU measurements and identical draw paths demonstrate
+no useful rendering benefit, rather than a meaningful 66-to-68 FPS improvement.
+
+### Why the toggle can do nothing
+
+`GpuMaterialCache.plan` reserves eight slots, then admits top pages nearest the view
+centre before wall pages. At capacity 94, 86 pages fit out of 180 requested top pages
+and 241 wall pages. Its final selection requires every needed page of a terrain
+mesh batch to be readable before any of that batch's tops (or walls) draw cached.
+Citadel spans four such batches. None is completely covered at this budget:
+`cached=[]`, `wallsCached=[]`, despite every admitted page being current. The debug
+capture is therefore red throughout. This is an admission/batch-granularity mismatch,
+not a failure to finish filling the admitted pages.
+
+Opaque terrain is the main GPU cost: approximately 10.2 ms of a 14.0 ms frame.
+The colour pass submits 369 draws and 7.53 million indexed vertices before any
+tessellation amplification; the depth pre-pass submits another 7.06 million.
+At the limited budget, depth takes about 1.1 ms, transparent effects (including
+water) 0.8 ms, AO 0.35 ms and the atmosphere composite 0.52 ms. Cached geometry
+shadows are negligible in this stationary view. Shader-family attribution also
+identifies direct sculpted grass tops/walls and mixed ground as the large costs.
+The cache replaces material evaluation, not geometry, lighting or these other passes.
+
+Automatic capacity uses half of driver-reported free GPU memory when allocating,
+subject to texture-array limits and the scene's estimated need; a startup MiB
+override replaces that budget. The memory limit is retained until reallocation.
+The screenshot alone cannot establish why its initial capacity was only 94 slots.
+This change adds diagnostics, not a new allocation policy. A focused optimization
+would admit complete terrain batches or allow smaller independently cached draws;
+simply admitting more scattered pages need not yield any cached rendering.
+
+Reproduce with `gpuBoardBenchmark --tests '*GpuBoardPerformanceSmokeTest.measuresTheCompleteBoardViewWithLiveCapture'`
+and these `-Dmegamek.gpu.` properties: `performanceFullView=true`,
+`performanceBoard=data/boards/buildingsnobasement/citadel.board`,
+`performanceOverviewOnly=true`, `performanceCompareMaterialCache=true`,
+`performanceWidth=3840`, `performanceHeight=2259`, `performanceSpan=2977.81`,
+`performanceAt=1568.98,-1818.00,-54.00`, `performanceWarmupFrames=60`,
+`performanceSampleFrames=180`, `performanceNoFinish=true`, `performanceFixedAtmosphere=true`,
+`performancePinnedSettings=true`, `performanceAmbientOcclusion=true`,
+`performanceGraphics=ENHANCED`, `performanceFamilyFrames=32`, `performanceDrawAudit=true`,
+`performanceSettleSeconds=300`, `card=DISCRETE`, `expectedRenderer=NVIDIA`.
+Add `materialCacheMiB=93` for the limited run. Local logs and captures are under
+`work/citadel-cache/`, with the two benchmark logs at `work/citadel-cache-profile.log`
+and `work/citadel-cache-limited-profile.log`.
+
+Validation passed all 16 selected native tests: the complete `GpuTuningPanelSmokeTest`,
+both `GpuMaterialCacheSmokeTest` cases, and the new material-debug rendering test.
+They cover the inline control at three window sizes, a fresh view starting with
+Debug off, red direct rendering, green L0 and blue L2, byte-identical restoration
+when Debug is disabled, and fills containing no diagnostic tint. Checkstyle and
+Spotless passed for the changed Java files. The final run compiled into an isolated
+directory and reused the already-staged assets to avoid shared build-output and
+mapped-font conflicts; its log is `work/citadel-cache-isolated-final.log`.
+
 ## Preparation and replacement
 
 `BoardSource` publishes immutable scene/frame data. `GpuTerrain` captures that

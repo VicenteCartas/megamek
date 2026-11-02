@@ -208,13 +208,14 @@ class MapSetupFormTest {
         form.toggleRotation(1);
         assertEquals(MapSettings.BOARD_GENERATED, form.settings().getBoardsSelectedVector().get(1));
 
-        form.assignRotated(1, "16x17/Lake Shore.board2");
+        form.assign(1, "16x17/Lake Shore.board2");
+        form.toggleRotation(1);
         assertEquals(Board.BOARD_REQUEST_ROTATION + "16x17/Lake Shore.board2",
               form.settings().getBoardsSelectedVector().get(1));
         form.boardSize(FIFTEEN);
-        assertFalse(form.canRotate());
+        assertFalse(form.picture().slots().get(0).canRotate());
         int before = calls.size();
-        form.assignRotated(0, "16x17/Lake Shore.board2");
+        form.toggleRotation(0);
         assertEquals(before, calls.size());
     }
 
@@ -272,13 +273,69 @@ class MapSetupFormTest {
     }
 
     @Test
-    void reloadIfNewKeepsAChangeUntilTheServerSendsOthers() {
+    void reloadIfNewKeepsAChangeThroughAnUnchangedServerRefresh() {
         form.mapWidth(3);
         assertFalse(form.reloadIfNew());
         assertEquals(3, form.settings().getMapWidth());
         server = MapSettings.getInstance(server);
         assertTrue(form.reloadIfNew());
-        assertEquals(2, form.settings().getMapWidth());
+        assertEquals(3, form.settings().getMapWidth());
+        server = MapSettings.getInstance(form.settings());
+        assertTrue(form.reloadIfNew());
+        assertEquals(3, form.settings().getMapWidth());
+    }
+
+    @Test
+    void olderRotationEchoDoesNotUndoLaterClicksOrOtherSlotEdits() {
+        form.toggleRotation(0);
+        MapSettings first = MapSettings.getInstance(form.settings());
+        form.toggleRotation(0);
+        MapSettings second = MapSettings.getInstance(form.settings());
+        form.theme(1, "snow");
+        MapSettings latest = MapSettings.getInstance(form.settings());
+        server = first;
+        form.reloadIfNew();
+        assertFalse(form.picture().slots().get(0).rotated());
+        assertEquals("snow", form.settings().getBoardTheme(1));
+        server = second;
+        form.reloadIfNew();
+        assertFalse(form.picture().slots().get(0).rotated());
+        assertEquals("snow", form.settings().getBoardTheme(1));
+        server = latest;
+        form.reloadIfNew();
+        assertTrue(MapSetupForm.sameSetup(latest, form.settings()));
+        server = MapSettings.getInstance(latest);
+        server.setBoardTheme(1, "desert");
+        form.reloadIfNew();
+        assertEquals("desert", form.settings().getBoardTheme(1), "other players' edits still apply");
+    }
+
+    @Test
+    void coalescedEchoAcknowledgesAllMatchingChanges() {
+        form.toggleRotation(0);
+        form.toggleRotation(0);
+        server = MapSettings.getInstance(form.settings());
+        form.reloadIfNew();
+        assertFalse(form.picture().slots().get(0).rotated());
+        server = MapSettings.getInstance(server);
+        server.getBoardsSelectedVector().set(0, Board.BOARD_REQUEST_ROTATION
+              + server.getBoardsSelectedVector().get(0));
+        form.reloadIfNew();
+        assertTrue(form.picture().slots().get(0).rotated(), "a subsequent external rotation is authoritative");
+    }
+
+    @Test
+    void threeQuickRotationsKeepTheirFinalStateThroughEveryEcho() {
+        List<MapSettings> echoes = new ArrayList<>();
+        for (int click = 0; click < 3; click++) {
+            form.toggleRotation(0);
+            echoes.add(MapSettings.getInstance(form.settings()));
+        }
+        for (MapSettings echo : echoes) {
+            server = echo;
+            form.reloadIfNew();
+            assertTrue(form.picture().slots().get(0).rotated(), "intermediate echoes do not undo the final click");
+        }
     }
 
     @Test

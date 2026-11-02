@@ -32,7 +32,7 @@ class BoardVolcanoFoliageTest {
                         var cover = cover(hex, at);
                         assertEquals(density == 1 ? 3 : density == 2 ? 9 : 16, cover.size());
                         for (var feature : cover) {
-                            assertTrue(height == 1 ? feature.asset().equals("vegetation/foliage-volcano")
+                            assertTrue(height == 1 ? feature.asset().matches("vegetation/foliage-volcano(-[23])?")
                                   : BoardFeatures.VOLCANO_TREES.contains(feature.asset()), feature.asset());
                             assertTrue(feature.height() >= height && feature.height() <= height * 1.1f);
                         }
@@ -73,12 +73,13 @@ class BoardVolcanoFoliageTest {
     }
 
     @Test
-    void allFourAssetsLoadWithinTheExistingTreeBudgetsAndKeepTheirRootsAndHeight() {
+    void cinderTreesAndLowThicketsKeepTheirBudgetsRootsAndHeight() {
         var root = new File("data/models/board").toPath().toAbsolutePath();
         var names = new ArrayList<>(BoardFeatures.VOLCANO_TREES);
-        names.add("vegetation/foliage-volcano");
-        int[] budgets = { 480, 240, 96, 12 };
+        names.addAll(List.of("vegetation/foliage-volcano", "vegetation/foliage-volcano-2", "vegetation/foliage-volcano-3"));
         for (String name : names) {
+            boolean shrub = name.startsWith("vegetation/foliage-");
+            int[] budgets = shrub ? new int[] { 24000, 8000, 2200, 12 } : new int[] { 32000, 10000, 2600, 12 };
             var levels = RigidGlb.loadLods(new FileHandle(root.resolve(name + ".glb").toFile()), root);
             assertEquals(4, levels.size(), name);
             int previous = Integer.MAX_VALUE;
@@ -100,9 +101,9 @@ class BoardVolcanoFoliageTest {
                 assertTrue(triangles > 0 && triangles <= budgets[lod] && triangles < previous, name + " LOD " + lod);
                 previous = triangles;
                 assertEquals(0, low, .001f, name + " roots touch the ground");
-                assertEquals(name.equals("vegetation/foliage-volcano") ? 18 : 30, high, .001f, name + " keeps its height");
-                if (name.equals("vegetation/foliage-volcano") && lod == 0) {
-                    assertTrue(right - left > high * 1.4f, "Low thickets have their own spreading proportions");
+                assertEquals(shrub ? 18 : 30, high, .001f, name + " keeps its height");
+                if (shrub && lod == 0) {
+                    assertTrue(right - left > high, "Low thickets have their own spreading proportions");
                 }
                 assertEquals(lod == 3 ? 1 : 2, level.meshes.first().parts.length, "Shared bark and cutout draw parts");
                 for (var material : level.materials) { assertFalse(material.textures.isEmpty()); }

@@ -127,13 +127,28 @@ final class UnitAttack {
         return event.result().kind() == ResolvedAttack.Kind.SHOT;
     }
 
-    /** The same captured effect families used by rendering, including multi-mount attacks. */
-    boolean continuousBeam() {
-        if (!shot()) { return false; }
+    /** The strongest individual hit, not a rifle platoon's or a burst's combined damage. Presentation only. */
+    double infantryHitDamage() {
+        if (!event.result().hit() || defensive()) { return 0; }
+        double damage = event.result().shot() == null ? 0 : event.result().shot().damagePerHit();
+        for (var profile : profiles.values()) { damage = Math.max(damage, profile.damagePerHit()); }
+        return damage > 0 ? damage : event.result().impacts().stream()
+              .mapToInt(ResolvedAttack.Impact::weight).max().orElse(0);
+    }
+
+    /** Heat weapons carbonize infantry figures, independently of how many damage points they dealt. */
+    boolean burnsInfantry() {
+        if (!shot() || !event.result().hit() || defensive()) { return false; }
         var mounts = event.result().mounts();
-        var effects = mounts.isEmpty() ? List.of(effect(event.entityId(), event.result().equipmentIndex()))
-              : mounts.stream().map(mount -> effect(mount.entityId(), mount.equipmentIndex())).toList();
-        return effects.stream().allMatch(effect -> "laser".equals(effect) || "ppc".equals(effect));
+        return mounts.isEmpty() ? burnsInfantry(event.entityId(), event.result().equipmentIndex())
+              : mounts.stream().anyMatch(mount -> burnsInfantry(mount.entityId(), mount.equipmentIndex()));
+    }
+
+    private boolean burnsInfantry(int owner, int index) {
+        String effect = effect(owner, index);
+        var profile = profile(owner, index);
+        return "flame".equals(effect) || "laser".equals(effect) || "ppc".equals(effect)
+              || profile != null && (profile.plasma() || profile.munitions().contains("M_INFERNO"));
     }
 
     /**
@@ -393,6 +408,23 @@ final class UnitAttack {
             if (Float.isFinite(distance)) { result.set(origin).mulAdd(ray.direction, (float) Math.sqrt(distance)); }
         }
         return result;
+    }
+
+    /** Whether the captured contact is on a conventional soldier, rather than its formation's vehicle. */
+    boolean hitsInfantryFigure(ModelInstance target, int seed) {
+        if (!event.result().hit() || !event.conventionalInfantryTarget()) { return false; }
+        if (target instanceof GpuUnitInstance instance && instance.visual() != null) {
+            for (var hit : hitPoints.entrySet()) {
+                if (hit.getKey().target() != target || hit.getKey().seed() != seed) { continue; }
+                for (var rig : instance.visual().rigs()) {
+                    if (!rig.vehicle()) { continue; }
+                    for (var node = hit.getValue().node(); node != null; node = node.getParent()) {
+                        if (node.id.equals(rig.container())) { return false; }
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     private void scatter(ModelInstance targetInstance, Vector3 origin, int ordinal, boolean beam, Vector3 result) {

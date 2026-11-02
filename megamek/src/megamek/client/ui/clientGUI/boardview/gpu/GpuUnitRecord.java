@@ -1059,8 +1059,7 @@ final class GpuUnitRecord {
         }
         int to = from < 0 ? from : Math.clamp((long) from + delta, 0, order.size() - 1);
         if (to != from) {
-            order.add(to, order.remove(from));
-            WeaponDisplayData.setCustomWeaponOrder(entity, order);
+            WeaponDisplayData.moveWeapon(entity, order.get(from), order.get(to));
         }
     }
 

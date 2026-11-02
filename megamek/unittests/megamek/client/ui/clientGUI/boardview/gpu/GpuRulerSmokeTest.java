@@ -10,13 +10,77 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
+import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @Tag("on-demand")
 class GpuRulerSmokeTest {
+    @Test
+    void interveningWoodsTurnTheRayYellowUntilAnyLaterBlockerInBothViews() throws Exception {
+        Board map = Board.createEmptyBoard(10, 10);
+        Coords from = new Coords(5, 2), to = new Coords(5, 8), woods = new Coords(5, 4);
+        map.getHex(woods).addTerrain(new Terrain(Terrains.WOODS, 1));
+        map.getHex(woods).addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+        AtomicReference<BoardScene> modified = new AtomicReference<>(), blocked = new AtomicReference<>();
+        try (GpuBoardFixture fixture = GpuBoardFixture.create(map)) {
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.entity.setPosition(from);
+                var ruler = fixture.source.los().model();
+                ruler.measure(from, to, fixture.entity.getId(), 2);
+                fixture.source.refresh();
+                modified.set(fixture.source.takeFrame().scene());
+                assertEquals(woods, modified.get().tactical().ruler().modifierAt());
+                map.setHex(new Coords(5, 6), new Hex(3));
+                fixture.source.refresh();
+                blocked.set(fixture.source.takeFrame().scene());
+                assertEquals(3, blocked.get().tile(new Coords(5, 6)).elevation());
+            });
+        }
+        GpuHudTestStage.run(hud -> {
+            GpuTactical ruler = new GpuTactical();
+            try {
+                for (boolean obstructed : new boolean[] { false, true }) {
+                    BoardScene scene = obstructed ? blocked.get() : modified.get();
+                    GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
+                    try {
+                        ruler.update(scene);
+                        for (boolean tactical : new boolean[] { false, true }) {
+                            board.view(tactical);
+                            board.draw(ruler::renderLabels);
+                            Pixmap shot = hud.captureBackBuffer("ruler-modified-" + (obstructed ? "blocked-" : "")
+                                  + (tactical ? "tactical" : "3d"));
+                            try {
+                                assertTrue(count(shot, GpuTactical.RULER_CLEAR, 0, 0, shot.getWidth(), shot.getHeight()) > 100);
+                                assertTrue(count(shot, GpuTactical.RULER_MODIFIED, 0, 0, shot.getWidth(), shot.getHeight()) > 100);
+                                int red = count(shot, GpuTactical.RULER_BLOCKED, 0, 0, shot.getWidth(), shot.getHeight());
+                                assertTrue(obstructed ? red > 100 : red < 10, "Red pixels: " + red);
+                                var before = board.screen(BoardGeometry.center(new Coords(5, 3), 2));
+                                var after = board.screen(BoardGeometry.center(new Coords(5, 5), 2));
+                                assertTrue(count(shot, GpuTactical.RULER_CLEAR,
+                                      Math.round(before.x) - 8, Math.round(before.y) - 8, 17, 17) > 0);
+                                assertTrue(count(shot, GpuTactical.RULER_MODIFIED,
+                                      Math.round(after.x) - 8, Math.round(after.y) - 8, 17, 17) > 0,
+                                      "The ray stays yellow after leaving the woods");
+                                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                            } finally {
+                                shot.dispose();
+                            }
+                        }
+                    } finally {
+                        board.dispose();
+                    }
+                }
+            } finally {
+                ruler.dispose();
+            }
+        });
+    }
+
     @Test
     void sharedRulerIsStraightAndRemainsVisibleThroughTheBlockingHillInBothViews() throws Exception {
         Board map = Board.createEmptyBoard(10, 10);
@@ -50,6 +114,7 @@ class GpuRulerSmokeTest {
                               + (tactical ? "tactical" : "3d"));
                         try {
                             assertTrue(count(shot, GpuTactical.RULER_CLEAR, 0, 0, shot.getWidth(), shot.getHeight()) > 100);
+                            assertEquals(0, count(shot, GpuTactical.RULER_MODIFIED, 0, 0, shot.getWidth(), shot.getHeight()));
                             int red = count(shot, GpuTactical.RULER_BLOCKED, 0, 0, shot.getWidth(), shot.getHeight());
                             assertTrue(obstructed ? red > 100 : red < 10, "Red pixels: " + red);
                             if (obstructed) {

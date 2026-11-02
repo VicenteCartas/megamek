@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -13,6 +14,32 @@ import megamek.common.units.Tank;
 import org.junit.jupiter.api.Test;
 
 class UnitAttackTest {
+    @Test
+    void infantryCasualtiesDistinguishRifleVolleysCannonRoundsAndHeat() {
+        var rifle = hit("InfantryAutoRifle", 28);
+        assertEquals(.52, rifle.infantryHitDamage(), .0001);
+        assertEquals(0, MeepleCasualties.infantryCuts(rifle), "A platoon's combined rifle damage is not one heavy projectile");
+        assertFalse(rifle.burnsInfantry());
+        assertEquals(2, MeepleCasualties.infantryCuts(hit("ISAC2", 1)));
+        assertEquals(3, MeepleCasualties.infantryCuts(hit("ISAC5", 1)));
+        assertEquals(4, MeepleCasualties.infantryCuts(hit("ISAC20", 2)), "Infantry damage reduction does not turn a shell into a rifle");
+        for (String weapon : List.of("ISMediumLaser", "InfantryLaserRifle", "InfantryPortableFlamer", "ISPPC", "ISPlasmaRifle")) {
+            var heat = hit(weapon, 12);
+            assertTrue(heat.burnsInfantry(), weapon);
+            assertEquals(0, MeepleCasualties.infantryCuts(heat), "Heat carbonizes instead of shattering: " + weapon);
+        }
+    }
+
+    private static UnitAttack hit(String name, int dealt) {
+        var base = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var raw = base.result();
+        var weapon = Mounted.createMounted(new Tank(), EquipmentType.get(name));
+        var result = new ResolvedAttack(raw.id(), raw.kind(), raw.attacker(), raw.target(), raw.targetType(),
+              0, name, raw.limb(), true, null, ResolvedAttack.Shot.capture(weapon))
+              .withImpacts(List.of(new ResolvedAttack.Impact("*", false, dealt)));
+        return new UnitAttack(new BoardScene.Combat(result, base.attacker(), base.target(), base.destination()));
+    }
+
     @Test
     void machineGunRapidFireTriplesCosmeticRoundsInTwiceTheFiringTime() {
         for (String name : List.of("ISMG", "ISLightMG", "ISHeavyMG", "CLMG", "CLBAMG")) {

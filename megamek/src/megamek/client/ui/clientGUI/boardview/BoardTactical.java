@@ -30,9 +30,9 @@ public record BoardTactical(List<Fill> fills, List<Label> labels, List<Wall> wal
         return new BoardTactical(fills, labels, walls, flatWalls, ruler);
     }
 
-    /** EDT-owned measurement snapshot. Heights are absolute display levels; null blockedAt means clear LOS. */
+    /** EDT-owned measurement snapshot. Heights are absolute display levels; null transitions mean no effect. */
     public record Ruler(Coords start, Coords end, int startHeight, int endHeight, Coords blockedAt,
-          int startArgb, int endArgb) { }
+          Coords modifierAt, int startArgb, int endArgb) { }
 
     public BoardTactical {
         fills = List.copyOf(fills);

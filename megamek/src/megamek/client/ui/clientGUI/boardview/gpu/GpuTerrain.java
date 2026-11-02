@@ -754,6 +754,7 @@ final class GpuTerrain implements Disposable {
             GpuSurfaceScars.register(result);
             if (fill) { materialCache.registerFill(result); }
             if (cached) { materialCache.registerCached(result, charted); }
+            if (!fill && !depthOnly) { materialCache.registerDebug(result, cached); }
             GpuLiquidShader.register(result);
             GpuMagmaShader.register(result, rainNoise);
             // Upload before drawing: creating ice maps from a uniform setter disturbs the active texture bindings.
@@ -2416,6 +2417,8 @@ final class GpuTerrain implements Disposable {
 
     /** Live A/B switch for the ground material cache, retaining its allocation. */
     void setMaterialCache(boolean enabled) { materialCache.setEnabled(enabled); }
+
+    void setMaterialCacheDebug(boolean enabled) { materialCache.setDebug(enabled); }
 
     GpuMaterialCache.Status materialCacheStatus() { return materialCache.status(); }
 
@@ -4565,7 +4568,7 @@ final class GpuTerrain implements Disposable {
             }
             if (feature.decoration() == null && (feature.kind() == BoardScene.FeatureKind.BUILDING
                   || feature.kind() == BoardScene.FeatureKind.INDUSTRIAL || feature.kind() == BoardScene.FeatureKind.FUEL_TANK
-                  || feature.kind() == BoardScene.FeatureKind.PROP && !feature.asset().equals("vegetation/field"))) {
+                  || feature.kind() == BoardScene.FeatureKind.PROP)) {
                 supports.add(prop);
             }
             if (feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding && multiHexLayout == null) {

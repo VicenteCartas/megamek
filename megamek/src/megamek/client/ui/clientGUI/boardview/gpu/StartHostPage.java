@@ -37,6 +37,7 @@ final class StartHostPage {
     private UiFormField metaserverField;
     private Table addresses;
     private Label publicAddress;
+    private UiButton showAddress;
     private UiButton hostButton;
     private UiButton backButton;
     /** The save the Resume page loads, what it says about itself, and the player the host takes. */
@@ -129,10 +130,10 @@ final class StartHostPage {
     private Table addresses() {
         Table table = new Table();
         table.left().top();
-        UiButton show = screen.kit.button("button-quiet-compact", null, Messages.getString("StartScreen.showAddress"),
+        showAddress = screen.kit.button("button-quiet-compact", null, Messages.getString("StartScreen.showAddress"),
               null);
         // Rows keep the button's height so the page doesn't shift when the address replaces it
-        table.defaults().left().minHeight(show.getPrefHeight()).padBottom(4);
+        table.defaults().left().minHeight(showAddress.getPrefHeight()).padBottom(4);
         Label local = screen.kit.typeLabel(Messages.getString("StartScreen.findingAddress"), "small", "text.primary");
         table.add(screen.kit.typeLabel(Messages.getString("StartScreen.localAddress"), "small", "text.muted"))
               .padRight(12);
@@ -140,15 +141,15 @@ final class StartHostPage {
         table.add(screen.kit.typeLabel(Messages.getString("StartScreen.publicAddress"), "small", "text.muted"))
               .padRight(12);
         publicAddress = screen.kit.typeLabel("", "small", "text.primary");
-        Cell<Actor> publicCell = table.add((Actor) show);
-        UiKit.onChange(show, () -> {
+        Cell<Actor> publicCell = table.add((Actor) showAddress);
+        UiKit.onChange(showAddress, () -> {
             publicAddress.setText(Messages.getString("StartScreen.findingAddress"));
             publicCell.setActor(publicAddress);
-            int at = screen.focusable.indexOf(show);
+            int at = screen.focusable.indexOf(showAddress);
             if (at >= 0) {
                 screen.focusable.remove(at);
             }
-            if (screen.stage.getKeyboardFocus() == show) {
+            if (screen.stage.getKeyboardFocus() == showAddress) {
                 screen.stage.setKeyboardFocus(hostButton);
             }
             lookUp(NetworkAddresses::publicAddress, publicAddress);
@@ -195,9 +196,35 @@ final class StartHostPage {
             return;
         }
         boolean register = registerBox.isChecked();
-        screen.starting(hostButton, "StartScreen.starting");
+        starting();
         screen.window.host(new HostRequest(name, inputs.passwordInput.getText(), port, register,
               register ? metaserverInput.getText().trim() : ""));
+    }
+
+    /** Locks the host form along with Start and Back until the existing start lifecycle restores them. */
+    private void starting() {
+        String text = hostButton.getText().toString();
+        screen.starting(hostButton, "StartScreen.starting", () -> {
+            controlsDisabled(false);
+            hostButton.setDisabled(false);
+            hostButton.setText(text);
+        });
+        controlsDisabled(true);
+        screen.stage.setKeyboardFocus(null);
+    }
+
+    private void controlsDisabled(boolean disabled) {
+        inputs.nameInput.setDisabled(disabled);
+        onlineToggle.setDisabled(disabled);
+        inputs.passwordInput.setDisabled(disabled);
+        inputs.passwordBox.reveal.setDisabled(disabled);
+        inputs.portInput.setDisabled(disabled);
+        registerBox.setDisabled(disabled);
+        metaserverInput.setDisabled(disabled);
+        showAddress.setDisabled(disabled);
+        if (playAs != null) {
+            playAs.setDisabled(disabled);
+        }
     }
 
     /**
@@ -267,7 +294,7 @@ final class StartHostPage {
         }
         boolean register = registerBox.isChecked();
         List<String> bots = resume.bots().stream().filter(bot -> watching || !bot.equals(name)).toList();
-        screen.starting(hostButton, "StartScreen.starting");
+        starting();
         screen.window.load(new LoadRequest(resume.file(), new HostRequest(name, inputs.passwordInput.getText(), port,
               register, register ? metaserverInput.getText().trim() : ""), watching, bots));
     }

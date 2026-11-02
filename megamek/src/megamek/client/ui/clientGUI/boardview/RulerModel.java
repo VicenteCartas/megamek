@@ -244,7 +244,7 @@ public final class RulerModel {
         };
         if (a == null || b == null) {
             return new Snapshot(true, InputEvent.ALT_DOWN_MASK, a, b, 0, mode, "", "", "", true, false,
-                  a == null ? null : new BoardTactical.Ruler(a.coords(), null, a.absoluteHeight(), 0, null,
+                  a == null ? null : new BoardTactical.Ruler(a.coords(), null, a.absoluteHeight(), 0, null, null,
                         GUIPreferences.getInstance().getRulerColor1().getRGB(), GUIPreferences.getInstance().getRulerColor2().getRGB()), List.of());
         }
         Entity first = identified(start), second = identified(end);
@@ -254,7 +254,8 @@ public final class RulerModel {
         var reverse = measure(b, a, second, first, actualHeights, false);
         var effects = forward.effects();
         var ruler = new BoardTactical.Ruler(a.coords(), b.coords(), a.absoluteHeight(), b.absoluteHeight(),
-              effects.getBlockingHex(), GUIPreferences.getInstance().getRulerColor1().getRGB(), GUIPreferences.getInstance().getRulerColor2().getRGB());
+              effects.getBlockingHex(), effects.getModifierHex(), GUIPreferences.getInstance().getRulerColor1().getRGB(),
+              GUIPreferences.getInstance().getRulerColor2().getRGB());
         List<Comparison> comparisons = List.of();
         if (compare) {
             var values = LOSModifierCalculator.compare(game,

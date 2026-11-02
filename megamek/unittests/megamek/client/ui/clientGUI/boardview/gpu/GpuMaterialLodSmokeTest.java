@@ -21,6 +21,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,80 @@ import org.junit.jupiter.api.Test;
 /** Mapped material response: normal maps, dry reflection, plateau outcrops and fungal pigment; authored roughness. */
 @Tag("on-demand")
 class GpuMaterialLodSmokeTest {
+    @Test
+    void cacheDebugFollowsDrawPathAndNeverBakesTheTint() {
+        UiTestStage.onGl(GpuBoardWindow.configuration(false), () -> {
+            var terrain = new GpuTerrain();
+            var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+            try {
+                var camera = new BoardCamera();
+                BoardScene scene = scene("dirt");
+                GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                terrain.setGrass(false);
+                terrain.setSmallObjects(false);
+                camera.setIsometric(false);
+                for (float footprint : new float[] { .15f, .55f }) {
+                    camera.camera.zoom = footprint * BoardGeometry.width() / 30;
+                    camera.center(BoardGeometry.center(new Coords(3, 3), 0));
+                    terrain.setMaterialCache(false);
+                    GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                    byte[] plain = debugPixels(frame, terrain, camera, scene);
+                    terrain.setMaterialCacheDebug(true);
+                    byte[] direct = debugPixels(frame, terrain, camera, scene);
+                    assertDominant(direct, 0, "Uncached ground is red even when caching is disabled");
+                    terrain.setMaterialCacheDebug(false);
+                    assertArrayEquals(plain, debugPixels(frame, terrain, camera, scene), "Debug off restores the frame");
+
+                    // Fill with diagnostics enabled too: its colour must never enter the stored material.
+                    terrain.setMaterialCacheDebug(true);
+                    terrain.setMaterialCache(true);
+                    for (int i = 0; i < 600 && !terrain.materialCacheComplete(); i++) {
+                        terrain.refine(camera.camera);
+                        frame.render(terrain, camera, scene);
+                    }
+                    assertTrue(terrain.materialCacheComplete(), terrain.materialCacheReport());
+                    assertEquals(footprint < .2f ? 0 : 2, terrain.materialCacheStatus().level());
+                    assertDominant(debugPixels(frame, terrain, camera, scene), footprint < .2f ? 1 : 2,
+                          "Cache level 0 is green; level 2 is blue");
+                    terrain.setMaterialCacheDebug(false);
+                    byte[] cached = debugPixels(frame, terrain, camera, scene);
+                    // DIRT stays near-neutral; a baked red, green or blue tint would exceed this by a wide margin.
+                    double[] rgb = meanRgb(cached);
+                    assertTrue(Math.max(rgb[0], Math.max(rgb[1], rgb[2]))
+                          - Math.min(rgb[0], Math.min(rgb[1], rgb[2])) < 65, "Cache fills contain no diagnostic tint");
+                    terrain.setMaterialCacheDebug(true);
+                    debugPixels(frame, terrain, camera, scene);
+                    terrain.setMaterialCacheDebug(false);
+                    assertArrayEquals(cached, debugPixels(frame, terrain, camera, scene));
+                }
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally {
+                frame.dispose();
+                terrain.dispose();
+            }
+        });
+    }
+
+    private static byte[] debugPixels(GpuReviewFrame frame, GpuTerrain terrain, BoardCamera camera, BoardScene scene) {
+        frame.render(terrain, camera, scene);
+        return ScreenUtils.getFrameBufferPixels(Gdx.graphics.getBackBufferWidth() / 2 - 32,
+              Gdx.graphics.getBackBufferHeight() / 2 - 32, 64, 64, false);
+    }
+
+    private static double[] meanRgb(byte[] pixels) {
+        double[] mean = new double[3];
+        for (int i = 0; i < pixels.length; i += 4) {
+            for (int c = 0; c < 3; c++) { mean[c] += (pixels[i + c] & 255) / (pixels.length / 4.0); }
+        }
+        return mean;
+    }
+
+    private static void assertDominant(byte[] pixels, int channel, String message) {
+        double[] mean = meanRgb(pixels);
+        assertTrue(mean[channel] > mean[(channel + 1) % 3] + 40
+              && mean[channel] > mean[(channel + 2) % 3] + 40, message + ": " + java.util.Arrays.toString(mean));
+    }
+
     @Test
     void materialsUseTheirDetailMapsAndKeepTheirColourAndHeat() {
         var failure = new AtomicReference<Throwable>();

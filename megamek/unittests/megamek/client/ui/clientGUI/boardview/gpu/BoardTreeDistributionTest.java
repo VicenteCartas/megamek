@@ -95,6 +95,54 @@ class BoardTreeDistributionTest {
         assertTrue(capture(clear, coords, true).isEmpty());
     }
 
+    @Test
+    void lightForestCrownsLeaveRoomWithinTheirHex() {
+        File root = new File(Configuration.dataDir(), "models/board");
+        var models = new java.util.HashMap<String, com.badlogic.gdx.graphics.g3d.model.data.ModelData>();
+        for (String theme : List.of("", "volcanic", "swamp")) {
+            for (int x = 0; x < 8; x++) {
+                var coords = new Coords(x, 3);
+                for (var tree : capture(new Hex(0, "woods:1;foliage_elev:3", theme, coords), coords, true)) {
+                    if (tree.asset().startsWith("vegetation/pine") || tree.asset().startsWith("vegetation/tree-dead")) { continue; }
+                    var model = models.computeIfAbsent(tree.asset(), name ->
+                          RigidGlb.loadLods(RigidGlb.source(root, name), root.toPath()).getFirst());
+                    float left = Float.POSITIVE_INFINITY, right = Float.NEGATIVE_INFINITY;
+                    float front = Float.POSITIVE_INFINITY, back = Float.NEGATIVE_INFINITY;
+                    double angle = Math.toRadians(tree.rotation());
+                    for (var mesh : model.meshes) {
+                        for (int i = 0; i < mesh.vertices.length; i += RigidGlb.STRIDE) {
+                            float px = (float) (mesh.vertices[i] * Math.cos(angle) - mesh.vertices[i + 1] * Math.sin(angle));
+                            float py = (float) (mesh.vertices[i] * Math.sin(angle) + mesh.vertices[i + 1] * Math.cos(angle));
+                            left = Math.min(left, px); right = Math.max(right, px);
+                            front = Math.min(front, py); back = Math.max(back, py);
+                        }
+                    }
+                    assertTrue(Math.max(right - left, back - front) * tree.scale() < BoardGeometry.TILE_WIDTH * .62f,
+                          "A light-woods tree must not occupy a whole hex: " + tree.asset());
+                }
+            }
+        }
+    }
+
+    @Test
+    void ordinaryWoodsDoNotReserveShorterTrees() {
+        var coords = new Coords(7, 4);
+        for (String theme : List.of("", "volcanic", "desert", "snow", "lunar", "mars")) {
+            for (int density = 1; density <= 3; density++) {
+                for (boolean natural : new boolean[] { false, true }) {
+                    for (String marker : List.of("", ";fluff:12")) {
+                        var trees = capture(new Hex(0, "woods:" + density + ";foliage_elev:2" + marker, theme, coords),
+                              coords, natural);
+                        assertTrue(trees.stream().allMatch(tree -> tree.height() >= 2),
+                              "Ordinary woods and orchards have no reserved small trees: " + theme);
+                    }
+                }
+            }
+        }
+        var fungal = capture(new Hex(0, "woods:1;foliage_elev:2", "fungus", coords), coords, true);
+        assertTrue(fungal.stream().anyMatch(tree -> tree.height() < 2), "Fungal stands retain small fruiting bodies");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = { "", "desert", "tropical", "snow", "lunar", "mars", "fungus" })
     void distributionAppliesToEveryBiomeIncludingOrchardsAndLowCover(String theme) {

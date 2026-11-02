@@ -6,16 +6,17 @@ import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackTest.scene;
 import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackTest.unit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
-import com.badlogic.gdx.math.Vector3;
 import megamek.common.ResolvedAttack;
 import megamek.common.equipment.EquipmentType;
+import megamek.common.equipment.Mounted;
+import megamek.common.units.Tank;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -26,16 +27,15 @@ class UnitSlowMotionTest {
     @Test
     void disablingRestoresSpeedImmediatelyAndImpactHasNoRecoveryState() {
         var shot = new UnitAttack(shot(unit(1, 0), unit(2, 2), "ISAC20"));
-        var death = death(shot);
-        death.seconds = -.01f;
+        var death = new UnitAttack(attack(shot.event.target(), shot.event.target(), ResolvedAttack.Kind.DEATH, true));
+        death.cause = shot;
+        death.seconds = -Float.MIN_NORMAL;
         var attacks = List.of(shot, death);
-        assertEquals(.1f, UnitSlowMotion.scale(attacks, ignored -> 0, 1, true), 1e-6);
-        assertEquals(1, UnitSlowMotion.scale(attacks, ignored -> {
-            throw new AssertionError("Disabled slow motion must not inspect the projectile");
-        }, 1, false));
+        assertEquals(.1f, UnitSlowMotion.scale(attacks, true), 1e-6);
+        assertEquals(1, UnitSlowMotion.scale(attacks, false));
         death.seconds = 0;
-        assertEquals(1, UnitSlowMotion.scale(attacks, ignored -> 0, 1, true), "Impact restores speed immediately");
-        assertEquals(1, UnitSlowMotion.scale(List.of(), ignored -> 0, 1, true));
+        assertEquals(1, UnitSlowMotion.scale(attacks, true), "Impact restores speed immediately");
+        assertEquals(1, UnitSlowMotion.scale(List.of(), true));
     }
 
     @Test
@@ -45,143 +45,146 @@ class UnitSlowMotionTest {
               ResolvedAttack.Kind.BRUSH_OFF, ResolvedAttack.Kind.SHAKE_OFF, ResolvedAttack.Kind.STOP_SWARM)) {
             var attacker = unit(1, 0);
             var target = unit(2, 1);
-            var playback = new UnitPlayback();
-            playback.accept(List.of(attack(attacker, target, kind, true),
-                  attack(target, target, ResolvedAttack.Kind.DEATH, true)), scene(attacker, target), ignored -> false);
-            playback.advance(0, UnitMotion.Speed.NORMAL);
-            for (int frame = 0; frame < 3000 && playback.busy(); frame++) {
-                assertEquals(1, UnitSlowMotion.scale(playback.attacks(), ignored -> {
-                    throw new AssertionError("Melee must never use projectile distance");
-                }, 1, true), "Physical attacks never slow the clock, including a lethal impact: " + kind);
-                playback.advance(.01, UnitMotion.Speed.NORMAL);
-            }
-            assertFalse(playback.busy(), "The full physical action and death must complete");
+            assertNormalThroughCompletion(playback(attack(attacker, target, kind, true), false));
         }
     }
 
     @Test
-    void laserAndPpcBeamsLastOneExtraRealSecondAtEachPlaybackSpeedThenExplodeAtFullSpeed() {
-        for (String weapon : List.of("ISMediumLaser", "ISPPC")) {
-            for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
-                  UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
-                var shot = new UnitAttack(shot(unit(1, 0), unit(2, 8), weapon));
-                var death = death(shot);
-                var attacks = List.of(shot, death);
-                var effects = new GpuAttackEffects();
-                try {
-                    effects.update(List.of(shot), null, Map.of());
-                    shot.seconds = Math.nextDown(shot.contactSeconds);
-                    assertEquals(Float.POSITIVE_INFINITY, effects.distanceToImpact(shot), "A beam has no travelling projectile");
-                    shot.seconds = UnitAttack.ANTICIPATION_SECONDS - .01f;
-                    death.seconds = shot.seconds - shot.contactSeconds;
-                    assertEquals(1, UnitSlowMotion.scale(attacks, effects::distanceToImpact, speed.rate, true),
-                          "Charging and anticipation retain their normal duration");
-                    double clock = UnitAttack.ANTICIPATION_SECONDS, elapsed = 0;
-                    for (int frame = 0; frame < 10000 && clock < shot.contactSeconds - 1e-7; frame++) {
-                        shot.seconds = (float) clock;
-                        death.seconds = shot.seconds - shot.contactSeconds;
-                        float scale = UnitSlowMotion.scale(attacks, effects::distanceToImpact, speed.rate, true);
-                        double step = Math.min(1 / 120d, (shot.contactSeconds - clock) / (speed.rate * scale));
-                        clock += step * speed.rate * scale;
-                        elapsed += step;
+    void allRangedWeaponsSlowBeforeDeathAtEveryRangePlaybackSpeedAndFrameRate() {
+        for (String weapon : List.of("ISAC20", "ISMG", "ISMediumLaser", "ISPPC", "ISFlamer", "ISPlasmaRifle",
+              "ISSRM6", "ISArrowIV", "InfantryAutoRifle", "InfantryPortableFlamer", "Pistol (Flamer)")) {
+            for (int range : new int[] { 0, 2, 8, 25 }) {
+                for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
+                      UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
+                    for (int fps : new int[] { 15, 30, 60, 144 }) {
+                        var playback = playback(shot(unit(1, 0), unit(2, range), weapon), false);
+                        var shot = playback.attack();
+                        var death = playback.attacks().getLast();
+                        assertSame(shot, death.cause);
+                        float previous = 1;
+                        int ticks = 0;
+                        while (death.seconds < 0 && ticks++ < fps * 30) {
+                            float scale = UnitSlowMotion.scale(playback.attacks(), true);
+                            if (death.seconds <= -UnitSlowMotion.DEATH_LEAD_SECONDS) {
+                                assertEquals(1, scale, "Only the final death window slows: " + weapon);
+                            }
+                            if (shot.seconds <= UnitAttack.ANTICIPATION_SECONDS) {
+                                assertEquals(1, scale, "Even point-blank weapons start firing at full speed: " + weapon);
+                            }
+                            assertTrue(scale <= previous + 1e-6, "The approach slows continuously: " + weapon);
+                            assertTrue(scale >= .1f);
+                            previous = scale;
+                            playback.advance(scale / fps, speed);
+                        }
+                        assertTrue(ticks < fps * 30, "The death must start: " + weapon);
+                        assertEquals(.1f, previous, .025f, "The last pre-death frame approaches one tenth speed: " + weapon);
+                        assertEquals(1, UnitSlowMotion.scale(playback.attacks(), true),
+                              "The impact frame is already at full speed: " + weapon);
+                        playback.advance(.1, speed);
+                        assertEquals(1, UnitSlowMotion.scale(playback.attacks(), true));
                     }
-                    assertEquals(shot.flightSeconds / speed.rate + 1, elapsed, .0001,
-                          "The lit beam gains one real second, without changing its impact timeline");
-                    death.seconds = 0;
-                    assertEquals(1, UnitSlowMotion.scale(attacks, effects::distanceToImpact, speed.rate, true));
-                } finally {
-                    effects.dispose();
                 }
             }
         }
     }
 
     @Test
-    void burstApproachTracksTheFinalRenderedTracer() {
-        var base = attack(unit(1, 0), unit(2, 8), ResolvedAttack.Kind.SHOT, true);
-        var result = base.result();
-        var profile = new ResolvedAttack.Shot("", Set.of(), false, false, 1, 0, false, null, null, null,
-              true, 2, false, true, false);
-        var shot = new UnitAttack(new BoardScene.Combat(new ResolvedAttack(result.id(), result.kind(), result.attacker(),
-              result.target(), result.targetType(), 0, "ISMG", 4, true, null, profile),
-              base.attacker(), base.target(), base.destination()));
-        var effects = new GpuAttackEffects();
-        try {
-            effects.update(List.of(shot), null, Map.of());
-            shot.seconds = UnitAttack.ANTICIPATION_SECONDS + shot.flightSeconds;
-            assertEquals(Float.POSITIVE_INFINITY, effects.distanceToImpact(shot),
-                  "Earlier MG bullets have arrived, but the final tracer has not launched");
-            float launch = UnitAttack.ANTICIPATION_SECONDS + shot.roundDelay(UnitAttack.roundCount(profile) - 1, profile);
-            shot.seconds = launch;
-            float distance = effects.distanceToImpact(shot);
-            assertTrue(Float.isFinite(distance) && distance > 4 * BoardGeometry.height());
-            shot.seconds = (launch + shot.contactSeconds) / 2;
-            assertEquals(distance / 2, effects.distanceToImpact(shot), .001f,
-                  "Slow motion measures the same captured tracer position as rendering");
-            var origin = UnitAttack.center(null, base.attacker().location(), new Vector3());
-            assertEquals(origin.dst(shot.endpoint(null, origin, new Vector3())), distance, .001f);
-            shot.seconds = shot.contactSeconds;
-            assertEquals(0, effects.distanceToImpact(shot));
-        } finally { effects.dispose(); }
-    }
-
-    @Test
-    void lethalProjectileSlowsAcrossFourHexesAndImpactRestoresFullSpeedAtEveryPlaybackSpeed() {
-        for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
-            for (int fps : new int[] { 15, 30, 60, 144 }) {
-                var attacker = unit(1, 0);
-                var target = unit(2, 8);
-                var playback = new UnitPlayback();
-                playback.accept(List.of(shot(attacker, target, "ISAC20"),
-                      attack(target, target, ResolvedAttack.Kind.DEATH, true)), scene(attacker, target), ignored -> false);
-                playback.advance(0, speed);
-                var shot = playback.attack();
-                var death = playback.attacks().getLast();
-                assertSame(shot, death.cause);
-                float step = 1f / fps, previous = 1;
-                int ticks = 0;
-                while (death.seconds < 0 && ticks++ < fps * 30) {
-                    float distance = 8 * BoardGeometry.height() * (1 - shot.flight());
-                    float scale = UnitSlowMotion.scale(playback.attacks(), cause -> {
-                        assertSame(shot, cause);
-                        return distance;
-                    }, speed.rate, true);
-                    if (distance >= 4 * BoardGeometry.height()) { assertEquals(1, scale); }
-                    assertTrue(scale <= previous + 1e-6, "The incoming round slows continuously");
-                    assertTrue(scale >= .1f);
-                    previous = scale;
-                    playback.advance(step * scale, speed);
-                }
-                assertTrue(ticks < fps * 30, "The projectile reaches the target");
-                assertEquals(.1f, previous, .003f, "The last approach frame is at one tenth speed");
-                assertEquals(1, UnitSlowMotion.scale(playback.attacks(), ignored -> 0, speed.rate, true),
-                      "The impact frame and explosion are already at full speed");
+    void beamsFlamesAndProjectilesShareTheSameTimeWindow() {
+        for (String weapon : List.of("ISAC20", "ISMediumLaser", "ISFlamer", "ISMG")) {
+            var playback = playback(shot(unit(1, 0), unit(2, 2), weapon), false);
+            var death = playback.attacks().getLast();
+            playback.advance((-death.seconds - UnitSlowMotion.DEATH_LEAD_SECONDS) / UnitMotion.Speed.NORMAL.rate,
+                  UnitMotion.Speed.NORMAL);
+            double elapsed = 0;
+            while (death.seconds < 0 && elapsed < 2) {
+                playback.advance(UnitSlowMotion.scale(playback.attacks(), true) / 240d, UnitMotion.Speed.NORMAL);
+                elapsed += 1 / 240d;
             }
+            assertEquals(1.12, elapsed, .02, "Every weapon has the same roughly one-second approach: " + weapon);
         }
     }
 
     @Test
-    void ordinaryHitsAndDeathsWithoutRangedCausesStayAtNormalSpeed() {
-        var shot = new UnitAttack(shot(unit(1, 0), unit(2, 5), "ISAC20"));
-        var death = new UnitAttack(attack(unit(2, 5), unit(2, 5), ResolvedAttack.Kind.DEATH, true));
-        for (float seconds = 0; seconds < shot.duration; seconds += .01f) {
-            shot.seconds = seconds;
-            assertEquals(1, UnitSlowMotion.scale(List.of(shot, death), ignored -> {
-                throw new AssertionError("An ordinary hit or unlinked death has no killing projectile");
-            }, 1, true));
+    void mixedWeaponsWaitForTheScheduledDeathAfterEarlierImpactsAndTargetChanges() {
+        var attacker = unit(1, 0);
+        var firstTarget = unit(2, 8);
+        var victim = unit(3, 2);
+        var mixed = shot(attacker, victim, "ISAC20", "ISMediumLaser", "ISFlamer", "ISMG");
+        var playback = new UnitPlayback();
+        playback.accept(List.of(shot(attacker, firstTarget, "ISAC20"), mixed,
+              attack(victim, victim, ResolvedAttack.Kind.DEATH, true)), scene(attacker, firstTarget, victim), ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        var death = playback.attacks().getLast();
+        var cause = death.cause;
+        assertSame(mixed, cause.event);
+        assertTrue(cause.delay > 0, "This target is reached later in the volley");
+        float earlierImpact = UnitAttack.ANTICIPATION_SECONDS + cause.flightSeconds;
+        playback.advance((cause.delay + earlierImpact) / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+        assertTrue(death.seconds < -UnitSlowMotion.DEATH_LEAD_SECONDS, "The final MG round has not arrived yet");
+        assertEquals(1, UnitSlowMotion.scale(playback.attacks(), true), "Earlier weapons cannot trigger the slowdown");
+        playback.advance((-death.seconds - UnitSlowMotion.DEATH_LEAD_SECONDS / 2) / UnitMotion.Speed.NORMAL.rate,
+              UnitMotion.Speed.NORMAL);
+        float scale = UnitSlowMotion.scale(playback.attacks(), true);
+        assertTrue(scale > .1f && scale < 1, "The scheduled death approaches even with mixed effect families");
+        playback.togglePaused();
+        float at = death.seconds;
+        playback.advance(10, UnitMotion.Speed.NORMAL);
+        assertEquals(at, death.seconds);
+        assertEquals(scale, UnitSlowMotion.scale(playback.attacks(), true));
+        playback.togglePaused();
+        playback.advance(0, UnitMotion.Speed.INSTANT);
+        assertFalse(playback.busy());
+        assertEquals(1, UnitSlowMotion.scale(playback.attacks(), true));
+    }
+
+    @Test
+    void pilotLossStaysAtSpeedEvenWhenLinkedToARangedHit() {
+        var playback = playback(shot(unit(1, 0), unit(2, 2), "ISAC20"), true);
+        assertSame(playback.attack(), playback.attacks().getLast().cause);
+        assertNormalThroughCompletion(playback);
+    }
+
+    @Test
+    void ordinaryHitsAndStandaloneDeathsStayAtNormalSpeed() {
+        var attacker = unit(1, 0);
+        var target = unit(2, 5);
+        for (var event : List.of(shot(attacker, target, "ISAC20"), attack(target, target, ResolvedAttack.Kind.DEATH, true))) {
+            var playback = new UnitPlayback();
+            playback.accept(List.of(event), scene(attacker, target), ignored -> false);
+            playback.advance(0, UnitMotion.Speed.NORMAL);
+            assertNormalThroughCompletion(playback);
         }
     }
 
-    private static UnitAttack death(UnitAttack shot) {
-        var death = new UnitAttack(attack(shot.event.target(), shot.event.target(), ResolvedAttack.Kind.DEATH, true));
-        death.cause = shot;
-        return death;
+    private static void assertNormalThroughCompletion(UnitPlayback playback) {
+        for (int frame = 0; frame < 3000 && playback.busy(); frame++) {
+            assertEquals(1, UnitSlowMotion.scale(playback.attacks(), true));
+            playback.advance(.01, UnitMotion.Speed.NORMAL);
+        }
+        assertFalse(playback.busy(), "The full action and death must complete");
     }
 
-    private static BoardScene.Combat shot(BoardScene.Unit attacker, BoardScene.Unit target, String weapon) {
+    private static UnitPlayback playback(BoardScene.Combat shot, boolean crewLoss) {
+        var target = shot.target();
+        var death = attack(target, target, ResolvedAttack.Kind.DEATH, true);
+        var playback = new UnitPlayback();
+        playback.accept(List.of(shot, new BoardScene.Combat(death.result().withCrewLoss(crewLoss), target, target, target.location())),
+              scene(shot.attacker(), target), ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        return playback;
+    }
+
+    private static BoardScene.Combat shot(BoardScene.Unit attacker, BoardScene.Unit target, String... weapons) {
         var base = attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
         var result = base.result();
+        List<ResolvedAttack.Mount> mounts = new ArrayList<>();
+        for (int index = 0; index < weapons.length; index++) {
+            var type = EquipmentType.get(weapons[index]);
+            assertNotNull(type, weapons[index]);
+            var profile = ResolvedAttack.Shot.capture(Mounted.createMounted(new Tank(), type));
+            mounts.add(new ResolvedAttack.Mount(attacker.id(), index, profile));
+        }
         return new BoardScene.Combat(new ResolvedAttack(result.id(), result.kind(), result.attacker(), result.target(),
-              result.targetType(), 0, weapon, 4, true), attacker, target, base.destination());
+              result.targetType(), 0, weapons[0], 4, true, mounts, mounts.getFirst().shot()), attacker, target, base.destination());
     }
 }

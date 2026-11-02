@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -25,7 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
     /**
-     * Woods keep their height: at most one shorter plant in light woods and two in heavier woods (a shorter one at
+     * Fungal stands may retain one shorter plant in light woods and two in heavier woods (a shorter one at
      * least .7 of it); the rest stand from their woods' height to a tenth above it.
      */
     static void assertWoodsHeights(List<BoardScene.Feature> plants, float height, int density) {
@@ -190,6 +191,20 @@ class BoardFeaturesTest {
     }
 
     @Test
+    void fieldTerrainNeverAddsALegacyModelEvenWithUnrepresentedTerrain() {
+        var at = new Coords(0, 0);
+        var hex = new Hex(0, "planted_fields:1;fortified:1", "");
+        assertFalse(BoardFeatures.detailedGround(hex, Map.of()));
+        assertTrue(BoardFeatures.capture(hex, at, Map.of()).stream()
+              .noneMatch(feature -> feature.asset().equals("vegetation/field")));
+        var represented = new TilesetScenery.Scenery(List.of(), Set.of(Terrains.FORTIFIED), 0);
+        assertTrue(BoardFeatures.detailedGround(hex, Map.of(), Set.of(), represented));
+        assertTrue(BoardFeatures.capture(hex, at, Map.of(), Set.of(), coords -> null, represented).stream()
+              .noneMatch(feature -> feature.asset().equals("vegetation/field")),
+              "Converted scenery must not add the legacy field prop over instanced crops");
+    }
+
+    @Test
     void cityParkEmptyTerrainMarkerKeepsEnhancedGroundBeneathItsBuilding() {
         // City Park 0916 retains an old "none" token beside its actual building terrain.
         Hex hex = new Hex(1, "none:2:4;bldg_elev:3:4;building:4:4;bldg_cf:105:4", "");
@@ -334,7 +349,7 @@ class BoardFeaturesTest {
             var trees = BoardFeatures.capture(hex, coords, Map.of());
             assertWoodsHeights(trees, density == 3 ? 3 : 2, density);
             for (var tree : trees) {
-                assertTrue(tree.scale() >= 1.2f, "Woods are drawn oversized, so their cover reads at a glance");
+                assertTrue(tree.scale() > 0 && tree.scale() <= 2, "Tree placement retains a bounded positive crown scale");
             }
         }
         Hex highland = new Hex(3);

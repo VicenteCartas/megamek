@@ -209,6 +209,10 @@ public final class UiList extends WidgetGroup {
                 layout.invalidate();
             }
             row.setHeight(height(row));
+            if (row instanceof Layout layout) {
+                // Descendant coordinates must use the final height before a caller scrolls to or hits them.
+                layout.validate();
+            }
             total += row.getHeight();
         }
         aim(snap);

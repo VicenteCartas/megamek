@@ -582,6 +582,24 @@ final class GpuFireOrders implements AutoCloseable {
         });
     }
 
+    /**
+     * Saves a declaration row's position in the unit's custom weapon order, without changing its queued attacks.
+     * Equipment numbers anchor the move even when this phase shows only some of the unit's weapons.
+     */
+    void moveWeapon(int unitId, int eqNum, int destinationEqNum) {
+        command((fd, actor) -> {
+            if (actor.getId() != unitId) {
+                return;
+            }
+            WeaponMounted weapon = weapon(actor, eqNum);
+            WeaponMounted destination = weapon(actor, destinationEqNum);
+            List<WeaponMounted> declarable = declarableWeapons(actor.getGame(), actor);
+            if (declarable.contains(weapon) && declarable.contains(destination)) {
+                WeaponDisplayData.moveWeapon(actor, weapon, destination);
+            }
+        });
+    }
+
     /** H15: targets an identified enemy, a hex, a building or a minefield; a sensor contact is refused (H19). */
     void focusTarget(TargetKey key) {
         command((fd, actor) -> {

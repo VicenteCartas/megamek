@@ -417,12 +417,24 @@ class GpuTuningPanelSmokeTest {
                 try (Hud hud = new Hud(harness)) {
                     var status = new AtomicReference<>(new GpuMaterialCache.Status("Rebuilding stale pages", true,
                           260L << 20, 1L << 20, new GpuPageCache.Status(256, 150, 25, 1, 100, 75, 25, 12),
-                          2, 120, 100, 0));
+                          2, 120, 100, 0, 4, 2, 4, 1));
                     hud.tuning.terrainCacheStatus(status::get);
                     hud.show();
                     hud.click("tuning-button");
                     Label state = hud.find("tuning-terrain-cache-state");
                     Label details = hud.find("tuning-terrain-cache-details");
+                    assertFalse(hud.tuning.terrainCacheDebug(), "Each new view starts with Debug off");
+                    Actor cache = hud.find("tuning-terrain-cache");
+                    Actor debug = hud.find("tuning-terrain-cache-debug");
+                    assertEquals(cache.localToStageCoordinates(new Vector2()).y,
+                          debug.localToStageCoordinates(new Vector2()).y, 1, "Debug is inline with Enable terrain cache");
+                    assertTrue(debug.getX() > cache.getX() + cache.getWidth(), "The two checkboxes do not overlap");
+                    assertEquals(((Group) cache).getChildren().first().getWidth(),
+                          ((Group) debug).getChildren().first().getWidth(), .01f,
+                          "The reading column must not squeeze Debug's checkbox icon");
+                    hud.click(debug);
+                    assertTrue(hud.tuning.terrainCacheDebug());
+                    assertTrue(hud.<Label>find("tuning-terrain-cache-legend").getText().toString().contains("red = direct"));
                     assertTrue(state.getText().toString().contains("75% (75 / 100 pages current)"));
                     assertTrue(details.getText().toString().contains("260.0 MiB"));
                     assertTrue(details.getText().toString().contains("stale: 25"));
@@ -433,10 +445,11 @@ class GpuTuningPanelSmokeTest {
                     assertTrue(hud.tuning.terrainCache());
                     hud.click("tuning-terrain-cache");
                     assertFalse(hud.tuning.terrainCache(), "The visible checkbox drives the renderer's setting");
+                    assertTrue(hud.tuning.terrainCacheDebug(), "Debug remains usable with the cache disabled");
                     hud.click("tuning-defaults");
                     assertFalse(hud.tuning.terrainCache(), "Defaults leaves Display settings alone");
                     status.set(new GpuMaterialCache.Status("Disabled - direct rendering", false,
-                          260L << 20, 1L << 20, status.get().pages(), 2, 0, 0, 0));
+                          260L << 20, 1L << 20, status.get().pages(), 2, 0, 0, 0, 0, 0, 0, 0));
                     hud.hud.draw(); // No board snapshot: live diagnostics still refresh.
                     assertEquals("Disabled - direct rendering", state.getText().toString());
                     assertTrue(details.getText().toString().contains("260.0 MiB"), "Disabled retains its allocation");
@@ -446,15 +459,17 @@ class GpuTuningPanelSmokeTest {
 
                     status.set(new GpuMaterialCache.Status("Ready - partial coverage", true,
                           260L << 20, 1L << 20, new GpuPageCache.Status(256, 150, 0, 0, 100, 100, 0, 12),
-                          2, 120, 100, 0));
+                          2, 120, 100, 0, 4, 0, 4, 0));
                     hud.hud.draw();
                     assertTrue(state.getText().toString().contains("100%"));
                     assertTrue(details.getText().toString().contains("100 / 120 pages admitted"));
+                    assertTrue(details.getText().toString().contains("tops 0 / 4 · walls 0 / 4"),
+                          "Building every admitted page need not make a single terrain batch cacheable");
                     hud.reveal(details);
                     hud.capture("tuning-cache-ready-" + size[0]);
 
                     status.set(new GpuMaterialCache.Status("Not allocated", false, 0, 1L << 20,
-                          new GpuPageCache.Status(0, 0, 0, 0, 0, 0, 0, 0), 0, 0, 0, 0));
+                          new GpuPageCache.Status(0, 0, 0, 0, 0, 0, 0, 0), 0, 0, 0, 0, 0, 0, 0, 0));
                     hud.hud.draw();
                     assertEquals("Not allocated", state.getText().toString());
                     assertFalse(state.getText().toString().contains("%"), "No invented percentage without a view");
@@ -858,11 +873,12 @@ class GpuTuningPanelSmokeTest {
                 assertEquals(-1, hud.tuning.damageOverride(), "override off");
                 hud.capture("tuning-board-edited");
 
-                // Defaults restores the Board page.
+                // Defaults restores the Board page and preserves the saved Display choices.
+                boolean normalMaps = hud.tuning.normalMaps(), parallax = hud.tuning.terrainParallax();
                 hud.click("tuning-defaults");
                 assertEquals(1, BoardGeometry.tuning().hexScale(), NEAR);
-                assertTrue(hud.tuning.normalMaps());
-                assertTrue(hud.tuning.terrainParallax());
+                assertEquals(normalMaps, hud.tuning.normalMaps());
+                assertEquals(parallax, hud.tuning.terrainParallax());
                 for (UnitFamilyScale family : UnitFamilyScale.values()) {
                     assertEquals(family.defaultUnitScale, family.UNIT_SCALE, NEAR, family.label);
                 }

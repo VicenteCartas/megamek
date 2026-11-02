@@ -30,7 +30,7 @@ import megamek.common.board.BoardModelBounds;
  * and where a vehicle that could go hull down there waits ({@link #hide}). A model made of numbered parts, as a platoon's
  * fighting holes, digs and draws only those its feature shows ({@link BoardScene.Feature#parts}).
  * Only the Enhanced ground is dug: a Classic column keeps its flat top, which hides what the model has below it. Scenery
- * on a bridge or on ice digs nothing.
+ * on a bridge or on ice digs nothing. Rubble shares the earthworks' footprint fit without digging ground.
  */
 final class BoardGroundCut {
     /**
@@ -46,6 +46,9 @@ final class BoardGroundCut {
     record Stand(float x, float y, float heading, Kind kind, int number) { }
 
     private static final Map<String, RigidGlb.Groundwork> MODELS = new ConcurrentHashMap<>();
+    private static final String RUBBLE = "scenery/rubble/";
+    /** Metres of clearance from a receding rim, and burial of a fitted pile's thin base into the ground. */
+    private static final float RUBBLE_MARGIN = .15f, RUBBLE_EMBED = .1f;
     /** Grounds whose dug earth is the model's own: soil, under grass, snow, jungle or pavement as on bare dirt. */
     private static final Set<BoardScene.Surface> SOIL = EnumSet.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT,
           BoardScene.Surface.SNOW, BoardScene.Surface.TROPICAL, BoardScene.Surface.CONCRETE);
@@ -179,21 +182,27 @@ final class BoardGroundCut {
     }
 
     /**
-     * {@code feature} fitted to its hex's top: an earthwork whose model reaches past where the top stops short of a
+     * {@code feature} fitted to its hex's top: an earthwork or rubble whose model reaches past where the top stops short of a
      * step, cliff or shore ({@link BoardRelief#topInset}) shrinks across, about its anchor, until it keeps inside, as
-     * deep as before; a level hex's top takes it whole. Every view places the earthwork, its cut and the plants round
-     * it by this.
+     * deep as before; a level hex's top takes it whole. Rubble leaves a small rim margin and beds its base into the
+     * ground only when fitted; ice and bridge decks keep its authored placement. Every view, ground cut and plant
+     * clearance uses this fit.
      */
     static BoardScene.Feature fitted(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
         float[] outline = feature.authoredPlacement() && feature.decoration() == null
               ? model(feature.asset()).outline() : new float[0];
         if (outline.length == 0) { return feature; }
+        boolean rubble = feature.asset().startsWith(RUBBLE);
+        if (rubble && (tile.frozen() || BoardBridge.feature(tile) != null)) { return feature; }
         BoardRelief relief = new BoardRelief(scene, tile, BoardSurface.ramps(scene, tile));
         Vector3 anchor = new Vector3(feature.x(), feature.y(), 0).scl(BoardGeometry.hexScale());
         Matrix4 frame = BoardFeatures.authoredTransform(anchor.x, anchor.y, 0, feature);
         float fit = 1;
         Vector3[] edges = edges(tile.coords());
         for (int e = 0; e < 6; e++) {
+            float inset = relief.topInset(e);
+            // A level neighbour supports the original pile; only a receding rim calls for a smaller footprint.
+            if (rubble && inset <= 0) { continue; }
             float apothem = edges[e].len();
             Vector3 middle = new Vector3(edges[e]).scl(1 / apothem);
             float reach = 0;
@@ -201,14 +210,17 @@ final class BoardGroundCut {
                 Vector3 point = new Vector3(outline[i], outline[i + 1], 0).mul(frame).sub(anchor);
                 reach = Math.max(reach, point.x * middle.x + point.y * middle.y);
             }
-            float room = apothem - relief.topInset(e) - (anchor.x * middle.x + anchor.y * middle.y);
+            float room = apothem - inset - (anchor.x * middle.x + anchor.y * middle.y)
+                  - (rubble ? BoardRelief.metres(RUBBLE_MARGIN) : 0);
             if (reach > 0) { fit = Math.min(fit, room / reach); }
         }
         if (fit >= 1) { return feature; }
         var stretch = feature.stretch();
         fit = Math.max(.2f, fit);
+        float elevation = feature.elevation() - (rubble ? BoardRelief.metres(RUBBLE_EMBED)
+              / (BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale()) : 0);
         return new BoardScene.Feature(feature.asset(), feature.x(), feature.y(), feature.rotation(), feature.scale(),
-              feature.height(), feature.elevation(), feature.kind(), feature.bridgeExits(), true, null,
+              feature.height(), elevation, feature.kind(), feature.bridgeExits(), true, null,
               new BoardDecoration.Stretch(stretch.x() * fit, stretch.y() * fit, stretch.z()), feature.colours(),
               feature.parts());
     }
@@ -312,7 +324,7 @@ final class BoardGroundCut {
         return MODELS.computeIfAbsent(asset, key -> {
             File file = BoardModelBounds.file(new File(Configuration.dataDir(), "models/board"), key);
             try {
-                return file.isFile() ? RigidGlb.groundwork(file) : RigidGlb.Groundwork.NONE;
+                return file.isFile() ? RigidGlb.groundwork(file, key.startsWith(RUBBLE)) : RigidGlb.Groundwork.NONE;
             } catch (RuntimeException unreadable) {
                 // A worker interrupted by a closing board fails its read: that is no answer to keep.
                 if (Thread.currentThread().isInterrupted()) { throw unreadable; }

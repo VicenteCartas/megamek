@@ -18,6 +18,8 @@ import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
+import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -34,6 +36,7 @@ import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbySnapshot.PlayerRow;
 import megamek.client.lobby.LobbySnapshot.Relation;
 import megamek.client.lobby.LobbySnapshot.TeamGroup;
+import megamek.client.lobby.LobbyUnit;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -100,6 +103,11 @@ final class LobbyPlayersPanel {
 
         /** The picture of the camo {@link LobbySnapshot#camoKey} names, once it has been drawn; else null. */
         default @Nullable Drawable camo(String key) {
+            return null;
+        }
+
+        /** The existing lobby sprite of unit {@code id}, once loaded; else null. */
+        default @Nullable Drawable sprite(int id) {
             return null;
         }
     }
@@ -247,6 +255,7 @@ final class LobbyPlayersPanel {
             playerCount.setText(String.valueOf(snapshot.playerCount()));
         }
         if (before == null || !before.teams().equals(snapshot.teams())
+              || !before.forces().units().equals(snapshot.forces().units())
               || before.gameMasterAvailable() != snapshot.gameMasterAvailable()) {
             fillPlayers(snapshot);
         }
@@ -313,8 +322,8 @@ final class LobbyPlayersPanel {
         return kit.skin.getDrawable(id == recipient ? "token-card-selected" : "token-card");
     }
 
-    /** Draws the cards again as the camo pictures their swatches wait for arrive. */
-    void camosArrived() {
+    /** Draws the cards again as their camo swatches and unit sprites arrive. */
+    void imagesArrived() {
         if (shown != null) {
             fillPlayers(shown);
         }
@@ -413,6 +422,14 @@ final class LobbyPlayersPanel {
         side.add(more).size(size("control.sm"));
         card.add(side).top().padLeft(space("xs"));
 
+        if (!player.hidden()) {
+            HorizontalGroup icons = unitIcons(player.id());
+            if (icons.hasChildren()) {
+                card.row();
+                card.add(icons).colspan(3).growX().minWidth(0).padTop(space("sm"));
+            }
+        }
+
         // A table takes only its children's hits; the whole card takes clicks, not only its labels
         card.setTouchable(Touchable.enabled);
         card.addListener(new ClickListener(Input.Buttons.RIGHT) {
@@ -434,6 +451,53 @@ final class LobbyPlayersPanel {
             }
         });
         return card;
+    }
+
+    /** Full-size sprites on one row; halve them before allowing the row to wrap, without shrinking again. */
+    private HorizontalGroup unitIcons(int ownerId) {
+        float normalSize = size("control.md");
+        float gap = space("xs");
+        HorizontalGroup icons = new HorizontalGroup() {
+            private void fitIcons() {
+                int count = getChildren().size;
+                float fullWidth = count * normalSize + Math.max(0, count - 1) * gap;
+                float side = getWidth() > 0 && fullWidth > getWidth() ? normalSize / 2 : normalSize;
+                boolean changed = false;
+                for (Actor child : getChildren()) {
+                    Container<?> icon = (Container<?>) child;
+                    if (icon.getPrefWidth() != side) {
+                        icon.size(side);
+                        changed = true;
+                    }
+                }
+                if (changed) {
+                    invalidateHierarchy();
+                }
+            }
+
+            @Override
+            public float getPrefHeight() {
+                fitIcons();
+                return super.getPrefHeight();
+            }
+
+            @Override
+            public void layout() {
+                fitIcons();
+                super.layout();
+            }
+        };
+        icons.setName("lobby-player-units-" + ownerId);
+        icons.wrap().left().rowLeft().space(gap).wrapSpace(gap);
+        for (LobbyUnit unit : shown.forces().units()) {
+            if (unit.ownerId() != ownerId || unit.hidden()) {
+                continue;
+            }
+            Image image = new Image(actions.sprite(unit.id()), Scaling.fit);
+            image.setName("lobby-player-unit-" + unit.id());
+            icons.addActor(new Container<>(image).size(normalSize).fill());
+        }
+        return icons;
     }
 
     private static boolean inButton(Actor target) {

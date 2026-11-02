@@ -129,6 +129,16 @@ into lobes, islands and scattered clods, and grass and plants grow up to it and 
 an earthwork's footprint (`BoardObstacles`) keeps them only out of its heap where it is over 20 cm thick and out of
 what it digs, with no cleared band round it.
 
+Terrain-owned rubble (`scenery/rubble/`, including cleared paths) shares that footprint fit. Its GLB's finest-level
+outline is read even without earthwork groups; it never digs ground. Only receding edges constrain the pile, leaving
+15 cm of clearance inside the rim and embedding a fitted pile's base 10 cm into the ground. Horizontal scale changes
+uniformly while vertical scale stays authored. Level ground, ice and bridge decks keep the original placement. The
+same fitted feature drives the visible mesh, shadows and vegetation clearance; game terrain and movement rules do
+not change. Narrow tops can make the pile's horizontal proportions more compact.
+`BoardRubbleFitTest` checks all ten assets and their model detail levels against the actual top triangles, flat-ground
+placement, all six single-edge cliffs and ice/deck support. `GpuRubbleFitSmokeTest` captures level ground, one exposed
+edge and an isolated plateau from overhead, isometric and low angles.
+
 ## Ground appearance and vegetation
 
 `BoardSurfaceBlend` supplies a continuous material-contact field.

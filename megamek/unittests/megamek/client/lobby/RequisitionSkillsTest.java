@@ -82,8 +82,8 @@ class RequisitionSkillsTest {
     @Test
     void aRecipientIsFoundByItsId() {
         LobbyRequisition requisition = new LobbyRequisition(RequisitionCatalog.Rules.OPEN,
-              List.of(new LobbyRequisition.Recipient(1, "Me", true, false),
-                    new LobbyRequisition.Recipient(2, "Bot", false, true)), false, List.of());
+              List.of(new LobbyRequisition.Recipient(1, "Me", true, false, ""),
+                    new LobbyRequisition.Recipient(2, "Bot", false, true, "")), false, List.of());
         assertEquals("Bot", requisition.recipient(2).name());
         assertNull(requisition.recipient(3));
         assertTrue(LobbyRequisition.EMPTY.recipients().isEmpty());

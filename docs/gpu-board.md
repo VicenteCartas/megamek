@@ -37,6 +37,13 @@ Holding Shift when pressing either button swaps those actions for the whole drag
 Free Flight starts with a 45-degree vertical field of view; the Camera tuning slider can
 change it, and Defaults restores 45 degrees.
 
+The Camera tuning tab's **Return camera after playback** is on by default. Live movement,
+firing and other automatic actions save the current view once, then restore its position,
+zoom and angle after the entire queue and its completion holds finish. The return uses the
+normal camera transition (Instant snaps). An explicit unit locate request takes precedence;
+Free Flight and report reviews retain their own camera behavior. Turning the option off
+discards the saved return view.
+
 Manual panning and pointer-centered zoom constrain the full viewport center in both the
 3D and Tactical views, including the area behind HUD panels. The limits act per screen
 axis: the board's leftmost, rightmost, nearest and farthest points cannot pass the viewport
@@ -98,9 +105,19 @@ without asking the game to construct another scene.
 The battle clock (the playback, unit animation, meeple debris and artillery blasts) can
 run in slow motion while the camera and the HUD keep real time. `GpuBattleView.BULLET_TIME`
 (off) slows it to a quarter from just before a shot that hits lands until it has landed,
-easing in and out. `DRAMATIC_DEATH` (on) cuts it to a quarter as a killing blow lands,
-then ramps it back to speed over the `DEATH` event while the pieces fly; an infantry unit
-gets it only with its last trooper.
+easing in and out. `DRAMATIC_DEATH` (on) uses the time until a ranged death's scheduled start:
+the final .18 animation seconds (.36 seconds at normal playback) ease from full speed toward
+one tenth speed just before contact, taking about one real second at normal playback.
+Bullets, beams, flames, bursts and mixed weapons all use this same timeline, regardless of range
+or projectile position. Impact restores full speed immediately, before the explosion, fall,
+burn or debris advance; an infantry or Battle Armor unit gets it only with its last trooper.
+Physical attacks stay at normal speed throughout, including lethal impacts and deaths;
+pilot death, ejection and deaths without a linked ranged attack also stay at speed. Pausing freezes the effect;
+Instant playback skips it entirely, including when selected during a slowdown.
+Selecting Instant also removes any death effects already in progress, including their Tactical markers.
+The Camera tuning tab's **Dramatic death slow motion** checkbox starts
+from `DRAMATIC_DEATH` and can disable the effect immediately, including while paused.
+`UnitSlowMotion` derives this presentation-only scale from the pending death; it retains no recovery clock.
 A `DEATH` that directly follows the hit that caused it joins that hit's action and plays
 from its landing; one no hit caused plays as its own action. The server reports a death
 before the movement or fall it happened in: `GpuBoardSource` queues it once the game shows
@@ -189,6 +206,11 @@ hides it too. A
 legacy board's lunar-theme buildings take these designs at conversion (`BoardSceneryLayouts`): a building
 glazed over half its hexes (skylights, glass roofs) with a full ring of hexes holding most of it becomes a
 glass dome, two full rings a biodome, any other a habitat; a dome's own glazing objects go.
+The dome annexes use plain riveted roof plating, with complete hatch and grille fittings in separate clear bays;
+short gatehouses omit fittings that cannot fit inside the bevel. Wall panels divide each storey into smaller bays.
+Sloping entrance roofs measure texture repeats along the slope. A connector too wide for its bend transitions
+between its opening cross-sections, with its rear collar recessed inside the building; texture distances and
+normals follow the drawn surface. Bevels, ribs and rims keep their local texture alignment across hex cuts.
 Metal deposits use Blender-authored quartz and ore GLBs with embedded colour,
 normal and material maps, over a soft terrain-following soil splat. Each GLB has
 one detailed LOD0 and one 88-triangle LOD1; farther slots reuse LOD1. Deposit size
@@ -257,7 +279,11 @@ trooper and battle armour suit; they hop along their path instead of moving limb
 hover) and buggy (motorized) are the `Infantry/mechanized_apc.png` and `motorized_buggy.png` sprites extruded into
 GLBs; their grey pixels take the camouflage, like the 2D icon.
 
-Meeples leave no wreck in the 3D view (a wreck has no gameplay; the Tactical View keeps its crossed-out base). As a
+Units leave no permanent body in either view. Tactical View shows the circle and cross from the death's first frame,
+with exactly the casualty's opacity; both disappear when the body finishes fading. A server-confirmed crew loss
+(`ResolvedAttack.crewLoss`, from pilot/crew death or ejection) preserves the last drawn pose and fades it over
+`UnitAttack.FADE_SECONDS` (0.8 s), with no death explosion, shattering or collapse. Vehicle and Mek deaths emit their explosion
+immediately, without the weapon anticipation delay. As a
 unit's death begins (or the first frame it shows destroyed), its meeple explodes instead of falling over
 (`MeepleCasualties`): `MeepleShatter` cuts it along four
 planes in different directions into closed pieces, and `MeepleDebris` throws them as rigid bodies. Each takes two
@@ -269,9 +295,24 @@ down, which test only the hexes under them and, through each finished surface's 
 (`BoardTacticalGeometry.Faces`), only the faces there; and skid to rest
 wherever the physics leaves them, under 1 g within the death's two-second beat but for a few slow stragglers.
 `MeepleCasualties.DEBRIS_SECONDS` (3 s) after the explosion the pieces fade away, at rest or still flying, through the
-unit program's opacity (`GpuUnitShader.Shown`), and are gone. A formation's lost soldier turns to the hits, is knocked
-back onto its back, lies a moment, then fades away, and a lost vehicle explodes like a meeple. The pieces do not collide with each other, small
-objects the zoom hides when they are sampled are not there for them, and the Tactical View does not draw them.
+unit program's opacity (`GpuUnitShader.Shown`), and are gone. Infantry meeple figures, including Battle Armor, use the
+captured killing weapon for both partial formation losses and the final unit kill. A light hit leaves the existing
+knockback, fall, brief rest and fade. At 2 damage per hit a figure shatters along two planes; at 5 along three; at 10
+along four. These cosmetic thresholds use captured damage per projectile, not a rifle platoon's combined damage
+or the target-modified infantry casualty count. Lasers, flamers, PPCs, plasma and inferno instead apply the existing
+destroyed-armor texture, hold the figure fully visible for one second at normal playback, then fade it in place.
+Conventional infantry soldiers also suppress a laser's generic impact fireball; vehicle and Battle Armor impacts
+keep it, as do explosive munitions' blasts. Figures produce no internal fireball. Infantry transports
+always shatter and emit their own explosion, even when their accompanying soldiers fall or carbonize. The existing
+ranged lethal-hit slowdown follows the scheduled death and ends immediately at impact, including for flamers.
+Melee stays at normal speed. Infantry and
+Battle Armor artwork tokens in Tactical View use these same light-hit, heavy-hit and heat rules for the whole
+unit icon, with no internal fireball. Their fall uses the same surface contact and clock as GLB figures, and their
+death marker shares the fade. Separate transport GLBs and vehicle unit tokens always explode and shatter. Fallen
+infantry and Battle Armor use their captured GLB surface vertices for ground contact; empty corners of a rotated bounding box
+cannot hold a figure above the ground. The pieces do not collide with each other, small
+objects the zoom hides when they are sampled are not there for them. Both views draw the same casualties on the same
+clock. Non-token models also fade away; their last pose, meshes and artwork remain available until the fade ends.
 
 `MeepleVisual` owns token geometry, wall paint and attachment sockets; the artwork shows on the token's top only, its
 underside is plain and darker than its walls. `MeepleAnimator` supplies rigid token poses;

@@ -153,11 +153,11 @@ final class BoardObstacles {
                 rail(scene, tile, feature);
                 continue;
             }
-            // Bridges already have height-aware passage/approach clearance. Fields are ground cover, not solids.
+            // Bridges already have height-aware passage/approach clearance.
             if (feature.kind() != BoardScene.FeatureKind.BUILDING && feature.kind() != BoardScene.FeatureKind.INDUSTRIAL
                   && feature.kind() != BoardScene.FeatureKind.FUEL_TANK && feature.kind() != BoardScene.FeatureKind.PROP
                   && feature.kind() != BoardScene.FeatureKind.SCENERY
-                  || feature.asset().equals("bridge") || feature.asset().equals("vegetation/field")) { continue; }
+                  || feature.asset().equals("bridge")) { continue; }
             boolean wall = BoardWall.supports(feature.asset());
             var layout = wall ? BoardWall.layout(scene, tile, feature) : null;
             // A civilian wall stands on posts with open fencing and no base: ground cover grows everywhere beneath it.
