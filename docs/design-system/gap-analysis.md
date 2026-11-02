@@ -1174,12 +1174,27 @@ work for Swing, and item 11 is under investigation.
        table, goes back, searches, picks a result and ends the search.
        Live: `lobby+randomarmy`. The probe's click list now takes a `type:text` step that types into the focused
        field.
+     - Review fix after #35: while a roll ran on the Swing thread, the random army's Keep, Discard and Clear
+       could still change the hand, so discarding mid-reroll threw in `RandomArmyForm.reroll()`. They are now
+       disabled and ignored while busy. The map setup no longer attaches a new tooltip to Generate on every
+       refresh.
+       Checks: `LobbyDialogsL17SmokeTest`, which holds a reroll on the Swing thread and clicks the locked
+       controls, and `LobbyMapSetupSmokeTest`, which refreshes 20 times and counts Generate's listeners.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
-       above) is done. Still open:
+       above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
          player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
+       - The last Swing dialogs the lobby opens, to move into libGDX:
+         - the portrait chooser (`PortraitChooserDialog`), next to the native camo chooser;
+         - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
+         - the map assembly help (`HelpDialog`);
+         - the random army's Advanced Search, which still opens the Swing random army dialog;
+         - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
+         Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
+         go.
+       - The settings check across the startup path, step 7 below.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
   7. A settings check across the startup path (the lobby's part is L14 in step 6).
