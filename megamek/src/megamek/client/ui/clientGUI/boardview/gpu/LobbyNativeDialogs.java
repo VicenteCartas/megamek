@@ -310,6 +310,38 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /** What a {@link #yesNo} question was answered: Yes or No, and whether its box was checked. */
+    interface YesNoAnswer {
+        void answered(boolean yes, boolean checked);
+    }
+
+    /**
+     * Asks a Yes or No question with a check box under its paragraphs, over whatever shows. Closing it any other way,
+     * such as with Esc, answers nothing.
+     */
+    UiDialog yesNo(String title, List<String> paragraphs, String check, YesNoAnswer answer) {
+        UiDialog dialog = begin(title, "dialog.md", true, () -> { });
+        float gap = DesignTokens.shipped().space().get("md");
+        for (String paragraph : paragraphs) {
+            var label = kit.typeLabel(paragraph, "body", "text.primary");
+            label.setWrap(true);
+            dialog.body().add(label).growX().left().padBottom(gap).row();
+        }
+        UiChoice box = kit.check(check, false);
+        box.setName("yes-no-check");
+        dialog.body().add(box).left().padTop(gap);
+        dialog.primary(Messages.getString("Yes"), () -> {
+            close();
+            answer.answered(true, box.isChecked());
+        }).setName("yes-no-yes");
+        dialog.secondary(Messages.getString("No"), () -> {
+            close();
+            answer.answered(false, box.isChecked());
+        }).setName("yes-no-no");
+        show(dialog);
+        return dialog;
+    }
+
     /**
      * Opens the random map settings.
      *

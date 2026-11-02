@@ -536,6 +536,29 @@ public final class MinimapPanel extends JPanel implements IPreferenceChangeListe
     }
 
     /**
+     * @return whether readying up in {@code game} would ask about recording the summary GIF: the preference is
+     *       {@link GifRecordingMode#ASK} and the game has no answer yet. A lobby that asks itself uses this, then
+     *       {@link #recordGifRecordingDecision}.
+     */
+    public static boolean needsGifRecordingConsent(Game game) {
+        return GUIPreferences.getInstance().getGifGameSummaryRecording() == GifRecordingMode.ASK
+              && !GIF_RECORDING_DECISIONS.containsKey(game.getUUIDString());
+    }
+
+    /**
+     * Keeps the player's answer about recording {@code game}'s summary GIF, as the Swing question does; when
+     * {@code remember}, it also becomes the preference ({@link GifRecordingMode#ALWAYS} or
+     * {@link GifRecordingMode#NEVER}).
+     */
+    public static void recordGifRecordingDecision(Game game, boolean record, boolean remember) {
+        GIF_RECORDING_DECISIONS.putIfAbsent(game.getUUIDString(), record);
+        if (remember) {
+            GUIPreferences.getInstance().setGifGameSummaryRecording(record ? GifRecordingMode.ALWAYS
+                  : GifRecordingMode.NEVER);
+        }
+    }
+
+    /**
      * Returns {@code true} when the combat-summary GIF should be recorded for this game. With
      * {@link GifRecordingMode#ASK} (the default) the answer normally comes from the lobby prompt
      * ({@link #promptForGifRecordingConsent(Game, Component)}); this asks lazily only as a fallback for a game

@@ -139,8 +139,12 @@ final class GpuStartScreen extends ApplicationAdapter {
     private boolean shotSaved;
     /** Whether the developer switch's {@code briefing+play} has pressed the briefing's Start. */
     private boolean playPressed;
+    /** Whether the developer switch has opened the briefing's dialog it asks for. */
+    private boolean probeDialogOpened;
     /** The welcome while it shows, or null. */
     private StartWelcome welcome;
+    /** The screen's libGDX dialogs, such as the briefing's camo, rules and conditions; null before it is made. */
+    LobbyNativeDialogs dialogs;
 
     private BufferedImage art;
     GpuBoardSkin boardSkin;
@@ -258,12 +262,25 @@ final class GpuStartScreen extends ApplicationAdapter {
         stage.addActor(tipCard);
         showPage(Page.MAIN);
         keys();
+        dialogs = new LobbyNativeDialogs(kit, stage, motion);
         start = System.nanoTime();
         if (skipped && motion) {
             // Reopened after a game: no greeting, but the menu still slides in
             pageShownAt = 0;
         }
         applyProbe();
+        showNotice();
+    }
+
+    /** GPU thread: shows the alert waiting for the screen, if any, over whatever shows. */
+    void showNotice() {
+        if (stage == null || disposed) {
+            return;
+        }
+        String[] notice = GpuStartWindow.takeNotice();
+        if (notice != null) {
+            dialogs.message(notice[0], notice[1]);
+        }
     }
 
     /** GPU thread: the welcome MegaMek shows at start; a developer switch's run shows it only when it asks to. */
@@ -313,6 +330,11 @@ final class GpuStartScreen extends ApplicationAdapter {
         }
         if (probe.has("welcome")) {
             showWelcome();
+        }
+        if (probe.has("notice")) {
+            // As a failed lobby's client leaves its game: the alert waits for the start screen
+            SwingUtilities.invokeLater(() -> GpuStartWindow.notice(Messages.getString("Lobby.windowTitle"),
+                  Messages.getString("Lobby.failure", "java.lang.IllegalStateException: probe")));
         }
         if (probe.lobby()) {
             showPage(Page.HOST);
@@ -1162,6 +1184,10 @@ final class GpuStartScreen extends ApplicationAdapter {
             playPressed = true;
             briefingPage.submitBriefing();
         }
+        if (probe != null && page == Page.BRIEFING && !probeDialogOpened && briefingPage.canStart()) {
+            probeDialogOpened = true;
+            briefingPage.probeDialog(probe);
+        }
         if (!settledRate && t >= StartTimeline.INTRO_END) {
             // The settled screen has only slow embers: 30 frames a second is plenty
             settledRate = true;
@@ -1343,6 +1369,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         disposed = true;
         generation++;
         window.disposing();
+        if (dialogs != null) {
+            dialogs.dispose();
+        }
         for (Object disposable : new Object[] { stage, batch, shapes, backdrop, logoTexture }) {
             if (disposable instanceof com.badlogic.gdx.utils.Disposable resource) {
                 resource.dispose();

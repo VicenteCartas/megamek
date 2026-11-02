@@ -28,6 +28,8 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationListener;
 import jakarta.annotation.Nullable;
+import megamek.MMConstants;
+import megamek.MegaMek;
 import megamek.client.AbstractClient;
 import megamek.client.Client;
 import megamek.client.bot.AIType;
@@ -65,6 +67,7 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
+import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
@@ -447,6 +450,30 @@ public final class GpuLobbyWindow {
         return active != null && !active.closing;
     }
 
+    /**
+     * EDT: asks over the lobby that shows whether to read the bot documentation, as the Swing bot readme nag does: Yes
+     * shows it as Princess help, and the box stops the question coming back. Returns false, asking nothing, when no
+     * lobby shows, so the Swing nag should.
+     */
+    public static boolean nagBotReadme() {
+        GpuLobbyWindow window = active;
+        if (window == null || window.closing) {
+            return false;
+        }
+        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.yesNo(
+              Messages.getString("BotReadmeNagDialog.title"),
+              List.of(Messages.getString("BotReadmeNagDialog.text").split("\\s*\\n\\s*")),
+              Messages.getString("chkIgnore.text"),
+              (read, ignore) -> {
+                  SwingUtilities.invokeLater(() -> MegaMek.getMMOptions()
+                        .setNagDialogIgnore(MMConstants.NAG_BOT_README, ignore));
+                  if (read) {
+                      window.tools.princessHelp();
+                  }
+              })));
+        return true;
+    }
+
     private void close() {
         closing = true;
         GpuHost.end(scene);
@@ -663,6 +690,20 @@ public final class GpuLobbyWindow {
                         shown.pulseWarnings();
                     }
                 });
+                return;
+            }
+            Game game = gui.getClient().getGame();
+            if (readying && MinimapPanel.needsGifRecordingConsent(game)) {
+                // Asked here rather than by the Swing question the services ask; the answer readies again
+                onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.yesNo(
+                      Messages.getString("MinimapPanel.RecordGifDialog.title"),
+                      List.of(Messages.getString("MinimapPanel.RecordGifDialog.message"),
+                            Messages.getString("MinimapPanel.RecordGifDialog.warning")),
+                      Messages.getString("MinimapPanel.RecordGifDialog.remember"),
+                      (record, remember) -> SwingUtilities.invokeLater(() -> {
+                          MinimapPanel.recordGifRecordingDecision(game, record, remember);
+                          ready();
+                      }))));
                 return;
             }
             SwingLobbyServices.of(gui).ready();
@@ -1696,7 +1737,7 @@ public final class GpuLobbyWindow {
     /** The camo picture the player settings' header and the swatches show, in pixels. */
     private static final int CAMO_PICTURE = 72;
     /** The camo chooser's preview of a camo without units, in pixels. */
-    private static final int CAMO_PREVIEW = 96;
+    static final int CAMO_PREVIEW = 96;
 
     /**
      * EDT: reads the camo directory and opens the native camo chooser over the lobby; {@code chosen} runs here, on
@@ -1757,7 +1798,7 @@ public final class GpuLobbyWindow {
     }
 
     /** The camo directory with the colour camos, read from disk again when {@code refresh}. */
-    private static CamoCatalog camoCatalog(boolean refresh) {
+    static CamoCatalog camoCatalog(boolean refresh) {
         if (refresh) {
             MMStaticDirectoryManager.refreshCamouflageDirectory();
         }

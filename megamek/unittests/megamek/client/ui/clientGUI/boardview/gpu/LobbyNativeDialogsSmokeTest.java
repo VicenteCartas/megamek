@@ -484,6 +484,87 @@ class LobbyNativeDialogsSmokeTest {
         });
     }
 
+    @Test
+    void theYesNoQuestionAnswersWithItsBoxAndEscapeAnswersNothing() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            dialogs.yesNo("Record?", List.of("First line.", "Second line."), "Remember",
+                  (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            click(ui, find(ui, "yes-no-check"));
+            click(ui, find(ui, "yes-no-no"));
+            assertEquals(List.of("false/true"), answers, "No answers, with the box as ticked");
+            assertFalse(dialogs.isOpen());
+
+            dialogs.yesNo("Record?", List.of("Line."), "Remember", (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            click(ui, find(ui, "yes-no-yes"));
+            assertEquals("true/false", answers.getLast(), "Yes answers, the box untouched");
+
+            dialogs.yesNo("Record?", List.of("Line."), "Remember", (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen(), "Escape closes it");
+            assertEquals(2, answers.size(), "Escape answers nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aLockedGameOptionShowsButTakesNoClick() {
+        UiTestStage.run(ui -> {
+            GameOptions options = new GameOptions();
+            boolean fire = options.booleanOption(OptionsConstants.BASE_FRIENDLY_FIRE);
+            GameOptionsForm form = new GameOptionsForm(options, Set.of(), true);
+            form.lock(Set.of(OptionsConstants.BASE_FRIENDLY_FIRE));
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            dialogs.gameOptions(form, new LobbyGameOptionsView.Host() {
+                @Override
+                public void edt(Runnable work, Runnable then) {
+                    work.run();
+                    then.run();
+                }
+
+                @Override
+                public void send(String password, Vector<IBasicOption> changed, Vector<IBasicOption> all) {
+                }
+
+                @Override
+                public void save(Vector<IBasicOption> all, Runnable then) {
+                    then.run();
+                }
+
+                @Override
+                public void load(GameOptions into, Consumer<Boolean> then) {
+                    then.accept(false);
+                }
+
+                @Override
+                public void grabBars() {
+                }
+            });
+            ui.draw();
+            click(ui, find(ui, "options-search"));
+            for (char typed : "friendly fire".toCharArray()) {
+                ui.stage.keyTyped(typed);
+            }
+            ui.draw();
+            GameOptionsForm.Page page = form.visiblePages().stream()
+                  .filter(shown -> form.visibleSections(shown).stream()
+                        .flatMap(section -> form.visibleRows(shown, section).stream())
+                        .anyMatch(row -> row.name().equals(OptionsConstants.BASE_FRIENDLY_FIRE)))
+                  .findFirst().orElseThrow();
+            click(ui, find(ui, "options-page-" + page.id()));
+            Actor friendlyFire = find(ui, "option-" + OptionsConstants.BASE_FRIENDLY_FIRE);
+            reveal(ui, friendlyFire);
+            click(ui, friendlyFire);
+            assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE), "a locked option keeps its value");
+            dialogs.dispose();
+        });
+    }
+
     @SuppressWarnings("unchecked")
     private static <T extends Actor> T find(UiTestStage ui, String name) {
         Actor actor = ui.stage.getRoot().findActor(name);

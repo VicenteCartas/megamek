@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.swing.JFrame;
@@ -34,6 +35,8 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
+import megamek.client.lobby.LobbyError;
+import megamek.client.lobby.LobbyFiles;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.game.IGame;
@@ -146,6 +149,7 @@ public final class GpuStartWindow {
     private static Consumer<ScenarioRequest> scenarios;
     /** The window a start action launched, until it closes; the start screen takes no input meanwhile. */
     private static volatile Window launched;
+    private static final AtomicReference<String[]> NOTICE = new AtomicReference<>();
 
     private final boolean greet;
     private final Set<Dialog> modalDialogs = new LinkedHashSet<>();
@@ -162,6 +166,18 @@ public final class GpuStartWindow {
     private Runnable onSettled;
     private boolean settled;
     private volatile GpuStartScreen screen;
+    private final LobbyFiles files = new LobbyFiles(this::chooseRouteFile, new LobbyFiles.Report() {
+        @Override
+        public void error(LobbyError error, Object... args) {
+            String title = error.title();
+            message(title == null ? Messages.getString("Lobby.prompt.message") : title, error.message(args));
+        }
+
+        @Override
+        public void message(String title, String text) {
+            GpuStartWindow.this.message(title, text);
+        }
+    }, new LobbyFiles.Folders());
     private final GpuHost.Scene scene = new GpuHost.Scene() {
         @Override
         public ApplicationListener listener() {
@@ -525,6 +541,37 @@ public final class GpuStartWindow {
               });
     }
 
+    /** The start screen's file routes, such as the briefing's game options files; Swing thread. */
+    LobbyFiles files() {
+        return files;
+    }
+
+    /**
+     * EDT: asks for the file of a file route in the system's file dialog, as {@link #chooseFile} does; a file to save
+     * over is confirmed on the screen first. {@code chosen} gets the file on the EDT, or null when none.
+     */
+    private void chooseRouteFile(LobbyFiles.Ask ask, Consumer<File> chosen) {
+        SystemFileDialog.show(SystemFileDialog.Request.of(ask), () -> nativeOwner, () -> anchor,
+              busy -> setStartEnabled(!busy), choice -> {
+                  if (choice == null || !live) {
+                      chosen.accept(null);
+                  } else if (ask.save() && choice.askReplace()) {
+                      File file = choice.file();
+                      post(() -> screen.dialogs.confirm(Messages.getString("ChatLounge.map.confirmReplace"),
+                            Messages.getString("Lobby.files.replace", file.getName()),
+                            () -> SwingUtilities.invokeLater(() -> chosen.accept(file)),
+                            () -> SwingUtilities.invokeLater(() -> chosen.accept(null))));
+                  } else {
+                      chosen.accept(choice.file());
+                  }
+              });
+    }
+
+    /** Any thread: shows an alert over the screen and any dialog on it. */
+    void message(String title, String text) {
+        post(() -> screen.dialogs.message(title, text));
+    }
+
     /**
      * Any thread: runs {@code work} on the Swing thread with the hidden frame that owns the screen's forms, so a form it
      * opens shows above this window, then hands its result to {@code done} on the GPU thread.
@@ -568,6 +615,27 @@ public final class GpuStartWindow {
         }
         window.post(() -> window.screen.welcomeAtStart());
         return true;
+    }
+
+    /**
+     * EDT: shows an alert, such as why a game ended, on the start screen as soon as one shows: at once over the open
+     * screen, or once it comes back. Returns false, keeping nothing, when MegaMek has no start screen to show it.
+     */
+    public static boolean notice(String title, String text) {
+        if (anchor == null) {
+            return false;
+        }
+        NOTICE.set(new String[] { title, text });
+        GpuStartWindow window = open;
+        if (window != null) {
+            window.post(() -> window.screen.showNotice());
+        }
+        return true;
+    }
+
+    /** Any thread: the alert waiting for the start screen, as its title and text, and forgets it; null when none. */
+    static String[] takeNotice() {
+        return NOTICE.getAndSet(null);
     }
     /** GPU thread: the intro has finished, or was skipped. */
     void settled() {

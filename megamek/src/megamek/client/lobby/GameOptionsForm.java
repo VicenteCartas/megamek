@@ -82,6 +82,7 @@ public final class GameOptionsForm {
     private final Map<String, Object> values = new HashMap<>();
     private final Map<String, String> texts = new HashMap<>();
     private final Set<String> skippedGroups;
+    private final Set<String> locked = new HashSet<>();
     private String search = "";
     private String password = "";
     private Runnable grabBarsChanged = () -> {
@@ -107,6 +108,19 @@ public final class GameOptionsForm {
 
     public boolean editable() {
         return editable;
+    }
+
+    /**
+     * Keeps options as they are, as a scenario locks the options it calls its mission: they show but can't be
+     * changed, not even by Defaults, a loaded file or another option that would clear them.
+     */
+    public void lock(Set<String> names) {
+        locked.addAll(names);
+    }
+
+    /** @return whether the option is locked by {@link #lock} */
+    public boolean locked(String name) {
+        return locked.contains(name);
     }
 
     // ---- structure and search
@@ -195,7 +209,7 @@ public final class GameOptionsForm {
     /** Switches a boolean option and clears what only applies without it, as the Swing dialog's clicks do. */
     public void bool(String name, boolean on) {
         IOption option = represented.get(name);
-        if (option == null || option.getType() != IOption.BOOLEAN || bool(name) == on) {
+        if (option == null || option.getType() != IOption.BOOLEAN || bool(name) == on || locked(name)) {
             return;
         }
         values.put(name, on);
@@ -205,7 +219,7 @@ public final class GameOptionsForm {
     /** Sets the text of a number, text or choice option. */
     public void text(String name, String text) {
         IOption option = represented.get(name);
-        if (option == null || option.getType() == IOption.BOOLEAN) {
+        if (option == null || option.getType() == IOption.BOOLEAN || locked(name)) {
             return;
         }
         texts.put(name, text == null ? "" : text);
@@ -213,7 +227,7 @@ public final class GameOptionsForm {
 
     /** @return whether the option can be changed now */
     public boolean editable(String name) {
-        if (!editable || !represented.containsKey(name)) {
+        if (!editable || !represented.containsKey(name) || locked(name)) {
             return false;
         }
         boolean indiv = bool(OptionsConstants.RPG_INDIVIDUAL_INITIATIVE);
@@ -359,6 +373,9 @@ public final class GameOptionsForm {
     /** Resets every option to its default, keeping the rule toggles in step. */
     public void defaults() {
         for (IOption option : represented.values()) {
+            if (locked(option.getName())) {
+                continue;
+            }
             if (option.getType() == IOption.BOOLEAN) {
                 values.put(option.getName(), Boolean.TRUE.equals(option.getDefault()));
             } else {
@@ -374,7 +391,7 @@ public final class GameOptionsForm {
     public void load(GameOptions loaded) {
         for (IOption option : represented.values()) {
             IOption source = loaded.getOption(option.getName());
-            if (source == null) {
+            if (source == null || locked(option.getName())) {
                 continue;
             }
             if (option.getType() == IOption.BOOLEAN) {
@@ -436,7 +453,7 @@ public final class GameOptionsForm {
     }
 
     private void categoryShown(String hideOption, boolean shown, Predicate<String> category) {
-        if (!represented.containsKey(hideOption)) {
+        if (!represented.containsKey(hideOption) || locked(hideOption)) {
             return;
         }
         bool(hideOption, !shown);

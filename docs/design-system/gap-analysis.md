@@ -1196,6 +1196,27 @@ work for Swing, and item 11 is under investigation.
        screen. The turn-sound and GIF questions also stop asking twice when a phase change arrives while they're
        open. Checks: `GpuDialogRoutingTest` (a startup prompt asked natively, a dead client's prompt) and
        `GpuChoiceRoutingTest`. Live: Illiani's save, closed from the board, back to a working start screen.
+     - More Swing dialogs made native:
+       - The lobby's own questions:
+         - The GIF recording consent at Ready is now a native yes/no card (`LobbyNativeDialogs.yesNo`) with its
+           "remember" box. The answer is recorded (`MinimapPanel.recordGifRecordingDecision`), then Ready goes
+           on. Escape now cancels the Ready and records nothing; Swing's close counted as No.
+         - The bot readme nag, when a bot joins, asks natively over the lobby (`GpuLobbyWindow.nagBotReadme`),
+           and Yes opens the native Princess help. It no longer blocks the bot's thread. Without a lobby on show,
+           the Swing nag stays.
+         - A lobby that fails leaves its message for the start screen, which shows it as a native notice
+           (`GpuStartWindow.notice`). When MegaMek exits, or no start screen exists (under MekHQ), the Swing
+           alert stays.
+       - The start screen briefing's Swing dialogs:
+         - The camo chooser is the lobby's native one.
+         - The game options are the lobby's native dialog. A scenario's locked options show greyed with a
+           Locked chip and take no change (`GameOptionsForm.lock`). As before, no options are saved as last used.
+           Save and load go through the system file dialog.
+         - The planetary conditions are the lobby's native dialog.
+       Checks: `GameOptionsFormTest` (locked options), `LobbyNativeDialogsSmokeTest` (the yes/no card's box and
+       Escape, a locked option that takes no click) and `GpuDialogRoutingTest`. Live: `briefing+rules`,
+       `+conditions` and `+camo` (with `MM_START_SCENARIO` pointing at a scenario that leaves them open), and
+       `main+notice`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
@@ -1210,6 +1231,14 @@ work for Swing, and item 11 is under investigation.
          - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
+       - The unit dialogs still in Swing, from the lobby and the board:
+         - the unit damage editor (`UnitEditorDialog`);
+         - the SBF and Alpha Strike stats dialogs, with their export;
+         - the auto-resolve dialogs: the chance of winning, the progress and the log.
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), and the map editor's Client
+         Settings and About.
+       - A Swing modal that a dead client leaves open could still block the start screen; the routing above
+         covers the questions found so far.
        - The settings check across the startup path, step 7 below.
        - Each Swing dialog the lobby stops using stays while MekHQ, MegaMekLab or the in-game screens still open it;
          retire it once its last user moves.
