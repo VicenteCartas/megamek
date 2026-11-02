@@ -1,14 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
-import com.badlogic.gdx.math.Matrix4;
-
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.A;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.EXTEND;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.H;
@@ -17,6 +9,14 @@ import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.MIDPOINTS;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.NOSE;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.ROOF_INSET;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.normal;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
+import com.badlogic.gdx.math.Matrix4;
 
 /**
  * A generated kit in the habitat style ({@link GeneratedKit}, style "habitat", a variant's {@link Spec}): the lunar
