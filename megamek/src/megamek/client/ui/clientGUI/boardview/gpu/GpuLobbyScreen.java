@@ -154,6 +154,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private int filterClicksPending;
     /** The {@code +setskills} clicks left: Set, then the gunnery's +. */
     private int skillClicksPending;
+    /** Whether {@code +pickbot} still has to click a bot's card while the Requisition is open. */
+    private boolean pickBotPending;
     private Deque<ProbeClick> gmClicks = new ArrayDeque<>();
     /** The developer switch's run through the C3 network manager, or null. */
     private LobbyC3Probe c3Probe;
@@ -254,6 +256,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
               : null;
         advancedStep = probe.options().contains("advanced") ? 0 : -1;
         skillClicksPending = probe.options().contains("setskills") ? 2 : 0;
+        pickBotPending = probe.options().contains("pickbot");
         gmClicks = gmClicks(probe);
         c3Probe = LobbyC3Probe.of(probe);
         bayProbe = LobbyUnitBayProbe.of(probe);
@@ -500,6 +503,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public void pick(int id) {
+                if (REQUISITION.equals(centre.showing())) {
+                    requisition.recipient(id);
+                }
+            }
+
+            @Override
             public void chatOpen(boolean open) {
                 preferences.setLobbyChatFolded(!open);
             }
@@ -554,6 +564,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     /** The Requisition's actions: searches on their own thread, the rest through the window on the Swing thread. */
     private LobbyRequisitionPanel.Actions requisitionActions() {
         return new LobbyRequisitionPanel.Actions() {
+            @Override
+            public @Nullable Drawable swatch(int id) {
+                return playerSwatch(id);
+            }
+
             @Override
             public void search(RequisitionSearch.Query query, Consumer<RequisitionSearch.Result> done) {
                 search.search(query, result -> GpuHost.post(() -> {
@@ -798,6 +813,23 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             camoDrawables.put(key, new TextureRegionDrawable(texture));
         });
         players.camosArrived();
+    }
+
+    /** Player {@code id}'s camo picture once drawn, else their colour; null when they are not shown. */
+    private @Nullable Drawable playerSwatch(int id) {
+        if (shown == null) {
+            return null;
+        }
+        for (LobbySnapshot.TeamGroup team : shown.teams()) {
+            for (LobbySnapshot.PlayerRow player : team.players()) {
+                if (player.id() == id) {
+                    Drawable camo = player.camo().isEmpty() ? null : camoDrawables.get(player.camo());
+                    return camo != null ? camo : kit.skin.newDrawable("white",
+                          new com.badlogic.gdx.graphics.Color(player.colour() << 8 | 0xFF));
+                }
+            }
+        }
+        return null;
     }
 
     /** GPU thread: closes the lobby's open menus, then opens the camo chooser over the lobby. */
@@ -1084,6 +1116,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             centre.show(BATTLEFIELD, Messages.getString("Lobby.battlefield"), battlefield.body());
         }
         stage.act(Math.min(0.1f, Gdx.graphics.getDeltaTime()));
+        // While units are being added, the roster marks who receives them, however the picker last changed
+        players.recipient(REQUISITION.equals(centre.showing()) ? requisition.recipient() : -1);
         // Once the bots have joined: a second before the shot
         if (menuPending && (System.nanoTime() - start) / 1e9 > Math.max(1, window.probe().shotAt() - 1)
               && players.openFirstMenu()) {
@@ -1429,6 +1463,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
             LOGGER.info("The lobby probe's skills click: gunnery {} shown {}", requisition.gunneryStepper().value(),
                   requisition.gunneryStepper().getStage() != null);
+        }
+        if (pickBotPending && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT) {
+            Actor card = players.probeBotCard();
+            if (card != null) {
+                pickBotPending = false;
+                GpuLobbyProbeInput.click(stage, card);
+                stage.mouseMoved(0, 0);
+                LOGGER.info("The lobby probe clicked {}: the units go to player {}, the roster marks player {}",
+                      card.getName(), requisition.recipient(), players.recipient());
+            }
         }
         if (advancedStep >= 0 && REQUISITION.equals(centre.showing()) && elapsed > PROBE_CLICK_AT
               && elapsed > advancedAt) {

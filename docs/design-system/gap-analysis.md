@@ -1180,6 +1180,12 @@ work for Swing, and item 11 is under investigation.
        refresh.
        Checks: `LobbyDialogsL17SmokeTest`, which holds a reroll on the Swing thread and clicks the locked
        controls, and `LobbyMapSetupSmokeTest`, which refreshes 20 times and counts Generate's listeners.
+     - Drake's review: the Requisition's "For" picker moved from the source row to stand beside Add, with the
+       recipient's camo or colour as a swatch. While the Requisition is open, the roster and the picker follow
+       each other: clicking your own card or your bot's card makes it the recipient, the recipient's card is
+       highlighted, and other players' cards are ignored. "Add a new team" became "Add opponent on a new team",
+       because it adds a bot; the server can't hold an empty team, so there is no client-only placeholder.
+       Checks: `LobbyRecipientSmokeTest`. Live: `lobby+requisition+atlas+pick+pickbot` with `MM_LOBBY_BOTS=1`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
