@@ -46,9 +46,9 @@ final class StartTimeline {
         return ease((t - MENU_START - ITEM_STAGGER * index) / ITEM_SLIDE);
     }
 
-    /** The commander's name to greet, or null to greet the commander without one. */
-    static String greetingName(String lastPlayerName) {
-        return lastPlayerName == null || lastPlayerName.isBlank() ? null : lastPlayerName.trim();
+    /** Whether the player has played before, so the greeting welcomes them back; it always calls them Commander. */
+    static boolean returning(String lastPlayerName) {
+        return lastPlayerName != null && !lastPlayerName.isBlank();
     }
 
     /** Eases out: fast at first, settling at 1. */

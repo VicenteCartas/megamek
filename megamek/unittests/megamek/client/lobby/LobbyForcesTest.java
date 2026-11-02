@@ -98,6 +98,7 @@ class LobbyForcesTest {
         assertTrue(owners.get(2).enemy());
     }
 
+
     @Test
     void cardShowsNameTonnageAndWeightClass() {
         Entity hunchback = mek(local, "Hunchback", 50);
@@ -111,9 +112,20 @@ class LobbyForcesTest {
         assertTrue(card.details().contains(hunchback.getWeightClassName()));
         assertTrue(card.editable());
         assertFalse(card.hidden());
+        assertEquals("50 t " + hunchback.getWeightClassName(), card.weight(), "the compact row's weight");
     }
 
     @Test
+    void aHiddenUnitHasNoWeightAndOneWithoutTonnageShowsItsClass() {
+        LobbyUnit hidden = new LobbyUnit(1, 1, "Mek", "", "", 0, 0, "", "", "", List.of(), 0, LobbyUnit.Link.NONE,
+              true, null, Force.NO_FORCE, false, false, null);
+        LobbyUnit classOnly = new LobbyUnit(2, 1, "Asset", "", "Light", 0, 0, "", "", "", List.of(), 0,
+              LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false, null);
+
+        assertEquals("", hidden.weight());
+        assertEquals("Light", classOnly.weight());
+    }
+
     void blindDropHidesTheEnemysCardButNotOwnOrAllied() {
         option(OptionsConstants.BASE_BLIND_DROP, true);
         Entity atlas = mek(enemy, "Atlas", 100);

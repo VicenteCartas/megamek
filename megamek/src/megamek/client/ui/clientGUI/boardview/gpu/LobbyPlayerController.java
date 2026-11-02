@@ -118,6 +118,16 @@ final class LobbyPlayerController {
         commands.toggleGameMaster();
     }
 
+    /** Votes in the running Game Master vote: for the request when {@code allow}, else against it. */
+    void voteGameMaster(boolean allow) {
+        commands.voteGameMaster(allow);
+    }
+
+    /** Withdraws the local player's own Game Master request. */
+    void withdrawGameMaster() {
+        commands.withdrawGameMaster();
+    }
+
     /** Opens the setup of the local bot {@code id} and gives it the behaviour chosen there. */
     void botSettings(int id) {
         Player player = session.game().getPlayer(id);

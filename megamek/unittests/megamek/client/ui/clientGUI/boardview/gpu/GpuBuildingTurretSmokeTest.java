@@ -94,7 +94,7 @@ class GpuBuildingTurretSmokeTest {
                     fixtures.add(example("AC/10 + flamers", "Autocannon/10", "Flamer", "Heavy Flamer"));
                     fixtures.add(example("MML 9 + ATM 12", "ISMML9", "CLATM12"));
                     fixtures.add(example("MRM 40 + Arrow IV", "MRM 40", "ISArrowIV"));
-                    fixtures.add(example("Thunderbolt 20 + mortar 8", "Thunderbolt 20", "IS Mech Mortar-8"));
+                    fixtures.add(example("Thunderbolt 20 + mortar 8", "Thunderbolt 20", "ISMekMortar8"));
                     var recipe = library.descriptor(BuildingTurretVisual.ROOT + "turret.json");
                     var unsupported = UnitModelState.capture(example("Screen launcher", "Screen Launcher").entity());
                     assertThrows(IllegalArgumentException.class,

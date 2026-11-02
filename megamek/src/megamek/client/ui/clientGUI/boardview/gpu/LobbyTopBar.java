@@ -28,12 +28,14 @@ import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * The lobby's top bar, over the art without a panel, as the reference's ready bar: the BRIEFING title with where the
- * game runs and its map under it at the start; the ready count and a Battle Value chip per side in the middle, centred
- * on the whole bar, more sides folding into one chip that lists them; at the end the warnings to heed before Ready,
- * then Leave and Ready, Ready last so it holds the edge. Ready turns green with a check once the player is ready, and
+ * game runs and its map under it at the start; the ready count, a Battle Value chip per side and the warnings to heed
+ * before Ready in the middle, centred on the whole bar, more sides folding into one chip that lists them; at the end
+ * only actions: the Game Master's seat, the Client Settings gear, then Leave and Ready, Ready last so it holds the
+ * edge. Ready turns green with a check once the player is ready, and
  * a click on it while a red warning stands lights the red warnings instead.
  */
 final class LobbyTopBar extends WidgetGroup {
@@ -47,6 +49,7 @@ final class LobbyTopBar extends WidgetGroup {
     static final int PULSE_FLASHES = 2;
 
     private final UiKit kit;
+    private final LobbyGameMasterSeat seat;
     private final Consumer<Warning> warningAction;
     private final Table heading = new Table();
     private final Table chips = new Table();
@@ -65,8 +68,10 @@ final class LobbyTopBar extends WidgetGroup {
     private String shortcut = "";
     private boolean narrow;
 
-    LobbyTopBar(UiKit kit, Runnable leaveAction, Runnable readyAction, Consumer<Warning> warningAction) {
+    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable settingsAction, Runnable leaveAction,
+          Runnable readyAction, Consumer<Warning> warningAction) {
         this.kit = kit;
+        this.seat = seat;
         this.warningAction = warningAction;
         sidesPopover = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
         sidesPopover.setName("lobby-sides");
@@ -78,6 +83,11 @@ final class LobbyTopBar extends WidgetGroup {
         subtitle.setEllipsis(true);
         heading.add(subtitle).left().minWidth(0).padTop(space("xxs"));
 
+        UiButton settings = kit.button("button-icon", "settings", null, null);
+        settings.setName("lobby-settings");
+        kit.tip(settings, true).getActor().setText(Messages.getString("Lobby.settingsTip",
+              KeyCommandBind.getDesc(KeyCommandBind.CLIENT_SETTINGS)));
+        UiKit.onChange(settings, settingsAction);
         UiButton leave = kit.button("button-secondary", null, Messages.getString("Lobby.leave"), null);
         UiKit.onChange(leave, leaveAction);
         ready = kit.button("button-primary", null, Messages.getString("Lobby.ready"), null);
@@ -92,7 +102,8 @@ final class LobbyTopBar extends WidgetGroup {
         // Leave and both of Ready's faces share the widest one's width, so nothing moves when Ready changes face
         float width = Math.max(leave.getPrefWidth(), Math.max(ready.getPrefWidth(), done.getPrefWidth()));
         Stack readyFaces = new Stack(ready, done);
-        trailing.add(warnings).padRight(space("sm"));
+        trailing.add(seat).padRight(space("sm"));
+        trailing.add(settings).padRight(space("sm"));
         trailing.add(leave).minWidth(width).padRight(space("sm"));
         trailing.add(readyFaces).minWidth(width);
 
@@ -109,11 +120,12 @@ final class LobbyTopBar extends WidgetGroup {
     void attach(Group layer) {
         layer.addActor(sidesPopover);
         layer.addActor(warningsPopover);
+        seat.attach(layer);
     }
 
     /** One Escape step: closes an open popover; true when one was open. */
     boolean back() {
-        return sidesPopover.back() || warningsPopover.back();
+        return sidesPopover.back() || warningsPopover.back() || seat.back();
     }
 
     /** The Ready key's name for the tooltips, such as "Ctrl+Enter", or empty for none. */
@@ -138,6 +150,7 @@ final class LobbyTopBar extends WidgetGroup {
             line += "  \u00b7  " + snapshot.mapSummary();
         }
         subtitle.setText(line);
+        seat.show(snapshot.gameMaster());
         ready.setVisible(!snapshot.localReady());
         done.setVisible(snapshot.localReady());
 
@@ -166,6 +179,8 @@ final class LobbyTopBar extends WidgetGroup {
             fillSides();
         }
         fillWarnings();
+        // The warnings stand with the status they qualify, so the end of the bar holds only actions
+        chips.add(warnings).padLeft(shown.readiness().warnings().isEmpty() ? 0 : space("md"));
         refreshTips();
         invalidateHierarchy();
     }

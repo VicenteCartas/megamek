@@ -40,6 +40,7 @@ import megamek.client.bot.AIType;
 import megamek.client.bot.BotClient;
 import megamek.client.bot.BotFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractNagDialog;
@@ -75,6 +76,12 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+overlap}: turns on double blind with exclusive deployment, so every player left on any edge
  *     overlaps and Ready is blocked.</li>
  *     <li>{@code lobby+blind}: turns on the real blind drop, so the other sides' Battle Value hides.</li>
+ *     <li>{@code lobby+gm}: allows the Game Master role and, {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, clicks the
+ *     top bar's Game Master seat and its Claim through the stage; alone, the seat is the player's at once.
+ *     {@code +step} then steps down. {@code +second} seats a second human player without a window on team 2, so the
+ *     claim becomes a vote they answer yes to {@value #SECOND_ACTS_AT} s in; with {@code +asked} the player claims
+ *     nothing and the second human asks instead, and the probe answers the card that opens with Allow, or with Deny
+ *     under {@code +deny}.</li>
  *     <li>{@code MM_START_SHOT}: a PNG file the lobby saves from its frame buffer, {@code MM_START_SHOT_AT} seconds
  *     after it shows (by default {@value #SHOT_AT}, once the bots and units have arrived).</li>
  *     <li>{@code MM_START_QUIT}: {@code true} to quit MegaMek once the shot is saved.</li>
@@ -101,6 +108,9 @@ import org.lwjgl.glfw.GLFW;
  *     dossier.</li>
  *     <li>{@code lobby+clickcompact}: clicks the forces' compact rows toggle through the stage, as a pointer would,
  *     {@value GpuLobbyScreen#PROBE_CLICK_AT} s in; with {@code +formations} it does so in the formations view.</li>
+
+ *     <li>{@code lobby+saveprefs}: saves the client settings when {@code MM_START_QUIT} quits, as quitting MegaMek
+ *     does; without it the probe leaves them as they were.</li>
  *     <li>{@code lobby+requisition+clickfilters}: clicks the Requisition's Filters button through the stage at the same
  *     time, opening the drawer; {@code +closefilters} clicks it again a second later, shutting it.</li>
  *     <li>{@code lobby+requisition+advanced}: through the stage, opens the Filters drawer, clicks Advanced search,
@@ -116,14 +126,35 @@ import org.lwjgl.glfw.GLFW;
  *     stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s in: {@code overview}, {@code readout}, {@code ascard},
  *     {@code factions} or {@code damage}; {@code tro} clicks Readout, then its TRO switch, and {@code summary} its
  *     Summary switch. With {@code +scroll=percent} it scrolls the tab that far down half a second before the shot.</li>
+ *     <li>{@code lobby+c3}: opens the C3 network manager {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as the forces'
+ *     menu would; {@code +c3plan} clicks Plan Force through the stage 2.5 s before the shot, or {@code +c3config=N}
+ *     the Configuration N template, and {@code +c3build} then clicks Build; the board is logged before the shot (see
+ *     {@link LobbyC3Probe}).</li>
+ *     <li>{@code lobby+mapsetup}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the map setup in the forces'
+ *     place, as the battlefield column would, and {@code lobby+randommap} the random map settings; with
+ *     {@code +mapclick=name,name} it then clicks their controls, or those of the dialog over them, by name through the
+ *     stage, one every {@value LobbyMapSetupProbe#CLICK_GAP} s, logging the setup after each and the server's map
+ *     settings once done: such as {@code map-slot-1}, {@code map-board-2} and {@code map-place},
+ *     {@code map-width-up} (and {@code nag-dont-show}, {@code nag-ok} of the odd-sized board warning),
+ *     {@code map-medium-space}, {@code map-rotate}, {@code map-level-offset-up}, {@code map-generate}; or
+ *     {@code random-advanced}, {@code random-tab-water}, {@code random-lakes-high}, {@code random-ok} (see
+ *     {@link LobbyMapSetupProbe}).</li> *     <li>{@code lobby+configure}: {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, opens the unit bay for the player's
+ *     first unit, as the unit menu's Configure does; with {@code +multi} for all their units at once. With
+ *     {@code +bayclick=name,name} it then clicks the bay's controls by name through the stage, one every
+ *     {@value LobbyUnitBayProbe#CLICK_GAP} s, logging after each the unit, the first crew member's gunnery, the zone,
+ *     the round and whether OK may be pressed: such as {@code bay-gunnery-0-up}, {@code bay-zone-5},
+ *     {@code bay-tab-deployment}, {@code bay-round}'s {@code bay-round-up}, {@code bay-next} and {@code bay-ok}.
+ *     {@code +bayrules} first turns on the rules that add the bay's Abilities, Quirks and Partial Repairs tabs (pilot
+ *     advantages, edge, quirks and partial repairs), so {@code bay-tab-abilities} and the others can be clicked.</li>
  *     <li>{@code lobby+dialog=name}: opens a Swing dialog as the lobby's control would once the shot's time comes, and
  *     saves a photograph of the window and its dialogs, taken from the screen only when the dialog is in front,
  *     instead of the frame buffer, which has no Swing dialogs; the
  *     log tells where the dialog stands against the window, then, as the probe closes it, whether the lobby has its
  *     input and the focus back. The names: {@code gameoptions}, {@code conditions}, {@code victory},
  *     {@code randommap}, {@code mapsetup}, {@code loadmapsetup}, {@code camo}, {@code playersettings},
- *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3}, {@code randomarmy}, {@code skills},
- *     {@code names}, {@code loadlist} and {@code alert}. The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
+ *     {@code botconfig}, {@code addbot}, {@code customize}, {@code c3} (now the native C3 network manager, on the
+ *     stage), {@code randomarmy}, {@code skills}, {@code names}, {@code loadlist}, {@code alert} and {@code settings} (Client Settings, through a click on the top
+ *     bar's gear). The libGDX dialogs ({@link #NATIVE_DIALOGS}: {@code camo},
  *     {@code playersettings}, {@code botconfig}, {@code addbot}, {@code conditions} and {@code gameoptions}) open on
  *     the stage instead, where the probe clicks through them: a colour camo for {@code camo}, the SE start and an
  *     offset of 2 for {@code playersettings}, the COWARDLY preset, the pirate switch and the bravery slider's top for
@@ -131,7 +162,11 @@ import org.lwjgl.glfw.GLFW;
  *     {@code +targets} a force and a hex on the targets tab; two steps down the light and one down the weather for
  *     {@code conditions}; a search for double blind and its check box for {@code gameoptions}; it saves the frame
  *     buffer, presses OK, and logs what the next snapshot shows, the battlefield's conditions and notable rules
- *     among it.</li>
+ *     among it. Since L17 {@code victory}, {@code randomarmy}, {@code skills} and {@code names} open their libGDX
+ *     views and {@code loadlist} the system's file dialog; the pages below probe those views.</li>
+ *     <li>{@code lobby+victory}, {@code +randomarmy}, {@code +skills}, {@code +names}, {@code +readout},
+ *     {@code +princesshelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
+ *     {@link LobbyToolsProbe}.</li>
  * </ul>
  */
 record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot, double shotAt, boolean quit,
@@ -154,10 +189,15 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     private static final double FORM_WAIT = 20;
     /** When {@code lobby+fold}'s player and bots chat, in seconds: after the screen has folded the chat. */
     static final double FOLD_CHAT_AT = 3;
+    /** {@code lobby+gm+second}'s second human player, and when they act, in seconds. */
+    private static final String SECOND_NAME = "Second";
+    static final double SECOND_ACTS_AT = 4;
     private static final String DIALOG_OPTION = "dialog=";
     private static final String TAB_OPTION = "tab=";
     private static final String SCROLL_OPTION = "scroll=";
     private static final String SEARCH_OPTION = "search=";
+    private static final String BAY_CLICK_OPTION = "bayclick=";
+    private static final String MAP_CLICK_OPTION = "mapclick=";
     /** How long a probed dialog has to show, and then to close, before the probe looks. */
     private static final int DIALOG_WAIT_MS = 2500;
     private static final int FRONT_WAIT_MS = 700;
@@ -271,6 +311,9 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         boolean[] readied = { !starts && !options.contains("ready") };
         int[] formed = { options.contains("formations") ? 0 : FORMED };
         boolean[] foldChatted = { !options.contains("fold") };
+        // lobby+gm+second: a second human at the table, who asks for the seat (+asked) or votes yes on the player's ask
+        Client[] second = { null };
+        boolean[] secondDone = { !options.contains("second") };
         Timer timer = new Timer(POLL_MS, null);
         timer.addActionListener(event -> {
             // The bots join after the player, who gets the first player id as when they are added by hand
@@ -286,6 +329,10 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 loadUnits(client, local);
                 chat(client);
                 addBots(gui, waiting);
+                if (!secondDone[0]) {
+                    second[0] = connectSecond(client);
+                    secondDone[0] = second[0] == null;
+                }
             }
             waiting.removeIf(bot -> {
                 Player player = bot.getLocalPlayer();
@@ -302,10 +349,13 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 return true;
             });
             double elapsed = (System.nanoTime() - start) / 1e9;
+            if (second[0] != null && !secondDone[0]) {
+                secondDone[0] = secondStep(second[0], elapsed);
+            }
             if (joined[0] && formed[0] < FORMED) {
                 formed[0] = elapsed > FORM_WAIT ? FORMED : form(client, local, formed[0]);
             }
-            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt) {
+            if (joined[0] && !readied[0] && waiting.isEmpty() && elapsed >= readyAt && botsArmed(gui)) {
                 readied[0] = true;
                 if (starts) {
                     LOGGER.info("The lobby probe presses Ready");
@@ -324,11 +374,42 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 LOGGER.info("The lobby probe's player and {} bots chat while the chat is folded",
                       gui.getLocalBots().size());
             }
-            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED && foldChatted[0]) {
+            if (joined[0] && waiting.isEmpty() && readied[0] && formed[0] >= FORMED && foldChatted[0]
+                  && secondDone[0]) {
                 timer.stop();
             }
         });
         timer.start();
+    }
+
+    /** Connects {@code lobby+gm+second}'s second human player, a client without a window; null when it fails. */
+    private static Client connectSecond(Client client) {
+        Client second = new Client(SECOND_NAME, client.getHost(), client.getPort());
+        if (second.connect()) {
+            LOGGER.info("The lobby probe's second human joins");
+            return second;
+        }
+        LOGGER.error("The lobby probe's second human failed to connect");
+        return null;
+    }
+
+    /**
+     * One step of the second human: on a team once they have joined, then {@value #SECOND_ACTS_AT} s in they ask for
+     * the seat ({@code +asked}) or vote yes on the player's ask; true once done.
+     */
+    private boolean secondStep(Client second, double elapsed) {
+        Player player = second.getLocalPlayer();
+        if (player == null || elapsed < SECOND_ACTS_AT) {
+            if (player != null && player.getTeam() != BOT_TEAM) {
+                player.setTeam(BOT_TEAM);
+                second.sendPlayerInfo();
+            }
+            return false;
+        }
+        boolean asks = options.contains("asked");
+        LOGGER.info("The lobby probe's second human {}", asks ? "asks for the Game Master seat" : "votes yes");
+        second.sendChat(asks ? LobbyCommands.GAME_MASTER_COMMAND : LobbyCommands.GAME_MASTER_ALLOW_COMMAND);
+        return true;
     }
 
     /** For a while, answers No to the questions the lobby asks and closes the nags, so the game starts unattended. */
@@ -371,9 +452,15 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         }
     }
 
-    /** Sends the game options {@code lobby+blocked}, {@code lobby+overlap} and {@code lobby+blind} ask for. */
+    /**
+     * Sends the game options {@code lobby+blocked}, {@code lobby+overlap}, {@code lobby+blind}, {@code lobby+gm} and
+     * {@code lobby+bayrules} ask for.
+     */
     private void sendOptions(Client client) {
         Vector<IBasicOption> changed = new Vector<>();
+        if (options.contains("gm")) {
+            changed.add(new BasicOption(OptionsConstants.GAME_MASTER_ALLOW, true));
+        }
         if (options.contains("blocked")) {
             changed.add(new BasicOption(OptionsConstants.VICTORY_COMMANDER_KILLED, true));
         }
@@ -383,6 +470,12 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         }
         if (options.contains("blind")) {
             changed.add(new BasicOption(OptionsConstants.BASE_REAL_BLIND_DROP, true));
+        }
+        if (options.contains("bayrules")) {
+            changed.add(new BasicOption(OptionsConstants.RPG_PILOT_ADVANTAGES, true));
+            changed.add(new BasicOption(OptionsConstants.EDGE, true));
+            changed.add(new BasicOption(OptionsConstants.ADVANCED_STRATOPS_QUIRKS, true));
+            changed.add(new BasicOption(OptionsConstants.ADVANCED_STRATOPS_PARTIAL_REPAIRS, true));
         }
         if (!changed.isEmpty()) {
             client.sendGameOptions("", changed);
@@ -425,6 +518,23 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
     }
 
     /** Loads every unit list for {@code player}, sent by its own client. */
+    /**
+     * Whether every bot's units have reached the game, so readying waits for them: a unit that arrives later un-readies
+     * the player.
+     */
+    private boolean botsArmed(ClientGUI gui) {
+        if (units.isEmpty()) {
+            return true;
+        }
+        for (AbstractClient bot : gui.getLocalBots().values()) {
+            Player player = bot.getLocalPlayer();
+            if (player == null || gui.getClient().getGame().getPlayerEntities(player, false).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private void loadUnits(AbstractClient client, Player player) {
         for (File file : units) {
             try {
@@ -488,6 +598,30 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
         openDialog(window, gui);
     }
 
+    /** The unit bay's controls {@code lobby+configure+bayclick=name,name} clicks, in order; empty without it. */
+    List<String> bayClicks() {
+        return clicks(BAY_CLICK_OPTION);
+    }
+
+    /** The map setup's controls {@code lobby+mapsetup+mapclick=name,name} clicks, in order; empty without it. */
+    List<String> mapClicks() {
+        return clicks(MAP_CLICK_OPTION);
+    }
+
+    private List<String> clicks(String prefix) {
+        List<String> names = new ArrayList<>();
+        for (String option : options) {
+            if (option.startsWith(prefix)) {
+                for (String name : option.substring(prefix.length()).split(",")) {
+                    if (!name.isBlank()) {
+                        names.add(name.trim());
+                    }
+                }
+            }
+        }
+        return names;
+    }
+
     /** The dialog {@code lobby+dialog=name} opens over the lobby, or null. */
     String dialog() {
         for (String option : options) {
@@ -542,6 +676,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
             case "loadlist" -> window.forcesCommand(LobbyForcesPanel.Command.LOAD_LIST);
             case "alert" -> SwingUtilities.invokeLater(() -> gui.doAlertDialog(
                   Messages.getString("ChatLounge.AlertBot.title"), Messages.getString("ChatLounge.AlertBot.message")));
+            case "settings" -> window.probeClick("lobby-settings");
             default -> LOGGER.error("The lobby probe has no dialog called {}", name);
         }
     }

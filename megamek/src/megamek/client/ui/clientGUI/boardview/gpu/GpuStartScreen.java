@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Application;
 import com.badlogic.gdx.ApplicationAdapter;
@@ -66,9 +67,11 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiListPopup;
+import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
+import megamek.client.ui.util.UIUtil;
 import megamek.common.Configuration;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.util.TipOfTheDay;
@@ -130,10 +133,14 @@ final class GpuStartScreen extends ApplicationAdapter {
     final StartScenarioPage scenarioPage = new StartScenarioPage(this);
     final StartBriefingPage briefingPage = new StartBriefingPage(this);
     private final List<String> tips;
-    private final boolean motion;
+    final boolean motion;
     /** The developer switch's page and shot, or null; only the first start window of a run reads it. */
     private final StartScreenProbe probe;
     private boolean shotSaved;
+    /** Whether the developer switch's {@code briefing+play} has pressed the briefing's Start. */
+    private boolean playPressed;
+    /** The welcome while it shows, or null. */
+    private StartWelcome welcome;
 
     private BufferedImage art;
     GpuBoardSkin boardSkin;
@@ -260,10 +267,53 @@ final class GpuStartScreen extends ApplicationAdapter {
         applyProbe();
     }
 
+    /** GPU thread: the welcome MegaMek shows at start; a developer switch's run shows it only when it asks to. */
+    void welcomeAtStart() {
+        if (probe == null || probe.page() == null) {
+            showWelcome();
+        }
+    }
+
+    /**
+     * GPU thread: shows the welcome over the screen, unless it already shows. Acknowledge with the box ticked stops it
+     * showing at later starts; the developer switch's welcome keeps the preference as it is.
+     */
+    void showWelcome() {
+        if (stage == null || disposed || (welcome != null && welcome.isOpen())) {
+            return;
+        }
+        welcome = new StartWelcome(kit, motion, new StartWelcome.Answer() {
+            @Override
+            public void acknowledged(boolean dontShowAgain) {
+                welcome = null;
+                if (dontShowAgain && probe == null) {
+                    SwingUtilities.invokeLater(() -> {
+                        preferences.setNagForReadme(false);
+                        PreferenceManager.getInstance().save();
+                    });
+                }
+            }
+
+            @Override
+            public void quit() {
+                window.dispatch(Action.QUIT);
+            }
+
+            @Override
+            public void browse(String url) {
+                SwingUtilities.invokeLater(() -> UIUtil.browse(url));
+            }
+        });
+        welcome.show(stage);
+    }
+
     /** Opens the page the developer switch asks for, in the state its options ask for. */
     private void applyProbe() {
         if (probe == null || probe.page() == null) {
             return;
+        }
+        if (probe.has("welcome")) {
+            showWelcome();
         }
         if (probe.lobby()) {
             showPage(Page.HOST);
@@ -725,6 +775,10 @@ final class GpuStartScreen extends ApplicationAdapter {
                     skip();
                     return true;
                 }
+                if (UiModal.active(stage) != null) {
+                    // A dialog over the screen answers its own keys
+                    return false;
+                }
                 // An open list, and a select's own opening keys, are the select's; the event reaches here after
                 Actor target = event.getTarget();
                 if (target instanceof UiListPopup || target instanceof UiSelect && (keycode == Keys.DOWN
@@ -847,9 +901,27 @@ final class GpuStartScreen extends ApplicationAdapter {
             heights[i] = item instanceof Layout layout ? layout.getPrefHeight() : item.getHeight();
             taken += gapAbove(item) + gapBelow(item, i) + (i == filler ? 0 : heights[i]);
         }
+        float reserved = 32 + bottomRow.getHeight() + 16;
+        float fillerWanted = filler >= 0 ? heights[filler] : 0;
         if (filler >= 0) {
-            float room = h - y - taken - (32 + bottomRow.getHeight() + 16);
+            float room = h - y - taken - reserved;
             heights[filler] = Math.min(heights[filler], Math.max(room, MIN_FILLER));
+            taken += heights[filler];
+        }
+        // The briefing's map gives way before the column runs into the bottom row
+        for (int i = 0; i < column.size(); i++) {
+            if (column.get(i) instanceof StartMapFrame map) {
+                float fitted = StartMapFrame.fitted(heights[i], map.getMinHeight(), y + taken - (h - reserved));
+                taken -= heights[i] - fitted;
+                heights[i] = fitted;
+                if (filler >= 0) {
+                    // The room the map left goes back to the list or description, up to all it would show
+                    float slack = h - reserved - y - taken;
+                    float grown = Math.min(fillerWanted, heights[filler] + Math.max(0, slack));
+                    taken += grown - heights[filler];
+                    heights[filler] = grown;
+                }
+            }
         }
         float offscreen = columnWidth + margin + 40;
         for (int i = 0; i < column.size(); i++) {
@@ -860,7 +932,7 @@ final class GpuStartScreen extends ApplicationAdapter {
             y += gapAbove(item);
             item.setBounds(left + dx, h - y - itemHeight, columnWidth, itemHeight);
             y += itemHeight + gapBelow(item, i);
-            item.setVisible(p > 0);
+            item.setVisible(p > 0 && itemHeight > 0);
         }
         // Like the logo, the bottom row only slides in with the greeting and stays put between pages
         double rowIn = pageShownAt < 0 ? slide(column.size()) : 1;
@@ -1004,10 +1076,9 @@ final class GpuStartScreen extends ApplicationAdapter {
         Font overline = TokenFonts.font("overline", true, true)
               .deriveFont(TokenFonts.font("overline").getSize2D() * 1.4f * scale);
         Font display = TokenFonts.font("display", true, true).deriveFont((float) Math.max(34, h * 0.055) * scale);
-        String name = StartTimeline.greetingName(PreferenceManager.getClientPreferences().getLastPlayerName());
+        boolean returning = StartTimeline.returning(PreferenceManager.getClientPreferences().getLastPlayerName());
         String first = Messages.getString("StartScreen.link", MMConstants.VERSION);
-        String second = name == null ? Messages.getString("StartScreen.welcome")
-              : Messages.getString("StartScreen.welcomeBack", name);
+        String second = Messages.getString(returning ? "StartScreen.welcomeBack" : "StartScreen.welcome");
         if (line1 != null) {
             line1.dispose();
             line2.dispose();
@@ -1097,6 +1168,11 @@ final class GpuStartScreen extends ApplicationAdapter {
         stage.draw();
         if (probe != null && probe.shot() != null && !probe.lobby() && !shotSaved && clock() >= probe.shotAt()) {
             saveShot();
+        }
+        if (probe != null && probe.has("play") && page == Page.BRIEFING && !playPressed && clock() >= probe.shotAt()
+              && briefingPage.canStart()) {
+            playPressed = true;
+            briefingPage.submitBriefing();
         }
         if (!settledRate && t >= StartTimeline.INTRO_END) {
             // The settled screen has only slow embers: 30 frames a second is plenty
@@ -1295,5 +1371,6 @@ final class GpuStartScreen extends ApplicationAdapter {
             boardSkin.release();
         }
         briefingPage.disposeSwatches();
+        briefingPage.disposeBriefingMap();
     }
 }

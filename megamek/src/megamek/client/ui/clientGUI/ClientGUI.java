@@ -868,9 +868,17 @@ public class ClientGUI extends AbstractClientGUI
     /**
      * Opens, follows and closes the Game Master vote dialog as the server shares the vote's state: the dialog opens
      * when a vote is called, follows the ballots as they come in, and closes when the vote resolves. The outcome itself
-     * is announced in the chat.
+     * is announced in the chat. While the libGDX lobby is up, its Game Master seat does all of this instead.
      */
     private void updateGameMasterVoteDialog(Poll poll) {
+        if (GpuLobbyWindow.isActiveFor(this)) {
+            // The lobby's Game Master seat shows the vote and the new Game Master itself
+            if (gameMasterVoteDialog != null) {
+                gameMasterVoteDialog.dispose();
+                gameMasterVoteDialog = null;
+            }
+            return;
+        }
         if (poll.getStatus().isResolved()) {
             if (gameMasterVoteDialog != null) {
                 gameMasterVoteDialog.dispose();
@@ -1095,12 +1103,12 @@ public class ClientGUI extends AbstractClientGUI
             controller.registerCommandAction(KeyCommandBind.BOT_COMMANDS.cmd, GUIP::toggleBotCommandsEnabled);
         }
 
-        // A joining client lands in the lounge; the phase the server sends next replaces the lobby when it is not
-        showDefaultBoard(CG_CHAT_LOUNGE);
+        // The scene follows the server's first phase: the lobby for the lounge, the board for a scenario or a running
+        // game. Until then whatever holds the window stays, so a scenario never flashes the lobby on its way in
         client.changePhase(GamePhase.UNKNOWN);
         // Unit tools are created on demand; constructing them here can wait for the cache on the EDT.
         new UnitLoadingDialog(frame).showForBackgroundLoad();
-        frame.setVisible(!GpuBoardWindow.isActiveFor(this) && !GpuLobbyWindow.isActiveFor(this));
+        frame.setVisible(getClient() instanceof BotClient);
         GUIP.addPreferenceChangeListener(this);
     }
 
@@ -1240,6 +1248,11 @@ public class ClientGUI extends AbstractClientGUI
 
         // Show the settings dialog.
         commonSettingsDialog.setVisible(true);
+    }
+
+    /** Opens Client Settings, as View &gt; Client Settings does; for the lobby, whose window hides the menu bar. */
+    public void openClientSettings() {
+        showSettings();
     }
 
     private void showSettingsSubPage(String subpage) {
@@ -1946,7 +1959,10 @@ public class ClientGUI extends AbstractClientGUI
 
     /**
      * The lounge shows the native lobby scene, and every later phase the native board, each replacing the other in the
-     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start.
+     * one window; the frame stays hidden behind both and shows only when the lobby scene can't start. Before the
+     * server sends its first phase the window keeps what it shows (the start screen, or nothing yet for MekHQ), so a
+     * scenario or a running game goes straight to the board; between the lounge and the first board phase the lobby
+     * stays.
      */
     void showDefaultBoard(String mainPanel) {
         if (getClient() instanceof BotClient) {
@@ -1956,8 +1972,8 @@ public class ClientGUI extends AbstractClientGUI
             boardViewChosen = false;
             GpuLobbyWindow.open(this);
             GpuBoardWindow.closeFor(this);
-        } else if (!boardViewChosen && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
-            // While waiting for the server (joining, or between the lounge and the first board phase) the lobby stays
+        } else if (client.getGame().getPhase() != GamePhase.UNKNOWN && !boardViewChosen
+              && !(CG_DEFAULT.equals(mainPanel) && GpuLobbyWindow.isActiveFor(this))) {
             openGpuBoard();
             GpuLobbyWindow.closeFor(this);
         }
@@ -3315,49 +3331,7 @@ public class ClientGUI extends AbstractClientGUI
             File unitFile = dlgLoadList.getSelectedFile();
 
             try {
-                // Read the units from the file.
-                final MULParser parser = new MULParser(unitFile,
-                      (GameOptions) getClient().getGame().getOptions());
-                if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
-                    return;
-                }
-                final Vector<Entity> loadedUnits = parser.getEntities();
-
-                // in the Lounge, set default deployment to "Before Game Start", round 0
-                // but in a game in-progress, deploy at the start of next round
-                final int deployRound = client.getGame().getRoundCount() + ((client.getGame().getPhase()
-                      == GamePhase.LOUNGE) ? 0 : 1);
-
-                // Add the units from the file.
-                for (Entity entity : loadedUnits) {
-                    entity.setOwner(player);
-                    if (reinforce) {
-                        entity.setDeployRound(deployRound);
-                        entity.setGame(client.getGame());
-                        // Set these to true, otherwise units reinforced in
-                        // the movement turn are considered selectable
-                        entity.setDone(true);
-                        entity.setUnloaded(true);
-                        if (entity instanceof IBomber && (client.getGame().getPhase() != GamePhase.LOUNGE)) {
-                            // Only apply bombs when we're going straight into the game; doing this in the
-                            // lounge
-                            // breaks the bombs completely.
-                            ((IBomber) entity).applyBombs();
-                        }
-                    }
-                }
-
-                if (!loadedUnits.isEmpty()) {
-                    client.sendAddEntity(loadedUnits);
-                    String msg = client.getLocalPlayer()
-                          + " loaded MUL file for player: "
-                          + player.getName()
-                          + " ["
-                          + loadedUnits.size()
-                          + " units]";
-                    client.sendServerChat(Player.PLAYER_NONE, msg);
-                    addedUnits = true;
-                }
+                addedUnits = loadUnitFile(player, unitFile, reinforce) > 0;
             } catch (Exception ex) {
                 logger.error(ex, "loadListFile");
                 doAlertDialog(Messages.getString("ClientGUI.errorLoadingFile"), ex.getMessage());
@@ -3373,6 +3347,64 @@ public class ClientGUI extends AbstractClientGUI
             doAlertDialog(Messages.getString("ClientGUI.errorLoadingFile"),
                   Messages.getString("ClientGUI.errorSelectingPlayer"));
         }
+    }
+
+    /**
+     * Loads the MegaMek Unit List {@code unitFile} onto {@code player}, as Load List does once a file is chosen, for a
+     * caller that chose the file itself.
+     *
+     * @return how many units were added, or -1 when the file's version was refused
+     *
+     * @throws Exception when the file cannot be read
+     */
+    public int loadListFile(Player player, File unitFile) throws Exception {
+        return loadUnitFile(player, unitFile, false);
+    }
+
+    private int loadUnitFile(Player player, File unitFile, boolean reinforce) throws Exception {
+        // Read the units from the file.
+        final MULParser parser = new MULParser(unitFile,
+              (GameOptions) getClient().getGame().getOptions());
+        if (!MULVersionValidator.isCorrectVersion(frame, parser)) {
+            return -1;
+        }
+        final Vector<Entity> loadedUnits = parser.getEntities();
+
+        // in the Lounge, set default deployment to "Before Game Start", round 0
+        // but in a game in-progress, deploy at the start of next round
+        final int deployRound = client.getGame().getRoundCount() + ((client.getGame().getPhase()
+              == GamePhase.LOUNGE) ? 0 : 1);
+
+        // Add the units from the file.
+        for (Entity entity : loadedUnits) {
+            entity.setOwner(player);
+            if (reinforce) {
+                entity.setDeployRound(deployRound);
+                entity.setGame(client.getGame());
+                // Set these to true, otherwise units reinforced in
+                // the movement turn are considered selectable
+                entity.setDone(true);
+                entity.setUnloaded(true);
+                if (entity instanceof IBomber && (client.getGame().getPhase() != GamePhase.LOUNGE)) {
+                    // Only apply bombs when we're going straight into the game; doing this in the
+                    // lounge
+                    // breaks the bombs completely.
+                    ((IBomber) entity).applyBombs();
+                }
+            }
+        }
+
+        if (!loadedUnits.isEmpty()) {
+            client.sendAddEntity(loadedUnits);
+            String msg = client.getLocalPlayer()
+                  + " loaded MUL file for player: "
+                  + player.getName()
+                  + " ["
+                  + loadedUnits.size()
+                  + " units]";
+            client.sendServerChat(Player.PLAYER_NONE, msg);
+        }
+        return loadedUnits.size();
     }
 
     @Override

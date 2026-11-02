@@ -4,8 +4,8 @@ package megamek.client.ui.gdx;
 import java.util.List;
 import java.util.function.IntConsumer;
 
-import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;

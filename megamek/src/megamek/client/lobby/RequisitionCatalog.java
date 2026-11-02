@@ -323,6 +323,26 @@ public final class RequisitionCatalog {
                   + levels.stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
         }
 
+        /** {@link #kept()} with the category tab the Commander last looked at, which {@link #keptCategory} reads. */
+        public String kept(Category category) {
+            return "C:" + category.name() + ";" + kept();
+        }
+
+        /** The category tab {@code kept} names, or {@link Category#ALL} when it names none this version knows. */
+        public static Category keptCategory(@Nullable String kept) {
+            for (String part : (kept == null) ? new String[0] : kept.split(";")) {
+                String trimmed = part.strip();
+                if (trimmed.startsWith("C:")) {
+                    try {
+                        return Category.valueOf(trimmed.substring(2).strip());
+                    } catch (IllegalArgumentException unknown) {
+                        return Category.ALL;
+                    }
+                }
+            }
+            return Category.ALL;
+        }
+
         private static String names(Set<? extends Enum<?>> values) {
             return values.stream().sorted().map(Enum::name).collect(Collectors.joining(","));
         }

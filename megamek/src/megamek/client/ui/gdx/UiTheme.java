@@ -178,13 +178,19 @@ public final class UiTheme implements Disposable {
           Map.entry("skip", 0xE044), Map.entry("warn", 0xE002), Map.entry("error", 0xE000), Map.entry("walk", 0xF87D),
           Map.entry("chevron-left", 0xE5CB), Map.entry("chevron-right", 0xE5CC), Map.entry("expand", 0xF1CE), Map.entry("grip", 0xE945),
           // unfold_more and unfold_less: a tree's Expand all and Collapse all, as the Client Settings sidebar draws them.
-          Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6),
+          Map.entry("unfold-more", 0xE5D7), Map.entry("unfold-less", 0xE5D6), Map.entry("tag", 0xE9EF),
           Map.entry("layers", 0xE53B), Map.entry("replay", 0xE042), Map.entry("rewind", 0xE020),
           Map.entry("star", 0xE838), Map.entry("star-outline", 0xE838), Map.entry("tune", 0xE429),
           Map.entry("arrow-right", 0xE941), Map.entry("arrow-up", 0xE986), Map.entry("arrow-down", 0xE984),
           Map.entry("triangle-left", 0xE5DE), Map.entry("wireframe", 0xF016),
-          // shield_person: the Game Master's toast (Token v0)
-          Map.entry("shield-person", 0xF650),
+          // deployed_code: an isometric cube, the 3D preview of a board
+          Map.entry("cube", 0xF720),
+          // The welcome's links: open_in_new, menu_book (the wiki) and forum (Discord)
+          Map.entry("open-in-new", 0xE89E), Map.entry("book", 0xEA19), Map.entry("forum", 0xE0BF),
+          // The random army's table browser: folder and casino (a die, a table to roll on)
+          Map.entry("folder", 0xE2C7), Map.entry("die", 0xEB40),
+          // shield_person: the Game Master's toast (Token v0) and seat; cancel: a no in the seat's vote
+          Map.entry("shield-person", 0xF650), Map.entry("cancel", 0xE5C9),
           // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,
           // smart_toy (a bot) and palette (camouflage)
           Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
@@ -1692,7 +1698,7 @@ public final class UiTheme implements Disposable {
 
     /** The Label style of a token count badge's digits: caption's size in the medium face. */
     public static final String TOKEN_BADGE = "token-badge";
-    /** The prefix of a token chip's frame, followed by neutral, success, warning, danger or accent. */
+    /** The prefix of a token chip's frame, followed by neutral, success, warning, danger, accent or gamemaster. */
     public static final String TOKEN_CHIP = "token-chip-";
     /**
      * The prefix of an acting chip's Button style, followed by the frame's tone: the chip's frame at rest, washed in its
@@ -1723,7 +1729,7 @@ public final class UiTheme implements Disposable {
         float chip = tokens.size().get("icon.sm") + 2 * tokens.space().get("xxs");
         String[][] tones = { { "neutral", "border.control" }, { "success", "status.success" },
                              { "warning", "status.warning" }, { "danger", "status.danger" },
-                             { "accent", "accent.primary" } };
+                             { "accent", "accent.primary" }, { "gamemaster", "status.gamemaster" } };
         for (String[] tone : tones) {
             box(TOKEN_CHIP + tone[0], Color.CLEAR, token(tokens.color(tone[1], mode)), border, radius, null, 0, 0, chip);
             // A chip that acts: its status color washes it under the pointer, and fills it pressed or lit

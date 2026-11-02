@@ -33,8 +33,10 @@ import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Player;
+import megamek.common.board.Board;
 import megamek.common.game.Game;
 import megamek.common.game.IGame;
 import megamek.common.icons.Camouflage;
@@ -64,6 +66,8 @@ final class StartBriefingPage {
     Briefing briefing;
     private Table briefingHeader;
     private ScrollPane briefingText;
+    /** The briefing's map and its caption, or null when its game has no board to draw. */
+    private StartMapFrame briefingMap;
     private Table playerRows;
     private final List<UiSelect> roleSelects = new ArrayList<>();
     /** Each player's camouflage swatch on the briefing, and the textures they show. */
@@ -112,25 +116,30 @@ final class StartBriefingPage {
             Scenario scenario = new ScenarioLoader(file).load();
             IGame game = scenario.createGame();
             List<Player> players = game.getPlayersList();
-            if (!scenario.isSinglePlayer()) {
-                // As the old players dialog did, a multiplayer scenario's sides take the colours in order; a side
-                // still in the default blue camouflage wears its colour, so the briefing's swatches tell them apart
-                PlayerColour[] colours = PlayerColour.values();
-                Camouflage untouched = Camouflage.of(PlayerColour.BLUE);
-                for (int i = 0; i < players.size(); i++) {
-                    Player player = players.get(i);
-                    PlayerColour colour = colours[i % colours.length];
-                    player.setColour(colour);
-                    if (untouched.equals(player.getCamouflage())) {
-                        player.setCamouflage(Camouflage.of(colour));
-                    }
-                }
-            }
+            colourSides(players);
             return new Briefing(scenario, game, players.stream().map(StartBriefingPage::swatch).toList(), null);
         } catch (Exception ex) {
             GpuStartScreen.LOGGER.error(ex, "The start screen could not prepare the scenario {}", file);
             return new Briefing(null, null, List.of(), Messages.getString("StartScreen.briefingFailed",
                   file.getName(), ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage()));
+        }
+    }
+
+    /**
+     * As the old players dialog did for multiplayer, the sides take MegaMek's player colours in order, in single player
+     * too; a side still in the default blue camouflage wears its colour's, so the briefing's swatches, the map's
+     * deployment zones and the units in the game tell the sides apart.
+     */
+    static void colourSides(List<Player> players) {
+        PlayerColour[] colours = PlayerColour.values();
+        Camouflage untouched = Camouflage.of(PlayerColour.BLUE);
+        for (int i = 0; i < players.size(); i++) {
+            Player player = players.get(i);
+            PlayerColour colour = colours[i % colours.length];
+            player.setColour(colour);
+            if (untouched.equals(player.getCamouflage())) {
+                player.setCamouflage(Camouflage.of(colour));
+            }
         }
     }
 
@@ -185,6 +194,15 @@ final class StartBriefingPage {
         about.add(Messages.getString(scenario.isSinglePlayer() ? "StartScreen.singlePlayer"
               : "StartScreen.multiplayer"));
         briefingHeader.add(screen.line(String.join("  \u00b7  ", about), "small", "text.muted")).padTop(2);
+
+        disposeBriefingMap();
+        Board board = briefing.game().getBoard();
+        if (board != null && board.getWidth() > 0 && board.getHeight() > 0) {
+            briefingMap = new StartMapFrame(screen.boardSkin.skin.getDrawable(UiTheme.TOKEN_PANEL_PLAIN),
+                  screen.kit.typeLabel(StartMapThumbnail.caption(briefing.game(), scenario), "small", "text.muted"),
+                  screen.motion);
+            bakeMap();
+        }
 
         String description = scenario.getDescription();
         briefingText = null;
@@ -287,6 +305,36 @@ final class StartBriefingPage {
         swatchTextures.forEach(Texture::dispose);
         swatchTextures.clear();
         swatches.clear();
+    }
+
+    /** Draws the briefing's map off the GPU thread, then fades it into its frame, which already holds its room. */
+    private void bakeMap() {
+        Briefing asked = briefing;
+        StartMapFrame frame = briefingMap;
+        screen.background("map", () -> {
+            try {
+                return StartMapThumbnail.bake(asked.game().getBoard(), asked.game().getPlayersList(),
+                      StartMapThumbnail.LONG_SIDE);
+            } catch (RuntimeException ex) {
+                GpuStartScreen.LOGGER.warn(ex, "The briefing could not draw the map of {}", briefingFile);
+                return null;
+            }
+        }, image -> {
+            if (image == null || briefing != asked || briefingMap != frame) {
+                return;
+            }
+            Texture texture = GpuStartScreen.texture(image, true);
+            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+            frame.setMap(texture);
+        });
+    }
+
+    void disposeBriefingMap() {
+        if (briefingMap != null) {
+            briefingMap.remove();
+            briefingMap.dispose();
+            briefingMap = null;
+        }
     }
 
     /**
@@ -421,6 +469,9 @@ final class StartBriefingPage {
             items.add(screen.note(briefing.error(), "status.danger"));
         } else {
             items.add(briefingHeader);
+            if (briefingMap != null) {
+                items.add(briefingMap);
+            }
             if (briefingText != null) {
                 items.add(briefingText);
             }
@@ -463,9 +514,14 @@ final class StartBriefingPage {
         return roles;
     }
 
+    /** Whether the briefing has loaded and its Start button may be pressed. */
+    boolean canStart() {
+        return startButton != null && !startButton.isDisabled();
+    }
+
     /** Checks the briefing; asks MegaMek to host the scenario with its sides as chosen. */
     void submitBriefing() {
-        if (startButton.isDisabled()) {
+        if (!canStart()) {
             return;
         }
         List<Role> roles = roles();
@@ -530,6 +586,11 @@ final class StartBriefingPage {
                       (PlanetaryConditions) oldConditions.getPlanetaryConditions().clone());
             }
             briefing = new Briefing(made.scenario(), made.game(), used.swatches(), null);
+            if (briefingMap != null) {
+                // A random map is rolled again with the game; the frame keeps its room while the new one fades in
+                briefingMap.setCaption(StartMapThumbnail.caption(made.game(), made.scenario()));
+                bakeMap();
+            }
             enableStart();
         });
     }

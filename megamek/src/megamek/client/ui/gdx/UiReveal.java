@@ -42,6 +42,12 @@ public class UiReveal extends Table {
         top().left();
     }
 
+    /** A column as {@link #UiReveal(boolean)} whose first band waits {@code delay} seconds, as for a card to unfold. */
+    public UiReveal(boolean motion, float delay) {
+        this(motion);
+        elapsed = -delay;
+    }
+
     /** Adds {@code block} as the next band, on a row of its own across the column. */
     public Cell<Band> band(Actor block) {
         Band band = new Band(block, bands.size());

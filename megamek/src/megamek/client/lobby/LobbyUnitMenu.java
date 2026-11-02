@@ -33,7 +33,6 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.orders.FormationShape;
 import megamek.common.orders.LanceRole;
 import megamek.common.orders.LanceRoles;
-import megamek.common.preference.PreferenceManager;
 import megamek.common.rules.SettableHeat;
 import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
@@ -349,8 +348,6 @@ public final class LobbyUnitMenu {
         String seIds = enToken(joinedEntities);
 
         popup.add(menuItem("View...", LMP_VIEW + NO_INFO + seIds, hasJoinedEntities));
-        popup.add(menuItem("View BV Calculation...", LMP_BV + NO_INFO + seIds, hasJoinedEntities));
-        popup.add(menuItem("View Cost Calculation...", LMP_COST + NO_INFO + seIds, hasJoinedEntities));
         popup.add(Item.spacer());
 
         if (joinedOneEntitySelected) {
@@ -624,11 +621,7 @@ public final class LobbyUnitMenu {
     }
 
     static String idString(Game game, int id) {
-        if (PreferenceManager.getClientPreferences().getLobbyShowUnitId()) {
-            return " [" + id + "]";
-        } else {
-            return "";
-        }
+        return " [" + id + "]";
     }
 
     /**

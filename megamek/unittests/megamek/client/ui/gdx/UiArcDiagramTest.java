@@ -33,6 +33,17 @@ class UiArcDiagramTest {
     }
 
     @Test
+    void theGapIsAnEvenBandSoItTakesLessAngleFurtherOut() {
+        float near = UiArcDiagram.gapDegrees(8, 50);
+        float far = UiArcDiagram.gapDegrees(8, 100);
+        assertTrue(far < near, "the same width takes a smaller angle at the rim");
+        // A side 4 off the divider at radius r sits at r * sin(half the angle) from it, at every radius
+        assertEquals(4, 50 * Math.sin(Math.toRadians(near / 2)), 1e-4);
+        assertEquals(4, 100 * Math.sin(Math.toRadians(far / 2)), 1e-4);
+        assertEquals(0, UiArcDiagram.gapDegrees(8, 0));
+    }
+
+    @Test
     void theFillRisesFromTheFloorToTheFullAtThePeak() {
         assertEquals(0, UiArcDiagram.intensity(0, 10, 0.2f));
         assertEquals(0, UiArcDiagram.intensity(5, 0, 0.2f));

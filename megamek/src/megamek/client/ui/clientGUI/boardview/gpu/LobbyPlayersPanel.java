@@ -414,7 +414,9 @@ final class LobbyPlayersPanel {
             row.add(kit.chip(Messages.getString("Lobby.bot"), Tone.NORMAL, true)).padLeft(space("xs"));
         }
         if (player.gameMaster()) {
-            row.add(kit.chip(Messages.getString("Lobby.gameMaster"), Tone.NORMAL, true)).padLeft(space("xs"));
+            Actor chip = kit.gameMasterChip(Messages.getString("Lobby.gameMaster"));
+            chip.setName("lobby-gm-chip");
+            row.add(chip).padLeft(space("xs"));
         }
         if (player.observer()) {
             row.add(kit.chip(Messages.getString("Lobby.observer"), Tone.NORMAL, true)).padLeft(space("xs"));

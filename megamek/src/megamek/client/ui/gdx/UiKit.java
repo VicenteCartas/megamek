@@ -9,6 +9,7 @@ import java.util.Set;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -29,6 +30,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
@@ -182,6 +184,9 @@ public final class UiKit {
     /** A tooltip as {@link #tip(Actor)}; with {@code token}, the Token v0 tooltip card ({@link UiTheme#TOKEN}). */
     public TextTooltip tip(Actor actor, boolean token) {
         TextTooltip tip = new TextTooltip("", skin, token ? UiTheme.TOKEN : "hud");
+        if (token) {
+            fitTokenTip(tip);
+        }
         actor.addListener(tip);
         tip.getActor().addAction(Actions.forever(Actions.run(() -> {
             if (!actor.ascendantsVisible()) {
@@ -189,6 +194,26 @@ public final class UiKit {
             }
         })));
         return tip;
+    }
+
+    /**
+     * A wrapping tooltip's card takes its style's whole wrap width; this one fits a short text and wraps a long one at
+     * that width.
+     */
+    private void fitTokenTip(TextTooltip tip) {
+        float wrapWidth = skin.get(UiTheme.TOKEN, TextTooltip.TextTooltipStyle.class).wrapWidth;
+        if (wrapWidth <= 0) {
+            return;
+        }
+        Label label = tip.getActor();
+        GlyphLayout measure = new GlyphLayout();
+        tip.getContainer().width(new Value() {
+            @Override
+            public float get(Actor context) {
+                measure.setText(label.getStyle().font, label.getText());
+                return Math.min(wrapWidth, (float) Math.ceil(measure.width * label.getFontScaleX()));
+            }
+        });
     }
 
     /**
@@ -506,6 +531,17 @@ public final class UiKit {
         }
         Table panel = new Table();
         panel.setBackground(skin.getDrawable(UiTheme.TOKEN_PANEL));
+        panel.top();
+        return panel;
+    }
+
+    /**
+     * A panel inside a panel (Token v0's {@link UiTheme#TOKEN_PANEL_PLAIN}): the edge and fill without the corner ticks,
+     * padded lg, since only the outermost frame has ticks; such as a section card in a framed view.
+     */
+    public Table plainPanel() {
+        Table panel = new Table();
+        panel.setBackground(skin.getDrawable(UiTheme.TOKEN_PANEL_PLAIN));
         panel.top();
         return panel;
     }
@@ -886,6 +922,14 @@ public final class UiKit {
      */
     public Table edgeChip(String text, String edge) {
         return tokenChip(edge, null, null, text, "text.primary");
+    }
+
+    /**
+     * The Game Master's status chip: the status chip with a {@code status.gamemaster} edge and shield, as the Game
+     * Master's toast has, so the referee never reads as an ordinary status.
+     */
+    public Table gameMasterChip(String text) {
+        return tokenChip("gamemaster", "shield-person", "status.gamemaster", text, "text.primary");
     }
 
     /**

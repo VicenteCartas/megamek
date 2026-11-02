@@ -283,6 +283,19 @@ class RequisitionCatalogTest {
     }
 
     @Test
+    void theCategoryTabIsKeptWithTheFilters() {
+        Filters filters = Filters.NONE.withWeights(Set.of(Weight.HEAVY));
+        String kept = filters.kept(Category.MEKS);
+        assertEquals("C:MEKS;W:HEAVY;B:;L:", kept);
+        assertEquals(Category.MEKS, Filters.keptCategory(kept));
+        assertEquals(Set.of(Weight.HEAVY), Filters.NONE.withKept(kept, List.of()).weights());
+        // Lines from before the tab was kept, or naming a tab this version lacks, open on All
+        assertEquals(Category.ALL, Filters.keptCategory("W:HEAVY;B:;L:"));
+        assertEquals(Category.ALL, Filters.keptCategory("C:NOPE;W:"));
+        assertEquals(Category.ALL, Filters.keptCategory(null));
+    }
+
+    @Test
     void clearingTheDrawerClearsTheKeptBasesAndLevels() {
         Filters filters = Filters.NONE.withWeights(Set.of(Weight.LIGHT)).withBases(Set.of(TechBase.MIXED))
               .withLevels(Set.of(TechConstants.T_SIMPLE_ADVANCED));

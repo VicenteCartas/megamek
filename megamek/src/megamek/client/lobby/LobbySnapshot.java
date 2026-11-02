@@ -35,8 +35,7 @@ import megamek.common.units.FighterSquadron;
  * @param localPlayerId       the local player's id, or {@link Player#PLAYER_NONE} before the server assigned one
  * @param localGameMaster     whether the local player is the Game Master
  * @param localReady          whether the local player has declared themselves ready (done)
- * @param gameMasterAvailable whether the local player may take or give up the Game Master role: the game allows one
- *                            and nobody else holds it
+ * @param gameMaster          the Game Master seat: whether the game allows one, who holds it and the vote for it
  * @param teams               the players by team: the local player's team first, then the others in team order, and
  *                            the players without a team last
  * @param chat                the chat's recent lines, the newest last
@@ -49,7 +48,7 @@ import megamek.common.units.FighterSquadron;
  * @param requisition         the game's rules on units and who units may be added for, for the Requisition view
  */
 public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean localReady,
-      boolean gameMasterAvailable, List<TeamGroup> teams, List<ChatLine> chat, List<Integer> customZones,
+      LobbyGameMaster gameMaster, List<TeamGroup> teams, List<ChatLine> chat, List<Integer> customZones,
       String mapSummary, String server, LobbyForces forces, LobbyBattlefield battlefield,
       LobbyReadiness readiness, LobbyRequisition requisition) {
 
@@ -60,7 +59,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
     public static final int TEAM_COUNT = Player.TEAM_NAMES.length;
 
     /** An empty lobby, as shown before the client has its game. */
-    public static final LobbySnapshot EMPTY = new LobbySnapshot(Player.PLAYER_NONE, false, false, false, List.of(),
+    public static final LobbySnapshot EMPTY = new LobbySnapshot(Player.PLAYER_NONE, false, false, LobbyGameMaster.OFF, List.of(),
           List.of(), List.of(), "", "", LobbyForces.EMPTY, LobbyBattlefield.EMPTY, LobbyReadiness.EMPTY,
           LobbyRequisition.EMPTY);
 
@@ -74,6 +73,15 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         Objects.requireNonNull(battlefield);
         Objects.requireNonNull(readiness);
         Objects.requireNonNull(requisition);
+        Objects.requireNonNull(gameMaster);
+    }
+
+    /**
+     * @return whether the local player may take or give up the Game Master role from the player menu: the game allows
+     *       one, nobody else holds it and no vote runs; giving it up is always allowed
+     */
+    public boolean gameMasterAvailable() {
+        return gameMaster.actionable();
     }
 
     /** How a player or team stands to the local player. */
@@ -209,7 +217,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         List<TeamGroup> shown = teams.stream().map(team -> new TeamGroup(team.id(), team.name(),
               team.players().stream().map(player -> player.local() ? player.withReady(ready) : player).toList()))
               .toList();
-        return new LobbySnapshot(localPlayerId, localGameMaster, ready, gameMasterAvailable, shown, chat,
+        return new LobbySnapshot(localPlayerId, localGameMaster, ready, gameMaster, shown, chat,
               customZones, mapSummary, server, forces, battlefield, readiness, requisition);
     }
     /** @return how many players are in the lobby */
@@ -338,7 +346,8 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
         LobbyForces forces = LobbyForces.of(session, order);
         return new LobbySnapshot(local == null ? Player.PLAYER_NONE : local.getId(),
               local != null && local.isGameMaster(), local != null && local.isDone(),
-              gameMasterAvailable(game, local), teams, lines, new ArrayList<>(new TreeSet<>(customZones)),
+              LobbyGameMaster.of(game, local, client.getGameMasterPoll()), teams, lines,
+              new ArrayList<>(new TreeSet<>(customZones)),
               mapSummary(client.getMapSettings()), server(client.getHost(), client.getPort()),
               forces, LobbyBattlefield.of(game.getOptions(), game.getPlanetaryConditions(),
               client.getMapSettings(), autoResolve), LobbyReadiness.of(game, local, localBots, forces,
@@ -360,18 +369,6 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
             return Integer.MAX_VALUE;
         }
         return team == localTeam ? Integer.MIN_VALUE : team;
-    }
-
-    /**
-     * Whether {@code local} may take or give up the Game Master role: the game must allow one, and nobody else may
-     * hold it, as the Swing lobby's Game Master button has it.
-     */
-    static boolean gameMasterAvailable(Game game, Player local) {
-        if (local == null || !game.getOptions().booleanOption(OptionsConstants.GAME_MASTER_ALLOW)) {
-            return false;
-        }
-        return game.getPlayersList().stream().noneMatch(player -> player.isGameMaster()
-              && player.getId() != local.getId());
     }
 
     /** The player's colour as 0xRRGGBB. */

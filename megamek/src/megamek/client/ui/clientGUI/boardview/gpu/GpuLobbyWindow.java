@@ -24,6 +24,7 @@ import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.badlogic.gdx.ApplicationListener;
 import jakarta.annotation.Nullable;
@@ -36,26 +37,34 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
+import megamek.client.lobby.LobbyError;
+import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.LobbyUnitOrder;
+import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.UnitConfigForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog;
-import megamek.client.ui.dialogs.helpDialogs.PrincessHelpDialog;
+import megamek.client.ui.clientGUI.boardview.BoardArtwork;
+import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
+import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
+import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
@@ -70,6 +79,7 @@ import megamek.common.containers.MunitionTree;
 import megamek.common.event.GameListener;
 import megamek.common.event.GameListenerAdapter;
 import megamek.common.event.GamePhaseChangeEvent;
+import megamek.common.event.GamePollEvent;
 import megamek.common.event.GameSettingsChangeEvent;
 import megamek.common.event.board.GameBoardChangeEvent;
 import megamek.common.event.board.GameBoardNewEvent;
@@ -82,12 +92,16 @@ import megamek.common.event.player.GamePlayerConnectedEvent;
 import megamek.common.event.player.GamePlayerDisconnectedEvent;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.icons.AbstractIcon;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.loaders.MapSettings;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.preference.ClientPreferences;
+import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
@@ -121,6 +135,8 @@ public final class GpuLobbyWindow {
     private static final int MAP_DELAY_MS = 150;
     /** How long a sent ready state shows before the server's echo, at most. */
     private static final long PENDING_READY_NANOS = 3_000_000_000L;
+    /** The folders the unit list dialogs last used, kept while MegaMek runs, as the Swing client's choosers keep them. */
+    private static final LobbyFiles.Folders FOLDERS = new LobbyFiles.Folders();
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;
@@ -128,6 +144,8 @@ public final class GpuLobbyWindow {
     private static ClientGUI displaced;
     /** The client whose lobby an open from another thread is about to show. */
     private static volatile ClientGUI pending;
+    /** EDT: the client whose map setup opened the 3D preview, so its lobby comes back to the map setup. */
+    private static ClientGUI previewedFromMapSetup;
 
     private final ClientGUI gui;
     private final LobbyDialogs swingDialogs = new LobbyDialogs(new LobbyDialogs.Host() {
@@ -162,6 +180,18 @@ public final class GpuLobbyWindow {
         }
     });
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
+    private final GpuLobbyTools tools = new GpuLobbyTools(this);
+    private final LobbyFiles files = new LobbyFiles(this::chooseFile, new LobbyFiles.Report() {
+        @Override
+        public void error(LobbyError error, Object... args) {
+            tools.asks().error(error, args);
+        }
+
+        @Override
+        public void message(String title, String text) {
+            onScreen(shown -> shown.messageDialog(title, text));
+        }
+    }, FOLDERS);
     private final GameListener gameListener = new GameListenerAdapter() {
         @Override
         public void gamePlayerConnected(GamePlayerConnectedEvent event) {
@@ -180,6 +210,11 @@ public final class GpuLobbyWindow {
 
         @Override
         public void gamePlayerChat(GamePlayerChatEvent event) {
+            queueRefresh();
+        }
+
+        @Override
+        public void gamePollChange(GamePollEvent event) {
             queueRefresh();
         }
 
@@ -219,6 +254,23 @@ public final class GpuLobbyWindow {
         @Override
         public void gameBoardChanged(GameBoardChangeEvent event) {
             boardReplaced();
+        }
+    };
+    /** Any thread: the client and GUI settings the lobby shows take effect at once, as the Swing lobby's did. */
+    private final IPreferenceChangeListener preferenceListener = event -> {
+        switch (event.getName()) {
+            case ClientPreferences.SHOW_AUTO_RESOLVE_PANEL -> queueRefresh();
+            case GUIPreferences.USE_CAMO_OVERLAY -> {
+                spritesStale = true;
+                queueRefresh();
+            }
+            case GUIPreferences.GUI_SCALE -> GpuHost.post(() -> {
+                GpuLobbyScreen shown = GpuLobbyWindow.this.screen;
+                if (shown != null) {
+                    shown.rescale();
+                }
+            });
+            default -> { }
         }
     };
     private final GpuHost.Scene scene = new GpuHost.Scene() {
@@ -282,6 +334,11 @@ public final class GpuLobbyWindow {
     private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
+    private static final String MAP_ASSEMBLY_HELP = "docs/Customization/MegaMek/Map and Board Stuff/MapAssemblyHelp.html";
+    /** EDT: the map setup while it shows in the centre; null otherwise. */
+    private LobbyMapSetupController mapSetup;
+    /** EDT: the C3 network manager while it shows in the centre; null otherwise. */
+    private LobbyC3Controller c3;
     /** EDT: the sprite keys whose images went to the screen, and the keys of the units it last got. */
     private final Set<String> spriteKeys = new HashSet<>();
     /** The catalogue units whose sprites the Requisition asked for, the latest first, and the thread that draws them. */
@@ -295,6 +352,9 @@ public final class GpuLobbyWindow {
     private int mapGeneration;
     private Timer mapTimer;
     private volatile BufferedImage lastMap;
+
+    /** EDT: set when the lobby comes back from a 3D preview the map setup opened, to show the map setup again. */
+    private boolean reopenMapSetup;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -325,10 +385,16 @@ public final class GpuLobbyWindow {
             active.close();
         }
         GpuLobbyWindow window = new GpuLobbyWindow(gui);
+        window.reopenMapSetup = previewedFromMapSetup == gui;
+        previewedFromMapSetup = null;
         active = window;
         gui.getClient().getGame().addGameListener(window.gameListener);
+        PreferenceManager.getClientPreferences().addPreferenceChangeListener(window.preferenceListener);
+        GUIPreferences.getInstance().addPreferenceChangeListener(window.preferenceListener);
         window.swingDialogs.install();
         gui.lobbyCommands().camoPicker(window.camoPicker);
+        gui.lobbyCommands().unitConfigurator(window.unitConfigurator);
+        gui.lobbyCommands().asks(window.tools.asks());
         window.refresh();
         GpuHost.show(window.scene);
         window.probe = GpuLobbyProbe.applyOnce(gui);
@@ -391,6 +457,21 @@ public final class GpuLobbyWindow {
         return gui;
     }
 
+    /** Whether the lobby is closing. */
+    boolean closing() {
+        return closing;
+    }
+
+    /** The lobby's screen, or null before it shows. */
+    @Nullable GpuLobbyScreen screen() {
+        return screen;
+    }
+
+    /** The lobby's tools and prompts. */
+    GpuLobbyTools tools() {
+        return tools;
+    }
+
     /** The developer switch's shot and quit, or null; see {@link GpuLobbyProbe}. */
     GpuLobbyProbe probe() {
         return probe;
@@ -404,6 +485,73 @@ public final class GpuLobbyWindow {
     /** Whether a modal Swing dialog over the lobby is open. */
     boolean modalOpen() {
         return swingDialogs.blocked();
+    }
+
+    /** Any thread, for the developer switch: clicks the screen's actor called {@code name} through its stage. */
+    /** EDT, for the developer switch: opens the L17 tool or prompt {@code tool} names; see {@link LobbyToolsProbe}. */
+    void probeTool(String tool) {
+        if (closing) {
+            return;
+        }
+        Player local = gui.getClient().getLocalPlayer();
+        switch (tool) {
+            case "gameoptions" -> openGameOptions();
+            case "playersettings" -> openPlayerSettings(gui.getClient());
+            case "savelist" -> forcesCommand(LobbyForcesPanel.Command.SAVE_LIST);
+            case "loadlist" -> forcesCommand(LobbyForcesPanel.Command.LOAD_LIST);
+            case "sprite" -> gui.getClient().getGame().getEntitiesVector().stream()
+                  .filter(unit -> local != null && unit.getOwnerId() == local.getId()).findFirst()
+                  .ifPresent(unit -> new SwingLobbyUnitActions(gui, files).run(LobbyUnitMenu.LMP_SPRITE + '|'
+                        + LobbyUnitMenu.SPRITE_CAMO + '|' + unit.getId()));
+            default -> tools.probe(tool);
+        }
+    }
+
+    /** EDT, for the developer switch's {@code lobby+configure}: opens the unit bay for the player's first unit or all. */
+    /** EDT, for the developer switch: opens the map setup, or with {@code random} the random map settings. */
+    void probeMapSetup(boolean random) {
+        if (!closing) {
+            battlefieldCommand(random ? LobbyBattlefieldController.Command.RANDOM_MAP
+                  : LobbyBattlefieldController.Command.MAP_SETUP);
+        }
+    }
+
+    /** EDT, for the developer switch: logs the server's map settings, with what happened. */
+    void probeMapSettings(String what) {
+        LOGGER.info("The lobby probe's server map settings, {}: {}", what,
+              LobbyMapSetupController.describe(gui.getClient().getMapSettings()));
+    }
+
+    void probeConfigure(boolean all) {        if (closing) {
+            return;
+        }
+        Client client = gui.getClient();
+        Player local = client.getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        List<Entity> units = new ArrayList<>();
+        for (Entity entity : client.getGame().getEntitiesVector()) {
+            if (entity.getOwnerId() == local.getId()) {
+                units.add(entity);
+            }
+        }
+        if (units.isEmpty()) {
+            LOGGER.warn("The lobby probe found no unit of the player to configure");
+        } else if (all) {
+            gui.lobbyCommands().customizeMeks(units);
+        } else {
+            gui.lobbyCommands().customizeMek(units.get(0));
+        }
+    }
+
+    void probeClick(String name) {
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.probeClick(name);
+            }
+        });
     }
 
     /** EDT, for the developer switch's {@code lobby+dialog=name}: opens that dialog and photographs the screen. */
@@ -483,6 +631,12 @@ public final class GpuLobbyWindow {
         LobbySnapshot shownRead = read;
         sendSprites(shownRead);
         sendCamos();
+        if (c3 != null) {
+            c3.refresh();
+        }
+        if (mapSetup != null) {
+            mapSetup.refresh();
+        }
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
@@ -609,6 +763,16 @@ public final class GpuLobbyWindow {
         players(LobbyPlayerController::toggleGameMaster);
     }
 
+    /** Any thread: votes in the running Game Master vote. */
+    void voteGameMaster(boolean allow) {
+        players(controller -> controller.voteGameMaster(allow));
+    }
+
+    /** Any thread: withdraws the local player's own Game Master request. */
+    void withdrawGameMaster() {
+        players(LobbyPlayerController::withdrawGameMaster);
+    }
+
     /** Any thread: opens the setup of the local bot {@code id}. */
     void botSettings(int id) {
         players(controller -> controller.botSettings(id));
@@ -650,10 +814,20 @@ public final class GpuLobbyWindow {
             }
             SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES, C3 -> services.forcesCommand(
-                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), null);
-                case LOAD_LIST, SAVE_LIST, PRINT_LIST -> services.forcesCommand(
-                      SwingLobbyServices.ForcesCommand.valueOf(command.name()), gui.getClient().getLocalPlayer());
+                case ADD_UNIT -> services.forcesCommand(SwingLobbyServices.ForcesCommand.ADD_UNIT, null);
+                case RANDOM_ARMY -> tools.randomArmy();
+                case SKILLS -> tools.skills();
+                case NAMES -> tools.names();
+                case C3 -> openC3(List.of());
+                case LOAD_LIST -> tools.loadList();
+                case SAVE_LIST -> {
+                    Player local = gui.getClient().getLocalPlayer();
+                    if (local != null) {
+                        files.saveUnitList(gui.getClient().getGame(), local, () -> { });
+                    }
+                }
+                case PRINT_LIST -> services.forcesCommand(SwingLobbyServices.ForcesCommand.PRINT_LIST,
+                      gui.getClient().getLocalPlayer());
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
             refreshSoon();
@@ -748,13 +922,17 @@ public final class GpuLobbyWindow {
                 switch (command) {
                     case CONDITIONS -> openConditions();
                     case GAME_OPTIONS -> openGameOptions();
+                    case RANDOM_MAP -> openRandomMap();
+                    case LOAD_MAP_SETUP -> loadMapSetup();
+                    case SAVE_MAP_SETUP -> saveMapSetup();
+                    case VICTORY -> tools.victory();
                     default -> lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
                 }
             }
 
             @Override
             public void mapSetup() {
-                MapSetupDialog.open(gui);
+                openMapSetup();
             }
 
             @Override
@@ -894,6 +1072,15 @@ public final class GpuLobbyWindow {
         });
     }
 
+    /** Any thread: opens Client Settings over the lobby, whose window hides the menu bar that holds them. */
+    void openSettings() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && !swingDialogs.blocked()) {
+                gui.openClientSettings();
+            }
+        });
+    }
+
     /** Any thread: opens the configuration of the editable unit {@code id}. */
     void configureUnit(int id) {
         forces(controller -> controller.configure(id));
@@ -943,14 +1130,379 @@ public final class GpuLobbyWindow {
             unitMenu = null;
             String command = (menu == null) ? null : menu.command(path);
             if (!closing && command != null) {
-                new SwingLobbyUnitActions(gui).run(command);
+                List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
+                if (c3Units != null) {
+                    openC3(c3Units);
+                    return;
+                }
+                if (tools.unitCommand(command)) {
+                    return;
+                }
+                new SwingLobbyUnitActions(gui, files).run(command);
                 refreshSoon();
             }
         });
     }
 
+    /** EDT: opens the C3 network manager in the forces' place, the units it opens on picked. */
+    private void openC3(List<Integer> units) {
+        Player local = gui.getClient().getLocalPlayer();
+        if (closing || local == null) {
+            return;
+        }
+        Client client = gui.getClient();
+        c3 = new LobbyC3Controller(new C3NetworkBoard(client::getGame, local.getId(),
+              C3NetworkBoard.Commands.of(gui.lobbyCommands()), units), picture -> GpuHost.post(() -> {
+                  GpuLobbyScreen shown = screen;
+                  if (shown != null) {
+                      shown.c3(picture);
+                  }
+              }));
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.openC3();
+            }
+        });
+        c3.refresh();
+    }
+
+    /** Any thread: runs one of the C3 network manager's actions on its board. */
+    void c3(Consumer<C3NetworkBoard> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && c3 != null) {
+                c3.act(action);
+                refreshSoon();
+            }
+        });
+    }
+
+    /** Any thread: the C3 network manager left the centre. */
+    void c3Closed() {
+        SwingUtilities.invokeLater(() -> c3 = null);
+    }
+
+    // ---- The map setup ----
+
+    /** Any thread: the map setup left the centre; its board pictures stop. */
+    void mapSetupClosed() {
+        SwingUtilities.invokeLater(() -> {
+            if (mapSetup != null) {
+                mapSetup.dispose();
+                mapSetup = null;
+            }
+        });
+    }
+
+    /** Any thread: runs {@code action} on the screen on the GPU thread, if one shows. */
+    private void onScreen(Consumer<GpuLobbyScreen> action) {
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                action.accept(shown);
+            }
+        });
+    }
+
+    /** EDT: opens the map setup in the forces' place, as the Swing lobby's Map Setup dialog. */
+    private void openMapSetup() {
+        if (closing) {
+            return;
+        }
+        if (mapSetup == null) {
+            Client client = gui.getClient();
+            MapSetupForm form;
+            try {
+                form = new MapSetupForm(client::getMapSettings, client::getAvailableMapSizes,
+                      MapSetupForm.Commands.of(gui.lobbyCommands(), client::sendLobbyBoardGenerationRequest),
+                      MapSetupForm::fileTags, BoardArtwork::themes);
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "The lobby could not read the map settings");
+                return;
+            }
+            mapSetup = new LobbyMapSetupController(form,
+                  (picture, themes) -> onScreen(shown -> shown.mapSetup(picture, themes)),
+                  (key, image) -> onScreen(shown -> shown.mapPicture(key, image)));
+        }
+        onScreen(GpuLobbyScreen::openMapSetup);
+        mapSetup.refresh();
+    }
+
+    /** The map setup view's side of the window. */
+    LobbyMapSetupView.Host mapSetupHost() {
+        return new LobbyMapSetupView.Host() {
+            @Override
+            public void act(Consumer<MapSetupForm> action) {
+                mapSetup(controller -> controller.act(action));
+            }
+
+            @Override
+            public void mapWidth(int width) {
+                mapSetup(controller -> {
+                    boolean[] nag = new boolean[1];
+                    controller.act(form -> nag[0] = form.mapWidth(width));
+                    nagOddBoards(nag[0]);
+                });
+            }
+
+            @Override
+            public void boardWidth(int width) {
+                mapSetup(controller -> {
+                    boolean[] nag = new boolean[1];
+                    controller.act(form -> nag[0] = form.boardWidth(width));
+                    nagOddBoards(nag[0]);
+                });
+            }
+
+            @Override
+            public void preview(String board) {
+                mapSetup(controller -> controller.preview(board));
+            }
+
+            @Override
+            public void run(LobbyMapSetupView.Action action) {
+                SwingUtilities.invokeLater(() -> {
+                    if (!closing) {
+                        mapSetupAction(action);
+                    }
+                });
+            }
+        };
+    }
+
+    /** Any thread: runs {@code action} on the map setup's controller on the Swing thread, while it shows. */
+    private void mapSetup(Consumer<LobbyMapSetupController> action) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && mapSetup != null) {
+                action.accept(mapSetup);
+                refreshSoon();
+            }
+        });
+    }
+
+    /** EDT: warns of boards of odd width tiled across, unless told not to again, as the Swing map setup does. */
+    private void nagOddBoards(boolean due) {
+        if (due && LobbyMapSetupController.nagWanted()) {
+            onScreen(shown -> shown.oddBoardNag(() -> SwingUtilities.invokeLater(
+                  () -> GUIPreferences.getInstance().setNagForOddSizedBoard(false))));
+        }
+    }
+
+    /** EDT: one of the map setup's toolbar or footer actions. */
+    private void mapSetupAction(LobbyMapSetupView.Action action) {
+        switch (action) {
+            case LOAD -> loadMapSetup();
+            case SAVE -> saveMapSetup();
+            case RANDOM_MAP -> openRandomMap();
+            case CONDITIONS -> openConditions();
+            case PREVIEW_3D -> {
+                previewedFromMapSetup = gui;
+                battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
+            }
+            case HELP -> {
+                try {
+                    new HelpDialog(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
+                          new File(MAP_ASSEMBLY_HELP).toURI().toURL(), swingDialogs.parent()).setVisible(true);
+                } catch (java.net.MalformedURLException failure) {
+                    LOGGER.error(failure, "The map assembly help could not be found");
+                }
+            }
+            case ADVANCED_SEARCH -> {
+                AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
+                if (search.showDialog().isConfirmed() && mapSetup != null) {
+                    String path = search.getPath();
+                    if (path != null) {
+                        mapSetup.act(form -> form.singleBoard(path));
+                        refreshSoon();
+                    }
+                }
+            }
+        }
+    }
+
+    /** The map settings the map setup works on, or else the server's. */
+    private MapSettings mapSettings() {
+        return mapSetup != null ? mapSetup.form().settings() : gui.getClient().getMapSettings();
+    }
+
+    /** EDT: asks for a map setup file in the system's file dialog and applies it, sending it to the server. */
+    private void loadMapSetup() {
+        MapSettings settings = MapSettings.getInstance(mapSettings());
+        mapSetupFile(false, file -> {
+            if (!file.exists()) {
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.fileNotFound")));
+                return;
+            }
+            try {
+                if (mapSetup != null) {
+                    mapSetup.form().load(file);
+                    mapSetup.act(form -> { });
+                } else {
+                    new MapSetupForm(() -> settings, gui.getClient()::getAvailableMapSizes,
+                          MapSetupForm.Commands.of(gui.lobbyCommands(), () -> { }), board -> "", List::of)
+                          .load(file);
+                }
+                refreshSoon();
+            } catch (java.io.IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The map setup {} could not be loaded", file);
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.map.problemLoadMapSetup")));
+            }
+        });
+    }
+
+    /** EDT: asks for a file in the system's file dialog and saves the map setup to it. */
+    private void saveMapSetup() {
+        MapSettings settings = MapSettings.getInstance(mapSettings());
+        mapSetupFile(true, file -> {
+            try {
+                new MapSetupForm(() -> settings, gui.getClient()::getAvailableMapSizes,
+                      MapSetupForm.Commands.of(gui.lobbyCommands(), () -> { }), board -> "", List::of).save(file);
+            } catch (java.io.IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The map setup could not be saved to {}", file);
+                onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                      Messages.getString("ChatLounge.map.problemSaving")));
+            }
+        });
+    }
+
+    /**
+     * EDT: asks for a map setup file in the system's file dialog, as the start screen asks for a game; a file to save
+     * to gets the XML extension and, unless the system's dialog asked already, a confirmation to replace it.
+     *
+     * @param chosen takes the file on the Swing thread
+     */
+    private void mapSetupFile(boolean save, Consumer<File> chosen) {
+        String title = Messages.getString(save ? "ChatLounge.map.saveMapSetup" : "ChatLounge.map.loadMapSetup");
+        chooseFile(new SystemFileDialog.Request(MapSetupForm.setupFolder(), title,
+              new FileNameExtensionFilter(Messages.getString("ChatLounge.map.SetupXMLfiles"), "xml"), save),
+              save ? "ChatLounge.map.saveMapSetupReplace" : null, chosen);
+    }
+
+    /**
+     * EDT: shows the system's file dialog over the lobby, which takes no input meanwhile.
+     *
+     * @param replaceKey the message asking to replace an existing file, with its name as {0}; null when opening
+     */
+    void chooseFile(SystemFileDialog.Request request, @Nullable String replaceKey, Consumer<File> chosen) {
+        chooseFileOrNone(request, replaceKey, file -> {
+            if (file != null) {
+                chosen.accept(file);
+            }
+        });
+    }
+
+    /** The lobby's file routes, which ask the system's file dialog; Swing thread. */
+    LobbyFiles files() {
+        return files;
+    }
+
+    /** EDT: asks for the file of a lobby file route in the system's file dialog; {@code chosen} gets null if none. */
+    private void chooseFile(LobbyFiles.Ask ask, Consumer<File> chosen) {
+        chooseFileOrNone(SystemFileDialog.Request.of(ask), ask.save() ? "Lobby.files.replace" : null, chosen);
+    }
+
+    /** EDT: as {@link #chooseFile(SystemFileDialog.Request, String, Consumer)}, but hands null on a cancel. */
+    private void chooseFileOrNone(SystemFileDialog.Request request, @Nullable String replaceKey,
+          Consumer<File> chosen) {
+        LOGGER.info("[LobbyFiles] The system file dialog opens: {}", request.title());
+        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+            LOGGER.info("[LobbyFiles] The system file dialog answered: {}", choice == null ? "cancel" : choice.file());
+            if (closing || choice == null) {
+                chosen.accept(null);
+                return;
+            }
+            File file = choice.file();
+            if (replaceKey != null && choice.askReplace()) {
+                String text = Messages.getString(replaceKey, file.getName());
+                onScreen(shown -> shown.confirmDialog(Messages.getString("ChatLounge.map.confirmReplace"), text,
+                      () -> SwingUtilities.invokeLater(() -> chosen.accept(closing ? null : file)),
+                      () -> SwingUtilities.invokeLater(() -> chosen.accept(null))));
+            } else {
+                chosen.accept(file);
+            }
+        });
+    }
+
+    /** EDT: opens the random map settings natively over the lobby; OK sends them to the server. */
+    private void openRandomMap() {
+        if (closing) {
+            return;
+        }
+        RandomMapForm form;
+        List<String> themes;
+        try {
+            form = new RandomMapForm(MapSettings.getInstance(mapSettings()), gui.getClient()::sendMapSettings);
+            form.advanced(GUIPreferences.getInstance().getBoolean(GUIPreferences.RND_MAP_ADVANCED));
+            themes = new ArrayList<>(gui.getTilesetManager().getThemes());
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the random map settings");
+            return;
+        }
+        LobbyRandomMapView.Host host = new LobbyRandomMapView.Host() {
+            @Override
+            public void advanced(boolean advanced) {
+                GUIPreferences.getInstance().setValue(GUIPreferences.RND_MAP_ADVANCED, advanced);
+            }
+
+            @Override
+            public void load(RandomMapForm loaded, Runnable then) {
+                SwingUtilities.invokeLater(() -> randomMapFile(false, file -> {
+                    try {
+                        loaded.load(file);
+                    } catch (java.io.IOException | RuntimeException failure) {
+                        LOGGER.error(failure, "The random map settings {} could not be loaded", file);
+                        onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                              Messages.getString("ChatLounge.fileNotFound")));
+                    }
+                }, () -> GpuHost.post(then)));
+            }
+
+            @Override
+            public void save(RandomMapForm saved, Consumer<Boolean> then) {
+                boolean[] done = new boolean[1];
+                SwingUtilities.invokeLater(() -> randomMapFile(true, file -> {
+                    try {
+                        done[0] = saved.applyAndSave(file);
+                    } catch (java.io.IOException | RuntimeException failure) {
+                        LOGGER.error(failure, "The random map settings could not be saved to {}", file);
+                        onScreen(shown -> shown.messageDialog(Messages.getString("Error"),
+                              Messages.getString("ChatLounge.map.problemSaving")));
+                    }
+                }, () -> GpuHost.post(() -> then.accept(done[0]))));
+            }
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                GpuLobbyWindow.this.edt("random map settings", work, then);
+            }
+        };
+        onScreen(shown -> shown.randomMapDialog(form, themes, host));
+    }
+
+    /**
+     * EDT: asks for a random map settings file in the system's file dialog; {@code done} runs after {@code chosen}, or
+     * when none was chosen.
+     */
+    private void randomMapFile(boolean save, Consumer<File> chosen, Runnable done) {
+        String title = Messages.getString("RandomMapDialog.title") + " - "
+              + Messages.getString(save ? "RandomMapDialog.Save" : "RandomMapDialog.Load");
+        SystemFileDialog.Request request = new SystemFileDialog.Request(RandomMapForm.settingsFolder(), title,
+              new FileNameExtensionFilter(Messages.getString("ChatLounge.map.SetupXMLfiles"), "xml"), save);
+        LOGGER.info("[LobbyFiles] The system file dialog opens: {}", title);
+        SystemFileDialog.show(request, () -> nativeOwner, swingDialogs::parent, this::setInputBlocked, choice -> {
+            try {
+                if (!closing && choice != null) {
+                    chosen.accept(choice.file());
+                }
+            } finally {
+                done.run();
+            }
+        });
+    }
     /** Reads the lobby now and twice more, as the server's answer to a unit change takes a moment to come back. */
-    private void refreshSoon() {
+    void refreshSoon() {
         queueRefresh();
         for (int delay : new int[] { 300, 1000 }) {
             Timer timer = new Timer(delay, event -> queueRefresh());
@@ -1012,7 +1564,7 @@ public final class GpuLobbyWindow {
         });
     }
 
-    private static @Nullable BufferedImage sprite(Entity entity, Camouflage camouflage) {
+    static @Nullable BufferedImage sprite(Entity entity, Camouflage camouflage) {
         try {
             Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
             Image icon = base == null ? null
@@ -1269,6 +1821,132 @@ public final class GpuLobbyWindow {
         }
     }
 
+    /** The unit menu's Configure and a unit card's double-click open the native unit bay while this lobby shows. */
+    private final LobbyCommands.UnitConfigurator unitConfigurator = this::openUnitBay;
+
+    /** The portraits in the unit bay, in pixels. */
+    private static final int PORTRAIT_PICTURE = 128;
+    /** The unit bay's board picture along its longer side, in pixels: sharp on a screen scaled twice. */
+    private static final int ZONE_PICTURE = LobbyMapThumbnail.LONG_SIDE * 3 / 4;
+
+    /**
+     * EDT: reads the units into a form and shows the native unit bay in the forces' place; its OK writes them back and
+     * sends them here, its Previous and Next do so and then open the unit beside them.
+     */
+    private void openUnitBay(Client client, List<Entity> units, boolean editable) {
+        if (closing || units.isEmpty()) {
+            return;
+        }
+        UnitConfigForm form;
+        try {
+            form = UnitConfigForm.of(client, gui.getClient(), units, editable);
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not read the units to configure");
+            return;
+        }
+        List<BufferedImage> sprites = new ArrayList<>();
+        for (Entity entity : units.subList(0, Math.min(5, units.size()))) {
+            BufferedImage image = sprite(entity, entity.getCamouflageOrElseOwners());
+            if (image != null) {
+                sprites.add(image);
+            }
+        }
+        List<BufferedImage> portraits = new ArrayList<>();
+        for (UnitConfigForm.Member member : form.members()) {
+            portraits.add(portraitPicture(member.portrait()));
+        }
+        BufferedImage boardPicture = null;
+        if (form.board() != null) {
+            try {
+                boardPicture = LobbyMapThumbnail.bake(form.board(), List.of(), null, ZONE_PICTURE);
+            } catch (RuntimeException failure) {
+                LOGGER.warn(failure, "The unit bay could not draw the board");
+            }
+        }
+        BufferedImage terrain = boardPicture;
+        LobbyUnitBayView.Host host = new LobbyUnitBayView.Host() {
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        if (!closing) {
+                            work.run();
+                        }
+                    } catch (RuntimeException failure) {
+                        LOGGER.error(failure, "The unit bay failed");
+                    } finally {
+                        GpuHost.post(then);
+                        queueRefresh();
+                    }
+                });
+            }
+
+            @Override
+            public boolean apply(UnitConfigForm applied) {
+                if (!applied.apply()) {
+                    return false;
+                }
+                if (applied.editable()) {
+                    gui.lobbyCommands().finishCustomization(applied.applied());
+                }
+                refreshSoon();
+                return true;
+            }
+
+            @Override
+            public void next(UnitConfigForm applied, boolean forward) {
+                Entity next = applied.next(forward);
+                if (next != null) {
+                    gui.lobbyCommands().customizeMek(next);
+                }
+            }
+
+            @Override
+            public @Nullable BufferedImage portrait(UnitConfigForm shown, int slot) {
+                UnitConfigForm.Member member = shown.member(slot);
+                PortraitChooserDialog chooser = new PortraitChooserDialog(swingDialogs.parent(), member.portrait());
+                if (!chooser.showDialog().isConfirmed() || chooser.getSelectedItem() == null) {
+                    return null;
+                }
+                member.portrait(chooser.getSelectedItem());
+                return portraitPicture(member.portrait());
+            }
+
+            @Override
+            public void close() {
+                GpuLobbyScreen shown = screen;
+                if (shown != null) {
+                    shown.closeUnitBay();
+                }
+            }
+
+            @Override
+            public @Nullable BufferedImage boardPicture() {
+                return terrain;
+            }
+        };
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.unitBay(form, sprites, portraits, host);
+            }
+        });
+    }
+
+    /** The portrait's picture, {@value #PORTRAIT_PICTURE} pixels square, or null; any thread. */
+    private static @Nullable BufferedImage portraitPicture(Portrait portrait) {
+        try {
+            Image image = portrait.getBaseImage();
+            if (image == null || image.getWidth(null) <= 0 || image.getHeight(null) <= 0) {
+                return null;
+            }
+            return AbstractIcon.scaleAndCenter(image, PORTRAIT_PICTURE);
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The lobby could not draw the portrait {}", portrait);
+            return null;
+        }
+    }
+
     /** EDT: reads the player settings of the player {@code client} plays and opens them natively over the lobby. */
     private void openPlayerSettings(Client client) {
         if (closing) {
@@ -1303,13 +1981,13 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void saveLoadout(MunitionTree tree) {
-                new SwingLobbyUnitActions(gui).saveLoadout(tree);
+            public void saveLoadout(MunitionTree tree, Runnable then) {
+                SwingUtilities.invokeLater(() -> files.saveLoadout(tree, () -> GpuHost.post(then)));
             }
 
             @Override
-            public @Nullable MunitionTree loadLoadout() {
-                return new SwingLobbyUnitActions(gui).loadLoadout();
+            public void loadLoadout(Consumer<MunitionTree> then) {
+                SwingUtilities.invokeLater(() -> files.loadLoadout(tree -> GpuHost.post(() -> then.accept(tree))));
             }
 
             @Override
@@ -1362,11 +2040,7 @@ public final class GpuLobbyWindow {
 
             @Override
             public void help() {
-                SwingUtilities.invokeLater(() -> {
-                    if (!closing) {
-                        new PrincessHelpDialog(swingDialogs.parent()).setVisible(true);
-                    }
-                });
+                tools.princessHelp();
             }
 
             @Override
@@ -1392,7 +2066,7 @@ public final class GpuLobbyWindow {
     }
 
     /** Runs {@code work} on the Swing thread unless the lobby closes, then {@code then} on the GPU thread. */
-    private void edt(String what, Runnable work, Runnable then) {
+    void edt(String what, Runnable work, Runnable then) {
         SwingUtilities.invokeLater(() -> {
             try {
                 if (!closing) {
@@ -1474,21 +2148,14 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public void save(Vector<IBasicOption> all) {
-                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), true);
-                if (file != null) {
-                    GameOptions.saveOptions(all, file.getAbsolutePath());
-                }
+            public void save(Vector<IBasicOption> all, Runnable then) {
+                SwingUtilities.invokeLater(() -> files.saveGameOptions(all, () -> GpuHost.post(then)));
             }
 
             @Override
-            public boolean load(GameOptions into) {
-                File file = GameOptionsDialog.selectGameOptionsFile(swingDialogs.parent(), false);
-                if (file == null) {
-                    return false;
-                }
-                into.loadOptions(file, false);
-                return true;
+            public void load(GameOptions into, Consumer<Boolean> then) {
+                SwingUtilities.invokeLater(() -> files.loadGameOptions(into,
+                      loaded -> GpuHost.post(() -> then.accept(loaded))));
             }
 
             @Override
@@ -1554,17 +2221,29 @@ public final class GpuLobbyWindow {
         }
         swingDialogs.presented();
         refresh();
+        if (reopenMapSetup) {
+            reopenMapSetup = false;
+            openMapSetup();
+        }
     }
 
     private void finished(Throwable failure) {
         swingDialogs.uninstall();
         if (active == this || active == null || active.gui != gui) {
             gui.lobbyCommands().camoPicker(null);
+        gui.lobbyCommands().unitConfigurator(null);
+        gui.lobbyCommands().asks(null);
         }
         gui.getClient().getGame().removeGameListener(gameListener);
+        PreferenceManager.getClientPreferences().removePreferenceChangeListener(preferenceListener);
+        GUIPreferences.getInstance().removePreferenceChangeListener(preferenceListener);
         boolean replaced = closing;
         closing = true;
         sprites.stop();
+        if (mapSetup != null) {
+            mapSetup.dispose();
+            mapSetup = null;
+        }
         if (mapTimer != null) {
             mapTimer.stop();
         }

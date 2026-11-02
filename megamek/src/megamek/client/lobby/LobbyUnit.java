@@ -213,6 +213,16 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
         return new Shown(tags.subList(0, count), tags.size() - count);
     }
 
+    /** @return the tonnage and weight class, such as "65 t Heavy"; the class alone without a weight, empty when hidden */
+    public String weight() {
+        if (hidden || tons <= 0) {
+            return hidden ? "" : weightClass;
+        }
+        String number = NumberFormat.getNumberInstance(SuiteOptions.getNumberFormatLocale()).format(tons);
+        String weight = Messages.getString("Lobby.card.tons", number);
+        return weightClass.isEmpty() ? weight : Messages.getString("Lobby.card.weight", weight, weightClass);
+    }
+
     /** @return {@code tags} by tone, keeping their order within a tone */
     static List<Tag> sorted(List<Tag> tags) {
         List<Tag> result = new ArrayList<>(tags);

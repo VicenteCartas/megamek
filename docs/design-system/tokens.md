@@ -958,7 +958,7 @@ that the user moves around or keeps open beside the game open as a **window** wi
 | Status | Info `status.info`, success `status.success`, warning `status.warning`, error `status.danger`, question `accent.primary`; always with the icon, never the color alone |
 | Body | `body` text in `text.primary` wrapping at the card's width, or any content such as form fields; an optional extra row (for example "Don't ask again") `xl` (16) below it |
 | Footer | `xxl` (24) below the content: the buttons centred, `md` (8) apart, all as wide as the widest and at least 88; the main action first, as in Windows (last in right-to-left) |
-| Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade |
+| Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade. A card that greets (the start screen's welcome) may unfold instead: `UiDialog.unfold(true)` opens it from a thin line at its centre over `medium`, the scrim darkening over the same time, and its bands reveal after it |
 
 - **One main action.** A dialog has at most one primary or danger button, and it goes first; Cancel and other choices
   follow it. This is the Windows order ([Deploy] [Cancel]), which most of the suite's users already know.
@@ -971,6 +971,10 @@ that the user moves around or keeps open beside the game open as a **window** wi
 - **Footer and header.** The footer holds the user's answer to the question the card asks, so only a card that asks
   something has one. The header's trailing end holds controls for the card itself: close, help, or stopping what it
   shows (see [Status cards](#status-cards)).
+- **Full panels are not cards.** A screen-filling panel such as the lobby's unit bay, C3 manager or map setup ends in a
+  command bar instead of a footer, as a game's screens do: its status or warning line on the left, its buttons in the
+  bottom-right corner, `md` apart and of one width, the main action last so it sits in the corner. File and tool
+  actions (Load, Save) may sit at the bar's leading end.
 
 **Swing.** Build the content as a
 [`TokenDialogPane`](../../megamek/src/megamek/client/ui/design/swing/TokenDialogPane.java): `status`, `width`,
@@ -1174,6 +1178,8 @@ for it.
 **libGDX.** `UiKit.chip(text, tone, true)` is the status chip: `Tone.OK`, `WARN` and `BAD` get the check, warning and
 error icons and the `token-chip-success`, `-warning` and `-danger` edges, and `Tone.NORMAL` is the neutral chip;
 `UiKit.edgeChip(text, edge)` is the status chip without an icon, edged in any `token-chip-*` frame (the lobby's sides).
+`UiKit.gameMasterChip(text)` is the Game Master's chip: the `shield-person` icon in `status.gamemaster` and the
+`token-chip-gamemaster` edge (the lobby's GM chip on a player card).
 `UiKit.actingChip(text, tone)` is the status chip as a button (`token-chip-button-<tone>`): `tint.hover` washes it
 under the pointer and `tint.pressed` fills it pressed or checked, so checking it for a moment lights it (the lobby's
 warning chips, which a blocked Ready lights for 700 ms). All three set their text in upper case, as the `overline` role in either [presentation](#presentation-mode). A
@@ -1261,7 +1267,8 @@ series' color, and the maximum and heat-sustained in `small` type and `text.seco
 tiles an **arc diagram** shows the expected damage by firing arc for the band picked in a segmented control.
 
 **Arc diagram.** A ring of arcs round a picture (the unit's sprite, or the unit icon in `text.muted`), the first arc
-centred at the top and the rest clockwise, `GAP_DEGREES` (4) apart, the hole `INNER` (0.55) of the ring. Each arc is a
+centred at the top and the rest clockwise, a `space.md` band apart (the band's sides straight and parallel, so the
+gap is as wide at the rim as at the hole), the hole `INNER` (0.55) of the ring. Each arc is a
 track in `border.subtle` filled in `accent.primary` at an opacity from `tint.hover` up to full by its value against the
 peak, nothing for nothing; the peak is taken across all bands, so switching bands keeps one scale. The value sits on
 its arc in `title` type, `text.primary`, or `text.onAccent` once the fill reaches `STRONG` (0.6); the arc's name is
