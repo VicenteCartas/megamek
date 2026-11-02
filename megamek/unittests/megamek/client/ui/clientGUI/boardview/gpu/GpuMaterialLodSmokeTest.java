@@ -535,6 +535,9 @@ class GpuMaterialLodSmokeTest {
             String roles = emission + "\n    result.finish.emission = vec3(roleShare.w, roleShare.x, 0.0);";
             assertTrue(material.contains(emission), "The probe reads completed cliff-material roles");
             String sculpt = GpuShaderSource.readDisk("terrain-sculpt.frag");
+            // This diagnostic deliberately stores non-material data in emission, even with plain authored finishes.
+            sculpt = sculpt.replace("#define SCORCH_IN_MATERIAL",
+                  "#define SCORCH_IN_MATERIAL\n#undef plainSculptFinishFlag");
             String result = "vec3 result = shadeSurface(surface, caustic, submerged);";
             String output = "fragColor = vec4(result, 1.0);";
             assertTrue(sculpt.contains(result) && sculpt.contains(output), "The role probe uses the final scene writer");

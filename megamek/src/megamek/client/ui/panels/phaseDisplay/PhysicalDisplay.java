@@ -817,7 +817,7 @@ public class PhysicalDisplay extends AttackPhaseDisplay {
     /**
      * Asks the informational "{attack} {target}?" question that shows the roll of a chosen attack. While this client's
      * native battle window is presented and draws its dialogs, its command dock showed that roll and its Declare
-     * button was the confirmation (user decision U3), so the question is not asked again. Rule choices (blades,
+     * button was the confirmation, so the question is not asked again. Rule choices (blades,
      * zweihander, which club, which arms brush off) are asked either way.
      */
     private boolean confirmAttack(String title, String message) {

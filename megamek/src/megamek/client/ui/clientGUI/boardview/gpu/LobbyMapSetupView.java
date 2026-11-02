@@ -18,6 +18,7 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
@@ -48,6 +49,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepper;
@@ -61,7 +63,7 @@ import megamek.common.loaders.MapSettings;
  * with the size controls at its top and load, save, preview and regeneration at its foot. The drawer beside it holds
  * a searchable board browser of thumbnails or rows, with Advanced beside the Boards heading. Each slot's compact
  * rotation, theme and level controls sit above its full preview. A click picks a slot (Ctrl-click several),
- * and Place, or a double-click, puts a board in the picked slots; Ctrl-clicked boards make a random or surprise board.
+ * and Place, or a double-click, replaces the picked slots; Add to Stack retains their existing boards and mode.
  * Map type and random map settings remain in the toolbar above both panels.
  * <p>
  * GPU thread. Every change runs on the Swing thread through the {@link Host}, and the window sends the setup anew.
@@ -136,8 +138,11 @@ final class LobbyMapSetupView {
     private final ScrollPane listScroll;
     private final Label pickHint;
     private final UiButton place;
-    private final UiButton random;
-    private final UiButton surprise;
+    private final UiButton addToStack;
+    private UiPopover stackMenu;
+    private int stackMenuSlot = -1;
+    private List<String> stackMenuBoards = List.of();
+    private String stackMenuSelection = "";
     private final UiButton load;
     private final UiButton save;
     private final UiButton advancedSearch;
@@ -302,18 +307,13 @@ final class LobbyMapSetupView {
         place = kit.button("button-primary" + UiTheme.COMPACT, null, Messages.getString("Lobby.map.place"), null);
         place.setName("map-place");
         UiKit.onChange(place, this::placePicked);
-        random = kit.button("button-secondary" + UiTheme.COMPACT, null, "", null);
-        random.setName("map-random");
-        tip(random, Messages.getString("Lobby.map.randomTip"));
-        UiKit.onChange(random, this::placeRandom);
-        surprise = kit.button("button-secondary" + UiTheme.COMPACT, "hidden", "", null);
-        surprise.setName("map-surprise");
-        tip(surprise, Messages.getString("Lobby.map.surpriseTip"));
-        UiKit.onChange(surprise, this::placeSurprise);
+        addToStack = kit.button("button-secondary" + UiTheme.COMPACT, "stack", Messages.getString("Lobby.map.addToStack"), null);
+        addToStack.setName("map-add-to-stack");
+        tip(addToStack, Messages.getString("Lobby.map.addToStackTip"));
+        UiKit.onChange(addToStack, this::addPickedToStack);
         placing.defaults().growX().uniformX();
-        placing.add(place).colspan(2).row();
-        placing.add(random).padRight(space("xs")).padTop(space("xs"));
-        placing.add(surprise).padTop(space("xs"));
+        placing.add(place).padRight(space("xs"));
+        placing.add(addToStack);
         drawer.add(placing).growX().padTop(space("sm")).row();
         drawerScroll = kit.scrollList(drawer, true, false);
         drawerScroll.setScrollingDisabled(true, false);
@@ -405,6 +405,11 @@ final class LobbyMapSetupView {
             return;
         }
         boolean first = shown == null;
+        if (stackMenu != null && (picture.space() || first || picture.mapWidth() != shown.mapWidth()
+              || picture.mapHeight() != shown.mapHeight() || picture.boardWidth() != shown.boardWidth()
+              || picture.boardHeight() != shown.boardHeight())) {
+            stackMenu.cancel();
+        }
         shown = picture;
         this.themes = themes;
         if (picture.space()) {
@@ -529,7 +534,7 @@ final class LobbyMapSetupView {
         return switch (slot.kind()) {
             case EMPTY -> Messages.getString("Lobby.map.empty");
             case SURPRISE -> MessageFormat.format(Messages.getString("Lobby.map.surpriseBoards"),
-                  slot.surprise().size());
+                  slot.stack().size());
             default -> slot.label();
         };
     }
@@ -634,15 +639,13 @@ final class LobbyMapSetupView {
         boolean target = !slots.isEmpty() && picture != null && !picture.space();
         String one = picks.size() == 1 ? picks.iterator().next() : null;
         place.setDisabled(!target || one == null);
-        boolean several = picks.size() > 1;
-        random.setText(kit.cased("button", MessageFormat.format(Messages.getString("Lobby.map.random"), picks.size())));
-        surprise.setText(kit.cased("button",
-              MessageFormat.format(Messages.getString("Lobby.map.surprise"), picks.size())));
-        random.setDisabled(!target || !several);
-        surprise.setDisabled(!target || !several);
+        boolean already = target && !picks.isEmpty() && picked().stream().allMatch(slot -> picks.stream()
+              .allMatch(board -> slot.stack().contains(MapSettings.stackBoardName(board))));
+        addToStack.setText(kit.cased("button", Messages.getString(already ? "Lobby.map.alreadyAdded" : "Lobby.map.addToStack")));
+        addToStack.setDisabled(!target || picks.isEmpty() || already);
         pickHint.setText(inspection.isVisible() ? Messages.getString("Lobby.map.inspectHint")
               : !target ? Messages.getString("Lobby.map.noSlot")
-              : several ? "" : Messages.getString("Lobby.map.pickHint"));
+              : Messages.getString("Lobby.map.pickHint"));
     }
 
     private static float aspect(Picture picture) {
@@ -665,25 +668,62 @@ final class LobbyMapSetupView {
         });
     }
 
-    private void placeRandom() {
-        if (picks.size() < 2 || slots.isEmpty()) {
+    private void addPickedToStack() {
+        if (picks.isEmpty() || slots.isEmpty()) {
             return;
         }
         List<String> boards = List.copyOf(picks);
         List<Integer> targets = List.copyOf(slots);
-        host.act(form -> {
-            java.util.Random dice = new java.util.Random();
-            targets.forEach(slot -> form.assignRandom(slot, boards, dice));
-        });
+        host.act(form -> targets.forEach(slot -> form.addToStack(slot, boards)));
     }
 
-    private void placeSurprise() {
-        if (picks.size() < 2 || slots.isEmpty()) {
-            return;
+    private void openStack(int index, Actor trigger) {
+        if (shown == null || index >= shown.slots().size() || shown.slots().get(index).stack().size() < 2) { return; }
+        if (stackMenu != null && stackMenu.isVisible() && stackMenuSlot == index) { stackMenu.cancel(); return; }
+        if (stackMenu == null) {
+            stackMenu = new UiPopover(kit, () -> stackMenuSlot = -1, UiTheme.TOKEN);
+            stackMenu.setName("map-stack-menu");
+            body.getStage().addActor(stackMenu);
         }
-        List<String> boards = List.copyOf(picks);
-        List<Integer> targets = List.copyOf(slots);
-        host.act(form -> targets.forEach(slot -> form.assignSurprise(slot, boards)));
+        stackMenuSlot = index;
+        stackMenuBoards = List.of();
+        stackContents(shown.slots().get(index));
+        stackMenu.openedFrom(trigger);
+        Vector2 at = trigger.localToStageCoordinates(new Vector2(0, 0));
+        stackMenu.showAt(at.x, at.y);
+    }
+
+    private void stackContents(Slot slot) {
+        if (slot.stack().equals(stackMenuBoards) && slot.board().equals(stackMenuSelection)) { return; }
+        stackMenuBoards = slot.stack();
+        stackMenuSelection = slot.board();
+        if (slot.stack().isEmpty()) { stackMenu.cancel(); return; }
+        Table contents = new Table();
+        contents.defaults().growX();
+        for (int index = 0; index < slot.stack().size(); index++) {
+            String board = slot.stack().get(index);
+            Table row = new Table();
+            boolean selected = slot.kind() != Kind.SURPRISE && board.equals(MapSettings.stackBoardName(slot.board()));
+            UiButton choice = kit.menuRow(UiTheme.TOKEN_MENU_ROW,
+                  MapSetupForm.label(board, shown.boardWidth(), shown.boardHeight()), null, selected, false).pressed(selected);
+            choice.setName("map-stack-select-" + slot.index() + "-" + index);
+            choice.getLabel().setEllipsis(true);
+            tip(choice, board);
+            UiKit.onChange(choice, () -> {
+                stackMenu.cancel();
+                host.act(form -> form.selectFromStack(slot.index(), board));
+            });
+            UiButton remove = kit.button("button-icon" + UiTheme.COMPACT, "close", null, null);
+            remove.setName("map-stack-remove-" + slot.index() + "-" + index);
+            tip(remove, Messages.getString("Lobby.map.stackRemoveTip"));
+            remove.setDisabled(slot.stack().size() == 1 && MapSettings.BOARD_GENERATED.equals(board));
+            UiKit.onChange(remove, () -> host.act(form -> form.removeFromStack(slot.index(), board, new java.util.Random())));
+            row.add(choice).width(250).minWidth(0).growX().height(size("control.sm"));
+            row.add(remove).padLeft(space("sm"));
+            contents.add(row).row();
+        }
+        stackMenu.header(MessageFormat.format(Messages.getString("Lobby.map.stackTitle"), slot.index() + 1,
+              slot.stack().size()), null).content(contents);
     }
 
     /** A click on a slot: picks it alone or, with {@code several}, along with the others. */
@@ -732,6 +772,7 @@ final class LobbyMapSetupView {
 
     /** The view left the centre: closes inspection and forgets the picks; pictures stay until {@link #dispose}. */
     void closed() {
+        if (stackMenu != null) { stackMenu.cancel(); }
         closeInspection();
         host.previews(List.of());
         requestedBoards = null;
@@ -743,6 +784,7 @@ final class LobbyMapSetupView {
 
     /** Gives the pictures' textures back. */
     void dispose() {
+        if (stackMenu != null) { stackMenu.cancel(); stackMenu.remove(); stackMenu = null; }
         closeInspection();
         textures.values().forEach(Texture::dispose);
         textures.clear();
@@ -753,6 +795,7 @@ final class LobbyMapSetupView {
     }
 
     private void inspect(Entry entry) {
+        if (stackMenu != null) { stackMenu.cancel(); }
         int ticket = ++inspectionTicket;
         tablePanel.setVisible(false);
         inspection.setVisible(true);
@@ -963,6 +1006,11 @@ final class LobbyMapSetupView {
         private final UiButton rotate;
         private final UiStepper offset;
         private final UiButton reset;
+        private final UiButton stackButton;
+        private final UiButton roll;
+        private final UiButton surpriseMode;
+        private final Table stackTools = new Table();
+        private boolean wrappedTools;
         private final HorizontalGroup controls = new HorizontalGroup();
         private final Table bar = new Table();
         private final Table themeBox = new Table() {
@@ -1005,9 +1053,29 @@ final class LobbyMapSetupView {
             level.add(offset);
             level.add(reset);
             controls.addActor(level);
+            stackButton = kit.button("button-quiet" + UiTheme.COMPACT, "stack", "", null);
+            Actor stackIcon = stackButton.icons.getFirst();
+            stackButton.clearChildren();
+            stackButton.add(stackButton.getLabel());
+            stackButton.add(stackIcon).padLeft(space("xs"));
+            stackButton.setName("map-stack-" + index);
+            tip(stackButton, Messages.getString("Lobby.map.stackTip"));
+            UiKit.onChange(stackButton, () -> openStack(index, stackButton));
+            roll = kit.button("button-icon" + UiTheme.COMPACT, "die", null, null);
+            roll.setName("map-stack-roll-" + index);
+            tip(roll, Messages.getString("Lobby.map.stackRollTip"));
+            UiKit.onChange(roll, () -> host.act(form -> form.rollStack(index, new java.util.Random())));
+            surpriseMode = kit.button("button-icon" + UiTheme.COMPACT, "show", null, null);
+            surpriseMode.setName("map-stack-surprise-" + index);
+            tip(surpriseMode, Messages.getString("Lobby.map.stackSurpriseTip"));
+            UiKit.onChange(surpriseMode, () -> host.act(form -> form.toggleSurprise(index, new java.util.Random())));
+            stackTools.add(stackButton);
+            stackTools.add(roll);
+            stackTools.add(surpriseMode);
             bar.setBackground(kit.skin.getDrawable("token-panel-plain"));
             bar.pad(space("xxs"));
             bar.add(controls).growX().minWidth(0);
+            bar.add(stackTools).right().top().padLeft(space("xs"));
             add(bar).growX().minWidth(0).padBottom(space("xxs")).row();
             add(face).grow().minWidth(0).minHeight(0).row();
             caption.setEllipsis(true);
@@ -1028,7 +1096,17 @@ final class LobbyMapSetupView {
 
         float chromeHeight(float width) {
             setWidth(width);
-            controls.setWidth(Math.max(1, width - getPadLeft() - getPadRight() - bar.getPadLeft() - bar.getPadRight()));
+            float available = width - getPadLeft() - getPadRight() - bar.getPadLeft() - bar.getPadRight();
+            float stackWidth = stackTools.isVisible() ? stackTools.getPrefWidth() + space("xs") : 0;
+            boolean wrap = stackTools.isVisible() && available - stackWidth < 180;
+            if (wrap != wrappedTools || (bar.getCell(stackTools) != null) != stackTools.isVisible()) {
+                wrappedTools = wrap;
+                bar.clearChildren();
+                bar.add(controls).growX().minWidth(0);
+                if (wrap) { bar.row(); }
+                if (stackTools.isVisible()) { bar.add(stackTools).right().top().padLeft(wrap ? 0 : space("xs")); }
+            }
+            controls.setWidth(Math.max(1, available - (wrap ? 0 : stackWidth)));
             controls.invalidate();
             bar.invalidate();
             return getPadTop() + getPadBottom() + bar.getPrefHeight() + caption.getPrefHeight() + 2 * space("xxs");
@@ -1047,8 +1125,7 @@ final class LobbyMapSetupView {
             setBackground(kit.skin.getDrawable(slots.contains(slot.index()) ? "token-card-selected"
                   : slot.kind() == Kind.EMPTY ? "token-row-slot" : "token-card"));
             Drawable drawable = drawables.get(LobbyMapSetupController.pictureKey(slot, picture));
-            image.setDrawable(drawable);
-            image.getColor().a = slot.kind() == Kind.SURPRISE ? .35f : 1;
+            image.setDrawable(slot.kind() == Kind.SURPRISE ? null : drawable);
             placeholder.clearChildren();
             String icon = switch (slot.kind()) {
                 case EMPTY -> "add";
@@ -1060,7 +1137,7 @@ final class LobbyMapSetupView {
                 placeholder.add(kit.icon(icon, size("icon.lg"), UiTheme.tokenColor("text.secondary")));
             }
             caption.setText(slotName(slot));
-            String hint = slot.kind() == Kind.SURPRISE ? String.join("\n", slot.surprise())
+            String hint = slot.kind() == Kind.SURPRISE ? Messages.getString("Lobby.map.stackSurpriseTip")
                   : slot.kind() == Kind.FIXED && LobbyMapSetupController.serverSide(slot.file())
                         ? Messages.getString("Lobby.map.serverSide") : "";
             if (!hint.isEmpty()) {
@@ -1074,6 +1151,13 @@ final class LobbyMapSetupView {
                 detail = null;
             }
             rotate.setDisabled(!slot.canRotate());
+            stackTools.setVisible(!picture.space() && slot.stack().size() >= 2);
+            stackButton.setText(Integer.toString(slot.stack().size()));
+            stackButton.setDisabled(picture.space() || slot.stack().isEmpty());
+            roll.setDisabled(picture.space() || slot.stack().size() < 2);
+            surpriseMode.setDisabled(picture.space() || slot.stack().isEmpty());
+            surpriseMode.pressed(slot.kind() == Kind.SURPRISE);
+            if (stackMenuSlot == slot.index() && stackMenu != null && stackMenu.isVisible()) { stackContents(slot); }
             rotate.pressed(slot.rotated());
             offset.value(slot.levelOffset());
             offset.down().setDisabled(!slot.adjustable() || slot.levelOffset() <= MapSettings.MIN_BOARD_LEVEL_OFFSET);

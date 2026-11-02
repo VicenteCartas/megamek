@@ -127,8 +127,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * The closing gate of user decision 2, no Swing in the battle view (rebuild plan R9, stage Z1). With the client's
- * battle window presented and its own dialog listener running, each prompt chokepoint of swing-inventory table 2, each
+ * With the client's battle window presented and its own dialog listener running, each prompt chokepoint of swing-inventory table 2, each
  * table-3 dialog that N7 made native and a list prompt of each class E6d routed asks in the native window, and no
  * Swing window shows; without the window the Legacy 2D client shows the same openers as Swing dialogs. The Swing
  * surfaces the user kept are raised over the battle window; any other Swing dialog is logged at error level and not

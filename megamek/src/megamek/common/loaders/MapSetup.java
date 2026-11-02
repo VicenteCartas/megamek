@@ -78,13 +78,46 @@ public class MapSetup implements Serializable {
     private int mapHeight = 1;
     @XmlElement(name = "BOARDS")
     private List<String> boards = new ArrayList<>();
+    @XmlElement(name = "STACK")
+    private List<BoardStack> stacks = new ArrayList<>();
+
+    @XmlAccessorType(XmlAccessType.NONE)
+    public static class BoardStack implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 1L;
+        @XmlElement(name = "SLOT")
+        private int slot;
+        @XmlElement(name = "BOARD")
+        private List<String> boards = new ArrayList<>();
+    }
 
     public MapSetup(MapSettings mapSettings) {
         boardWidth = mapSettings.getBoardWidth();
         boardHeight = mapSettings.getBoardHeight();
         mapWidth = mapSettings.getMapWidth();
         mapHeight = mapSettings.getMapHeight();
-        boards = mapSettings.getBoardsSelectedVector();
+        boards = new ArrayList<>(mapSettings.getBoardsSelectedVector());
+        for (int slot = 0; slot < boards.size(); slot++) {
+            List<String> candidates = mapSettings.getBoardStack(slot);
+            if (candidates.size() > 1 && !boards.get(slot).startsWith(MapSettings.BOARD_SURPRISE)) {
+                BoardStack stack = new BoardStack();
+                stack.slot = slot;
+                stack.boards = new ArrayList<>(candidates);
+                stacks.add(stack);
+            }
+        }
+    }
+
+    /** Restores alternatives as well as the visible choices; older setups simply have no STACK elements. */
+    public void applyTo(MapSettings settings) {
+        settings.setMapSize(mapWidth, mapHeight);
+        settings.setBoardSize(boardWidth, boardHeight);
+        settings.setBoardsSelectedVector(boards);
+        for (BoardStack stack : stacks) {
+            if (stack.slot >= 0 && stack.slot < mapWidth * mapHeight) {
+                settings.setBoardStack(stack.slot, stack.boards);
+            }
+        }
     }
 
     @Deprecated(since = "0.51.0", forRemoval = true)

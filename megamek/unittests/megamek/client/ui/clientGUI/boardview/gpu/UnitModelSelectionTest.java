@@ -57,7 +57,7 @@ class UnitModelSelectionTest {
 
     /**
      * The whole-body overlay follows the damage level that the board label's damage tile and the unit card show, not
-     * the share of armor and structure lost (the user's decision of 2026-10-07).
+     * the share of armor and structure lost.
      */
     @Test
     void wholeBodyDamageFollowsTheDamageLevelAndSurvivesCapture() {

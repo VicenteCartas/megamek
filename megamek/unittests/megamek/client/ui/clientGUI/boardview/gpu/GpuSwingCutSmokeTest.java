@@ -66,8 +66,8 @@ import org.junit.jupiter.api.Test;
  * The Swing cut (I3) in a scripted battle over the real native window. Through every phase, with each auxiliary
  * window's preference switched on and the client's phase rules run, no Swing window of the client shows over the
  * battle window: the HUD stands for the minimap, the players, the rounds in the air, the force display, the bot
- * commands, the Unit Display and the report. A Ctrl measurement shows MegaMek's ruler, which line of sight stays
- * (the user's decision of 2026-10-03). A Swing dialog outside the allowlist is not raised. With the default
+ * commands, the Unit Display and the report. A Ctrl measurement shows MegaMek's ruler, which line of sight stays.
+ * A Swing dialog outside the allowlist is not raised. With the default
  * preferences the minimap keeps the player's choice through the report phases. Back on the Legacy 2D board every window
  * shows again as its preference says.
  */

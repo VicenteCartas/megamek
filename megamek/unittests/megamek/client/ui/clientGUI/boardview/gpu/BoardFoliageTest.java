@@ -106,7 +106,7 @@ class BoardFoliageTest {
         for (int density = 1; density <= 3; density++) {
             hex.addTerrain(new Terrain(Terrains.WOODS, density));
             var features = BoardFeatures.capture(hex, coords, Map.of());
-            assertTrue(!features.isEmpty() && features.size() <= BoardTreeCoverage.limit(density, false));
+            assertTrue(!features.isEmpty() && features.size() <= BoardTreeCoverage.canopyLimit(density));
             assertTrue(features.stream().allMatch(feature -> shrub(feature, family)
                   && feature.kind() == BoardScene.FeatureKind.TREE));
             BoardFeaturesTest.assertWoodsHeights(features, 1, density);

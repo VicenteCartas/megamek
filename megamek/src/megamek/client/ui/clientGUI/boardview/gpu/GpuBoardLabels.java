@@ -78,7 +78,7 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static final float PAIR = 3;
     /**
      * Guides of each direction at most, the preview's best first, besides the open row's: every shot is badged, but a
-     * crowded battle keeps its guides legible (the user's decision of 2026-10-03).
+     * crowded battle keeps its guides legible.
      */
     private static final int GUIDES = 50;
     /** Guides and traces keep this much space around both units' screen rectangles. */

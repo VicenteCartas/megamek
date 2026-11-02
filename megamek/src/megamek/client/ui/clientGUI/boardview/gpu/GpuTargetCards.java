@@ -292,10 +292,9 @@ final class GpuTargetCards implements GpuHud.Component {
     // ------------------------------------------------------------------ building
 
     /**
-     * A card (.tcard.panel), its frame neutral for every target (the user's decision of 2026-10-03; the letter carries
-     * the target's colour): the header and its rule, then the attack
-     * rows and the footer, the empty card's hint, or the collapsed line. A click on it focuses its target and assigns
-     * the armed weapon there, as a click on the unit does (H28, H16).
+     * A card (.tcard.panel), its frame neutral for every target (the letter carries the target's colour): 
+     * the header and its rule, then the attack rows and the footer, the empty card's hint, or the collapsed line.
+     * A click on it focuses its target and assigns the armed weapon there, as a click on the unit does.
      */
     private Card build(CardView view) {
         TargetKey key = view.key();
@@ -340,7 +339,7 @@ final class GpuTargetCards implements GpuHud.Component {
     /**
      * The header (.th): the target's letter in its colour, the upper-case name, and "Primary", "Set primary" or "No
      * attacks" at the right. The focus without attacks has no letter yet, and no "+" square that would look like a
-     * button (the user's decision of 2026-10-03).
+     * button.
      */
     private Table header(CardView view) {
         Target target = view.target();
@@ -378,7 +377,7 @@ final class GpuTargetCards implements GpuHud.Component {
 
     /**
      * An attack row (.or), the {@code index}th of the card's {@code list}: the grip (no fire-order number, which only
-     * took room: the user's decision of 2026-10-03), the weapon over its ammunition (a select when it can switch bins) or its location and kind, the roll and the remove
+     * took room), the weapon over its ammunition (a select when it can switch bins) or its location and kind, the roll and the remove
      * mark. A right click opens the queued-attack menu (H28, H37); a drag takes the row to another place of the card
      * (H29). A handheld weapon's attack has no number on the actor, so it has no controls.
      */

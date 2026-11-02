@@ -513,7 +513,7 @@ final class GpuForcesPanel implements GpuHud.Component {
             created.addListener(UnitRow.menuOpener(menu, id, this::unit));
             return created;
         });
-        // The one highlighted unit is the card's (the user's decision of 2026-10-02): the focus pressed in mint, an
+        // The one highlighted unit is the card's: the focus pressed in mint, an
         // inspected unit with its edges. The acting unit keeps its line, "Acting now", without the highlight.
         boolean card = unit.id() == shown.card();
         row.show(unit, line(unit), shown.status().phase(), card && unit.id() != shown.focus(), unit(acting()));

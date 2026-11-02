@@ -104,7 +104,7 @@ final class LobbyMapSetupController {
         try {
             MapSettings before = MapSettings.getInstance(form.settings());
             form.reloadIfNew();
-            if (!MapSetupForm.sameSetup(before, form.settings())) {
+            if (!before.equalBoardConfiguration(form.settings())) {
                 clearGenerated();
             }
         } catch (RuntimeException failure) {
@@ -122,7 +122,7 @@ final class LobbyMapSetupController {
         } catch (RuntimeException failure) {
             LOGGER.error(failure, "The map setup action failed");
         }
-        if (!MapSetupForm.sameSetup(before, form.settings())) {
+        if (!before.equalBoardConfiguration(form.settings())) {
             clearGenerated();
             // This board belongs to the setup before the edit. Wait for its server replacement.
             generatedBoard = game.get().getBoard();

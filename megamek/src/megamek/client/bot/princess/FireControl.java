@@ -126,7 +126,7 @@ public class FireControl {
     static final double PRIORITY_TARGET_UTILITY_STEP = 0.10;
     /**
      * How far priority 1 sits above the enemy-commander bonus. A player marking a unit "shoot this first" outranks the
-     * bot's own preference for the enemy commander, C3 master or initiative leader (user decision, #9174).
+     * bot's own preference for the enemy commander, C3 master or initiative leader.
      */
     static final double PRIORITY_ONE_MARGIN_OVER_COMMANDER = 0.05;
     /** What {@link #calcDamageAllocationUtility} returns for a target already expected to be destroyed. */

@@ -485,7 +485,7 @@ class GpuWeaponsPanelSmokeTest {
             assertEquals(LRM, column.state.armedWeapon);
             verify(fire).selectWeapon(LRM);
             column.update(hud, firing(), shot05()).place(hud, COLUMN_X, COLUMN_TOP, 310, -1);
-            // No assign line while a weapon is armed: its row shows it selected (the user's decision of 2026-10-03).
+            // No assign line while a weapon is armed: its row shows it selected.
             Actor assignLine = ((Group) column.weapons.actor()).findActor("weapons-assign");
             assertTrue(assignLine == null || !GpuBoardTestUi.shown(assignLine), "no line for the armed weapon");
             click(hud, column.find("weapons-pill-" + BATTLEMASTER));

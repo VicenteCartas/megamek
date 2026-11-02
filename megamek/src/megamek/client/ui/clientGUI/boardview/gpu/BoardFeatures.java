@@ -298,10 +298,10 @@ final class BoardFeatures {
         List<BoardScene.Feature> result = new ArrayList<>(), trunks = new ArrayList<>();
         List<BoardPlantFootprint> solids = new ArrayList<>();
         var prepared = new HashMap<BoardPlantFootprint.Key, BoardPlantFootprint>();
-        int limit = BoardTreeCoverage.limit(layout.colonies() ? 3 : layout.density, false);
         float target = layout.colonies() ? 1 : BoardTreeCoverage.target(layout.density);
-        int failed = 0, cacti = 0, spores = 0, bareTrees = 0;
-        for (int index = 0; index < 128 && trunks.size() < limit; index++) {
+        int failed = 0, cacti = 0, spores = 0, bareTrees = 0, canopies = 0;
+        for (int index = 0; index < 128; index++) {
+            if (layout.colonies() && trunks.size() >= BoardTreeCoverage.colonyLimit(3)) { break; }
             int plantIndex = layout.understory ? index * 2 : index;
             var random = new Random(coords.getX() * 73_856_093L ^ coords.getY() * 19_349_663L ^ index * 83_492_791L);
             double phase = natural ? random.nextDouble() * Math.PI * 2 : Math.floorMod(coords.getX() * 31 + coords.getY() * 17, 4);
@@ -311,7 +311,9 @@ final class BoardFeatures {
             String asset = natural ? BoardTreeDistribution.species(choices, coords, origin[0], origin[1], random.nextLong())
                   : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, choices.size()));
             boolean cactus = asset.startsWith("vegetation/cactus"), bare = BoardTreeCoverage.bare(asset), rigid = layout.colonies() || cactus;
-            if (cactus && cacti >= BoardTreeCoverage.limit(layout.density, true)) { break; }
+            boolean canopy = !rigid && !bare;
+            if (canopy && canopies >= BoardTreeCoverage.canopyLimit(layout.density)) { break; }
+            if (cactus && cacti >= BoardTreeCoverage.cactusLimit(layout.density)) { break; }
             if (bare && bareTrees >= BoardTreeCoverage.bareLimit(layout.density)) { break; }
             float rotation = natural ? random.nextFloat() * 360 : index * 137.5f;
             BoardScene.Feature best = null;
@@ -334,12 +336,12 @@ final class BoardFeatures {
                           && trunks.stream().anyMatch(tree -> Math.hypot(tree.x() - at[0], tree.y() - at[1]) < 5)) {
                         continue;
                     }
-                    float orientation = layout.colonies() ? Math.floorMod(Math.round((rotation + attempt * 137.5f) / 22.5f), 16) * 22.5f : rotation;
+                    float orientation = rigid ? Math.floorMod(Math.round((rotation + attempt * 137.5f) / 22.5f), 16) * 22.5f : rotation;
                     var candidate = new BoardScene.Feature(asset, at[0], at[1], orientation,
                           woodsCrown(layout, asset, plantIndex), bodyHeight, 0,
                           BoardScene.FeatureKind.TREE, 0, false, null, new BoardDecoration.Stretch(slim, slim, 1),
                           BoardDecoration.Colours.NONE);
-                    var footprint = layout.colonies() ? BoardPlantFootprint.of(candidate, prepared) : rigid ? BoardPlantFootprint.of(candidate) : null;
+                    var footprint = rigid ? BoardPlantFootprint.of(candidate, prepared) : null;
                     if (rigid && (!footprint.inside() || solids.stream().anyMatch(footprint::overlaps))) { continue; }
                     var gain = coverage.addition(candidate);
                     // Rigid bodies start near the rim, leaving room for further bodies at the same natural height.
@@ -361,6 +363,7 @@ final class BoardFeatures {
             if (trunks.size() >= minimum && Math.abs(coverage.fraction() - target) <= Math.abs(coverage.with(addition) - target)) { break; }
             result.add(best);
             trunks.add(best);
+            if (canopy) { canopies++; }
             if (cactus) { cacti++; }
             if (bare) { bareTrees++; }
             if (BoardFungus.SPORES.contains(asset)) { spores++; }
@@ -394,7 +397,7 @@ final class BoardFeatures {
             float[] areas = pods == spores.size() ? fullAreas : colonyAreas(crowns, spores.subList(0, pods));
             // Reserve a body for each later tier where the packing supports three distinct populations.
             int reserve = crowns.size() >= 3 ? Math.max(0, 3 - level - Math.max(0, spores.size() - pods)) : 0;
-            int maximum = Math.min(BoardTreeCoverage.limit(level, false) - pods,
+            int maximum = Math.min(BoardTreeCoverage.colonyLimit(level) - pods,
                   crowns.size() - reserve);
             int previous = count;
             count = Math.min(count + (level == 1 || level > spores.size() ? 1 : 0), maximum);
@@ -505,6 +508,8 @@ final class BoardFeatures {
 
     /** Fungal colonies and Mars corals: solid bodies, fitted to their height with their proportions kept. */
     static boolean solid(String asset) { return asset.startsWith("fungus/") || asset.startsWith("mars/"); }
+
+    static boolean rigid(String asset) { return solid(asset) || asset.startsWith("vegetation/cactus"); }
 
     /** Captured counterparts of BoardRoad.nearbyWays; no game connection is added for visual overhang. */
     private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board) {

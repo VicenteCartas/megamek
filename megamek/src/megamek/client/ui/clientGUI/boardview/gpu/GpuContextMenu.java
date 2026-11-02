@@ -31,7 +31,7 @@ import megamek.common.units.Entity;
  * Context menus and select lists in one popover (C.1 G12; r1 3.17, r2 8.1, shot 13): the unit menus at the pointer
  * (M2-M4), the hex menu with MegaMek's own map menu in sections (M5, M10), the weapon row and queued attack menus
  * (H36, H37), the dock's More above its button (A.7 G14, H38) and the select lists of select faces (C.3). A group
- * opens its submenu beside its item, as a desktop menu does (the user's decision of 2026-10-03): the menus before it
+ * opens its submenu beside its item, as a desktop menu does: the menus before it
  * stay open, a press outside them all closes them, and Esc closes the deepest. Items run existing commands only: the
  * HUD's selection rule, the source's locate and centre requests, and the movement, fire and line-of-sight services.
  * Opening a menu never changes orders.

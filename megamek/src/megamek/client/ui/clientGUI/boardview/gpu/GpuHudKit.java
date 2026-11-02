@@ -66,8 +66,8 @@ final class GpuHudKit implements Disposable {
     private static final Color TICK = new Color(0, 0, 0, .7f);
 
     /**
-     * The targets' colours by letter from A, wrapping: MekBay's DEFAULT_ENCOUNTER_TARGET_COLORS (the user's decision
-     * of 2026-10-03). A letter square shows its target's colour wherever the letter appears.
+     * The targets' colours by letter from A, wrapping: MekBay's DEFAULT_ENCOUNTER_TARGET_COLORS
+     * A letter square shows its target's colour wherever the letter appears.
      */
     private static final Color[] TARGET_COLOURS = Stream.of("C0F7FF", "FFEBCA", "C6FFE1", "ECC6FF", "DDFFC0",
           "FFC6C6", "6FB3BD", "EACC80", "8ED2AD", "AB77C6", "A9D087", "D5A790").map(Color::valueOf)
@@ -264,7 +264,7 @@ final class GpuHudKit implements Disposable {
     }
 
     /**
-     * Orders one layer of board labels for drawing (the user's decision of 2026-10-02): {@code labels} in their order,
+     * Orders one layer of board labels for drawing: {@code labels} in their order,
      * then the hovered unit's label and last the label of the unit the card shows, so a highlighted unit's label is
      * never buried under another unit's. {@code hovered} and {@code shown} may be null or not in {@code labels}. A
      * label already in its place is not moved, so an unchanged frame moves nothing.
@@ -387,8 +387,8 @@ final class GpuHudKit implements Disposable {
     /**
      * A unit row (.row, .prow): the sprite, the model line, the upper-case name, a status line, a fourth line that
      * shows only with a text, and a slot at the right. Selected is the pressed state; an inspected unit gets coral
-     * edges (.row.insp), mint ones for a friendly unit, which never takes the enemy's colour (the user's decision of
-     * 2026-10-02). Done and destroyed rows fade through the row's color alpha. A null image shows a sensor
+     * edges (.row.insp), mint ones for a friendly unit, which never takes the enemy's colour.
+     * Done and destroyed rows fade through the row's color alpha. A null image shows a sensor
      * contact's "?". {@link #show} fills a row of the forces or contacts list from the unit's status; the static
      * helpers give both lists and the forces grid the same lines, colors, tooltips and unit menu (C5, C6, C12, C13).
      */

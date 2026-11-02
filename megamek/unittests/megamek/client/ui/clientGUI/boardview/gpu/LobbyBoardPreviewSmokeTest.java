@@ -23,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
@@ -88,6 +89,7 @@ class LobbyBoardPreviewSmokeTest {
                 GpuBoardTestUi.assertHorizontalBounds(preview, preview);
                 UiTestStage.capture("map-embedded-inspection", 960, 720).dispose();
                 BoardCamera camera = checkCameraInput(stage, preview, theme);
+                checkHexInspection(stage, preview, camera, inspection);
                 checkConditions(stage, preview, camera, inspection);
                 checkDisplayPreferences(stage, preview, camera, inspection);
                 camera.setIsometric(false);
@@ -294,7 +296,7 @@ class LobbyBoardPreviewSmokeTest {
         assertFalse(weatherField.getBoolean(atmosphere), "returning to clear weather removes the precipitation");
     }
 
-    /** Real stage events exercise focus, shared camera buttons and all six mouse gestures. */
+    /** Real stage events exercise focus, shared camera buttons, and left-drag inspection. */
     private static BoardCamera checkCameraInput(Stage stage, LobbyBoardPreview preview, UiTheme theme) throws Exception {
         var field = LobbyBoardPreview.class.getDeclaredField("camera");
         field.setAccessible(true);
@@ -319,7 +321,10 @@ class LobbyBoardPreviewSmokeTest {
                 GpuBoardTestUi.withModifiers(shift ? java.awt.event.InputEvent.SHIFT_DOWN_MASK : 0,
                       () -> drag(stage, image, button));
                 boolean orbit = (button == Input.Buttons.MIDDLE) != shift;
-                if (orbit) {
+                if (button == Input.Buttons.LEFT) {
+                    assertEquals(azimuth, camera.azimuth(), .001f, "left-drag inspects without orbiting");
+                    assertTrue(focus.epsilonEquals(camera.focus, .001f), "left-drag inspects without panning");
+                } else if (orbit) {
                     assertNotEquals(azimuth, camera.azimuth(), "drag must orbit: button=" + button + ", shift=" + shift);
                 } else {
                     assertEquals(azimuth, camera.azimuth(), .001f);
@@ -376,6 +381,45 @@ class LobbyBoardPreviewSmokeTest {
         return camera;
     }
 
+    private static void checkHexInspection(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
+          Inspection inspection) throws Exception {
+        click(stage, preview.findActor("map-view-top"));
+        click(stage, preview.findActor("map-view-fit"));
+        Image image = preview.findActor("map-inspection-image");
+        for (Coords coords : new Coords[] { new Coords(0, 3), new Coords(2, 2) }) {
+            float height = inspection.game().getBoard().getHex(coords).getLevel() * BoardGeometry.level();
+            Vector3 point = camera.camera.project(BoardGeometry.center(coords, height), 0, 0,
+                  camera.camera.viewportWidth, camera.camera.viewportHeight);
+            Vector2 at = screen(stage, image, point.x * image.getWidth() / camera.camera.viewportWidth,
+                  point.y * image.getHeight() / camera.camera.viewportHeight);
+            stage.mouseMoved(Math.round(at.x), Math.round(at.y));
+            stage.touchDown(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+            stage.touchUp(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+            SwingUtilities.invokeAndWait(inspection.source()::refresh);
+            awaitImage(stage, preview);
+            assertEquals(GpuMapSource.hexCard(inspection.game().getBoard().getHex(coords)),
+                  inspection.source().takeFrame().tooltip(), "hovering follows the hex without a camera gesture");
+            assertNull(inspection.source().takeFrame().context(), "left-click must not pin the hex card");
+            assertFalse(inspection.source().takeFrame().panels().los().open(), "plain left-click must not start LOS");
+            Table card = preview.findActor("map-hex");
+            assertNotNull(card);
+            assertTrue(card.hasChildren());
+            Vector2 corner = card.localToAscendantCoordinates(preview, new Vector2());
+            assertTrue(corner.x > preview.getWidth() / 2, "hex information is in the bottom-right corner");
+            assertTrue(corner.y < 30);
+            Actor hint = preview.findActor("map-inspection-controls");
+            Vector2 hintRight = hint.localToAscendantCoordinates(preview, new Vector2(hint.getWidth(), 0));
+            assertTrue(hintRight.x <= corner.x, "camera hints must not run under the hex card");
+        }
+        UiTestStage.capture("map-embedded-hex-card", 960, 720).dispose();
+        stage.mouseMoved(959, 719);
+        stage.act(1 / 60f);
+        SwingUtilities.invokeAndWait(inspection.source()::refresh);
+        awaitImage(stage, preview);
+        assertEquals("", inspection.source().takeFrame().tooltip(), "moving off the board clears its hex information");
+        assertNull(preview.findActor("map-hex"));
+    }
+
     private static Vector2 screen(Stage stage, Actor actor, float x, float y) {
         return stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(x, y)));
     }
@@ -398,6 +442,9 @@ class LobbyBoardPreviewSmokeTest {
     private static Inspection inspection(Board board, PlanetaryConditions conditions) throws Exception {
         AtomicReference<Inspection> created = new AtomicReference<>();
         SwingUtilities.invokeAndWait(() -> {
+            for (int x = 0; x < board.getWidth(); x++) {
+                for (int y = 0; y < board.getHeight(); y++) { board.getHex(x, y).setCoords(new Coords(x, y)); }
+            }
             Game game = new Game();
             game.setPhase(GamePhase.LOUNGE);
             game.setBoard(board);

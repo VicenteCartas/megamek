@@ -228,7 +228,7 @@ class GpuHudLayoutSmokeTest {
             // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
             case "minimap" -> new float[] { metrics.right(), metrics.lowHeight() ? 180 : 210 };
             case "solution-card" -> new float[] { metrics.right(), 145 };
-            // The chip without the prototype's Back to 3D button (the user's decision of 2026-10-02), as measured.
+            // The chip without the prototype's Back to 3D button, as measured.
             case "tactical-chip" -> new float[] { 153, 32 };
             case "conditions-card" -> new float[] { 260, 140 };
             case "initiative-card" -> new float[] { 560, 290 };

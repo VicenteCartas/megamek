@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Zoom-out unit scaling (user decision 26): a unit keeps its size until a hex is narrower on screen than the threshold,
+ * Zoom-out unit scaling: a unit keeps its size until a hex is narrower on screen than the threshold,
  * then grows to keep the size it had on screen at the threshold, up to the maximum, on every axis and on top of its
  * family scale, and its strides grow with it.
  */

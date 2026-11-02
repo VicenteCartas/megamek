@@ -10,8 +10,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.math.ConvexHull;
-import com.badlogic.gdx.math.Intersector;
-import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Configuration;
 import megamek.common.board.BoardDecoration;
@@ -22,12 +20,11 @@ final class BoardPlantFootprint {
     private static final int STRIPS = 24, LAYERS = 12;
     private static final Map<File, List<Section>> SHAPES = new ConcurrentHashMap<>();
     private final List<Section> sections;
-    private final Polygon cactus;
     private final float[] edges;
     private final float minX, minY, maxX, maxY;
     private final float x, y, z;
 
-    record Key(String asset, float height, BoardDecoration.Stretch stretch, float rotation) { }
+    record Key(String asset, float scale, float height, BoardDecoration.Stretch stretch, float rotation) { }
     private record Shape(float[] points, float minX, float minY, float maxX, float maxY, Map<Shape, float[]> tests) { }
     private record Section(float bottom, float top, List<Shape> shapes) { }
 
@@ -36,14 +33,13 @@ final class BoardPlantFootprint {
         sections = new ArrayList<>();
         edges = new float[4];
         java.util.Arrays.fill(edges, Float.NEGATIVE_INFINITY);
-        cactus = BoardFeatures.solid(plant.asset()) ? null : BoardTreeCoverage.outline(plant);
-        if (cactus != null) { minX = minY = maxX = maxY = 0; return; }
         File root = new File(Configuration.dataDir(), "models/board");
         File file = BoardModelBounds.file(root, plant.asset()).getAbsoluteFile();
         float[] bounds = BoardModelBounds.bounds(plant.asset());
         float scale = BoardTreeCoverage.scale(plant, bounds[5] - bounds[2]);
         float sx = scale * (float) plant.stretch().x(), sy = scale * (float) plant.stretch().y();
-        float sz = scale * (float) plant.stretch().z();
+        float sz = BoardFeatures.solid(plant.asset()) ? scale * (float) plant.stretch().z()
+              : plant.height() * BoardGeometry.level() / BoardGeometry.hexScale() / (bounds[5] - bounds[2]) * (float) plant.stretch().z();
         float inset = plant.asset().startsWith("mars/") ? (bounds[2] + (bounds[5] - bounds[2]) * .06f) * sz : 0;
         double angle = Math.toRadians(plant.rotation()), cos = Math.cos(angle), sin = Math.sin(angle);
         float lowX = Float.POSITIVE_INFINITY, lowY = Float.POSITIVE_INFINITY;
@@ -74,7 +70,7 @@ final class BoardPlantFootprint {
     }
 
     private BoardPlantFootprint(BoardPlantFootprint source, float x, float y, float z) {
-        sections = source.sections; cactus = source.cactus; edges = source.edges;
+        sections = source.sections; edges = source.edges;
         minX = source.minX; minY = source.minY; maxX = source.maxX; maxY = source.maxY;
         this.x = x; this.y = y; this.z = z;
     }
@@ -83,12 +79,12 @@ final class BoardPlantFootprint {
 
     static BoardPlantFootprint of(BoardScene.Feature plant) {
         var result = new BoardPlantFootprint(plant);
-        return result.cactus == null ? result.at(plant.x(), plant.y(), 0) : result;
+        return result.at(plant.x(), plant.y(), 0);
     }
 
     /** Geometry belongs to one packing search; each candidate position only creates a translated wrapper. */
     static BoardPlantFootprint of(BoardScene.Feature plant, Map<Key, BoardPlantFootprint> prepared) {
-        var key = new Key(plant.asset(), plant.height(), plant.stretch(), plant.rotation());
+        var key = new Key(plant.asset(), plant.scale(), plant.height(), plant.stretch(), plant.rotation());
         return prepared.computeIfAbsent(key, ignored -> new BoardPlantFootprint(plant)).at(plant.x(), plant.y(), 0);
     }
 
@@ -96,17 +92,6 @@ final class BoardPlantFootprint {
     BoardPlantFootprint at(float x, float y, float z) { return new BoardPlantFootprint(this, x, y, z); }
 
     boolean overlaps(BoardPlantFootprint other) {
-        if (cactus != null && other.cactus != null) { return Intersector.overlapConvexPolygons(cactus, other.cactus); }
-        if (cactus != null) { return other.overlaps(this); }
-        if (other.cactus != null) {
-            for (var section : sections) {
-                for (var shape : section.shapes) {
-                    var polygon = new Polygon(shape.points); polygon.setPosition(x, y);
-                    if (Intersector.overlapConvexPolygons(polygon, other.cactus)) { return true; }
-                }
-            }
-            return false;
-        }
         float dx = other.x - x, dy = other.y - y, dz = other.z - z;
         if (maxX <= other.minX + dx || minX >= other.maxX + dx || maxY <= other.minY + dy || minY >= other.maxY + dy) { return false; }
         for (var a : sections) {
@@ -126,7 +111,6 @@ final class BoardPlantFootprint {
 
     /** A rigid colony stays within its own hex to prevent intersections across shared borders; crowns may overhang its cliff top. */
     boolean inside() {
-        if (cactus != null) { return BoardTreeCoverage.inside(cactus); }
         float w = BoardGeometry.TILE_WIDTH, h = BoardGeometry.TILE_HEIGHT;
         if (minY + y < -h / 2 + .02 || maxY + y > h / 2 - .02) { return false; }
         for (int edge = 0; edge < 4; edge++) {

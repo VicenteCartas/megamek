@@ -167,7 +167,7 @@ class LobbyMapSetupSmokeTest {
     }
 
     @Test
-    void severalPickedBoardsMakeASurpriseBoard() {
+    void stackControlsAddWithoutDuplicatesRollHideAndRemoveBoards() {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
             Table body = fixture.body;
@@ -176,10 +176,106 @@ class LobbyMapSetupSmokeTest {
             fixture.view.pick(boards.get(1), false);
             fixture.view.pick(boards.get(2), true);
             fixture.body.validate();
-            click(ui, body.findActor("map-surprise"));
+            assertNull(body.findActor("map-random"));
+            assertNull(body.findActor("map-surprise"));
+            assertNull(body.findActor("map-stack-0"), "a single map has no stack controls");
+            assertNull(body.findActor("map-stack-roll-0"));
+            assertNull(body.findActor("map-stack-surprise-0"));
+            click(ui, body.findActor("map-add-to-stack"));
+            assertEquals(2, fixture.form.settings().getBoardStack(0).size());
+            assertEquals(boards.get(1).name(), fixture.form.settings().getBoardsSelectedVector().getFirst());
+            UiButton add = body.findActor("map-add-to-stack");
+            assertTrue(add.isDisabled());
+            assertEquals("ALREADY ADDED", add.getText().toString());
+            click(ui, body.findActor("map-stack-roll-0"));
+            assertEquals(boards.get(2).name(), fixture.form.settings().getBoardsSelectedVector().getFirst());
+            click(ui, body.findActor("map-stack-surprise-0"));
             String surprise = fixture.form.settings().getBoardsSelectedVector().get(0);
             assertTrue(surprise.startsWith(MapSettings.BOARD_SURPRISE), surprise);
             assertEquals(MapSetupForm.Kind.SURPRISE, fixture.view.shown().slots().get(0).kind());
+            assertNull(body.<Image>findActor("map-slot-picture-0").getDrawable());
+            fixture.view.pick(boards.get(3), false);
+            click(ui, body.findActor("map-add-to-stack"));
+            assertEquals(3, fixture.form.settings().getBoardStack(0).size());
+            assertEquals(MapSetupForm.Kind.SURPRISE, fixture.view.shown().slots().get(0).kind());
+            UiButton stack = body.findActor("map-stack-0");
+            assertEquals("3", stack.getText().toString());
+            assertTrue(stack.details.isEmpty(), "the stack count must not have a text subtitle");
+            assertEquals(1, stack.icons.size());
+            body.validate();
+            assertTrue(stack.icons.getFirst().getX() >= stack.getLabel().getX() + stack.getLabel().getWidth(),
+                  "the stack icon follows the number in the same button");
+            click(ui, body.findActor("map-stack-0"));
+            ui.draw();
+            assertTrue(ui.stage.getRoot().findActor("map-stack-menu").isVisible());
+            for (int index = 0; index < 3; index++) {
+                assertFalse(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-" + index).isChecked(),
+                      "a surprise has no currently selected map to highlight");
+            }
+            click(ui, ui.stage.getRoot().findActor("map-stack-select-0-2"));
+            assertEquals(boards.get(3).name(), fixture.form.picture().slots().getFirst().file());
+            assertEquals(3, fixture.form.settings().getBoardStack(0).size());
+            assertFalse(ui.stage.getRoot().findActor("map-stack-menu").isVisible(), "selecting a map closes the dropdown");
+            click(ui, body.findActor("map-stack-0"));
+            assertTrue(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-2").isChecked());
+            click(ui, ui.stage.getRoot().findActor("map-stack-select-0-0"));
+            assertEquals(boards.get(1).name(), fixture.form.picture().slots().getFirst().file());
+            assertEquals(3, fixture.form.settings().getBoardStack(0).size());
+            assertFalse(ui.stage.getRoot().findActor("map-stack-menu").isVisible());
+            click(ui, body.findActor("map-stack-0"));
+            assertTrue(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-0").isChecked());
+            assertFalse(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-2").isChecked());
+            ui.draw();
+            UiTestStage.capture("map-stack-menu", 1600, 1080).dispose();
+            click(ui, ui.stage.getRoot().findActor("map-stack-remove-0-1"));
+            assertEquals(List.of(boards.get(1).name(), boards.get(3).name()), fixture.form.settings().getBoardStack(0));
+            assertEquals(boards.get(1).name(), fixture.form.picture().slots().getFirst().file(),
+                  "the remove action must not select the map it removes");
+            assertTrue(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-0").isChecked());
+            assertTrue(ui.stage.getRoot().findActor("map-stack-menu").isVisible());
+            click(ui, ui.stage.getRoot().findActor("map-stack-remove-0-0"));
+            assertEquals(boards.get(3).name(), fixture.form.picture().slots().getFirst().file(),
+                  "removing the current map selects a remaining member");
+            assertTrue(ui.stage.getRoot().findActor("map-stack-menu").isVisible(),
+                  "removing a map keeps the dropdown open even when only one map remains");
+            assertTrue(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-0").isChecked());
+            assertNull(body.findActor("map-stack-0"));
+            assertNull(body.findActor("map-stack-roll-0"));
+            assertNull(body.findActor("map-stack-surprise-0"));
+            click(ui, ui.stage.getRoot().findActor("map-stack-select-0-0"));
+            assertFalse(ui.stage.getRoot().findActor("map-stack-menu").isVisible(),
+                  "choosing the current map also closes the dropdown");
+            fixture.view.pick(boards.get(1), false);
+            click(ui, body.findActor("map-add-to-stack"));
+            assertNotNull(body.findActor("map-stack-0"), "adding a second map restores the stack controls");
+            fixture.view.pick(boards.get(3), false);
+            click(ui, body.findActor("map-place"));
+            assertEquals(List.of(boards.get(3).name()), fixture.form.settings().getBoardStack(0));
+            assertEquals(MapSetupForm.Kind.FIXED, fixture.view.shown().slots().getFirst().kind());
+            assertNull(body.findActor("map-stack-0"), "Place removes the stack controls along with its alternatives");
+            fixture.view.pick(boards.get(1), false);
+            click(ui, body.findActor("map-add-to-stack"));
+            body.setSize(1050, 800);
+            ui.draw();
+            for (int index = 0; index < 2; index++) {
+                Actor slot = body.findActor("map-slot-" + index);
+                Actor picture = body.findActor("map-slot-picture-" + index);
+                float previewTop = picture.localToAscendantCoordinates(slot, new Vector2(0, picture.getHeight())).y;
+                for (String name : List.of("map-stack-", "map-stack-roll-", "map-stack-surprise-", "map-theme-",
+                      "map-slot-rotate-", "map-level-offset-reset-")) {
+                    Actor control = body.findActor(name + index);
+                    if (name.startsWith("map-stack-") && index == 1) {
+                        assertNull(control, "single maps do not reserve space for stack controls");
+                        continue;
+                    }
+                    assertNotNull(control, name);
+                    Vector2 at = control.localToAscendantCoordinates(slot, new Vector2());
+                    assertTrue(at.y >= previewTop, name + " must stay above the board image when controls wrap");
+                    assertTrue(at.x >= 0 && at.x + control.getWidth() <= slot.getWidth() + .5f, name);
+                }
+            }
+            UiTestStage.capture("map-stack-small", 1600, 1080).dispose();
+            fixture.view.dispose();
             body.remove();
         });
     }
@@ -571,7 +667,7 @@ class LobbyMapSetupSmokeTest {
         public void changeBoard(MapSettings settings, int slot, String board) {
             calls.add("board " + slot + " " + board);
             settings.getBoardsSelectedVector().set(slot,
-                  board.contains("\n") ? MapSettings.BOARD_SURPRISE + board : board);
+                  board.contains("\n") && !board.startsWith(MapSettings.BOARD_SURPRISE) ? MapSettings.BOARD_SURPRISE + board : board);
         }
 
         @Override

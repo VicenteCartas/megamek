@@ -14,6 +14,8 @@ import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -42,6 +44,7 @@ import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.board.Coords;
 import megamek.logging.MMLogger;
 
 /** An embedded, read-only board inspection using the game's terrain, atmosphere and camera implementations. */
@@ -52,6 +55,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private final GpuLoadingPanel loading;
     private final Image image = new Image();
     private final Stack stack = new Stack();
+    private final GpuMapHexCard hexCard;
+    private final Table hexCorner = new Table();
     private final UiButton measure;
     private final BoardCamera camera = new BoardCamera();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
@@ -77,12 +82,16 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private GpuHexText hexText;
     private GpuTactical tactical;
     private SpriteBatch annotations;
+    private ShapeRenderer hoverLines;
+    private Coords hovered;
+    private float hoverZ = Float.NaN;
     private FrameBuffer target;
     private boolean installed;
     private boolean loadingDrawn;
 
     LobbyBoardPreview(UiKit kit, Runnable close) {
         this.kit = kit;
+        hexCard = new GpuMapHexCard(kit);
         setName("map-inspection-panel");
         setBackground(kit.skin.getDrawable("token-panel-plain"));
         pad(0);
@@ -130,7 +139,12 @@ final class LobbyBoardPreview extends Table implements Disposable {
         hint.setWrap(true);
         hint.setTouchable(Touchable.disabled);
         hint.getStyle().fontColor = Color.WHITE;
-        overlay.add(hint).growX().minWidth(0).pad(5, 8, 5, 8).left();
+        Table footer = new Table();
+        footer.add(hint).growX().minWidth(0).pad(5, 8, 5, 8).bottom().left();
+        hexCorner.setTouchable(Touchable.disabled);
+        hexCorner.bottom().right();
+        footer.add(hexCorner).bottom().right().padLeft(gap);
+        overlay.add(footer).growX();
         stack.add(image);
         stack.add(loading);
         stack.add(overlay);
@@ -179,6 +193,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
         private int button = -1;
         private int modifiers;
         private boolean dragged, orbiting;
+        private boolean hovering;
+        private float hoverX, hoverY;
 
         void clear() {
             cameraKeys.clear();
@@ -196,15 +212,15 @@ final class LobbyBoardPreview extends Table implements Disposable {
             button = pressed;
             modifiers = GpuBattleView.modifiers();
             dragged = false;
-            // Inspection has no unit-selection drag: left also takes the game's right-button gesture.
-            orbiting = BoardCameraControls.orbits(pressed == Input.Buttons.LEFT ? Input.Buttons.RIGHT : pressed,
-                  GpuBattleView.modifiers());
+            orbiting = BoardCameraControls.cameraButton(pressed) && BoardCameraControls.orbits(pressed, modifiers);
+            hover(x, y);
             return true;
         }
 
         @Override
         public void touchDragged(InputEvent event, float x, float y, int pointer) {
             if (!interactive() || button == -1) { return; }
+            hover(x, y);
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD) { return; }
             if (!dragged && orbiting) { cursor.capture(x, y); }
             dragged = true;
@@ -213,7 +229,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
                 x = at.x;
                 y = at.y;
             }
-            if (button == Input.Buttons.LEFT || BoardCameraControls.cameraButton(button)) {
+            if (BoardCameraControls.cameraButton(button)) {
                 float scale = camera.camera.viewportWidth / image.getWidth();
                 BoardCameraControls.drag(camera, orbiting, (x - lastX) * scale, (lastY - y) * scale, scale);
             }
@@ -235,12 +251,32 @@ final class LobbyBoardPreview extends Table implements Disposable {
 
         @Override
         public void enter(InputEvent event, float x, float y, int pointer, Actor fromActor) {
-            if (pointer == -1 && interactive()) { getStage().setScrollFocus(image); }
+            if (pointer == -1 && interactive()) { getStage().setScrollFocus(image); hover(x, y); }
         }
 
         @Override
         public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
             if (pointer == -1 && getStage().getScrollFocus() == image) { getStage().setScrollFocus(null); }
+            if (pointer == -1) {
+                hovering = false;
+                hovered = null;
+                if (source != null) { source.setHover(null); }
+            }
+        }
+
+        @Override
+        public boolean mouseMoved(InputEvent event, float x, float y) {
+            if (interactive()) { hover(x, y); }
+            return false;
+        }
+
+        private void hover(float x, float y) {
+            hovering = true;
+            hoverX = x; hoverY = y;
+            Pick hit = pick(x, y);
+            hovered = hit == null ? null : hit.coords();
+            hoverZ = hit == null ? Float.NaN : hit.height();
+            source.setHover(hovered, hoverZ);
         }
 
         @Override
@@ -311,19 +347,32 @@ final class LobbyBoardPreview extends Table implements Disposable {
         }
     }
 
-    /** Same picked surface and model commands as the full map preview; drags remain camera gestures. */
-    private void boardClick(float x, float y, int button, int modifiers) {
+    /** The same picked surface used by the full map preview's hover card and LOS tool. */
+    private record Pick(Coords coords, float height) { }
+
+    private Pick pick(float x, float y) {
         float px = x * camera.camera.viewportWidth / image.getWidth();
         // Camera.unproject flips against the window height, even for a smaller, offscreen viewport.
         float py = Gdx.graphics.getHeight() - y * camera.camera.viewportHeight / image.getHeight();
         var ray = camera.camera.getPickRay(px, py, 0, 0, camera.camera.viewportWidth, camera.camera.viewportHeight);
         var hit = terrain.selectionHit(scene, ray);
-        if (hit == null) { return; }
+        if (hit == null) { return null; }
         var floor = terrain.walkableHit(scene, ray);
         float z = floor != null && floor.coords().equals(hit.coords())
               ? ray.getEndPoint(new Vector3(), (float) Math.sqrt(floor.distance())).z : Float.NaN;
-        if (button == Input.Buttons.LEFT) { source.measure(hit.coords(), modifiers, z); }
+        return new Pick(hit.coords(), z);
+    }
+
+    private void boardClick(float x, float y, int button, int modifiers) {
+        Pick hit = pick(x, y);
+        if (hit == null) { source.setHover(null); return; }
+        float z = hit.height();
+        if (button == Input.Buttons.LEFT) {
+            source.setHover(hit.coords(), z);
+            source.measure(hit.coords(), modifiers, z);
+        }
         else if (button == Input.Buttons.RIGHT) {
+            source.inspect(hit.coords());
             UiMenuList list = new UiMenuList(kit);
             long generation = frame.boardGeneration();
             Integer height = Float.isNaN(z) ? null : GpuLosResult.pointedHeight(scene.tile(hit.coords()).elevation(), z);
@@ -344,6 +393,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (menu != null) { menu.cancel(); menu.remove(); menu = null; }
         if (source != null) { source.close(); source = null; }
         frame = null;
+        hovered = null;
+        input.hovering = false;
+        hexCard.update("");
+        hexCorner.clearChildren();
     }
 
     @Override
@@ -360,6 +413,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (source == null || source.isClosed() || getStage() == null || !loadingDrawn) { return; }
         frame = source.takeFrame();
         scene = frame.scene();
+        if (!menu.isVisible() && frame.context() != null) { source.inspect(null); }
         if (UiModal.active(getStage()) != null) { unfocus(); }
         validate();
         if (image.getWidth() < 1 || image.getHeight() < 1) { return; }
@@ -399,6 +453,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
             hexText = new GpuHexText();
             tactical = new GpuTactical();
             annotations = new SpriteBatch();
+            hoverLines = new ShapeRenderer();
         }
         atmosphere.configure(conditions);
         display.apply(terrain, atmosphere, ambientOcclusion, width, height, false);
@@ -421,6 +476,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (interactive() && getStage().getKeyboardFocus() == image) {
             BoardCameraControls.move(camera, cameraKeys.values(), delta * BoardCameraControls.speed(GpuBattleView.modifiers()));
         }
+        if (interactive() && input.hovering) { input.hover(input.hoverX, input.hoverY); }
         atmosphere.updateLight(camera.camera);
         terrain.setAtmosphere(atmosphere.lighting());
         atmosphere.configureClouds(terrain, scene);
@@ -431,6 +487,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
             loading.setVisible(true);
             measure.setDisabled(true);
             los.actor().setVisible(false);
+            hexCorner.setVisible(false);
             return;
         }
         try (TerrainSettings.Scope ignored = TerrainSettings.use(terrain.settings())) {
@@ -454,6 +511,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
             hexText.render(annotations, camera, atmosphere.depthTexture(), null, 0, atmosphere);
             tactical.update(scene);
             tactical.renderLabels(camera.camera);
+            GpuHexHover.render(hoverLines, camera.camera, scene, hovered, GpuHexHover.top(scene, hovered, hoverZ));
             target.end();
         }
         if (image.getDrawable() == null) {
@@ -463,8 +521,23 @@ final class LobbyBoardPreview extends Table implements Disposable {
         }
         loading.setVisible(false);
         measure.setDisabled(false);
+        if (hexCard.update(frame.tooltip())) {
+            hexCorner.clearChildren();
+            if (hexCard.actor().hasChildren()) {
+                hexCorner.add(hexCard.actor()).width(new Value() {
+                    @Override public float get(Actor context) {
+                        return Math.min(GpuMapHexCard.WIDTH, image.getWidth() / 2);
+                    }
+                });
+            }
+        }
+        hexCorner.setVisible(UiModal.active(getStage()) == null);
+        hexCorner.validate();
+        Vector2 corner = hexCard.actor().hasChildren() ? hexCard.actor().localToAscendantCoordinates(stack, new Vector2()) : new Vector2();
+        List<Rectangle> occupied = hexCard.actor().hasChildren() ? List.of(new Rectangle(corner.x, corner.y,
+              hexCard.actor().getWidth(), hexCard.actor().getHeight())) : List.of();
         los.update(new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, null, preferences,
-              GpuHud.Metrics.of(image.getWidth(), image.getHeight()), List.of()));
+              GpuHud.Metrics.of(image.getWidth(), image.getHeight()), occupied));
         if (UiModal.active(getStage()) != null) { los.actor().setVisible(false); los.dismiss(); menu.cancel(); }
     }
 
@@ -493,5 +566,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (hexText != null) { hexText.dispose(); hexText = null; }
         if (tactical != null) { tactical.dispose(); tactical = null; }
         if (annotations != null) { annotations.dispose(); annotations = null; }
+        if (hoverLines != null) { hoverLines.dispose(); hoverLines = null; }
     }
 }

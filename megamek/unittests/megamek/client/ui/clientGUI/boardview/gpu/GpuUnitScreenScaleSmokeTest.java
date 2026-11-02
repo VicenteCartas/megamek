@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Zoom-out unit scaling (user decision 26) in the running 3D view and on the board-space harness: at or above the
+ * Zoom-out unit scaling in the running 3D view and on the board-space harness: at or above the
  * threshold a unit keeps its size; zoomed out further it grows on every axis and keeps its size on screen, up to the
  * maximum; picking and its anchor follow the grown unit, switching it off restores the size, and the Tactical View's
  * icons keep their size in the hex.

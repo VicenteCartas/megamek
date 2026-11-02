@@ -271,7 +271,7 @@ class GpuPlaybackHistoryTest {
             history.togglePaused();
             assertFalse(history.replaying(), "Play/pause stops a replay");
         }
-        // Instant is a speed of its own (the user's decision of 2026-10-03): a replay steps every frame.
+        // Instant is a speed of its own: a replay steps every frame.
         history.speed(UnitMotion.Speed.INSTANT);
         assertEquals(UnitMotion.Speed.INSTANT, history.speed());
         history.replay(notFired);

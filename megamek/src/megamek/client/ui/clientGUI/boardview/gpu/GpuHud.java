@@ -886,7 +886,7 @@ final class GpuHud implements GpuBoardHud {
      * The unit a left click with this pick takes before a stack's turn ({@link #clickedUnit}). In the local planning
      * turn it is none, so the click plans the move there as in an empty hex, on a hex of the plan's envelope, the legal
      * end hexes the board highlights on the actor's board, other than the actor's own hex: a unit's model there as
-     * well as the ground (the user's decision of 2026-10-11, end destination wins); and on a transport the actor can
+     * well as the ground; and on a transport the actor can
      * board ({@link GpuMovePlan.Snapshot#mounts}). Otherwise it is the picked unit, which a click selects or inspects.
      */
     int boardUnit(Coords coords, int unitId) {
@@ -905,8 +905,8 @@ final class GpuHud implements GpuBoardHud {
     /**
      * The unit a left click on {@code coords} takes instead of the picked {@code unitId}: while the unit the HUD shows
      * as taken (the fire orders' focused target, else the card's unit) stands in that hex, the next of the hex's units
-     * after it, so repeated clicks on a stack select, inspect or focus its units in turn (the user's decision of
-     * 2026-10-11). Only units the status lists take part, not the wrecks the board draws too, and while a click focuses
+     * after it, so repeated clicks on a stack select, inspect or focus its units in turn.
+     * Only units the status lists take part, not the wrecks the board draws too, and while a click focuses
      * targets (the local FIRING turn) no sensor contact, which it cannot focus.
      */
     private int cycled(Coords coords, int unitId) {
@@ -993,7 +993,7 @@ final class GpuHud implements GpuBoardHud {
      * menus of the components: an own unit that can act now in the local MOVEMENT, FIRING, TARGETING, OFFBOARD or
      * PHYSICAL turn is selected through that phase's command (the fire orders' in FIRING, the display's own selection
      * elsewhere). Outside the local turn, where MegaMek selects nothing, an own unit becomes the focus (C.5), which the
-     * card and the panels show as the selected unit (the user's decision of 2026-10-02). Any other unit is inspected.
+     * card and the panels show as the selected unit. Any other unit is inspected.
      * Selecting ends an inspection and a cleared selection (the card's ✕); selecting the acting unit again posts
      * nothing, so its plan stays, unless the selection was cleared.
      */

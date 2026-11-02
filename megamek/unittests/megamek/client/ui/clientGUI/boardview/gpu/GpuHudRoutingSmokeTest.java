@@ -703,7 +703,7 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * The user's decision of 2026-10-02: outside the local turn a click on an own unit, on its forces row or on the
+     * Outside the local turn a click on an own unit, on its forces row or on the
      * board, makes it the unit the card and the forces list show as selected (mint), in the initiative phases, a report
      * phase, the end report and the opponent's movement turn. MegaMek's selection is not asked, the pick holds over
      * later captures even where no turn accepts the unit, a friendly row never takes the enemy's coral, and an enemy
@@ -761,7 +761,7 @@ class GpuHudRoutingSmokeTest {
             assertSame(row.getSkin().getDrawable("row-friend"), row.getBackground(), "a friendly unit's mint edges");
             routing.capture("i1a2-forces-own-turn-inspected");
 
-            // The card's ✕ closes the card and deselects (the user's decision of 2026-10-02): no card and no
+            // The card's ✕ closes the card and deselects: no card and no
             // highlighted row while the actor keeps its turn; a click on a unit shows the card again.
             routing.press(routing.find("unit-card-close"));
             routing.view.render();
@@ -781,7 +781,7 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * The user's decisions of 2026-10-02: the card's ✕, on the selected unit as on an inspected one, clears the
+     * The card's ✕, on the selected unit as on an inspected one, clears the
      * selection. In the local turn no unit is then selected at all: no card, no dock, no selected row; a hex does
      * nothing, an enemy is only inspected, and the keys of MegaMek's current unit stay with the HUD while a menu-bar
      * bind still reaches MegaMek. A click on the own unit selects it again, afresh.
@@ -843,7 +843,7 @@ class GpuHudRoutingSmokeTest {
     }
 
     /**
-     * The user's decision of 2026-10-02 (item 33.1): the unit the card shows is the one highlighted row of the forces
+     * The unit the card shows is the one highlighted row of the forces
      * and contacts lists, in the initiative phase, the own movement turn and the opponent's. Panel clicks and board
      * clicks switch it from a friendly unit to the enemy and back: a friendly unit's forces row, the enemy's contacts
      * row (and its row in the forces list's contacts), never a second row; in the own turn the acting unit keeps its

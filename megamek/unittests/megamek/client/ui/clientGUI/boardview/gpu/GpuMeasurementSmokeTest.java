@@ -87,7 +87,7 @@ class GpuMeasurementSmokeTest {
 
                 private void verifyModifiers(int modifiers) {
                     // The HUD hands an Alt click to MegaMek's measurement tools, at the height the pointer
-                    // shows: the measured hex's ground (the user's decision of 2026-10-03).
+                    // shows: the measured hex's ground.
                     ArgumentCaptor<Float> pointed = ArgumentCaptor.forClass(Float.class);
                     verify(source).measure(eq(start), eq(modifiers), pointed.capture());
                     assertEquals(0, GpuLosResult.pointedHeight(fixture.game.getBoard().getHex(start),

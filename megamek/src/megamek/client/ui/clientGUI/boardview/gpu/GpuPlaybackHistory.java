@@ -288,7 +288,7 @@ final class GpuPlaybackHistory {
     }
 
     /**
-     * The phase header's speeds, 0.5x to 4x and Instant (the user's decision of 2026-10-03); "Skip to results" is an
+     * The phase header's speeds, 0.5x to 4x and Instant; "Skip to results" is an
      * Instant for the current playback only ({@link #skip}).
      */
     void speed(UnitMotion.Speed value) {

@@ -30,7 +30,7 @@ class BoardVolcanoFoliageTest {
                         var hex = new Hex(0, type + ":" + density + ";foliage_elev:" + height + extra, theme);
                         var at = new Coords(density, height);
                         var cover = cover(hex, at);
-                        assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.limit(density, false));
+                        assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.canopyLimit(density));
                         for (var feature : cover) {
                             assertTrue(height == 1 ? feature.asset().matches("vegetation/foliage-volcano(-[23])?")
                                   : BoardFeatures.VOLCANO_TREES.contains(feature.asset()), feature.asset());

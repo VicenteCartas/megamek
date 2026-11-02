@@ -73,12 +73,17 @@ class MapSettingsTest {
         original.setBoardTheme(3, "snow");
         original.setBoardLevelOffset(0, 5);
         original.setBoardLevelOffset(3, -7);
+        original.setBoardStack(0, List.of("a", "alternate"));
+        original.setBoardStack(3, List.of("d", MapSettings.BOARD_GENERATED));
 
         MapSettings copy = MapSettings.getInstance(original);
         copy.setBoardTheme(0, null);
         copy.setBoardTheme(1, "desert");
         copy.setBoardLevelOffset(0, 0);
         copy.setBoardLevelOffset(1, 3);
+        copy.setBoardStack(0, List.of("a", "other"));
+        assertEquals(List.of("a", "alternate"), original.getBoardStack(0));
+        assertEquals(List.of("a", "other"), copy.getBoardStack(0));
         assertEquals("volcano", original.getBoardTheme(0));
         assertNull(original.getBoardTheme(1));
         assertNull(copy.getBoardTheme(0));
@@ -105,6 +110,8 @@ class MapSettingsTest {
         assertEquals(0, received.getBoardLevelOffset(1));
         assertEquals(0, received.getBoardLevelOffset(2));
         assertEquals(-7, received.getBoardLevelOffset(3));
+        assertEquals(original.getBoardStack(0), received.getBoardStack(0));
+        assertEquals(original.getBoardStack(3), received.getBoardStack(3));
     }
 
     @Test
@@ -118,6 +125,8 @@ class MapSettingsTest {
         settings.setBoardLevelOffset(1, 5);
         settings.setBoardLevelOffset(2, -3);
         settings.setBoardLevelOffset(3, 7);
+        settings.setBoardStack(2, List.of("c", "alternate"));
+        settings.setBoardStack(3, List.of("d", "other"));
 
         settings.setMapSize(3, 2);
         assertEquals("volcano", settings.getBoardTheme(1));
@@ -129,6 +138,8 @@ class MapSettingsTest {
         assertEquals(0, settings.getBoardLevelOffset(2));
         assertEquals(-3, settings.getBoardLevelOffset(3));
         assertEquals(7, settings.getBoardLevelOffset(4));
+        assertEquals(List.of("c", "alternate"), settings.getBoardStack(3));
+        assertEquals(List.of("d", "other"), settings.getBoardStack(4));
 
         settings.setMapSize(1, 2);
         assertNull(settings.getBoardTheme(0));
@@ -137,6 +148,8 @@ class MapSettingsTest {
         assertEquals(0, settings.getBoardLevelOffset(0));
         assertEquals(-3, settings.getBoardLevelOffset(1));
         assertEquals(0, settings.getBoardLevelOffset(4));
+        assertEquals(List.of("c", "alternate"), settings.getBoardStack(1));
+        assertEquals(List.of(), settings.getBoardStack(4));
         settings.setMapSize(2, 2);
         assertNull(settings.getBoardTheme(1), "A restored panel must not inherit its cropped override");
         assertEquals("snow", settings.getBoardTheme(2));
@@ -144,10 +157,28 @@ class MapSettingsTest {
         assertEquals(0, settings.getBoardLevelOffset(1));
         assertEquals(-3, settings.getBoardLevelOffset(2));
         assertEquals(0, settings.getBoardLevelOffset(3));
+        assertEquals(List.of("c", "alternate"), settings.getBoardStack(2));
+        assertEquals(List.of(), settings.getBoardStack(3), "Growing must not resurrect a cropped stack");
         settings.setMapSize(2, 1);
         settings.setMapSize(2, 2);
         assertNull(settings.getBoardTheme(2), "Cropped rows must not restore stale overrides either");
         assertEquals(0, settings.getBoardLevelOffset(2));
+        assertEquals(List.of(), settings.getBoardStack(2));
+    }
+
+    @Test
+    void serverValidationPrunesMissingCandidatesButKeepsGeneratedAndSurpriseMode() {
+        MapSettings settings = MapSettings.getInstance();
+        settings.setMapSize(2, 1);
+        settings.setBoardsSelectedVector(List.of("missing", MapSettings.BOARD_SURPRISE + "missing\nkeep"));
+        settings.setBoardStack(0, List.of("missing", "keep", MapSettings.BOARD_GENERATED));
+        settings.setBoardsAvailableVector(List.of("keep"));
+        settings.removeUnavailable();
+        assertEquals("keep", settings.getBoardsSelectedVector().getFirst());
+        assertEquals(List.of("keep", MapSettings.BOARD_GENERATED), settings.getBoardStack(0));
+        assertEquals(MapSettings.BOARD_SURPRISE + "keep", settings.getBoardsSelectedVector().get(1));
+        settings.chooseSurpriseBoards();
+        assertEquals("keep", settings.getBoardsSelectedVector().get(1));
     }
 
     @Test

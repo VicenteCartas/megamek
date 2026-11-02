@@ -302,7 +302,7 @@ class GpuUtilityMinimapSmokeTest {
         click(hud, "map-view-isometric");
         assertTrue(board.camera.isTopDown(), "The disabled preset cannot incline the Tactical View");
         assertTrue(board.camera.tactical(), "Camera presets keep the Tactical View active");
-        // The chip names the mode only (the user's decision of 2026-10-02): the pressed utility switches back.
+        // The chip names the mode only: the pressed utility switches back.
         List<String> chip = new ArrayList<>();
         boolean button = false;
         for (Actor child : ((Table) parts.utilities.chip()).getChildren()) {

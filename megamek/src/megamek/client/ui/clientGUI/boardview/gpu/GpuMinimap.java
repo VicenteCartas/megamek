@@ -28,9 +28,9 @@ import megamek.common.board.Coords;
 /**
  * Minimap under the utilities (C.1 G4): the board in fixed colours of its terrain, the presented units, the
  * planned route and the ground the camera shows. The map fills the panel inside its rails, with the close button over
- * its top-right corner (the user's decision of 2026-10-02: no caption, no north mark). A left press or drag on it
+ * its top-right corner (no caption, no north mark). A left press or drag on it
  * centres the camera there, a middle drag orbits the camera and the wheel zooms it as the board's do, about the view's
- * centre (the user's decision of 2026-10-03), and none changes an order.
+ * centre, and none changes an order.
  */
 final class GpuMinimap implements GpuHud.Component {
     private static final Color BACKGROUND = Color.valueOf("141B1B");
@@ -89,7 +89,7 @@ final class GpuMinimap implements GpuHud.Component {
         close.setName("minimap-close");
         canvas = new Canvas();
         // Presses beside the close button reach the map under it: a Table takes presses on its children only. The
-        // button lies straight on the panel's corner, as every panel's does (the user's decision of 2026-10-03).
+        // button lies straight on the panel's corner, as every panel's does.
         Table corner = new Table();
         corner.top().right().add(close).size(CLOSE_SIZE).pad(CLOSE_INSET);
         root.add(new Stack(canvas, corner)).growX();

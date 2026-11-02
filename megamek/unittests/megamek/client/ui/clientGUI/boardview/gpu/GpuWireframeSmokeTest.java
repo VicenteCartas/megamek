@@ -111,7 +111,7 @@ class GpuWireframeSmokeTest {
         float originalZoom = view.boardCamera.camera.zoom;
         view.boardCamera.zoom(.08f);
         render(view, "wireframe-unit.png");
-        // The cosmetic scatter draws no lines (the user's decision of 2026-10-03).
+        // The cosmetic scatter draws no lines.
         Set<Object> scatter = visibleScatter(view);
         assertFalse(scatter.isEmpty(), "The board around the unit has scatter in view");
         List<Object> drawn = new ArrayList<>();

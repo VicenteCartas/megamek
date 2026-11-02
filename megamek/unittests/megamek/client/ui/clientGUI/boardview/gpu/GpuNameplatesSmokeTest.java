@@ -465,7 +465,7 @@ class GpuNameplatesSmokeTest {
     }
 
     /**
-     * The user's decision of 2026-10-02: the tag of the unit the card shows lies over every other tag and the hovered
+     * The tag of the unit the card shows lies over every other tag and the hovered
      * unit's over the rest; without either the tags keep the units' order. With the nameplate key held every unit has
      * a tag; the King Crab's overlaps the Timber Wolf's, which comes first.
      */

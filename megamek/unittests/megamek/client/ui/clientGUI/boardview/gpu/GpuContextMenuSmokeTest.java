@@ -471,7 +471,7 @@ class GpuContextMenuSmokeTest {
     }
 
     /**
-     * The user's decision of 2026-10-03: a group opens its submenu beside its item, as a desktop menu does. The menu
+     * A group opens its submenu beside its item, as a desktop menu does. The menu
      * stays open; a submenu's own group opens the next level and keeps the chain; another group of the menu replaces
      * the chain below it; Esc closes the deepest; a press outside closes them all, and so does a choice.
      */

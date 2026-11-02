@@ -74,7 +74,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * Movement clicks into occupied hexes (the user's decisions of 2026-10-11): the picks the 3D board hands the HUD
+ * Movement clicks into occupied hexes: the picks the 3D board hands the HUD
  * ({@code GpuBattleView.touchUp}: the hex and the unit picked there) go through the real GpuHud routing into the real
  * GpuBoardSource, GpuMovePlan and MovementDisplay. In the planning turn the end destination wins: a click on a hex in the
  * plan's envelope plans as in an empty hex, on a unit's model as on the ground; elsewhere a click selects or inspects,
@@ -580,8 +580,8 @@ class GpuMoveClickRoutingTest {
     }
 
     /**
-     * Every unit menu ends with MegaMek's full map menu of the unit's hex, in every phase (the user's decision of
-     * 2026-10-11): a gamemaster's lists the Gamemaster commands, for an enemy and an own unit alike, and they act on
+     * Every unit menu ends with MegaMek's full map menu of the unit's hex, in every phase: 
+     * a gamemaster's lists the Gamemaster commands, for an enemy and an own unit alike, and they act on
      * that hex's units; another player's lists none.
      */
     @Test

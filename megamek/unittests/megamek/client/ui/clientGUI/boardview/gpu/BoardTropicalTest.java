@@ -44,7 +44,7 @@ class BoardTropicalTest {
             assertEquals(.5f, tile.groundCover().desert(), .00001f);
             assertEquals(0, tile.groundCover().grass());
             long canopy = tile.features().stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE && f.height() >= 2).count();
-            assertTrue(canopy > 0 && canopy <= BoardTreeCoverage.limit(1, false));
+            assertTrue(canopy > 0 && canopy <= BoardTreeCoverage.canopyLimit(1));
             assertEquals(canopy, tile.features().stream().filter(f -> f.asset().startsWith("vegetation/foliage-jungle")).count());
             palms += (int) tile.features().stream().filter(f -> f.asset().startsWith("vegetation/palm")).count();
             broadleaf += (int) tile.features().stream().filter(f -> f.asset().startsWith("vegetation/tree")).count();
@@ -67,7 +67,7 @@ class BoardTropicalTest {
             var trees = BoardFeatures.capture(hex, at, Map.of());
             var road = BoardRoad.clearance(at, hex, c -> null);
             long canopy = trees.stream().filter(f -> f.height() >= 2).count();
-            assertTrue(canopy > 0 && canopy <= BoardTreeCoverage.limit(density, false));
+            assertTrue(canopy > 0 && canopy <= BoardTreeCoverage.canopyLimit(density));
             assertTrue(trees.stream().filter(f -> f.asset().startsWith("vegetation/foliage-jungle")).count() <= canopy);
             assertEquals(trees, BoardFeatures.capture(hex, at, Map.of()), "Capture is deterministic");
             for (var tree : trees) {
@@ -76,7 +76,7 @@ class BoardTropicalTest {
             }
             var low = new Hex(0, terrain + ":" + density + ";foliage_elev:1", "tropical", at);
             var shrubs = BoardFeatures.capture(low, at, Map.of());
-            assertTrue(!shrubs.isEmpty() && shrubs.size() <= BoardTreeCoverage.limit(density, false));
+            assertTrue(!shrubs.isEmpty() && shrubs.size() <= BoardTreeCoverage.canopyLimit(density));
             assertTrue(shrubs.stream().allMatch(f -> f.asset().startsWith("vegetation/foliage-jungle") && f.height() <= 1.1f));
         }
     }

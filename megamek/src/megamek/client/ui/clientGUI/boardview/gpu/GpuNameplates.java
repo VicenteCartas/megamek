@@ -41,7 +41,7 @@ import megamek.common.units.Entity;
  * inspected, the physical target or a sensor contact, and every unit while the nameplate key shows them all or the
  * client's nameplate setting ({@link NameplateMode}) always does. A tag names the
  * unit as the client's label style does (the Legacy 2D board label's name) before its status words; a tag with neither
- * stays a pip (the user's decision of 2026-10-07: no phase words, no model repeated after the name).
+ * stays a pip (no phase words, no model repeated after the name).
  * Every unit but a sensor contact or a destroyed unit also gets its board label's marks on its head, under the pip or
  * tag: the Legacy 2D board's damage tile, armor and structure bars ({@link GpuBattleStatus.Marks}), and an E(C)CM
  * source its "ECM"/"ECCM" chip beside them. A tag carries the unit's weight class letter and its gunnery and piloting
@@ -227,7 +227,7 @@ final class GpuNameplates implements GpuHud.Component {
             }
         }
         // Each layer keeps the units' order with the hovered unit's actors and then the card unit's last, so the
-        // highlighted unit's plate is never buried under another (the user's decision of 2026-10-02).
+        // highlighted unit's plate is never buried under another.
         List<Plate> ordered = units.stream().map(unit -> plates.get(unit.id())).filter(Objects::nonNull).toList();
         Plate hovered = plates.get(view.hoveredUnit());
         Plate card = plates.get(state.cardUnit());

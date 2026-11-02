@@ -388,8 +388,8 @@ class GpuUnitPanelTest {
     }
 
     /**
-     * A doll location's click opens the critical table and flashes that location's block, a highlight that fades
-     * (the user's decision of 2026-10-02): no filter chip, nothing selected. The ARMOR dolls' arrows still step
+     * A doll location's click opens the critical table and flashes that location's block, a highlight that fades: 
+     * no filter chip, nothing selected. The ARMOR dolls' arrows still step
      * through the locations, the shield after its arm, and Enter opens the stepped location as a click does.
      */
     @Test

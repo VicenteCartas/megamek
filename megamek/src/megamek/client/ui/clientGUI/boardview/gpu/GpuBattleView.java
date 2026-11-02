@@ -1202,6 +1202,12 @@ class GpuBattleView extends ApplicationAdapter {
      */
     private void renderHoverRings() {
         float top = hoverTop();
+        if (!source.isEditor()) {
+            if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+                GpuHexHover.render(lines, boardCamera.camera, scene, hovered, top);
+            }
+            return;
+        }
         if ((hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY()))
               && (!source.isEditor() || source.editorState() == null || source.editorState().selection().isEmpty())
               && ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY()) < 0) {
@@ -1336,18 +1342,7 @@ class GpuBattleView extends ApplicationAdapter {
                 lines.box(box.min.x, box.min.y, box.max.z, box.getWidth(), box.getHeight(), box.getDepth());
             }
         } else {
-            float base = BoardTacticalGeometry.floatingZ(scene, hovered);
-            ring(hovered, Float.isNaN(top) ? base : top);
-            if (!Float.isNaN(top)) {
-                lines.setColor(1, 1, 1, alpha * .25f);
-                ring(hovered, base);
-                Vector3 center = BoardGeometry.center(hovered, 0);
-                for (int edge = 0; edge < 6; edge++) {
-                    Vector3 corner = BoardGeometry.inset(BoardGeometry.corner(hovered, 0, edge), center,
-                          HOVER_HEX_INSET);
-                    lines.line(corner.x, corner.y, base, corner.x, corner.y, top);
-                }
-            }
+            GpuHexHover.draw(lines, scene, hovered, top, alpha);
         }
         lines.end();
     }
@@ -2586,12 +2581,7 @@ class GpuBattleView extends ApplicationAdapter {
      * a hex above the floor's level when that is more than a hex above the hex's own ground, else NaN.
      */
     private float hoverTop() {
-        if (hovered == null || scene == null || scene.tile(hovered) == null || Float.isNaN(hoverZ)) {
-            return Float.NaN;
-        }
-        float base = BoardTacticalGeometry.floatingZ(scene, hovered);
-        float top = Math.max(base, hoverFloorZ() + .5f * BoardGeometry.hexScale());
-        return top > base + BoardGeometry.hexScale() ? top : Float.NaN;
+        return scene == null ? Float.NaN : GpuHexHover.top(scene, hovered, hoverZ);
     }
 
     private boolean hovers(BoardScene.Unit unit) {

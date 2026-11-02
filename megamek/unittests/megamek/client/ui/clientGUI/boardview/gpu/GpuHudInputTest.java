@@ -685,7 +685,7 @@ class GpuHudInputTest {
         assertEquals(Entity.NONE, hud.state.inspected, "selecting ends the inspection");
         click(HEX, Entity.NONE, CTRL_DOWN_MASK);
         verify(source, never()).measure(HEX, CTRL_DOWN_MASK, Float.NaN);
-        // At the height the pointer shows (the user's decision of 2026-10-03), the terrain hit's world height.
+        // At the height the pointer shows, ser's decision of 2026-10-03), the terrain hit's world height.
         hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, ALT_DOWN_MASK, 100, 100, 3.5f);
         verify(source).measure(HEX, ALT_DOWN_MASK, 3.5f);
         // Ctrl on an own unit pins a waypoint in its hex instead of selecting it.
@@ -718,7 +718,7 @@ class GpuHudInputTest {
         verify(source).hover(HEX, 0);
         verify(source).click(HEX, false, 0);
 
-        // Outside the local turn an own unit becomes the shown unit, the focus (the user's decision of 2026-10-02):
+        // Outside the local turn an own unit becomes the shown unit, the focus:
         // MegaMek selects nothing then, and the orders stay as they are.
         update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 2, unit(FIRST, OWN, false, true),
               unit(SECOND, OWN, false, true)), panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
@@ -733,7 +733,7 @@ class GpuHudInputTest {
     }
 
     /**
-     * Repeated clicks on a stack take its units in turn in every phase (the user's decision of 2026-10-11), here
+     * Repeated clicks on a stack take its units in turn in every phase, here
      * outside the local turn: while the shown unit stands in the clicked hex, a click takes the next unit there, so the
      * own units become the focus one after the other and the enemies, a sensor contact among them, are inspected one
      * after the other, whichever unit the pick hit. A lone unit stays taken.

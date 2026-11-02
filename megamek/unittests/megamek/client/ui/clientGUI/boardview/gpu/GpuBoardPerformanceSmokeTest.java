@@ -340,6 +340,7 @@ class GpuBoardPerformanceSmokeTest {
                 Input rawInput;
                 Input fixedInput;
                 GpuDrawCallAudit drawAudit;
+                GpuDrawCallAudit.PipelineStatistics pipelineStatistics;
                 String profiledStage;
                 final StringBuilder draws = new StringBuilder();
                 final double[] samples = new double[sampleFrames];
@@ -431,6 +432,7 @@ class GpuBoardPerformanceSmokeTest {
 
                 @Override
                 void renderStage(String stage) {
+                    if (pipelineStatistics != null) { pipelineStatistics.stage(stage); }
                     long now = System.nanoTime();
                     if (currentStage != null && now - stageStarted > 8_000_000) {
                         SlowStage event = new SlowStage();
@@ -521,6 +523,12 @@ class GpuBoardPerformanceSmokeTest {
                             detailSubmissions.clear();
                         }
                         if (phase == warmupFrames) {
+                            if (Boolean.getBoolean("megamek.gpu.performanceAssertPlainGround")) {
+                                // A source diagnostic may erase only channels proven absent from every sculpt layer.
+                                var plain = GpuTerrain.class.getDeclaredMethod("plainSculptFinish");
+                                plain.setAccessible(true);
+                                assertEquals(true, plain.invoke(terrain(this)), "Expected non-emissive dielectric sculpt materials");
+                            }
                             if (fixedAtmosphere) {
                                 assertEquals(measuredAtmosphere, GpuBoardTestUi.tuning(this).atmosphere());
                                 assertEquals(false, GpuBoardTestUi.tuning(this).fixedSun());
@@ -693,6 +701,18 @@ class GpuBoardPerformanceSmokeTest {
                                     Files.writeString(new File(output, "performance-full-" + scenario + "-families.txt").toPath(),
                                           attribution);
                                 } finally { drawAudit = null; }
+                            }
+                            if (Boolean.getBoolean("megamek.gpu.performancePipelineStatistics") && shot != 2) {
+                                // Hardware work counts and synchronous readback are diagnostic only, after timings.
+                                measuring = timingFrame = false;
+                                try (var statistics = new GpuDrawCallAudit.PipelineStatistics()) {
+                                    pipelineStatistics = statistics;
+                                    super.render();
+                                    String counts = statistics.report(scenario);
+                                    System.out.print(counts);
+                                    Files.writeString(new File(output, "performance-full-" + scenario + "-pipeline.txt").toPath(),
+                                          counts);
+                                } finally { pipelineStatistics = null; }
                             }
                             if (compareCache) {
                                 // Readback and debug frames stay outside both timing and draw-count samples.

@@ -284,7 +284,7 @@ class GpuHelpMenuPlayersSmokeTest {
                 choose(root, open, menu("viewGameOptions"));
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS), ran, "an item without a redirect runs Swing's");
-                // Line of sight stays MegaMek's ruler (the user's decision of 2026-10-03).
+                // Line of sight stays MegaMek's ruler.
                 choose(root, open, menu("viewLOSSetting"));
                 SwingUtilities.invokeAndWait(() -> { });
                 assertEquals(List.of(ClientGUI.VIEW_GAME_OPTIONS, ClientGUI.VIEW_LOS_SETTING), ran,

@@ -301,7 +301,7 @@ public final class UiList extends WidgetGroup {
 
     /**
      * While the pointer holds the row: scrolls a scroll pane the row nears the edge of, keeps the row under the
-     * pointer at its grab, bounded to the list (the user's decision of 2026-10-03), and moves the slot to the index
+     * pointer at its grab, bounded to the list, and moves the slot to the index
      * it reaches.
      */
     private void follow(float delta) {

@@ -265,7 +265,7 @@ class GpuContactsPanelSmokeTest {
             GpuFirePreview.Snapshot preview = shot02();
             show(hud, panel, MOCK, preview);
 
-            // The open row is the inspected enemy (F6 and the user's decisions of 2026-10-02): a row's click inspects
+            // The open row is the inspected enemy: a row's click inspects
             // its enemy, which opens its detail and gives it the coral edges; another row's click moves both; the open
             // row's click ends the inspection, which closes it; only one row is open.
             click(hud, panel, "contacts-preview-" + KING_CRAB, Input.Buttons.LEFT);

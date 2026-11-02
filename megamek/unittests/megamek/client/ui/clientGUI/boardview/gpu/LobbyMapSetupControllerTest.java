@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.SwingUtilities;
 
 import megamek.client.lobby.MapSetupForm;
@@ -113,15 +114,19 @@ class LobbyMapSetupControllerTest {
         Game game = new Game();
         game.setBoard(Board.createEmptyBoard(16, 17));
         LinkedBlockingQueue<BufferedImage> images = new LinkedBlockingQueue<>();
+        AtomicInteger cleared = new AtomicInteger();
         LobbyMapSetupController controller = new LobbyMapSetupController(form, () -> game, (setup, themes) -> { },
               (key, image) -> {
                   if (image != null) {
                       images.add(image);
-                  }
+                  } else { cleared.incrementAndGet(); }
               });
         try {
             SwingUtilities.invokeAndWait(controller::refresh);
             assertImage(game.getBoard(), images.poll(10, TimeUnit.SECONDS));
+            int clearsBeforeStack = cleared.get();
+            SwingUtilities.invokeAndWait(() -> controller.act(value -> value.addToStack(0, List.of("another-board"))));
+            assertEquals(clearsBeforeStack, cleared.get(), "adding alternatives must keep the generated preview");
             Board regenerated = Board.createEmptyBoard(16, 17);
             regenerated.getHex(4, 5).addTerrain(new Terrain(Terrains.WATER, 2));
             regenerated.getHex(7, 8).setLevel(4);

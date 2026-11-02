@@ -63,7 +63,8 @@ class MapSetupFormTest {
 
         @Override
         public void changeBoard(MapSettings settings, int slot, String board) {
-            String value = board.contains("\n") ? MapSettings.BOARD_SURPRISE + board : board;
+            String value = board.contains("\n") && !board.startsWith(MapSettings.BOARD_SURPRISE)
+                  ? MapSettings.BOARD_SURPRISE + board : board;
             calls.add("board " + slot + " " + value);
             settings.getBoardsSelectedVector().set(slot, value);
         }
@@ -88,6 +89,7 @@ class MapSetupFormTest {
         @Override
         public void applySetup(MapSettings settings, MapSetup setup) {
             calls.add("setup " + setup.getMapWidth() + "x" + setup.getMapHeight() + " " + setup.getBoards());
+            setup.applyTo(settings);
         }
 
         @Override
@@ -134,11 +136,13 @@ class MapSetupFormTest {
 
     @Test
     void surpriseAndUnsetSlotsBlockGenerate() {
-        form.assignSurprise(1, List.of("16x17/Desert 1.board2", "16x17/Lake Shore.board2"));
+        form.assign(1, "16x17/Desert 1.board2");
+        form.addToStack(1, List.of("16x17/Lake Shore.board2"));
+        form.toggleSurprise(1, new Random(1));
         Slot surprise = form.picture().slots().get(1);
         assertEquals(Kind.SURPRISE, surprise.kind());
-        assertEquals(2, surprise.surprise().size());
-        assertEquals("16x17/Desert 1.board2", surprise.file());
+        assertEquals(2, surprise.stack().size());
+        assertEquals("", surprise.file(), "a surprise does not expose a candidate thumbnail");
         assertFalse(form.picture().generable());
         form.generate();
         assertFalse(calls.contains("generate"));
@@ -220,13 +224,97 @@ class MapSetupFormTest {
     }
 
     @Test
-    void randomPicksOneOfTheChosenBoards() {
-        form.assignRandom(0, List.of("a.board2", "b.board2"), new Random(1));
-        String picked = form.settings().getBoardsSelectedVector().get(0);
-        assertTrue(picked.equals("a.board2") || picked.equals("b.board2"));
+    void stacksKeepTheirSelectionAndModeAndRejectDuplicates() {
+        String desert = form.picture().slots().getFirst().file();
+        form.toggleRotation(0);
+        form.addToStack(0, List.of(desert, "16x17/City Hills.board2", "16x17/City Hills.board2"));
+        assertEquals(List.of(desert, "16x17/City Hills.board2"), form.settings().getBoardStack(0));
+        assertTrue(form.picture().slots().getFirst().rotated());
         int before = calls.size();
-        form.assignRandom(0, List.of("a.board2"), new Random(1));
-        assertEquals(before, calls.size(), "needs two boards");
+        form.addToStack(0, List.of(Board.BOARD_REQUEST_ROTATION + desert));
+        assertEquals(before, calls.size(), "duplicates send no change");
+        form.toggleSurprise(0, new Random(1));
+        form.addToStack(0, List.of("16x17/Lake Shore.board2"));
+        assertEquals(Kind.SURPRISE, form.picture().slots().getFirst().kind());
+        assertEquals(3, form.settings().getBoardStack(0).size());
+        form.rollStack(0, new Random(1));
+        assertEquals(Kind.FIXED, form.picture().slots().getFirst().kind());
+        List<String> stack = form.settings().getBoardStack(0);
+        String chosen = form.picture().slots().getFirst().file();
+        form.rollStack(0, new Random(1));
+        assertFalse(chosen.equals(form.picture().slots().getFirst().file()), "reroll picks another candidate");
+        assertEquals(stack, form.settings().getBoardStack(0));
+        form.toggleSurprise(0, new Random(1));
+        form.assign(0, desert);
+        assertEquals(Kind.FIXED, form.picture().slots().getFirst().kind());
+        assertEquals(List.of(desert), form.settings().getBoardStack(0), "Place replaces stack and surprise mode");
+    }
+
+    @Test
+    void selectingAStackMemberKeepsItsAlternativesAndSlotSettings() {
+        String desert = form.picture().slots().getFirst().file();
+        String city = "16x17/City Hills.board2";
+        form.addToStack(0, List.of(city, MapSettings.BOARD_GENERATED));
+        List<String> stack = form.settings().getBoardStack(0);
+        form.theme(0, "snow");
+        form.levelOffset(0, 2);
+        form.toggleRotation(0);
+        form.selectFromStack(0, desert);
+        assertTrue(form.picture().slots().getFirst().rotated(), "choosing the current map keeps its rotation");
+        form.selectFromStack(0, city);
+        assertEquals(city, form.picture().slots().getFirst().file());
+        assertEquals(stack, form.settings().getBoardStack(0));
+        assertEquals("snow", form.settings().getBoardTheme(0));
+        assertEquals(2, form.settings().getBoardLevelOffset(0));
+        assertEquals(Kind.GENERATED, form.picture().slots().get(1).kind(), "other slots are untouched");
+        form.toggleSurprise(0, new Random(1));
+        form.selectFromStack(0, city);
+        assertEquals(Kind.FIXED, form.picture().slots().getFirst().kind());
+        assertEquals(stack, form.settings().getBoardStack(0));
+        form.selectFromStack(0, MapSettings.BOARD_GENERATED);
+        assertEquals(Kind.GENERATED, form.picture().slots().getFirst().kind());
+        assertEquals(stack, form.settings().getBoardStack(0));
+        assertEquals("generate", calls.getLast(), "selecting Generated builds its preview");
+        int sent = calls.size();
+        form.selectFromStack(0, MapSettings.BOARD_GENERATED);
+        form.selectFromStack(0, "not-in-stack");
+        assertEquals(sent, calls.size(), "unchanged and removed choices must not send a map edit");
+    }
+
+    @Test
+    void removingMembersKeepsSurpriseAndResolvingItUsesOnlyRemainingBoards() {
+        form.addToStack(0, List.of("16x17/City Hills.board2", "16x17/Lake Shore.board2"));
+        form.removeFromStack(0, "16x17/Desert 1.board2", new Random(1));
+        assertEquals("16x17/Lake Shore.board2", form.picture().slots().getFirst().file(),
+              "removing the selected board rolls a random remaining member, rather than always taking the first");
+        assertEquals(List.of("16x17/City Hills.board2", "16x17/Lake Shore.board2"), form.settings().getBoardStack(0));
+        form.toggleSurprise(0, new Random(1));
+        form.removeFromStack(0, "16x17/City Hills.board2", new Random(1));
+        assertEquals(Kind.SURPRISE, form.picture().slots().getFirst().kind());
+        MapSettings launched = MapSettings.getInstance(form.settings());
+        launched.removeUnavailable();
+        assertTrue(launched.getBoardsSelectedVector().getFirst().startsWith(MapSettings.BOARD_SURPRISE));
+        launched.chooseSurpriseBoards();
+        assertEquals("16x17/Lake Shore.board2", launched.getBoardsSelectedVector().getFirst());
+        form.removeFromStack(0, "16x17/Lake Shore.board2", new Random(1));
+        assertEquals(Kind.GENERATED, form.picture().slots().getFirst().kind());
+    }
+
+    @Test
+    void stacksSurviveSetupFilesAndOldServerEchoes() throws IOException {
+        form.addToStack(0, List.of("16x17/City Hills.board2"));
+        MapSettings first = MapSettings.getInstance(form.settings());
+        form.addToStack(0, List.of("16x17/Lake Shore.board2"));
+        server = first;
+        form.reloadIfNew();
+        assertEquals(3, form.settings().getBoardStack(0).size(), "an old echo cannot erase a later addition");
+        var expected = form.settings().getBoardStack(0);
+        File file = new File(folder, "stack.xml");
+        form.save(file);
+        form.assign(0, MapSettings.BOARD_GENERATED);
+        form.load(file);
+        assertEquals(expected, form.settings().getBoardStack(0));
+        assertEquals("16x17/Desert 1.board2", form.picture().slots().getFirst().file());
     }
 
     @Test

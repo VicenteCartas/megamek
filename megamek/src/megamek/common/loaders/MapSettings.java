@@ -59,6 +59,7 @@ import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
 import megamek.common.Configuration;
 import megamek.common.board.Board;
 import megamek.common.board.BoardDimensions;
+import megamek.common.board.BoardFile;
 import megamek.common.compute.Compute;
 import megamek.common.util.BuildingTemplate;
 import megamek.logging.MMLogger;
@@ -111,6 +112,8 @@ public class MapSettings implements Serializable {
     private Map<Integer, String> boardThemes = new HashMap<>();
     /** Session-only elevation offsets by map-panel index. Missing entries leave levels unchanged. */
     private Map<Integer, Integer> boardLevelOffsets = new HashMap<>();
+    /** Alternatives retained behind a visible choice. Surprise slots carry their alternatives in boardsSelected. */
+    private Map<Integer, List<String>> boardStacks = new HashMap<>();
     private ArrayList<String> boardsAvailable = new ArrayList<>();
     private ArrayList<BuildingTemplate> boardBuildings = new ArrayList<>();
 
@@ -498,6 +501,9 @@ public class MapSettings implements Serializable {
         medium = other.getMedium();
 
         boardsSelected = new ArrayList<>(other.getBoardsSelectedVector());
+        if (other.boardStacks != null) {
+            other.boardStacks.forEach((slot, boards) -> boardStacks.put(slot, List.copyOf(boards)));
+        }
         if (other.boardThemes != null) {
             boardThemes.putAll(other.boardThemes);
         }
@@ -666,6 +672,7 @@ public class MapSettings implements Serializable {
         // Keep overrides on the same panel coordinates as the boards retained below.
         boardThemes = resizeBoardOverrides(boardThemes, newWidth, newHeight);
         boardLevelOffsets = resizeBoardOverrides(boardLevelOffsets, newWidth, newHeight);
+        boardStacks = resizeBoardOverrides(boardStacks, newWidth, newHeight);
 
         // Change in height
         if (newHeight > mapHeight) {
@@ -716,12 +723,63 @@ public class MapSettings implements Serializable {
     }
 
     private void clearBoardOverrides() {
+        if (boardStacks != null) { boardStacks.clear(); }
         if (boardThemes != null) {
             boardThemes.clear();
         }
         if (boardLevelOffsets != null) {
             boardLevelOffsets.clear();
         }
+    }
+
+    /** The inputs that build the visible battlefield, excluding unused stack alternatives and the catalogue. */
+    public boolean equalBoardConfiguration(MapSettings other) {
+        if (!equalMapGenParameters(other) || !boardsSelected.equals(other.boardsSelected)) { return false; }
+        for (int slot = 0; slot < mapWidth * mapHeight; slot++) {
+            if (!Objects.equals(getBoardTheme(slot), other.getBoardTheme(slot))
+                  || getBoardLevelOffset(slot) != other.getBoardLevelOffset(slot)) { return false; }
+        }
+        return true;
+    }
+
+    /** Whether the slots retain the same alternatives, including hidden surprise candidates. */
+    public boolean equalBoardStacks(MapSettings other) {
+        if (mapWidth != other.mapWidth || mapHeight != other.mapHeight) { return false; }
+        for (int slot = 0; slot < mapWidth * mapHeight; slot++) {
+            if (!getBoardStack(slot).equals(other.getBoardStack(slot))) { return false; }
+        }
+        return true;
+    }
+
+    /** A slot's unique candidates, including the selected board when it has no saved alternatives. */
+    public List<String> getBoardStack(int index) {
+        if (index < 0 || index >= boardsSelected.size()) { return List.of(); }
+        String selected = boardsSelected.get(index);
+        if (selected == null || selected.isBlank()) { return List.of(); }
+        if (selected.startsWith(BOARD_SURPRISE)) {
+            return LobbyUtility.extractSurpriseMaps(selected).stream().filter(name -> !name.isBlank())
+                  .map(MapSettings::stackBoardName).distinct().toList();
+        }
+        return boardStacks != null && boardStacks.containsKey(index)
+              && boardStacks.get(index).contains(stackBoardName(selected)) ? boardStacks.get(index)
+              : List.of(stackBoardName(selected));
+    }
+
+    /** Sets the alternatives behind a visible choice; an empty list clears them. */
+    public void setBoardStack(int index, List<String> boards) {
+        Objects.checkIndex(index, mapWidth * mapHeight);
+        if (boardStacks == null) { boardStacks = new HashMap<>(); }
+        List<String> unique = boards.stream().filter(name -> name != null && !name.isBlank())
+              .map(MapSettings::stackBoardName).distinct().toList();
+        if (unique.size() < 2) { boardStacks.remove(index); }
+        else { boardStacks.put(index, unique); }
+    }
+
+    /** Rotation belongs to the slot, not a second copy of the same board in its stack. */
+    public static String stackBoardName(String board) {
+        String name = board.startsWith(Board.BOARD_REQUEST_ROTATION)
+              ? board.substring(Board.BOARD_REQUEST_ROTATION.length()) : board;
+        return BoardFile.selectionName(name.replace('\\', '/'));
     }
 
     /** Returns this panel's theme override, or null to keep the source board's themes. */
@@ -875,7 +933,7 @@ public class MapSettings implements Serializable {
                     List<String> boards = LobbyUtility.extractSurpriseMaps(boardName);
                     ArrayList<String> remainingBoards = new ArrayList<>();
                     for (String board : boards) {
-                        if (boardsAvailable.contains(board)) {
+                        if (BOARD_GENERATED.equals(board) || boardsAvailable.contains(board)) {
                             remainingBoards.add(board);
                         }
                     }
@@ -883,19 +941,25 @@ public class MapSettings implements Serializable {
                         boardsSelected.set(i, null);
                         setBoardTheme(i, null);
                         setBoardLevelOffset(i, 0);
-                    } else if (remainingBoards.size() == 1) {
-                        boardsSelected.set(i, remainingBoards.getFirst());
                     } else {
-                        String remBoards = String.join("\n", boards);
+                        String remBoards = String.join("\n", remainingBoards);
                         boardsSelected.set(i, MapSettings.BOARD_SURPRISE + remBoards);
                     }
                 } else {
-                    if (!boardsAvailable.contains(boardName)) {
+                    if (!BOARD_GENERATED.equals(boardName) && !boardsAvailable.contains(boardName)) {
                         boardsSelected.set(i, null);
                         setBoardTheme(i, null);
                         setBoardLevelOffset(i, 0);
                     }
                 }
+            }
+            if (boardStacks != null && boardStacks.containsKey(i)) {
+                List<String> remaining = boardStacks.get(i).stream()
+                      .filter(board -> BOARD_GENERATED.equals(board) || boardsAvailable.contains(board)).toList();
+                if (boardsSelected.get(i) == null && !remaining.isEmpty()) {
+                    boardsSelected.set(i, remaining.getFirst());
+                }
+                setBoardStack(i, remaining);
             }
         }
     }

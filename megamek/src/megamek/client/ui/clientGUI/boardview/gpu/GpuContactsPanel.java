@@ -40,7 +40,7 @@ import megamek.common.units.Entity;
  * Contacts and the movement fire preview in the right column (C.1 G5). Without an active preview it lists the enemy
  * units; with one it shows where the previewed unit fires from, each enemy's best salvo both ways and the open row's
  * weapons, with the Outgoing and Incoming guide toggles. The highlighted row, and the preview's open row, is the unit
- * the card shows (the user's decisions of 2026-10-02): a row's click inspects its enemy. It presents the snapshots and
+ * the card shows: a row's click inspects its enemy. It presents the snapshots and
  * opens unit menus; the client computes every value.
  */
 final class GpuContactsPanel implements GpuHud.Component {

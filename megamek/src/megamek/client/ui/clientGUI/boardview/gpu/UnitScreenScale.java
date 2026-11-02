@@ -5,8 +5,7 @@ import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector3;
 
 /**
- * Zoom-out readability of the 3D view's units (user decision 26; hud-v3 view3d.js unitScaleAt): while a hex is at
- * least {@link #THRESHOLD} HUD pixels wide on screen a unit is drawn at its size; zoomed out further it grows as the
+ * while a hex is at least {@link #THRESHOLD} HUD pixels wide on screen a unit is drawn at its size; zoomed out further it grows as the
  * hex shrinks, keeping the size it had on screen at the threshold, up to {@link #MAX} times. The growth multiplies the
  * placed instance on every axis, on top of {@link UnitFamilyScale}, so meshes keep their canonical size and
  * proportions, and picking, bounds, anchors, attack points and the route ghost follow the grown instance. The Tactical

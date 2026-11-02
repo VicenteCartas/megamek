@@ -106,8 +106,7 @@ public final class MapSetupForm {
 
                 @Override
                 public void applySetup(MapSettings settings, MapSetup setup) {
-                    commands.applyMapSetup(settings, setup.getMapWidth(), setup.getMapHeight(),
-                          setup.getBoardWidth(), setup.getBoardHeight(), setup.getBoards());
+                    commands.applyMapSetup(settings, setup);
                 }
 
                 @Override
@@ -125,13 +124,13 @@ public final class MapSetupForm {
      * A board slot as the map shows it.
      *
      * @param board     the slot's entry in the map settings, empty for an unset slot
-     * @param file      the board to draw: the fixed board without its rotation prefix, or the first surprise board
-     * @param surprise  the boards one of which is picked at launch, empty unless {@link Kind#SURPRISE}
+     * @param file      the fixed board without its rotation prefix, empty for generated, surprise or unset slots
+     * @param stack     the unique boards available to this slot, whether visible or a surprise
      * @param canRotate whether the rotation can be toggled (a fixed board of even width)
      * @param adjustable whether theme and level offset apply (a set slot off space maps)
      */
     public record Slot(int index, String board, Kind kind, String label, String file, boolean rotated,
-          List<String> surprise, boolean canRotate, boolean adjustable, @Nullable String theme, int levelOffset) {}
+          List<String> stack, boolean canRotate, boolean adjustable, @Nullable String theme, int levelOffset) {}
 
     /** An entry of the board list: the name the map settings use, its short label and its folder. */
     public record Entry(String name, String label, String folder) {
@@ -245,17 +244,7 @@ public final class MapSetupForm {
 
     /** Compares the setup, excluding the server's catalogue of available boards. */
     public static boolean sameSetup(MapSettings first, MapSettings second) {
-        if (!first.equalMapGenParameters(second)
-              || !first.getBoardsSelectedVector().equals(second.getBoardsSelectedVector())) {
-            return false;
-        }
-        for (int slot = 0; slot < first.getMapWidth() * first.getMapHeight(); slot++) {
-            if (!Objects.equals(first.getBoardTheme(slot), second.getBoardTheme(slot))
-                  || first.getBoardLevelOffset(slot) != second.getBoardLevelOffset(slot)) {
-                return false;
-            }
-        }
-        return true;
+        return first.equalBoardConfiguration(second) && first.equalBoardStacks(second);
     }
 
     /** The local copy the commands change; views must not change it. */
@@ -301,7 +290,6 @@ public final class MapSetupForm {
     private Slot slot(int index, @Nullable String board) {
         String value = (board == null) ? "" : board;
         Kind kind;
-        List<String> surprise = List.of();
         String file = "";
         if (value.isBlank()) {
             kind = Kind.EMPTY;
@@ -309,15 +297,13 @@ public final class MapSetupForm {
             kind = Kind.GENERATED;
         } else if (value.startsWith(MapSettings.BOARD_SURPRISE)) {
             kind = Kind.SURPRISE;
-            surprise = surpriseBoards(value);
-            file = surprise.isEmpty() ? "" : surprise.get(0);
         } else {
             kind = Kind.FIXED;
             file = unrotated(value);
         }
         boolean rotated = value.startsWith(Board.BOARD_REQUEST_ROTATION);
         boolean adjustable = (kind != Kind.EMPTY) && (settings.getMedium() != MapSettings.MEDIUM_SPACE);
-        return new Slot(index, value, kind, label(value), file, rotated, surprise,
+        return new Slot(index, value, kind, label(value), file, rotated, settings.getBoardStack(index),
               (kind == Kind.FIXED) && evenBoardWidth(), adjustable, settings.getBoardTheme(index),
               settings.getBoardLevelOffset(index));
     }
@@ -343,6 +329,10 @@ public final class MapSetupForm {
 
     /** A board name as the map and list show it: no folder, extension or size, as the Swing lobby's. */
     public String label(String board) {
+        return label(board, settings.getBoardWidth(), settings.getBoardHeight());
+    }
+
+    public static String label(String board, int width, int height) {
         if (board.isBlank()) {
             return "";
         }
@@ -355,7 +345,7 @@ public final class MapSetupForm {
         } else {
             name = new File(unrotated(board)).getName();
         }
-        String size = settings.getBoardWidth() + "x" + settings.getBoardHeight();
+        String size = width + "x" + height;
         return BoardFile.withoutExtension(name).replace(size, "").trim();
     }
 
@@ -499,23 +489,75 @@ public final class MapSetupForm {
     /** Puts a board (or Generated) into a slot. */
     public void assign(int slot, String board) {
         if (validSlot(slot) && !board.isBlank()) {
+            settings.setBoardStack(slot, List.of());
             commands.changeBoard(settings, slot, board);
             sent();
         }
     }
 
-    /** Puts one of the boards, picked now and not shown to the others, into a slot. */
-    public void assignRandom(int slot, List<String> boards, Random random) {
-        if (boards.size() > 1) {
-            assign(slot, boards.get(random.nextInt(boards.size())));
+    /** Adds unique alternatives without replacing the visible board or changing surprise mode. */
+    public void addToStack(int slot, List<String> boards) {
+        if (!validSlot(slot) || settings.getMedium() == MapSettings.MEDIUM_SPACE) { return; }
+        List<String> current = settings.getBoardStack(slot);
+        List<String> added = new ArrayList<>(current);
+        for (String board : boards) {
+            if (!board.isBlank() && !added.contains(MapSettings.stackBoardName(board))) {
+                added.add(MapSettings.stackBoardName(board));
+            }
         }
+        if (added.equals(current) || added.isEmpty()) { return; }
+        String selected = settings.getBoardsSelectedVector().get(slot);
+        updateStack(slot, added, selected == null || selected.isBlank() ? added.getFirst() : selected);
     }
 
-    /** Makes a slot a surprise board: one of the boards is picked at launch. */
-    public void assignSurprise(int slot, List<String> boards) {
-        if (boards.size() > 1) {
-            assign(slot, String.join("\n", boards));
-        }
+    /** Reveals an existing stack member without replacing the alternatives or resetting an unchanged choice. */
+    public void selectFromStack(int slot, String board) {
+        if (!validSlot(slot) || settings.getMedium() == MapSettings.MEDIUM_SPACE) { return; }
+        List<String> boards = settings.getBoardStack(slot);
+        String selected = MapSettings.stackBoardName(board);
+        if (!boards.contains(selected)
+              || selected.equals(MapSettings.stackBoardName(settings.getBoardsSelectedVector().get(slot)))) { return; }
+        updateStack(slot, boards, selected);
+    }
+
+    /** Reveals another candidate now. The alternatives remain available for subsequent rolls. */
+    public void rollStack(int slot, Random random) {
+        if (!validSlot(slot)) { return; }
+        List<String> boards = settings.getBoardStack(slot);
+        if (boards.isEmpty()) { return; }
+        String selected = settings.getBoardsSelectedVector().get(slot);
+        List<String> others = boards.stream().filter(board -> !board.equals(MapSettings.stackBoardName(selected))).toList();
+        List<String> choices = others.isEmpty() ? boards : others;
+        updateStack(slot, boards, choices.get(random.nextInt(choices.size())));
+    }
+
+    /** Hides the choice until launch; turning surprise off reveals a random member of the same stack. */
+    public void toggleSurprise(int slot, Random random) {
+        if (!validSlot(slot) || settings.getBoardStack(slot).isEmpty()) { return; }
+        String selected = settings.getBoardsSelectedVector().get(slot);
+        if (selected.startsWith(MapSettings.BOARD_SURPRISE)) { rollStack(slot, random); }
+        else { updateStack(slot, settings.getBoardStack(slot), MapSettings.BOARD_SURPRISE); }
+    }
+
+    /** Removing the displayed member rolls a remaining one; the last removal restores the generated placeholder. */
+    public void removeFromStack(int slot, String board, Random random) {
+        if (!validSlot(slot)) { return; }
+        List<String> boards = new ArrayList<>(settings.getBoardStack(slot));
+        if (!boards.remove(MapSettings.stackBoardName(board))) { return; }
+        String selected = settings.getBoardsSelectedVector().get(slot);
+        if (boards.isEmpty()) { assign(slot, MapSettings.BOARD_GENERATED); generate(); }
+        else { updateStack(slot, boards, selected.startsWith(MapSettings.BOARD_SURPRISE) ? selected
+              : boards.contains(MapSettings.stackBoardName(selected)) ? selected : boards.get(random.nextInt(boards.size()))); }
+    }
+
+    private void updateStack(int slot, List<String> boards, String selected) {
+        boolean surprise = selected.startsWith(MapSettings.BOARD_SURPRISE);
+        boolean generate = MapSettings.BOARD_GENERATED.equals(selected)
+              && !selected.equals(settings.getBoardsSelectedVector().get(slot));
+        settings.setBoardStack(slot, surprise ? List.of() : boards);
+        commands.changeBoard(settings, slot, surprise ? MapSettings.BOARD_SURPRISE + String.join("\n", boards) : selected);
+        sent();
+        if (generate) { generate(); }
     }
 
     /** Turns a slot's fixed board by 180 degrees, or back. */

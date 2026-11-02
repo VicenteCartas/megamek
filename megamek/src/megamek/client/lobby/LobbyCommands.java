@@ -44,6 +44,7 @@ import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.interfaces.ForceAssignable;
 import megamek.common.loaders.MapSettings;
+import megamek.common.loaders.MapSetup;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.ClientPreferences;
@@ -344,7 +345,7 @@ public class LobbyCommands {
      * @param board the board, or several boards separated by newlines to pick one of at random
      */
     public void changeBoard(MapSettings mapSettings, int slot, String board) {
-        if (board.contains("\n")) {
+        if (board.contains("\n") && !board.startsWith(MapSettings.BOARD_SURPRISE)) {
             board = MapSettings.BOARD_SURPRISE + board;
         }
         mapSettings.getBoardsSelectedVector().set(slot, board);
@@ -463,11 +464,8 @@ public class LobbyCommands {
     }
 
     /** Applies a saved map setup's map size, board size and boards and sends the map settings. */
-    public void applyMapSetup(MapSettings mapSettings, int mapWidth, int mapHeight, int boardWidth, int boardHeight,
-          List<String> boards) {
-        mapSettings.setMapSize(mapWidth, mapHeight);
-        mapSettings.setBoardSize(boardWidth, boardHeight);
-        mapSettings.setBoardsSelectedVector(boards);
+    public void applyMapSetup(MapSettings mapSettings, MapSetup setup) {
+        setup.applyTo(mapSettings);
         sendMapSettings(mapSettings);
     }
 

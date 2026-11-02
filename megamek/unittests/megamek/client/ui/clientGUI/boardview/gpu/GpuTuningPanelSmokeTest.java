@@ -798,7 +798,7 @@ class GpuTuningPanelSmokeTest {
                     assertEquals(1.5f, family.UNIT_SCALE, NEAR, family.label);
                 }
 
-                // Zoom-out unit scaling (user decision 26): the panel's controls set the growth the 3D view takes on
+                // Zoom-out unit scaling: the panel's controls set the growth the 3D view takes on
                 // its next frame, from the constants.
                 UiKit.Checkbox scaling = hud.find("tuning-zoom-scaling");
                 assertEquals(UnitScreenScale.ENABLED, scaling.isTicked(), "the switch starts at its constant");

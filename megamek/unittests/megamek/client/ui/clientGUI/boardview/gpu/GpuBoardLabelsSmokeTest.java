@@ -574,8 +574,8 @@ class GpuBoardLabelsSmokeTest {
     }
 
     /**
-     * The user's decisions of 2026-10-03: every shot is badged, and the guides are the preview's best 50 of each
-     * direction, so a crowded battle stays legible. 60 enemies the Warhammer shoots, which all shoot back.
+     * Every shot is badged, and the guides are the preview's best 50 of each direction, 
+     * so a crowded battle stays legible. 60 enemies the Warhammer shoots, which all shoot back.
      */
     @Test
     void everyShotIsBadgedAndTheBestFiftyOfEachDirectionGetGuides() {
@@ -716,7 +716,7 @@ class GpuBoardLabelsSmokeTest {
     }
 
     /**
-     * The user's decision of 2026-10-02: the badge of the unit the card shows lies over every other badge, the hovered
+     * The badge of the unit the card shows lies over every other badge, the hovered
      * unit's over the rest, and without either the badges keep the preview's order. Two badges overlap here; the King
      * Crab's comes first in that order, so the Timber Wolf's lies over it until the King Crab is selected.
      */

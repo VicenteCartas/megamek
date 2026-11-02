@@ -1369,6 +1369,7 @@ public class TWGameManager extends AbstractGameManager {
                 case SENDING_MAP_SETTINGS:
                     if (game.getPhase().isBefore(GamePhase.DEPLOYMENT)) {
                         MapSettings newSettings = packet.getMapSettings(0);
+                        boolean onlyStackChanged = false;
                         if (newSettings != null) {
                             if (!game.getMapSettings().equalMapGenParameters(newSettings)) {
                                 sendServerChat(player + " changed map settings");
@@ -1376,12 +1377,16 @@ public class TWGameManager extends AbstractGameManager {
                             newSettings.setBoardsAvailableVector(ServerBoardHelper.scanForBoards(newSettings));
                             newSettings.removeUnavailable();
                             newSettings.setNullBoards(DEFAULT_BOARD);
+                            onlyStackChanged = newSettings.equalBoardConfiguration(game.getMapSettings())
+                                  && !newSettings.equalBoardStacks(game.getMapSettings());
                             game.setMapSettings(newSettings);
                         }
                         cleanupCustomDZs();
                         resetPlayersDone();
                         send(createMapSettingsPacket());
-                        lobbyBoardHandler().invalidate("map settings changed");
+                        // Adding alternatives must keep a generated map. An identical-settings packet still
+                        // reloads board files after an editor save, as it did before stacks were introduced.
+                        if (!onlyStackChanged) { lobbyBoardHandler().invalidate("map settings changed"); }
                     }
                     break;
                 case SENDING_MAP_DIMENSIONS:

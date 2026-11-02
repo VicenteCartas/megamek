@@ -795,7 +795,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(FLOATING_ISO, false);
         store.setDefault(LEVEL_HIGHLIGHT, false);
 
-        // Declarations wait for FIRE WEAPONS unless the player turns this on (the user's decision of 2026-10-03).
+        // Declarations wait for FIRE WEAPONS unless the player turns this on.
         store.setDefault(AUTO_END_FIRING, false);
         store.setDefault(AUTO_DECLARE_SEARCHLIGHT, true);
         store.setDefault(CUSTOM_UNIT_HEIGHT, 400);

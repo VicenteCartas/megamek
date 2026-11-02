@@ -36,6 +36,7 @@ package megamek.server.totalWarfare;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -205,6 +206,24 @@ class LobbyBoardHandlerTest {
 
         assertFalse(lobbyBoardHandler.hasBoardFromLounge());
         assertEquals(0, game.getBoard().getWidth());
+    }
+
+    @Test
+    void stackEditsPreserveTheBuiltBattlefieldButChangingTheSlotStillInvalidatesIt() {
+        game.setMapSettings(createMapSettingsFor(List.of("/" + BOARD_NAME)));
+        TWGameManager manager = spyWithoutNetwork();
+        manager.handlePacket(0, new Packet(PacketCommand.LOBBY_GENERATE_BOARD));
+        Board built = game.getBoard();
+        assertEquals(2, built.getWidth());
+        MapSettings changed = MapSettings.getInstance(game.getMapSettings());
+        changed.setBoardStack(0, List.of("/" + BOARD_NAME, MapSettings.BOARD_GENERATED));
+        manager.handlePacket(0, new Packet(PacketCommand.SENDING_MAP_SETTINGS, changed));
+        assertSame(built, game.getBoard(), "adding an alternative must not discard the existing map");
+        assertEquals(changed.getBoardStack(0), game.getMapSettings().getBoardStack(0));
+        changed = MapSettings.getInstance(game.getMapSettings());
+        changed.setBoardLevelOffset(0, 1);
+        manager.handlePacket(0, new Packet(PacketCommand.SENDING_MAP_SETTINGS, changed));
+        assertEquals(0, game.getBoard().getWidth(), "an actual map edit still requires rebuilding");
     }
 
     @Test

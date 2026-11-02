@@ -50,7 +50,7 @@ class BoardTreeDistributionTest {
                 for (int mode = 0; mode < 2; mode++) {
                     var hex = new Hex(0, "woods:2;foliage_elev:2", "", coords);
                     var trees = capture(hex, coords, mode == 1);
-                    assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.limit(2, false));
+                    assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.canopyLimit(2));
                     assertEquals(trees, capture(hex, coords, mode == 1), "Capture order cannot reroll a stand");
                     if (mode == 1) { trees.forEach(t -> selected.add(t.asset())); }
                     for (int i = 1; i < trees.size(); i++) {
@@ -87,7 +87,7 @@ class BoardTreeDistributionTest {
         for (int density = 1; density <= 3; density++) {
             var hex = new Hex(0, "woods:" + density + ";foliage_elev:2", "", coords);
             var trees = capture(hex, coords, true);
-            assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.limit(density, false));
+            assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.canopyLimit(density));
             BoardFeaturesTest.assertWoodsHeights(trees, 2, density);
             assertTrue(trees.stream().allMatch(t -> Math.hypot(t.x(), t.y()) <= 31.001), "Trunks stay inside the planting disc");
         }

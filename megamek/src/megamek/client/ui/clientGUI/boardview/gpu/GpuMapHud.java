@@ -15,8 +15,6 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
-import com.badlogic.gdx.scenes.scene2d.ui.Image;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
@@ -31,7 +29,6 @@ import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiMessageDialog;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.gdx.UiPopover;
-import megamek.client.ui.gdx.UiTheme;
 import megamek.common.board.Coords;
 
 /**
@@ -40,7 +37,7 @@ import megamek.common.board.Coords;
  */
 final class GpuMapHud implements GpuBoardHud {
     /** The hex card's width, in stage units. */
-    private static final float CARD_WIDTH = 320;
+    private static final float CARD_WIDTH = GpuMapHexCard.WIDTH;
 
     private final Stage stage;
     private final GpuBoardEditor editor;
@@ -73,9 +70,7 @@ final class GpuMapHud implements GpuBoardHud {
     private final UiPopover contextMenu;
     private long boardGeneration;
     /** The hovered or inspected hex's card in the bottom-right corner. */
-    private final Table hexCard;
-    /** The card's text as last laid out. */
-    private String shownCard = "";
+    private final GpuMapHexCard hexCard;
     private GpuHud.Metrics metrics;
     private float scale = 1;
     private BoardScene scene;
@@ -115,8 +110,7 @@ final class GpuMapHud implements GpuBoardHud {
         tuningSlot.setTouchable(Touchable.childrenOnly);
         stage.addActor(tuningSlot);
 
-        hexCard = ui.panel();
-        hexCard.setName("map-hex");
+        hexCard = new GpuMapHexCard(ui);
         bottom.setFillParent(true);
         bottom.setTouchable(Touchable.disabled);
         bottom.bottom().right();
@@ -196,7 +190,7 @@ final class GpuMapHud implements GpuBoardHud {
         top.pad(metrics.gap(), 0, 0, metrics.gap());
         bottom.padBottom(metrics.gap()).padRight(metrics.gap());
         losPanel.actor().setSize(metrics.width(), metrics.height());
-        shownCard = "";
+        layoutBottom();
         layoutEditor();
     }
 
@@ -224,9 +218,10 @@ final class GpuMapHud implements GpuBoardHud {
             showCard(frame.tooltip());
             bottom.validate();
             top.validate();
-            var bounds = hexCard.localToStageCoordinates(new Vector2());
-            if (hexCard.hasChildren()) {
-                occupied.add(new com.badlogic.gdx.math.Rectangle(bounds.x, bounds.y, hexCard.getWidth(), hexCard.getHeight()));
+            var bounds = hexCard.actor().localToStageCoordinates(new Vector2());
+            if (hexCard.actor().hasChildren()) {
+                occupied.add(new com.badlogic.gdx.math.Rectangle(bounds.x, bounds.y,
+                      hexCard.actor().getWidth(), hexCard.actor().getHeight()));
             }
         } else {
             editor.update(frame.boardGeneration());
@@ -303,47 +298,18 @@ final class GpuMapHud implements GpuBoardHud {
     }
 
     /**
-     * The hex card (the user's decision of 2026-10-03): the hex with its level and theme as a panel's header, a rule,
+     * The hex card: the hex with its level and theme as a panel's header, a rule,
      * then each row's name with its detail on the right; laid out again only when its text changes.
      */
     private void showCard(String card) {
-        if (card.equals(shownCard)) {
-            return;
-        }
-        shownCard = card;
-        hexCard.clearChildren();
-        if (!card.isEmpty()) {
-            UiKit ui = kit.ui;
-            List<String> rows = List.of(card.split("\n"));
-            String[] head = cells(rows.getFirst());
-            hexCard.add(ui.header(head[0], head[1].isEmpty() ? null : head[1])).growX().row();
-            hexCard.add(new Image(ui.skin.getDrawable("rule"))).growX().height(1).row();
-            Table list = new Table();
-            list.pad(6, 14, 10, 14);
-            for (String row : rows.subList(1, rows.size())) {
-                String[] cells = cells(row);
-                Label name = ui.label(cells[0], "hud-small", 12, UiTheme.TEXT);
-                name.setWrap(true);
-                list.add(name).growX().left();
-                list.add(ui.label(cells[1], "hud-small", 11.5f, UiTheme.MUTED)).right().top().padLeft(12).row();
-            }
-            hexCard.add(list).growX();
-        }
-        layoutBottom();
-    }
-
-    /** A card row's name and detail, split at GpuMapSource's column; a row without one has an empty detail. */
-    private static String[] cells(String row) {
-        int column = row.indexOf(GpuMapSource.COLUMN);
-        return column < 0 ? new String[] { row, "" }
-              : new String[] { row.substring(0, column), row.substring(column + 1) };
+        if (hexCard.update(card)) { layoutBottom(); }
     }
 
     /** Keep the inspected hex in the bottom-right corner, clear of the board centre. */
     private void layoutBottom() {
         bottom.clearChildren();
-        if (hexCard.hasChildren()) {
-            bottom.add(hexCard).width(Math.min(CARD_WIDTH, metrics.width() - 2 * metrics.gap())).row();
+        if (hexCard.actor().hasChildren()) {
+            bottom.add(hexCard.actor()).width(Math.min(CARD_WIDTH, metrics.width() - 2 * metrics.gap())).row();
         }
     }
 

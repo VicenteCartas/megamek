@@ -529,7 +529,7 @@ final class GpuMapSource implements BoardSource {
      * The hovered or inspected hex as the map tools' card lists it, one row a line, a {@link #COLUMN} before a row's
      * detail: its number with its level and theme; each terrain a player sees with its terrain factor, by MegaMek's
      * display names as the battle's hex tooltip lists them, so automated and cosmetic terrains, which have none, stay
-     * out (the user's decision of 2026-10-03); then why an invalid hex is invalid.
+     * out; then why an invalid hex is invalid.
      */
     static String hexCard(Hex hex) {
         String level = Messages.getString("GpuBoard.map.level", hex.getLevel());

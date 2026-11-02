@@ -122,7 +122,7 @@ final class GpuHudState {
     /**
      * The unit the card and the record sheet show: the inspected unit, else the own focus unit (C.5) unless the player
      * closed the card. It is also the one unit the forces and contacts lists highlight and the board labels draw in
-     * front (the user's decisions of 2026-10-02).
+     * front.
      */
     int cardUnit() {
         return inspected != Entity.NONE ? inspected : selectionCleared ? Entity.NONE : focus;
@@ -148,7 +148,7 @@ final class GpuHudState {
     }
 
     /**
-     * The card's ✕ (the user's decisions of 2026-10-02): ends the inspection and clears the selection. No unit is
+     * The card's ✕: ends the inspection and clears the selection. No unit is
      * shown or highlighted, and in the local turn no unit acts ({@link #presented}) until the player selects one, or a
      * turn, a phase or the focus moves on.
      */
@@ -171,8 +171,8 @@ final class GpuHudState {
 
     /**
      * The frame as the HUD and the board overlay present it. Outside the local turn there is no fire preview: no
-     * to-hit badges or guides from the last own unit while another player moves or fires (the user's decision of
-     * 2026-10-03). A cleared selection has no actor, route, orders or physical options. During playback the displayed
+     * to-hit badges or guides from the last own unit while another player moves or fires.
+     * A cleared selection has no actor, route, orders or physical options. During playback the displayed
      * unit context stays together, but no unit commands remain available. Chat and notifications stay live.
      */
     GpuBoardSource.Frame presented(GpuBoardSource.Frame frame) {
@@ -217,7 +217,7 @@ final class GpuHudState {
 
     /**
      * An own unit the player picked outside the local turn becomes the focus, the unit the card and the panels show as
-     * selected (the user's decision of 2026-10-02). It stays the focus even where no turn of the phase accepts it,
+     * selected. It stays the focus even where no turn of the phase accepts it,
      * until the local turn begins or ends; at the next phase's start it stays while a turn of that phase accepts it.
      */
     void pick(int id) {

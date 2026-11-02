@@ -498,7 +498,7 @@ class GpuMapSourceTest {
     }
 
     /**
-     * The map tools' hex card (the user's decision of 2026-10-03): the hex with its level and theme, then the terrains
+     * The map tools' hex card: the hex with its level and theme, then the terrains
      * a player sees with their terrain factors; automated and cosmetic terrains and terrain codes stay out.
      */
     @Test

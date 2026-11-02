@@ -32,7 +32,7 @@ class BoardMarsCoralTest {
                         var at = new Coords(density, height);
                         var before = hex.duplicate();
                         var cover = cover(hex, at);
-                        assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.limit(density, false));
+                        assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.colonyLimit(density));
                         assertEquals(height, cover.getFirst().height());
                         // The leading body reaches the rules' cover height; compact members fill the colony.
                         for (var feature : cover) {
@@ -69,7 +69,7 @@ class BoardMarsCoralTest {
             var hex = new Hex(0, "woods:" + density + ";foliage_elev:2;road:1:9", "mars");
             var road = BoardRoad.clearance(at, hex, neighbor -> null);
             var cover = cover(hex, at);
-            assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.limit(density, false));
+            assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.colonyLimit(density));
             assertTrue(cover.stream().allMatch(f -> road.distance(f.x(), f.y()) >= BoardRoad.SHOULDER + 2));
         }
     }

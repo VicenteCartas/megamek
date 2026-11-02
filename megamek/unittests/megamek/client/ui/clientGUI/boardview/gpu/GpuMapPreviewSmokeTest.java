@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The map preview's HUD on the real view (the user's decisions of 2026-10-03): the hovered hex's card lists the hex and
+ * The map preview's HUD on the real view: the hovered hex's card lists the hex and
  * the terrains a player sees, without the automated inclines of the rise beside it or terrain codes; and the preview
  * measures line of sight with MegaMek's ruler, whose line the board draws.
  */

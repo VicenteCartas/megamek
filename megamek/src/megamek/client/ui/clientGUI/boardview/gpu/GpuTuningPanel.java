@@ -165,7 +165,7 @@ final class GpuTuningPanel implements GpuHud.Component {
         UiButton close = ui.closeButton(() -> state.dialog = GpuHudState.Dialog.NONE);
         close.setName("tuning-close");
         Table header = ui.header(text("GpuBoard.hud.tuning.title"), "", close);
-        // The frame rate beside the title, in the count's smaller type (the user's decision of 2026-10-03).
+        // The frame rate beside the title, in the count's smaller type.
         Label fps = header.findActor(UiKit.HEADER_COUNT);
         fps.setName("tuning-fps");
         shows.add(() -> {

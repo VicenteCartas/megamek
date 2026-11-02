@@ -171,7 +171,7 @@ class GpuTargetCardsSmokeTest {
                           panels(hud, PANELS_05));
                     Table wolf = layer.card(TIMBER_WOLF);
                     Table master = layer.card(BATTLEMASTER);
-                    // No fire-order numbers in the rows (the user's decision of 2026-10-03).
+                    // No fire-order numbers in the rows.
                     assertEquals(List.of("A", "TIMBER WOLF", "PRIMARY", "AC/20", "[RT] AC/20  (8)", "7+", "58%",
                           "SRM 6", "[LT] SRM 6  (9)", "7+", "58%", "MEDIUM LASER", "LA · Energy", "7+", "58%",
                           "MEDIUM LASER", "RA · Energy", "7+", "58%"), rows(wolf));

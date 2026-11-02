@@ -1443,8 +1443,7 @@ public final class MapSetupDialog extends JDialog implements IMapSettingsObserve
         }
         try (InputStream os = new FileInputStream(fc.getSelectedFile())) {
             MapSetup setup = MapSetup.load(os);
-            lobbyCommands.applyMapSetup(mapSettings, setup.getMapWidth(), setup.getMapHeight(),
-                  setup.getBoardWidth(), setup.getBoardHeight(), setup.getBoards());
+            lobbyCommands.applyMapSetup(mapSettings, setup);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(clientgui.getFrame(),
                   Messages.getString("ChatLounge.map.problemLoadMapSetup"),

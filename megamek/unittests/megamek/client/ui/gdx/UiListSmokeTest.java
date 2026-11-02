@@ -87,7 +87,7 @@ class UiListSmokeTest {
     }
 
     /**
-     * The held row stays inside its list (the user's decision of 2026-10-03): dragged far above the list it stops at
+     * The held row stays inside its list: dragged far above the list it stops at
      * the top, far below at the bottom, and beside it keeps the list's x; a drop at the bottom takes the last place.
      */
     @Test
@@ -218,7 +218,7 @@ class UiListSmokeTest {
             frames(stage, .5f);
             assertTrue(scroll.getScrollY() > scrolled + 40, "on and on while the row stays there");
 
-            // Held below the pane, the row stays in the pane's view of the list (the user's decision of 2026-10-03),
+            // Held below the pane, the row stays in the pane's view of the list,
             // whole at its bottom edge, where no clip cuts it.
             drag(stage, low, new Vector2(grip.x, view.y - 12), 2);
             ui.draw();

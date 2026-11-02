@@ -769,6 +769,13 @@ void main() {
     fillDetail = vec4(cavity, relief, alpha * alpha, field);
     return;
 #endif
+#ifdef plainSculptFinishFlag
+    // The asset metadata proves these authored channels are zero. Let the compiler remove their reads/blends and
+    // unused lighting paths. Keep this before live effects: nuclear scorch below can still emit light.
+    finish.metallic = 0.0;
+    finish.scatter = 0.0;
+    finish.emission = vec3(0.0);
+#endif
     if (!ground && u_surfaceScar > .5) groundDamage(world, face, 0.0, sand, exposed, albedo, normal, cavity, finish);
     // Scorch replaces material before rain, grid and elevation grade. Severity zero takes no material samples.
     if (u_groundScorch.x > 0.0 && volcanic < 1.0) {

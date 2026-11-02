@@ -22,9 +22,9 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.common.enums.GamePhase;
 
 /**
- * Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon (C.1 G1), and the
- * playback speeds in the frame's top right corner, one pill of sections from 0.5x to Instant, for every phase and turn
- * (the user's decisions of 2026-10-03: also to hurry the other players' moves).
+ * Phase header, top left: round, phase ring, phase name, who line and the movement activation ribbon, and the
+ * playback speeds in the frame's top right corner, one pill of sections from 0.5x to Instant, for every phase and turn:
+ * also to hurry the other players' moves).
  */
 final class GpuPhaseHeader implements GpuHud.Component {
     /** The phase name's size (#phase .name), and at W <= 1350. */
@@ -45,8 +45,8 @@ final class GpuPhaseHeader implements GpuHud.Component {
     private static final List<UnitMotion.Speed> SPEEDS = List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL,
           UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE, UnitMotion.Speed.INSTANT);
     /**
-     * The speeds' distance from the frame's top and right edges, in its top right corner above the text's lines (the
-     * user's decision of 2026-10-03), and the room the round keeps from them.
+     * The speeds' distance from the frame's top and right edges, in its top right corner above the text's lines,
+     * and the room the round keeps from them.
      */
     private static final float SPEEDS_TOP = 5;
     private static final float SPEEDS_RIGHT = 6;
@@ -135,7 +135,7 @@ final class GpuPhaseHeader implements GpuHud.Component {
         GamePhase phase = status.phase();
         ring.progress = progress(phase) / 6f;
         // No number before the first combat round (the start-of-game deployment and the setup phases before it); only
-        // the number where the round line has no room for the word (the user's decision of 2026-10-03).
+        // the number where the round line has no room for the word.
         if (status.round() != shownRound || top.getWidth() != shownWidth) {
             shownRound = status.round();
             shownWidth = top.getWidth();

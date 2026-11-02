@@ -84,16 +84,28 @@ class BoardTreeCoverageTest {
     }
 
     @Test
-    void cactiUseTheRotatedXYBoxIncludingSpaceBetweenArms() {
+    void cactiDiscountEmptyBoxAreaWithoutChangingWithRotation() {
         for (String name : List.of("cactus", "cactus-flowers", "cactus-young", "cactus-old", "cactus-organ")) {
             float[] bounds = BoardModelBounds.bounds("vegetation/" + name);
             float expected = (bounds[3] - bounds[0]) * (bounds[4] - bounds[1]) * 1.7f * 1.7f
-                  / (BoardGeometry.TILE_WIDTH * BoardGeometry.TILE_HEIGHT * .75f);
+                  / (BoardGeometry.TILE_WIDTH * BoardGeometry.TILE_HEIGHT * .75f) * .85f * .85f;
             for (int angle : new int[] { 0, 31, 73 }) {
                 var plant = new BoardScene.Feature("vegetation/" + name, 0, 0, angle, 1.7f, 2, 0, BoardScene.FeatureKind.TREE);
                 assertEquals(expected, coverage(List.of(plant)), .02f, "Rotation does not inflate an axis-aligned box");
             }
         }
+    }
+
+    @Test
+    void minesHeavyCactiHaveMoreBodiesThanTheAdjacentPalmLight() {
+        var lightAt = new Coords(1, 10);
+        var heavyAt = new Coords(1, 11);
+        var light = BoardTreeDistributionTest.capture(new Hex(0, "woods:1;foliage_elev:2", "desert", lightAt), lightAt, true);
+        var heavy = BoardTreeDistributionTest.capture(new Hex(0, "woods:2;foliage_elev:2", "desert", heavyAt), heavyAt, true);
+        assertTrue(light.stream().anyMatch(t -> t.asset().startsWith("vegetation/palm")));
+        assertTrue(heavy.stream().filter(t -> t.asset().startsWith("vegetation/cactus")).count() >= 7,
+              "Sparse cactus arms cannot receive the same credit as a full palm crown");
+        assertTrue(heavy.size() >= light.size() * 2, "The heavy cactus stand needs a clearly denser population");
     }
 
     @Test
@@ -135,11 +147,13 @@ class BoardTreeCoverageTest {
                         assertTrue(trees.size() >= previous.size(), theme);
                         assertEquals(previous, trees.subList(0, previous.size()), "Existing plants keep their scale and position");
                         assertTrue(coverage(trees) >= coverage(previous));
-                        long canopy = trees.stream().filter(t -> t.height() >= 1).count();
-                        int cap = BoardTreeCoverage.limit(density, false);
-                        assertTrue(canopy <= cap, "A sparse crown cannot produce unbounded plants");
+                        long canopy = trees.stream().filter(t -> t.height() >= 1 && !BoardFeatures.rigid(t.asset())
+                              && !BoardTreeCoverage.bare(t.asset())).count();
+                        assertTrue(canopy <= density * 3, "Ordinary canopy plants stay within 3/6/9, including mixed stands");
+                        assertTrue(trees.stream().filter(t -> BoardFeatures.solid(t.asset())).count()
+                              <= BoardTreeCoverage.colonyLimit(density), "Rigid colonies retain their independent packing budget");
                         assertTrue(trees.stream().filter(t -> t.asset().startsWith("vegetation/cactus")).count()
-                              <= BoardTreeCoverage.limit(density, true), "Cactus caps also apply in mixed stands");
+                              <= BoardTreeCoverage.cactusLimit(density), "Cactus caps also apply in mixed stands");
                         assertTrue(trees.stream().filter(t -> BoardTreeCoverage.bare(t.asset())).count()
                               <= BoardTreeCoverage.bareLimit(density), "Bare-tree caps also apply in mixed stands");
                         assertTrue(trees.stream().allMatch(t -> BoardFeatures.solid(t.asset())
@@ -350,15 +364,17 @@ class BoardTreeCoverageTest {
     }
 
     @Test
-    void leafyStandsStayNearTheRequestedCoverageAtRepresentativeLocations() {
+    void leafyStandsApproachCoverageUntilTheirPopulationLimit() {
+        boolean limited = false;
         for (String theme : List.of("", "volcanic", "rock", "snow")) {
             for (int density = 1; density <= 3; density++) {
                 var at = new Coords(3, 3);
                 var trees = BoardTreeDistributionTest.capture(new Hex(0,
                       "woods:" + density + ";foliage_elev:2", theme, at), at, true);
-                assertEquals(BoardTreeCoverage.target(density), coverage(trees), .10f, theme + " " + density);
+                limited |= assertCoverageOrPopulationLimit(trees, density, theme);
             }
         }
+        assertTrue(limited, "Sparse crowns exercise the cap before reaching the coverage target");
     }
 
     @Test
@@ -371,10 +387,22 @@ class BoardTreeCoverageTest {
                     var trees = BoardTreeDistributionTest.capture(new Hex(0,
                           terrain + ":" + density + ";foliage_elev:3" + extra, kind.equals("tropical") ? kind : "", at), at, true)
                           .stream().filter(t -> t.height() >= 1).toList();
-                    assertEquals(BoardTreeCoverage.target(density), coverage(trees), .10f, kind + " " + density);
+                    assertCoverageOrPopulationLimit(trees, density, kind);
                 }
             }
         }
+    }
+
+    private static boolean assertCoverageOrPopulationLimit(List<BoardScene.Feature> trees, int density, String kind) {
+        float target = BoardTreeCoverage.target(density), actual = coverage(trees);
+        if (actual < target - .10f) {
+            long bare = trees.stream().filter(tree -> BoardTreeCoverage.bare(tree.asset())).count();
+            assertTrue(trees.size() - bare == density * 3 || bare == density * 2,
+                  "A population cap takes priority over filling the remaining crown gaps: " + kind + " " + density);
+            return true;
+        }
+        assertEquals(target, actual, .10f, kind + " " + density);
+        return false;
     }
 
     @Test

@@ -406,7 +406,7 @@ final class GpuWeaponsPanel implements GpuHud.Component {
 
     /**
      * The assign line (H10): the target a "+" assigns to, or how to begin. None while a weapon is armed, which its row
-     * already shows selected (the user's decision of 2026-10-03).
+     * already shows selected.
      */
     private void showAssign(View view) {
         if (row(view.weapons(), view.armed()) != null) {

@@ -98,7 +98,7 @@ class BoardFungusTest {
                 int density = hex.terrainLevel(Terrains.WOODS);
                 var cover = features.stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
                 assertEquals(density < 1, cover.isEmpty());
-                assertTrue(cover.size() <= BoardTreeCoverage.limit(density, false));
+                assertTrue(cover.size() <= BoardTreeCoverage.colonyLimit(density));
                 assertTrue(cover.stream().filter(f -> BoardFungus.SPORES.contains(f.asset())).count() <= Math.max(0, density));
                 if (!cover.isEmpty()) {
                     assertEquals(hex.terrainLevel(Terrains.FOLIAGE_ELEV), cover.getFirst().height());
@@ -152,7 +152,7 @@ class BoardFungusTest {
                 hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, height));
                 var cover = BoardFeatures.capture(hex, new Coords(5, 8), Map.of()).stream()
                       .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
-                assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.limit(density, false));
+                assertTrue(!cover.isEmpty() && cover.size() <= BoardTreeCoverage.colonyLimit(density));
                 assertEquals(height, cover.getFirst().height());
                 // Fungal stands retain small fruiting bodies; ordinary trees retain their full cover height.
                 long shorter = cover.stream().filter(f -> f.height() < height).count();

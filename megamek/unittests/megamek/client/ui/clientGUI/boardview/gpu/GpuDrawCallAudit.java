@@ -31,12 +31,88 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.utils.Array;
+import org.lwjgl.opengl.ARBPipelineStatisticsQuery;
 import org.lwjgl.opengl.ARBTimerQuery;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL15;
 
 /** Optional inspection of actual terrain submissions; never installed during normal benchmark frames. */
 final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
+    /** One opaque pass, outside timing samples. Driver counts may include helper work and are not an overdraw ratio. */
+    static final class PipelineStatistics implements AutoCloseable {
+        private record Counter(int target, String name) { }
+        private static final List<Counter> COUNTERS = List.of(
+              new Counter(ARBPipelineStatisticsQuery.GL_VERTICES_SUBMITTED_ARB, "submitted vertices (including instances)"),
+              new Counter(ARBPipelineStatisticsQuery.GL_PRIMITIVES_SUBMITTED_ARB, "submitted primitives or patches"),
+              new Counter(ARBPipelineStatisticsQuery.GL_VERTEX_SHADER_INVOCATIONS_ARB, "vertex shader invocations"),
+              new Counter(ARBPipelineStatisticsQuery.GL_TESS_CONTROL_SHADER_PATCHES_ARB, "tessellation control patches"),
+              new Counter(ARBPipelineStatisticsQuery.GL_TESS_EVALUATION_SHADER_INVOCATIONS_ARB, "tessellation evaluation invocations"),
+              new Counter(ARBPipelineStatisticsQuery.GL_CLIPPING_INPUT_PRIMITIVES_ARB, "primitives entering clipping"),
+              new Counter(ARBPipelineStatisticsQuery.GL_CLIPPING_OUTPUT_PRIMITIVES_ARB, "primitives leaving clipping"),
+              new Counter(ARBPipelineStatisticsQuery.GL_FRAGMENT_SHADER_INVOCATIONS_ARB, "fragment shader invocations"),
+              new Counter(GL15.GL_SAMPLES_PASSED, "samples passing depth and stencil"));
+        private final int[] queries = new int[COUNTERS.size()];
+        private boolean active, started;
+
+        PipelineStatistics() {
+            if (!GL.getCapabilities().GL_ARB_pipeline_statistics_query) {
+                throw new IllegalStateException("Pipeline diagnostics require GL_ARB_pipeline_statistics_query");
+            }
+            for (int i = 0; i < queries.length; i++) {
+                int target = COUNTERS.get(i).target();
+                if ((target == ARBPipelineStatisticsQuery.GL_TESS_CONTROL_SHADER_PATCHES_ARB
+                      || target == ARBPipelineStatisticsQuery.GL_TESS_EVALUATION_SHADER_INVOCATIONS_ARB)
+                      && !GL.getCapabilities().OpenGL40 && !GL.getCapabilities().GL_ARB_tessellation_shader) {
+                    continue;
+                }
+                if (GL15.glGetQueryi(target, GL15.GL_QUERY_COUNTER_BITS) > 0) {
+                    queries[i] = GL15.glGenQueries();
+                }
+            }
+        }
+
+        void stage(String name) {
+            if (active && !"opaque terrain".equals(name)) { end(); }
+            if (!active && "opaque terrain".equals(name)) {
+                if (started) { throw new IllegalStateException("Expected one opaque pass per diagnostic frame"); }
+                started = active = true;
+                for (int i = 0; i < queries.length; i++) {
+                    if (queries[i] != 0) { GL15.glBeginQuery(COUNTERS.get(i).target(), queries[i]); }
+                }
+            }
+        }
+
+        private void end() {
+            if (!active) { return; }
+            for (int i = 0; i < queries.length; i++) {
+                if (queries[i] != 0) { GL15.glEndQuery(COUNTERS.get(i).target()); }
+            }
+            active = false;
+        }
+
+        String report(String scenario) {
+            end();
+            if (!started) { throw new IllegalStateException("No opaque pass reached the pipeline diagnostic"); }
+            var report = new StringBuilder("PIPELINE ").append(scenario).append(" opaque terrain\n");
+            report.append("counter,value\n");
+            for (int i = 0; i < queries.length; i++) {
+                report.append(COUNTERS.get(i).name()).append(',');
+                if (queries[i] == 0) { report.append("unsupported"); }
+                else { report.append(ARBTimerQuery.glGetQueryObjectui64(queries[i], GL15.GL_QUERY_RESULT)); }
+                report.append('\n');
+            }
+            return report.append("Driver-dependent counts may include helper work. Passing samples accumulate across draws "
+                        + "and MSAA samples; they are not unique pixels.\n")
+                  .toString();
+        }
+
+        @Override
+        public void close() {
+            end();
+            for (int query : queries) { if (query != 0) { GL15.glDeleteQueries(query); } }
+        }
+    }
+
     private record Origin(String category, int chunk) { }
     private record Row(String pass, String category, String family, int shader, long materialMask,
           long environmentMask, long vertexMask, boolean blended) { }

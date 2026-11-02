@@ -120,7 +120,7 @@ class GpuPhaseHeaderSmokeTest {
                 hud.compare("g1-header-04", shot, header.actor(), "04-opponent-turn.jpg", 20, 20);
                 shot.dispose();
                 // The playback's speeds at the round line's right, in every phase and also on the opponent's turn
-                // (the user's decision of 2026-10-03): the history's speed is pressed.
+                // the history's speed is pressed.
                 Group head = (Group) header.actor();
                 assertTrue(head.<UiButton>findActor("phase-speed-normal").isChecked(), "1x is the history's speed");
                 state.history.speed(UnitMotion.Speed.DOUBLE);

@@ -287,6 +287,8 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? "#define terrainBlendFlag\n" : "")
                   + (ordinaryFamily != -1 ? "#define VOLCANIC_ORDINARY_FAMILY " + ordinaryFamily + "\n" : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? "#define volcanicFlag\n" : "")
+                  + (chosen == sculptShader && magma == null && plainSculptFinish()
+                        ? "#define plainSculptFinishFlag\n" : "")
                   + (renderable.material.has(GpuRoads.TYPE) ? "#define roadFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Mask.TYPE) ? "#define roadMaskFlag\n" : "")
                   + (renderable.material.has(GpuRoads.Coats.TYPE) ? "#define roadCoatFlag\n" : "")
@@ -4324,7 +4326,7 @@ final class GpuTerrain implements Disposable {
         List<Prop> supports = new ArrayList<>();
         List<BoardPlantFootprint> colonies = new ArrayList<>();
         var colonyShapes = new HashMap<BoardPlantFootprint.Key, BoardPlantFootprint>();
-        var colonyWays = features.stream().anyMatch(f -> BoardFeatures.solid(f.asset())) ? BoardRoad.nearbyWays(scene, tile) : List.<BoardRoad>of();
+        var colonyWays = features.stream().anyMatch(f -> BoardFeatures.rigid(f.asset())) ? BoardRoad.nearbyWays(scene, tile) : List.<BoardRoad>of();
         for (BoardScene.Feature feature : features) {
             if (build.preview != null && !routeFeature(tile, feature)) { continue; }
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
@@ -4443,7 +4445,7 @@ final class GpuTerrain implements Disposable {
             float plantingRadius = coral ? build.coralRootRadii.computeIfAbsent(model,
                   key -> coralRootRadius(key, bounds.min.z + rootInset)) * coralScale : BoardRelief.metres(.8f);
             boolean packedColony = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()
-                  && feature.decoration() == null && BoardFeatures.solid(feature.asset());
+                  && feature.decoration() == null && BoardFeatures.rigid(feature.asset());
             var colony = packedColony ? BoardPlantFootprint.of(feature, colonyShapes) : null;
             boolean naturalPlant = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement() || fungusScatter;
             if (naturalPlant) { plantSurfaces.columns(build.chunk.columns); }
@@ -8023,13 +8025,19 @@ final class GpuTerrain implements Disposable {
     }
 
     /**
-     * Whether the ground material cache draws this terrain's level tops: the view's own terrain (prints and previews
-     * borrow its assets and draw directly), with every sculpted surface a plain dielectric. The cache keeps no emission
-     * (a map or a constant glow), metallic or scattering, map or factor (their means are zero only where every texel
-     * is).
+     * Whether the ground material cache draws this terrain's level tops. Prints and previews borrow its assets and
+     * draw directly. The cache stores only plain authored finishes; live effects are applied afterward.
      */
     private boolean cachesGround() {
-        if (!GpuMaterialCache.ENABLED || borrowedAssets) { return false; }
+        return GpuMaterialCache.ENABLED && !borrowedAssets && plainSculptFinish();
+    }
+
+    /**
+     * All authored sculpt finishes lack emission (map or glow), metallic and scattering. Their nonnegative map means
+     * are zero only where every texel is zero. The direct shader can discard those unused channels before live effects;
+     * volcanic programs retain their procedural emission. This reads the sculpt arrays already owned by the assets.
+     */
+    private boolean plainSculptFinish() {
         var finish = assets.finishArrays(FINISHES, SCULPT_LAYERS.size());
         for (int material = 0; material < SCULPT_LAYERS.size(); material++) {
             if (finish.tint()[material * 4 + 3] >= 0 || finish.glow()[material * 3] != 0
