@@ -129,7 +129,9 @@ class BoardOrchardTest {
                     }
                 }
                 assertTrue(triangles > 0 && triangles < previous);
-                assertTrue(triangles <= List.of(800, 300, 110).get(lod));
+                assertTrue(triangles <= List.of(34000, 10000, 3200).get(lod));
+                assertTrue(data.meshes.first().parts.length >= 3,
+                      "The crown, wood and attached apples retain separate materials: " + name);
                 assertEquals(0, low, .001f, name);
                 assertEquals(30, high, 1f, "LOD preserves the tree height: " + name);
                 boolean hasSnow = false;
@@ -137,9 +139,9 @@ class BoardOrchardTest {
                     hasSnow |= material.id.equals("snow") || material.id.equals("canopy-snow-cutout");
                     boolean cutout = material.id.endsWith("-cutout");
                     if (cutout) {
-                        assertEquals(.5f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
+                        assertEquals(.3f, ((RigidGlb.Data) data).alphaTests.get(material.id), .0001f);
                     }
-                    // Crowns, bark and fruit carry albedo, normal and surface maps; the impostor card its own atlas.
+                    // Crowns and bark carry albedo, normal and surface maps; the impostor card its own atlas.
                     assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size,
                           name + " LOD" + lod + ": " + material.id);
                     for (var texture : material.textures) {

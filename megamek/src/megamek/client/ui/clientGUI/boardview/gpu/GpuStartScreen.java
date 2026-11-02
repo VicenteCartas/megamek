@@ -172,7 +172,8 @@ final class GpuStartScreen extends ApplicationAdapter {
     int generation;
     /** Set once the screen is disposed, so results that arrive after it are dropped. GPU thread only. */
     boolean disposed;
-    /** Gives the button that is starting a game its use back; null while none is. */
+    private UiButton pageBackButton;
+    /** Restores the start controls when starting ends; null while no game is starting. */
     private Runnable restoreStart;
 
     GpuStartScreen(GpuStartWindow window, boolean greet, GUIPreferences preferences) {
@@ -374,6 +375,7 @@ final class GpuStartScreen extends ApplicationAdapter {
 
     void showPage(Page shown) {
         page = shown;
+        pageBackButton = null;
         generation++;
         column.forEach(Actor::remove);
         column.clear();
@@ -519,7 +521,9 @@ final class GpuStartScreen extends ApplicationAdapter {
     UiButton backButton(Page target) {
         UiButton back = kit.button("button-secondary", "chevron-left", Messages.getString("StartScreen.back"), null);
         leftAligned(back);
+        back.setDisabled(restoreStart != null);
         UiKit.onChange(back, () -> showPage(target));
+        pageBackButton = back;
         return back;
     }
 
@@ -587,14 +591,17 @@ final class GpuStartScreen extends ApplicationAdapter {
     }
 
     /**
-     * Disables {@code button}, which starts a game, and has it say {@code key}'s text until {@link #startEnded}, which
-     * runs {@code ended}.
+     * Disables {@code button}, which starts a game, and Back, and has {@code button} say {@code key}'s text until
+     * {@link #startEnded}, which runs {@code ended}.
      */
     void starting(UiButton button, String key, Runnable ended) {
         // The button of an earlier start, such as a save whose read another click dropped, works again
         startEnded();
         restoreStart = ended;
         button.setDisabled(true);
+        if (pageBackButton != null) {
+            pageBackButton.setDisabled(true);
+        }
         button.setText(kit.cased("button", Messages.getString(key)));
     }
 
@@ -607,10 +614,13 @@ final class GpuStartScreen extends ApplicationAdapter {
         });
     }
 
-    /** No game started, or the one that did has closed: the button that started it works again. */
+    /** No game started, or the one that did has closed: the start controls work again. */
     void startEnded() {
         Runnable ended = restoreStart;
         restoreStart = null;
+        if (pageBackButton != null) {
+            pageBackButton.setDisabled(false);
+        }
         if (ended != null) {
             ended.run();
         }
@@ -729,7 +739,9 @@ final class GpuStartScreen extends ApplicationAdapter {
                     case Keys.ENTER, Keys.NUMPAD_ENTER, Keys.SPACE -> {
                         Actor focus = stage.getKeyboardFocus();
                         if (focus instanceof UiButton button) {
-                            button.fire(new ChangeListener.ChangeEvent());
+                            if (!button.isDisabled()) {
+                                button.fire(new ChangeListener.ChangeEvent());
+                            }
                         } else if (focus instanceof TextField && keycode != Keys.SPACE && submitsOnEnter()) {
                             submit();
                         } else {
@@ -737,7 +749,7 @@ final class GpuStartScreen extends ApplicationAdapter {
                         }
                     }
                     case Keys.ESCAPE -> {
-                        if (page != Page.MAIN) {
+                        if (page != Page.MAIN && restoreStart == null) {
                             showPage(parent(page));
                         }
                     }

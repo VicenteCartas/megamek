@@ -38,7 +38,7 @@ final class GpuHudState {
      * transport, the log, the board's pop-ups and the playback keys share it.
      */
     final GpuPlaybackHistory history;
-    /** The unit the player inspects; the unit card shows it instead of the focus unit. */
+    /** The unit the player inspects; non-owned units have a separate card on the right. */
     int inspected = Entity.NONE;
     /** The equipment number of the weapon armed for click-to-assign, or -1. */
     int armedWeapon = -1;
@@ -73,6 +73,8 @@ final class GpuHudState {
     /** A report phase opened the closed log, so the next phase that is no report closes it again. */
     private boolean logAuto;
     private int focus = Entity.NONE;
+    /** Last explicit own inspection; a foreign inspection must not replace the left card during playback. */
+    private int ownInspection = Entity.NONE;
     /** The player cleared the selection with the card's ✕ (clearSelection). */
     private boolean selectionCleared;
     /** The last status {@link #presented} masked, and the mask, kept so that the snapshot keeps its identity. */
@@ -87,9 +89,11 @@ final class GpuHudState {
     private GpuBoardSource.Frame selectionFrame;
     private boolean concealedDuringPlayback;
     private GpuUnitRecord.Snapshot record;
+    private GpuUnitRecord.Snapshot ownRecord;
     private boolean playbackBusy;
     private List<GpuBattleStatus.UnitStatus> presentedUnits = List.of();
     private GpuUnitRecord.Snapshot presentedRecord = GpuUnitRecord.Snapshot.EMPTY;
+    private GpuUnitRecord.Snapshot presentedOwnRecord = GpuUnitRecord.Snapshot.EMPTY;
 
     GpuHudState(GpuPlaybackHistory history) {
         this.history = history;
@@ -124,6 +128,25 @@ final class GpuHudState {
         return inspected != Entity.NONE ? inspected : selectionCleared ? Entity.NONE : focus;
     }
 
+    /** The left card shows an own inspection or the own selection, independently of a foreign inspection. */
+    int ownCardUnit() {
+        GpuBattleStatus.UnitStatus unit = presented(inspected);
+        if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return inspected; }
+        if (selectionCleared) { return Entity.NONE; }
+        unit = presented(ownInspection);
+        if (unit != null && unit.side() == GpuBattleStatus.Side.OWN) { return ownInspection; }
+        unit = presented(focus);
+        return unit != null && unit.side() == GpuBattleStatus.Side.OWN ? focus : presentedUnits.stream()
+              .filter(candidate -> candidate.side() == GpuBattleStatus.Side.OWN)
+              .mapToInt(GpuBattleStatus.UnitStatus::id).findFirst().orElse(Entity.NONE);
+    }
+
+    /** Only units outside the local player's control occupy the right card, allies included. */
+    int otherCardUnit() {
+        GpuBattleStatus.UnitStatus unit = presented(inspected);
+        return unit != null && unit.side() != GpuBattleStatus.Side.OWN ? inspected : Entity.NONE;
+    }
+
     /**
      * The card's ✕ (the user's decisions of 2026-10-02): ends the inspection and clears the selection. No unit is
      * shown or highlighted, and in the local turn no unit acts ({@link #presented}) until the player selects one, or a
@@ -131,12 +154,14 @@ final class GpuHudState {
      */
     void clearSelection() {
         inspected = Entity.NONE;
+        ownInspection = Entity.NONE;
         selectionCleared = true;
     }
 
     /** A unit the player selects ends a cleared selection. */
     void restoreSelection() {
         selectionCleared = false;
+        ownInspection = Entity.NONE;
     }
 
     /** Unit commands wait for playback, or for the player to restore a cleared local selection. */
@@ -157,7 +182,7 @@ final class GpuHudState {
             GpuHudData shown = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
                   GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, presentedRecord,
                   selectionCleared || concealedDuringPlayback ? GpuFirePreview.Snapshot.NONE : held.preview(), latest.chat(), latest.toasts(),
-                  latest.los(), latest.players());
+                  latest.los(), latest.players(), presentedOwnRecord);
             BoardScene scene = frame.scene() == null ? null : frame.scene().withPlaybackSelection(
                   selectionCleared ? Entity.NONE : focus);
             return new GpuBoardSource.Frame(scene, frame.timeline(), null, frame.globalCommands(), frame.tooltip(),
@@ -180,7 +205,8 @@ final class GpuHudState {
         GpuHudData shown = new GpuHudData(panels.phase(), locked ? GpuMovePlan.Snapshot.EMPTY : panels.move(),
               locked ? GpuFireOrders.Snapshot.EMPTY : panels.fire(),
               locked ? GpuPhysicalOptions.Snapshot.EMPTY : panels.physical(), panels.record(),
-              GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players());
+              GpuFirePreview.Snapshot.NONE, panels.chat(), panels.toasts(), panels.los(), panels.players(),
+              panels.ownRecord());
         BoardScene.Context context = frame.context();
         return new GpuBoardSource.Frame(frame.scene(), frame.timeline(),
               locked && context != null && !context.selectionCleared() ? null : context,
@@ -217,6 +243,12 @@ final class GpuHudState {
         return presentedRecord;
     }
 
+    /** Each card uses only its unit's record; a changed selection waits for the EDT capture. */
+    GpuUnitRecord.Snapshot presentedRecord(int unitId) {
+        return presentedRecord.unitId() == unitId ? presentedRecord
+              : presentedOwnRecord.unitId() == unitId ? presentedOwnRecord : GpuUnitRecord.Snapshot.EMPTY;
+    }
+
     /**
      * Applies the newest status. The units are presented from the last status captured while the playback was idle
      * (C.6); a closed log opens itself for the report phases after initiative and closes again with the next phase
@@ -226,19 +258,35 @@ final class GpuHudState {
      *       {@code Entity.NONE}
      */
     int update(GpuBattleStatus.Snapshot next, GpuUnitRecord.Snapshot nextRecord, boolean busy) {
-        if (next == status && nextRecord == record && busy == playbackBusy
+        return update(next, nextRecord, nextRecord, busy);
+    }
+
+    private int update(GpuBattleStatus.Snapshot next, GpuUnitRecord.Snapshot nextRecord,
+          GpuUnitRecord.Snapshot nextOwnRecord, boolean busy) {
+        GpuBattleStatus.UnitStatus inspection = presented(inspected);
+        if (inspection != null && inspection.side() == GpuBattleStatus.Side.OWN) {
+            ownInspection = inspected;
+        }
+        if (next == status && nextRecord == record && nextOwnRecord == ownRecord && busy == playbackBusy
+              && (nextOwnRecord.unitId() != ownCardUnit()
+                    || nextOwnRecord.unitId() == presentedOwnRecord.unitId())
               && (nextRecord.unitId() != cardUnit() || nextRecord.unitId() == presentedRecord.unitId())) {
             return Entity.NONE;
         }
         GpuBattleStatus.Snapshot previous = focusStatus == null ? GpuBattleStatus.Snapshot.EMPTY : focusStatus;
         status = next;
         record = nextRecord;
+        ownRecord = nextOwnRecord;
         playbackBusy = busy;
         if (!busy || presentedUnits.isEmpty()) {
             presentedUnits = next.units();
             presentedRecord = nextRecord;
+            presentedOwnRecord = nextOwnRecord;
         } else if (nextRecord.unitId() != presentedRecord.unitId() && nextRecord.unitId() == cardUnit()) {
             presentedRecord = nextRecord;
+        }
+        if (nextOwnRecord.unitId() != presentedOwnRecord.unitId() && nextOwnRecord.unitId() == ownCardUnit()) {
+            presentedOwnRecord = nextOwnRecord;
         }
         if (busy && focusStatus != null) {
             return Entity.NONE;
@@ -264,13 +312,16 @@ final class GpuHudState {
             selectionFrame = null;
             focusStatus = null;
             status = null;
+            ownInspection = Entity.NONE;
             presentedUnits = List.of();
+            presentedRecord = GpuUnitRecord.Snapshot.EMPTY;
+            presentedOwnRecord = GpuUnitRecord.Snapshot.EMPTY;
         }
         if (!busy || selectionFrame == null) {
             selectionFrame = frame;
             concealedDuringPlayback = false;
         }
-        int select = update(frame.status(), frame.panels().record(), busy);
+        int select = update(frame.status(), frame.panels().record(), frame.panels().ownRecord(), busy);
         for (BoardScene.Animation event : frame.timeline()) {
             if (busy && event instanceof BoardScene.Concealed hidden && frame.scene() != null
                   && hidden.boardId() == frame.scene().boardId()) {
@@ -278,7 +329,11 @@ final class GpuHudState {
                 concealedDuringPlayback = true;
                 presentedUnits = presentedUnits.stream().filter(unit -> unit.id() != hidden.entityId()).toList();
                 if (presentedRecord.unitId() == hidden.entityId()) { presentedRecord = GpuUnitRecord.Snapshot.EMPTY; }
+                if (presentedOwnRecord.unitId() == hidden.entityId()) {
+                    presentedOwnRecord = GpuUnitRecord.Snapshot.EMPTY;
+                }
                 if (focus == hidden.entityId()) { focus = Entity.NONE; }
+                if (ownInspection == hidden.entityId()) { ownInspection = Entity.NONE; }
                 if (inspected == hidden.entityId()) { inspected = Entity.NONE; }
                 GpuBattleStatus.Snapshot held = focusStatus;
                 focusStatus = new GpuBattleStatus.Snapshot(held.round(), held.phase(), held.myTurn(), held.localPlayerId(),
@@ -333,6 +388,7 @@ final class GpuHudState {
             }
         }
         // A cleared selection ends with the next turn, phase or focus unit.
+        if (focus != before || phaseStart || turnBegins || turnEnded) { ownInspection = Entity.NONE; }
         selectionCleared &= !phaseStart && !turnBegins && !turnEnded && focus == before;
         return select;
     }

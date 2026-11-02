@@ -26,10 +26,9 @@ final class GpuFungus implements Disposable {
     static Emitter emitter(String asset, BoundingBox bounds) {
         if (!BoardFungus.COVER.contains(asset)) { return null; }
         Vector3 origin = bounds.getCenter(new Vector3());
-        // A cup's wisp starts at its rim, fading in as it rises, so the bowl keeps its own flesh; a spore body's starts
-        // inside it.
-        origin.z = bounds.min.z + bounds.getDepth() * (BoardFungus.CUPS.contains(asset) ? 1 : .65f);
         float radius = Math.max(.25f * BoardGeometry.hexScale(), Math.min(bounds.getWidth(), bounds.getHeight()) * .13f);
+        // Start below the lip, so the wisp becomes visible inside the bowl before rising through its opening.
+        origin.z = BoardFungus.CUPS.contains(asset) ? bounds.max.z - radius : bounds.min.z + bounds.getDepth() * .65f;
         return source(origin, radius, false);
     }
 
@@ -61,7 +60,7 @@ final class GpuFungus implements Disposable {
 
     void add(List<Emitter> sources, Camera camera) {
         for (Emitter source : sources) {
-            if (camera.frustum.sphereInFrustum(source.origin(), source.radius() * 2)
+            if (camera.frustum.sphereInFrustum(source.origin(), source.radius() * (source.cloud() ? 2 : 3.5f))
                   && source.radius() * BoardCamera.pixelsPerUnit(camera, source.origin()) > 1.5f) {
                 visible.add(source);
             }
@@ -83,12 +82,12 @@ final class GpuFungus implements Disposable {
                 float age = seconds / (7 + source.phase() * 3) + source.phase() + puff / (float) puffs;
                 age -= (float) Math.floor(age);
                 float radius = source.radius();
-                // Broad cloudlets mill around the hex; individual wisps rise only a little way out of the body.
+                // Broad cloudlets mill around the hex; wisps rise from inside the bowl, expanding and fading above it.
                 float drift = source.cloud() ? radius * .6f : age * radius * .18f;
                 point.set(source.origin()).add(
                       MathUtils.cos(seed + age * .7f) * drift + wind.x * wind.z * drift * age * .3f,
                       MathUtils.sin(seed + age * .7f) * drift + wind.y * wind.z * drift * age * .3f,
-                      age * radius * (source.cloud() ? .18f : .9f));
+                      age * radius * (source.cloud() ? .18f : 2));
                 float fade = MathUtils.sin(age * MathUtils.PI);
                 mist.billboard(camera, point, radius * (.85f + age * .4f),
                       1 + (int) (seed * 7) + age, (source.cloud() ? .16f : .26f) * fade * fade * detail);

@@ -54,6 +54,7 @@ final class BoardCamera {
     boolean animateOnSelectionChange = ANIMATE_CAMERA_ON_SELECTION_CHANGE;
     boolean animateCombatPlayback = ANIMATE_CAMERA_COMBAT_PLAYBACK;
     boolean animateOnMove = ANIMATE_CAMERA_ON_MOVE;
+    private boolean returnAfterPlayback = true;
     private float azimuth;
     private float tilt;
     /** In first person, camera.position owns the eye; focus and zoom retain the tactical view to restore. */
@@ -98,6 +99,9 @@ final class BoardCamera {
     /** The pose a look ({@link #look}) replaced; null otherwise. */
     private Pose lookReturn;
     private boolean lookReturnFit;
+    /** The view before the first automatic action, retained across the whole live playback queue. */
+    private Pose playbackReturn;
+    private boolean playbackReturnFit;
     private Pose framingStart;
     private Pose framingTarget;
     private float framingElapsed;
@@ -185,6 +189,7 @@ final class BoardCamera {
             return;
         }
         if (camera.perspective == value) { return; }
+        discardPlaybackReturn();
         stopFraming();
         fitToWindow = false;
         camera.perspective = value;
@@ -197,6 +202,7 @@ final class BoardCamera {
 
     void setFirstPerson(boolean value) {
         if (firstPerson == value) { return; }
+        discardPlaybackReturn();
         // Free flight starts from the 3D pose, so it leaves the Tactical View.
         if (value && tactical()) { setTactical(false, null); }
         stopFraming();
@@ -295,6 +301,10 @@ final class BoardCamera {
             tacticalReturn = new Pose(tacticalReturn.focus(), tacticalReturn.zoom() * displayScale / scale,
                   tacticalReturn.azimuth(), tacticalReturn.tilt());
         }
+        if (playbackReturn != null) {
+            playbackReturn = new Pose(playbackReturn.focus(), playbackReturn.zoom() * displayScale / scale,
+                  playbackReturn.azimuth(), playbackReturn.tilt());
+        }
         displayScale = scale;
         constrainFlight();
         if (fitToWindow && scene != null) {
@@ -382,6 +392,7 @@ final class BoardCamera {
      */
     void setTactical(boolean enabled, BoardScene scene) {
         if (enabled == tactical()) { return; }
+        discardPlaybackReturn();
         if (enabled) {
             // The Tactical View replaces the orbit pose that free flight left.
             setFirstPerson(false);
@@ -434,7 +445,37 @@ final class BoardCamera {
     /** A new board makes the saved 3D position meaningless: leaving the Tactical View then fits the new board. */
     void boardChanged() {
         boardColumns = boardRows = 0;
+        discardPlaybackReturn();
         if (tactical()) { tacticalReturnFit = true; }
+    }
+
+    boolean returnAfterPlayback() { return returnAfterPlayback; }
+
+    void setReturnAfterPlayback(boolean enabled) {
+        returnAfterPlayback = enabled;
+        if (!enabled) { discardPlaybackReturn(); }
+    }
+
+    void discardPlaybackReturn() { playbackReturn = null; }
+
+    /** Save once, before playback changes the usable area or frames its first action. */
+    void beginPlayback() {
+        if (!returnAfterPlayback || firstPerson || playbackReturn != null) { return; }
+        viewableArea(0, camera.viewportWidth);
+        playbackReturn = new Pose(focus.cpy(), camera.zoom, azimuth, tilt);
+        playbackReturnFit = fitToWindow;
+    }
+
+    /** Restore only after all actions and completion holds finish; explicit navigation can discard the return. */
+    boolean endPlayback(boolean animate) {
+        if (playbackReturn == null) { return false; }
+        Pose target = playbackReturn;
+        discardPlaybackReturn();
+        clearPlaybackFrame();
+        viewableArea(0, camera.viewportWidth);
+        animateTo(target, target.focus().z, animate);
+        fitToWindow = playbackReturnFit;
+        return true;
     }
 
     /** The board's width from straight above in world units: its hexes span x from 0 to this. */

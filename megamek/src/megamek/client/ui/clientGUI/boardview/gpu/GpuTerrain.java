@@ -62,7 +62,6 @@ import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DepthShader;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultShaderProvider;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
-import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.RenderContext;
 import com.badlogic.gdx.graphics.g3d.utils.RenderableSorter;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
@@ -1720,8 +1719,10 @@ final class GpuTerrain implements Disposable {
             // They draw as opaque (unblended, sorted with the solid trees), so they too hide the ground beneath first.
             if (material.id.equals("impostor")) {
                 BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
+                if (!material.has(FloatAttribute.AlphaTest)) {
+                    material.set(FloatAttribute.createAlphaTest(.5f));
+                }
                 material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
-                      new FloatAttribute(FloatAttribute.AlphaTest, .5f),
                       new Impostor(Math.max(bounds.getWidth(), bounds.getHeight()) / 2));
             }
         }
@@ -2413,8 +2414,10 @@ final class GpuTerrain implements Disposable {
         groundDamage.impact(scene, impact, this::tacticalSurface, surfaceScars::add);
     }
 
-    /** Test hook: the ground material cache on or off (GpuMaterialCache), with its state for reports. */
+    /** Live A/B switch for the ground material cache, retaining its allocation. */
     void setMaterialCache(boolean enabled) { materialCache.setEnabled(enabled); }
+
+    GpuMaterialCache.Status materialCacheStatus() { return materialCache.status(); }
 
     boolean materialCacheComplete() { return materialCache.complete(); }
 

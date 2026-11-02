@@ -25,6 +25,7 @@ import com.badlogic.gdx.utils.ScreenUtils;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 /** Native ground-weather appearance, height, advection and render cost. */
 @Tag("on-demand")
@@ -33,12 +34,34 @@ class GpuGroundWeatherSmokeTest {
 
     @Test
     void groundWeatherUsesTheExistingAtmosphereStages() {
+        runOnGlThread(this::checkWeather);
+    }
+
+    @Test
+    void sandLayerUsesBorderBaselineInBothViews() {
+        runOnGlThread(() -> {
+            assertTrue(output.isDirectory() || output.mkdirs());
+            var camera = new BoardCamera();
+            camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+            var atmosphere = new GpuAtmosphere();
+            var terrain = new GpuTerrain();
+            try {
+                checkSandBorderBaseline(atmosphere, terrain, camera);
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally {
+                atmosphere.dispose();
+                terrain.dispose();
+            }
+        });
+    }
+
+    private static void runOnGlThread(Executable check) {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 try {
-                    checkWeather();
+                    check.execute();
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -286,6 +309,57 @@ class GpuGroundWeatherSmokeTest {
             }
         }
         atmosphere.setOptions(GpuAtmosphere.Options.DEFAULTS);
+    }
+
+    private void checkSandBorderBaseline(GpuAtmosphere atmosphere, GpuTerrain terrain, BoardCamera camera) {
+        var tiles = scene(0, -1).tiles().stream().map(tile -> {
+            Coords at = tile.coords();
+            boolean basin = at.getX() >= 3 && at.getX() <= 5 && at.getY() >= 3 && at.getY() <= 5;
+            return new BoardScene.Tile(at, basin ? -4 : 0, -1, false, 0, tile.surface(), null, List.of(), List.of());
+        }).toList();
+        var basin = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
+        terrain.update(basin);
+        var settings = new BoardAtmosphere.Settings(13, 0, 0, 1, 0, 0,
+              new BoardAtmosphere.Effects(0, 0, 0, 1, 0, 0, 0));
+        for (boolean tilted : new boolean[] { false, true }) {
+            for (boolean sheltered : new boolean[] { false, true }) {
+                camera.setIsometric(tilted);
+                camera.fit(basin);
+                if (sheltered) {
+                    // Look at the floor from level -2, with the entire sampled air column below the level-0 rim.
+                    camera.camera.position.set(BoardGeometry.center(new Coords(4, 4), -4))
+                          .mulAdd(camera.camera.direction, 2 * BoardGeometry.level() / camera.camera.direction.z);
+                    camera.camera.zoom = 2 * BoardGeometry.width() / camera.camera.viewportWidth;
+                    camera.camera.update();
+                }
+                Vector3 sample = camera.camera.project(sheltered ? BoardGeometry.center(new Coords(4, 4), -4)
+                      : BoardGeometry.center(new Coords(6, 5), 0));
+                Pixmap clear = frame(atmosphere, terrain, camera, basin, BoardAtmosphere.DEFAULTS, 0);
+                try {
+                    // Hold terrain and camera fixed while moving the weather snapshot across the 24/32 border cutoff.
+                    for (int negativeBorder : new int[] { 9, 8, 7 }) {
+                        var weatherTiles = tiles.stream().map(tile -> new BoardScene.Tile(tile.coords(),
+                              tile.coords().getY() == 0 && tile.coords().getX() < negativeBorder ? -4 : tile.elevation(),
+                              -1, false, 0, tile.surface(), null, List.of(), List.of())).toList();
+                        var weather = new BoardScene(0, 9, 9, weatherTiles, List.of(), List.of(), -1, "", List.of());
+                        Pixmap dusty = frame(atmosphere, terrain, camera, weather, settings, 0);
+                        try {
+                            double dust = patchDifference(clear, dusty, sample);
+                            boolean expectSand = sheltered ? negativeBorder > 8 : negativeBorder <= 8;
+                            if (expectSand) {
+                                assertTrue(dust > 1, sheltered ? "Below 75%, sand still reaches negative levels"
+                                      : "At least 75% nonnegative border must raise sand over the rim: " + dust);
+                            } else {
+                                assertEquals(0, dust, 0.01, sheltered ? "Sublevels below the raised sand baseline are protected"
+                                      : "Below 75%, the low sand layer stays below the rim");
+                            }
+                            save(dusty, "ground-sand-border-" + negativeBorder + (tilted ? "-iso" : "-top")
+                                  + (sheltered ? "-sheltered" : ""));
+                        } finally { dusty.dispose(); }
+                    }
+                } finally { clear.dispose(); }
+            }
+        }
     }
 
     private void checkDesertAndWind(GpuAtmosphere atmosphere, GpuTerrain terrain, BoardCamera camera, BoardScene original)

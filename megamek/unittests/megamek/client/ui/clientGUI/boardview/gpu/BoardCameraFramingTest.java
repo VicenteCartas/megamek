@@ -24,6 +24,29 @@ class BoardCameraFramingTest {
     }
 
     @Test
+    void playbackReturnRestoresTheViewAcrossHudClearanceAndForgetsAReplacedBoard() {
+        var camera = camera(65);
+        camera.viewableArea(100, 500);
+        var eye = camera.camera.position.cpy();
+        var direction = camera.camera.direction.cpy();
+        float zoom = camera.camera.zoom;
+        camera.beginPlayback();
+        camera.viewableArea(200, 350);
+        camera.frameLocation(new Vector3(500, -700, 0), 350);
+        camera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+        camera.beginPlayback();
+        assertTrue(camera.endPlayback(true));
+        camera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+        assertTrue(eye.epsilonEquals(camera.camera.position, .001f));
+        assertTrue(direction.epsilonEquals(camera.camera.direction, .001f));
+        assertEquals(zoom, camera.camera.zoom);
+        assertFalse(camera.endPlayback(true), "Returning consumes the saved view");
+        camera.beginPlayback();
+        camera.boardChanged();
+        assertFalse(camera.endPlayback(true), "A saved view must not survive board replacement");
+    }
+
+    @Test
     void unitAndHexNavigationShareTheSelectionSettingAndTakeOverTheEntrance() {
         var unit = unit(1, 18, 14, 3, 2);
         List<Consumer<BoardCamera>> navigation = List.of(

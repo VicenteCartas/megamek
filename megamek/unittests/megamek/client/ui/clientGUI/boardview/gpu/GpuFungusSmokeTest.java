@@ -182,8 +182,12 @@ class GpuFungusSmokeTest {
             var bounds = new BoundingBox(new Vector3(-10, -10, 0), new Vector3(10, 10, 30));
             for (String asset : BoardFungus.CLIFF) { assertNull(GpuFungus.emitter(asset, bounds)); }
             for (String asset : BoardFungus.SCATTER) { assertNull(GpuFungus.emitter(asset, bounds)); }
+            for (String asset : BoardFungus.CUPS) {
+                var cup = GpuFungus.emitter(asset, bounds);
+                assertTrue(bounds.contains(cup.origin()) && cup.origin().z < bounds.max.z,
+                      asset + " must emit below the rim, inside the bowl");
+            }
             var source = GpuFungus.emitter(BoardFungus.CUPS.getFirst(), bounds);
-            assertTrue(bounds.contains(source.origin()), "Emission starts inside the mushroom");
             for (int step = 0; step < 2; step++) {
                 output.begin(0, 0, 0, 1);
                 mist.begin();

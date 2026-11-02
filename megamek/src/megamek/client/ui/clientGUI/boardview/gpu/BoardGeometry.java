@@ -227,9 +227,32 @@ final class BoardGeometry {
         return lowest - depth;
     }
 
-    /** Shared atmosphere baseline: hex elevation, never a riverbed, water depth, or model height. */
+    /** Lowest hex elevation for fog, precipitation and volume bounds, never a riverbed or model height. */
     static float weatherBase(BoardScene scene) {
         return scene.tiles().stream().mapToInt(BoardScene.Tile::elevation).min().orElse(0) * level();
+    }
+
+    /** Sand ignores negative levels when at least 75% of border hexes have nonnegative elevations. */
+    static float sandBase(BoardScene scene) {
+        int lowest = Integer.MAX_VALUE, lowestNonnegative = Integer.MAX_VALUE;
+        int border = 0, nonnegativeBorder = 0;
+        for (BoardScene.Tile tile : scene.tiles()) {
+            int elevation = tile.elevation();
+            Coords at = tile.coords();
+            // Each border hex counts once, including corners and one-row/one-column boards.
+            if (at.getX() == 0 || at.getY() == 0 || at.getX() == scene.width() - 1 || at.getY() == scene.height() - 1) {
+                border++;
+                if (elevation >= 0) { nonnegativeBorder++; }
+            }
+            // An ultra-sublevel never supplies the sand layer's baseline.
+            if (tile.ultraSublevel()) { continue; }
+            lowest = Math.min(lowest, elevation);
+            if (elevation >= 0) { lowestNonnegative = Math.min(lowestNonnegative, elevation); }
+        }
+        if (border > 0 && nonnegativeBorder * 4L >= border * 3L && lowestNonnegative != Integer.MAX_VALUE) {
+            return lowestNonnegative * level();
+        }
+        return (lowest == Integer.MAX_VALUE ? 0 : lowest) * level();
     }
 
     static boolean contains(Coords coords, float x, float y) {

@@ -1305,7 +1305,8 @@ class GpuCommandDockSmokeTest {
         GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         BoardCamera camera = new BoardCamera();
         GpuContextMenu menu = new GpuContextMenu(hud.kit, source, state, id -> { });
-        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu), state, camera, menu);
+        UiButton chat = new GpuChatPanel(hud.kit, source, state).button();
+        return new Dock(new GpuCommandDock(hud.kit, source, state, camera, menu, chat), state, camera, menu);
     }
 
     /**

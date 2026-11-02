@@ -71,6 +71,14 @@ class GpuMeepleDeathSmokeTest {
                         capture("before");
                         // One zoom from the explosion to the checks: small scenery the zoom hides is looked through.
                         view.boardCamera.zoom(.6f);
+                        view.render();
+                        Map<Integer, java.util.Set<String>> figures = new HashMap<>();
+                        for (int id = 3; id <= 5; id++) {
+                            var standing = instance(view, id);
+                            java.util.Set<String> names = new java.util.HashSet<>();
+                            for (Node node : standing.nodes) { names.add(node.id); }
+                            figures.put(id, names);
+                        }
                         var atlas = UnitBounds.world(instance(view, 1)).getCenter(new Vector3());
                         // The Atlas was just hit from the west for 30 damage; nothing is known of the tank's hit.
                         @SuppressWarnings("unchecked")
@@ -108,6 +116,18 @@ class GpuMeepleDeathSmokeTest {
                         capture("settled-iso");
                         assertLanded(casualties, 1, atlas, ground, new Vector3(1, 0, 0));
                         assertLanded(casualties, 2, null, ground, null);
+                        int checked = 0;
+                        for (var casualty : casualties.casualties()) {
+                            var names = figures.get(casualty.unit.id());
+                            if (names == null) { continue; }
+                            for (Node node : casualty.instance.nodes) {
+                                if (!names.contains(node.id)) { continue; } // A shattered transport, checked separately above.
+                                assertEquals(0, gap(vertices(casualty.instance, node), ground), .25f,
+                                      "A fallen infantry GLB rests on its surface, not an empty bounding-box corner: " + node.id);
+                                checked++;
+                            }
+                        }
+                        assertEquals(7, checked, "Three foot soldiers, two motorized riders and two Battle Armor suits");
                         view.boardCamera.setIsometric(false);
                         view.render();
                         capture("settled-top");
@@ -299,7 +319,7 @@ class GpuMeepleDeathSmokeTest {
      * The nearest any of the points comes to the surface right under it (negative inside one): near zero for a piece
      * resting on the ground, a deck, a ledge or a rock, also with an edge tucked under a bridge's deck.
      */
-    private static float gap(List<Vector3> points, MeepleDebris.Ground ground) {
+    static float gap(List<Vector3> points, MeepleDebris.Ground ground) {
         float gap = Float.POSITIVE_INFINITY;
         for (Vector3 point : points) {
             float under = ground.height(point.x, point.y, point.z + 1, true);
@@ -312,20 +332,25 @@ class GpuMeepleDeathSmokeTest {
         return (float) points.stream().mapToDouble(point -> point.z).min().orElse(Float.NaN);
     }
 
-    /** The piece's vertices in world space; a broken meeple's meshes are unindexed. */
-    private static List<Vector3> vertices(ModelInstance instance, Node piece) {
+    /** Actual drawn vertices in world space, for both GLB figures and unindexed shattered pieces. */
+    static List<Vector3> vertices(ModelInstance instance, Node piece) {
         List<Vector3> result = new ArrayList<>();
         var world = new Matrix4(instance.transform).mul(piece.globalTransform);
         for (var part : piece.parts) {
+            if (!part.enabled) { continue; }
             var mesh = part.meshPart.mesh;
             int stride = mesh.getVertexSize() / Float.BYTES;
             int position = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES;
-            float[] vertices = new float[part.meshPart.size * stride];
-            mesh.getVertices(part.meshPart.offset * stride, vertices.length, vertices);
-            for (int at = 0; at < vertices.length; at += stride) {
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            short[] indices = new short[mesh.getNumIndices()];
+            mesh.getVertices(vertices);
+            if (indices.length > 0) { mesh.getIndices(indices); }
+            for (int index = part.meshPart.offset; index < part.meshPart.offset + part.meshPart.size; index++) {
+                int at = (indices.length == 0 ? index : Short.toUnsignedInt(indices[index])) * stride;
                 result.add(new Vector3(vertices[at + position], vertices[at + position + 1], vertices[at + position + 2]).mul(world));
             }
         }
+        for (Node child : piece.getChildren()) { result.addAll(vertices(instance, child)); }
         return result;
     }
 

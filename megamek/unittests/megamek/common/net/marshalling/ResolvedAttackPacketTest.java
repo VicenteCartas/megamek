@@ -4,6 +4,7 @@ package megamek.common.net.marshalling;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -26,6 +27,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class ResolvedAttackPacketTest {
+    @Test
+    void crewLossSurvivesImpactCopiesAndTheNetwork() throws Exception {
+        var location = new UnitLocation(1, new Coords(2, 3), 0, 0, 0);
+        var result = new ResolvedAttack(UUID.randomUUID(), ResolvedAttack.Kind.DEATH, location, location,
+              Targetable.TYPE_ENTITY, -1, "", 0, true).withCrewLoss(true)
+              .withImpacts(List.of(new ResolvedAttack.Impact("HD", false, 1)));
+        var bytes = new ByteArrayOutputStream();
+        var marshaller = new NativeSerializationMarshaller();
+        marshaller.marshall(new Packet(PacketCommand.ENTITY_ATTACK_RESOLVED, result), bytes);
+        var received = (ResolvedAttack) marshaller.unmarshall(new ByteArrayInputStream(bytes.toByteArray())).getObject(0);
+        assertEquals(result, received);
+        assertTrue(received.crewLoss());
+    }
+
     @ParameterizedTest
     @CsvSource({
           "ISSmallLaser,       ,                      3,  0",

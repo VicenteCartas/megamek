@@ -586,6 +586,65 @@ class GpuHudInputTest {
     }
 
     @Test
+    void enemyAndAllyInspectionsKeepTheOwnCardAndClosingThemKeepsTheTurn() {
+        for (GpuBattleStatus.Side side : List.of(ENEMY, GpuBattleStatus.Side.ALLY)) {
+            GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 0,
+                  unit(FIRST, OWN, true, true), unit(FOE, side, false, false));
+            GpuUnitRecord.Snapshot own = record(FIRST);
+            GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of()),
+                  GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, record(FOE),
+                  GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
+                  RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY, own);
+            update(moving, panels, null);
+            hud.select(FOE);
+            update(moving, panels, null);
+            assertEquals(FIRST, hud.state.ownCardUnit());
+            assertEquals(FOE, hud.state.otherCardUnit());
+            assertSame(own, hud.state.presentedRecord(FIRST));
+            assertTrue(shown(hud.stage.getRoot().findActor("unit-card")));
+            assertTrue(shown(hud.stage.getRoot().findActor("other-unit-card")));
+            hud.stage.getRoot().findActor("other-unit-card-close").fire(new ChangeListener.ChangeEvent());
+            update(moving, panels, null);
+            assertEquals(Entity.NONE, hud.state.otherCardUnit());
+            assertEquals(FIRST, hud.state.ownCardUnit());
+            assertFalse(hud.state.turnLocked(moving));
+        }
+    }
+
+    @Test
+    void bothInspectorRecordsWaitForPlaybackAndOwnInspectionSurvivesAForeignClick() {
+        GpuBattleStatus.Snapshot report = status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0,
+              unit(FIRST, OWN, false, false), unit(SECOND, OWN, false, false), unit(FOE, ENEMY, false, false));
+        GpuUnitRecord.Snapshot own = record(SECOND);
+        GpuUnitRecord.Snapshot enemy = record(FOE);
+        GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
+              GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, own,
+              GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
+              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY, own);
+        update(report, panels, null);
+        GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
+        hud.update(frame(report, panels), playing, null, preferences());
+        hud.select(SECOND);
+        hud.update(frame(report, panels), playing, null, preferences());
+        hud.select(FOE);
+        GpuHudData inspected = new GpuHudData(panels.phase(), panels.move(), panels.fire(), panels.physical(),
+              enemy, panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players(), own);
+        hud.update(frame(report, inspected), playing, null, preferences());
+        assertEquals(SECOND, hud.state.ownCardUnit());
+        assertEquals(FOE, hud.state.otherCardUnit());
+        GpuUnitRecord.Snapshot changedOwn = record(SECOND);
+        GpuUnitRecord.Snapshot changedEnemy = record(FOE);
+        GpuHudData changed = new GpuHudData(panels.phase(), panels.move(), panels.fire(), panels.physical(),
+              changedEnemy, panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players(), changedOwn);
+        hud.update(frame(report, changed), playing, null, preferences());
+        assertSame(own, hud.state.presentedRecord(SECOND));
+        assertSame(enemy, hud.state.presentedRecord(FOE));
+        hud.update(frame(report, changed), GpuHud.HudView.EMPTY, null, preferences());
+        assertSame(changedOwn, hud.state.presentedRecord(SECOND));
+        assertSame(changedEnemy, hud.state.presentedRecord(FOE));
+    }
+
+    @Test
     void escSkipsARunningPlaybackOnceNothingIsLeftToClose() {
         BoardScene.Waypoint from = new BoardScene.Waypoint(HEX, 0, 0);
         BoardScene.Unit mover = new BoardScene.Unit(FOE, -1, "Unit " + FOE, from, null, false, null, 1, false);

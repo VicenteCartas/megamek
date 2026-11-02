@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
@@ -102,9 +103,15 @@ final class GpuBoardTuning {
     private final BoardCamera camera;
     private final CheckBox firstPerson;
     private final CheckBox wireframe;
+    private final CheckBox dramaticDeath;
     private final List<Control> cameraFieldOfView;
     private final CheckBox normalMaps;
     private final CheckBox terrainParallax;
+    private final CheckBox terrainCache;
+    private final Label terrainCacheState;
+    private final Label terrainCacheDetails;
+    private Supplier<GpuMaterialCache.Status> terrainCacheStatus = () -> null;
+    private GpuMaterialCache.Status shownTerrainCache;
     private final SelectBox<UnitDisplayMode> unitDisplayMode;
     private final CheckBox vsync;
     /** Windowed or Fullscreen; the view switches the window and shows its state here every frame. */
@@ -197,6 +204,9 @@ final class GpuBoardTuning {
         this.camera = camera;
         cameraRows = rows;
         rows.top().defaults().pad(0, 3, 0, 3);
+        dramaticDeath = checkbox(skin, Messages.getString("GpuBoard.dramaticDeath"), "camera-dramatic-death");
+        dramaticDeath.setChecked(GpuBattleView.DRAMATIC_DEATH);
+        dramaticDeath.addListener(new TextTooltip(Messages.getString("GpuBoard.dramaticDeathHelp"), skin, "menu"));
         firstPerson = checkbox(skin, "Free Flight", "tuning-free-flight");
         firstPerson.addListener(new TextTooltip("Fly freely: WASD moves, Q/E lowers/raises, Shift speeds up, "
               + "right drag pans, middle drag looks around, Shift swaps the drags, and the wheel moves forward/back. "
@@ -398,6 +408,24 @@ final class GpuBoardTuning {
             rows.add(cardPending).colspan(3).left().height(18).row();
             updateGraphicsCard();
         }
+        section(skin, "Terrain cache");
+        terrainCache = checkbox(skin, "Enable terrain cache", "tuning-terrain-cache");
+        terrainCache.setChecked(GpuMaterialCache.ENABLED && GpuMaterialCache.SPLIT);
+        terrainCache.setDisabled(!GpuMaterialCache.ENABLED || !GpuMaterialCache.SPLIT);
+        terrainCache.addListener(new TextTooltip("Live A/B comparison: off draws ground materials directly and pauses"
+              + " cache fills. Allocated memory and cached pages are retained for switching back. This session only;"
+              + " startup materialCache/materialCacheSplit overrides still apply.", skin, "menu"));
+        terrainCacheState = new Label("Waiting for terrain", skin, "small");
+        terrainCacheState.setName("tuning-terrain-cache-state");
+        rows.add(terrainCacheState).colspan(3).growX().row();
+        terrainCacheDetails = new Label("", skin, "small");
+        terrainCacheDetails.setName("tuning-terrain-cache-details");
+        terrainCacheDetails.addListener(new TextTooltip("GPU allocation is estimated from texture formats, mip levels,"
+              + " build targets and page tables; driver overhead and other terrain resources are excluded. Occupied"
+              + " slots include spare pages used during rebuilds. Progress counts current pages admitted for this view,"
+              + " not the whole board or elapsed rebuild time. Pages outside capacity or table coverage draw directly."
+              + " Stale pages outside the view wait until needed again.", skin, "menu"));
+        rows.add(terrainCacheDetails).colspan(3).growX().row();
         rows = general;
         section(skin, "Unit family sizes");
         familySizes = controls(skin, Arrays.stream(UnitFamilyScale.values())
@@ -959,6 +987,8 @@ final class GpuBoardTuning {
         return cameraRows;
     }
 
+    boolean dramaticDeath() { return dramaticDeath.isChecked(); }
+
     /** The Defaults button: a ChangeEvent on it restores the tabs' board values. */
     TextButton defaults() {
         return reset;
@@ -994,6 +1024,8 @@ final class GpuBoardTuning {
      * anti-aliasing choices saved preferences, not board values, so a reset leaves them alone.
      */
     private void restoreDefaults() {
+        dramaticDeath.setChecked(GpuBattleView.DRAMATIC_DEATH);
+        camera.setReturnAfterPlayback(true);
         syncing = true;
         firstPerson.setChecked(false);
         syncing = false;
@@ -1129,6 +1161,39 @@ final class GpuBoardTuning {
 
     boolean terrainParallax() {
         return terrainParallax.isChecked();
+    }
+
+    boolean terrainCache() { return terrainCache.isChecked(); }
+
+    /** The current renderer, resolved on the render thread so an asset reload cannot leave a disposed cache here. */
+    void terrainCacheStatus(Supplier<GpuMaterialCache.Status> status) { terrainCacheStatus = status; }
+
+    /** Called only while Display is visible, after the frame's rendering; these labels never drive cache state. */
+    void showTerrainCacheStatus() {
+        var status = terrainCacheStatus.get();
+        if (status == null) {
+            shownTerrainCache = null;
+            terrainCacheState.setText("Waiting for terrain");
+            terrainCacheDetails.setText("");
+            return;
+        }
+        if (status.equals(shownTerrainCache)) { return; }
+        shownTerrainCache = status;
+        var pages = status.pages();
+        String progress = status.active() && pages.needed() > 0
+              ? String.format(Locale.ROOT, "\nView build: %d%% (%d / %d pages current)",
+                    100L * pages.current() / pages.needed(), pages.current(), pages.needed()) : "";
+        terrainCacheState.setText(status.state() + progress);
+        String coverage = status.active()
+              ? String.format(Locale.ROOT, "\nView: %d / %d pages admitted · level %d\nPrefetch pending: %d",
+                    status.admitted(), status.requested(), status.level(), pages.prefetchPending()) : "";
+        if (status.wallsOutside() > 0) { coverage += "\nWall pages outside table: " + status.wallsOutside(); }
+        terrainCacheDetails.setText(String.format(Locale.ROOT,
+              "GPU allocation (est.): %.1f MiB\nPage storage: %.1f MiB · occupied: %.1f MiB"
+                    + "\nSlots: %d / %d · stale: %d · building: %d%s",
+              status.allocatedBytes() / 1048576.0, pages.capacity() * status.pageBytes() / 1048576.0,
+              pages.occupied() * status.pageBytes() / 1048576.0, pages.occupied(), pages.capacity(),
+              pages.stale(), pages.building(), coverage));
     }
 
     /** The view switches the window when the user picks a display mode: true for Fullscreen. */

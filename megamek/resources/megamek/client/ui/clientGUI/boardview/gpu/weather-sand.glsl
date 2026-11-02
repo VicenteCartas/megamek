@@ -1,6 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Sandstorm density, wind-driven grains and dust shading, composed through the shared ground layer.
-uniform vec4 u_sand; // Strength, height, board baseline, inverse terrain-level height.
+uniform vec4 u_sand; // Strength, height, sand baseline, inverse terrain-level height.
 uniform vec4 u_sandWind; // Unit direction, integrated fine-grain travel, inverse hex width.
 uniform vec2 u_sandOffset;
 uniform vec3 u_sandLight; // The ground light times the dust albedo (BoardAtmosphere.SAND_DUST).
@@ -10,8 +10,12 @@ vec4 sandLayer(float depth) {
     if (u_sand.x <= 0.0 || outsideGroundLayer()) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 origin = world(0.0), surface = world(depth);
     vec3 direction = normalize(world(1.0) - origin);
-    if (groundBaseSide(surface, depth, u_sand.z)) return vec4(0.0, 0.0, 0.0, 1.0);
+    // The plinth follows the actual terrain minimum, even when sand starts above negative levels.
+    if (groundBaseSide(surface, depth, u_boundsMin.z)) return vec4(0.0, 0.0, 0.0, 1.0);
     vec2 segment = groundSegment(origin, surface, direction);
+    // Sublevels below a raised baseline are sheltered. Clip the air column above that plane;
+    // negating world Z lets the shared belowHeight helper clip its opposite half-space.
+    if (u_sand.z > u_boundsMin.z) segment = belowHeight(segment, -origin, -direction, -u_sand.z);
     if (segment.y <= segment.x) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 first = origin + direction * segment.x;
     vec3 last = origin + direction * segment.y;

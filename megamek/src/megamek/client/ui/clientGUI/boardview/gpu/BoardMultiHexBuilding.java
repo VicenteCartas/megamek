@@ -66,17 +66,19 @@ final class BoardMultiHexBuilding {
     private static final float STRUT_LENGTH = 16, STRUT_WIDTH = .75f, STRUT_OUT = .5f, STRUT_IN = .4f;
     private static final float LEVEL = GpuBuilding.LEVEL_HEIGHT;
     private static final float WIDTH = HexTile.MODEL_WIDTH, HEIGHT = HexTile.HEIGHT;
-    /** Wall texture: one repeat per two storeys, as wide as high. */
-    private static final float WALL_REPEAT = 2 * LEVEL;
-    /** A roof's texture, one square repeat laid along its building: as the habitats' roofs (HexTile#HEIGHT / 2). */
-    private static final float ROOF_REPEAT = HEIGHT / 2;
+    /** The wall material has two panel rows: smaller cladding panels within each storey. */
+    private static final float WALL_REPEAT = LEVEL;
+    /** Plain riveted roof plating, at the same scale as the bevels. Fittings have bounded UVs of their own. */
+    private static final float ROOF_REPEAT = 24;
     private static final float EPSILON = 1e-3f;
 
     // Board materials (textures/<name>.tres); their .tres files give every finish, transparency included.
-    static final String WALL = "structures/lunar/colony-panel", ROOF = "structures/lunar/habitat-roof",
+    static final String WALL = "structures/lunar/colony-panel", ROOF = "structures/lunar/dome-frame",
           PLINTH_MATERIAL = "structures/lunar/regolith-concrete", FRAME = "structures/lunar/dome-frame",
           GLASS = "structures/lunar/dome-glass", GARDEN = "structures/lunar/biodome-garden",
           PIER = "structures/lunar/habitat-pier", SKYLIGHT = "structures/lunar/skylight-glass";
+    /** The existing hatch/grille artwork is sampled only by complete fittings, never tiled over a roof. */
+    private static final String ROOF_DETAILS = "structures/lunar/habitat-roof";
 
     private static final MMLogger LOGGER = MMLogger.create(BoardMultiHexBuilding.class);
 
@@ -1144,8 +1146,10 @@ final class BoardMultiHexBuilding {
             // Its roof meets the gate's wall top, under its bevelled cap.
             corridor(mesh, hex, from, new float[] { to[0], to[1], to[2], to[3], to[4], to[5] - BEVEL_RISE });
         } else {
-            // Its open ends in the building and in the gate, its collars within both caps (#moduleBlock's bevel).
-            float[] start = { from[0] - from[2] * 2, from[1] - from[3] * 2, from[2], from[3], from[4], from[5] - 1.1f };
+            // Recess the rear collar into the building so the angled opening has room to turn at full door width;
+            // both collars stay under their caps (#moduleBlock's bevel).
+            float recess = GATE_HALF / 2;
+            float[] start = { from[0] - from[2] * recess, from[1] - from[3] * recess, from[2], from[3], from[4], from[5] - 1.1f };
             float[] end = { to[0] + to[2] * 2, to[1] + to[3] * 2, to[2], to[3], to[4], to[5] - BEVEL_RISE - 1.6f };
             bellows(mesh, hex, start, end, lod, GATE_HALF - 1.5f, true);
         }
@@ -1183,7 +1187,7 @@ final class BoardMultiHexBuilding {
             // Laid along the passage from its start, alike in every share.
             float[] c = foot[corner];
             float ox = c[0] - sx, oy = c[1] - sy;
-            roof[corner] = vertex(c[0], c[1], c[2], nx, ny, nz, 1, (ox * ux + oy * uy) / ROOF_REPEAT,
+            roof[corner] = vertex(c[0], c[1], c[2], nx, ny, nz, 1, (ox * ux + oy * uy) * lean / ROOF_REPEAT,
                   (ox * uy - oy * ux) / ROOF_REPEAT);
         }
         outward(mesh, ROOF, hex, roof[0], roof[1], roof[2]);
@@ -1211,70 +1215,90 @@ final class BoardMultiHexBuilding {
               { to[0] - to[2] * reach, to[1] - to[3] * reach }, { to[0], to[1] } };
         int samples = 64;
         float[] lengths = new float[samples + 1];
-        float[] last = point(curve, 0);
+        float[] last = point(curve, 0), previous = tangent(curve, 0);
+        float bend = 0;
         for (int sample = 1; sample <= samples; sample++) {
             float[] next = point(curve, (float) sample / samples);
-            lengths[sample] = lengths[sample - 1] + (float) Math.hypot(next[0] - last[0], next[1] - last[1]);
+            float[] direction = tangent(curve, (float) sample / samples);
+            float distance = (float) Math.hypot(next[0] - last[0], next[1] - last[1]);
+            lengths[sample] = lengths[sample - 1] + distance;
+            float turn = (float) Math.atan2(previous[0] * direction[1] - previous[1] * direction[0],
+                  previous[0] * direction[0] + previous[1] * direction[1]);
+            bend = Math.max(bend, Math.abs(turn) / Math.max(EPSILON, distance));
             last = next;
+            previous = direction;
         }
-        float total = lengths[samples];
+        // A short, wide elbow cannot follow its centreline without folding its inner wall. Loft corresponding
+        // points of the two openings instead: a gradual transition that keeps both collars and the passage open.
+        boolean loft = bend * (radius + 1.1f) > .8f;
+        float total = loft ? chord : lengths[samples];
+        float endSign = from[2] * to[2] + from[3] * to[3] < 0 ? -1 : 1;
         int stations = Math.max(6, Math.round(total / (PITCH / 2)) + 1);
         // Round its ring, or its arch's feet and roof (#arch).
         int sides = tunnel ? (lod == 0 ? 12 : 6) + 2 : lod == 0 ? 14 : 8;
         float rib = tunnel ? .7f : RIB;
         float[][] centres = new float[stations][], along = new float[stations][], across = new float[stations][];
         float[][] ups = new float[stations][];
-        float[] radii = new float[stations], distances = new float[stations], rises = new float[stations];
+        float[] radii = new float[stations], rises = new float[stations];
         float climb = (to[4] - from[4]) / total;
         for (int station = 0; station < stations; station++) {
-            float distance = total * station / (stations - 1), t = 1;
-            for (int sample = 1; sample <= samples; sample++) {
-                if (lengths[sample] >= distance) {
-                    float share = (distance - lengths[sample - 1]) / Math.max(1e-6f, lengths[sample] - lengths[sample - 1]);
-                    t = (sample - 1 + share) / samples;
-                    break;
+            float fraction = (float) station / (stations - 1), distance = total * fraction, t = fraction;
+            if (!loft) {
+                for (int sample = 1; sample <= samples; sample++) {
+                    if (lengths[sample] >= distance) {
+                        float share = (distance - lengths[sample - 1]) / Math.max(1e-6f, lengths[sample] - lengths[sample - 1]);
+                        t = (sample - 1 + share) / samples;
+                        break;
+                    }
                 }
             }
-            float[] at = point(curve, t), slope = tangent(curve, t);
+            float[] at = loft ? new float[] { from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t }
+                  : point(curve, t);
+            float[] slope = loft ? new float[] { from[2] * (1 - t) + to[2] * endSign * t,
+                  from[3] * (1 - t) + to[3] * endSign * t } : tangent(curve, t);
             float flat = (float) Math.hypot(slope[0], slope[1]), tx = slope[0] / flat, ty = slope[1] / flat;
             float floor = from[4] + (to[4] - from[4]) * distance / total, length = (float) Math.sqrt(1 + climb * climb);
             centres[station] = new float[] { at[0], at[1], floor + (tunnel ? SPRING : radius + .4f) };
             // A tunnel's roof over its springing: up to the height its ends ask for, between them in turn.
             rises[station] = tunnel ? Math.max(2, from[5] + (to[5] - from[5]) * distance / total - floor - SPRING) : 0;
             along[station] = new float[] { tx / length, ty / length, climb / length };
-            across[station] = new float[] { ty, -tx, 0 };
+            // Linear interpolation of the opening's axes keeps the loft's side paths straight. Do not normalise
+            // it: doing so bows the inner wall back into a fold at a tight bend.
+            across[station] = loft ? new float[] { slope[1], -slope[0], 0 } : new float[] { ty, -tx, 0 };
             // Up, square to the tube: across x along.
             float[] a = along[station];
             ups[station] = new float[] { -tx * a[2], -ty * a[2], ty * a[1] + tx * a[0] };
-            distances[station] = distance;
             // Collars at the ends, ribs between.
             radii[station] = station <= 1 || station >= stations - 2 ? radius + 1.1f : station % 2 == 0 ? radius
                   : radius + rib;
         }
-        // Where it bends tighter than it is wide, its inner side draws in towards the bend's centre, so it does not fold
-        // over itself: how far each side reaches (left of its way, then right) as a share of its radius.
-        float[][] reaches = new float[stations][];
+        // Derive the texture distances and normals from the drawn surface, including its changing roof height,
+        // collars and bends. Equal texture density in both directions keeps the corrugations from smearing panels.
+        float[][][] profiles = new float[stations][sides + 1][];
+        float[][] us = new float[stations][sides + 1], vs = new float[stations][sides + 1];
         for (int station = 0; station < stations; station++) {
-            int before = Math.max(0, station - 1), after = Math.min(stations - 1, station + 1);
-            float[] a = along[before], b = along[after];
-            float turn = (float) Math.atan2(a[0] * b[1] - a[1] * b[0], a[0] * b[0] + a[1] * b[1]);
-            float bend = Math.abs(turn) / Math.max(1e-4f, distances[after] - distances[before]);
-            float inner = bend > 0 ? Math.min(1, .8f / (bend * radii[station])) : 1;
-            // Turning left, the bend's centre lies left of the way (`across` points right).
-            reaches[station] = turn > 0 ? new float[] { inner, 1 } : new float[] { 1, inner };
+            for (int side = 0; side <= sides; side++) {
+                float[] p = tunnel ? arch(centres[station], across[station], radii[station],
+                      rises[station] + radii[station] - radius, side, sides)
+                      : ring(centres[station], across[station], ups[station], radii[station], side, sides);
+                profiles[station][side] = p;
+                if (station > 0) {
+                    float[] q = profiles[station - 1][side];
+                    us[station][side] = us[station - 1][side] + Vector3.dst(p[0], p[1], p[2], q[0], q[1], q[2]) / 12;
+                }
+                if (side > 0) {
+                    float[] q = profiles[station][side - 1];
+                    vs[station][side] = vs[station][side - 1] + Vector3.dst(p[0], p[1], p[2], q[0], q[1], q[2]) / 12;
+                }
+            }
         }
         for (int band = 0; band < stations - 1; band++) {
             String material = band == 0 || band == stations - 2 ? PIER : FRAME;
-            float flare = (radii[band + 1] - radii[band]) / Math.max(1e-4f, distances[band + 1] - distances[band]);
             for (int side = 0; side < sides; side++) {
-                float[] a = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band, side, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, reaches, distances, band, side, sides, flare);
-                float[] b = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band, side + 1, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, reaches, distances, band, side + 1, sides, flare);
-                float[] c = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band + 1, side + 1, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, reaches, distances, band + 1, side + 1, sides, flare);
-                float[] d = tunnel ? arch(centres, along, across, radii, rises, reaches, distances, band + 1, side, sides, radius, flare)
-                      : ring(centres, along, across, ups, radii, reaches, distances, band + 1, side, sides, flare);
+                float[] a = bellowsVertex(profiles, us, vs, band, band, side, tunnel);
+                float[] b = bellowsVertex(profiles, us, vs, band, band, side + 1, tunnel);
+                float[] c = bellowsVertex(profiles, us, vs, band, band + 1, side + 1, tunnel);
+                float[] d = bellowsVertex(profiles, us, vs, band, band + 1, side, tunnel);
                 outward(mesh, material, hex, a, b, c);
                 outward(mesh, material, hex, a, c, d);
             }
@@ -1291,47 +1315,40 @@ final class BoardMultiHexBuilding {
     }
 
     /**
-     * A vertex of a tunnel's arch at {@code station}, {@code point} of {@code points}: its left foot on the ground, the
-     * half ellipse of its roof, {@code radii} either side and {@code rises} high over the springing (its centre's
-     * height), over to the right, and its right foot; ribs ({@code radii} past {@code radius}) stand out of both, each
-     * side drawn in by its {@code reaches}; its normal leaning with the rib.
+     * A tunnel's cross-section: left foot on the ground, the half ellipse over its springing, and right foot.
      */
-    private static float[] arch(float[][] centres, float[][] along, float[][] across, float[] radii, float[] rises,
-          float[][] reaches, float[] distances, int station, int point, int points, float radius, float flare) {
-        float r = radii[station], rise = rises[station] + r - radius, spring = centres[station][2];
-        float[] centre = centres[station], a = along[station], x = across[station];
-        float out, z, side, up;
+    private static float[] arch(float[] centre, float[] across, float radius, float rise, int point, int points) {
+        float out, z;
         if (point == 0 || point == points) {
             out = point == 0 ? -1 : 1;
-            side = out;
             z = 0;
-            up = 0;
         } else {
             double angle = Math.PI * (points - 1 - point) / (points - 2);
             out = (float) Math.cos(angle);
-            z = spring + (float) Math.sin(angle) * rise;
-            // Square to the ellipse.
-            float length = (float) Math.hypot(Math.cos(angle) * rise, Math.sin(angle) * r);
-            side = (float) Math.cos(angle) * rise / length;
-            up = (float) Math.sin(angle) * r / length;
+            z = centre[2] + (float) Math.sin(angle) * rise;
         }
-        float reach = out * r * reaches[station][out < 0 ? 0 : 1];
-        return vertex(centre[0] + x[0] * reach, centre[1] + x[1] * reach, z, x[0] * side - a[0] * flare,
-              x[1] * side - a[1] * flare, up - a[2] * flare, contact(z), distances[station] / 8, (float) point / points * 2);
+        return new float[] { centre[0] + across[0] * out * radius, centre[1] + across[1] * out * radius, z };
     }
 
-    /** A vertex of the tube's ring at {@code station}, {@code side} of {@code sides} round it, its normal leaning with the rib. */
-    private static float[] ring(float[][] centres, float[][] along, float[][] across, float[][] ups, float[] radii,
-          float[][] reaches, float[] distances, int station, int side, int sides, float flare) {
+    /** A tube's round cross-section in its local frame. */
+    private static float[] ring(float[] centre, float[] across, float[] up, float radius, int side, int sides) {
         double angle = 2 * Math.PI * side / sides;
-        float c = (float) Math.cos(angle), s = (float) Math.sin(angle), r = radii[station];
-        float[] centre = centres[station], a = along[station], x = across[station], u = ups[station];
-        float rx = x[0] * c + u[0] * s, ry = x[1] * c + u[1] * s, rz = x[2] * c + u[2] * s;
-        // Its across part drawn in on the bend's inner side (#bellows' reaches).
-        float drawn = c * (reaches[station][c < 0 ? 0 : 1] - 1);
-        float z = centre[2] + rz * r;
-        return vertex(centre[0] + (rx + x[0] * drawn) * r, centre[1] + (ry + x[1] * drawn) * r, z, rx - a[0] * flare,
-              ry - a[1] * flare, rz - a[2] * flare, contact(z), distances[station] / 8, (float) side / sides * 2);
+        float c = (float) Math.cos(angle), s = (float) Math.sin(angle);
+        return new float[] { centre[0] + (across[0] * c + up[0] * s) * radius,
+              centre[1] + (across[1] * c + up[1] * s) * radius, centre[2] + up[2] * s * radius };
+    }
+
+    /** Smooth around an arch, sharp at its corrugations: the normal uses the two actual neighbouring profiles. */
+    private static float[] bellowsVertex(float[][][] profiles, float[][] us, float[][] vs, int band, int station,
+          int point, boolean tunnel) {
+        int sides = profiles[station].length - 1;
+        int before = point == 0 ? (tunnel ? 0 : sides - 1) : point - 1;
+        int after = point == sides ? (tunnel ? sides : 1) : point + 1;
+        var across = new Vector3(profiles[station][after]).sub(new Vector3(profiles[station][before]));
+        var along = new Vector3(profiles[band + 1][point]).sub(new Vector3(profiles[band][point]));
+        var normal = across.crs(along).nor().scl(tunnel ? 1 : -1);
+        float[] p = profiles[station][point];
+        return vertex(p[0], p[1], p[2], normal.x, normal.y, normal.z, contact(p[2]), us[station][point], vs[station][point]);
     }
 
     /** A triangle of a tube's wall, wound to face along its vertices' normals. */
@@ -1543,11 +1560,16 @@ final class BoardMultiHexBuilding {
     private static void block(GeneratedMesh mesh, String material, float x, float y, float rx, float ry, float along, float across,
           float bottom, float top) {
         List<float[]> corners = new ArrayList<>(4);
+        List<float[]> roof = new ArrayList<>(4);
         for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
-            corners.add(new float[] { x + rx * along * sign[0] - ry * across * sign[1],
-                  y + ry * along * sign[0] + rx * across * sign[1] });
+            float px = x + rx * along * sign[0] - ry * across * sign[1];
+            float py = y + ry * along * sign[0] + rx * across * sign[1];
+            corners.add(new float[] { px, py });
+            // The metal's grain runs in V, along the piece, at the same scale as its sides. These local UVs also
+            // survive clippedBlock's hex cuts without restarting at each share's origin.
+            roof.add(vertex(px, py, top, 0, 0, 1, 1, (sign[1] + 1) * across / 12, (sign[0] + 1) * along / 12));
         }
-        flat(mesh, material, corners, top, 1);
+        mesh.polygon(material, roof);
         for (int i = 0; i < 4; i++) {
             float[] a = corners.get(i), b = corners.get((i + 1) % 4);
             float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -1764,23 +1786,32 @@ final class BoardMultiHexBuilding {
         // Chosen by the module, alike in every share it crosses.
         var random = new SplittableRandom(Float.floatToIntBits(ux) * 31L + Float.floatToIntBits(uy) * 17L
               + Float.floatToIntBits(outer));
-        // The machinery cluster on the gatehouse: a pale housing between two dark units, a conduit to the door.
-        float spot = head + (outer - head) * .35f, flank = random.nextFloat() < .5f ? 1 : -1;
-        clippedBlock(mesh, hex, FRAME, cx + ux * spot, cy + uy * spot, ux, uy, 4.5f, 5, top, top + 3 + random.nextFloat());
-        for (int unit = -1; unit <= 1; unit += 2) {
-            float across = unit * 9.5f;
-            clippedBlock(mesh, hex, PIER, cx + ux * spot + px * across, cy + uy * spot + py * across, ux, uy, 3, 2.4f, top,
-                  top + 1.4f + .8f * random.nextFloat());
-        }
-        float conduit = (outer - BEVEL - 2 + spot + 5) / 2, length = (outer - BEVEL - 2 - spot - 5) / 2;
-        if (length > 1) {
-            clippedBlock(mesh, hex, PIER, cx + ux * conduit + px * flank * (side - 1), cy + uy * conduit + py * flank * (side - 1),
-                  ux, uy, length, .7f, top, top + .9f);
-        }
-        if (random.nextFloat() < .5f) {
-            float light = head + (outer - head) * .75f;
-            clippedBlock(mesh, hex, SKYLIGHT, cx + ux * light - px * flank * 3, cy + uy * light - py * flank * 3, ux, uy,
-                  3.5f, 4, top, top + .7f);
+        // Separate bays for machinery and access: complete fittings clear the cap and one another. A short
+        // gatehouse omits what cannot fit instead of clipping a hatch or grille into its bevel.
+        float spot = head + 10, flank = random.nextFloat() < .5f ? 1 : -1;
+        if (outer - head >= 22) {
+            clippedBlock(mesh, hex, FRAME, cx + ux * spot, cy + uy * spot, ux, uy, 4.5f, 5, top, top + 3 + random.nextFloat());
+            for (int unit = -1; unit <= 1; unit += 2) {
+                float across = unit * 9.5f, z = top + 1.4f + .8f * random.nextFloat();
+                float vx = cx + ux * spot + px * across, vy = cy + uy * spot + py * across;
+                clippedBlock(mesh, hex, PIER, vx, vy, ux, uy, 3, 2.4f, top, z);
+                roofDetail(mesh, hex, vx, vy, ux, uy, 2.7f, 2.1f, z + .02f, .775f, .115f, .99f, .425f);
+            }
+            float conduit = (outer - BEVEL - 2 + spot + 5) / 2, length = (outer - BEVEL - 2 - spot - 5) / 2;
+            if (length > 1) {
+                clippedBlock(mesh, hex, PIER, cx + ux * conduit + px * flank * (side - 1), cy + uy * conduit + py * flank * (side - 1),
+                      ux, uy, length, .7f, top, top + .9f);
+            }
+            if (outer - head >= 30) {
+                float access = outer - BEVEL - 4, hx = cx + ux * access + px * flank * 6;
+                float hy = cy + uy * access + py * flank * 6;
+                clippedBlock(mesh, hex, PIER, hx, hy, ux, uy, 3.3f, 3.3f, top, top + .35f);
+                roofDetail(mesh, hex, hx, hy, ux, uy, 3, 3, top + .37f, .025f, .015f, .26f, .265f);
+                if (random.nextFloat() < .5f) {
+                    clippedBlock(mesh, hex, SKYLIGHT, cx + ux * access - px * flank * 6, cy + uy * access - py * flank * 6,
+                          ux, uy, 3.5f, 4, top, top + .7f);
+                }
+            }
         }
         // The blast door: a dark steel frame round a pale door under a yellow lintel; a gate's passage docked to it hides it.
         float door = Math.min(15, rise - 3), fx = cx + ux * outer, fy = cy + uy * outer;
@@ -1799,6 +1830,19 @@ final class BoardMultiHexBuilding {
         }
     }
 
+    /** One complete hatch or grille from the roof artwork, on a fitting's top; hex cuts interpolate the same UVs. */
+    private static void roofDetail(GeneratedMesh mesh, List<float[]> hex, float x, float y, float ux, float uy,
+          float along, float across, float z, float u0, float v0, float u1, float v1) {
+        List<float[]> corners = new ArrayList<>(4);
+        for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
+            corners.add(vertex(x + ux * along * sign[0] - uy * across * sign[1],
+                  y + uy * along * sign[0] + ux * across * sign[1], z, 0, 0, 1, 1,
+                  sign[1] < 0 ? u0 : u1, sign[0] < 0 ? v0 : v1));
+        }
+        mesh.clipped(ROOF_DETAILS, hex, corners.get(0), corners.get(1), corners.get(2));
+        mesh.clipped(ROOF_DETAILS, hex, corners.get(0), corners.get(2), corners.get(3));
+    }
+
     /**
      * A module's block over {@code walls} (#moduleOutline), cut to the hex: panelled faces, its cut corners in dark
      * steel, under a bevelled steel cap, its roof at {@code top}.
@@ -1814,14 +1858,19 @@ final class BoardMultiHexBuilding {
             // The odd edges are the cut corners (#moduleOutline).
             face(mesh, hex, edge % 2 == 1 ? PIER : WALL, a, b, nx, ny, bottom, top - BEVEL_RISE, along / WALL_REPEAT,
                   (along + length) / WALL_REPEAT);
-            along += length;
             float sx = nx * BEVEL_RISE / slope, sy = ny * BEVEL_RISE / slope, sz = BEVEL / slope;
-            float[] va = vertex(a[0], a[1], top - BEVEL_RISE, sx, sy, sz, 1, a[0] / 24, a[1] / 24);
-            float[] vb = vertex(b[0], b[1], top - BEVEL_RISE, sx, sy, sz, 1, b[0] / 24, b[1] / 24);
-            float[] vd = vertex(d[0], d[1], top, sx, sy, sz, 1, d[0] / 24, d[1] / 24);
-            float[] vc = vertex(c[0], c[1], top, sx, sy, sz, 1, c[0] / 24, c[1] / 24);
+            // Unwrap each sloping strip along its edge and up its actual slope. Project the inset corners along
+            // that edge so the trapezoid does not shear the panels; the perimeter origin is shared by every hex.
+            float u0 = along / 24, u1 = (along + length) / 24;
+            float uc = u0 + ((c[0] - a[0]) * -ny + (c[1] - a[1]) * nx) / 24;
+            float ud = u0 + ((d[0] - a[0]) * -ny + (d[1] - a[1]) * nx) / 24;
+            float[] va = vertex(a[0], a[1], top - BEVEL_RISE, sx, sy, sz, 1, u0, 0);
+            float[] vb = vertex(b[0], b[1], top - BEVEL_RISE, sx, sy, sz, 1, u1, 0);
+            float[] vd = vertex(d[0], d[1], top, sx, sy, sz, 1, ud, -slope / 24);
+            float[] vc = vertex(c[0], c[1], top, sx, sy, sz, 1, uc, -slope / 24);
             mesh.clipped(FRAME, hex, va, vb, vd);
             mesh.clipped(FRAME, hex, va, vd, vc);
+            along += length;
         }
         // Its roof laid along the block (#moduleOutline's first edge), from its first corner, alike in every share.
         float[] origin = walls.getFirst(), next = walls.get(1);

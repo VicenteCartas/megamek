@@ -44,8 +44,6 @@ final class GpuHud implements GpuBoardHud {
     /** The top of larger overlays and panels beside the right column. */
     private static final float SECOND_ROW = 90;
     private static final float RIGHT_BOTTOM = 70;
-    private static final float CHAT_BUTTON_BOTTOM = 18;
-    private static final float CHAT_BOTTOM = 66;
     private static final float TOAST_BOTTOM = 232;
     /** The initiative card's top, as a fraction of the window height. */
     private static final float INITIATIVE_TOP = .2f;
@@ -59,8 +57,6 @@ final class GpuHud implements GpuBoardHud {
      */
     static final float FORCES_WIDTH = 250;
     private static final float INITIATIVE_WIDTH = 560;
-    private static final float CHAT_WIDTH = 340;
-    private static final float CHAT_HEIGHT = 320;
     /**
      * The binds MegaMek applies without a unit besides its menu bar's ({@link #unitless}): the camera, the chat, the
      * pause, the report keys, the turn timer and the HUD's own panels.
@@ -191,6 +187,7 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> conditionsSlot;
     private final Container<Actor> forcesSlot;
     private final Container<Actor> unitSlot;
+    private final Container<Actor> otherUnitSlot;
     private final Container<Actor> sheetSlot;
     private final Container<Actor> utilitySlot;
     private final Container<Actor> chipSlot;
@@ -204,7 +201,6 @@ final class GpuHud implements GpuBoardHud {
     private final Container<Actor> logSlot;
     private final Container<Actor> dockSlot;
     private final Container<Actor> drawerSlot;
-    private final Container<Actor> chatButtonSlot;
     private final Container<Actor> chatSlot;
     private final Container<Actor> overviewSlot;
     private final Container<Actor> helpSlot;
@@ -228,6 +224,7 @@ final class GpuHud implements GpuBoardHud {
     private Inputs inputs;
     private int publishedFocus = Entity.NONE;
     private int publishedCard = Entity.NONE;
+    private int publishedOwnCard = Entity.NONE;
     /** The unit the HUD selects once the local turn began (C.5), held while a dialog would drop the command. */
     private int pendingSelect = Entity.NONE;
     /** The key that opened the chat also types a character (Enter's newline) that must not start the message. */
@@ -259,8 +256,8 @@ final class GpuHud implements GpuBoardHud {
         // The prototype's stacking, bottom to top, with the native modal above everything.
         Group labels = layer();
         Group panels = layer();
-        Group chatLayer = layer();
         Group overviewLayer = layer();
+        Group chatLayer = layer();
         Group popover = layer();
         dialogs = layer();
         centeredDialogs = new UiModal(kit.ui, () -> state.dialog = GpuHudState.Dialog.NONE);
@@ -279,7 +276,8 @@ final class GpuHud implements GpuBoardHud {
         GpuForcesPanel forces = new GpuForcesPanel(kit, source, state, contextMenu, this::select);
         // The unit panel's paperdoll geometry, read once per window (unit panel design 6.2).
         GpuPaperdolls paperdolls = new GpuPaperdolls();
-        GpuUnitCard unitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls);
+        GpuUnitCard unitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls, false);
+        GpuUnitCard otherUnitCard = new GpuUnitCard(kit, source, state, contextMenu, paperdolls, true);
         recordSheet = new GpuRecordSheet(kit, source, state, contextMenu, paperdolls);
         GpuTuningPanel tuning = new GpuTuningPanel(kit, source, state, camera, tuningModel);
         GpuUtilityBar utilities = new GpuUtilityBar(kit, source, state, camera, tuningModel, tuning.button(), () -> {
@@ -296,8 +294,8 @@ final class GpuHud implements GpuBoardHud {
         weapons = new GpuWeaponsPanel(kit, source, state, contextMenu);
         GpuSolutionCard solution = new GpuSolutionCard(kit, source, state);
         log = new GpuLogPanel(kit, source, state, contextMenu);
-        dock = new GpuCommandDock(kit, source, state, camera, contextMenu);
         chat = new GpuChatPanel(kit, source, state);
+        dock = new GpuCommandDock(kit, source, state, camera, contextMenu, chat.button());
         GpuForceOverview overview = new GpuForceOverview(kit, source, state, contextMenu, this::select);
         GpuHelpDialog help = new GpuHelpDialog(kit, source, state);
         GpuMenuPanel menu = new GpuMenuPanel(kit, source, state, camera);
@@ -306,7 +304,7 @@ final class GpuHud implements GpuBoardHud {
         modal = new GpuModalDialog(kit, source, state);
         GpuHexTip hexTip = new GpuHexTip(kit, state, contextMenu);
         List<Component> parts = new ArrayList<>(List.of(nameplates, boardLabels, targetCards, losPanel, phaseHeader,
-              initiativeCard, conditionsCard, forces, unitCard, recordSheet, utilities, hint, minimap, overlays,
+              initiativeCard, conditionsCard, forces, unitCard, otherUnitCard, recordSheet, utilities, hint, minimap, overlays,
               contacts, weapons, solution, log, dock, chat, overview, help, menu, players, contextMenu, hexTip, toasts,
               modal));
 
@@ -317,12 +315,14 @@ final class GpuHud implements GpuBoardHud {
         // menu, which opens over them.
         List<Container<Actor>> spanning = new ArrayList<>(List.of(slot(labels, boardLabels.fx()),
               slot(labels, nameplates.actor()), slot(labels, boardLabels.actor()), slot(labels, targetCards.actor()), slot(labels, losPanel.actor()),
-              slot(popover, hexTip.actor()), slot(popover, unitCard.overlay()), slot(popover, recordSheet.overlay()),
+              slot(popover, hexTip.actor()), slot(popover, unitCard.overlay()), slot(popover, otherUnitCard.overlay()),
+              slot(popover, recordSheet.overlay()),
               slot(popover, contextMenu.actor()), slot(popover, dock.confirmation().actor())));
         phaseSlot = panel(panels, phaseHeader.actor()).top().left().fillX();
         conditionsSlot = panel(panels, conditionsCard.actor()).top().left().fillX();
         forcesSlot = panel(panels, forces.actor()).top().left().fillX();
         unitSlot = panel(panels, unitCard.actor()).bottom().left().fillX();
+        otherUnitSlot = panel(panels, otherUnitCard.actor()).bottom().right().fillX();
         sheetSlot = panel(panels, recordSheet.actor()).fill();
         utilitySlot = panel(panels, utilities.actor()).top().right();
         chipSlot = panel(panels, utilities.chip()).top();
@@ -340,9 +340,8 @@ final class GpuHud implements GpuBoardHud {
         pickSlot = panel(panels, hint.chip());
         dockSlot = panel(panels, dock.actor()).bottom().fillX();
         // The dock's More panel slides out of the dock's right side, over the board beside it.
-        drawerSlot = panel(panels, dock.drawer().actor()).fill();
-        chatButtonSlot = panel(panels, chat.button()).bottom().right();
         chatSlot = panel(chatLayer, chat.actor()).fill();
+        drawerSlot = panel(chatLayer, dock.drawer().actor()).fill();
         overviewSlot = panel(overviewLayer, overview.actor()).fill();
         helpSlot = panel(centeredDialogs, help.actor()).fillX();
         menuSlot = panel(centeredDialogs, menu.actor()).fillX();
@@ -455,6 +454,11 @@ final class GpuHud implements GpuBoardHud {
         if (card != publishedCard) {
             publishedCard = card;
             source.setCardUnit(card);
+        }
+        int ownCard = state.ownCardUnit();
+        if (ownCard != publishedOwnCard) {
+            publishedOwnCard = ownCard;
+            source.setOwnCardUnit(ownCard);
         }
     }
 
@@ -952,6 +956,7 @@ final class GpuHud implements GpuBoardHud {
             source.hover(coords, modifiers);
             source.click(coords, false, modifiers);
         } else if (phase.isFiring() && unit != null) {
+            if (!own) { state.inspected = unit.id(); }
             if (own) {
                 select(unit.id());
             } else if (unit.sensorContact()) {
@@ -977,6 +982,7 @@ final class GpuHud implements GpuBoardHud {
             }
         } else {
             // Deployment, the targeting display's phases (D1), non-planner movement and every other tool of the turn.
+            if (unit != null && !own) { state.inspected = unit.id(); }
             source.hover(coords, modifiers);
             source.click(coords, false, modifiers);
         }
@@ -1072,10 +1078,11 @@ final class GpuHud implements GpuBoardHud {
         // blurs it (shot 12).
         boolean covered = state.overview;
         unitSlot.setVisible(!covered);
-        // The dock acts for the selected unit: none while the player cleared the selection in the local turn.
-        dockSlot.setVisible(!covered && !state.turnLocked(inputs.frame().status()));
-        hintSlot.setVisible(!covered && !m.narrow());
-        pickSlot.setVisible(!covered && m.narrow() && picking(inputs));
+        otherUnitSlot.setVisible(!covered);
+        // The dock keeps its chat footer even when unit commands are unavailable.
+        dockSlot.setVisible(true);
+        hintSlot.setVisible(!covered && !state.chatOpen && !m.narrow());
+        pickSlot.setVisible(!covered && (m.narrow() || state.chatOpen) && picking(inputs));
         initiativeSlot.setVisible(!covered);
         forcesSlot.setVisible(!covered);
         boolean sheet = GpuRecordSheet.open(state) && !covered;
@@ -1118,30 +1125,36 @@ final class GpuHud implements GpuBoardHud {
         float sheetTop = forcesTop + forcesHeight + STACK;
         place(sheetSlot, gap, sheetTop, m.grid(), forcesBottom - sheetTop);
 
-        // Right column: utilities, minimap, contacts / weapons / log, solution card, chat button.
+        // The secondary inspector reserves the bottom of the right column before its other panels are sized.
+        float otherCardHeight = height(otherUnitSlot);
+        place(otherUnitSlot, width - gap - m.right(), height - gap - otherCardHeight, m.right(), otherCardHeight);
+        float rightReserve = gap + (otherCardHeight > 0 ? otherCardHeight + STACK : 0);
+        // Right column: utilities, minimap, contacts / weapons / log, solution card, secondary inspector.
         float rightStart = gap + utilityHeight + gap;
         float minimapHeight = height(minimapSlot);
-        if (shown(weaponsSlot)) {
-            // Keep a weapon row usable above its fixed footer, even in a short window.
-            minimapHeight = Math.min(minimapHeight, Math.max(minimapSlot.getMinHeight(),
-                  height - rightStart - gap - RIGHT_BOTTOM - weapons.minimumHeight()));
+        float columnMinimum = shown(weaponsSlot) ? weapons.minimumHeight()
+              : shown(logSlot) ? logSlot.getMinHeight() + 60
+              : shown(contactsSlot) ? contactsSlot.getMinHeight() + 40 : 0;
+        if (columnMinimum > 0 && minimapHeight > 0) {
+            // Keep the panel's controls and one list row usable above the inspector, even in a short window.
+            minimapHeight = Math.min(minimapHeight, height - rightStart - gap - rightReserve - columnMinimum);
+            if (minimapHeight < minimapSlot.getMinHeight()) {
+                minimapSlot.setVisible(false);
+                minimapHeight = 0;
+            }
         }
         place(minimapSlot, width - gap - m.right(), rightStart, m.right(), minimapHeight);
         float rightWidth = rightWidth();
         float rightTop = minimapHeight > 0 ? rightStart + minimapHeight + gap : rightStart;
         float solutionHeight = height(solutionSlot);
         boolean beside = solutionHeight > 0
-              && height - rightTop - RIGHT_BOTTOM - solutionHeight - STACK < SOLUTION_ROOM;
-        float rightBottom = height - RIGHT_BOTTOM - (solutionHeight > 0 && !beside ? solutionHeight + STACK : 0);
+              && height - rightTop - rightReserve - solutionHeight - STACK < SOLUTION_ROOM;
+        float rightBottom = height - rightReserve - (solutionHeight > 0 && !beside ? solutionHeight + STACK : 0);
         for (Container<Actor> column : List.of(contactsSlot, weaponsSlot, logSlot)) {
             place(column, width - gap - rightWidth, rightTop, rightWidth, rightBottom - rightTop);
         }
-        place(solutionSlot, width - gap - m.right(), height - RIGHT_BOTTOM - solutionHeight, m.right(),
+        place(solutionSlot, width - gap - m.right(), height - rightReserve - solutionHeight, m.right(),
               solutionHeight);
-        float chatWidth = chatButtonSlot.getPrefWidth();
-        float chatHeight = chatButtonSlot.getPrefHeight();
-        place(chatButtonSlot, width - gap - chatWidth, height - CHAT_BUTTON_BOTTOM - chatHeight, chatWidth,
-              chatHeight);
 
         // Middle band between the columns: the dock, the hint line above it and a pick's chip above it, centred in the
         // window where the band allows. It starts after the left column, which the unit card fills, or the wider grid.
@@ -1152,6 +1165,9 @@ final class GpuHud implements GpuBoardHud {
         float dockTop = height - gap - dockHeight;
         place(dockSlot, centred(dockWidth, bandLeft, bandRight), dockTop, dockWidth,
               dockHeight);
+        float pickHeight = height(pickSlot);
+        float chatHeight = chat.height(dockTop - STACK - rightStart - (pickHeight > 0 ? pickHeight + STACK : 0));
+        place(chatSlot, dockSlot.getX(), dockTop - STACK - chatHeight, dockWidth, chatHeight);
         float hintWidth = hintSlot.getPrefWidth();
         float hintHeight = hintSlot.getPrefHeight();
         float hintBottom = gap + (dockHeight > 0 ? dockHeight + STACK : 0);
@@ -1159,10 +1175,10 @@ final class GpuHud implements GpuBoardHud {
               height - hintBottom - hintHeight, hintWidth,
               hintHeight);
         float pickWidth = Math.min(pickSlot.getPrefWidth(), dockWidth);
-        float pickHeight = height(pickSlot);
-        place(pickSlot, centred(pickWidth, bandLeft, bandRight), dockTop - STACK - pickHeight,
+        place(pickSlot, centred(pickWidth, bandLeft, bandRight),
+              dockTop - (state.chatOpen ? chatHeight + STACK : 0) - STACK - pickHeight,
               pickWidth, pickHeight);
-        // The More panel, sized to its commands: right of the dock, up to the chat button, or up to the right column
+        // The More panel, sized to its commands: right of the dock, up to the window edge, or up to the right column
         // while one of its panels reaches down beside the dock. It takes the columns that room holds, no more than the
         // dock's height needs, and grows upward from the dock's bottom when they need more rows. Without room for one
         // column there, it lies above the dock, at most the dock's width, and grows upward over the hint line.
@@ -1171,9 +1187,10 @@ final class GpuHud implements GpuBoardHud {
         if (!drawerSlot.isVisible() || isModal()) {
             drawer.close();
         }
-        boolean rightColumn = shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(solutionSlot);
+        boolean rightColumn = shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(solutionSlot)
+              || shown(otherUnitSlot);
         float drawerX = dockSlot.getX() + dockSlot.getWidth() + STACK;
-        float drawerRight = rightColumn ? bandRight + gap : width - gap - chatWidth - STACK;
+        float drawerRight = rightColumn ? bandRight + gap : width - gap;
         int besideColumns = Math.min(GpuMoreDrawer.columnsIn(drawerRight - drawerX), drawer.columnsAt(dockHeight));
         // A short drawer can fit below the minimap, but a taller one must fit to its left or above the dock.
         if (besideColumns > 0 && shown(minimapSlot)
@@ -1221,7 +1238,7 @@ final class GpuHud implements GpuBoardHud {
         float initiativeX = centred(initiativeWidth, bandLeft, bandRight);
         if (shown(overlaysSlot)) {
             float column = Math.max(shown(minimapSlot) ? m.right() : 0,
-                  shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) ? rightWidth : 0);
+                  shown(contactsSlot) || shown(weaponsSlot) || shown(logSlot) || shown(otherUnitSlot) ? rightWidth : 0);
             float overlaysWidth = overlays.width();
             float overlaysX = width - gap - (column > 0 ? column + gap : 0) - overlaysWidth;
             boolean crowded = beside || shown(initiativeSlot) && initiativeX < overlaysX + overlaysWidth
@@ -1240,8 +1257,7 @@ final class GpuHud implements GpuBoardHud {
                   List.of(conditionsSlot, chipSlot, overlaysSlot));
         }
 
-        // Overlays: chat, forces overview, centred dialogs and toasts.
-        place(chatSlot, width - gap - CHAT_WIDTH, height - CHAT_BOTTOM - CHAT_HEIGHT, CHAT_WIDTH, CHAT_HEIGHT);
+        // Overlays: forces overview, centred dialogs and toasts.
         place(overviewSlot, gap, SECOND_ROW, width - 2 * gap, height - SECOND_ROW - RIGHT_BOTTOM);
         float dialogWidth = Math.min(UiKit.DIALOG_WIDTH, width - 2 * gap);
         for (Container<Actor> dialog : List.of(helpSlot, menuSlot, playersSlot)) {
@@ -1268,7 +1284,7 @@ final class GpuHud implements GpuBoardHud {
             }
         }
         float bottom = height - RIGHT_BOTTOM;
-        for (Container<Actor> below : List.of(dockSlot, hintSlot, pickSlot)) {
+        for (Container<Actor> below : List.of(dockSlot, chatSlot, hintSlot, pickSlot, otherUnitSlot)) {
             if (shown(below) && overlapsHorizontally(below, x, width)) {
                 bottom = Math.min(bottom, height - below.getY() - below.getHeight() - STACK);
             }

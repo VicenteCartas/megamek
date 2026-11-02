@@ -61,9 +61,11 @@ class GpuOrchardSmokeTest {
                     camera.resize(1280, 960);
                     camera.setIsometric(true);
                     Coords coords = new Coords(0, 0);
+                    var names = new ArrayList<String>();
                     for (boolean snow : new boolean[] { false, true }) {
                         for (String form : BoardOrchardTest.FORMS) {
                             String name = "vegetation/orchard-" + form + (snow ? "-snow" : "");
+                            names.add(name);
                             var tree = new BoardScene.Feature(name, 0, 0, 0, 1, 2, 0, BoardScene.FeatureKind.TREE);
                             // Keep terrain/scatter detail fixed while measuring the submitted tree geometry.
                             var tile = new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.GRASS, null,
@@ -115,6 +117,7 @@ class GpuOrchardSmokeTest {
                         }
                     }
                     profiler.disable();
+                    GpuTreeLodSmokeTest.compareLevels(assets, names);
                     BoardScene orchard = orchard();
                     terrain.update(orchard);
                     camera.fit(orchard);
@@ -132,6 +135,11 @@ class GpuOrchardSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, orchard, camera);
                     frame.render(terrain, camera, orchard);
                     GpuReviewFrame.save(new File(output, "orchard-close.png"));
+                    camera.camera.zoom = .085f;
+                    camera.update();
+                    GpuTerrainLodSmokeTest.settle(terrain, null, orchard, camera);
+                    frame.render(terrain, camera, orchard);
+                    GpuReviewFrame.save(new File(output, "orchard-fruit-detail.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);

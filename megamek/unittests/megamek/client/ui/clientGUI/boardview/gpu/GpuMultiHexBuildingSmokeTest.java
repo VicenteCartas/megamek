@@ -43,7 +43,9 @@ class GpuMultiHexBuildingSmokeTest {
           new View("light-well", new Coords(12, 3), .25f, true, 0),
           new View("solar-halls", new Coords(5, 10), .3f, true, 0),
           new View("colony-road", new Coords(20, 5), .2f, true, 25),
-          new View("road-gates", new Coords(23, 12), .3f, true, -20));
+          new View("road-gates", new Coords(23, 12), .3f, true, -20),
+          new View("annex-cap", new Coords(21, 11), .12f, true, -20),
+          new View("podium-trim", new Coords(23, 11), .16f, true, -20));
 
     @Test
     void capturesLunarBase() throws Exception {

@@ -181,11 +181,14 @@ class GpuChatToastModalSmokeTest {
                 assertEquals(DRAFT, field.getText());
                 assertSame(field, hud.focus());
                 assertEquals(List.of(system, lines.get(0).text(), system, lines.get(1).text()), messages(panel));
-                assertEquals(new Rectangle(1570, 66, 340, 320), GpuHudTestStage.bounds(panel),
-                      "right 10, bottom 66, 340 x 320");
+                Actor dock = hud.find("command-dock");
+                Rectangle dockBounds = GpuHudTestStage.bounds(dock);
+                assertEquals(new Rectangle(dockBounds.x, dockBounds.y + dockBounds.height + 12, dockBounds.width, 320),
+                      GpuHudTestStage.bounds(panel), "chat shares the dock's width with the standard panel gap");
                 Rectangle place = GpuHudTestStage.bounds(button);
-                assertEquals(1910, place.x + place.width, .01f, "the button keeps the right gap");
-                assertEquals(18, place.y, .01f, "and stands 18 above the bottom");
+                assertTrue(button.isDescendantOf(dock));
+                assertTrue(dockBounds.contains(place), "the icon button stays inside the footer");
+                assertTrue(button.getText().isEmpty(), "chat uses only its icon");
                 UiTestStage.assertTexts(panel);
                 UiTestStage.assertTexts(button);
                 Pixmap shot = UiTestStage.capture("chat-hud", harness.width(), harness.height());

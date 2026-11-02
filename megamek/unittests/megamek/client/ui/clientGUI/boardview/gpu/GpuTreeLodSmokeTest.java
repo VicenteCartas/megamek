@@ -50,7 +50,9 @@ import org.junit.jupiter.api.Test;
 /** Actual submitted triangle counts, shared render passes, and pixel comparisons across the shipped detail levels. */
 @Tag("on-demand")
 class GpuTreeLodSmokeTest {
-    private static final List<String> TREES = BoardTreeDistributionTest.IMPORTED_TREES;
+    private static final List<String> TREES = java.util.stream.Stream.concat(
+          BoardTreeDistributionTest.IMPORTED_TREES.stream(), java.util.stream.Stream.of(
+                "vegetation/tree-volcano-crown", "vegetation/tree-volcano-forked", "vegetation/tree-volcano-spire")).toList();
     /** A projected diameter within each level's band, past the hysteresis of the thresholds on both sides. */
     static final float[] PIXELS = { 200, 60, 32, 12 };
 
@@ -98,14 +100,27 @@ class GpuTreeLodSmokeTest {
                                   || model.getMaterial("canopy-snow-cutout") != null, name);
                             for (Material material : model.materials) {
                                 if (!material.id.endsWith("-cutout")) { continue; }
-                                assertEquals(.5f, material.get(FloatAttribute.class, FloatAttribute.AlphaTest).value);
+                                assertEquals(authoredForest(name) ? .3f : .5f,
+                                      material.get(FloatAttribute.class, FloatAttribute.AlphaTest).value);
                                 assertTrue(!material.get(BlendingAttribute.class, BlendingAttribute.Type).blended,
                                       "Cutout crowns write opaque depth: " + name);
                                 assertTrue(material.has(TextureAttribute.Normal) && material.has(TextureAttribute.Ambient),
                                       "Cutout crowns carry relief and packed leaf surface maps: " + name);
                             }
                         }
-                        assertTrue(triangles[0] <= 1600 && triangles[1] <= 410 && triangles[2] <= 96 && triangles[3] <= 12, name);
+                        boolean bareBranches = name.startsWith("vegetation/tree-dead");
+                        boolean forest = authoredForest(name);
+                        assertTrue(triangles[0] <= (forest ? 32000 : bareBranches ? 12000 : 1600)
+                              && triangles[1] <= (forest ? 10000 : bareBranches ? 1800 : 410)
+                              && triangles[2] <= (forest ? 2600 : bareBranches ? 180 : 96) && triangles[3] <= 12, name);
+                        if (forest) {
+                            for (Material material : assets.model(name).materials) {
+                                if (material.id.startsWith("bark")) {
+                                    assertTrue(material.has(TextureAttribute.Normal)
+                                          && material.has(TextureAttribute.Ambient), "Authored bark surface: " + name);
+                                }
+                            }
+                        }
                         BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                         assertEquals(30, bounds.getDepth(), .001f, "Plant GLBs must not contain flattened geometry: " + name);
                         float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
@@ -174,7 +189,7 @@ class GpuTreeLodSmokeTest {
                         }
                     }
                     profiler.disable();
-                    compareLevels(assets);
+                    compareLevels(assets, TREES);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {
                     failure.set(error);
@@ -189,6 +204,11 @@ class GpuTreeLodSmokeTest {
             }
         }, GpuBoardWindow.configuration(false));
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
+    }
+
+    private static boolean authoredForest(String name) {
+        return name.startsWith("vegetation/tree") && !name.startsWith("vegetation/tree-dead")
+              || name.startsWith("vegetation/willow") || name.startsWith("vegetation/birch");
     }
 
     /** Opt-in external pilot: reuse the complete review with selected immutable assets/source drafts. */
@@ -565,13 +585,13 @@ class GpuTreeLodSmokeTest {
     }
 
     /** The shipped near mesh is the coverage reference for its coarser detail levels. */
-    private static void compareLevels(GpuAssets assets) throws Exception {
+    static void compareLevels(GpuAssets assets, List<String> names) throws Exception {
         Environment environment = new Environment();
         environment.set(ColorAttribute.createAmbientLight(0.55f, 0.58f, 0.62f, 1));
         environment.add(new DirectionalLight().set(0.55f, 0.53f, 0.48f, -24, -30, -18));
         ModelBatch batch = new ModelBatch();
         try {
-            for (String name : TREES) {
+            for (String name : names) {
                 Model near = assets.lodModel(name, 0);
                 for (float tilt : new float[] { 0, 54.73561f, 80 }) {
                     for (int bearing = 0; bearing < 360; bearing += 90) {
@@ -622,14 +642,14 @@ class GpuTreeLodSmokeTest {
                     }
                 }
             }
-            compareDistantLevels(assets, environment);
+            compareDistantLevels(assets, environment, names);
         } finally {
             batch.dispose();
         }
     }
 
     /** Native pixel scale at the largest size each coarse mesh can retain through hysteresis. */
-    private static void compareDistantLevels(GpuAssets assets, Environment environment) throws Exception {
+    private static void compareDistantLevels(GpuAssets assets, Environment environment, List<String> names) throws Exception {
         // Impostor vertex colors encode lighting, not pigment. Use the actual instanced foliage shader here;
         // the default ModelBatch used for silhouette comparisons would tint these cards purple.
         var preview = new GpuTerrain();
@@ -645,15 +665,16 @@ class GpuTreeLodSmokeTest {
         String[] labels = { "Near / 150px", "Medium / 150px", "Near / 88px", "Medium / 88px", "Far / 52px", "Far / 26px", "Impostor / 26px", "Impostor / 12px" };
         int[] levels = { 0, 1, 0, 1, 2, 2, 3, 3 };
         float[] sizes = { 150, 150, 88, 88, 52.8f, 26.4f, 26.4f, 12 };
-        BufferedImage sheet = new BufferedImage(192 + labels.length * 128, TREES.size() * 132 + 32, BufferedImage.TYPE_INT_RGB);
+        BufferedImage sheet = new BufferedImage(192 + labels.length * 128, names.size() * 132 + 32, BufferedImage.TYPE_INT_RGB);
+        var continuityErrors = new ArrayList<String>();
         var graphics = sheet.createGraphics();
         try (var output = new GpuSceneTestOutput()) {
             graphics.setColor(java.awt.Color.WHITE);
             for (int column = 0; column < labels.length; column++) {
                 graphics.drawString(labels[column], 192 + column * 128, 20);
             }
-            for (int row = 0; row < TREES.size(); row++) {
-                String name = TREES.get(row);
+            for (int row = 0; row < names.size(); row++) {
+                String name = names.get(row);
                 var stand = new GpuTreeInstances.Stand();
                 stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
                 BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
@@ -663,10 +684,34 @@ class GpuTreeLodSmokeTest {
                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                 camera.setIsometric(true);
                 camera.center(new Vector3(0, 0, 18));
+                int farCoverage = 0;
+                int nearCoverage = 0;
                 for (int column = 0; column < labels.length; column++) {
                     camera.camera.zoom = zoomForSize(diameter, sizes[column]);
                     camera.update();
                     BufferedImage frame = foliageFrame(output, preview, instances, stand, levels[column], batch, environment, camera);
+                    if (authoredForest(name)) {
+                        if (column == 2) { nearCoverage = coverage(frame); }
+                        if (column == 3) {
+                            checkCoverageContinuity(continuityErrors, name, "near/medium at 88px", nearCoverage, coverage(frame));
+                        }
+                        if (column == 4) {
+                            var medium = foliageFrame(output, preview, instances, stand, 1, batch, environment, camera);
+                            checkCoverageContinuity(continuityErrors, name, "medium/far at 52px", coverage(medium), coverage(frame));
+                        }
+                        if (column == 5) { farCoverage = coverage(frame); }
+                        if (column == 6) {
+                            checkCoverageContinuity(continuityErrors, name, "far/impostor at 26px", farCoverage, coverage(frame));
+                        }
+                    }
+                    if (name.startsWith("vegetation/orchard-")) {
+                        if (column == 5) { farCoverage = coverage(frame); }
+                        if (column == 6) {
+                            int impostorCoverage = coverage(frame);
+                            assertTrue(farCoverage >= impostorCoverage * .6 && farCoverage <= impostorCoverage * 1.6,
+                                  name + " at 26px: LOD2=" + farCoverage + ", impostor=" + impostorCoverage);
+                        }
+                    }
                     graphics.drawImage(frame.getSubimage(frame.getWidth() / 2 - 64, frame.getHeight() / 2 - 64, 128, 128),
                           192 + column * 128, row * 132 + 32, null);
                 }
@@ -676,6 +721,10 @@ class GpuTreeLodSmokeTest {
             var materialPlants = new ArrayList<>(List.of("vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-tall-snow", "vegetation/palm", "vegetation/palm-bent", "vegetation/cactus", "vegetation/cactus-flowers",
                   "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch-tall", "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/willow-broad",
                   "vegetation/pine-slender", "vegetation/pine-layered"));
+            if (!names.equals(TREES)) {
+                materialPlants.clear();
+                materialPlants.addAll(names);
+            }
             if (Boolean.getBoolean("megamek.gpu.materialMigrationReview")) {
                 materialPlants.addAll(List.of("vegetation/foliage-barren", "vegetation/foliage-desert", "vegetation/foliage-highland", "vegetation/foliage-rocky",
                       "vegetation/foliage-snow", "vegetation/foliage-temperate", "vegetation/foliage-wetland", "vegetation/foliage-jungle", "vegetation/tree-volcano-crown",
@@ -688,6 +737,7 @@ class GpuTreeLodSmokeTest {
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 var detail = new BufferedImage(1152, 416, BufferedImage.TYPE_INT_RGB);
                 var paint = detail.createGraphics();
+                int fruitPixels = 0;
                 int normalChanges = 0;
                 try {
                     for (int angle = 0; angle < 3; angle++) {
@@ -699,6 +749,9 @@ class GpuTreeLodSmokeTest {
                         camera.camera.zoom = zoomForSize(bounds.getDimensions(new Vector3()).scl(1, 1, 36 / 30f).len(), 380);
                         camera.update();
                         var frame = foliageFrame(output, preview, instances, stand, 0, batch, environment, camera);
+                        if (name.startsWith("vegetation/orchard-") && !name.endsWith("-snow")) {
+                            fruitPixels += redPixels(frame);
+                        }
                         preview.setNormalMaps(false);
                         var plain = foliageFrame(output, preview, instances, stand, 0, batch, environment, camera);
                         preview.setNormalMaps(true);
@@ -715,6 +768,9 @@ class GpuTreeLodSmokeTest {
                 assertTrue(normalChanges > (name.startsWith("vegetation/cactus") ? 100 : 0),
                       "Normal detail must affect real plant lighting: " + name
                       + " changed=" + normalChanges);
+                if (name.startsWith("vegetation/orchard-") && !name.endsWith("-snow")) {
+                    assertTrue(fruitPixels > 40, "Ripe apples must be visible across orchard views: " + name);
+                }
                 ImageIO.write(detail, "png", new File(System.getProperty("megamek.gpu.screenshots"), "plant-material-" + name.replace('/', '-') + ".png"));
             }
         } finally {
@@ -723,6 +779,7 @@ class GpuTreeLodSmokeTest {
             preview.dispose();
         }
         ImageIO.write(sheet, "png", new File(System.getProperty("megamek.gpu.screenshots"), "tree-lod-transitions.png"));
+        assertTrue(continuityErrors.isEmpty(), String.join("\n", continuityErrors));
     }
 
     private static String specimenTimings(GpuSceneTestOutput output, GpuTerrain preview, GpuTreeInstances instances,
@@ -827,6 +884,24 @@ class GpuTreeLodSmokeTest {
                 if (Math.abs((pixel >> 16 & 255) - (background >> 16 & 255)) > 2
                       || Math.abs((pixel >> 8 & 255) - (background >> 8 & 255)) > 2
                       || Math.abs((pixel & 255) - (background & 255)) > 2) { count++; }
+            }
+        }
+        return count;
+    }
+
+    private static void checkCoverageContinuity(List<String> errors, String name, String transition, int before, int after) {
+        String sample = name + " " + transition + ": " + before + " -> " + after;
+        System.out.println("Forest LOD coverage: " + sample);
+        if (before <= 0 || after < before * .8 || after > before * 1.2) { errors.add(sample); }
+    }
+
+    private static int redPixels(BufferedImage image) {
+        int count = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int pixel = image.getRGB(x, y);
+                int red = pixel >> 16 & 255, green = pixel >> 8 & 255, blue = pixel & 255;
+                if (red > 50 && red > green * 1.35 && red > blue * 1.3) { count++; }
             }
         }
         return count;

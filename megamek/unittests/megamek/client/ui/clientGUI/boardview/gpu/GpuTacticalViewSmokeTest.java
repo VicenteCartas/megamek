@@ -560,7 +560,7 @@ class GpuTacticalViewSmokeTest {
         assertFalse(bases.spec(unit(scene, ENEMY)).destroyed(), "The enemy is whole again");
     }
 
-    /** The game removes the destroyed enemy and leaves its wreck: grey and crossed out, without a facing notch. */
+    /** Death shows a crossed-out ring, which fades with the body instead of leaving a permanent wreck. */
     private static void verifyWreck(GpuBattleView view, GpuBoardFixture fixture, GpuUnitBases bases)
           throws Exception {
         SwingUtilities.invokeAndWait(() -> {
@@ -578,6 +578,13 @@ class GpuTacticalViewSmokeTest {
         assertFalse(wreck.facing(), "The wreck has no facing notch");
         assertFalse(bases.spec(unit(scene, OWN)).destroyed(), "The own unit stays whole");
         capture("tactical-view-wreck.png");
+        var victim = unit(scene, ENEMY);
+        ((MeepleCasualties) field(view, "casualties")).advance(MeepleCasualties.DEBRIS_SECONDS + UnitAttack.FADE_SECONDS,
+              (MeepleDebris.Ground) field(view, "debrisGround"), 1);
+        render(view);
+        assertNull(bases.base(victim), "The ring fades away with the unit");
+        assertNull(bases.badges(victim), "The cross fades away with the unit");
+        assertFalse(((Map<?, ?>) field(view, "unitInstances")).containsKey(victim.id() + ":" + victim.part()));
     }
 
     private static float layoutScale(GpuBattleView view) throws Exception {

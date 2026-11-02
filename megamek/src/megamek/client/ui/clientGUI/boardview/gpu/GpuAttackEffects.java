@@ -242,6 +242,36 @@ final class GpuAttackEffects implements Disposable {
         }
     }
 
+    /**
+     * Remaining world distance of the final arriving projectile, using the same captured flight as drawing. Earlier
+     * rounds in an MG burst cannot trigger a killing blow's slowdown. Infinity means no final projectile is in flight.
+     */
+    float distanceToImpact(UnitAttack shot) {
+        if (!shot.shot() || !shot.event.result().hit() || shot.defensive()
+              || shot.seconds < UnitAttack.ANTICIPATION_SECONDS) { return Float.POSITIVE_INFINITY; }
+        if (shot.seconds >= shot.contactSeconds) { return 0; }
+        prepare(shot);
+        float distance = -1;
+        for (int index = 0; index < muzzleCount; index++) {
+            if (emitted[index] == null || !impacts[index]
+                  || !("bullet".equals(effects[index]) || "energy".equals(effects[index]))) { continue; }
+            float contact = contactSeconds(index);
+            if (Math.abs(contact - shot.contactSeconds) > .0001f) { continue; }
+            float start = UnitAttack.ANTICIPATION_SECONDS + roundDelays[index];
+            float progress = (shot.seconds - start) / Math.max(.0001f, contact - start);
+            distance = Math.max(distance, emitted[index].position(progress, arcs[index], point).dst(endpoints[index]));
+        }
+        for (var launch : launches.getOrDefault(shot, Map.of()).values()) {
+            for (int index = 0; index < launch.missiles(); index++) {
+                float progress = GpuMissileEffects.progress(launch, index, shot.seconds);
+                if (!launch.hit(index) || launch.opened(index) || progress < 0
+                      || Math.abs(launch.endSeconds(index) - shot.contactSeconds) > .0001f) { continue; }
+                distance = Math.max(distance, GpuMissileEffects.position(launch, index, progress, point).dst(launch.targets()[index]));
+            }
+        }
+        return distance < 0 ? Float.POSITIVE_INFINITY : distance;
+    }
+
     private static int missileCount(ResolvedAttack.Shot profile, String effect) {
         return profile != null && profile.missiles() > 0 ? profile.missiles()
               : "missile".equals(effect) || "cluster".equals(effect) ? 1 : 0;
@@ -478,7 +508,8 @@ final class GpuAttackEffects implements Disposable {
         this.camera = camera;
         for (var shot : volley) {
             if (shot.defensive() && shot.interception() != null) { continue; }
-            if (shot.seconds < UnitAttack.ANTICIPATION_SECONDS && !shot.chargingPpc() || shot.seconds >= shot.duration) { continue; }
+            if (shot.seconds < (shot.death() ? 0 : UnitAttack.ANTICIPATION_SECONDS) && !shot.chargingPpc()
+                  || shot.seconds >= shot.duration) { continue; }
             prepare(shot);
             renderShot();
         }
@@ -573,7 +604,9 @@ final class GpuAttackEffects implements Disposable {
 
     private void renderShot() {
         if (attack.death()) {
-            explosions.burst(target, 18, attack.deathProgress(), attack.event.result().id().hashCode());
+            if (!attack.event.result().crewLoss()) {
+                explosions.burst(target, 18, attack.deathProgress(), attack.event.result().id().hashCode());
+            }
             return;
         }
         if (attack.shot()) {

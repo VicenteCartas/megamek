@@ -42,7 +42,7 @@ import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 
 /**
- * The glance card, bottom left (unit panel design 4): the inspected unit, else the own focus unit. Its fixed rows show
+ * A glance card: the own unit at bottom left, or an inspected non-owned unit at bottom right. Its fixed rows show
  * the unit's paperdoll with a number per location (a Mek's rear armor in a strip under it), four vitals rows by family,
  * one line of chips for what the doll cannot show, and the Unit record and Locate buttons. While the sheet is open it
  * is the one-line mini card; a sensor contact gets the compact contact card. Each element opens the sheet's tab that
@@ -115,7 +115,7 @@ final class GpuUnitCard implements GpuHud.Component {
 
     /** What the card shows; it is rebuilt when this changes. Snapshots keep their identity while unchanged. */
     private record Shown(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record, GpuFireOrders.Heat heat,
-          boolean low, GamePhase phase, boolean mini, Deltas deltas,
+          boolean low, GamePhase phase, boolean mini, boolean sheetSelected, Deltas deltas,
           List<GpuBoardSource.Bind> binds) { }
 
     private final GpuHudKit kit;
@@ -124,6 +124,7 @@ final class GpuUnitCard implements GpuHud.Component {
     private final GpuHudState state;
     private final GpuContextMenu menu;
     private final GpuPaperdolls paperdolls;
+    private final boolean other;
     private final Table root;
     private final Drawable friendPanel;
     private final Drawable foePanel;
@@ -139,19 +140,20 @@ final class GpuUnitCard implements GpuHud.Component {
     private Deltas deltas = Deltas.NONE;
 
     GpuUnitCard(GpuHudKit kit, GpuBoardSource source, GpuHudState state, GpuContextMenu menu,
-          GpuPaperdolls paperdolls) {
+          GpuPaperdolls paperdolls, boolean other) {
         this.kit = kit;
         ui = kit.ui;
         this.source = source;
         this.state = state;
         this.menu = menu;
         this.paperdolls = paperdolls;
+        this.other = other;
         root = ui.panel();
-        root.setName("unit-card");
+        root.setName(name(""));
         friendPanel = ui.skin.getDrawable("panel");
         foePanel = ui.skin.getDrawable("panel-foe");
         doll = new GpuPaperdoll(ui.skin);
-        doll.setName("unit-card-doll");
+        doll.setName(name("-doll"));
         doll.setTouchable(Touchable.enabled);
         doll.addListener(new InputListener() {
             @Override
@@ -173,12 +175,12 @@ final class GpuUnitCard implements GpuHud.Component {
                 if (picked != null) {
                     state.selectedLocation = picked;
                 }
-                GpuRecordSheet.show(state, SheetTab.ARMOR);
+                showSheet(SheetTab.ARMOR);
             }
         });
         overlay.setTouchable(Touchable.disabled);
         hoverCard.setBackground(ui.skin.getDrawable("panel-pop"));
-        hoverCard.setName("unit-card-hover");
+        hoverCard.setName(name("-hover"));
         hoverCard.setVisible(false);
         overlay.addActor(hoverCard);
     }
@@ -200,7 +202,7 @@ final class GpuUnitCard implements GpuHud.Component {
 
     @Override
     public void update(GpuHud.Inputs inputs) {
-        GpuBattleStatus.UnitStatus unit = state.presented(state.cardUnit());
+        GpuBattleStatus.UnitStatus unit = state.presented(other ? state.otherCardUnit() : state.ownCardUnit());
         root.setVisible(unit != null);
         if (unit == null) {
             shownId = Entity.NONE;
@@ -218,7 +220,7 @@ final class GpuUnitCard implements GpuHud.Component {
             root.addListener(opener);
         }
         // The source records the card unit at its next capture; until then the previous unit's record is not shown.
-        GpuUnitRecord.Snapshot unitRecord = state.presentedRecord();
+        GpuUnitRecord.Snapshot unitRecord = state.presentedRecord(unit.id());
         if (unitRecord.unitId() != unit.id()) {
             unitRecord = GpuUnitRecord.Snapshot.EMPTY;
         }
@@ -228,7 +230,8 @@ final class GpuUnitCard implements GpuHud.Component {
         GpuFireOrders.Snapshot fire = inputs.frame().panels().fire();
         GpuFireOrders.Heat forecast = fire.active() && fire.actorId() == unit.id() ? fire.heat() : null;
         Shown next = new Shown(unit, unitRecord, forecast, inputs.metrics().lowHeight(),
-              inputs.frame().status().phase(), GpuRecordSheet.open(state), deltas.shown(now),
+              inputs.frame().status().phase(), !other && GpuRecordSheet.open(state),
+              state.recordOpen && state.cardUnit() == unit.id(), deltas.shown(now),
               inputs.preferences().binds());
         if (!next.equals(shown)) {
             shown = next;
@@ -268,11 +271,10 @@ final class GpuUnitCard implements GpuHud.Component {
         float bodyHeight = low ? 114 : 136;
         root.add(body).growX().height(bodyHeight).padTop(low ? 6 : 8).row();
         Table chips = new Table();
-        chips.setName("unit-card-chips");
+        chips.setName(name("-chips"));
         chips.left();
         float room = (low ? 250 : 300) - 2 * (low ? 14 : 16);
-        fillChips(ui, chips, chips(unit, next.record(), next.phase()), room, chip -> GpuRecordSheet.show(state,
-              chip.home()));
+        fillChips(ui, chips, chips(unit, next.record(), next.phase()), room, chip -> showSheet(chip.home()));
         root.add(chips).growX().height(22).padTop(low ? 6 : 8).row();
         root.add(buttons(unit, next, preferences, low)).growX().height(low ? 30 : 34).padTop(low ? 8 : 10);
     }
@@ -284,12 +286,12 @@ final class GpuUnitCard implements GpuHud.Component {
         Label name = ui.label(UiTheme.upper(unitName(unit)), "hud-title", 16, unit.side() == GpuBattleStatus.Side.ENEMY
               ? UiTheme.CORAL : UiTheme.TEXT);
         name.setEllipsis(true);
-        name.setName("unit-card-name");
+        name.setName(name("-name"));
         line.add(name).minWidth(0).padRight(8);
         line.add(damageLevel(unit, next.record())).padRight(8);
         line.add().expandX();
         UiButton record = ui.button("hud-icon", "chevron-down", null, null);
-        record.setName("unit-card-record");
+        record.setName(name("-record"));
         record.pressed(true);
         ui.tip(record).getActor().setText(text("GpuBoard.hud.unit.recordTip",
               GpuHintLine.key(preferences, KeyCommandBind.UNIT_DISPLAY)));
@@ -322,7 +324,7 @@ final class GpuUnitCard implements GpuHud.Component {
         root.add(blip).size(WIDE_DOLL, 60).left().padTop(8).row();
         Table buttons = new Table();
         UiButton record = ui.button("hud-plain", "report", text("GpuBoard.hud.common.unitRecord"), null);
-        record.setName("unit-card-record");
+        record.setName(name("-record"));
         record.setDisabled(true);
         ui.tip(record).getActor().setText(text("GpuBoard.hud.unit.noRecord"));
         buttons.add(record).growX().uniformX().minHeight(34).padRight(8);
@@ -338,7 +340,7 @@ final class GpuUnitCard implements GpuHud.Component {
         Label name = ui.label(UiTheme.upper(unitName(unit)), "hud-heading", low ? 18 : 20, enemy ? UiTheme.CORAL
               : UiTheme.TEXT);
         name.setEllipsis(true);
-        name.setName("unit-card-name");
+        name.setName(name("-name"));
         ui.tip(name).getActor().setText(unit.name());
         header.add(name).minWidth(0).growX().left().height(low ? 22 : 24);
         header.add(damageLevel(unit, next.record())).right().padLeft(8);
@@ -376,7 +378,7 @@ final class GpuUnitCard implements GpuHud.Component {
     private Label damageLevel(GpuBattleStatus.UnitStatus unit, GpuUnitRecord.Snapshot record) {
         String text = record.damageLevel().isEmpty() ? "" : UiTheme.upper(record.damageLevel());
         Label level = ui.label(text, "hud-name", 10.5f, unit.destroyed() ? UiTheme.FILL_INK : UiTheme.ACCENT);
-        level.setName("unit-card-damage");
+        level.setName(name("-damage"));
         Label.LabelStyle style = level.getStyle();
         if (unit.destroyed()) {
             // A destroyed unit's level is a coral tag (4.1).
@@ -401,10 +403,13 @@ final class GpuUnitCard implements GpuHud.Component {
         return level;
     }
 
-    /** The card's ✕, on a selected and on an inspected unit: it clears the selection (GpuHudState.clearSelection). */
+    /** Closing the secondary inspector leaves the own selection and its commands intact. */
     private UiButton closeButton() {
-        UiButton close = ui.closeButton(state::clearSelection);
-        close.setName("unit-card-close");
+        UiButton close = ui.closeButton(() -> {
+            if (other) { state.inspected = Entity.NONE; }
+            else { state.clearSelection(); }
+        });
+        close.setName(name("-close"));
         return close;
     }
 
@@ -416,7 +421,7 @@ final class GpuUnitCard implements GpuHud.Component {
           GpuBoardSource.UiPreferences preferences) {
         UiButton locate = labelled ? ui.button("hud-plain", "locate", text("GpuBoard.hud.common.locate"), null)
               : ui.button("hud-icon", "locate", null, null);
-        locate.setName(unit.sensorContact() ? "unit-card-contact-locate" : "unit-card-locate");
+        locate.setName(name(unit.sensorContact() ? "-contact-locate" : "-locate"));
         boolean placed = unit.position() != null;
         locate.setDisabled(!placed);
         if (!placed) {
@@ -438,9 +443,12 @@ final class GpuUnitCard implements GpuHud.Component {
           boolean low) {
         Table buttons = new Table();
         UiButton record = ui.button("hud-plain", "report", text("GpuBoard.hud.common.unitRecord"), null);
-        record.setName("unit-card-record");
-        record.pressed(state.recordOpen);
-        onChange(record, () -> state.recordOpen = !state.recordOpen);
+        record.setName(name("-record"));
+        record.pressed(next.sheetSelected());
+        onChange(record, () -> {
+            if (state.recordOpen && state.cardUnit() == shownId) { state.recordOpen = false; }
+            else { showSheet(state.sheetTab); }
+        });
         UiButton locate = locate(unit, true, preferences);
         float height = low ? 30 : 34;
         // .brow .b:first-child flex 1.4 against Locate's 1, 8 apart.
@@ -753,9 +761,19 @@ final class GpuUnitCard implements GpuHud.Component {
         actor.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
-                GpuRecordSheet.show(state, home);
+                showSheet(home);
             }
         });
+    }
+
+    private String name(String suffix) {
+        return (other ? "other-unit-card" : "unit-card") + suffix;
+    }
+
+    /** The shared sheet must follow the card that was clicked, even while both cards are visible. */
+    private void showSheet(SheetTab tab) {
+        state.inspected = shownId == state.focus() ? Entity.NONE : shownId;
+        GpuRecordSheet.show(state, tab);
     }
 
     /**
@@ -1087,7 +1105,7 @@ final class GpuUnitCard implements GpuHud.Component {
         private final List<GpuPaperdoll.Cell> cells = new ArrayList<>();
 
         RearStrip(GpuUnitRecord.Snapshot record, boolean low) {
-            setName("unit-card-rear");
+            setName(name("-rear"));
             // Left to right as on the doll: the left torso, the centre torso, the right torso.
             List<GpuUnitRecord.Location> rear = record.locations().stream().filter(location -> location.maxRear() > 0)
                   .sorted(Comparator.comparingInt(location -> REAR_ORDER.indexOf(location.abbr()))).toList();

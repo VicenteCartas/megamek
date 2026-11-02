@@ -40,8 +40,11 @@ import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
 import megamek.common.Configuration;
+import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
+import megamek.common.loaders.MekFileParser;
+import megamek.common.units.Entity;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -79,6 +82,7 @@ class GpuHudServicesTest {
             assertSame(GpuFireOrders.Snapshot.EMPTY, panels.fire());
             assertSame(GpuPhysicalOptions.Snapshot.EMPTY, panels.physical());
             assertSame(GpuUnitRecord.Snapshot.EMPTY, panels.record());
+            assertSame(GpuUnitRecord.Snapshot.EMPTY, panels.ownRecord());
             assertSame(GpuFirePreview.Snapshot.NONE, panels.preview());
             assertSame(GpuChat.Snapshot.EMPTY, panels.chat());
             assertSame(GpuToasts.Snapshot.EMPTY, panels.toasts());
@@ -91,6 +95,36 @@ class GpuHudServicesTest {
             // The render thread and the report panel compare these by identity.
             assertSame(panels, fixture.source.takeFrame().panels(), "An unchanged capture keeps the panel bundle");
             assertSame(preferences, fixture.source.uiPreferences, "Unchanged preferences are not republished");
+        }
+    }
+
+    @Test
+    void bothInspectorRecordsAreCapturedAndReuseTheirOwnCaches() throws Exception {
+        try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
+            Entity enemy = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf")).getEntity();
+            SwingUtilities.invokeAndWait(() -> {
+                Player player = new Player(2, "Other player");
+                player.setTeam(2);
+                fixture.game.addPlayer(player.getId(), player);
+                enemy.setOwner(player);
+                enemy.setId(2);
+                enemy.setPosition(new Coords(6, 6));
+                fixture.game.addEntity(enemy);
+                fixture.source.setCardUnit(enemy.getId());
+                fixture.source.setOwnCardUnit(fixture.entity.getId());
+                fixture.source.refresh();
+            });
+            GpuHudData first = fixture.source.takeFrame().panels();
+            assertEquals(enemy.getId(), first.record().unitId());
+            assertEquals(fixture.entity.getId(), first.ownRecord().unitId());
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            GpuHudData same = fixture.source.takeFrame().panels();
+            assertSame(first.record(), same.record());
+            assertSame(first.ownRecord(), same.ownRecord());
+            fixture.source.setOwnCardUnit(enemy.getId());
+            SwingUtilities.invokeAndWait(fixture.source::refresh);
+            assertSame(GpuUnitRecord.Snapshot.EMPTY, fixture.source.takeFrame().panels().ownRecord(),
+                  "the own-card channel rechecks ownership on the EDT");
         }
     }
 

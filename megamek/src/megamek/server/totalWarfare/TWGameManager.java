@@ -23979,7 +23979,15 @@ public class TWGameManager extends AbstractGameManager {
 
         // Destroy the entity, unless it's already destroyed.
         if (!entity.isDoomed() && !entity.isDestroyed()) {
-            sendAttackAnimation(entity, entity, megamek.common.ResolvedAttack.Kind.DEATH, -1, Entity.LOC_NONE, true);
+            boolean crewLoss = switch (reason) {
+                case "ejection", "deadly ejection", "pilot death", "crew death", "crew casualties" -> true;
+                default -> Messages.getString("MovementDisplay.CVEP.destroyReason.escapePodLaunch").equals(reason)
+                      || Messages.getString("MovementDisplay.CVEP.destroyReason.crewLossInPodCrash").equals(reason)
+                      || Messages.getString("MovementDisplay.CVEP.destroyReason.crewLossDuringEscape").equals(reason)
+                      || Messages.getString("MovementDisplay.CVEP.destroyReason.crewExited").equals(reason);
+            };
+            sendAttackAnimation(entity, entity, megamek.common.ResolvedAttack.Kind.DEATH, -1, Entity.LOC_NONE, true,
+                  null, null, crewLoss);
             r = new Report(6365);
             r.subject = entity.getId();
             r.addDesc(entity);
@@ -28340,6 +28348,12 @@ public class TWGameManager extends AbstractGameManager {
     public void sendAttackAnimation(Entity attacker, Targetable target, megamek.common.ResolvedAttack.Kind kind,
           int equipmentIndex, int limb, boolean hit, megamek.common.ResolvedAttack.Shot shot,
           List<megamek.common.ResolvedAttack.Mount> firingMounts) {
+        sendAttackAnimation(attacker, target, kind, equipmentIndex, limb, hit, shot, firingMounts, false);
+    }
+
+    private void sendAttackAnimation(Entity attacker, Targetable target, megamek.common.ResolvedAttack.Kind kind,
+          int equipmentIndex, int limb, boolean hit, megamek.common.ResolvedAttack.Shot shot,
+          List<megamek.common.ResolvedAttack.Mount> firingMounts, boolean crewLoss) {
         // A Mek's limbs make the other physical attacks; any unit that charges, jumps on or rams another displaces or
         // damages both, which plays from the attack's contact.
         if (attacker == null || target == null || attacker.getPosition() == null || target.getPosition() == null
@@ -28358,7 +28372,7 @@ public class TWGameManager extends AbstractGameManager {
                     target.getElevation(), target.getBoardId()), target.getTargetType(), equipmentIndex,
               equipment == null ? "" : equipment.getType().getInternalName(), limb, hit,
               firingMounts == null ? megamek.common.ResolvedAttack.captureMounts(attacker, equipmentIndex) : firingMounts,
-              shot == null ? megamek.common.ResolvedAttack.Shot.capture(equipment) : shot);
+              shot == null ? megamek.common.ResolvedAttack.Shot.capture(equipment) : shot).withCrewLoss(crewLoss);
         List<Player> recipients = new ArrayList<>(game.getPlayersList());
         if (doBlind() || attacker.isHidden()) {
             recipients.retainAll(whoCanSee(attacker, false, null));

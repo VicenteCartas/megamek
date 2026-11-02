@@ -37,7 +37,7 @@ final class UnitAttack {
     /** Rotary barrels run at about this speed through a burst; slow enough that a turn never reads as backwards. */
     static final float SPIN_TURNS_PER_SECOND = 1.5f;
     static final float PPC_RECOIL_SCALE = 1.5f;
-    /** In playback seconds: a death's slow motion ({@link GpuBattleView#DRAMATIC_DEATH}) shows it twice as long. */
+    /** In playback seconds; an impact immediately restores the normal battle clock before the death plays. */
     static final float DEATH_SECONDS = .6f;
     static final float MELEE_WALK_SECONDS = 1.05f;
     static final float MELEE_RUN_SECONDS = .65f;
@@ -125,6 +125,15 @@ final class UnitAttack {
 
     boolean shot() {
         return event.result().kind() == ResolvedAttack.Kind.SHOT;
+    }
+
+    /** The same captured effect families used by rendering, including multi-mount attacks. */
+    boolean continuousBeam() {
+        if (!shot()) { return false; }
+        var mounts = event.result().mounts();
+        var effects = mounts.isEmpty() ? List.of(effect(event.entityId(), event.result().equipmentIndex()))
+              : mounts.stream().map(mount -> effect(mount.entityId(), mount.equipmentIndex())).toList();
+        return effects.stream().allMatch(effect -> "laser".equals(effect) || "ppc".equals(effect));
     }
 
     /**

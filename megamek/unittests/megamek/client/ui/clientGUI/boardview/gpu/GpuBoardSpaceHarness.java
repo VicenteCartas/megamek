@@ -158,7 +158,7 @@ final class GpuBoardSpaceHarness implements Disposable {
             }
             if (tactical && bases != null) {
                 bases.update(scene, basesStatus, poses, Entity.NONE, Entity.NONE, Entity.NONE, null,
-                      UnitScreenScale.hexPixels(camera.camera.zoom, 1), 0, true);
+                      UnitScreenScale.hexPixels(camera.camera.zoom, 1), 0, true, List.of());
             }
         }
         boolean based = units && tactical && bases != null;

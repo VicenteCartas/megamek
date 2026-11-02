@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
+import megamek.client.ui.Messages;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class ResolvedAttackServerTest {
@@ -104,6 +106,28 @@ class ResolvedAttackServerTest {
         assertEquals(ResolvedAttack.Kind.DEATH, deliveries.getFirst().result().kind());
         manager.destroyEntity(target, "review repeated", true, true);
         assertEquals(1, deliveries.size());
+    }
+
+    @ParameterizedTest
+    @MethodSource("crewLossReasons")
+    void crewLossIsCapturedOnTheDeathEvent(String reason) {
+        manager.destroyEntity(target, reason, true, true);
+        assertEquals(2, deliveries.size());
+        assertTrue(deliveries.stream().allMatch(delivery -> delivery.result().crewLoss()));
+    }
+
+    private static Stream<String> crewLossReasons() {
+        return Stream.concat(Stream.of("ejection", "deadly ejection", "pilot death", "crew death", "crew casualties"),
+              Stream.of("escapePodLaunch", "crewLossInPodCrash", "crewLossDuringEscape", "crewExited")
+                    .map(reason -> Messages.getString("MovementDisplay.CVEP.destroyReason." + reason)));
+    }
+
+    @Test
+    void structuralDestructionStillExplodesEvenWithADeadCrew() {
+        target.getCrew().setDead(true);
+        manager.destroyEntity(target, "center torso destroyed", false, false);
+        assertEquals(2, deliveries.size());
+        assertTrue(deliveries.stream().noneMatch(delivery -> delivery.result().crewLoss()));
     }
 
     private record Delivery(int player, ResolvedAttack result) { }

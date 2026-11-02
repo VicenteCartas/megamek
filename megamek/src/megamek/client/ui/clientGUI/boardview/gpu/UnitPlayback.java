@@ -597,6 +597,9 @@ final class UnitPlayback {
 
     boolean paused() { return paused; }
 
+    /** Paused playback may still advance one requested action or a report review. */
+    boolean clockRunning() { return !paused || stepping || review != null; }
+
     void togglePaused() {
         paused = !paused;
         stepping = false;

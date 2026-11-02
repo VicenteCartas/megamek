@@ -175,8 +175,8 @@ final class GpuUnitBases implements Disposable {
             return new BaseSpec(look, false, 0, Emphasis.NONE, false, false, 0, 0, false,
                   GpuBattleStatus.Marks.NONE, 0, 0, -1, 0, List.of(), null, dead, badges && dead);
         }
-        boolean destroyed = dead || status.destroyed();
-        if (destroyed) {
+        // The playback pose decides when death is shown; the live status can already describe a later frame.
+        if (dead) {
             return new BaseSpec(Look.NEUTRAL, false, 0, Emphasis.NONE, false, false, 0, 0, false,
                   GpuBattleStatus.Marks.NONE, 0, 0, -1, 0, List.of(), null, true, badges);
         }
@@ -272,7 +272,7 @@ final class GpuUnitBases implements Disposable {
      */
     void update(BoardScene scene, GpuBattleStatus.Snapshot status, Map<BoardScene.Unit, UnitFootprint.Pose> poses,
           int actor, int focus, int hoveredUnit, Coords hovered, float hexPixels, float seconds,
-          boolean statusBadges) {
+          boolean statusBadges, List<MeepleCasualties.Casualty> casualties) {
         clock = (clock + seconds) % 1;
         fade = fade(hexPixels);
         Map<Integer, GpuBattleStatus.UnitStatus> listed = new HashMap<>();
@@ -293,27 +293,40 @@ final class GpuUnitBases implements Disposable {
             if (pose == null || unit.attachment() != null) { continue; }
             String key = key(unit);
             keys.add(key);
-            boolean dead = !unit.sensorContact() && unit.model() != null && unit.model().state() != null
-                  && unit.model().state().pose().dead();
             var source = sources.get(unit.id());
-            BaseSpec spec = spec(listed.get(unit.id()), unit.sensorContact(), dead, actor, focus, source,
+            BaseSpec spec = spec(listed.get(unit.id()), unit.sensorContact(), false, actor, focus, source,
                   open != null && source != null && open.source().entityId() == unit.id(), status.links(),
                   badged.contains(key) && unit.part() <= 0);
             if (!statusBadges) { spec = spec.withoutStatus(); }
-            Shown entry = shown.get(key);
-            if (entry == null || !entry.spec().equals(spec) || !sameFootprint(entry, unit)) {
-                if (entry != null) { dispose(entry); }
-                entry = build(spec, unit);
-                shown.put(key, entry);
-            }
-            place(entry, unit, pose);
-            placed.add(entry);
+            show(unit, pose, spec, 1);
+        }
+        for (var casualty : casualties) {
+            if (casualty.pose == null || casualty.unit.attachment() != null) { continue; }
+            keys.add(key(casualty.unit));
+            show(casualty.unit, casualty.pose,
+                  spec(null, false, true, Entity.NONE, Entity.NONE, null, false, List.of(), true), casualty.opacity());
         }
         shown.entrySet().removeIf(entry -> {
             boolean gone = !keys.contains(entry.getKey());
             if (gone) { dispose(entry.getValue()); }
             return gone;
         });
+    }
+
+    private void show(BoardScene.Unit unit, UnitFootprint.Pose pose, BaseSpec spec, float opacity) {
+        String key = key(unit);
+        Shown entry = shown.get(key);
+        if (entry == null || !entry.spec().equals(spec) || !sameFootprint(entry, unit)) {
+            if (entry != null) { dispose(entry); }
+            entry = build(spec, unit);
+            shown.put(key, entry);
+        }
+        place(entry, unit, pose);
+        for (var instance : List.of(entry.baseInstance(), entry.badgeInstance())) {
+            if (!(instance.userData instanceof GpuUnitShader.Shown)) { instance.userData = new GpuUnitShader.Shown(); }
+            ((GpuUnitShader.Shown) instance.userData).opacity = opacity;
+        }
+        placed.add(entry);
     }
 
     /**

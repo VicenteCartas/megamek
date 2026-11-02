@@ -116,6 +116,35 @@ final class GpuPageCache implements Disposable {
 
     int capacity() { return layers.length; }
 
+    /** Render-thread diagnostics after a fill. Occupied slots include the spare used by a stale page's rebuild. */
+    record Status(int capacity, int occupied, int stale, int building, int needed, int current,
+          int neededStale, int prefetchPending) { }
+
+    Status status() {
+        int stale = 0, building = 0, wanted = 0, current = 0, neededStale = 0, prefetchPending = 0;
+        for (Page page : pages.values()) {
+            if (ready(page) && page.stale) { stale++; }
+            if (page.layer >= 0 && (!ready(page) || page.stale) && page.step > 0) { building++; }
+        }
+        for (Page page : needed) {
+            boolean fresh = ready(page) && !page.stale;
+            if (page.pinned) {
+                wanted++;
+                if (fresh) { current++; }
+                if (ready(page) && page.stale) { neededStale++; }
+            } else if (!fresh) { prefetchPending++; }
+        }
+        return new Status(layers.length, layers.length - free.size(), stale, building, wanted, current,
+              neededStale, prefetchPending);
+    }
+
+    /** Requested GPU storage, including page-table buffers; driver overhead is not measurable here. */
+    long allocatedBytes() {
+        long bytes = capacity() * pageBytes();
+        for (int buffer : buffers) { if (buffer != 0) { bytes += TABLE_BYTES; } }
+        return bytes;
+    }
+
     /** The array of one format, for a sampler. */
     GLTexture array(int index) { return arrays[index]; }
 
@@ -470,6 +499,7 @@ final class GpuPageCache implements Disposable {
         for (int[] query : queries) { GL15.glDeleteQueries(query[0]); }
         queries.clear();
         pages.clear();
+        needed.clear();
         free.clear();
         layers = new Page[0];
         revision++;

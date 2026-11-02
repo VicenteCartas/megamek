@@ -105,7 +105,7 @@ class GpuTuningPanelSmokeTest {
             // A preset previews its own conditions, as GpuBoardSource.preview does with its time sample.
             when(source.preview(any(AtmospherePreset.class)))
                   .thenAnswer(call -> call.<AtmospherePreset>getArgument(0).settings(.5));
-            tuning = new GpuBoardTuning(harness.theme.skin, source);
+            tuning = new GpuBoardTuning(harness.theme.skin, source, camera);
             hud = new GpuHud(source, harness.theme.skin, batch, camera, tuning,
                   new GpuPlaybackHistory(new UnitPlayback()));
             resize();
@@ -404,6 +404,61 @@ class GpuTuningPanelSmokeTest {
                     hud.hud.draw();
                     assertNull(hud.hud.stage.getRoot().findActor("tuning-reload-progress"));
                     assertEquals("OK", hud.tuning.assetReloadStatus().getText().toString());
+                }
+            }
+        });
+    }
+
+    @Test
+    void theDisplayShowsLiveTerrainCacheStatusAndSwitchesItForAB() {
+        GpuHudTestStage.run(harness -> {
+            for (int[] size : SIZES) {
+                harness.size(size[0], size[1]);
+                try (Hud hud = new Hud(harness)) {
+                    var status = new AtomicReference<>(new GpuMaterialCache.Status("Rebuilding stale pages", true,
+                          260L << 20, 1L << 20, new GpuPageCache.Status(256, 150, 25, 1, 100, 75, 25, 12),
+                          2, 120, 100, 0));
+                    hud.tuning.terrainCacheStatus(status::get);
+                    hud.show();
+                    hud.click("tuning-button");
+                    Label state = hud.find("tuning-terrain-cache-state");
+                    Label details = hud.find("tuning-terrain-cache-details");
+                    assertTrue(state.getText().toString().contains("75% (75 / 100 pages current)"));
+                    assertTrue(details.getText().toString().contains("260.0 MiB"));
+                    assertTrue(details.getText().toString().contains("stale: 25"));
+                    hud.reveal(details);
+                    hud.capture("tuning-cache-building-" + size[0]);
+                    GpuBoardTestUi.assertHorizontalBounds(hud.find("tuning-frame"), hud.find("tuning-frame"));
+
+                    assertTrue(hud.tuning.terrainCache());
+                    hud.click("tuning-terrain-cache");
+                    assertFalse(hud.tuning.terrainCache(), "The visible checkbox drives the renderer's setting");
+                    hud.click("tuning-defaults");
+                    assertFalse(hud.tuning.terrainCache(), "Defaults leaves Display settings alone");
+                    status.set(new GpuMaterialCache.Status("Disabled - direct rendering", false,
+                          260L << 20, 1L << 20, status.get().pages(), 2, 0, 0, 0));
+                    hud.hud.draw(); // No board snapshot: live diagnostics still refresh.
+                    assertEquals("Disabled - direct rendering", state.getText().toString());
+                    assertTrue(details.getText().toString().contains("260.0 MiB"), "Disabled retains its allocation");
+                    assertFalse(details.getText().toString().contains("View:"));
+                    hud.click("tuning-terrain-cache");
+                    assertTrue(hud.tuning.terrainCache());
+
+                    status.set(new GpuMaterialCache.Status("Ready - partial coverage", true,
+                          260L << 20, 1L << 20, new GpuPageCache.Status(256, 150, 0, 0, 100, 100, 0, 12),
+                          2, 120, 100, 0));
+                    hud.hud.draw();
+                    assertTrue(state.getText().toString().contains("100%"));
+                    assertTrue(details.getText().toString().contains("100 / 120 pages admitted"));
+                    hud.reveal(details);
+                    hud.capture("tuning-cache-ready-" + size[0]);
+
+                    status.set(new GpuMaterialCache.Status("Not allocated", false, 0, 1L << 20,
+                          new GpuPageCache.Status(0, 0, 0, 0, 0, 0, 0, 0), 0, 0, 0, 0));
+                    hud.hud.draw();
+                    assertEquals("Not allocated", state.getText().toString());
+                    assertFalse(state.getText().toString().contains("%"), "No invented percentage without a view");
+                    assertTrue(details.getText().toString().contains("0.0 MiB"));
                 }
             }
         });
@@ -998,8 +1053,18 @@ class GpuTuningPanelSmokeTest {
                 hud.click("tuning-camera-tab");
                 UiKit.Checkbox selection = hud.find("camera-animate-selection");
                 UiKit.Checkbox movement = hud.find("camera-animate-movement");
+                UiKit.Checkbox returning = hud.find("camera-return-playback");
+                UiKit.Checkbox dramatic = hud.find("camera-dramatic-death");
                 assertEquals(hud.camera.animateOnSelectionChange, selection.isTicked());
                 assertEquals(hud.camera.animateOnMove, movement.isTicked());
+                assertTrue(returning.isTicked());
+                assertTrue(hud.camera.returnAfterPlayback());
+                assertTrue(dramatic.isTicked());
+                assertTrue(hud.tuning.dramaticDeath());
+                hud.click(returning);
+                hud.click(dramatic);
+                assertFalse(hud.camera.returnAfterPlayback());
+                assertFalse(hud.tuning.dramaticDeath());
 
                 hud.click("camera-fixed-sun");
                 assertTrue(hud.tuning.fixedSun(), "the fixed sun is the model's");
@@ -1017,9 +1082,11 @@ class GpuTuningPanelSmokeTest {
                 // Changes made elsewhere (the model, the camera) show on the next frame.
                 hud.tuning.setFixedSun(false);
                 hud.camera.animateOnMove = animateMovement;
+                hud.camera.setReturnAfterPlayback(true);
                 hud.show();
                 assertFalse(hud.<UiKit.Checkbox>find("camera-fixed-sun").isTicked());
                 assertEquals(animateMovement, movement.isTicked());
+                assertTrue(returning.isTicked());
             }
         });
     }

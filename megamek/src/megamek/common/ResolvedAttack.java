@@ -20,13 +20,19 @@ import megamek.common.weapons.infantry.InfantryWeapon;
 /** A transient, server-confirmed visual event. It is not an attack order or another damage/rules calculation. */
 public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
       int equipmentIndex, String equipmentName, int limb, boolean hit, List<Mount> mounts, Shot shot,
-      List<Impact> impacts) implements Serializable {
+      List<Impact> impacts, boolean crewLoss) implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
     public ResolvedAttack {
         mounts = mounts == null ? singleMount(attacker, equipmentIndex) : List.copyOf(mounts);
         impacts = impacts == null ? List.of() : List.copyOf(impacts);
+    }
+
+    public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
+          int equipmentIndex, String equipmentName, int limb, boolean hit, List<Mount> mounts, Shot shot,
+          List<Impact> impacts) {
+        this(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit, mounts, shot, impacts, false);
     }
 
     public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,
@@ -39,7 +45,13 @@ public record ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLoca
 
     public ResolvedAttack withImpacts(List<Impact> locations) {
         return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
-              mounts, shot, locations);
+              mounts, shot, locations, crewLoss);
+    }
+
+    /** The server destroyed this unit because its crew died or left, rather than because its body was destroyed. */
+    public ResolvedAttack withCrewLoss(boolean lost) {
+        return new ResolvedAttack(id, kind, attacker, target, targetType, equipmentIndex, equipmentName, limb, hit,
+              mounts, shot, impacts, lost);
     }
 
     public ResolvedAttack(UUID id, Kind kind, UnitLocation attacker, UnitLocation target, int targetType,

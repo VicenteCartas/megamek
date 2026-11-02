@@ -27,6 +27,130 @@ class GpuPlaybackCameraTest {
     }
 
     @Test
+    void returnsToTheOriginalViewAfterTheEntireMoveAndFiringQueueIncludingAPausedHold() throws Exception {
+        var selected = UnitPlaybackTest.unit(1, 0);
+        var move = movement(2, 7, 9);
+        var target = UnitPlaybackTest.unit(3, 11);
+        var shot = UnitPlaybackTest.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
+        for (boolean isometric : List.of(false, true)) {
+            var view = view(isometric);
+            try {
+                assertTrue(view.boardCamera.returnAfterPlayback(), "Camera return starts enabled");
+                view.updateCameraFocus(scene(selected.id(), selected, UnitPlaybackTest.unit(2, 7), target), INITIAL_CENTER);
+                view.boardCamera.camera.zoom = .25f;
+                view.boardCamera.center(BoardGeometry.center(selected.location().coords(), 0));
+                var origin = view.boardCamera.focus.cpy();
+                var eye = view.boardCamera.camera.position.cpy();
+                var direction = view.boardCamera.camera.direction.cpy();
+                float zoom = view.boardCamera.camera.zoom;
+                var latest = scene(target.id(), selected, move.unit(), target);
+                var playback = playback(view);
+                playback.accept(List.of(move, shot), latest, ignored -> false);
+                playback.advance(0, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, latest));
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                var routeView = view.boardCamera.focus.cpy();
+                assertFalse(origin.epsilonEquals(routeView, .001f));
+                var motion = playback.motions.get(move.entityId());
+                playback.advance(motion.remainingSeconds() / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+                focus(view, playback, latest);
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                assertEquals(routeView, view.boardCamera.focus, "No return during the first action's hold");
+                playback.advance(UnitPlayback.COMPLETION_HOLD_SECONDS, UnitMotion.Speed.NORMAL,
+                      state -> view.preparePlaybackCamera(state, latest));
+                focus(view, playback, latest);
+                assertEquals(shot, playback.attack().event);
+                assertEquals(routeView, view.boardCamera.focus, "The next action starts from the preceding action's view");
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                var firingView = view.boardCamera.focus.cpy();
+                playback.advance(playback.attack().duration / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
+                focus(view, playback, latest);
+                playback.togglePaused();
+                playback.advance(10, UnitMotion.Speed.NORMAL);
+                focus(view, playback, latest);
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+                assertEquals(firingView, view.boardCamera.focus, "Pausing the final hold must not return early");
+                playback.togglePaused();
+                playback.advance(UnitPlayback.COMPLETION_HOLD_SECONDS, UnitMotion.Speed.NORMAL);
+                assertFalse(playback.busy());
+                focus(view, playback, latest);
+                assertTrue(view.boardCamera.isFraming(), "The return is eased, not a snap");
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS / 2);
+                assertFalse(origin.epsilonEquals(view.boardCamera.focus, .001f));
+                focus(view, playback, latest);
+                view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS / 2);
+                assertTrue(origin.epsilonEquals(view.boardCamera.focus, .001f));
+                assertTrue(eye.epsilonEquals(view.boardCamera.camera.position, .001f));
+                assertTrue(direction.epsilonEquals(view.boardCamera.camera.direction, .001f));
+                assertEquals(zoom, view.boardCamera.camera.zoom, .0001f);
+                focus(view, playback, latest);
+                assertFalse(view.boardCamera.isFraming(), "The changed live selection cannot undo the return next frame");
+            } finally {
+                view.dispose();
+            }
+        }
+    }
+
+    @Test
+    void instantPlaybackKeepsTheOriginalViewAndSkippingAnActiveMoveReturnsToIt() throws Exception {
+        var move = movement(2, 7, 9);
+        for (boolean startMovement : List.of(false, true)) {
+            var view = view(true);
+            try {
+                var latest = scene(move.entityId(), move.unit());
+                view.updateCameraFocus(latest, INITIAL_CENTER);
+                view.boardCamera.camera.zoom = .25f;
+                view.boardCamera.center(BoardGeometry.center(new Coords(0, 0), 0));
+                var origin = view.boardCamera.focus.cpy();
+                float zoom = view.boardCamera.camera.zoom;
+                var playback = playback(view);
+                playback.accept(List.of(move), latest, ignored -> false);
+                if (startMovement) {
+                    playback.advance(0, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, latest));
+                    view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS / 2);
+                    assertFalse(origin.epsilonEquals(view.boardCamera.focus, .001f));
+                }
+                instant(view);
+                var last = playback.lastAction();
+                playback.advance(0, UnitMotion.Speed.INSTANT);
+                view.updateCameraFocus(latest, INITIAL_CENTER, last);
+                assertFalse(view.boardCamera.isFraming());
+                assertTrue(origin.epsilonEquals(view.boardCamera.focus, .001f));
+                assertEquals(zoom, view.boardCamera.camera.zoom);
+            } finally {
+                view.dispose();
+            }
+        }
+    }
+
+    @Test
+    void disablingCameraReturnDuringPlaybackDiscardsTheSavedView() throws Exception {
+        var move = movement(2, 7, 9);
+        var view = view(true);
+        try {
+            var latest = scene(move.entityId(), move.unit());
+            view.updateCameraFocus(latest, INITIAL_CENTER);
+            view.boardCamera.camera.zoom = .25f;
+            view.boardCamera.center(BoardGeometry.center(new Coords(0, 0), 0));
+            var playback = playback(view);
+            playback.accept(List.of(move), latest, ignored -> false);
+            playback.advance(0, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, latest));
+            focus(view, playback, latest);
+            view.boardCamera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
+            var framed = view.boardCamera.focus.cpy();
+            view.boardCamera.setReturnAfterPlayback(false);
+            playback.finish();
+            focus(view, playback, latest);
+            assertFalse(view.boardCamera.isFraming());
+            assertEquals(framed, view.boardCamera.focus);
+            view.boardCamera.setReturnAfterPlayback(true);
+            focus(view, playback, latest);
+            assertEquals(framed, view.boardCamera.focus, "Re-enabling must not restore an obsolete view");
+        } finally {
+            view.dispose();
+        }
+    }
+
+    @Test
     void initialFitIgnoresOldLegacy2DCenterRequestsButNewRequestsStillWork() {
         var unit = UnitPlaybackTest.unit(1, 0);
         var view = view(true);
@@ -179,6 +303,7 @@ class GpuPlaybackCameraTest {
         var shot = UnitPlaybackTest.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
         for (boolean selectTarget : List.of(false, true)) {
             var view = view(true);
+            view.boardCamera.setReturnAfterPlayback(false);
             var expected = new BoardCamera();
             try {
                 var initial = scene(selected.id(), selected, move.unit(), target);
@@ -224,6 +349,7 @@ class GpuPlaybackCameraTest {
         var first = movement(1, 0, 5);
         var last = movement(2, 7, 11);
         var view = view(false);
+        view.boardCamera.setReturnAfterPlayback(false);
         try {
             var initial = scene(1, UnitPlaybackTest.unit(1, 0), UnitPlaybackTest.unit(2, 7));
             view.updateCameraFocus(initial, INITIAL_CENTER);
@@ -291,6 +417,7 @@ class GpuPlaybackCameraTest {
             for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE,
                   UnitMotion.Speed.QUADRUPLE)) {
                 var view = view(isometric);
+                view.boardCamera.setReturnAfterPlayback(false);
                 try {
                     var playback = playback(view);
                     var initial = scene(1, UnitPlaybackTest.unit(1, 0), UnitPlaybackTest.unit(2, 7), next);
@@ -356,6 +483,7 @@ class GpuPlaybackCameraTest {
         var shot = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
         for (boolean isometric : List.of(false, true)) {
             var view = view(isometric);
+            view.boardCamera.setReturnAfterPlayback(false);
             try {
                 var playback = playback(view);
                 var initial = scene(target.id(), target, attacker, next);
@@ -459,6 +587,7 @@ class GpuPlaybackCameraTest {
         for (Consumer<UnitPlayback> skip : List.<Consumer<UnitPlayback>>of(
               playback -> playback.advance(0, UnitMotion.Speed.INSTANT), UnitPlayback::finish)) {
             var view = view(true);
+            view.boardCamera.setReturnAfterPlayback(false);
             try {
                 var playback = playback(view);
                 var latest = scene(selected.id(), selected, enemy.unit());

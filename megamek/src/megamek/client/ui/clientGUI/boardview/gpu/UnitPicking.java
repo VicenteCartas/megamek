@@ -2,7 +2,10 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -24,6 +27,28 @@ final class UnitPicking {
         Vector3 world(ModelInstance instance, Vector3 result) {
             return result.set(local).mul(node.globalTransform).mul(instance.transform);
         }
+    }
+
+    /** Unique vertices of a posed rigid subtree, in world space, for a casualty's captured contact shape. */
+    List<Vector3> vertices(ModelInstance instance, Node root) {
+        Set<Vector3> points = new LinkedHashSet<>();
+        vertices(root, instance.transform, points);
+        return List.copyOf(points);
+    }
+
+    private void vertices(Node node, Matrix4 root, Set<Vector3> points) {
+        var world = new Matrix4(root).mul(node.globalTransform);
+        for (var part : node.parts) {
+            if (!part.enabled) { continue; }
+            Geometry geometry = meshes.computeIfAbsent(part.meshPart.mesh, UnitPicking::read);
+            int end = part.meshPart.offset + part.meshPart.size;
+            for (int index = part.meshPart.offset; index < end; index++) {
+                var point = new Vector3();
+                vertex(geometry, index, point);
+                points.add(point.mul(world));
+            }
+        }
+        for (Node child : node.getChildren()) { vertices(child, root, points); }
     }
 
     /** Pick an area-weighted point on the posed, incoming-facing surface, not inside its bounding box. */

@@ -52,7 +52,7 @@ class GpuHudLayoutSmokeTest {
     private record Layout(String name, GamePhase phase, boolean grid, boolean overlays, List<String> panels) { }
 
     private static final List<String> BASE = List.of("phase-header", "forces-panel", "unit-card", "command-dock",
-          "hint-line", "utility-bar", "minimap", "chat-button");
+          "hint-line", "utility-bar", "minimap");
     private static final List<Layout> LAYOUTS = List.of(
           new Layout("movement", GamePhase.MOVEMENT, false, false, with("contacts-panel")),
           new Layout("firing", GamePhase.FIRING, false, false, with("weapons-panel", "solution-card")),
@@ -67,7 +67,7 @@ class GpuHudLayoutSmokeTest {
     private static final List<String> SLOTTED = List.of("phase-header", "initiative-card", "conditions-card",
           "forces-panel", "unit-card", "record-sheet", "utility-bar", "tactical-chip", "hint-line",
           "minimap", "contacts-panel", "weapons-panel", "log-panel", "solution-card", "command-dock",
-          "chat-button", "chat-panel", "force-overview", "help-dialog", "menu-panel", "players-panel",
+          "chat-panel", "force-overview", "help-dialog", "menu-panel", "players-panel",
           "toast-stack");
     /** The full-width shortcut line sits behind these side panels, which may cover it. */
     private static final Set<String> HINT_COVERING_PANELS = Set.of("phase-header", "forces-panel", "unit-card",
@@ -228,7 +228,6 @@ class GpuHudLayoutSmokeTest {
             // Minimap: the prototype's 210 (180 at 800 or less), which its map fills inside the rails.
             case "minimap" -> new float[] { metrics.right(), metrics.lowHeight() ? 180 : 210 };
             case "solution-card" -> new float[] { metrics.right(), 145 };
-            case "chat-button" -> new float[] { 80, 36 };
             // The chip without the prototype's Back to 3D button (the user's decision of 2026-10-02), as measured.
             case "tactical-chip" -> new float[] { 153, 32 };
             case "conditions-card" -> new float[] { 260, 140 };

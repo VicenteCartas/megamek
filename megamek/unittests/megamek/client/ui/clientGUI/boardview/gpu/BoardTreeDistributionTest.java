@@ -163,12 +163,15 @@ class BoardTreeDistributionTest {
                         low = Math.min(low, m.vertices[v + 2]); high = Math.max(high, m.vertices[v + 2]);
                     }
                 }
-                assertTrue(triangles > 0 && triangles <= List.of(1600, 410, 96, 12).get(lod), name);
+                var budgets = tree.startsWith("vegetation/pine") ? List.of(1600, 410, 96, 12)
+                      : List.of(32000, 10000, 2600, 12);
+                assertTrue(triangles > 0 && triangles <= budgets.get(lod), name);
                 assertEquals(0, low, .001f, name);
                 assertEquals(30, high, .001f, name);
                 for (var material : model.materials) {
                     if (!material.id.endsWith("-cutout")) { continue; }
-                    assertEquals(.5f, ((RigidGlb.Data) model).alphaTests.get(material.id), .0001f);
+                    assertEquals(tree.startsWith("vegetation/pine") ? .5f : .3f,
+                          ((RigidGlb.Data) model).alphaTests.get(material.id), .0001f);
                     var texture = ((RigidGlb.Data) model).images.get(material.textures.first().fileName);
                     // Willows wear their own cutout in summer and the broadleaf snow in winter.
                     String cutout = tree.startsWith("vegetation/pine") ? "conifer"

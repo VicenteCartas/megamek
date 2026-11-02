@@ -213,6 +213,7 @@ final class GpuAtmosphere implements Disposable {
     private List<BoardScene.Tile> groundTiles;
     private float groundLevel;
     private float groundBase;
+    private float sandBase;
     private float groundHollow;
     private Texture groundNoise;
     private final GroundMotion groundMotion = new GroundMotion();
@@ -955,6 +956,7 @@ final class GpuAtmosphere implements Disposable {
             groundTiles = board.tiles();
             groundLevel = BoardGeometry.level();
             groundBase = BoardGeometry.weatherBase(board);
+            sandBase = BoardGeometry.sandBase(board);
             groundHollow = (float) board.tiles().stream().mapToDouble(BoardRelief::headroom).max().orElse(0);
         }
     }
@@ -1012,11 +1014,11 @@ final class GpuAtmosphere implements Disposable {
         float strength = settings.effects().sand();
         if (strength > 0) { updateGroundBase(board); }
         float height = settings.groundLayerHeight() * BoardGeometry.level();
-        compositeShader.setUniformf("u_sand", strength, height, groundBase, 1 / BoardGeometry.level());
+        compositeShader.setUniformf("u_sand", strength, height, sandBase, 1 / BoardGeometry.level());
         compositeShader.setUniformf("u_groundHollow", groundHollow);
         compositeShader.setUniformf("u_sandMaxOpacity", MAX_SAND_OPACITY);
         if (strength <= 0) { return; }
-        bindGroundLayer(compositeShader, camera, board, groundBase + height * 3, 4);
+        bindGroundLayer(compositeShader, camera, board, sandBase + height * 3, 4);
         compositeShader.setUniformf("u_sandWind", MathUtils.sinDeg(settings.effects().windDirection()),
               MathUtils.cosDeg(settings.effects().windDirection()), groundMotion.grains, 1 / BoardGeometry.width());
         compositeShader.setUniformf("u_sandOffset", groundMotion.sand);

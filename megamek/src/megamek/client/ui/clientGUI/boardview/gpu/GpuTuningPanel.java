@@ -183,6 +183,10 @@ final class GpuTuningPanel implements GpuHud.Component {
         for (int i = 1; i < tabs.buttons.size(); i++) { tabs.getCell(tabs.buttons.get(i)).padLeft(14); }
         tabs.left().pad(2, 14, 0, 14);
         frame.add(tabs).growX().row();
+        // Resolve the cache after the scene has drawn, only while its page is attached; before mirroring its labels.
+        shows.add(() -> {
+            if (root.findActor("tuning-display") != null) { tuning.showTerrainCacheStatus(); }
+        });
         List<ScrollPane> pages = List.of(page("tuning-display", mirror(tuning.displayRows())),
               page("tuning-board", mirror(tuning.boardRows())),
               page("tuning-atmosphere", mirror(tuning.atmosphereRows())),
@@ -269,8 +273,10 @@ final class GpuTuningPanel implements GpuHud.Component {
             if (model instanceof Slider slider) {
                 page.add(slider(slider)).colspan(span).growX().minWidth(0).pad(4, 8, 4, 8);
             } else if (model instanceof CheckBox box) {
-                page.add(checkbox(box.getName(), box.getText().toString(), tooltip(box), box::isChecked,
-                      box::setChecked)).colspan(span).left().pad(5, 0, 5, 0);
+                var shown = checkbox(box.getName(), box.getText().toString(), tooltip(box), box::isChecked,
+                      value -> { if (!box.isDisabled()) { box.setChecked(value); } });
+                shows.add(() -> shown.getColor().a = box.isDisabled() ? .5f : 1);
+                page.add(shown).colspan(span).left().pad(5, 0, 5, 0);
             } else if (model instanceof TextButton toggle) {
                 var buttonCell = page.add(toggle(toggle)).colspan(span).left().pad(2, 0, 2, 0);
                 if (span > 1) { buttonCell.growX(); } else { buttonCell.width(NAME_WIDTH); }
@@ -284,7 +290,9 @@ final class GpuTuningPanel implements GpuHud.Component {
                 page.add(shown).colspan(span).width(READING_WIDTH).right();
             } else if (model instanceof Label note && span > 1) {
                 Label shown = ui.label(note.getText().toString(), "hud-small", 11.5f, UiTheme.MUTED);
+                shown.setName(note.getName());
                 shown.setWrap(true);
+                tip(shown, note);
                 shows.add(() -> shown.setText(note.getText()));
                 page.add(shown).colspan(span).growX().pad(2, 0, 4, 0);
             } else if (model instanceof Label name) {
@@ -323,6 +331,9 @@ final class GpuTuningPanel implements GpuHud.Component {
         page.add(checkbox("camera-animate-movement", text("GpuBoard.animateMovement"),
               text("GpuBoard.cameraAnimationHelp"), () -> camera.animateOnMove,
               value -> camera.animateOnMove = value)).row();
+        page.add(checkbox("camera-return-playback", text("GpuBoard.returnAfterPlayback"),
+              text("GpuBoard.returnAfterPlaybackHelp"), camera::returnAfterPlayback,
+              camera::setReturnAfterPlayback)).row();
         page.add(mirror(tuning.cameraRows())).growX().padTop(6).row();
         // The live view as one line, which reproduces it in a report, and its Copy.
         Label view = ui.label("", "hud-small", 11.5f, UiTheme.ACCENT);

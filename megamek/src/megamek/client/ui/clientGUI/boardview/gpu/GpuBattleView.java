@@ -87,14 +87,8 @@ class GpuBattleView extends ApplicationAdapter {
     static final boolean HIDE_TARGET_ARROWS_DURING_ATTACKS = true;
     /** Slow motion as a shot that hits comes in, just before its impact. */
     static final boolean BULLET_TIME = false;
-    /** Slow motion while a unit dies; an infantry unit dies with its last trooper. */
+    /** Slow a killing projectile's last four hexes, or a melee kill at impact; infantry dies with its last trooper. */
     static final boolean DRAMATIC_DEATH = true;
-    /** Each slow motion's share of the playback speed: a death's as its killing blow lands, ramping back up from there. */
-    private static final float BULLET_TIME_RATE = .25f, DRAMATIC_DEATH_RATE = .25f;
-    /** How long before a hit's impact bullet time begins, in playback seconds. */
-    private static final float BULLET_TIME_LEAD_SECONDS = .25f;
-    /** How quickly the playback eases into and out of slow motion, in real seconds. */
-    private static final float SLOW_MOTION_EASE_SECONDS = .15f;
     /** unit's screen rectangle is .55 of a hex wide. */
     private static final float UNIT_RECT_WIDTH = .55f;
     /** Floating units are tied to their hex with this faint solid stem; solid, so it needs no blending state. */
@@ -472,6 +466,7 @@ class GpuBattleView extends ApplicationAdapter {
         theme = loadingTheme == null ? GpuBoardSkin.forScene() : loadingTheme;
         loadingTheme = null;
         tuning = new GpuBoardTuning(theme.skin, source, boardCamera);
+        tuning.terrainCacheStatus(() -> terrain == null ? null : terrain.materialCacheStatus());
         // The switch resizes and redraws the window: after the HUD's event, not inside it.
         tuning.onDisplayMode(fullscreen -> Gdx.app.postRunnable(() -> setFullscreen(fullscreen)));
         // Before the scene renderers: the atmosphere starts with the board's conditions, as the first frame sets them.
@@ -783,6 +778,7 @@ class GpuBattleView extends ApplicationAdapter {
             terrain.boardChanged();
             atmosphere.resetContrast();
             playback.clear();
+            timeScale = 1;
             attackEffects.clearArtilleryBlasts();
             history.clear();
             animators.clear();
@@ -809,8 +805,10 @@ class GpuBattleView extends ApplicationAdapter {
         playback.gravityOverride = tuning.gravityOverride();
         if (!fitted) { updateCameraFocus(scene, frame.centerRequest()); }
         var instantAction = history.speed() == UnitMotion.Speed.INSTANT ? playback.lastAction() : null;
-        easeSlowMotion();
+        updateSlowMotion();
         history.advance(Gdx.graphics.getDeltaTime() * timeScale, state -> preparePlaybackCamera(state, scene));
+        // The impact frame's explosion and debris already use full speed, without waiting for the next frame.
+        updateSlowMotion();
         // Historical review is presentation only: it must never signal a live movement completion to Swing.
         source.playbackState(frame, history.running());
         scene = playback.present(scene);
@@ -825,7 +823,7 @@ class GpuBattleView extends ApplicationAdapter {
         camouflage.retain(Stream.concat(scene.units().stream(), casualties.units().stream()).toList());
         if (unitModels != null) {
             // The units not on the board keep the models their warm-up assembled, for the moment they appear.
-            unitModels.retainAssemblies(Stream.concat(scene.units().stream(), source.reserveUnits().stream())
+            unitModels.retainAssemblies(Stream.of(scene.units(), source.reserveUnits(), casualties.units()).flatMap(List::stream)
                   .filter(unit -> !unit.sensorContact()).map(BoardScene.Unit::id).collect(Collectors.toSet()));
         }
         boardGeneration = frame.boardGeneration();
@@ -843,6 +841,7 @@ class GpuBattleView extends ApplicationAdapter {
         atmosphere.configureClouds(terrain, scene);
         ambientOcclusion.configure(terrain.environment(), tuning.ambientOcclusion());
         terrain.setTessellation(tuning.tessellation());
+        terrain.setMaterialCache(tuning.terrainCache());
         atmosphere.setDepthCues(tuning.depthCues() && !boardCamera.tactical() ? GpuDepthCues.STRENGTH : 0);
         atmosphere.setVignette(tuning.vignette());
         // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
@@ -933,10 +932,12 @@ class GpuBattleView extends ApplicationAdapter {
         terrain.setGrass(tuning.grass());
         terrain.setWaterEffects(tuning.waterEffects());
         // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
-        Set<BoardScene.Pixels> moved = unitTextures.updateRegions(scene.units().stream().filter(unit -> !unit.sensorContact()
-              && (unitModels == null || unitModels.get(unit.model(), unit.id(), unit.part()) == null)).map(BoardScene.Unit::image).distinct()
+        Set<BoardScene.Pixels> moved = unitTextures.updateRegions(Stream.concat(scene.units().stream().filter(unit -> !unit.sensorContact()
+              && (unitModels == null || unitModels.get(unit.model(), unit.id(), unit.part()) == null)), casualties.units().stream())
+              .map(BoardScene.Unit::image).distinct()
               .collect(Collectors.toMap(pixels -> pixels, pixels -> pixels)));
-        Set<BoardScene.Pixels> images = scene.units().stream().map(BoardScene.Unit::image).collect(Collectors.toSet());
+        Set<BoardScene.Pixels> images = Stream.concat(scene.units().stream(), casualties.units().stream())
+              .map(BoardScene.Unit::image).collect(Collectors.toSet());
         disposeSpriteModels(sprite -> moved.contains(sprite.pixels()) || !images.contains(sprite.pixels()));
         updateCameraFocus(scene, frame.centerRequest(), instantAction);
         // The first visible frame's delta may still include the hidden window's loading time.
@@ -1031,9 +1032,8 @@ class GpuBattleView extends ApplicationAdapter {
         }
         unitBounds.begin();
         List<ModelInstance> units = new ArrayList<>(unitInstances.values());
-        // The Tactical View draws no dying meeples: it keeps tokens and their wreck markers. Ghosts cast no shadow, nor
-        // anything half faded.
-        if (!boardCamera.tactical()) { casualties.casualties().forEach(casualty -> units.add(casualty.instance)); }
+        // Both views share the casualties and their clock. Ghosts cast no shadow, nor anything half faded.
+        casualties.casualties().forEach(casualty -> units.add(casualty.instance));
         units.removeIf(instance -> unitGhosts.containsKey(instance)
               || instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < .5f);
         List<ModelInstance> outlined = scene.units().stream()
@@ -1056,7 +1056,7 @@ class GpuBattleView extends ApplicationAdapter {
             // After the HUD update, which settles the board overlay's acting unit and focused enemy.
             unitBases.update(scene, frame.status(), unitFootprints, overlay.actor(), overlay.focus(), hoveredUnit,
                   hovered, UnitScreenScale.hexPixels(boardCamera.camera.zoom, 1), Gdx.graphics.getDeltaTime(),
-                  source.uiPreferences().overlays().statusBadges());
+                  source.uiPreferences().overlays().statusBadges(), casualties.casualties());
         }
         renderStage("cutaways and light");
         atmosphere.updateLight(boardCamera);
@@ -1685,7 +1685,7 @@ class GpuBattleView extends ApplicationAdapter {
             boolean dead = dead(unit);
             var death = playback.attacks().stream().filter(attack -> attack.death() && attack.event.entityId() == unit.id())
                   .findFirst().orElse(null);
-            float collapse = death == null ? dead ? 1 : 0 : death.deathProgress();
+            float collapse = death == null ? dead ? 1 : 0 : death.event.result().crewLoss() ? 0 : death.deathProgress();
             if (airborne && collapse > 0) {
                 float ground = UnitLandingSupports.ground(scene, position.x, position.y, groundSurfaces);
                 if (!Float.isFinite(ground) && tile != null) { ground = BoardGeometry.surfaceZ(tile); }
@@ -1707,26 +1707,25 @@ class GpuBattleView extends ApplicationAdapter {
             String key = unit.id() + ":" + unit.part();
             ModelInstance instance = unitInstances.get(key);
             // Its death begins as the hit that killed it lands, or as a death no hit caused starts to play.
-            boolean destroyed = dead || death != null && death.seconds >= 0;
+            boolean destroyed = death == null ? dead : death.seconds >= 0;
             boolean dying = destroyed && deadUnits.add(key);
-            if (!destroyed) { deadUnits.remove(key); }
-            boolean shatters = visual.meeple() && !UnitAnimator.troops(unit) && !boardCamera.tactical();
-            if (!destroyed && shatters && death != null && instance instanceof GpuUnitInstance standing
+            if (!destroyed && deadUnits.remove(key)) { casualties.revived(unit); }
+            if (!destroyed && visual.meeple() && death != null && !death.event.result().crewLoss()
+                  && instance instanceof GpuUnitInstance standing
                   && MeepleVisual.isMeeple(standing) && history.speed() != UnitMotion.Speed.INSTANT) {
                 // Its death waits for the hit that causes it: its meeple is cut meanwhile, off this thread, for the
                 // explosion only to make meshes.
                 casualties.prepare(death, standing, unit);
             }
-            boolean exploded = destroyed && shatters;
-            float ghost = exploded ? ghost(unit, death) : 0;
-            if (exploded) {
-                // A destroyed unit's meeple explodes as its death begins, instead of falling. A wreck has no gameplay:
-                // none is drawn, but the Tactical View's crossed-out base, and a ghost while the playback shows what it
-                // still did. A formation's figures die one by one instead, as its assembly loses them.
+            float ghost = destroyed ? ghost(unit, death) : 0;
+            if (destroyed) {
+                // The casualty owns the last drawn pose until it fades. A later simultaneous attack can still draw
+                // a temporary ghost, but neither view keeps a permanent wreck.
                 if (dying || ghost == 0) { unitInstances.remove(key); }
-                if (dying && instance instanceof GpuUnitInstance standing && MeepleVisual.isMeeple(standing)
+                if (dying && instance instanceof GpuUnitInstance standing
                       && history.speed() != UnitMotion.Speed.INSTANT) {
-                    casualties.exploded(standing, unit, recentHit(unit), death);
+                    casualties.died(standing, unit, recentHit(unit), death,
+                          new UnitFootprint.Pose(placement, position, footprintFacing));
                 }
                 if (ghost == 0) { continue; }
                 instance = unitInstances.get(key);
@@ -1866,7 +1865,7 @@ class GpuBattleView extends ApplicationAdapter {
                 anchor.add(0, 0, offset);
                 position.z += offset;
             }
-            unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing));
+            if (ghost == 0) { unitFootprints.put(unit, new UnitFootprint.Pose(placement, position, footprintFacing)); }
             unitAnchors.put(unit, anchor);
             if (ghost > 0) { unitGhosts.put(instance, ghost); }
         }
@@ -2000,6 +1999,9 @@ class GpuBattleView extends ApplicationAdapter {
      * change waits for the terrain to build the ground its moving parts start from (GpuTerrain#ready).
      */
     boolean preparePlaybackCamera(UnitPlayback state, BoardScene scene) {
+        if (!state.reviewing() && (state.movement() != null || state.attack() != null || state.detonation() != null)) {
+            boardCamera.beginPlayback();
+        }
         if (state.movement() != null) {
             boardCamera.frameMovement(state.movement(), motions.get(state.activeEntityId()), state.present(scene), playbackCameraWidth());
         } else if (state.attack() != null && state.attack().shot()) {
@@ -2063,6 +2065,20 @@ class GpuBattleView extends ApplicationAdapter {
             cameraReviewing = false;
             return;
         }
+        boolean instant = instantAction != null || history.speed() == UnitMotion.Speed.INSTANT;
+        if (!history.running() && !playback.reviewing()) {
+            if (centerSequence != request.sequence() && request.entityId() != Entity.NONE) {
+                // A deliberate locate request takes precedence over returning to the earlier view.
+                boardCamera.discardPlaybackReturn();
+            } else if (boardCamera.endPlayback(!instant)
+                  || instantAction != null && boardCamera.returnAfterPlayback()) {
+                cameraReviewing = false;
+                cameraSelection = scene.selectedId();
+                centerSequence = request.sequence();
+                cameraFollowingPlayback = false;
+                return;
+            }
+        }
         if (cameraReviewing && !playback.reviewing()) {
             // Keep the event's framing when a report replay finishes. Later explicit requests still work.
             cameraReviewing = false;
@@ -2074,11 +2090,11 @@ class GpuBattleView extends ApplicationAdapter {
         }
         cameraReviewing = playback.reviewing();
         boolean firing = playback.attack() != null && playback.attack().shot();
-        boolean instant = history.speed() == UnitMotion.Speed.INSTANT;
         if (!instant && !firing && playback.movement() == null) { boardCamera.clearPlaybackFrame(); }
         // Keep the last idle selection until the entire playback, including its completion hold, ends; a reviewed
         // attack is framed as a live one.
         if (playback.busy() || playback.reviewing()) {
+            if (!playback.reviewing()) { boardCamera.beginPlayback(); }
             if (playback.detonation() != null) {
                 var strike = playback.detonation().result();
                 cameraFollowingPlayback = true;
@@ -2209,26 +2225,23 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** The animation clock's step: none while the playback is paused, unless a review plays its attack meanwhile. */
     private float animationSeconds() {
-        return playback.paused() && !playback.reviewing() ? 0
+        return !playback.clockRunning() ? 0
               : (float) (Gdx.graphics.getDeltaTime() * history.speed().rate * timeScale);
     }
 
     /**
-     * Eases the battle clock into slow motion while a shot that hits is about to land ({@link #BULLET_TIME}), and back
-     * out after. A killing blow ({@link #DRAMATIC_DEATH}) cuts to slow motion as it lands, then ramps back to speed
-     * while the unit's pieces fly. The camera and the HUD keep real time.
+     * A shot that hits can slow before landing ({@link #BULLET_TIME}). A killing blow ({@link #DRAMATIC_DEATH}) slows
+     * over its final four hexes to 0.1, or extends a continuous beam by one real second. Impact restores full speed
+     * immediately. Physical attacks and deaths without a ranged cause never trigger the effect.
+     * The camera and the HUD keep real time.
      */
-    private void easeSlowMotion() {
-        float rate = 1, ramp = 1;
-        for (var attack : playback.attacks()) {
-            if (BULLET_TIME && attack.landing(BULLET_TIME_LEAD_SECONDS)) { rate = Math.min(rate, BULLET_TIME_RATE); }
-            if (DRAMATIC_DEATH && attack.death() && attack.seconds >= 0 && attack.seconds < attack.duration) {
-                float progress = UnitAttack.smooth(attack.seconds / attack.duration);
-                ramp = Math.min(ramp, MathUtils.lerp(DRAMATIC_DEATH_RATE, 1, progress));
-            }
+    private void updateSlowMotion() {
+        if (history.speed() == UnitMotion.Speed.INSTANT || !history.running() && !playback.reviewing()) {
+            timeScale = 1;
+            return;
         }
-        float ease = 1 - (float) Math.exp(-Gdx.graphics.getDeltaTime() / SLOW_MOTION_EASE_SECONDS);
-        timeScale = Math.min(timeScale + (rate - timeScale) * ease, ramp);
+        timeScale = UnitSlowMotion.scale(playback.attacks(), attackEffects::distanceToImpact,
+              history.speed().rate, tuning.dramaticDeath());
     }
 
     private boolean hasInfantryTransports(BoardScene.Unit unit) {
@@ -2527,7 +2540,7 @@ class GpuBattleView extends ApplicationAdapter {
                 }
             }
         }
-        for (var casualty : boardCamera.tactical() ? List.<MeepleCasualties.Casualty>of() : casualties.casualties()) {
+        for (var casualty : casualties.casualties()) {
             var bounds = unitBounds.get(casualty.instance);
             if (!boardCamera.camera.frustum.boundsInFrustum(bounds)) { continue; }
             if (thermal) { wireframe.units.add(casualty.instance, casualty.unit, bounds); }

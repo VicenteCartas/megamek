@@ -17,6 +17,7 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.Disposable;
 
 /**
@@ -42,13 +43,16 @@ final class MeepleCasualties implements Disposable {
     static final class Casualty implements Disposable {
         final GpuUnitInstance instance;
         final BoardScene.Unit unit;
+        /** The whole unit's death marker, or null for individual losses in a surviving formation. */
+        final UnitFootprint.Pose pose;
         private final List<Soldier> soldiers = new ArrayList<>();
         private final List<Debris> debris = new ArrayList<>();
         private float seconds;
 
-        private Casualty(GpuUnitInstance instance, BoardScene.Unit unit) {
+        private Casualty(GpuUnitInstance instance, BoardScene.Unit unit, UnitFootprint.Pose pose) {
             this.instance = instance;
             this.unit = unit;
+            this.pose = pose;
             // It fades as its unit would have (GpuUnitShader.Shown).
             if (!(instance.userData instanceof GpuUnitShader.Shown)) { instance.userData = new GpuUnitShader.Shown(); }
         }
@@ -60,10 +64,10 @@ final class MeepleCasualties implements Disposable {
     }
 
     /**
-     * A fallen soldier: its node's local transform when it fell, its rest bounds' world corners and their centre, the
+     * A fallen soldier: its node's local transform when it fell, its visible surface vertices and bounds' centre, the
      * ground under it, its height, the way it is knocked and the turn that makes it face the hit.
      */
-    private record Soldier(Node node, Matrix4 rest, Vector3[] corners, Vector3 center, float floor, float height,
+    private record Soldier(Node node, Matrix4 rest, Vector3[] points, Vector3 center, float floor, float height,
           Vector3 away, float turn) { }
 
     /** Thrown pieces and the model that owns their meshes. */
@@ -74,6 +78,15 @@ final class MeepleCasualties implements Disposable {
     private final Map<UnitAttack, CompletableFuture<MeepleShatter.Cut>> prepared = new WeakHashMap<>();
 
     List<Casualty> casualties() { return casualties; }
+
+    /** A repair or a replay returning before death replaces that unit's old casualty. */
+    void revived(BoardScene.Unit unit) {
+        casualties.removeIf(casualty -> {
+            boolean replaced = casualty.pose != null && casualty.unit.id() == unit.id() && casualty.unit.part() == unit.part();
+            if (replaced) { casualty.dispose(); }
+            return replaced;
+        });
+    }
 
     /**
      * Cuts the meeple of a unit whose {@code death} is coming, once, on another thread: its explosion then only makes
@@ -88,18 +101,28 @@ final class MeepleCasualties implements Disposable {
     }
 
     /**
-     * Blows up a destroyed unit's meeple.
+     * Takes over a destroyed unit's last drawn pose. Crew loss fades that pose unchanged; otherwise a token shatters,
+     * a formation's figures fall, and other models fade where the death's explosion plays.
      *
      * @param standing the meeple as the view last drew it, which it no longer draws
      * @param hit      horizontal, away from the hits, as long as the damage they dealt; null to burst out evenly
      * @param death    the death playing, whose cut {@link #prepare} may have made; null for a death that did not play
      */
-    void exploded(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 hit, UnitAttack death) {
+    void died(GpuUnitInstance standing, BoardScene.Unit unit, Vector3 hit, UnitAttack death, UnitFootprint.Pose pose) {
+        var casualty = new Casualty(standing, unit, pose);
         Node meeple = standing.getNode(MeepleVisual.ROOT);
-        if (meeple == null) { return; }
-        var casualty = new Casualty(standing, unit);
-        standing.nodes.clear();
-        shatter(casualty, meeple, TOKEN_CUTS, unit.id(), hit, death == null ? null : prepared.remove(death));
+        if (death == null || !death.event.result().crewLoss()) {
+            if (meeple != null) {
+                standing.nodes.clear();
+                shatter(casualty, meeple, TOKEN_CUTS, unit.id(), hit, death == null ? null : prepared.remove(death));
+            } else if (standing.visual() != null && standing.visual().infantry()) {
+                List<Node> figures = new ArrayList<>();
+                for (Node node : standing.nodes) {
+                    if (standing.visual().rigs().stream().anyMatch(rig -> node.id.equals(rig.container()))) { figures.add(node); }
+                }
+                fall(casualty, figures, hit);
+            }
+        }
         casualties.add(casualty);
     }
 
@@ -120,8 +143,17 @@ final class MeepleCasualties implements Disposable {
             if (!kept.contains(node.id) && was.rigs().stream().anyMatch(rig -> node.id.equals(rig.container()))) { lost.add(node); }
         }
         if (lost.isEmpty()) { return; }
+        var casualty = new Casualty(previous, unit, null);
+        fall(casualty, lost, hit);
+        casualties.add(casualty);
+    }
+
+    private static void fall(Casualty casualty, List<Node> lost, Vector3 hit) {
+        var previous = casualty.instance;
+        var was = previous.visual();
         var middle = previous.transform.getTranslation(new Vector3());
-        var casualty = new Casualty(previous, unit);
+        // Read each shared GLB mesh once for this group; only the posed contact points survive with its casualties.
+        var surfaces = new UnitPicking();
         previous.nodes.clear();
         for (Node node : lost) {
             var rig = was.rigs().stream().filter(candidate -> node.id.equals(candidate.container())).findFirst().orElseThrow();
@@ -130,14 +162,16 @@ final class MeepleCasualties implements Disposable {
             var away = hit != null ? new Vector3(hit).nor() : outward.len2() < 1e-4f ? null : outward.nor();
             Node drawn = rig.transport() ? drawn(node) : null;
             if (drawn == null) {
-                previous.nodes.add(node);
-                casualty.soldiers.add(soldier(previous, node, away));
+                var points = surfaces.vertices(previous, node);
+                if (!points.isEmpty()) {
+                    previous.nodes.add(node);
+                    casualty.soldiers.add(soldier(previous, node, away, points.toArray(Vector3[]::new)));
+                }
             } else {
-                shatter(casualty, drawn, VEHICLE_CUTS, unit.id() * 31 + node.id.hashCode(), hit, null);
+                shatter(casualty, drawn, VEHICLE_CUTS, casualty.unit.id() * 31 + node.id.hashCode(), hit, null);
             }
         }
         previous.calculateTransforms();
-        casualties.add(casualty);
     }
 
     /**
@@ -177,17 +211,12 @@ final class MeepleCasualties implements Disposable {
         return null;
     }
 
-    private static Soldier soldier(ModelInstance instance, Node node, Vector3 away) {
+    private static Soldier soldier(ModelInstance instance, Node node, Vector3 away, Vector3[] points) {
         var rest = new Matrix4(node.calculateLocalTransform());
         node.isAnimated = true;
-        var corners = MeepleShatter.corners(UnitBounds.subtree(node), instance.transform);
-        var center = new Vector3();
-        float floor = Float.POSITIVE_INFINITY, top = Float.NEGATIVE_INFINITY;
-        for (Vector3 corner : corners) {
-            center.mulAdd(corner, 1f / corners.length);
-            floor = Math.min(floor, corner.z);
-            top = Math.max(top, corner.z);
-        }
+        var bounds = new BoundingBox().inf();
+        for (Vector3 point : points) { bounds.ext(point); }
+        var center = bounds.getCenter(new Vector3());
         // A meeple figure's printed side faces its +Y.
         var front = new Vector3(Vector3.Y).rot(new Matrix4(instance.transform).mul(node.globalTransform));
         front.z = 0;
@@ -195,7 +224,7 @@ final class MeepleCasualties implements Disposable {
         var knocked = away == null ? new Vector3(front).scl(-1) : new Vector3(away);
         float turn = MathUtils.atan2(front.x * -knocked.y - front.y * -knocked.x, front.x * -knocked.x + front.y * -knocked.y)
               * MathUtils.radiansToDegrees;
-        return new Soldier(node, rest, corners, center, floor, top - floor, knocked, turn);
+        return new Soldier(node, rest, points, center, bounds.min.z, bounds.getDepth(), knocked, turn);
     }
 
     /**
@@ -206,6 +235,7 @@ final class MeepleCasualties implements Disposable {
     void advance(float seconds, MeepleDebris.Ground ground, float gravity) {
         for (var iterator = casualties.iterator(); iterator.hasNext();) {
             var casualty = iterator.next();
+            float previous = casualty.seconds;
             float time = casualty.seconds += seconds;
             float fade = Math.max(casualty.soldiers.isEmpty() ? 0 : FALL_SECONDS + LIE_SECONDS,
                   casualty.debris.isEmpty() ? 0 : DEBRIS_SECONDS);
@@ -217,14 +247,14 @@ final class MeepleCasualties implements Disposable {
             }
             ((GpuUnitShader.Shown) casualty.instance.userData).opacity = 1
                   - UnitAttack.smooth((time - fade) / UnitAttack.FADE_SECONDS);
-            casualty.soldiers.forEach(soldier -> fall(casualty.instance, soldier, time));
+            if (previous < FALL_SECONDS) { casualty.soldiers.forEach(soldier -> fall(casualty.instance, soldier, time, ground)); }
             casualty.debris.forEach(debris -> debris.pieces().pose());
             casualty.instance.calculateTransforms();
         }
     }
 
     /** Turned to face the hit, knocked away from it and onto its back, always resting on its lowest point. */
-    private static void fall(ModelInstance instance, Soldier soldier, float seconds) {
+    private static void fall(ModelInstance instance, Soldier soldier, float seconds, MeepleDebris.Ground ground) {
         float progress = MathUtils.clamp(seconds / FALL_SECONDS, 0, 1);
         var turn = new Quaternion(Vector3.Z, soldier.turn() * UnitAttack.smooth(progress / .25f));
         var back = new Vector3(Vector3.Z).crs(soldier.away());
@@ -232,7 +262,18 @@ final class MeepleCasualties implements Disposable {
         float knock = KNOCKBACK * soldier.height() * (1 - (1 - progress) * (1 - progress));
         float hop = THROW * soldier.height() * MathUtils.sin(MathUtils.PI * MathUtils.clamp(progress / .8f, 0, 1));
         var at = new Vector3(soldier.center()).mulAdd(soldier.away(), knock);
-        at.z = soldier.floor() - MeepleShatter.lowest(soldier.corners(), soldier.center(), pose) + hop;
+        float lowest = Float.POSITIVE_INFINITY, support = Float.NEGATIVE_INFINITY;
+        var point = new Vector3();
+        for (Vector3 vertex : soldier.points()) {
+            pose.transform(point.set(vertex).sub(soldier.center()));
+            lowest = Math.min(lowest, point.z);
+            float floor = ground.height(at.x + point.x, at.y + point.y, soldier.floor() + MeepleDebris.CELL, true);
+            if (Float.isFinite(floor)) { support = Math.max(support, floor - point.z); }
+        }
+        // The captured pose can be hopping or standing on a slope. Land on the surface under the fallen figure;
+        // its original height only anchors the start of the fall, never the final resting position.
+        float start = soldier.floor() - lowest;
+        at.z = MathUtils.lerp(start, Float.isFinite(support) ? support : start, UnitAttack.smooth(progress)) + hop;
         var motion = new Matrix4().setToTranslation(at).rotate(pose)
               .translate(-soldier.center().x, -soldier.center().y, -soldier.center().z);
         soldier.node().localTransform.set(instance.transform).inv().mul(motion).mul(instance.transform).mul(soldier.rest());

@@ -45,7 +45,7 @@ import megamek.common.units.Entity;
  */
 final class GpuCommandDock implements GpuHud.Component {
     /** The dock's variants (plan C.2); GENERIC is every phase and turn the prototype does not design. */
-    private enum Variant { INITIATIVE, PLAN, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC }
+    private enum Variant { INITIATIVE, PLAN, WAITING, FIRE, PHYSICAL, NO_PHYSICAL, PLAYBACK, GENERIC, CHAT }
 
     /** The action awaiting an explicit choice beside its triggering button. */
     private enum Confirm {
@@ -131,9 +131,10 @@ final class GpuCommandDock implements GpuHud.Component {
     private final Table row1 = new Table();
     private final Table row2 = new Table();
     private final Table foot = new Table();
+    private final Cell<Table> headCell;
     private final Cell<Actor> row1Cell;
     private final Cell<Actor> row2Cell;
-    private final Cell<Table> footCell;
+    private final UiButton chatButton;
     private final UiButton main;
     private final UiButton secondary;
     private final UiButton more;
@@ -198,12 +199,14 @@ final class GpuCommandDock implements GpuHud.Component {
      * {@code camera} holds the playback's "Follow camera" flag (J6); {@code menu} shows the More popover above the
      * More button (A.7 G14, G12).
      */
-    GpuCommandDock(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera, GpuContextMenu menu) {
+    GpuCommandDock(GpuHudKit kit, GpuBoardSource source, GpuHudState state, BoardCamera camera, GpuContextMenu menu,
+          UiButton chatButton) {
         ui = kit.ui;
         this.source = source;
         this.state = state;
         this.camera = camera;
         this.menu = menu;
+        this.chatButton = chatButton;
         root = ui.panel();
         root.setName("command-dock");
         // #dock padding 9 12 8, inside the 2-unit rails and the transparent side borders.
@@ -315,11 +318,12 @@ final class GpuCommandDock implements GpuHud.Component {
 
         // .foot: a muted line with a white condensed part (the route's cost) or the route legend, minis at the right.
         footBold = ui.label("", "hud-phase", 11.5f, Color.WHITE);
+        footBold.setEllipsis(true);
         footText = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         footText.setEllipsis(true);
         footBold.setName("dock-foot-bold");
         footText.setName("dock-foot");
-        footLine.add(footBold);
+        footLine.add(footBold).minWidth(0);
         footLine.add(footText).growX().minWidth(0);
         legendText = ui.label("", "hud-small", 11.5f, UiTheme.MUTED);
         legendText.setEllipsis(true);
@@ -332,13 +336,15 @@ final class GpuCommandDock implements GpuHud.Component {
         // The steps are read-only lines, which the tooltip lists (plan C.2 "Steps").
         stepsTip = ui.tip(steps);
         foot.pad(6, 2, 0, 2);
+        footRight.defaults().minWidth(0);
 
-        root.add(head).growX().padBottom(7).row();
+        headCell = root.add(head).growX().padBottom(7);
+        root.row();
         row1Cell = root.add((Actor) null).growX();
         root.row();
         row2Cell = root.add((Actor) null).growX();
         root.row();
-        footCell = root.add(foot).growX().minHeight(26);
+        root.add(foot).growX().minHeight(26);
     }
 
     /** A named button whose caption and sub-label end in an ellipsis instead of widening the dock. */
@@ -408,7 +414,8 @@ final class GpuCommandDock implements GpuHud.Component {
         };
         boolean stopShown = phase.isMovement() && panels.move().holdingRemaining() > 0
               || (phase.isFiring() || phase.isTargeting()) && panels.fire().autoDeclareRemaining() > 0;
-        Shape shape = new Shape(variant, buttons, more() != null, variant != Variant.WAITING
+        Shape shape = new Shape(variant, buttons, variant != Variant.CHAT && more() != null,
+              variant != Variant.CHAT && variant != Variant.WAITING
               && (variant != Variant.GENERIC || done() != null), secondaryShown, stopShown,
               variant == Variant.PLAN && panels.move().route().isEmpty(), stepsShown(),
               variant == Variant.PLAN && enabled(command(MoveCommand.MOVE_BACK_UP.getCmd())),
@@ -426,10 +433,11 @@ final class GpuCommandDock implements GpuHud.Component {
             case NO_PHYSICAL -> showNoPhysical();
             case PLAYBACK -> showPlayback();
             case GENERIC -> showGeneric();
+            case CHAT -> {
+                footBold.setText("");
+                footText.setText("");
+            }
         }
-        // The last firing declaration has no status footer; keep any available footer controls.
-        boolean footerShown = variant != Variant.FIRE || !footText.getText().isEmpty() || footRight.hasChildren();
-        footCell.setActor(footerShown ? foot : null).minHeight(footerShown ? 26 : 0);
         // The hold and auto-declare modes (A.7 G15, A.8 H6) replace the span with their count, beside Stop.
         if (phase.isMovement() && panels.move().holdingRemaining() > 0) {
             span(text("GpuBoard.hud.dock.holding", panels.move().holdingRemaining()), UiTheme.AMBER);
@@ -444,6 +452,7 @@ final class GpuCommandDock implements GpuHud.Component {
         if (root.getWidth() > 0) {
             root.validate();
         }
+        if (variant == Variant.CHAT) { drawer.close(); }
         drawer.update(drawer.isOpen() ? more() : null);
     }
 
@@ -452,6 +461,7 @@ final class GpuCommandDock implements GpuHud.Component {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuHudData panels = inputs.frame().panels();
         GamePhase phase = status.phase();
+        if (state.overview || state.turnLocked(status) && !phase.isReport()) { return Variant.CHAT; }
         boolean turns = phase.isMovement() || phase.isFiring() || phase.isTargeting() || phase.isPhysical();
         if (phase.isInitiativeReport()) {
             return Variant.INITIATIVE;
@@ -513,6 +523,8 @@ final class GpuCommandDock implements GpuHud.Component {
 
     /** Rebuilds the cells from the shape: the head's parts, the variant's rows, their dynamic buttons and the foot. */
     private void layout(Shape shape) {
+        headCell.setActor(shape.variant() == Variant.CHAT ? null : head)
+              .padBottom(shape.variant() == Variant.CHAT ? 0 : 7);
         head.clearChildren();
         head.add(title).left().minWidth(0);
         head.add().expandX();
@@ -619,7 +631,8 @@ final class GpuCommandDock implements GpuHud.Component {
         if (shape.steps()) {
             footRight.add(steps).padLeft(8);
         }
-        foot.add(footRight);
+        footRight.add(chatButton).minWidth(chatButton.getPrefWidth()).padLeft(8);
+        foot.add(footRight).minWidth(chatButton.getPrefWidth() + 8);
     }
 
     // ------------------------------------------------------------------ variants

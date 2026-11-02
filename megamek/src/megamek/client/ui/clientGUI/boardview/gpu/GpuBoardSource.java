@@ -121,6 +121,8 @@ final class GpuBoardSource implements BoardSource {
     private final GpuFireOrders fire = new GpuFireOrders(this);
     private final GpuPhysicalOptions physical = new GpuPhysicalOptions(this);
     private final GpuUnitRecord unitRecord = new GpuUnitRecord(this);
+    /** Independent capture cache for the own card while another unit's record is inspected. */
+    private final GpuUnitRecord ownUnitRecord = new GpuUnitRecord(this);
     private final GpuFirePreview preview;
     private final GpuChat chat;
     private final GpuToasts toasts = new GpuToasts(this);
@@ -130,6 +132,7 @@ final class GpuBoardSource implements BoardSource {
     private GpuHudData panels = GpuHudData.EMPTY;
     /** Set by the GL thread; each capture uses them only while the unit is still identified or owned. */
     private volatile int cardUnit = Entity.NONE;
+    private volatile int ownCardUnit = Entity.NONE;
     private volatile int focusUnit = Entity.NONE;
     private final GpuAtmosphereControls atmosphere;
     private final BoardScene.PixelPool terrainImages = new BoardScene.PixelPool();
@@ -1098,12 +1101,16 @@ final class GpuBoardSource implements BoardSource {
         // The other HUD panels, in this order. The fire preview follows the own focus unit, else the acting unit; the
         // fire orders show its draft read-only on another player's turn.
         int focus = checked(focusUnit, this::owned);
+        int card = checked(cardUnit, this::identified);
+        int ownCard = checked(ownCardUnit, this::owned);
+        GpuUnitRecord.Snapshot record = unitRecord.capture(card);
         GpuHudData nextPanels = new GpuHudData(actions.phaseInfo(commands), move,
               fire.capture(panel, hover, focus), physical.capture(panel),
-              unitRecord.capture(checked(cardUnit, this::identified)),
+              record,
               preview.capture(view.getLocalPlayer(), activeTurn, focus == Entity.NONE ? actorId : focus, path,
                     this::visible, this::sensorContact),
-              chat.capture(), toasts.capture(), rulerSnapshot, players.capture());
+              chat.capture(), toasts.capture(), rulerSnapshot, players.capture(),
+              ownCard == card ? record : ownUnitRecord.capture(ownCard));
         if (!nextPanels.equals(panels)) {
             panels = nextPanels;
         }
@@ -1721,6 +1728,11 @@ final class GpuBoardSource implements BoardSource {
     /** GL thread: the unit on the unit card and record sheet. */
     void setCardUnit(int id) {
         cardUnit = id;
+    }
+
+    /** GL thread: the own unit whose glance card stays beside an inspection. */
+    void setOwnCardUnit(int id) {
+        ownCardUnit = id;
     }
 
     /** GL thread: the own focus unit, which the fire preview follows and whose draft the fire orders show (H33). */

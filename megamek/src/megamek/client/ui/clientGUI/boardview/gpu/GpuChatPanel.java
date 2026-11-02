@@ -4,12 +4,15 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static megamek.client.ui.gdx.UiKit.text;
 
 import com.badlogic.gdx.Input;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
+import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
+import com.badlogic.gdx.scenes.scene2d.ui.SplitPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import megamek.client.ui.gdx.UiButton;
@@ -17,7 +20,7 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
- * Chat panel above its bottom-right button (C.1 G15, r1 3.20, r2 8.5, plan A.15 O6; shot 16): the game's chat lines
+ * Chat panel attached above the command dock: the game's chat lines
  * (GpuChat), each sender over its consecutive messages, mint for a player and muted for MegaMek's own lines, then
  * the message field and Send. Enter or Send posts the draft through the board chat's send, which keeps it in the
  * chat history, and the field keeps the focus. The draft stays while the panel closes and opens again. The list shows the
@@ -41,6 +44,9 @@ final class GpuChatPanel implements GpuHud.Component {
     private boolean open;
     /** The list scrolls to its newest line once it is laid out. */
     private boolean scrollDown;
+    /** Preferred height survives closing and temporary window constraints; the bottom stays attached to the dock. */
+    private float height = 320;
+    private float maximumHeight = 320;
 
     GpuChatPanel(GpuHudKit kit, GpuBoardSource source, GpuHudState state) {
         ui = kit.ui;
@@ -48,6 +54,28 @@ final class GpuChatPanel implements GpuHud.Component {
         this.state = state;
         root = ui.panel();
         root.setName("chat-panel");
+        Image grip = new Image(ui.skin.get("hud-split", SplitPane.SplitPaneStyle.class).handle);
+        grip.setName("chat-resize");
+        ui.tip(grip).getActor().setText(text("GpuBoard.hud.chat.resize"));
+        grip.addListener(new InputListener() {
+            private float startY;
+            private float startHeight;
+
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                if (button != Input.Buttons.LEFT) { return false; }
+                startY = event.getStageY();
+                startHeight = root.getHeight();
+                return true;
+            }
+
+            @Override
+            public void touchDragged(InputEvent event, float x, float y, int pointer) {
+                height = MathUtils.clamp(startHeight + event.getStageY() - startY,
+                      Math.min(144, maximumHeight), maximumHeight);
+            }
+        });
+        root.add(grip).growX().height(9).row();
         root.add(ui.header(text("GpuBoard.hud.chat.title"), text("GpuBoard.hud.chat.allPlayers"),
               ui.closeButton(() -> state.chatOpen = false))).growX().row();
         // #chat .msgs: the list takes the free height, padded 4 14.
@@ -80,9 +108,10 @@ final class GpuChatPanel implements GpuHud.Component {
         sendRow.add(field).growX().height(SEND_HEIGHT);
         sendRow.add(send).height(SEND_HEIGHT).padLeft(6);
         root.add(sendRow).growX();
-        // The row utility (.b.util.row): pressed while the panel is open.
-        button = ui.button("hud-utility-row", "chat", text("GpuBoard.hud.chat.title"), null);
+        // The last mini button in every command-dock footer, pressed while the panel is open.
+        button = ui.button("hud-mini", "chat", null, null);
         button.setName("chat-button");
+        ui.tip(button).getActor().setText(text("GpuBoard.hud.chat.title"));
         UiKit.onChange(button, () -> {
             state.chatOpen = !state.chatOpen;
             if (state.chatOpen) {
@@ -96,9 +125,15 @@ final class GpuChatPanel implements GpuHud.Component {
         return root;
     }
 
-    /** The Chat button at the bottom right. */
-    Actor button() {
+    /** The Chat button at the right end of the dock's footer. */
+    UiButton button() {
         return button;
+    }
+
+    /** The chosen height within the space above the dock in this frame. */
+    float height(float available) {
+        maximumHeight = Math.max(0, available);
+        return Math.min(height, maximumHeight);
     }
 
     @Override

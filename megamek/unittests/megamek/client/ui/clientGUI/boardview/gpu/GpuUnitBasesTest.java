@@ -69,8 +69,11 @@ class GpuUnitBasesTest {
         assertTrue(ready.ready(), "A unit the player can act with now pulses");
         assertFalse(spec(unit(GpuBattleStatus.Side.OWN, 0, 0, true, true, false, 0, "", 0, false, List.of(),
               List.of())).ready(), "One that has acted does not");
-        GpuUnitBases.BaseSpec wreck = spec(unit(GpuBattleStatus.Side.ENEMY, 2, 2, true, false, true, 9, "Walked", 2,
-              true, List.of(), List.of()));
+        var destroyed = unit(GpuBattleStatus.Side.ENEMY, 2, 2, true, false, true, 9, "Walked", 2,
+              true, List.of(), List.of());
+        assertFalse(spec(destroyed).destroyed(), "Live status must not show the cross before playback reaches death");
+        GpuUnitBases.BaseSpec wreck = GpuUnitBases.spec(destroyed, false, true, Entity.NONE, Entity.NONE, null,
+              false, List.of(), true);
         assertTrue(wreck.destroyed());
         assertEquals(GpuUnitBases.Look.NEUTRAL, wreck.look(), "A wreck's ring is grey");
         assertFalse(wreck.facing(), "without a notch");

@@ -174,7 +174,11 @@ final class GpuMaterialCache {
 
     /** What end() leaves for the frame's draws and diagnostics. */
     private record Result(boolean active, boolean exact, int under, int admitted, int walled, int wallsOutside,
-          int[] cachedPages, int[] cachedWalls) { }
+          int[] cachedPages, int[] cachedWalls, GpuPageCache.Status pages) { }
+
+    /** Read-only render-thread snapshot for Tuning; bytes describe requested GPU storage, not driver overhead. */
+    record Status(String state, boolean active, long allocatedBytes, long pageBytes, GpuPageCache.Status pages,
+          int level, int requested, int admitted, int wallsOutside) { }
 
     /** A page of any level, hashed as the page cache keys it: a record's own hash repeats along nearby rows. */
     private record PageKey(int at, int x, int y) {
@@ -835,8 +839,41 @@ final class GpuMaterialCache {
     /** Whether the cache has storage (diagnostics and tests). */
     boolean allocated() { return pages.allocated(); }
 
-    /** Test hook: off, every top draws with its own program. */
+    /** Live A/B switch: off, tops and walls draw directly; storage stays allocated for switching back. */
     void setEnabled(boolean value) { enabled = ENABLED && value; }
+
+    Status status() {
+        // A still frame reuses its plan without calling need(): retain that plan's diagnostic counts too.
+        var counts = pages.allocated() && filling && last != null && pages.changes() == lastChanges
+              ? last.pages() : pages.status();
+        String state;
+        if (!ENABLED || !SPLIT) { state = "Disabled at startup"; }
+        else if (!enabled) { state = "Disabled - direct rendering"; }
+        else if (!usable) { state = "Unavailable - GPU requirements"; }
+        else if (!pages.allocated()) { state = "Not allocated"; }
+        else if (!filling) { state = "Inactive - waiting for sculpted terrain / shaders"; }
+        else if (!active) { state = "Inactive - current view draws directly"; }
+        else if (counts.current() < counts.needed()) {
+            state = !prewarmed ? "Warming up" : counts.neededStale() > 0 ? "Rebuilding stale pages" : "Building";
+        } else if (!built && counts.prefetchPending() > 0) { state = "Prefetching"; }
+        else { state = exact ? "Ready" : "Ready - partial coverage"; }
+        return new Status(state, active && enabled && usable && pages.allocated(),
+              pages.allocatedBytes() + buildBytes(), pages.pageBytes(), counts,
+              level, under + walled, admitted, wallsOutside);
+    }
+
+    /** Nominal storage of the fill's textures and renderbuffers, including their mips and multisample targets. */
+    private long buildBytes() {
+        long bytes = 0;
+        for (int tile : tiles) {
+            if (tile == 0) { continue; }
+            for (int mip = 0; mip < TILE_LEVELS; mip++) { bytes += (long) (TILE >> mip) * (TILE >> mip) * 4; }
+        }
+        if (tileDepth != 0) { bytes += (long) TILE * TILE * 2; }
+        for (int target : coarseTargets) { if (target != 0) { bytes += (long) TILE * TILE * 4 * 4; } }
+        if (coarseDepth != 0) { bytes += (long) TILE * TILE * 2 * 4; }
+        return bytes;
+    }
 
     /** Whether this frame drew every visible top and wall cached from the level its pixels need (tests). */
     boolean complete() {
@@ -996,7 +1033,7 @@ final class GpuMaterialCache {
         lastInputs.clear();
         lastInputs.addAll(inputs);
         last = new Result(active, exact, under, admitted, walled, wallsOutside, cachedPages.toArray(),
-              cachedWalls.toArray());
+              cachedWalls.toArray(), pages.status());
         return done;
     }
 
