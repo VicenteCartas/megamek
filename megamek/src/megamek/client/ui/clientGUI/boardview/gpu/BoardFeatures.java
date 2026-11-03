@@ -321,7 +321,8 @@ final class BoardFeatures {
             BoardTreeCoverage.Addition addition = null;
             double bestScore = 0;
             // Shared milestones keep the sequence stable across densities, while avoiding a large early overshoot.
-            float milestone = coverage.fraction() < .27f ? .3f : coverage.fraction() < .57f ? .6f : .9f;
+            float milestone = BoardTreeCoverage.target(coverage.fraction() < BoardTreeCoverage.target(1) - .03f ? 1
+                  : coverage.fraction() < BoardTreeCoverage.target(2) - .03f ? 2 : 3);
             // Try full-height widths first, then a compact member of the same colony species if no full body fits.
             // Increasing density never changes an existing body; the leading member always reaches cover height.
             int sizes = layout.colonies() && !trunks.isEmpty() && !layout.shorter(plantIndex) ? 2 : 1;

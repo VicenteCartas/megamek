@@ -147,18 +147,17 @@ class LobbyBoardPreviewSmokeTest {
           Inspection inspection) throws Exception {
         click(stage, preview.findActor("map-view-top"));
         click(stage, preview.findActor("map-view-fit"));
-        click(stage, preview.findActor("map-inspection-los"));
+        Image image = preview.findActor("map-inspection-image");
+        Coords from = new Coords(0, 3), to = new Coords(5, 3);
+        clickHex(stage, image, camera, from, Input.Buttons.RIGHT);
+        awaitImage(stage, preview);
+        click(stage, stage.getRoot().findActor("map-line-of-sight"));
         SwingUtilities.invokeAndWait(() -> { });
         awaitImage(stage, preview);
         assertTrue(inspection.source().takeFrame().panels().los().open());
-        Image image = preview.findActor("map-inspection-image");
-        Coords from = new Coords(0, 3), to = new Coords(5, 3);
-        clickHex(stage, image, camera, from);
-        SwingUtilities.invokeAndWait(() -> { });
-        awaitImage(stage, preview);
         assertEquals(from, inspection.source().takeFrame().panels().los().start().coords(),
               "picking is local to the resized embedded viewport");
-        clickHex(stage, image, camera, to);
+        clickHex(stage, image, camera, to, Input.Buttons.LEFT);
         SwingUtilities.invokeAndWait(() -> { });
         awaitImage(stage, preview);
         var result = inspection.source().takeFrame().panels().los();
@@ -173,13 +172,13 @@ class LobbyBoardPreviewSmokeTest {
         assertFalse(inspection.source().takeFrame().panels().los().open());
     }
 
-    private static void clickHex(Stage stage, Image image, BoardCamera camera, Coords coords) {
+    private static void clickHex(Stage stage, Image image, BoardCamera camera, Coords coords, int button) {
         Vector3 point = camera.camera.project(BoardGeometry.center(coords, 0), 0, 0,
               camera.camera.viewportWidth, camera.camera.viewportHeight);
         Vector2 at = screen(stage, image, point.x * image.getWidth() / camera.camera.viewportWidth,
               point.y * image.getHeight() / camera.camera.viewportHeight);
-        stage.touchDown(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
-        stage.touchUp(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+        stage.touchDown(Math.round(at.x), Math.round(at.y), 0, button);
+        stage.touchUp(Math.round(at.x), Math.round(at.y), 0, button);
     }
 
     private static void checkDisplayPreferences(Stage stage, LobbyBoardPreview preview, BoardCamera camera,

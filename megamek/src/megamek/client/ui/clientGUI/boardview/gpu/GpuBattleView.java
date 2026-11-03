@@ -2967,7 +2967,7 @@ class GpuBattleView extends ApplicationAdapter {
             if (!dragged && orbiting) { cursorCapture.capture(x, y); }
             dragged = true;
             if (orbiting) {
-                // Without the frame after the capture, whose first poll can report a stale jump (UiCursorCapture).
+                // The first motion after capture can report a stale jump, even after idle frames (UiCursorCapture).
                 Vector2 at = cursorCapture.trusted(x, y);
                 x = (int) at.x;
                 y = (int) at.y;

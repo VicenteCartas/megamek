@@ -47,11 +47,11 @@ final class BoardTreeCoverage {
         }
     }
 
-    static float target(int density) { return density >= 3 ? .9f : density == 2 ? .6f : .3f; }
+    static float target(int density) { return density >= 3 ? 1 : density == 2 ? .75f : .3f; }
 
     /** Population limits take priority over coverage targets; ordinary plants are never resized to meet either. */
     static int canopyLimit(int density) { return Math.clamp(density, 1, 3) * 3; }
-    static int cactusLimit(int density) { return Math.clamp(density, 1, 3) * 4; }
+    static int cactusLimit(int density) { return density >= 3 ? 12 : density == 2 ? 8 : 3; }
 
     /** Rigid colonies retain their independent collision-safe packing budget. */
     static int colonyLimit(int density) { return density >= 3 ? 36 : density == 2 ? 20 : 8; }

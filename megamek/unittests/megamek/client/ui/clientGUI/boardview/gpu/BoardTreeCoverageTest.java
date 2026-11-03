@@ -119,7 +119,8 @@ class BoardTreeCoverageTest {
                               "woods:" + density + ";foliage_elev:" + height, "lunar", at), at, natural);
                         assertEquals(density * 2, trees.size(), "Bare branches need a readable stand, not twig-gap infill");
                         assertEquals(previous, trees.subList(0, previous.size()));
-                        assertEquals(BoardTreeCoverage.target(density), coverage(trees), .04f);
+                        assertEquals(density * .3f, coverage(trees), .04f,
+                              "The bare-tree budget remains 2/4/6 even when general coverage targets rise");
                         for (int i = 0; i < trees.size(); i++) {
                             for (int j = i + 1; j < trees.size(); j++) {
                                 assertTrue(Math.hypot(trees.get(i).x() - trees.get(j).x(), trees.get(i).y() - trees.get(j).y()) > 12,
@@ -153,7 +154,7 @@ class BoardTreeCoverageTest {
                         assertTrue(trees.stream().filter(t -> BoardFeatures.solid(t.asset())).count()
                               <= BoardTreeCoverage.colonyLimit(density), "Rigid colonies retain their independent packing budget");
                         assertTrue(trees.stream().filter(t -> t.asset().startsWith("vegetation/cactus")).count()
-                              <= BoardTreeCoverage.cactusLimit(density), "Cactus caps also apply in mixed stands");
+                              <= List.of(3, 8, 12).get(density - 1), "Cactus caps also apply in mixed stands");
                         assertTrue(trees.stream().filter(t -> BoardTreeCoverage.bare(t.asset())).count()
                               <= BoardTreeCoverage.bareLimit(density), "Bare-tree caps also apply in mixed stands");
                         assertTrue(trees.stream().allMatch(t -> BoardFeatures.solid(t.asset())
@@ -394,7 +395,7 @@ class BoardTreeCoverageTest {
     }
 
     private static boolean assertCoverageOrPopulationLimit(List<BoardScene.Feature> trees, int density, String kind) {
-        float target = BoardTreeCoverage.target(density), actual = coverage(trees);
+        float target = List.of(.3f, .75f, 1f).get(density - 1), actual = coverage(trees);
         if (actual < target - .10f) {
             long bare = trees.stream().filter(tree -> BoardTreeCoverage.bare(tree.asset())).count();
             assertTrue(trees.size() - bare == density * 3 || bare == density * 2,

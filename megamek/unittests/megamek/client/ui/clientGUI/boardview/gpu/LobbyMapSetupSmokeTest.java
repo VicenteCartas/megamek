@@ -129,6 +129,7 @@ class LobbyMapSetupSmokeTest {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
             Table body = fixture.body;
+            UiButton generate = body.findActor("map-generate");
             click(ui, body.findActor("map-slot-1"));
             assertEquals(List.of(1), fixture.view.pickedSlots(), "a click on a tile picks its slot");
 
@@ -147,11 +148,11 @@ class LobbyMapSetupSmokeTest {
             assertNotNull(body.findActor("map-slot-2"), "a new tile shows");
             click(ui, body.findActor("map-height-up"));
             assertEquals(6, fixture.view.shown().slots().size());
-            int listeners = body.findActor("map-generate").getListeners().size;
+            int listeners = generate.getListeners().size;
             for (int refresh = 0; refresh < 20; refresh++) {
                 fixture.view.show(fixture.form.picture(), fixture.form.themes(-1));
             }
-            assertEquals(listeners, body.findActor("map-generate").getListeners().size,
+            assertEquals(listeners, generate.getListeners().size,
                   "refreshing the setup reuses Generate's tooltip rather than stacking new ones");
 
             click(ui, body.findActor("map-load"));
@@ -163,6 +164,47 @@ class LobbyMapSetupSmokeTest {
             assertFalse(body.findActor("map-drawer-scroll").isVisible(), "space has no boards to pick");
 
             body.remove();
+        });
+    }
+
+    @Test
+    void regenerationAppearsOnlyForActiveGeneratedBoards() {
+        UiTestStage.run(ui -> {
+            Fixture fixture = new Fixture(ui);
+            try {
+                Table body = fixture.body;
+                UiButton generate = body.findActor("map-generate");
+                assertNotNull(generate);
+                click(ui, generate);
+                assertTrue(calls.contains("generate"));
+                UiButton preview = body.findActor("map-preview-3d");
+                assertEquals("PREVIEW", preview.getText().toString());
+                click(ui, preview);
+                assertTrue(calls.contains("run PREVIEW_3D"));
+
+                fixture.act(form -> form.assign(1, LAKE));
+                ui.draw();
+                assertNull(body.findActor("map-generate"), "fixed maps have nothing to regenerate");
+                assertEquals(preview.getPrefWidth(), ((Table) preview.getParent()).getPrefWidth(), .1f,
+                      "hiding Regenerate leaves no empty button space");
+                fixture.act(form -> form.addToStack(1, List.of(MapSettings.BOARD_GENERATED)));
+                assertNull(body.findActor("map-generate"), "an unused stack alternative is not an active generated map");
+                fixture.act(form -> form.toggleSurprise(1, new java.util.Random(1)));
+                assertNull(body.findActor("map-generate"), "surprise candidates are not active generated maps");
+                fixture.act(form -> form.removeFromStack(1, LAKE, new java.util.Random(1)));
+                ui.draw();
+                assertSame(generate, body.findActor("map-generate"));
+                assertFalse(generate.isDisabled());
+                assertEquals(MapSetupForm.Kind.GENERATED, fixture.view.shown().slots().get(1).kind());
+
+                click(ui, body.findActor("map-medium-space"));
+                assertNull(body.findActor("map-generate"), "space has no generated terrain");
+                click(ui, body.findActor("map-medium-ground"));
+                assertSame(generate, body.findActor("map-generate"));
+            } finally {
+                fixture.view.dispose();
+                fixture.body.remove();
+            }
         });
     }
 
@@ -248,6 +290,17 @@ class LobbyMapSetupSmokeTest {
             fixture.view.pick(boards.get(1), false);
             click(ui, body.findActor("map-add-to-stack"));
             assertNotNull(body.findActor("map-stack-0"), "adding a second map restores the stack controls");
+            click(ui, body.findActor("map-stack-surprise-0"));
+            click(ui, body.findActor("map-stack-0"));
+            click(ui, ui.stage.getRoot().findActor("map-stack-remove-0-1"));
+            assertEquals(boards.get(3).name(), fixture.view.shown().slots().getFirst().file(),
+                  "the last surprise candidate is revealed before its eye button disappears");
+            assertEquals(MapSetupForm.Kind.FIXED, fixture.view.shown().slots().getFirst().kind());
+            assertNull(body.findActor("map-stack-surprise-0"));
+            assertTrue(ui.stage.getRoot().findActor("map-stack-menu").isVisible());
+            assertTrue(ui.stage.getRoot().<UiButton>findActor("map-stack-select-0-0").isChecked());
+            click(ui, ui.stage.getRoot().findActor("map-stack-select-0-0"));
+            click(ui, body.findActor("map-add-to-stack"));
             fixture.view.pick(boards.get(3), false);
             click(ui, body.findActor("map-place"));
             assertEquals(List.of(boards.get(3).name()), fixture.form.settings().getBoardStack(0));
@@ -466,6 +519,11 @@ class LobbyMapSetupSmokeTest {
             fixture.view.pick(fixture.view.shown().boards().get(2), false);
             for (int mode = 0; mode < 2; mode++) {
                 assertNull(fixture.body.findActor("map-board-inspect-0"), "Generated cannot be inspected");
+                UiButton preview = fixture.body.findActor("map-board-inspect-1");
+                assertEquals("PREVIEW", preview.getText().toString());
+                assertTrue(preview.icons.isEmpty());
+                ui.draw();
+                UiTestStage.capture("map-preview-buttons-" + mode, 1600, 1080).dispose();
                 ScrollPane list = fixture.body.findActor("map-board-list");
                 float scroll = list.getScrollY();
                 calls.clear();

@@ -147,6 +147,7 @@ final class LobbyMapSetupView {
     private final UiButton save;
     private final UiButton advancedSearch;
     private final UiButton preview3D;
+    private final Table previewActions = new Table();
     private final UiButton generate;
     private final TextTooltip generateTip;
     private final Map<String, Texture> textures = new HashMap<>();
@@ -327,16 +328,14 @@ final class LobbyMapSetupView {
         Table files = new Table();
         files.add(load).padRight(space("xs"));
         files.add(save);
-        preview3D = footButton("button-secondary", "cube", "BoardSelectionDialog.ViewGameBoard3D",
+        preview3D = footButton("button-secondary", "cube", "Lobby.map.preview",
               "map-preview-3d", Action.PREVIEW_3D);
-        generate = kit.button("button-primary" + UiTheme.COMPACT, "play",
+        generate = kit.button("button-primary" + UiTheme.COMPACT, "die",
               Messages.getString("Lobby.map.regenerate"), null);
         generate.setName("map-generate");
         generateTip = kit.tip(generate, true);
         UiKit.onChange(generate, () -> host.act(MapSetupForm::generate));
-        Table previewActions = new Table();
-        previewActions.add(preview3D).padRight(space("sm"));
-        previewActions.add(generate);
+        previewActions.add(preview3D);
         Table footer = new Table() {
             private boolean stacked;
 
@@ -448,6 +447,13 @@ final class LobbyMapSetupView {
         advancedSearch.setDisabled(!picture.advancedSearch());
         generate.setDisabled(!picture.generable());
         generateTip.getActor().setText(plain(picture.generateTip()));
+        if (picture.hasGeneratedBoards() != generate.hasParent()) {
+            previewActions.clearChildren();
+            previewActions.add(preview3D);
+            if (picture.hasGeneratedBoards()) {
+                previewActions.add(generate).padLeft(space("sm"));
+            }
+        }
         drawerScroll.setVisible(!space);
         drawerCell.width(space ? 0 : size("dialog.sm")).padLeft(space ? 0 : space("md"));
         drawerScroll.invalidateHierarchy();
@@ -857,8 +863,11 @@ final class LobbyMapSetupView {
             placeholder.add(kit.icon(entry.generated() ? "hex" : "map", size("icon.lg"),
                   UiTheme.tokenColor("text.muted")));
             Stack face = new Stack(image, placeholder);
-            inspect = entry.generated() ? null : kit.button("button-icon" + UiTheme.COMPACT, "cube", null, null);
+            inspect = entry.generated() ? null : kit.button("button-secondary" + UiTheme.COMPACT, null,
+                  Messages.getString("Lobby.map.preview"), null);
             if (inspect != null) {
+                UiKit.size(inspect.getLabel(), "hud-medium", 11);
+                inspect.padLeft(space("sm")).padRight(space("sm"));
                 tip(inspect, Messages.getString("Lobby.map.inspect"));
                 UiKit.onChange(inspect, () -> inspect(entry));
             }

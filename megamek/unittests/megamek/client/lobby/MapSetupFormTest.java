@@ -282,22 +282,43 @@ class MapSetupFormTest {
     }
 
     @Test
-    void removingMembersKeepsSurpriseAndResolvingItUsesOnlyRemainingBoards() {
+    void removingMembersKeepsSurpriseUntilOnlyOneMapRemains() {
         form.addToStack(0, List.of("16x17/City Hills.board2", "16x17/Lake Shore.board2"));
         form.removeFromStack(0, "16x17/Desert 1.board2", new Random(1));
         assertEquals("16x17/Lake Shore.board2", form.picture().slots().getFirst().file(),
               "removing the selected board rolls a random remaining member, rather than always taking the first");
         assertEquals(List.of("16x17/City Hills.board2", "16x17/Lake Shore.board2"), form.settings().getBoardStack(0));
         form.toggleSurprise(0, new Random(1));
+        form.addToStack(0, List.of("16x17/Desert 1.board2"));
+        form.removeFromStack(0, "16x17/Desert 1.board2", new Random(1));
+        assertEquals(Kind.SURPRISE, form.picture().slots().getFirst().kind(), "two alternatives remain hidden");
         form.removeFromStack(0, "16x17/City Hills.board2", new Random(1));
-        assertEquals(Kind.SURPRISE, form.picture().slots().getFirst().kind());
+        assertEquals(Kind.FIXED, form.picture().slots().getFirst().kind());
+        assertEquals("16x17/Lake Shore.board2", form.picture().slots().getFirst().file());
+        assertEquals(List.of("16x17/Lake Shore.board2"), form.settings().getBoardStack(0));
         MapSettings launched = MapSettings.getInstance(form.settings());
         launched.removeUnavailable();
-        assertTrue(launched.getBoardsSelectedVector().getFirst().startsWith(MapSettings.BOARD_SURPRISE));
         launched.chooseSurpriseBoards();
         assertEquals("16x17/Lake Shore.board2", launched.getBoardsSelectedVector().getFirst());
         form.removeFromStack(0, "16x17/Lake Shore.board2", new Random(1));
         assertEquals(Kind.GENERATED, form.picture().slots().getFirst().kind());
+    }
+
+    @Test
+    void aRemainingGeneratedMapIsRevealedAndBuilt() {
+        String city = "16x17/City Hills.board2";
+        form.addToStack(1, List.of(city));
+        form.theme(1, "snow");
+        form.levelOffset(1, 2);
+        form.toggleSurprise(1, new Random(1));
+        calls.clear();
+        form.removeFromStack(1, city, new Random(1));
+        assertEquals(Kind.GENERATED, form.picture().slots().get(1).kind());
+        assertEquals(List.of(MapSettings.BOARD_GENERATED), form.settings().getBoardStack(1));
+        assertEquals("snow", form.settings().getBoardTheme(1));
+        assertEquals(2, form.settings().getBoardLevelOffset(1));
+        assertEquals(List.of("board 1 " + MapSettings.BOARD_GENERATED, "generate"), calls,
+              "revealing Generated must also request its new terrain");
     }
 
     @Test
