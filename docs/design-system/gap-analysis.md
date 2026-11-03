@@ -1228,6 +1228,24 @@ work for Swing, and item 11 is under investigation.
        Checks: `UiGallerySmokeTest.aListInsideAScrollingPaneTakesTheWheelOverItsRows` and
        `LobbyTogglesSmokeTest.aRightClickAnywhereOnACardOpensItsMenu`. Live: `briefing+camo`, the wheel over the
        tree.
+     - Drake's map setup round, after #36 (pushed straight to `UI`):
+       - The board browser has thumbnail and list views, and each slot has its own rotate, theme and level
+         controls. A generated slot shows a preview. Inspect in 3D, and Inspect's "Point to inspect hexes"
+         (`GpuHexHover`, `GpuMapHexCard`) shows each hex's terrain on a card. Thumbnails read only the terrain
+         (`BoardFile.readTerrain`).
+       - The preview shows the planetary conditions, in the lobby and in the Swing `MapSetupDialog`
+         (`GpuBoardWindow.openPreview(frame, board, conditions)`).
+       - Board stacks: a slot can hold several boards (Add to stack). The game rolls one of them, or keeps it a
+         surprise until the game starts, and another can be rolled or revealed. `MapSettings` keeps the stacks
+         (`getBoardStack`, `setBoardStack`) and `MapSetup` saves them as `<STACK>` elements; older setup files
+         still load. When only a stack changes (`equalBoardConfiguration` and `!equalBoardStacks`), the server
+         keeps the lobby's generated board. `removeUnavailable` now builds a surprise from the boards that are
+         still available, not the full list, and prunes the stacks.
+       - `MapSetupForm` holds pending local edits, so a late server echo doesn't undo a newer change.
+       - `LobbyCommands.applyMapSetup` takes `(MapSettings, MapSetup)`. MekHQ doesn't call it; MekHQ and
+         MegaMekLab still compile.
+       Checks: `MapSettingsTest`, `MapSettingsDataTest`, `MapSetupFormTest`, `LobbyMapSetupControllerTest`,
+       `MinimapTerrainTest` and `LobbyMapSetupSmokeTest`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

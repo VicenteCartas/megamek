@@ -574,7 +574,7 @@ class GpuBoardLabelsSmokeTest {
     }
 
     /**
-     * Every shot is badged, and the guides are the preview's best 50 of each direction, 
+     * Every shot is badged, and the guides are the preview's best 50 of each direction,
      * so a crowded battle stays legible. 60 enemies the Warhammer shoots, which all shoot back.
      */
     @Test

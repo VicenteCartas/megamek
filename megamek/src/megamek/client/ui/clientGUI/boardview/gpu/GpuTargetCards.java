@@ -292,7 +292,7 @@ final class GpuTargetCards implements GpuHud.Component {
     // ------------------------------------------------------------------ building
 
     /**
-     * A card (.tcard.panel), its frame neutral for every target (the letter carries the target's colour): 
+     * A card (.tcard.panel), its frame neutral for every target (the letter carries the target's colour):
      * the header and its rule, then the attack rows and the footer, the empty card's hint, or the collapsed line.
      * A click on it focuses its target and assigns the armed weapon there, as a click on the unit does.
      */
