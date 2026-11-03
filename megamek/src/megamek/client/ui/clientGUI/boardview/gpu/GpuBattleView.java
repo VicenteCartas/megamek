@@ -1289,6 +1289,7 @@ class GpuBattleView extends ApplicationAdapter {
                     }
                 }
             }
+            drawAuthoredVolumes(alpha);
             // The objects hovered in the side view (every one of a shared pill) or Layers.
             List<String> hoveredObjects = ui instanceof GpuMapHud map ? map.editorHoverObjects() : List.of();
             if (!hoveredObjects.isEmpty() && state.selected() != null) {
@@ -1345,6 +1346,43 @@ class GpuBattleView extends ApplicationAdapter {
             GpuHexHover.draw(lines, scene, hovered, top, alpha);
         }
         lines.end();
+    }
+
+    private List<BoardScene.Tile> authoredSelection() {
+        var state = source.editorState();
+        if (state == null) { return List.of(); }
+        var ids = state.selection().stream().map(megamek.client.ui.boardeditor.BoardEditorSession.Selection::object)
+              .filter(id -> !id.isEmpty()).collect(java.util.stream.Collectors.toSet());
+        if (ids.isEmpty()) { return List.of(); }
+        return scene.tiles().stream().filter(tile -> tile.cover().reference() != null
+              && ids.contains(tile.cover().reference().id())).toList();
+    }
+
+    /** The GLB's hidden structural solids and the gameplay columns they bake, visible only while selected. */
+    private void drawAuthoredVolumes(float alpha) {
+        var selected = authoredSelection();
+        java.util.Set<String> drawn = new java.util.HashSet<>();
+        float unit = BoardGeometry.hexScale();
+        for (var tile : selected) {
+            var ref = tile.cover().reference();
+            lines.setColor(.45f, 1, .8f, alpha);
+            ring(tile.coords(), (tile.elevation() + .06f) * BoardGeometry.level());
+            lines.setColor(1, .75f, .25f, alpha);
+            ring(tile.coords(), (tile.elevation() + tile.cover().height() + .06f) * BoardGeometry.level());
+            var feature = tile.features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElse(null);
+            if (feature == null || !drawn.add(ref.id())) { continue; }
+            lines.setColor(.45f, 1, .8f, alpha * .55f);
+            for (var solid : megamek.common.board.BuildingVolumes.placed(ref.anchor(), feature.decoration(), feature.elevation())) {
+                for (var triangle : solid.triangles()) {
+                    var points = List.of(triangle.a(), triangle.b(), triangle.c());
+                    for (int i = 0; i < 3; i++) {
+                        var a = points.get(i); var b = points.get((i + 1) % 3);
+                        lines.line((float) a.x() * unit, (float) a.y() * unit, (float) a.z() * unit,
+                              (float) b.x() * unit, (float) b.y() * unit, (float) b.z() * unit);
+                    }
+                }
+            }
+        }
     }
 
     /** A hex's outline, inset by {@link #HOVER_HEX_INSET}, at height {@code z}. */
@@ -2491,11 +2529,33 @@ class GpuBattleView extends ApplicationAdapter {
                   source.editorBadges(), terrain::roofBounds, hovered);
         }
         if (source.isEditor() && editorPreviewShown()) { renderEditorPreviewLabel(); }
+        if (source.isEditor()) { renderAuthoredHeights(); }
         annotationBatch.end();
     }
 
     /** The editor preview label's capital height, in layout units. */
     private static final float PREVIEW_LABEL_HEIGHT = 11;
+
+    private void renderAuthoredHeights() {
+        var selected = authoredSelection();
+        if (selected.isEmpty()) { return; }
+        var font = theme.skin.getFont("default-font");
+        float scale = font.getData().scaleX;
+        font.getData().setScale(PREVIEW_LABEL_HEIGHT * layoutScale * scale / font.getCapHeight());
+        try {
+            for (var tile : selected) {
+                if (tile.cover().height() <= 0) { continue; }
+                Vector3 point = boardCamera.camera.project(BoardGeometry.center(tile.coords(), tile.elevation() + tile.cover().height() + .25f),
+                      0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
+                if (point.z < 0 || point.z > 1) { continue; }
+                String label = Messages.getString("BoardEditor.derivedHeightLabel", tile.cover().height());
+                font.setColor(0, 0, 0, .85f);
+                font.draw(annotationBatch, label, point.x + layoutScale, point.y - layoutScale, 0, Align.center, false);
+                font.setColor(1, .8f, .35f, 1);
+                font.draw(annotationBatch, label, point.x, point.y, 0, Align.center, false);
+            }
+        } finally { font.getData().setScale(scale); font.setColor(Color.WHITE); }
+    }
 
     /** The editor preview's label over its hex: what the click brings, or for Erase what goes, in red. */
     private void renderEditorPreviewLabel() {

@@ -21,11 +21,41 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardFileTest {
+    @Test void calculatedStructureExitsSurviveNativeAndClipboardSerialization() throws Exception {
+        for (int type : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK }) {
+            Board board = Board.createEmptyBoard(1, 2);
+            for (int y = 0; y < 2; y++) {
+                Hex hex = new Hex(0, type == Terrains.BUILDING
+                      ? "bldg_cf:15;bldg_elev:2;bldg_basement_type:1"
+                      : "fuel_tank_cf:15;fuel_tank_elev:2;fuel_tank_magn:100", "");
+                hex.addTerrain(new Terrain(type, 1));
+                board.setHex(0, y, hex);
+            }
+            ByteArrayOutputStream legacyText = new ByteArrayOutputStream();
+            board.saveLegacy(legacyText, false);
+            Board legacy = new Board();
+            legacy.load(legacyText.toString(StandardCharsets.UTF_8), null);
+            Board nativeBoard = BoardFile.readNative(encode(board));
+            for (int y = 0; y < 2; y++) {
+                Hex source = board.getHex(0, y);
+                int expected = y == 0 ? 8 : 1;
+                assertEquals(expected, source.getTerrain(type).getExits());
+                assertFalse(source.getTerrain(type).hasExitsSpecified(), "Saving must not mutate the live terrain");
+                assertEquals(expected, legacy.getHex(0, y).getTerrain(type).getExits());
+                assertEquals(expected, nativeBoard.getHex(0, y).getTerrain(type).getExits());
+                assertEquals(expected, BoardFile.fromClipboard(BoardFile.clipboard(source)).getTerrain(type).getExits());
+            }
+            assertSame(nativeBoard.getBuildingAt(new Coords(0, 0)), nativeBoard.getBuildingAt(new Coords(0, 1)),
+                  "The game must reconstruct one connected structure");
+        }
+    }
+
     @Test void terrainPreviewsReadBothFormatsWithoutResolvingVisualAssets() throws Exception {
         String nativeBoard = """
-              {"format":"megamek-board","version":2,"size":{"width":1,"height":1},"hexes":[
-                {"at":[1,1],"elevation":2,"terrain":"water:2;road:1:9","theme":"mars",
-                 "appearance":{"building":{"asset":"buildings/missing","uid":"missing-building-id"}},
+              {"format":"megamek-board","version":3,"size":{"width":1,"height":1},"hexes":[
+                {"at":[1,1],"elevation":2,"theme":"mars",
+                 "components":{"water":{"depth":2},"road":{"type":"paved","connections":["n","s"]},
+                   "building":{"appearance":{"asset":"buildings/missing","uid":"missing-building-id"}}},
                  "decorations":[{"id":"object","kind":"prop","asset":"missing/object","uid":"missing-object-id"}]}
               ]}
               """;
@@ -45,8 +75,6 @@ class BoardFileTest {
             }
             models.verifyNoInteractions();
         }
-        assertThrows(java.io.IOException.class, () -> BoardFile.readTerrain(new ByteArrayInputStream(
-              nativeBoard.replace("water:2", "unknown_terrain:2").getBytes(StandardCharsets.UTF_8))));
     }
 
     @Test void legacyRoadSelectorsNormalizeBeforeEitherFormatIsResaved() throws Exception {
@@ -66,14 +94,15 @@ class BoardFileTest {
             assertEquals(2, hex.terrainLevel(Terrains.ROUGH));
             assertEquals("grass", hex.getTheme());
             String saved = encode(loaded);
-            assertEquals(selector != 0, saved.contains("road:"), saved);
+            assertEquals(selector != 0, new com.fasterxml.jackson.databind.ObjectMapper().readTree(saved)
+                  .path("hexes").get(0).path("components").has("road"), saved);
             assertEquals(expected, BoardFile.readNative(saved).getHex(0, 0).terrainLevel(Terrains.ROAD));
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             loaded.saveLegacy(output, false);
             String oldFormat = output.toString(StandardCharsets.UTF_8);
             assertEquals(selector != 0, oldFormat.contains("road:"), oldFormat);
             if (selector != 0) {
-                assertTrue(saved.contains("road:" + expected + ":44"), saved);
+                assertEquals(44, BoardFile.readNative(saved).getHex(0, 0).getTerrain(Terrains.ROAD).getExits());
                 assertTrue(oldFormat.contains("road:" + expected + ":44"), oldFormat);
             }
             Board reread = new Board(); reread.load(oldFormat, null);
@@ -100,8 +129,9 @@ class BoardFileTest {
         for (int selector : new int[] { 0, 5, 90 }) {
             Hex nativeSource = new Hex(0, "road:" + selector + ":44", "");
             assertEquals(selector, BoardFile.fromClipboard(BoardFile.clipboard(nativeSource)).terrainLevel(Terrains.ROAD));
-            String nativeText = "{\"format\":\"megamek-board\",\"version\":2,\"size\":{\"width\":1,\"height\":1},"
-                  + "\"hexes\":[{\"at\":[1,1],\"elevation\":0,\"terrain\":\"road:" + selector + ":44\"}]}";
+            String nativeText = "{\"format\":\"megamek-board\",\"version\":3,\"size\":{\"width\":1,\"height\":1},"
+                  + "\"hexes\":[{\"at\":[1,1],\"elevation\":0,\"components\":{\"road\":{\"type\":" + selector
+                  + ",\"connections\":[\"se\",\"s\",\"nw\"]}}}]}";
             assertEquals(selector, BoardFile.readNative(nativeText, true).getHex(0, 0).terrainLevel(Terrains.ROAD),
                   "Native documents retain their stored values");
         }
@@ -195,13 +225,13 @@ class BoardFileTest {
               "A surface with no stored control keeps the topology-dependent default");
     }
 
-    @Test void threeAxisRotationRoundTripsInVersionTwoAndOldObjectsDefaultToUpright() throws Exception {
+    @Test void threeAxisRotationRoundTripsAndOldObjectsDefaultToUpright() throws Exception {
         Board board = Board.createEmptyBoard(1, 1);
         var tilted = new BoardDecoration("tilted", "prop", "scenery/vehicles/car", null, .1, .2, 75,
               true, 1.2, BoardDecoration.Placement.ground(), 0, false, 30, -45);
         board.getHex(0, 0).setDecorations(List.of(tilted));
         String saved = encode(board);
-        assertTrue(saved.contains("\"version\":2"));
+        assertTrue(saved.contains("\"version\":" + BoardFile.VERSION));
         assertEquals(tilted, BoardFile.readNative(saved).getHex(0, 0).getDecorations().getFirst());
         assertEquals(30, tilted.duplicate().rotationX());
         assertEquals(-45, tilted.transform(.2, .3, 90, false, 2, tilted.placement()).rotationY());
@@ -314,7 +344,7 @@ class BoardFileTest {
         board.setHex(0, 0, hex);
         String serialized = encode(board);
         assertEquals(2, serialized.lines().filter(line -> line.contains("\"at\"") && line.contains("\"elevation\"")).count());
-        assertTrue(serialized.contains("\"bridge\":{\"variant\":\"bridge/pillars\"}"), serialized);
+        assertTrue(serialized.contains("\"appearance\":{\"variant\":\"bridge/pillars\"}"), serialized);
         Board loaded = BoardFile.readNative(serialized);
         assertEquals(serialized, encode(loaded));
         assertTrue(HexAppearance.pillars(loaded.getHex(0, 0).getAppearance()), "The bridge's Pillars toggle round-trips");
@@ -326,7 +356,7 @@ class BoardFileTest {
             bridge.setAppearance(Map.of("bridge", type));
             typed.setHex(0, 0, bridge);
             String text = encode(typed);
-            assertTrue(text.contains("\"bridge\":{\"variant\":\"" + type.variant() + "\"}"), text);
+            assertTrue(text.contains("\"appearance\":{\"variant\":\"" + type.variant() + "\"}"), text);
             Board back = BoardFile.readNative(text);
             assertEquals(type, back.getHex(0, 0).getAppearance().get("bridge"));
             assertEquals(type == HexAppearance.BUILT_BRIDGE, HexAppearance.bridgeBuilt(back.getHex(0, 0).getAppearance()));
@@ -338,7 +368,7 @@ class BoardFileTest {
         steel.setAppearance(Map.of("bridge", green));
         truss.setHex(0, 0, steel);
         String text = encode(truss);
-        assertTrue(text.contains("\"bridge\":{\"variant\":\"bridge/truss-pillars\",\"colours\":[\"#2e5233\"]}"), text);
+        assertTrue(text.contains("\"appearance\":{\"variant\":\"bridge/truss-pillars\",\"colours\":[\"#2e5233\"]}"), text);
         assertEquals(green, BoardFile.readNative(text).getHex(0, 0).getAppearance().get("bridge"));
         assertEquals(green, BoardFile.fromClipboard(BoardFile.clipboard(steel)).getAppearance().get("bridge"));
         assertTrue(HexAppearance.truss(steel.getAppearance()) && HexAppearance.pillars(steel.getAppearance())
@@ -346,7 +376,7 @@ class BoardFileTest {
         assertThrows(java.io.IOException.class, () -> BoardFile.readNative(text.replace("bridge/truss-pillars", "bridge/pillars")),
               "A standard deck has no colours");
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance("ground/blend/a", null, null, null,
-              BoardDecoration.Colours.of("#2e5233")));
+              BoardDecoration.Colours.of("#2e5233")).validateOwner("ground"));
         assertThrows(IllegalArgumentException.class, () -> green.validateOwner("road"));
         // A bridge appearance is a plain variant: an asset or a material belongs to another owner.
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, "buildings/a", null, null).validateOwner("bridge"));
@@ -366,7 +396,7 @@ class BoardFileTest {
         hex.setAppearance(Map.of("vegetation", turned));
         yard.setHex(0, 0, hex);
         String text = encode(yard);
-        assertTrue(text.contains("\"vegetation\":{\"variant\":\"woods/container-yard/quay-crane\",\"rotation\":240}"), text);
+        assertTrue(text.contains("\"appearance\":{\"variant\":\"woods/container-yard/quay-crane\",\"rotation\":240}"), text);
         assertEquals(turned, BoardFile.readNative(text).getHex(0, 0).getAppearance().get("vegetation"));
         assertEquals(turned, BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance().get("vegetation"));
         var straight = new HexAppearance(turned.variant(), null, null, null, BoardDecoration.Colours.NONE, 0);
@@ -379,7 +409,8 @@ class BoardFileTest {
         }
         assertThrows(java.io.IOException.class, () -> BoardFile.readNative(text.replace("\"vegetation\":", "\"rough\":")),
               "Only a vegetation look turns");
-        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, BoardDecoration.Colours.NONE, 60),
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null,
+              BoardDecoration.Colours.NONE, 60).validateOwner("road"),
               "A rotation turns a design");
     }
 
@@ -398,12 +429,11 @@ class BoardFileTest {
         try (var files = Files.list(directory)) { assertFalse(files.anyMatch(p -> p.getFileName().toString().endsWith(".tmp"))); }
     }
 
-    @Test void futureAndMalformedDocumentsCannotFallThroughToLegacyOrReplaceAnExistingBoard() {
+    @Test void malformedDocumentsCannotFallThroughToLegacyOrReplaceAnExistingBoard() {
         Board existing = Board.createEmptyBoard(3, 2);
         for (String invalid : List.of(
               "{\"format\":\"megamek-board\",\"version\":3,\"size\":{\"width\":1,\"height\":1},\"hexes\":[]}",
-              "{\"format\":\"megamek-board\",\"version\":2,\"version\":2}",
-              "{\"format\":\"megamek-board\",\"version\":2,\"unknownFutureField\":true}",
+              "{\"format\":\"megamek-board\",\"version\":3,\"version\":3}",
               "{broken json")) {
             assertThrows(IllegalArgumentException.class, () -> existing.load(invalid, null));
             assertEquals(3, existing.getWidth()); assertEquals(2, existing.getHeight());
@@ -501,7 +531,7 @@ class BoardFileTest {
         Board lenient = BoardFile.read(file, true);
         assertFalse(lenient.isValid());
         assertThrows(java.io.IOException.class, () -> BoardFile.read(directory.resolve("missing.board2"), true));
-        assertThrows(java.io.IOException.class, () -> BoardFile.readNative("{\"format\":\"megamek-board\",\"version\":2}", true),
+        assertThrows(java.io.IOException.class, () -> BoardFile.readNative("{\"format\":\"megamek-board\",\"version\":3}", true),
               "A malformed document is refused either way");
     }
 
@@ -529,13 +559,13 @@ class BoardFileTest {
         assertEquals(encode(example), encode(BoardFile.readNative(encode(example))));
     }
 
-    @Test void versionTwoPreservesOlderClippingAndRoundTripsScaledSpanningPaint() throws Exception {
+    @Test void omittedClippingUsesItsDefaultAndScaledSpanningPaintRoundTrips() throws Exception {
         Board board = Board.createEmptyBoard(2, 2);
         BoardDecoration decal = new BoardDecoration("paint", "decal", "decal/damage/rubble-light-path", null,
               1.2, -.4, 35, true, 3, BoardDecoration.Placement.ground(), 2, false);
         board.getHex(0, 0).setDecorations(List.of(decal));
         String text = encode(board);
-        assertTrue(text.contains("\"version\":2"));
+        assertTrue(text.contains("\"version\":" + BoardFile.VERSION));
         assertEquals(decal, BoardFile.readNative(text).getHex(0, 0).getDecorations().getFirst());
         assertTrue(BoardFile.readNative(text.replace(",\"clipToHex\":false", ""))
               .getHex(0, 0).getDecorations().getFirst().clipToHex(), "Earlier development maps retain owner clipping");

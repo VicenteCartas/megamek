@@ -331,8 +331,10 @@ class GpuBoardPerformanceSmokeTest {
             config.setWindowedMode(width, height);
             config.useVsync(false);
             config.setForegroundFPS(0);
+            config.enableGLDebugOutput(Boolean.getBoolean("megamek.gpu.performanceGlDebug"), System.err);
             new Lwjgl3Application(new GpuBattleView(fixture.source) {
                 int frame;
+                int configuredFrame = -1;
                 GpuStageTimings timings;
                 GpuStageTimings total;
                 GLProfiler profiler;
@@ -461,6 +463,9 @@ class GpuBoardPerformanceSmokeTest {
                     try {
                         Gdx.input = fixedInput;
                         int phase = frame % scenarioFrames;
+                        // Detail-settle retries keep the pose and controls of this logical frame.
+                        boolean configureFrame = configuredFrame != frame;
+                        configuredFrame = frame;
                         // Every scenario of the first variant, then every scenario of the second.
                         int variant = frame / (scenarioFrames * views);
                         int view = frame / scenarioFrames % views;
@@ -472,34 +477,34 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         // Overview, close and moving: in the 3D view, then (views 3-5) in the Tactical View.
                         int shot = view % 3;
-                        if (comparePages && phase == 0) { setPages(this, variant == 1); }
-                        if (compareCache && phase == 0) {
+                        if (configureFrame && comparePages && phase == 0) { setPages(this, variant == 1); }
+                        if (configureFrame && compareCache && phase == 0) {
                             CheckBox cache = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-terrain-cache");
                             cache.setChecked(variant == 1);
                         }
                         BoardGraphics shown = graphics.isEmpty() ? null : graphics.get(Math.min(variant, graphics.size() - 1));
-                        if (variant > 0 && view == 0 && phase == 0) {
+                        if (configureFrame && variant > 0 && view == 0 && phase == 0) {
                             // The next variant starts from the 3D view's fitted overview, as the first did.
                             setTacticalView(false);
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
                         // The switch takes effect in this warmup frame, which builds what the variant first draws.
-                        if (graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
-                        if (frame == 1) {
+                        if (configureFrame && graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
+                        if (configureFrame && frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
-                        if (shot == 0 && (frame == 1 || variant > 0 && phase == 0)) {
+                        if (configureFrame && shot == 0 && (frame == 1 || variant > 0 && phase == 0)) {
                             overviewCamera(boardCamera);
                         }
-                        if (view == 3 && phase == 0) {
+                        if (configureFrame && view == 3 && phase == 0) {
                             // T: the locked top view with meeples and the ground layer, framed as the 3D overview.
                             setTacticalView(true);
                             boardCamera.fit(fixture.source.takeFrame().scene());
                         }
                         // The close view starts at the board's centre; each variant's moving view pans on from there.
-                        if (shot == 1 && phase == 0) {
+                        if (configureFrame && shot == 1 && phase == 0) {
                             boardCamera.camera.zoom = Float.parseFloat(System.getProperty("megamek.gpu.performanceZoom", ".5"));
                             BoardScene scene = fixture.source.takeFrame().scene();
                             boardCamera.center(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0));
@@ -647,6 +652,9 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         if (phase == scenarioFrames - 1) {
                             phase(scenario + "-report");
+                            var familyPrograms = terrain(this).familyPrograms();
+                            System.out.printf("PERF full-%s familyPrograms=%d/%d%n", scenario,
+                                  familyPrograms.ready().size(), familyPrograms.requested());
                             Arrays.sort(samples);
                             Arrays.sort(submissions);
                             Arrays.sort(intervals);

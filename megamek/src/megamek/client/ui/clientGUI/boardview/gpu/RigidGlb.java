@@ -133,6 +133,7 @@ final class RigidGlb {
     record Source(File file, String variant) { }
 
     static Source source(File root, String asset) {
+        if (asset.startsWith("buildings/")) { return new Source(megamek.common.board.TilesetScenery.customBuildingFile(asset), null); }
         File file = megamek.common.board.BoardModelBounds.file(root, asset);
         return new Source(file, file.equals(new File(root, asset + ".glb")) ? null : "snow");
     }
@@ -524,10 +525,15 @@ final class RigidGlb {
         var roots = source.getSceneModels().get(asset.scene()).getNodeModels();
         String shape = file.nameWithoutExtension();
         Map<Integer, NodeModel> groups = new HashMap<>();
+        if (source.getNodeModels().stream().anyMatch(root -> megamek.common.board.BuildingVolumes.helper(root.getName()))
+              && roots.stream().noneMatch(root -> MeshLod.level(root.getName()) >= 0)) {
+            return java.util.Collections.nCopies(LEVELS, convert(file, shape + "-lod0", asset, roots, variant));
+        }
         // Every level is named, so which mesh draws at a given size is always visible in the file itself: a group's name
         // ends with its level, whatever precedes it, so a renamed or moved file keeps its levels.
         for (var group : roots) {
-            if (CUT.equals(group.getName()) || STANDS.equals(group.getName()) || SPORES.equals(group.getName())) { continue; }
+            if (CUT.equals(group.getName()) || STANDS.equals(group.getName()) || SPORES.equals(group.getName())
+                  || megamek.common.board.BuildingVolumes.helper(group.getName())) { continue; }
             int level = MeshLod.level(group.getName());
             require(level >= 0 && level < LEVELS, "Unexpected LOD group in " + file.name() + ": " + group.getName()
                   + " (name the levels' groups ...-lod0, and optionally ...-lod1 to ...-lod" + (LEVELS - 1) + ")");
@@ -828,6 +834,7 @@ final class RigidGlb {
             Set<NodeModel> visited = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
             Set<String> nodeNames = new HashSet<>();
             for (var node : roots) {
+                if (megamek.common.board.BuildingVolumes.helper(node.getName())) { continue; }
                 result.nodes.add(node(node, partIds, materials, visited, nodeNames));
             }
             return result;
@@ -891,6 +898,7 @@ final class RigidGlb {
     }
 
     private static void collectMeshes(NodeModel node, Set<MeshModel> meshes, Set<NodeModel> visited) {
+        if (megamek.common.board.BuildingVolumes.helper(node.getName())) { return; }
         require(visited.add(node), "Node hierarchy contains a cycle or repeated child");
         meshes.addAll(node.getMeshModels());
         for (var child : node.getChildren()) { collectMeshes(child, meshes, visited); }
@@ -991,7 +999,8 @@ final class RigidGlb {
             }
         }
         result.parts = nodeParts.toArray(ModelNodePart[]::new);
-        result.children = source.getChildren().stream().map(child -> node(child, parts, materials, visited, names))
+        result.children = source.getChildren().stream().filter(child -> !megamek.common.board.BuildingVolumes.helper(child.getName()))
+              .map(child -> node(child, parts, materials, visited, names))
               .toArray(ModelNode[]::new);
         return result;
     }

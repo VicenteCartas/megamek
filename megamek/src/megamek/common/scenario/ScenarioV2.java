@@ -216,6 +216,7 @@ public class ScenarioV2 implements Scenario {
                 id++;
                 board.setBoardId(boardId);
             }
+            board.closeOffBoardBuildingExits();
             game.setBoard(boardId, board);
         }
         // post-process embedded boards and deployment areas

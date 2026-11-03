@@ -310,7 +310,9 @@ public class ScenarioV1 extends HashMap<String, Collection<String>> implements S
     public IGame createGame() throws ScenarioLoaderException {
         LOGGER.info("Loading scenario from {}", file);
         Game game = new Game();
-        game.setBoardDirect(createBoard(this));
+        Board board = createBoard(this);
+        board.closeOffBoardBuildingExits();
+        game.setBoardDirect(board);
 
         // build the faction players
         Collection<Player> players = createPlayers(this);

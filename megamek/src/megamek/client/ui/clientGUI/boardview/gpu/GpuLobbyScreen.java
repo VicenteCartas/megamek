@@ -240,7 +240,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         hud = new GpuHudKit(boardSkin.skin);
         kit = hud.ui;
         kit.presentation(Presentation.GAME);
-        stage = new Stage(new ScreenViewport());
+        stage = new Stage(new ScreenViewport()) {
+            @Override
+            public boolean scrolled(float amountX, float amountY) {
+                UiKit.focusScrollAt(this, Gdx.input.getX(), Gdx.input.getY());
+                return super.scrolled(amountX, amountY);
+            }
+        };
         build();
         map(window.lastMap(), true);
         setInputBlocked(window.modalOpen());

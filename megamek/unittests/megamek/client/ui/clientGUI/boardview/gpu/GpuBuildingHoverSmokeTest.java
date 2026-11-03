@@ -83,7 +83,11 @@ class GpuBuildingHoverSmokeTest {
                             boardCamera.camera.zoom = .4f;
                             boardCamera.center(BoardGeometry.center(BUILDING, 2));
                         } else {
-                            checkHover(this);
+                            // Pixel comparisons need complete programs for every cutaway state, not a partial
+                            // frame while newly encountered material shaders link in the background.
+                            GpuGlsl.presenting(false);
+                            try { checkHover(this); }
+                            finally { GpuGlsl.presenting(true); }
                             if (tick == 2) { boardCamera.setPerspective(true); }
                             else { Gdx.app.exit(); }
                         }
@@ -378,6 +382,7 @@ class GpuBuildingHoverSmokeTest {
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         var buildingBounds = terrain.roofBounds(BUILDING);
         Pixmap baseline = Pixmap.createFromFrameBuffer(0, 0, width, height);
+        PixmapIO.writePNG(new FileHandle("build/gpu-board-review/hover-baseline.png"), baseline, -1, true);
         var depth = BufferUtils.newFloatBuffer(width * height);
         Gdx.gl.glReadPixels(0, 0, width, height, GL30.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, depth);
         try {
@@ -442,7 +447,8 @@ class GpuBuildingHoverSmokeTest {
                         assertTrue(changedRoof > 10, "Hovering the top storey must also fade the roof: " + changedRoof);
                         assertTrue(visibleRoof > 10, "The faded roof must remain visible: " + visibleRoof);
                     }
-                    assertTrue(unchangedOutside > 100, "Storeys outside the cutaway must remain visible");
+                    assertTrue(unchangedOutside > 100, "Storeys outside the cutaway must remain visible: " + unchangedOutside
+                          + " unchanged, " + changedOutside + " changed, level=" + level + ", bounds=" + buildingBounds);
                     assertEquals(0, changedOutside, "Hover must not alter walls outside the highlighted storey: " + level + outsideSample);
                     if (level < 5 && level != 1) {
                         assertTrue(changedInside > 10, "The highlighted storey's walls must become translucent: " + level);
@@ -484,8 +490,11 @@ class GpuBuildingHoverSmokeTest {
                     if (!buildingBounds.contains(point)
                           || point.z < 2 * BoardGeometry.level() - .1f * BoardGeometry.hexScale()) { continue; }
                     checked++;
+                    Vector3 depthPoint = new Vector3((x + .5f) / camera.viewportWidth * 2 - 1,
+                          (y + .5f) / camera.viewportHeight * 2 - 1,
+                          depth.get(y * width + x) * 2 - 1).prj(camera.invProjectionView);
                     assertEquals(colorDepth.get(y * width + x), depth.get(y * width + x), .00001f,
-                          "Depth must preserve the storey opening at " + point);
+                          "Depth must preserve the storey opening at " + point + "; depth hit " + depthPoint);
                 }
             }
             assertTrue(checked > 50, "Depth comparison must cover the building's visible surfaces");

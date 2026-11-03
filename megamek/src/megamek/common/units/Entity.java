@@ -3195,7 +3195,7 @@ public abstract class Entity extends TurnOrdered
             default:
                 return false;
         }
-        return (assumedAlt > minAlt);
+        return assumedAlt > minAlt && megamek.common.board.BuildingInteriors.allows(this, hex, assumedElevation - 1);
     }
 
     /**
@@ -3265,7 +3265,7 @@ public abstract class Entity extends TurnOrdered
             default:
                 return false;
         }
-        return (assumedAlt < maxAlt);
+        return assumedAlt < maxAlt && megamek.common.board.BuildingInteriors.allows(this, hex, assumedElevation + 1);
     }
 
     /**

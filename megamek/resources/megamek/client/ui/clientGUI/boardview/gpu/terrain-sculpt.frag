@@ -368,6 +368,17 @@ void main() {
     float deckMud = ground && !shore && kind > .05 ? 1.0
           : mudShell ? 1.0 - smoothstep(.35, mix(1.3, 2.9, .35 * broad + .65 * fine), v_color.r * 8.0) : 0.0;
     MaterialProjection rockProjection = materialProjection(world, face);
+#if defined(biomeMaskFlag) && !defined(materialCachedFlag) && !defined(materialFillFlag) && !defined(volcanicFlag)
+    if ((ground || cliff || bedrock) && !family(4.0) && !(shore && above <= -1.1)) {
+        int wetBiome = deckMud == 1.0 ? 4
+              : (!shore || above >= -.15 ? opaqueWetBiome(world, face) : 0);
+        bool sandPossible = family(2.0);
+#ifdef terrainBlendFlag
+        sandPossible = sandPossible || any(lessThan(abs(coverFamilies - 2.0), vec4(.5)));
+#endif
+        terrainCovered = wetBiome == 4 || (!sandPossible && (wetBiome == 2 || wetBiome == 3));
+    }
+#endif
     vec3 albedo = toLinear(vec3(.52));
     vec3 normal = face;
     float cavity = 1.0;
@@ -878,8 +889,11 @@ void main() {
     vec2 tufts = world.xy + world.z * vec2(.6, -.4);
     vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
           * (2.0 * FRAY_METRES / 1.5);
+    // shadeSurface has no directional lobe on this hemisphere unless it transmits or scatters light.
+    bool receivesSun = leaf || volcanic > 0.0 || finish.scatter > 0.0
+          || dot(smoothSupport ? face : geometric, light) > 0.0;
     Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray)
+          sculptShadow(receiver, light, u_metre, lift, fray, receivesSun)
                 * sunOnRelief(relief, dot(face, light))
                 * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.

@@ -85,7 +85,10 @@ class GpuRoutePreviewTest {
     }
 
     static void choose(BoardEditorSession session, String kind) {
-        if (kind.equals("rail") || kind.equals("maglev")) {
+        if (List.of("building", "habitat", "fortress").contains(kind)) {
+            session.command(new Command(Action.CHOOSE_BRUSH, "building", kind.equals("habitat") ? "building/lunar-habitat" : ""), null);
+            if (kind.equals("fortress")) { session.command(new Command(Action.BRUSH_VALUE, "terrain:bldg_class", "2"), null); }
+        } else if (kind.equals("rail") || kind.equals("maglev")) {
             var route = kind.equals("rail") ? RailRoute.Kind.RAIL : RailRoute.Kind.MAGLEV;
             session.command(new Command(Action.ASSET, "", route.asset), null);
         }

@@ -228,6 +228,10 @@ public class Terrains implements Serializable {
      * hex's MUD is the ground's. Read through {@link Hex#deckMud}; it has no effect on a deck at the hex level.
      */
     public static final int BRIDGE_MUD = 65;
+    /** Building interior override: 1 floors, 2 open hall, 3 inaccessible; absent uses the building's default. */
+    public static final int BLDG_INTERIORS = 66;
+    /** Walls retain their own structural kind; their construction weight is independent. */
+    public static final int BLDG_WEIGHT = 67;
 
     /**
      * Keeps track of the different type of terrains that can have exits.
@@ -251,7 +255,7 @@ public class Terrains implements Serializable {
                                             "foliage_elev", "black_ice", "sky",
                                             "deployment_zone", "hazardous_liquid", "ultra_sublevel",
                                             "bridge_repaired", "industrial_elevator", "rail", "bridge_rail",
-                                            "bridge_road", "bridge_mud" };
+                                            "bridge_road", "bridge_mud", "bldg_interiors", "bldg_weight" };
 
     /** Terrains in this set are hidden in the Editor, not saved to board files and handled internally. */
     public static final HashSet<Integer> AUTOMATIC = new HashSet<>(Arrays.asList(

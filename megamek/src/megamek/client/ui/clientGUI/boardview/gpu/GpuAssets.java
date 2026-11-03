@@ -76,6 +76,11 @@ final class GpuAssets implements Disposable {
     /** Each share building share's levels and glass (BoardMultiHexBuilding), retired with the other generated models. */
     private record MultiHex(List<Model> levels, Model glass) { }
     private final Map<BoardMultiHexBuilding.Layout, MultiHex> multiHexes = new HashMap<>();
+    private final Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Slice> authoredBuildings = new HashMap<>();
+
+    GpuAuthoredBuilding.Slice authoredBuilding(GpuAuthoredBuilding.Prepared prepared) {
+        return authoredBuildings.computeIfAbsent(prepared.layout(), key -> GpuAuthoredBuilding.build(prepared, this::createModel));
+    }
     private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
@@ -91,7 +96,7 @@ final class GpuAssets implements Disposable {
     private BoardScene.Pixels incline;
     private BoardScene.Pixels highIncline;
 
-    private record Interior(String asset, int levels) { }
+    private record Interior(Model shell, int levels) { }
 
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
@@ -1195,7 +1200,7 @@ final class GpuAssets implements Disposable {
     private List<ModelData> decode(String name, RigidGlb.Source source) {
         var started = decoding.remove(name);
         var levels = started == null ? null : joined(started);
-        return levels != null ? levels : RigidGlb.loadLods(source, root.toPath());
+        return levels != null ? levels : RigidGlb.loadLods(source, name.startsWith("buildings/") ? root.getParentFile().toPath() : root.toPath());
     }
 
     /** The first level whose mesh {@code level} draws: itself, or the level it repeats where the file lacks it. */
@@ -1340,6 +1345,20 @@ final class GpuAssets implements Disposable {
      * {@link ConnectedKit#reach}.
      */
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed, boolean withInterior) {
+        return building(asset, levels, reach, seed, withInterior ? megamek.common.board.BuildingInteriors.YES : megamek.common.board.BuildingInteriors.NO);
+    }
+
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed, megamek.common.board.BuildingInteriors interiors) {
+        return building(asset, levels, reach, seed, interiors, false);
+    }
+
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
+          megamek.common.board.BuildingInteriors interiors, boolean stepped) {
+        return building(asset, levels, reach, seed, interiors, stepped, 1);
+    }
+
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
+          megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
@@ -1347,8 +1366,8 @@ final class GpuAssets implements Disposable {
         if (!file.isFile()) { return null; }
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
-            return buildings.computeIfAbsent(GpuBuilding.kit(asset), key -> new GpuBuilding(key, this::createModel))
-                  .assemble(levels, reach, seed, withInterior);
+            return buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale), key -> new GpuBuilding(key, this::createModel))
+                  .assemble(levels, reach, seed, interiors, stepped);
         } catch (RuntimeException failure) {
             missing(kit, reason(failure));
             return null;
@@ -1382,6 +1401,14 @@ final class GpuAssets implements Disposable {
             return true;
         });
         retain(this.routes, liveModels);
+        interiors.entrySet().removeIf(entry -> {
+            if (liveModels.contains(entry.getKey().shell()) || this.models.containsValue(entry.getKey().shell())) { return false; }
+            entry.getValue().dispose(); return true;
+        });
+        authoredBuildings.values().removeIf(slice -> {
+            if (slice.levels().stream().anyMatch(liveModels::contains) || liveModels.contains(slice.interior())) { return false; }
+            slice.dispose(); return true;
+        });
     }
 
     /**
@@ -1703,7 +1730,8 @@ final class GpuAssets implements Disposable {
             Texture.TextureWrap wrap = repeating ? Texture.TextureWrap.Repeat : Texture.TextureWrap.ClampToEdge;
             texture.setWrap(wrap, wrap);
             if (repeating && (file.parent().name().equals("surfaces") || file.parent().name().equals("roads")
-                  || file.parent().name().equals("ice") || file.parent().name().equals("industrial"))) {
+                  || file.parent().name().equals("ice") || file.parent().name().equals("industrial")
+                  || file.parent().name().equals("lunar"))) {
                 // Detailed materials retain full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {
@@ -1870,8 +1898,12 @@ final class GpuAssets implements Disposable {
 
     /** Interior meshes share the shell's local coordinates; geometry tuning only changes their instance transform. */
     Model interior(String asset, int levels) {
-        return interiors.computeIfAbsent(new Interior(asset, levels),
-              key -> GpuBuildingInterior.build(model(key.asset()), key.levels()));
+        return interior(model(asset), levels);
+    }
+
+    Model interior(Model shell, int levels) {
+        return interiors.computeIfAbsent(new Interior(shell, levels),
+              key -> GpuBuildingInterior.build(key.shell(), key.levels()));
     }
 
     private static org.w3c.dom.Node child(org.w3c.dom.Node parent, String name) {
@@ -1895,6 +1927,8 @@ final class GpuAssets implements Disposable {
         industrial.clear();
         multiHexes.values().forEach(GpuAssets::dispose);
         multiHexes.clear();
+        authoredBuildings.values().forEach(GpuAuthoredBuilding.Slice::dispose);
+        authoredBuildings.clear(); GpuAuthoredBuilding.reload();
         buildings.values().forEach(GpuBuilding::dispose);
         buildings.clear();
         interiors.values().forEach(Model::dispose);

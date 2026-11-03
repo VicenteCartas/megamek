@@ -462,6 +462,31 @@ public class Board implements Serializable {
     }
 
     /**
+     * Closes building connections beyond the finished game or preview map. Call only after all sheets and rotations
+     * have been assembled, before publishing the board. Source sheets and editor documents retain their authored exits.
+     * No building is rebuilt: removing off-board exits changes neither its membership nor its current damage.
+     */
+    public void closeOffBoardBuildingExits() {
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                Hex hex = getHex(x, y);
+                Terrain building = hex == null ? null : hex.getTerrain(Terrains.BUILDING);
+                if (building == null || (building.getExits() & ~63) != 0) {
+                    // Legacy values above the six directional bits select artwork, not connections.
+                    continue;
+                }
+                int exits = building.getExits();
+                for (int direction = 0; direction < 6; direction++) {
+                    if (!contains(Coords.xInDir(x, y, direction), Coords.yInDir(x, y, direction))) {
+                        exits &= ~(1 << direction);
+                    }
+                }
+                building.setExits(exits);
+            }
+        }
+    }
+
+    /**
      * Initialize all hexes
      */
     protected void initializeAll(final @Nullable List<String> errors) {
@@ -594,6 +619,7 @@ public class Board implements Serializable {
 
         // Always make the coords of the hex match the actual position on the board
         hex.setCoords(new Coords(x, y));
+        BuildingInteriors.normalizeBasement(hex);
 
         hex.clearExits();
         for (int i = 0; i < 6; i++) {
@@ -1547,12 +1573,7 @@ public class Board implements Serializable {
                         if (!firstTerrain) {
                             hexBuff.append(";");
                         }
-                        hexBuff.append(terrain);
-                        // Do something funky to save building exits.
-                        if (((Terrains.BUILDING == terrType) || (terrType == Terrains.FUEL_TANK))
-                            && !terrain.hasExitsSpecified() && (terrain.getExits() != 0)) {
-                            hexBuff.append(":").append(terrain.getExits());
-                        }
+                        hexBuff.append(terrain.toBoardString());
                         firstTerrain = false;
                     }
                 }

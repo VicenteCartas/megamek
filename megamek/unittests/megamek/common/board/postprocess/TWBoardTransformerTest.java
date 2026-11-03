@@ -34,6 +34,7 @@
 package megamek.common.board.postprocess;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -43,15 +44,22 @@ import java.nio.file.Path;
 import java.util.List;
 
 import megamek.common.Configuration;
+import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.GameOptions;
 import megamek.common.planetaryConditions.PlanetaryConditions;
+import megamek.common.units.Terrains;
+import megamek.common.util.BoardUtilities;
 import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Characterization tests for {@link TWBoardTransformer}. These pin the behavior of the board assembly pipeline
@@ -159,6 +167,57 @@ class TWBoardTransformerTest {
         assertEquals(1, board.getHex(1, 0).getLevel());
         assertEquals(4, board.getHex(2, 0).getLevel());
         assertEquals(5, board.getHex(3, 0).getLevel());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void gameAndPreviewCloseOuterExitsAndKeepSheetSeams(boolean vertical) throws IOException {
+        Board first = Board.createEmptyBoard(2, 2), second = Board.createEmptyBoard(2, 2);
+        Coords firstAt = vertical ? new Coords(0, 1) : new Coords(1, 0);
+        Coords secondAt = vertical ? new Coords(0, 2) : new Coords(2, 0);
+        int firstExits = vertical ? 40 : 3; // S + NW, or N + NE.
+        first.setHex(firstAt, new Hex(0, "building:1:" + firstExits + ";bldg_cf:15;bldg_elev:2", ""));
+        second.setHex(0, 0, new Hex(0, "building:1:17;bldg_cf:15;bldg_elev:2", "")); // N + SW.
+        first.setNativeFormat(true);
+        second.setNativeFormat(true);
+        Path firstFile = temporaryBoardsDirectory.resolve("edge-first.board2");
+        Path secondFile = temporaryBoardsDirectory.resolve("edge-second.board2");
+        BoardFile.save(first, firstFile);
+        BoardFile.save(second, secondFile);
+        String firstText = Files.readString(firstFile), secondText = Files.readString(secondFile);
+        MapSettings settings = createMapSettingsFor(List.of("edge-first.board2", "edge-second.board2"));
+        settings.setMapSize(vertical ? 1 : 2, vertical ? 2 : 1);
+        settings.setBoardsSelectedVector(List.of("edge-first.board2", "edge-second.board2"));
+
+        Board game = TWBoardTransformer.instantiateBoard(settings, new PlanetaryConditions(), new GameOptions());
+        Board preview = ServerBoardHelper.getPossibleGameBoard(MapSettings.getInstance(settings), false);
+        for (Board board : List.of(game, preview)) {
+            assertEquals(vertical ? 8 : 2, board.getHex(firstAt).getTerrain(Terrains.BUILDING).getExits());
+            assertEquals(vertical ? 1 : 16, board.getHex(secondAt).getTerrain(Terrains.BUILDING).getExits());
+            assertSame(board.getBuildingAt(firstAt), board.getBuildingAt(secondAt), "The seam stays one building");
+        }
+        assertEquals(firstText, Files.readString(firstFile));
+        assertEquals(secondText, Files.readString(secondFile));
+    }
+
+    @Test
+    void nestedAssemblyKeepsConnectionsUntilTheFinalBoundaryIsKnown() {
+        Board sheet = Board.createEmptyBoard(2, 2);
+        sheet.setHex(1, 0, new Hex(0, "building:1:3;bldg_cf:15;bldg_elev:2", ""));
+        Board intermediate = BoardUtilities.combine(2, 2, 2, 1,
+              new Board[] { Board.createEmptyBoard(2, 2), sheet }, MapSettings.MEDIUM_GROUND);
+        assertEquals(3, intermediate.getHex(3, 0).getTerrain(Terrains.BUILDING).getExits());
+        Board next = Board.createEmptyBoard(4, 2);
+        next.setHex(0, 0, new Hex(0, "building:1:17;bldg_cf:15;bldg_elev:2", ""));
+        next.setHex(3, 1, new Hex(0, "building:1:1;bldg_cf:15;bldg_elev:2", ""));
+        Board finished = BoardUtilities.combine(4, 2, 2, 1, new Board[] { intermediate, next }, MapSettings.MEDIUM_GROUND);
+        finished.closeOffBoardBuildingExits();
+
+        assertEquals(2, finished.getHex(3, 0).getTerrain(Terrains.BUILDING).getExits());
+        assertEquals(16, finished.getHex(4, 0).getTerrain(Terrains.BUILDING).getExits());
+        assertEquals(1, finished.getHex(7, 1).getTerrain(Terrains.BUILDING).getExits(), "An authored in-map opening stays");
+        assertEquals(3, intermediate.getHex(3, 0).getTerrain(Terrains.BUILDING).getExits());
+        assertEquals(3, sheet.getHex(1, 0).getTerrain(Terrains.BUILDING).getExits());
     }
 
     @Test

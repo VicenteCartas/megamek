@@ -59,6 +59,11 @@ final class BoardTreeCoverage {
     static boolean bare(String asset) { return asset.startsWith("vegetation/tree-dead"); }
     static int bareLimit(int density) { return Math.clamp(density, 1, 3) * 2; }
 
+    /** Whole authored crown at the supplied scale, before placement, overlap or hex-edge clipping. */
+    static float crownFraction(String asset, float scale) {
+        return crown(asset).area * scale * scale / (BoardGeometry.TILE_WIDTH * BoardGeometry.TILE_HEIGHT * .75f);
+    }
+
     float fraction() { return fraction(covered.cardinality(), credit); }
     float with(Addition addition) { return fraction(covered.cardinality() + addition.pixels.cardinality(), credit + addition.credit); }
     private float fraction(int count, float sparse) { return available.isEmpty() ? 0 : Math.min(1, (float) count / available.cardinality() + sparse); }
@@ -100,7 +105,20 @@ final class BoardTreeCoverage {
     private static float sampleX(int column) { return ((column + .5f) / GRID - .5f) * BoardGeometry.TILE_WIDTH; }
     private static float sampleY(int row) { return ((row + .5f) / GRID - .5f) * BoardGeometry.TILE_HEIGHT; }
 
-    private record Crown(float[] bounds, boolean[][] mask, float span) {
+    private record Crown(float[] bounds, boolean[][] mask, float span, float area) {
+        private Crown(float[] bounds, boolean[][] mask, float span) {
+            this(bounds, mask, span, area(bounds, mask, span));
+        }
+
+        private static float area(float[] bounds, boolean[][] mask, float span) {
+            if (mask == null) { return (bounds[3] - bounds[0]) * (bounds[4] - bounds[1]); }
+            int pixels = 0;
+            for (var row : mask) {
+                for (boolean covered : row) { if (covered) { pixels++; } }
+            }
+            return span * span * pixels / (mask.length * mask.length);
+        }
+
         boolean contains(float x, float y) {
             if (mask == null) { return x >= bounds[0] && x <= bounds[3] && y >= bounds[1] && y <= bounds[4]; }
             int px = (int) Math.floor(((x - (bounds[0] + bounds[3]) * .5f) / span + .5f) * mask.length);

@@ -172,7 +172,7 @@ final class BoardObstacles {
             ConnectedKit.Kit kit = null;
             if (custom) {
                 try {
-                    kit = GpuBuilding.kit(feature.asset());
+                    kit = GpuBuilding.kit(feature.asset(), feature.footprintScale());
                 } catch (RuntimeException failure) {
                     // The asset's own model then draws (GpuAssets#building), and keeps its clearance.
                     unreadable(customFile, failure);
@@ -213,7 +213,7 @@ final class BoardObstacles {
                 // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
                 int levels = Math.max(1, Math.round(feature.height()));
                 for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
-                      GpuBuilding.seed(tile, feature))) {
+                      GpuBuilding.seed(tile, feature), megamek.common.board.HexAppearance.steppedBuilding(tile.appearance()))) {
                     var triangles = ConnectedKit.triangles(kit, 0, piece);
                     var underside = !piece.role().startsWith("roof") ? List.<Vector3>of()
                           : GpuBuildingInterior.plane(triangles, piece.level() * GpuBuilding.LEVEL_HEIGHT, false);
@@ -226,7 +226,7 @@ final class BoardObstacles {
                 });
             }
             float turn = (float) Math.toRadians(feature.rotation()), c = (float) Math.cos(turn), s = (float) Math.sin(turn);
-            float scale = feature.scale() * BoardGeometry.hexScale();
+            float scale = feature.modelScale() * BoardGeometry.hexScale();
             float x = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float y = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
             BoundingBox bounds = new BoundingBox().inf();

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -16,7 +17,9 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +27,57 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 class GpuPlantPlacementSmokeTest {
     private static final Coords AT = new Coords(3, 3);
+
+    @Test
+    void fullMartianPackingUsesTheDrawnRootWidth() {
+        var failure = new AtomicReference<Throwable>();
+        var configuration = GpuBoardWindow.configuration(false);
+        configuration.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override
+            public void create() {
+                var terrain = new GpuTerrain();
+                try {
+                    var seed = new Coords(19, 14);
+                    var hex = new Hex(0, "woods:3;foliage_elev:2", "mars", seed);
+                    var plants = BoardFeatures.capture(hex, seed, Map.of(), Set.of(), c -> null,
+                          TilesetScenery.Scenery.EMPTY, true).stream()
+                          .filter(f -> f.kind() == BoardScene.FeatureKind.TREE).toList();
+                    assertTrue(plants.stream().anyMatch(p -> p.stretch().x() < 1), "Exercise reduced-width colonies");
+                    var tiles = new ArrayList<BoardScene.Tile>();
+                    for (int x = 0; x < 7; x++) {
+                        for (int y = 0; y < 7; y++) {
+                            var at = new Coords(x, y);
+                            tiles.add(new BoardScene.Tile(at, 0, -1, false, 0, BoardScene.Surface.MARS,
+                                  null, null, at.equals(AT) ? plants : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                        }
+                    }
+                    var scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+                    terrain.update(scene);
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    camera.center(BoardGeometry.center(AT, 0));
+                    var lods = new HashSet<String>();
+                    List<String> original = null;
+                    for (float zoom : new float[] { .08f, 3, 48, .08f }) {
+                        camera.camera.zoom = zoom;
+                        camera.camera.update();
+                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        var current = placements(terrain, lods);
+                        assertEquals(plants.size(), current.size(), "Supported packed roots must not displace another colony");
+                        if (original == null) { original = current; }
+                        assertEquals(original, current, "LOD must preserve the complete packing");
+                    }
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, configuration);
+        assertNull(failure.get(), String.valueOf(failure.get()));
+    }
 
     @Test
     void cameraCannotMovePlantsButTerrainEditsCan() {

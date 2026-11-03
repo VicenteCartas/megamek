@@ -322,6 +322,12 @@ public class Terrain implements Serializable {
         return getName(type) + ":" + level + (exitsSpecified ? ":" + exits : "");
     }
 
+    /** Board files must retain calculated structure exits: parsing an omitted mask makes these structures isolated. */
+    public String toBoardString() {
+        return toString() + (((type == BUILDING) || (type == FUEL_TANK)) && !exitsSpecified && (exits != 0)
+              ? ":" + exits : "");
+    }
+
     /**
      * @param moveMode       the movement mode of the pilot
      * @param roll           the piloting roll

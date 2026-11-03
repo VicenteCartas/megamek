@@ -14,6 +14,27 @@ vec3 biomeWetnessGradient(vec2 p) {
     return vec3(.55 * a.x + .30 * b.x + .15 * c.x, gradient);
 }
 
+// The existing per-hex metadata proves a dry, uniform biome at this plateau's height.
+bool biomePlateau(vec4 tile, float z) {
+    float height = (tile.a * 255.0 - 64.0) * u_levelHeight / u_metre;
+    return (int(tile.g * 255.0 + .5) & 16) != 0 && abs(z - height) <= .15;
+}
+
+// Conservative direct-material preflight: only uniform wet interiors with full slope support can bury the base.
+// Edges retain the complete substrate. The regular biome stage still evaluates its coverage once, at its old site.
+int opaqueWetBiome(vec3 world, vec3 face) {
+    if (u_biomeBoard.x < 1.0 || face.z < .92) return 0;
+    const float width = 30.0, height = 30.0 * BOARD_HEX.y / BOARD_HEX.x;
+    int column = int(floor(world.x / (width * .75)));
+    float rows = -world.y / height - mod(float(column), 2.0) * .5;
+    ivec2 cell = ivec2(column, int(floor(rows)));
+    if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, ivec2(u_biomeBoard)))) return 0;
+    vec4 tile = texelFetch(u_biomeHexes, cell, 0);
+    int flags = int(tile.r * 255.0 + .5), kind = flags & 15;
+    int quarter = (fract(world.x / (width * .75)) < .5 ? 4 : 5) + (fract(rows) < .5 ? 0 : 2);
+    return kind >= 2 && kind <= 4 && ((flags >> quarter) & 1) != 0 && biomePlateau(tile, world.z) ? kind : 0;
+}
+
 // One bounded stencil serves both the shoreline treatment and the connected liquid's optical mixture.
 // A negative waterLevel disables the liquid work for dry terrain. No additional textures or per-hex draws.
 void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, out vec4 cover, out vec4 fringe, out vec4 liquids,
@@ -36,9 +57,7 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, ou
         if (((flags >> quarter) & 1) == 0) return;
         // The CPU proves all stencil candidates are dry and share this biome/elevation. On their supported
         // plateau each numerator equals its denominator, including the narrow field and broad bank masks.
-        float z = (tile.a * 255.0 - 64.0) * u_levelHeight / u_metre;
-        if (waterLevel <= -1000.0 && edge == 14.0 && (int(tile.g * 255.0 + .5) & 16) != 0
-              && abs(world.z - z) <= .15) {
+        if (waterLevel <= -1000.0 && edge == 14.0 && biomePlateau(tile, world.z)) {
             int kind = flags & 15;
             cover = vec4(kind == 1, kind == 2, kind == 3, kind == 4);
             fringe = cover;

@@ -46,9 +46,9 @@ class BoardVolcanoFoliageTest {
             }
         }
         var used = new HashSet<String>();
-        var woods = new Hex(0, "woods:2;foliage_elev:2", theme);
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 12; y++) {
+                var woods = new Hex(0, "woods:" + (1 + (x + y) % 3) + ";foliage_elev:2", theme);
                 cover(woods, new Coords(x, y)).forEach(feature -> used.add(feature.asset()));
             }
         }

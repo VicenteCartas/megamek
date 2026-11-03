@@ -177,7 +177,7 @@ class GpuResourcesSmokeTest {
         try {
             BoundingBox floors = new ModelInstance(interior, "floors").calculateBoundingBox(new BoundingBox());
             assertEquals(height * 2 / 3, floors.max.z, .0001f, "Floors share the shell's local height");
-            assertEquals(height * .002f / 3, floors.min.z, .0001f, "Ground floor clears the terrain");
+            assertEquals(height * .002f / 3 - 1.2f, floors.min.z, .0001f, "The ground slab extends below its walking surface");
             BoundingBox struts = new ModelInstance(interior, "struts").calculateBoundingBox(new BoundingBox());
             assertEquals(height, struts.getDepth(), .0001f, "Columns span the full shell height");
             List<Vector3> triangles = GpuTerrain.triangles(interior);

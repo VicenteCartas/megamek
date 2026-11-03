@@ -3,6 +3,10 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GeneratedMesh.clip;
 
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Area;
+import java.awt.geom.Path2D;
+import java.awt.geom.PathIterator;
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -18,6 +22,7 @@ import java.util.SplittableRandom;
 import java.util.TreeSet;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.math.EarClippingTriangulator;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -33,7 +38,7 @@ import megamek.logging.MMLogger;
  * a model per hex. Every hex draws only its own share, so drawing, picking, clearance and a collapsed hex stay per hex,
  * and neighbouring shares meet exactly on their hexsides: the domes stand on a plinth over the building, fitted to its
  * heights ({@link #fits}), each hex taking the part over its own hex; a hex outside every podium is an annex: the
- * plinth, and a module at its own height standing out from the podium's ring towards it ({@link #module}). The lunar habitats are a connected kit instead
+     * plinth and, at its own height, a corridor following connected sides or a single terminal module ({@link #module}). The lunar habitats are a connected kit instead
  * ({@code buildings/lunar_habitat}).
  * Coordinates are model units (a level {@link GpuBuilding#LEVEL_HEIGHT} high) about the hex centre on its own ground.
  */
@@ -66,19 +71,18 @@ final class BoardMultiHexBuilding {
     private static final float STRUT_LENGTH = 16, STRUT_WIDTH = .75f, STRUT_OUT = .5f, STRUT_IN = .4f;
     private static final float LEVEL = GpuBuilding.LEVEL_HEIGHT;
     private static final float WIDTH = HexTile.MODEL_WIDTH, HEIGHT = HexTile.HEIGHT;
-    /** The wall material has two panel rows: smaller cladding panels within each storey. */
-    private static final float WALL_REPEAT = LEVEL;
+    /** Two panel rows per texture repeat: one framed cladding bay per storey. */
+    private static final float WALL_REPEAT = 2 * LEVEL;
     /** Plain riveted roof plating, at the same scale as the bevels. Fittings have bounded UVs of their own. */
-    private static final float ROOF_REPEAT = 24;
+    private static final float ROOF_REPEAT = 12;
     private static final float EPSILON = 1e-3f;
 
     // Board materials (textures/<name>.tres); their .tres files give every finish, transparency included.
-    static final String WALL = "structures/lunar/colony-panel", ROOF = "structures/lunar/dome-frame",
+    static final String WALL = "structures/lunar/dome-cladding", ROOF = "structures/lunar/dome-deck",
           PLINTH_MATERIAL = "structures/lunar/regolith-concrete", FRAME = "structures/lunar/dome-frame",
           GLASS = "structures/lunar/dome-glass", GARDEN = "structures/lunar/biodome-garden",
-          PIER = "structures/lunar/habitat-pier", SKYLIGHT = "structures/lunar/skylight-glass";
-    /** The existing hatch/grille artwork is sampled only by complete fittings, never tiled over a roof. */
-    private static final String ROOF_DETAILS = "structures/lunar/habitat-roof";
+          PIER = "structures/lunar/dome-trim", WINDOW = "structures/lunar/dome-window",
+          LIGHT = "structures/lunar/dome-light";
 
     private static final MMLogger LOGGER = MMLogger.create(BoardMultiHexBuilding.class);
 
@@ -116,10 +120,11 @@ final class BoardMultiHexBuilding {
      * it and its rise above the foot.
      */
     record Dome(float x, float y, float radius, float foot, float ring, float apex, int frequency, float podium,
-          List<Float> entrances, List<Float> modules) {
+          List<Float> entrances, List<Float> modules, List<Point> ports) {
         Dome {
             entrances = List.copyOf(entrances);
             modules = List.copyOf(modules);
+            ports = List.copyOf(ports);
         }
 
         /** The podium's ring's height above the foot: where the glass meets its roof. */
@@ -142,6 +147,10 @@ final class BoardMultiHexBuilding {
          * annex's module: fins and pylons keep clear of them.
          */
         boolean joined(double angle, double margin) {
+            for (Point port : ports) {
+                double toward = Math.atan2(port.y(), port.x());
+                if (Math.abs(Math.IEEEremainder(toward - angle, 2 * Math.PI)) < Math.atan2(MODULE_HALF + 3, podium) + margin) { return true; }
+            }
             for (int at = 0; at < entrances.size(); at += 7) {
                 // Its gate or its airlock's tube enters the podium towards it.
                 double toward = Math.atan2(entrances.get(at + 1), entrances.get(at));
@@ -163,13 +172,33 @@ final class BoardMultiHexBuilding {
      * {@code annex}: a domed building's hex outside every podium, whose share is the plinth and the modules over it
      * ({@link #module}): the domes are there for their modules alone.
      */
-    record Layout(Design design, float top, List<Float> reach, List<Dome> domes, List<Gear> gear, boolean annex) {
+    record Layout(Design design, float top, List<Float> reach, List<Dome> domes, List<Gear> gear, boolean annex,
+          List<Tunnel> tunnels, List<Gate> corridorGates) {
         Layout {
             domes = List.copyOf(domes);
             reach = List.copyOf(reach);
             gear = List.copyOf(gear);
+            tunnels = List.copyOf(tunnels);
+            corridorGates = List.copyOf(corridorGates);
         }
     }
+
+    record Point(float x, float y) { }
+
+    record Gate(float x, float y, float ux, float uy, float floor) { }
+
+    /** One corridor outline clipped to this hex; each edge opens up to its neighbour's roof, or zero for a wall. */
+    record Tunnel(List<Point> outline, List<Float> openings, float foot, float top, Point origin) {
+        Tunnel { outline = List.copyOf(outline); openings = List.copyOf(openings); }
+    }
+
+    private record Link(Point from, Point to, int firstDome, int secondDome, float top) { }
+
+    /** Temporary board-space footprint used to union corridors and solid three-way junctions before clipping. */
+    private record Span(Area footprint, float top) { }
+
+    /** One connected corridor footprint and the roof actually drawn over it, before opening its shared cuts. */
+    private record Corridor(List<Point> outline, float top) { }
 
     /** A support piece on the share: its node in the equipment kit, its origin, its turn clockwise in degrees, its size. */
     record Gear(String piece, float x, float y, float z, float angle, float scale) {
@@ -180,7 +209,9 @@ final class BoardMultiHexBuilding {
     record Equipment(List<RigidGlb.Data> lods, Map<String, BoundingBox> bounds) { }
 
     /** A hex of a building: its board position, ground and top in levels; a ghost is a collapsed hex it still names. */
-    record Member(Coords coords, int elevation, int top, boolean ghost) { }
+    record Member(Coords coords, int elevation, int top, boolean ghost, int exits) {
+        Member(Coords coords, int elevation, int top, boolean ghost) { this(coords, elevation, top, ghost, 63); }
+    }
 
     /**
      * A dome fitted to a footprint: the centre (board model coordinates), the foot radius, the ground it stands over
@@ -197,7 +228,7 @@ final class BoardMultiHexBuilding {
         Coords lone = new Coords(0, 0);
         var fits = fits(List.of(new Member(lone, 0, height, false)));
         var none = java.util.Collections.nCopies(fits.size(), List.<Float>of());
-        return new Layout(design, PLINTH, List.of(closed), domes(fits, lone, 0, none, none), List.of(), false);
+        return new Layout(design, PLINTH, List.of(closed), domes(fits, lone, 0, none, none, List.of()), List.of(), false, List.of(), List.of());
     }
 
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
@@ -206,34 +237,38 @@ final class BoardMultiHexBuilding {
         Float[] connected = connections(scene, tile, feature.asset(), levels);
         var group = group(scene, tile, feature.asset());
         var fits = fits(group);
-        int base = group.stream().mapToInt(Member::elevation).max().orElse(tile.elevation());
-        float shift = (base - tile.elevation()) * LEVEL, plinth = PLINTH + shift;
-        var none = java.util.Collections.nCopies(fits.size(), List.<Float>of());
+        Set<Coords> routed = routed(scene, group, fits, feature.asset());
+        List<Link> links = links(scene, group, fits, routed, feature.asset());
+        int nearest = nearest(fits, tile.coords());
+        int base = nearest < 0 || routed.contains(tile.coords()) ? tile.elevation() : Math.max(tile.elevation(), fits.get(nearest).base());
+        float plinth = PLINTH + (base - tile.elevation()) * LEVEL;
+        var tunnels = tunnels(scene, tile, spans(links, group, fits, routed), fits, connected, Math.min(plinth, levels * LEVEL - 3));
+        var corridorGates = routed.contains(tile.coords()) ? gates(scene, tile, connected) : List.<Gate>of();
         if (annex(fits, tile.coords())) {
             // An annex: the plinth, joined to its neighbours', under the modules that cross it, its own among them; one
             // without a module of its own (no higher than the plinth, or none fits) a block at its own height.
             float top = levels * LEVEL, apron = Math.min(top, plinth);
-            boolean block = annexModule(scene, tile, fits, base, feature.asset()) == null;
+            boolean block = tunnels.isEmpty() && annexModule(scene, tile, fits, feature.asset()) == null;
             for (int direction = 0; direction < 6; direction++) {
                 connected[direction] = Math.min(connected[direction], apron);
                 // A block opens only towards another block: the hexes under the domes and the wings draw no wall to meet.
                 var neighbor = scene.neighbor(tile, direction);
                 if (block && connected[direction] > 0 && !(annex(fits, neighbor.coords())
-                      && annexModule(scene, neighbor, fits, base, feature.asset()) == null)) {
+                      && annexModule(scene, neighbor, fits, feature.asset()) == null)) {
                     connected[direction] = 0f;
                 }
             }
             var domes = block ? List.<Dome>of()
-                  : domes(fits, tile.coords(), shift, entrances(scene, group, fits, base, feature.asset()),
-                        modules(scene, group, fits, base, feature.asset()));
+                  : domes(fits, tile.coords(), tile.elevation(), entrances(scene, group, fits, feature.asset(), routed),
+                        modules(scene, group, fits, feature.asset(), routed), links);
             return new Layout(design, top, List.of(connected), domes,
-                  support(scene, tile, design, block ? 0 : apron, connected, List.of(), true, block), true);
+                  support(scene, tile, design, block ? 0 : apron, connected, List.of(), true, block), true, tunnels, corridorGates);
         }
         plinth(connected, plinth);
-        var domes = domes(fits, tile.coords(), shift, entrances(scene, group, fits, base, feature.asset()),
-              modules(scene, group, fits, base, feature.asset()));
+        var domes = domes(fits, tile.coords(), tile.elevation(), entrances(scene, group, fits, feature.asset(), routed),
+              modules(scene, group, fits, feature.asset(), routed), links);
         return new Layout(design, plinth, List.of(connected), domes,
-              support(scene, tile, design, plinth, connected, domes, false, false), false);
+              support(scene, tile, design, plinth, connected, domes, false, false), false, tunnels, corridorGates);
     }
 
     /**
@@ -265,15 +300,21 @@ final class BoardMultiHexBuilding {
         }
     }
 
-    /** The domes of {@code fits} as the hex {@code at} sees them, its ground {@code shift} below the building's base. */
-    private static List<Dome> domes(List<Fit> fits, Coords at, float shift, List<List<Float>> entrances,
-          List<List<Float>> wings) {
+    /** The domes of {@code fits} relative to this hex's centre and ground elevation. */
+    private static List<Dome> domes(List<Fit> fits, Coords at, int ground, List<List<Float>> entrances,
+          List<List<Float>> wings, List<Link> links) {
         List<Dome> result = new ArrayList<>();
         for (int index = 0; index < fits.size(); index++) {
             var fit = fits.get(index);
+            float shift = (fit.base() - ground) * LEVEL;
+            List<Point> ports = new ArrayList<>();
+            for (Link link : links) {
+                Point port = link.firstDome() == index ? link.from() : link.secondDome() == index ? link.to() : null;
+                if (port != null) { ports.add(new Point(port.x() - fit.x(), port.y() - fit.y())); }
+            }
             result.add(new Dome(fit.x() - HexTile.centerX(at, WIDTH), fit.y() - HexTile.centerY(at, HEIGHT), fit.radius(),
                   PLINTH + shift, fit.ring() + shift, fit.apex() + shift, fit.frequency(), fit.podium(),
-                  entrances.get(index), wings.get(index)));
+                  entrances.get(index), wings.get(index), ports));
         }
         return result;
     }
@@ -291,20 +332,14 @@ final class BoardMultiHexBuilding {
      * and the module as {@link Dome#modules}
      * gives it; null where the annex rises no higher than the plinth.
      */
-    private static float[] annexModule(BoardScene scene, BoardScene.Tile annex, List<Fit> fits, int base, String asset) {
+    private static float[] annexModule(BoardScene scene, BoardScene.Tile annex, List<Fit> fits, String asset) {
         int levels = Math.max(1, annex.cover().height());
-        float rise = (annex.elevation() + levels - base) * LEVEL - PLINTH;
-        if (rise <= EPSILON || fits.isEmpty()) { return null; }
+        if (fits.isEmpty()) { return null; }
         float ax = HexTile.centerX(annex.coords(), WIDTH), ay = HexTile.centerY(annex.coords(), HEIGHT);
-        int nearest = 0;
-        for (int index = 1; index < fits.size(); index++) {
-            var fit = fits.get(index);
-            if (Math.hypot(ax - fit.x(), ay - fit.y()) - fit.podium()
-                  < Math.hypot(ax - fits.get(nearest).x(), ay - fits.get(nearest).y()) - fits.get(nearest).podium()) {
-                nearest = index;
-            }
-        }
+        int nearest = nearest(fits, annex.coords());
         var fit = fits.get(nearest);
+        float rise = (annex.elevation() + levels - fit.base()) * LEVEL - PLINTH;
+        if (rise <= EPSILON) { return null; }
         float dx = ax - fit.x(), dy = ay - fit.y(), apart = (float) Math.hypot(dx, dy), ux = dx / apart, uy = dy / apart;
         var kit = equipment();
         List<List<float[]>> airlocks = new ArrayList<>();
@@ -312,8 +347,8 @@ final class BoardMultiHexBuilding {
         for (Gear airlock : airlocks(kit, scene, annex, 0, connected, List.of(), true, false)) {
             airlocks.add(footprint(kit, airlock));
         }
-        for (float[] gate : gates(scene, annex, connected)) {
-            airlocks.add(moduleOutline(gate[0], gate[1], gate[2], gate[3], -GATE_DEPTH, 0, GATE_HALF, 2));
+        for (Gate gate : gates(scene, annex, connected)) {
+            airlocks.add(moduleOutline(gate.x(), gate.y(), gate.ux(), gate.uy(), -GATE_DEPTH, 0, GATE_HALF, 2));
         }
         List<float[]> facades = outline(63, SETBACK);
         float inner = ringMiddle(fit.radius(), fit.podium());
@@ -339,11 +374,12 @@ final class BoardMultiHexBuilding {
     }
 
     /** Each dome's annexes' modules ({@link Dome#modules}), in a stable order. */
-    private static List<List<Float>> modules(BoardScene scene, List<Member> group, List<Fit> fits, int base, String asset) {
+    private static List<List<Float>> modules(BoardScene scene, List<Member> group, List<Fit> fits, String asset,
+          Set<Coords> routed) {
         List<float[]> found = new ArrayList<>();
         for (Member member : group) {
-            if (member.ghost() || !annex(fits, member.coords())) { continue; }
-            var module = annexModule(scene, scene.tile(member.coords()), fits, base, asset);
+            if (member.ghost() || routed.contains(member.coords()) || !annex(fits, member.coords())) { continue; }
+            var module = annexModule(scene, scene.tile(member.coords()), fits, asset);
             if (module != null) { found.add(module); }
         }
         found.sort(Comparator.<float[]>comparingDouble(module -> module[1]).thenComparingDouble(module -> module[2]));
@@ -353,6 +389,245 @@ final class BoardMultiHexBuilding {
             for (int at = 1; at < module.length; at++) { result.get((int) module[0]).add(module[at]); }
         }
         return result;
+    }
+
+    /** Adjacent annexes form a corridor network; a single annex keeps its terminal gatehouse. */
+    private static Set<Coords> routed(BoardScene scene, List<Member> group, List<Fit> fits, String asset) {
+        Set<Coords> result = new java.util.HashSet<>();
+        for (Member member : group) {
+            if (member.ghost() || !annex(fits, member.coords())) { continue; }
+            var tile = scene.tile(member.coords());
+            var reach = connections(scene, tile, asset, Math.max(1, tile.cover().height()));
+            int count = 0;
+            for (int direction = 0; direction < 6; direction++) {
+                if (reach[direction] > 0) { count++; }
+                var next = scene.neighbor(tile, direction);
+                if (reach[direction] > 0 && annex(fits, next.coords())) {
+                    result.add(member.coords()); result.add(next.coords());
+                }
+            }
+            if (count > 1) { result.add(member.coords()); }
+        }
+        return result;
+    }
+
+    /** The closest dome whose podium reaches this hex, or -1 for a corridor hex outside all podiums. */
+    private static int domeAt(List<Fit> fits, Coords at) {
+        return annex(fits, at) ? -1 : nearest(fits, at);
+    }
+
+    private static int nearest(List<Fit> fits, Coords at) {
+        Point centre = centre(at);
+        int best = -1; double distance = Double.POSITIVE_INFINITY;
+        for (int index = 0; index < fits.size(); index++) {
+            Fit fit = fits.get(index);
+            double from = Math.hypot(centre.x() - fit.x(), centre.y() - fit.y()) - fit.podium();
+            if (from < distance) { best = index; distance = from; }
+        }
+        return best;
+    }
+
+    private static Point centre(Coords at) { return new Point(HexTile.centerX(at, WIDTH), HexTile.centerY(at, HEIGHT)); }
+
+    /** Routes follow the authored sides, with one span per edge and one terminal cap at a dead end. */
+    private static List<Link> links(BoardScene scene, List<Member> group, List<Fit> fits, Set<Coords> routed, String asset) {
+        List<Link> result = new ArrayList<>();
+        for (Member member : group.stream().sorted(Comparator.comparingInt((Member m) -> m.coords().getX())
+              .thenComparingInt(m -> m.coords().getY())).toList()) {
+            if (member.ghost()) { continue; }
+            var tile = scene.tile(member.coords());
+            var reach = connections(scene, tile, asset, Math.max(1, tile.cover().height()));
+            Point point = centre(member.coords());
+            int own = domeAt(fits, member.coords()), count = 0, last = 0;
+            for (int direction = 0; direction < 6; direction++) {
+                if (reach[direction] <= 0) { continue; }
+                count++; last = direction;
+                Coords next = member.coords().translated(direction);
+                if (next.getX() < member.coords().getX() || next.getX() == member.coords().getX()
+                      && next.getY() < member.coords().getY()) { continue; }
+                int other = domeAt(fits, next);
+                if (!routed.contains(member.coords()) && !routed.contains(next) && (own < 0 || other < 0 || own == other)) { continue; }
+                Point end = centre(next);
+                Point from = own < 0 ? point : dock(fits.get(own), point, other < 0 ? end : new Point(fits.get(other).x(), fits.get(other).y()));
+                Point to = other < 0 ? end : dock(fits.get(other), end, own < 0 ? point : new Point(fits.get(own).x(), fits.get(own).y()));
+                var neighbour = scene.tile(next);
+                float top = Math.min(member.top(), neighbour.elevation() + Math.max(1, neighbour.cover().height())) * LEVEL;
+                result.add(new Link(from, to, own, other, top));
+            }
+            if (routed.contains(member.coords())) {
+                result.add(new Link(point, point, -1, -1, member.top() * LEVEL));
+                if (count == 1) {
+                    Point next = centre(member.coords().translated(last));
+                    float dx = point.x() - next.x(), dy = point.y() - next.y(), length = (float) Math.hypot(dx, dy);
+                    result.add(new Link(point, new Point(point.x() + dx / length * GATEHOUSE / 2,
+                          point.y() + dy / length * GATEHOUSE / 2), -1, -1, member.top() * LEVEL));
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** Meet the ring along the incoming hex axis where possible, keeping an offset straight run straight. */
+    private static Point dock(Fit fit, Point inside, Point outside) {
+        float dx = inside.x() - outside.x(), dy = inside.y() - outside.y(), length = (float) Math.hypot(dx, dy);
+        float radius = ringMiddle(fit.radius(), fit.podium());
+        if (length > EPSILON) {
+            dx /= length; dy /= length;
+            float x = outside.x() - fit.x(), y = outside.y() - fit.y(), along = x * dx + y * dy;
+            float discriminant = along * along - x * x - y * y + radius * radius;
+            if (discriminant >= 0) {
+                float travel = -along - (float) Math.sqrt(discriminant);
+                if (travel >= 0) { return new Point(outside.x() + dx * travel, outside.y() + dy * travel); }
+            }
+        }
+        dx = outside.x() - fit.x(); dy = outside.y() - fit.y(); length = (float) Math.hypot(dx, dy);
+        return new Point(fit.x() + dx / length * radius, fit.y() + dy / length * radius);
+    }
+
+    /** Open shared cuts only up to the roof drawn on the other side, which may be below that hex's dome. */
+    private static List<Tunnel> tunnels(BoardScene scene, BoardScene.Tile tile, List<Span> spans, List<Fit> fits,
+          Float[] reach, float foot) {
+        Map<Coords, List<Corridor>> neighbours = new HashMap<>();
+        List<Tunnel> result = new ArrayList<>();
+        Point origin = centre(tile.coords());
+        for (Corridor corridor : corridors(tile, spans, !annex(fits, tile.coords()))) {
+            List<Float> openings = new ArrayList<>();
+            for (int edge = 0; edge < corridor.outline().size(); edge++) {
+                Point a = corridor.outline().get(edge), b = corridor.outline().get((edge + 1) % corridor.outline().size());
+                float opening = 0;
+                for (int direction = 0; direction < 6; direction++) {
+                    if (reach[direction] <= 0) { continue; }
+                    float[] border = side(direction);
+                    if (Math.abs(a.x() * border[0] + a.y() * border[1] - border[2]) >= .02f
+                          || Math.abs(b.x() * border[0] + b.y() * border[1] - border[2]) >= .02f) { continue; }
+                    var neighbour = scene.neighbor(tile, direction);
+                    var beyond = neighbours.computeIfAbsent(neighbour.coords(), ignored ->
+                          corridors(neighbour, spans, !annex(fits, neighbour.coords())));
+                    Point next = centre(neighbour.coords());
+                    double x = (a.x() + b.x()) / 2 + origin.x() - next.x() + border[0] * .02;
+                    double y = (a.y() + b.y()) / 2 + origin.y() - next.y() + border[1] * .02;
+                    for (Corridor other : beyond) {
+                        if (area(other.outline().stream().map(p -> new float[] { p.x(), p.y() }).toList()).contains(x, y)) {
+                            opening = Math.max(opening, Math.min(reach[direction], other.top() + (neighbour.elevation() - tile.elevation()) * LEVEL));
+                        }
+                    }
+                }
+                openings.add(opening);
+            }
+            result.add(new Tunnel(corridor.outline(), openings, Math.min(foot, corridor.top() - 3), corridor.top(), origin));
+        }
+        return List.copyOf(result);
+    }
+
+    /** Connected triangles are solid junctions; unconnected bends and larger courtyards retain their open ground. */
+    private static List<Span> spans(List<Link> links, List<Member> group, List<Fit> fits, Set<Coords> routed) {
+        List<Span> result = new ArrayList<>();
+        for (Link link : links) {
+            float x = link.from().x(), y = link.from().y();
+            float dx = link.to().x() - link.from().x(), dy = link.to().y() - link.from().y();
+            float length = (float) Math.hypot(dx, dy);
+            List<float[]> shape = new ArrayList<>();
+            if (length < EPSILON) {
+                // A hub tangent to the six corridor axes avoids tiny notches where an octagon met diagonal spans.
+                Point anchor = centre(new Coords(0, 0));
+                for (int corner = 0; corner < 6; corner++) {
+                    Point a = centre(new Coords(0, 0).translated(corner)), b = centre(new Coords(0, 0).translated((corner + 1) % 6));
+                    float[] p = meet(shifted(new float[] { 0, 0 }, new float[] { a.x() - anchor.x(), a.y() - anchor.y() }, MODULE_HALF),
+                          shifted(new float[] { 0, 0 }, new float[] { b.x() - anchor.x(), b.y() - anchor.y() }, MODULE_HALF));
+                    shape.add(new float[] { x + p[0], y + p[1] });
+                }
+            } else {
+                float px = -dy / length * MODULE_HALF, py = dx / length * MODULE_HALF;
+                shape.add(new float[] { x + px, y + py }); shape.add(new float[] { x - px, y - py });
+                shape.add(new float[] { x + dx - px, y + dy - py }); shape.add(new float[] { x + dx + px, y + dy + py });
+            }
+            result.add(new Span(area(shape), link.top()));
+        }
+        Map<Coords, Member> members = new HashMap<>();
+        for (Member member : group) { if (!member.ghost()) { members.put(member.coords(), member); } }
+        Area podiums = new Area();
+        for (Fit fit : fits) {
+            List<float[]> outline = new ArrayList<>();
+            for (int corner = 0; corner < 12; corner++) {
+                double angle = Math.PI / 6 * corner;
+                outline.add(new float[] { fit.x() + (fit.podium() - 1) * (float) Math.cos(angle),
+                      fit.y() + (fit.podium() - 1) * (float) Math.sin(angle) });
+            }
+            podiums.add(area(outline));
+        }
+        for (Member a : members.values()) {
+            // These two sectors visit every adjacent triangle once, from its westernmost/northernmost hex.
+            for (int direction = 1; direction <= 2; direction++) {
+                Member b = members.get(a.coords().translated(direction)), c = members.get(a.coords().translated(direction + 1));
+                if (b == null || c == null || !joined(a, b) || !joined(a, c) || !joined(b, c)
+                      || Math.min(a.top(), Math.min(b.top(), c.top())) <= Math.max(a.elevation(), Math.max(b.elevation(), c.elevation()))) { continue; }
+                int top = 0;
+                for (Member member : List.of(a, b, c)) {
+                    if (routed.contains(member.coords())) { top = Math.max(top, member.top()); }
+                }
+                if (top == 0) { continue; }
+                List<float[]> triangle = new ArrayList<>();
+                for (Member member : List.of(a, b, c)) {
+                    Point p = centre(member.coords()); triangle.add(new float[] { p.x(), p.y() });
+                }
+                Area junction = area(triangle);
+                // Stop inside the solid ring wall; a roof must never bridge over the dome's glass or garden.
+                junction.subtract(podiums);
+                if (!junction.isEmpty()) { result.add(new Span(junction, top * LEVEL)); }
+            }
+        }
+        return result;
+    }
+
+    /** Union spans before cutting shares. Each separate docking roof meets its tallest incoming corridor. */
+    private static List<Corridor> corridors(BoardScene.Tile tile, List<Span> footprints, boolean docking) {
+        Point origin = centre(tile.coords());
+        Area area = new Area();
+        Map<Area, Float> spans = new LinkedHashMap<>();
+        for (Span footprint : footprints) {
+            Area span = footprint.footprint().createTransformedArea(AffineTransform.getTranslateInstance(-origin.x(), -origin.y()));
+            span.intersect(area(hex()));
+            if (span.isEmpty()) { continue; }
+            spans.put(span, footprint.top() - tile.elevation() * LEVEL);
+            area.add(span);
+        }
+        List<Corridor> result = new ArrayList<>();
+        List<float[]> polygon = new ArrayList<>();
+        float[] point = new float[6];
+        for (PathIterator path = area.getPathIterator(null); !path.isDone(); path.next()) {
+            int segment = path.currentSegment(point);
+            if (segment == PathIterator.SEG_MOVETO) { polygon = new ArrayList<>(); }
+            if (segment == PathIterator.SEG_MOVETO || segment == PathIterator.SEG_LINETO) {
+                polygon.add(new float[] { point[0], point[1] });
+            } else if (segment == PathIterator.SEG_CLOSE) {
+                // Area can leave collinear vertices at unions; they must not create parallel inset lines.
+                for (int i = polygon.size() - 1; i >= 0 && polygon.size() > 2; i--) {
+                    float[] a = polygon.get((i + polygon.size() - 1) % polygon.size()), b = polygon.get(i), c = polygon.get((i + 1) % polygon.size());
+                    if (Math.abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) < .002f) { polygon.remove(i); }
+                }
+                if (polygon.size() < 3) { continue; }
+                polygon = counterClockwise(polygon);
+                float top = Math.max(1, tile.cover().height()) * LEVEL;
+                if (docking) {
+                    float incoming = 0;
+                    Area footprint = area(polygon);
+                    for (var span : spans.entrySet()) {
+                        Area part = new Area(span.getKey()); part.intersect(footprint);
+                        if (!part.isEmpty()) { incoming = Math.max(incoming, span.getValue()); }
+                    }
+                    top = Math.min(top, incoming);
+                }
+                result.add(new Corridor(polygon.stream().map(p -> new Point(p[0], p[1])).toList(), top));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static Area area(List<float[]> polygon) {
+        Path2D.Float path = new Path2D.Float();
+        path.moveTo(polygon.getFirst()[0], polygon.getFirst()[1]);
+        for (int index = 1; index < polygon.size(); index++) { path.lineTo(polygon.get(index)[0], polygon.get(index)[1]); }
+        path.closePath(); return new Area(path);
     }
 
     /** The middle of a dome's ring, where an annex's module ends inside it. */
@@ -407,8 +682,8 @@ final class BoardMultiHexBuilding {
      * roads arrive ({@link #gates}) and the airlocks the hexes under its domes place ({@link #airlocks}), by the
      * nearest dome.
      */
-    private static List<List<Float>> entrances(BoardScene scene, List<Member> group, List<Fit> fits, int base,
-          String asset) {
+    private static List<List<Float>> entrances(BoardScene scene, List<Member> group, List<Fit> fits,
+          String asset, Set<Coords> routed) {
         var kit = equipment();
         List<List<Float>> result = new ArrayList<>();
         fits.forEach(fit -> result.add(new ArrayList<>()));
@@ -418,26 +693,26 @@ final class BoardMultiHexBuilding {
         for (Member member : group) {
             if (member.ghost()) { continue; }
             var tile = scene.tile(member.coords());
-            float shift = (base - tile.elevation()) * LEVEL;
+            float shift = Math.max(0, fits.get(nearest(fits, member.coords())).base() - tile.elevation()) * LEVEL;
             float cx = HexTile.centerX(member.coords(), WIDTH), cy = HexTile.centerY(member.coords(), HEIGHT);
             boolean annex = annex(fits, member.coords());
             var connected = connections(scene, tile, asset, Math.max(1, tile.cover().height()));
             // Its vehicle gates, in to the podium, or on an annex to its gatehouse (an annex standing as a block keeps
             // airlocks at its facade, #airlocks).
-            if (!annex || annexModule(scene, tile, fits, base, asset) != null) {
-                for (float[] gate : gates(scene, tile, connected)) {
-                    points.add(new float[] { cx + gate[0], cy + gate[1], gate[2], gate[3], gate[4] - PLINTH - shift, 1,
-                          annex ? (float) Math.hypot(gate[0], gate[1]) : 0 });
+            if (!routed.contains(member.coords()) && (!annex || annexModule(scene, tile, fits, asset) != null)) {
+                for (Gate gate : gates(scene, tile, connected)) {
+                    points.add(new float[] { cx + gate.x(), cy + gate.y(), gate.ux(), gate.uy(), gate.floor() + tile.elevation() * LEVEL, 1,
+                          annex ? (float) Math.hypot(gate.x(), gate.y()) : 0 });
                 }
             }
             if (annex) { continue; }
             plinth(connected, PLINTH + shift);
             for (Gear airlock : airlocks(kit, scene, tile, PLINTH + shift, connected,
-                  domes(fits, member.coords(), shift, none, none), false, false)) {
+                  domes(fits, member.coords(), tile.elevation(), none, none, List.of()), false, false)) {
                 // Turned clockwise from +y (#frame).
                 double facing = Math.toRadians(airlock.angle());
                 points.add(new float[] { cx + airlock.x(), cy + airlock.y(), (float) Math.sin(facing),
-                      (float) Math.cos(facing), airlock.z() - PLINTH - shift, 0, 0 });
+                      (float) Math.cos(facing), airlock.z() + tile.elevation() * LEVEL, 0, 0 });
             }
         }
         points.sort(Comparator.<float[]>comparingDouble(point -> point[0]).thenComparingDouble(point -> point[1]));
@@ -448,7 +723,7 @@ final class BoardMultiHexBuilding {
                       < Math.hypot(point[0] - fits.get(nearest).x(), point[1] - fits.get(nearest).y())) { nearest = index; }
             }
             result.get(nearest).addAll(List.of(point[0] - fits.get(nearest).x(), point[1] - fits.get(nearest).y(), point[2],
-                  point[3], point[4], point[5], point[6]));
+                  point[3], point[4] - fits.get(nearest).base() * LEVEL - PLINTH, point[5], point[6]));
         }
         return result;
     }
@@ -573,8 +848,8 @@ final class BoardMultiHexBuilding {
      * BoardRoad#layout): its door's x and y about the hex centre, just inside the hexside where the road ends, the way it
      * faces and its floor, at the road's own level.
      */
-    private static List<float[]> gates(BoardScene scene, BoardScene.Tile tile, Float[] reach) {
-        List<float[]> result = new ArrayList<>();
+    private static List<Gate> gates(BoardScene scene, BoardScene.Tile tile, Float[] reach) {
+        List<Gate> result = new ArrayList<>();
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = scene.neighbor(tile, direction);
             if (reach[direction] > 0 || neighbor == null || (neighbor.roadExits() & 1 << (direction + 3) % 6) == 0) {
@@ -583,7 +858,7 @@ final class BoardMultiHexBuilding {
             float[] side = side(direction);
             // Its door's frame and lintel stand out of its face, inside the hexside.
             float along = side[2] - 2.6f;
-            result.add(new float[] { side[0] * along, side[1] * along, side[0], side[1], road(tile, neighbor) });
+            result.add(new Gate(side[0] * along, side[1] * along, side[0], side[1], road(tile, neighbor)));
         }
         return result;
     }
@@ -737,11 +1012,76 @@ final class BoardMultiHexBuilding {
     }
 
     private static Member member(BoardScene.Tile tile, boolean ghost) {
-        return new Member(tile.coords(), tile.elevation(), tile.elevation() + Math.max(1, tile.cover().height()), ghost);
+        return new Member(tile.coords(), tile.elevation(), tile.elevation() + Math.max(1, tile.cover().height()), ghost,
+              ghost ? 63 : tile.cover().exits());
     }
 
     /**
-     * The domes a building's heights shape: one over each peak, standing hexes of one top that no standing neighbour
+     * Broad clusters are joined triangles of hexes; a one-hex-wide chain between them is a corridor, not part of
+     * either dome's fit. A lone hex still gets a dome, as does a raised peak in a narrow run. Everything is derived
+     * from the current connections and heights, including boards made before the editor had drawn connections.
+     */
+    static List<Fit> fits(Collection<Member> group) {
+        Map<Coords, Member> members = new LinkedHashMap<>();
+        group.stream().sorted(Comparator.comparingInt((Member member) -> member.coords().getX())
+              .thenComparingInt(member -> member.coords().getY())).forEach(member -> members.put(member.coords(), member));
+        if (members.size() <= 1) { return fitRegion(members.values()); }
+        Map<Coords, Set<Coords>> wide = new HashMap<>();
+        for (Member member : members.values()) {
+            for (int direction = 0; direction < 6; direction++) {
+                Member a = members.get(member.coords().translated(direction));
+                Member b = members.get(member.coords().translated((direction + 1) % 6));
+                if (!joined(member, a) || !joined(member, b) || !joined(a, b)) { continue; }
+                for (Member vertex : List.of(member, a, b)) {
+                    var neighbours = wide.computeIfAbsent(vertex.coords(), ignored -> new java.util.HashSet<>());
+                    for (Member other : List.of(member, a, b)) {
+                        if (vertex != other) { neighbours.add(other.coords()); }
+                    }
+                }
+            }
+        }
+        Set<Coords> seen = new java.util.HashSet<>();
+        List<Fit> result = new ArrayList<>();
+        for (Member start : members.values()) {
+            if (!wide.containsKey(start.coords()) || !seen.add(start.coords())) { continue; }
+            List<Member> cluster = new ArrayList<>();
+            var open = new ArrayDeque<>(List.of(start.coords()));
+            while (!open.isEmpty()) {
+                Coords at = open.remove(); cluster.add(members.get(at));
+                for (Coords next : wide.get(at)) { if (seen.add(next)) { open.add(next); } }
+            }
+            if (cluster.stream().anyMatch(member -> !member.ghost())) { result.addAll(fitRegion(cluster)); }
+        }
+        // Heights can still make a tower in an otherwise narrow corridor; a level run never creates repeated domes.
+        for (Member start : members.values()) {
+            if (start.ghost() || !seen.add(start.coords())) { continue; }
+            List<Member> peak = new ArrayList<>();
+            var open = new ArrayDeque<>(List.of(start));
+            boolean higher = false, lower = false;
+            while (!open.isEmpty()) {
+                Member at = open.remove(); peak.add(at);
+                for (int direction = 0; direction < 6; direction++) {
+                    Member next = members.get(at.coords().translated(direction));
+                    if (!joined(at, next) || next.ghost()) { continue; }
+                    higher |= next.top() > at.top() || next.top() == at.top() && wide.containsKey(next.coords());
+                    lower |= next.top() < at.top();
+                    if (next.top() == at.top() && !wide.containsKey(next.coords()) && seen.add(next.coords())) { open.add(next); }
+                }
+            }
+            if (!higher && lower) { result.addAll(fitRegion(peak)); }
+        }
+        result.sort(Comparator.comparingDouble(Fit::x).thenComparingDouble(Fit::y));
+        return List.copyOf(result);
+    }
+
+    private static boolean joined(Member first, Member second) {
+        if (first == null || second == null || first.coords().distance(second.coords()) != 1) { return false; }
+        int direction = first.coords().direction(second.coords());
+        return (first.exits() & 1 << direction) != 0 && (second.exits() & 1 << (direction + 3) % 6) != 0;
+    }
+
+    /**
+     * The domes a cluster's heights shape: one over each peak, standing hexes of one top that no standing neighbour
      * rises above. Each centres on the peak's hex centre or corner farthest from the footprint's outline (ties to the
      * one nearest the peak's middle; a collapsed hex still counts in the outline); its podium's corners lie that far in
      * less {@link #DOME_MARGIN}, shrunk in proportion where two domes' podiums would meet; its apex is the peak's top.
@@ -750,7 +1090,7 @@ final class BoardMultiHexBuilding {
      * The order of {@code group} does not matter, so every hex of a building fits the same domes. Heights are model
      * units over the highest ground under the building.
      */
-    static List<Fit> fits(Collection<Member> group) {
+    private static List<Fit> fitRegion(Collection<Member> group) {
         List<Member> members = group.stream().sorted(Comparator.comparingInt((Member member) -> member.coords().getX())
               .thenComparingInt(member -> member.coords().getY())).toList();
         Map<Coords, Member> byCoords = new HashMap<>();
@@ -759,7 +1099,7 @@ final class BoardMultiHexBuilding {
         int base = Integer.MIN_VALUE;
         for (Member member : members) {
             for (int direction = 0; direction < 6; direction++) {
-                if (byCoords.containsKey(member.coords().translated(direction))) { continue; }
+                if (joined(member, byCoords.get(member.coords().translated(direction)))) { continue; }
                 int edge = Math.floorMod(1 - direction, 6);
                 Coords coords = member.coords();
                 outline.add(new float[] { HexTile.cornerX(coords, edge, WIDTH), HexTile.cornerY(coords, edge, HEIGHT),
@@ -782,7 +1122,7 @@ final class BoardMultiHexBuilding {
                 plateau.add(member);
                 for (int direction = 0; direction < 6; direction++) {
                     var next = byCoords.get(member.coords().translated(direction));
-                    if (next == null || next.ghost()) { continue; }
+                    if (!joined(member, next) || next.ghost()) { continue; }
                     if (next.top() > member.top()) { peak = false; }
                     else if (next.top() == member.top() && seen.add(next.coords())) { open.add(next); }
                 }
@@ -824,8 +1164,8 @@ final class BoardMultiHexBuilding {
         return List.copyOf(result);
     }
 
-    /** The podium's lowest roof over its plinth, and its highest: two storeys. */
-    static final float RING_LOW = PLINTH + 7, RING_HIGH = PLINTH + 2 * LEVEL;
+    /** The podium's lowest roof over its plinth; taller domes extend the podium to meet their glass. */
+    static final float RING_LOW = PLINTH + 7;
 
     /**
      * Where the glass of a dome with this foot radius and apex meets its podium's roof: the cap whose heights best
@@ -833,7 +1173,8 @@ final class BoardMultiHexBuilding {
      * roof; a dome over its peak alone rises {@link #DOME_RISE} of its radius.
      */
     private static float ring(float radius, float apex, List<float[]> samples) {
-        float low = Math.min(RING_HIGH, Math.max(RING_LOW, apex - radius)), high = Math.min(RING_HIGH, apex - radius * .2f);
+        // Keep the cap no taller than a hemisphere: any extra height belongs to its supporting tower.
+        float low = Math.max(RING_LOW, apex - radius), high = apex - radius * .2f;
         if (high <= low) { return Math.max(RING_LOW, Math.min(apex - 1, low)); }
         if (samples.stream().allMatch(sample -> sample[1] >= apex)) {
             return Math.clamp(apex - radius * DOME_RISE, low, high);
@@ -935,11 +1276,10 @@ final class BoardMultiHexBuilding {
         var mesh = new GeneratedMesh();
         float[] reach = new float[6];
         for (int direction = 0; direction < 6; direction++) { reach[direction] = layout.reach().get(direction); }
-        if (layout.domes().isEmpty()) {
+        if (layout.domes().isEmpty() && layout.tunnels().isEmpty()) {
             // A footprint too narrow for any dome, or an annex without a module of its own, stands at its own height.
             shell(mesh, layout.top(), reach);
         }
-        if (!layout.domes().isEmpty() || layout.annex()) { skirt(mesh, layout, lod); }
         for (Dome dome : layout.domes()) {
             if (layout.annex()) {
                 for (int at = 0; at < dome.modules().size(); at += 4) { module(mesh, hex(), dome, at); }
@@ -948,6 +1288,13 @@ final class BoardMultiHexBuilding {
             dome(mesh, dome, lod);
             if (layout.design() == Design.BIODOME) { garden(mesh, dome); }
         }
+        for (Tunnel tunnel : layout.tunnels()) {
+            var outline = tunnel.outline().stream().map(point -> new float[] { point.x(), point.y() }).toList();
+            prism(mesh, hex(), PLINTH_MATERIAL, outline, 0, tunnel.foot(), outline.size());
+            moduleBlock(mesh, hex(), outline, tunnel.foot(), tunnel.top(), tunnel.openings(), tunnel.origin());
+        }
+        // Entrances cut their own opening in the finished facade before adding their passage and fitted flanges.
+        if (!layout.domes().isEmpty() || layout.annex()) { skirt(mesh, layout, lod); }
         return mesh;
     }
 
@@ -1010,7 +1357,7 @@ final class BoardMultiHexBuilding {
                     gate(mesh, hex, dome.x() + x, dome.y() + y, ux, uy, floor);
                     // Joined to its annex's gatehouse door, else to the podium square to it.
                     float[] building = centre > 0
-                          ? door(layout, dome.x() + x - ux * centre, dome.y() + y - uy * centre) : ring(dome, bx, by, top);
+                          ? door(layout, dome.x() + x - ux * centre, dome.y() + y - uy * centre, ux, uy, GATE_HALF) : ring(dome, bx, by, top);
                     if (building != null) {
                         passage(mesh, hex, building,
                               new float[] { dome.x() + bx, dome.y() + by, ux, uy, floor, floor + GATE_HEIGHT }, lod);
@@ -1023,6 +1370,14 @@ final class BoardMultiHexBuilding {
                       top + entrances.get(at + 4) }, lod, TUBE, false);
             }
         }
+        for (Gate gate : layout.corridorGates()) {
+            gate(mesh, hex, gate.x(), gate.y(), gate.ux(), gate.uy(), gate.floor());
+            float[] door = door(layout, 0, 0, gate.ux(), gate.uy(), GATE_HALF);
+            if (door != null) {
+                passage(mesh, hex, door, new float[] { gate.x() - gate.ux() * GATE_DEPTH, gate.y() - gate.uy() * GATE_DEPTH,
+                      gate.ux(), gate.uy(), gate.floor(), gate.floor() + GATE_HEIGHT }, lod);
+            }
+        }
         // Under each raised airlock; on an annex its tube bends from its gatehouse's door to it, where it stands ahead of
         // the door, else runs in from it to the gatehouse over the annex's centre.
         for (Gear gear : layout.gear()) {
@@ -1033,7 +1388,7 @@ final class BoardMultiHexBuilding {
             if (!layout.annex() || from <= EPSILON) { continue; }
             double facing = Math.toRadians(gear.angle());
             float[] airlock = { gear.x(), gear.y(), (float) Math.sin(facing), (float) Math.cos(facing), gear.z() };
-            float[] door = door(layout);
+            float[] door = door(layout, 0, 0, airlock[2], airlock[3], TUBE + 1.1f);
             if (door != null && (gear.x() - door[0]) * door[2] + (gear.y() - door[1]) * door[3] > 3) {
                 bellows(mesh, hex, door, airlock, lod, TUBE, false);
             } else if (door != null) {
@@ -1054,7 +1409,7 @@ final class BoardMultiHexBuilding {
      * the road's level ({@code floor}), under a yellow lintel between hazard posts.
      */
     private static void gate(GeneratedMesh mesh, List<float[]> hex, float x, float y, float ux, float uy, float floor) {
-        moduleBlock(mesh, hex, moduleOutline(x, y, ux, uy, -GATE_DEPTH, 0, GATE_HALF, 2), 0, floor + GATE_HEIGHT);
+        moduleBlock(mesh, hex, moduleOutline(x, y, ux, uy, -GATE_DEPTH, 0, GATE_HALF, 2), 0, floor + GATE_HEIGHT, null, null, false);
         float px = -uy, py = ux, top = floor + GATE_DOOR_HEIGHT;
         clippedBlock(mesh, hex, PIER, x + ux * .4f, y + uy * .4f, px, py, GATE_DOOR + 1.2f, .8f, floor, top + 1.2f);
         clippedBlock(mesh, hex, FRAME, x + ux * .9f, y + uy * .9f, px, py, GATE_DOOR, .5f, floor, top);
@@ -1070,17 +1425,44 @@ final class BoardMultiHexBuilding {
         }
     }
 
-    /**
-     * The blast door of the annex's own gatehouse ({@link #module}), its tube's start in front of it as {@link #bellows}
-     * takes it; null where the annex has no module.
-     */
-    private static float[] door(Layout layout) { return door(layout, 0, 0); }
-
-    /** The blast door of the gatehouse over the annex whose centre lies at (x, y) in the share, whichever dome's, or null. */
-    private static float[] door(Layout layout, float x, float y) {
+    /** A gatehouse door, or the corridor wall reached from the annex's centre towards its entrance. */
+    private static float[] door(Layout layout, float x, float y, float ux, float uy, float half) {
         for (Dome dome : layout.domes()) {
             float[] door = door(dome, x - dome.x(), y - dome.y());
             if (door != null) { return door; }
+        }
+        if (!inside(hex(), x, y)) { return null; }
+        float[] result = null;
+        Tunnel owner = null;
+        float nearest = Float.POSITIVE_INFINITY;
+        for (Tunnel tunnel : layout.tunnels()) {
+            for (int edge = 0; edge < tunnel.outline().size(); edge++) {
+                Point a = tunnel.outline().get(edge), b = tunnel.outline().get((edge + 1) % tunnel.outline().size());
+                float dx = b.x() - a.x(), dy = b.y() - a.y(), cross = ux * dy - uy * dx;
+                if (Math.abs(cross) < EPSILON || tunnel.openings().get(edge) >= tunnel.top() - EPSILON) { continue; }
+                float distance = ((a.x() - x) * dy - (a.y() - y) * dx) / cross;
+                float along = ((a.x() - x) * uy - (a.y() - y) * ux) / cross;
+                if (distance < 0 || distance >= nearest || along < 0 || along > 1) { continue; }
+                nearest = distance;
+                owner = tunnel;
+                float length = (float) Math.hypot(dx, dy);
+                result = new float[] { x + ux * distance, y + uy * distance, dy / length, -dx / length,
+                      tunnel.foot(), Math.min(tunnel.top() - BEVEL_RISE, tunnel.foot() + GATE_DOOR_HEIGHT) };
+            }
+        }
+        if (owner == null) { return null; }
+        // Stay on the gate's centreline, including a corner entry. Recess the whole mouth into the footprint;
+        // the passage cuts both intersected walls to its own profile instead of bending towards one of them.
+        Area footprint = area(owner.outline().stream().map(p -> new float[] { p.x(), p.y() }).toList());
+        for (int step = 0; step <= Math.ceil(nearest); step++) {
+            float distance = Math.max(0, nearest - step), px = x + ux * distance, py = y + uy * distance;
+            float ax = px - uy * half, ay = py + ux * half, bx = px + uy * half, by = py - ux * half;
+            Area collar = area(List.of(new float[] { ax, ay }, new float[] { bx, by },
+                  new float[] { bx - ux, by - uy }, new float[] { ax - ux, ay - uy }));
+            collar.subtract(footprint);
+            if (collar.isEmpty()) {
+                return new float[] { px, py, ux, uy, owner.foot(), result[5] };
+            }
         }
         return null;
     }
@@ -1126,72 +1508,155 @@ final class BoardMultiHexBuilding {
         float from = (float) Math.hypot(bx, by), start = dome.podium() * (float) Math.cos(Math.PI / 12) - 1;
         if (from <= start + 1) { return null; }
         float ux = bx / from, uy = by / from;
-        return new float[] { dome.x() + ux * start, dome.y() + uy * start, ux, uy, floor, floor + GATE_HEIGHT };
+        return new float[] { dome.x() + ux * start, dome.y() + uy * start, ux, uy, floor, floor + GATE_DOOR_HEIGHT };
     }
 
     /** The height above its floor a bending passage's arched roof springs from (#arch). */
     private static final float SPRING = 6;
 
     /**
-     * A vehicle gate's passage, cut to the hex, as wide as the gate, from {@code from} to {@code to} (as
-     * {@link #bellows} takes its ends, and the height it reaches at each, over a door it covers): straight on, a rigid
-     * panelled corridor under a sloping roof; turned, a corrugated tunnel that bends.
+     * A rigid pressure passage. Corresponding points of its two rounded rectangular mouths are lofted directly,
+     * keeping short angled connections full-width instead of folding a wide tube around a tight centreline.
      */
     private static void passage(GeneratedMesh mesh, List<float[]> hex, float[] from, float[] to, int lod) {
-        float dx = to[0] - from[0], dy = to[1] - from[1], length = (float) Math.hypot(dx, dy);
+        float length = (float) Math.hypot(to[0] - from[0], to[1] - from[1]);
         if (length < 1.5f) { return; }
-        boolean straight = from[2] * to[2] + from[3] * to[3] > Math.cos(Math.toRadians(8))
-              && Math.abs(dx * from[3] - dy * from[2]) < 2.5f;
-        if (straight) {
-            // Its roof meets the gate's wall top, under its bevelled cap.
-            corridor(mesh, hex, from, new float[] { to[0], to[1], to[2], to[3], to[4], to[5] - BEVEL_RISE });
-        } else {
-            // Recess the rear collar into the building so the angled opening has room to turn at full door width;
-            // both collars stay under their caps (#moduleBlock's bevel).
-            float recess = GATE_HALF / 2;
-            float[] start = { from[0] - from[2] * recess, from[1] - from[3] * recess, from[2], from[3], from[4], from[5] - 1.1f };
-            float[] end = { to[0] + to[2] * 2, to[1] + to[3] * 2, to[2], to[3], to[4], to[5] - BEVEL_RISE - 1.6f };
-            bellows(mesh, hex, start, end, lod, GATE_HALF - 1.5f, true);
+        float[][] start = passageProfile(from, to, 0, 0), end = passageProfile(from, to, 1, 0);
+        passageOpening(mesh, start, end, from, to);
+        // Anchor the wrap at the roof's centre, not the ground: a ramp must not slide its panels round the arch.
+        float across = 0;
+        for (int i = 0; i < start.length / 2 - 1; i++) { across -= new Vector3(start[i]).dst(new Vector3(start[i + 1])); }
+        across -= new Vector3(start[start.length / 2 - 1]).dst(new Vector3(start[start.length / 2])) / 2;
+        for (int side = 0; side < start.length - 1; side++) {
+            String material = side == 0 || side == start.length - 2 ? WALL : ROOF;
+            passagePanel(mesh, hex, material, start[side], start[side + 1], end[side + 1], end[side], across, 0);
+            across += new Vector3(start[side]).dst(new Vector3(start[side + 1]));
+        }
+        // Heavy fitted end flanges and a few widely spaced structural hoops, never an accordion skin.
+        int bays = Math.max(2, Math.round((length + GATE_HALF / 2 + 2) / 8));
+        for (int rib = 0; rib <= bays; rib++) {
+            float centre = (float) rib / bays;
+            float half = (rib == 0 || rib == bays ? .75f : .38f) / (length + GATE_HALF / 2 + 2);
+            float lo = Math.max(0, centre - half), hi = Math.min(1, centre + half);
+            float[][] a = passageProfile(from, to, lo, 0), b = passageProfile(from, to, hi, 0);
+            float[][] c = passageProfile(from, to, lo, .55f), d = passageProfile(from, to, hi, .55f);
+            float run = 0;
+            for (int side = 0; side < a.length - 1; side++) {
+                passagePanel(mesh, hex, PIER, c[side], c[side + 1], d[side + 1], d[side], run, 0);
+                passagePanel(mesh, hex, PIER, a[side], a[side + 1], c[side + 1], c[side], run, 0);
+                passagePanel(mesh, hex, PIER, d[side], d[side + 1], b[side + 1], b[side], run, 0);
+                run += new Vector3(c[side]).dst(new Vector3(c[side + 1]));
+            }
         }
     }
 
-    /**
-     * A straight passage, cut to the hex: a panelled block as wide as its gate from a unit inside the building at
-     * {@code from} to half a unit inside the gate at {@code to}, on the ground, its roof sloping from the one's height
-     * to the other's.
-     */
-    private static void corridor(GeneratedMesh mesh, List<float[]> hex, float[] from, float[] to) {
-        float dx = to[0] - from[0], dy = to[1] - from[1], length = (float) Math.hypot(dx, dy);
-        float ux = dx / length, uy = dy / length, px = -uy * GATE_HALF, py = ux * GATE_HALF;
-        float sx = from[0] - ux, sy = from[1] - uy, ex = to[0] + ux * .5f, ey = to[1] + uy * .5f;
-        // Counter-clockwise from the start's right corner, with each corner's top.
-        float[][] foot = { { sx - px, sy - py, from[5] }, { ex - px, ey - py, to[5] }, { ex + px, ey + py, to[5] },
-              { sx + px, sy + py, from[5] } };
-        float along = 0;
-        for (int edge = 0; edge < 4; edge++) {
-            float[] a = foot[edge], b = foot[(edge + 1) % 4];
-            float wx = b[0] - a[0], wy = b[1] - a[1], width = (float) Math.hypot(wx, wy), nx = wy / width, ny = -wx / width;
-            float u0 = along / WALL_REPEAT, u1 = (along + width) / WALL_REPEAT;
-            along += width;
-            float[] a0 = vertex(a[0], a[1], 0, nx, ny, 0, contact(0), u0, 0);
-            float[] b0 = vertex(b[0], b[1], 0, nx, ny, 0, contact(0), u1, 0);
-            float[] b1 = vertex(b[0], b[1], b[2], nx, ny, 0, 1, u1, -b[2] / WALL_REPEAT);
-            float[] a1 = vertex(a[0], a[1], a[2], nx, ny, 0, 1, u0, -a[2] / WALL_REPEAT);
-            outward(mesh, WALL, hex, a0, b0, b1);
-            outward(mesh, WALL, hex, a0, b1, a1);
+    /** Broad flat roof, rounded shoulders and vertical walls, recessed into both buildings under their caps. */
+    private static float[][] passageProfile(float[] from, float[] to, float t, float relief) {
+        float recess = GATE_HALF / 2;
+        float sx = from[0] - from[2] * recess, sy = from[1] - from[3] * recess;
+        float ex = to[0] + to[2] * 2, ey = to[1] + to[3] * 2;
+        float sign = from[2] * to[2] + from[3] * to[3] < 0 ? -1 : 1;
+        // Do not normalise the interpolated axes: that would bow the inner wall into the usable passage.
+        float ax = from[3] * (1 - t) + to[3] * sign * t, ay = -from[2] * (1 - t) - to[2] * sign * t;
+        float x = sx + (ex - sx) * t, y = sy + (ey - sy) * t;
+        float top = from[5] * (1 - t) + (to[5] - BEVEL_RISE) * t + relief;
+        float half = GATE_HALF - 1.5f + relief, shoulder = Math.min(6, top * .4f);
+        int steps = 5;
+        List<float[]> result = new ArrayList<>(2 * steps + 4);
+        result.add(new float[] { x - ax * half, y - ay * half, 0 });
+        for (int corner = 0; corner <= steps; corner++) {
+            double angle = Math.PI / 2 * corner / steps;
+            float out = -half + shoulder * (1 - (float) Math.cos(angle));
+            result.add(new float[] { x + ax * out, y + ay * out, top - shoulder + shoulder * (float) Math.sin(angle) });
         }
-        float rise = (to[5] - from[5]) / (length + 1.5f), lean = (float) Math.sqrt(1 + rise * rise);
-        float nx = -ux * rise / lean, ny = -uy * rise / lean, nz = 1 / lean;
-        float[][] roof = new float[4][];
-        for (int corner = 0; corner < 4; corner++) {
-            // Laid along the passage from its start, alike in every share.
-            float[] c = foot[corner];
-            float ox = c[0] - sx, oy = c[1] - sy;
-            roof[corner] = vertex(c[0], c[1], c[2], nx, ny, nz, 1, (ox * ux + oy * uy) * lean / ROOF_REPEAT,
-                  (ox * uy - oy * ux) / ROOF_REPEAT);
+        for (int corner = 0; corner <= steps; corner++) {
+            double angle = Math.PI / 2 * corner / steps;
+            float out = half - shoulder + shoulder * (float) Math.sin(angle);
+            result.add(new float[] { x + ax * out, y + ay * out, top - shoulder + shoulder * (float) Math.cos(angle) });
         }
-        outward(mesh, ROOF, hex, roof[0], roof[1], roof[2]);
-        outward(mesh, ROOF, hex, roof[0], roof[2], roof[3]);
+        result.add(new float[] { x + ax * half, y + ay * half, 0 });
+        return result.toArray(float[][]::new);
+    }
+
+    /** A rigid plate with physical texture distances and a normal derived from the plate, including sloping roofs. */
+    private static void passagePanel(GeneratedMesh mesh, List<float[]> hex, String material, float[] a, float[] b,
+          float[] c, float[] d, float across, float along) {
+        Vector3 origin = new Vector3(a), u = new Vector3(d).sub(origin).nor();
+        Vector3 v = new Vector3(b).sub(origin), normal = new Vector3(v).crs(u).nor();
+        if (normal.isZero(.0001f)) { return; }
+        v.set(u).crs(normal).nor();
+        float[][] vertices = new float[4][];
+        float[][] points = { a, b, c, d };
+        for (int i = 0; i < 4; i++) {
+            float[] p = points[i]; Vector3 delta = new Vector3(p).sub(origin);
+            float uvScale = ROOF_REPEAT / 2;
+            float du = (along + delta.dot(u)) / uvScale, dv = (across + delta.dot(v)) / uvScale;
+            if (material.equals(WALL)) { du = (along + delta.dot(u)) / LEVEL; dv = -p[2] / WALL_REPEAT; }
+            vertices[i] = vertex(p[0], p[1], p[2], normal.x, normal.y, normal.z, contact(p[2]), du, dv);
+        }
+        outward(mesh, material, hex, vertices[0], vertices[1], vertices[2]);
+        outward(mesh, material, hex, vertices[0], vertices[2], vertices[3]);
+    }
+
+    /** Cut the passage's volume out of the facade, including windows, floor bands and inset panel details. */
+    private static void passageOpening(GeneratedMesh mesh, float[][] start, float[][] end, float[] from, float[] to) {
+        List<float[]> planes = new ArrayList<>();
+        planes.add(new float[] { -from[2], -from[3], 0, -from[2] * start[0][0] - from[3] * start[0][1] });
+        planes.add(new float[] { to[2], to[3], 0, to[2] * end[0][0] + to[3] * end[0][1] });
+        planes.add(new float[] { 0, 0, -1, .01f });
+        var bounds = new BoundingBox();
+        for (int i = 0; i < start.length; i++) { bounds.ext(new Vector3(start[i])); bounds.ext(new Vector3(end[i])); }
+        for (int i = 0; i < start.length - 1; i++) {
+            Vector3 a = new Vector3(start[i]), b = new Vector3(start[i + 1]), c = new Vector3(end[i + 1]), d = new Vector3(end[i]);
+            Vector3 n = new Vector3(b).sub(a).crs(new Vector3(d).sub(a)).nor();
+            planes.add(new float[] { n.x, n.y, n.z, n.dot(a) });
+            n.set(c).sub(b).crs(new Vector3(d).sub(b)).nor();
+            planes.add(new float[] { n.x, n.y, n.z, n.dot(b) });
+        }
+        for (var entry : mesh.parts.entrySet()) {
+            FloatArray source = entry.getValue(), result = new FloatArray();
+            for (int at = 0; at < source.size; at += 3 * RigidGlb.STRIDE) {
+                List<float[]> polygon = new ArrayList<>(3);
+                BoundingBox triangle = new BoundingBox();
+                for (int corner = 0; corner < 3; corner++) {
+                    float[] v = new float[RigidGlb.STRIDE];
+                    System.arraycopy(source.items, at + corner * RigidGlb.STRIDE, v, 0, v.length);
+                    polygon.add(v); triangle.ext(new Vector3(v[0], v[1], v[2]));
+                }
+                if (!bounds.intersects(triangle)) {
+                    result.addAll(source.items, at, 3 * RigidGlb.STRIDE); continue;
+                }
+                // Each outside piece is disjoint; only what remains inside all planes is the removed opening.
+                for (float[] plane : planes) {
+                    List<float[]> outside = passageClip(polygon, plane, true);
+                    for (int i = 1; i < outside.size() - 1; i++) {
+                        result.addAll(outside.getFirst()); result.addAll(outside.get(i)); result.addAll(outside.get(i + 1));
+                    }
+                    polygon = passageClip(polygon, plane, false);
+                    if (polygon.isEmpty()) { break; }
+                }
+            }
+            entry.setValue(result);
+        }
+    }
+
+    /** Clip a facade triangle against a passage plane, interpolating positions, normals, colour and UVs together. */
+    private static List<float[]> passageClip(List<float[]> polygon, float[] plane, boolean outside) {
+        List<float[]> result = new ArrayList<>();
+        float sign = outside ? -1 : 1;
+        for (int i = 0; i < polygon.size(); i++) {
+            float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());
+            float da = sign * (plane[0] * a[0] + plane[1] * a[1] + plane[2] * a[2] - plane[3]);
+            float db = sign * (plane[0] * b[0] + plane[1] * b[1] + plane[2] * b[2] - plane[3]);
+            if (da <= 0) { result.add(a); }
+            if (da < 0 != db < 0 && da != 0 && db != 0) {
+                float share = da / (da - db); float[] v = new float[a.length];
+                for (int k = 0; k < v.length; k++) { v[k] = a[k] + (b[k] - a[k]) * share; }
+                Vector3 n = new Vector3(v[3], v[4], v[5]).nor(); v[3] = n.x; v[4] = n.y; v[5] = n.z;
+                result.add(v);
+            }
+        }
+        return result.size() < 3 ? List.of() : result;
     }
 
     /**
@@ -1597,10 +2062,18 @@ final class BoardMultiHexBuilding {
 
     /** {@link #flat}, cut to the hex: a part of a dome's building over whichever shares it stands. */
     private static void clippedFlat(GeneratedMesh mesh, List<float[]> hex, String material, List<float[]> polygon, float z) {
-        float[] first = deck(polygon.getFirst()[0], polygon.getFirst()[1], z, 1);
-        for (int i = 1; i < polygon.size() - 1; i++) {
-            mesh.clipped(material, hex, first, deck(polygon.get(i)[0], polygon.get(i)[1], z, 1),
-                  deck(polygon.get(i + 1)[0], polygon.get(i + 1)[1], z, 1));
+        clippedPolygon(mesh, hex, material, polygon.stream().map(point -> deck(point[0], point[1], z, 1)).toList());
+    }
+
+    /** Concave corridor bends need triangulation rather than a fan across their empty inside corner. */
+    private static void clippedPolygon(GeneratedMesh mesh, List<float[]> hex, String material, List<float[]> vertices) {
+        float[] xy = new float[vertices.size() * 2];
+        for (int index = 0; index < vertices.size(); index++) {
+            xy[index * 2] = vertices.get(index)[0]; xy[index * 2 + 1] = vertices.get(index)[1];
+        }
+        var indices = new EarClippingTriangulator().computeTriangles(xy);
+        for (int index = 0; index < indices.size; index += 3) {
+            mesh.clipped(material, hex, vertices.get(indices.get(index)), vertices.get(indices.get(index + 2)), vertices.get(indices.get(index + 1)));
         }
     }
 
@@ -1674,14 +2147,19 @@ final class BoardMultiHexBuilding {
             float[] w2 = vertex(bx, by, top, nx, ny, 0, 1, u1, v1), w3 = vertex(ax, ay, top, nx, ny, 0, 1, u0, v1);
             mesh.clipped(WALL, hex, w0, w1, w2);
             mesh.clipped(WALL, hex, w0, w2, w3);
-            // Its roof, from the outline in to the ring beam, laid round the ring: along it at its middle, across it in.
-            float middle = (inner + flat) / 2;
-            float[][] corners = { vertex(ax, ay, top, 0, 0, 1, 1, (float) a * middle / ROOF_REPEAT, oa / ROOF_REPEAT),
-                  vertex(bx, by, top, 0, 0, 1, 1, (float) b * middle / ROOF_REPEAT, ob / ROOF_REPEAT),
-                  vertex(x + inner * cb, y + inner * sb, top, 0, 0, 1, 1, (float) b * middle / ROOF_REPEAT, inner / ROOF_REPEAT),
-                  vertex(x + inner * ca, y + inner * sa, top, 0, 0, 1, 1, (float) a * middle / ROOF_REPEAT, inner / ROOF_REPEAT) };
-            mesh.clipped(PLINTH_MATERIAL, hex, corners[0], corners[1], corners[2]);
-            mesh.clipped(PLINTH_MATERIAL, hex, corners[0], corners[2], corners[3]);
+            // Each rib-bounded bay has a straight outer edge. Lay square panels along that edge, rather than
+            // warping them by angle/radius. All four segments and all hex shares use the same bay's axes.
+            double bay = Math.PI / sides * (2 * (segment / steps) + 1);
+            float ux = -(float) Math.sin(bay), uy = (float) Math.cos(bay);
+            float[][] corners = { deck(ax, ay, top, 1), deck(bx, by, top, 1),
+                  deck(x + inner * cb, y + inner * sb, top, 1), deck(x + inner * ca, y + inner * sa, top, 1) };
+            for (float[] v : corners) {
+                float dx = v[0] - x, dy = v[1] - y;
+                v[10] = (dx * ux + dy * uy + corner * (float) Math.sin(Math.PI / sides)) / ROOF_REPEAT;
+                v[11] = (dx * uy - dy * ux - flat) / ROOF_REPEAT;
+            }
+            mesh.clipped(ROOF, hex, corners[0], corners[1], corners[2]);
+            mesh.clipped(ROOF, hex, corners[0], corners[2], corners[3]);
             // Its inner wall faces the dome, under the glass.
             float[] i0 = vertex(x + inner * cb, y + inner * sb, bottom, -cb, -sb, 0, contact(0), u1, v0);
             float[] i1 = vertex(x + inner * ca, y + inner * sa, bottom, -ca, -sa, 0, contact(0), u0, v0);
@@ -1718,6 +2196,9 @@ final class BoardMultiHexBuilding {
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle);
             clippedBlock(mesh, hex, PIER, x + ux * (flat - rim), y + uy * (flat - rim), -uy, ux, half - rim, rim, top,
                   top + .9f);
+            float[] a = { x + flat * ux + half * uy, y + flat * uy - half * ux };
+            float[] b = { x + flat * ux - half * uy, y + flat * uy + half * ux };
+            facadeDetails(mesh, hex, a, b, bottom, top, 2 * half * side, true, true);
         }
     }
 
@@ -1782,37 +2263,6 @@ final class BoardMultiHexBuilding {
                   bottom, top - Math.min(6, rise * .25f));
         }
         moduleBlock(mesh, hex, moduleOutline(cx, cy, ux, uy, head, outer, MODULE_HALF + HEAD, MODULE_CHAMFER), bottom, top);
-        float side = MODULE_HALF + HEAD - BEVEL - 1;
-        // Chosen by the module, alike in every share it crosses.
-        var random = new SplittableRandom(Float.floatToIntBits(ux) * 31L + Float.floatToIntBits(uy) * 17L
-              + Float.floatToIntBits(outer));
-        // Separate bays for machinery and access: complete fittings clear the cap and one another. A short
-        // gatehouse omits what cannot fit instead of clipping a hatch or grille into its bevel.
-        float spot = head + 10, flank = random.nextFloat() < .5f ? 1 : -1;
-        if (outer - head >= 22) {
-            clippedBlock(mesh, hex, FRAME, cx + ux * spot, cy + uy * spot, ux, uy, 4.5f, 5, top, top + 3 + random.nextFloat());
-            for (int unit = -1; unit <= 1; unit += 2) {
-                float across = unit * 9.5f, z = top + 1.4f + .8f * random.nextFloat();
-                float vx = cx + ux * spot + px * across, vy = cy + uy * spot + py * across;
-                clippedBlock(mesh, hex, PIER, vx, vy, ux, uy, 3, 2.4f, top, z);
-                roofDetail(mesh, hex, vx, vy, ux, uy, 2.7f, 2.1f, z + .02f, .775f, .115f, .99f, .425f);
-            }
-            float conduit = (outer - BEVEL - 2 + spot + 5) / 2, length = (outer - BEVEL - 2 - spot - 5) / 2;
-            if (length > 1) {
-                clippedBlock(mesh, hex, PIER, cx + ux * conduit + px * flank * (side - 1), cy + uy * conduit + py * flank * (side - 1),
-                      ux, uy, length, .7f, top, top + .9f);
-            }
-            if (outer - head >= 30) {
-                float access = outer - BEVEL - 4, hx = cx + ux * access + px * flank * 6;
-                float hy = cy + uy * access + py * flank * 6;
-                clippedBlock(mesh, hex, PIER, hx, hy, ux, uy, 3.3f, 3.3f, top, top + .35f);
-                roofDetail(mesh, hex, hx, hy, ux, uy, 3, 3, top + .37f, .025f, .015f, .26f, .265f);
-                if (random.nextFloat() < .5f) {
-                    clippedBlock(mesh, hex, SKYLIGHT, cx + ux * access - px * flank * 6, cy + uy * access - py * flank * 6,
-                          ux, uy, 3.5f, 4, top, top + .7f);
-                }
-            }
-        }
         // The blast door: a dark steel frame round a pale door under a yellow lintel; a gate's passage docked to it hides it.
         float door = Math.min(15, rise - 3), fx = cx + ux * outer, fy = cy + uy * outer;
         if (!docked(dome, ux, uy)) {
@@ -1830,59 +2280,176 @@ final class BoardMultiHexBuilding {
         }
     }
 
-    /** One complete hatch or grille from the roof artwork, on a fitting's top; hex cuts interpolate the same UVs. */
-    private static void roofDetail(GeneratedMesh mesh, List<float[]> hex, float x, float y, float ux, float uy,
-          float along, float across, float z, float u0, float v0, float u1, float v1) {
-        List<float[]> corners = new ArrayList<>(4);
-        for (float[] sign : new float[][] { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) {
-            corners.add(vertex(x + ux * along * sign[0] - uy * across * sign[1],
-                  y + uy * along * sign[0] + ux * across * sign[1], z, 0, 0, 1, 1,
-                  sign[1] < 0 ? u0 : u1, sign[0] < 0 ? v0 : v1));
-        }
-        mesh.clipped(ROOF_DETAILS, hex, corners.get(0), corners.get(1), corners.get(2));
-        mesh.clipped(ROOF_DETAILS, hex, corners.get(0), corners.get(2), corners.get(3));
-    }
-
     /**
      * A module's block over {@code walls} (#moduleOutline), cut to the hex: panelled faces, its cut corners in dark
      * steel, under a bevelled steel cap, its roof at {@code top}.
      */
     private static void moduleBlock(GeneratedMesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top) {
-        List<float[]> roof = parapets(walls, BEVEL);
+        moduleBlock(mesh, hex, walls, bottom, top, null, null);
+    }
+
+    /** Open corridor cuts have neither a wall nor a bevel across the shared roof. */
+    private static void moduleBlock(GeneratedMesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top,
+          List<Float> openings, Point origin) {
+        moduleBlock(mesh, hex, walls, bottom, top, openings, origin, true);
+    }
+
+    private static void moduleBlock(GeneratedMesh mesh, List<float[]> hex, List<float[]> walls, float bottom, float top,
+          List<Float> openings, Point origin, boolean detailed) {
+        List<float[]> cap = walls;
+        List<float[]> roof;
+        List<float[]> facades = walls;
+        if (openings == null) { roof = parapets(walls, BEVEL); }
+        else {
+            // A height-step facade lies on the hex cut. Recess its cladding so its relief stays in this share;
+            // the full-depth floor bands close the ledges up to the adjoining roof and the coping.
+            facades = new ArrayList<>();
+            for (int index = 0; index < walls.size(); index++) {
+                int before = (index + walls.size() - 1) % walls.size(), after = (index + 1) % walls.size();
+                float previousInset = openings.get(before) > 0 && openings.get(before) < top - EPSILON ? 1.1f : 0;
+                float nextInset = openings.get(index) > 0 && openings.get(index) < top - EPSILON ? 1.1f : 0;
+                facades.add(meet(shifted(walls.get(before), walls.get(index), previousInset),
+                      shifted(walls.get(index), walls.get(after), nextInset)));
+            }
+            // An open hex cut is not a roof edge. Extend it before bevelling, then let the shared hex clip trim the
+            // finished cap. Insetting an already clipped sliver can invert its corners and leave overlapping faces.
+            cap = new ArrayList<>();
+            for (int index = 0; index < walls.size(); index++) {
+                int before = (index + walls.size() - 1) % walls.size(), after = (index + 1) % walls.size();
+                cap.add(meet(shifted(walls.get(before), walls.get(index), openings.get(before) >= top - EPSILON ? -2 * BEVEL : 0),
+                      shifted(walls.get(index), walls.get(after), openings.get(index) >= top - EPSILON ? -2 * BEVEL : 0)));
+            }
+            roof = new ArrayList<>();
+            for (int index = 0; index < walls.size(); index++) {
+                int before = (index + walls.size() - 1) % walls.size(), after = (index + 1) % walls.size();
+                roof.add(meet(shifted(cap.get(before), cap.get(index), openings.get(before) >= top - EPSILON ? 0 : BEVEL),
+                      shifted(cap.get(index), cap.get(after), openings.get(index) >= top - EPSILON ? 0 : BEVEL)));
+            }
+        }
         float along = 0, slope = (float) Math.hypot(BEVEL, BEVEL_RISE);
         for (int edge = 0; edge < walls.size(); edge++) {
             int next = (edge + 1) % walls.size();
             float[] a = walls.get(edge), b = walls.get(next), c = roof.get(edge), d = roof.get(next);
             float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
             float nx = (b[1] - a[1]) / length, ny = -(b[0] - a[0]) / length;
-            // The odd edges are the cut corners (#moduleOutline).
-            face(mesh, hex, edge % 2 == 1 ? PIER : WALL, a, b, nx, ny, bottom, top - BEVEL_RISE, along / WALL_REPEAT,
-                  (along + length) / WALL_REPEAT);
+            if (openings != null && openings.get(edge) >= top - EPSILON) { along += length; continue; }
+            // Only the fixed module outline alternates cut corners. A union's vertex order is not a facade design.
+            float wallU = origin == null ? along : (a[0] + origin.x()) * -ny + (a[1] + origin.y()) * nx;
+            float[] fa = facades.get(edge), fb = facades.get(next);
+            float facadeU = wallU + (fa[0] - a[0]) * -ny + (fa[1] - a[1]) * nx;
+            float facadeLength = (float) Math.hypot(fb[0] - fa[0], fb[1] - fa[1]);
+            face(mesh, hex, openings == null && edge % 2 == 1 ? PIER : WALL, fa, fb, nx, ny,
+                  openings == null ? bottom : Math.max(bottom, openings.get(edge)), top - BEVEL_RISE,
+                  facadeU / WALL_REPEAT, (facadeU + facadeLength) / WALL_REPEAT);
+            if (detailed) {
+                boolean startCorner = openings == null || openings.get((edge + walls.size() - 1) % walls.size()) < top - EPSILON;
+                boolean endCorner = openings == null || openings.get(next) < top - EPSILON;
+                facadeDetails(mesh, hex, fa, fb, openings == null ? bottom : Math.max(bottom, openings.get(edge)),
+                      top - BEVEL_RISE, facadeU, startCorner, endCorner);
+            }
+            float u0 = (wallU + (cap.get(edge)[0] - a[0]) * -ny + (cap.get(edge)[1] - a[1]) * nx) / 12;
+            float u1 = (wallU + length + (cap.get(next)[0] - b[0]) * -ny + (cap.get(next)[1] - b[1]) * nx) / 12;
+            a = cap.get(edge); b = cap.get(next);
             float sx = nx * BEVEL_RISE / slope, sy = ny * BEVEL_RISE / slope, sz = BEVEL / slope;
             // Unwrap each sloping strip along its edge and up its actual slope. Project the inset corners along
             // that edge so the trapezoid does not shear the panels; the perimeter origin is shared by every hex.
-            float u0 = along / 24, u1 = (along + length) / 24;
-            float uc = u0 + ((c[0] - a[0]) * -ny + (c[1] - a[1]) * nx) / 24;
-            float ud = u0 + ((d[0] - a[0]) * -ny + (d[1] - a[1]) * nx) / 24;
-            float[] va = vertex(a[0], a[1], top - BEVEL_RISE, sx, sy, sz, 1, u0, 0);
-            float[] vb = vertex(b[0], b[1], top - BEVEL_RISE, sx, sy, sz, 1, u1, 0);
-            float[] vd = vertex(d[0], d[1], top, sx, sy, sz, 1, ud, -slope / 24);
-            float[] vc = vertex(c[0], c[1], top, sx, sy, sz, 1, uc, -slope / 24);
-            mesh.clipped(FRAME, hex, va, vb, vd);
-            mesh.clipped(FRAME, hex, va, vd, vc);
+            float uc = u0 + ((c[0] - a[0]) * -ny + (c[1] - a[1]) * nx) / 12;
+            float ud = u0 + ((d[0] - a[0]) * -ny + (d[1] - a[1]) * nx) / 12;
+            // The dark coping uses the same along-piece metal grain as the dome ring's ribs.
+            float[] va = vertex(a[0], a[1], top - BEVEL_RISE, sx, sy, sz, 1, 0, u0);
+            float[] vb = vertex(b[0], b[1], top - BEVEL_RISE, sx, sy, sz, 1, 0, u1);
+            float[] vd = vertex(d[0], d[1], top, sx, sy, sz, 1, -slope / 12, ud);
+            float[] vc = vertex(c[0], c[1], top, sx, sy, sz, 1, -slope / 12, uc);
+            mesh.clipped(PIER, hex, va, vb, vd);
+            mesh.clipped(PIER, hex, va, vd, vc);
             along += length;
         }
         // Its roof laid along the block (#moduleOutline's first edge), from its first corner, alike in every share.
-        float[] origin = walls.getFirst(), next = walls.get(1);
-        float length = (float) Math.hypot(next[0] - origin[0], next[1] - origin[1]);
-        float ux = (next[0] - origin[0]) / length, uy = (next[1] - origin[1]) / length;
+        float[] start = walls.getFirst(), next = walls.get(1);
+        float length = (float) Math.hypot(next[0] - start[0], next[1] - start[1]);
+        float ux = (next[0] - start[0]) / length, uy = (next[1] - start[1]) / length;
         List<float[]> laid = new ArrayList<>(roof.size());
         for (float[] corner : roof) {
-            float dx = corner[0] - origin[0], dy = corner[1] - origin[1];
+            if (origin != null) {
+                float[] v = deck(corner[0], corner[1], top, 1); roofUV(v, origin); laid.add(v); continue;
+            }
+            float dx = corner[0] - start[0], dy = corner[1] - start[1];
             laid.add(vertex(corner[0], corner[1], top, 0, 0, 1, 1, (dx * ux + dy * uy) / ROOF_REPEAT,
                   (dx * uy - dy * ux) / ROOF_REPEAT));
         }
-        for (int i = 1; i < laid.size() - 1; i++) { mesh.clipped(ROOF, hex, laid.getFirst(), laid.get(i), laid.get(i + 1)); }
+        clippedPolygon(mesh, hex, ROOF, laid);
+    }
+
+    private static void roofUV(float[] vertex, Point origin) {
+        vertex[10] = (vertex[0] + origin.x()) / ROOF_REPEAT;
+        vertex[11] = -(vertex[1] + origin.y()) / ROOF_REPEAT;
+    }
+
+    /** The same framed habitat facade on corridors and dome rings. Roof equipment is placed by the editor. */
+    private static void facadeDetails(GeneratedMesh mesh, List<float[]> hex, float[] a, float[] b, float bottom, float top,
+          float phase, boolean startCorner, boolean endCorner) {
+        float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (length < 1 || top - bottom < 2) { return; }
+        float tx = (b[0] - a[0]) / length, ty = (b[1] - a[1]) / length;
+        float first = startCorner ? 1.1f : 0, last = length - (endCorner ? 1.1f : 0), pitch = LEVEL / 2;
+        for (float floor = (float) Math.floor(bottom / LEVEL) * LEVEL; floor < top; floor += LEVEL) {
+            float low = Math.max(bottom, floor), high = Math.min(top, floor + LEVEL);
+            if (high - low < 1) { continue; }
+            facadeStrip(mesh, hex, PIER, a, tx, ty, 0, length, .55f, 1.1f, low, low + .8f);
+            facadeStrip(mesh, hex, PIER, a, tx, ty, 0, length, .55f, 1.1f, high - .9f, high);
+            if (high - low < 7 || length < 8) { continue; }
+            float sill = high - 5.2f, lintel = high - 2;
+            // Glass sits back from the deep sill and lintel, on a dark gasket. Its bounded UVs sample a complete
+            // pressure window from the habitat material rather than tiling its entire wall over each pane.
+            facadeStrip(mesh, hex, PIER, a, tx, ty, first, last, .2f, .45f, sill - .35f, lintel + .35f);
+            facadeStrip(mesh, hex, PIER, a, tx, ty, first, last, .5f, .7f, sill - .6f, sill);
+            facadeStrip(mesh, hex, PIER, a, tx, ty, first, last, .5f, .7f, lintel, lintel + .6f);
+            for (int bay = (int) Math.floor((phase + first) / pitch); bay * pitch < phase + last; bay++) {
+                float from = bay * pitch - phase + .8f, to = (bay + 1) * pitch - phase - .8f;
+                float lo = Math.max(first, from), hi = Math.min(last, to);
+                if (hi - lo < .1f) { continue; }
+                float u0 = (lo - from) / (to - from), u1 = (hi - from) / (to - from);
+                float x0 = a[0] + tx * lo + ty * .44f, y0 = a[1] + ty * lo - tx * .44f;
+                float x1 = a[0] + tx * hi + ty * .44f, y1 = a[1] + ty * hi - tx * .44f;
+                float[] v0 = vertex(x0, y0, sill, ty, -tx, 0, 1, u0, 1), v1 = vertex(x1, y1, sill, ty, -tx, 0, 1, u1, 1);
+                float[] v2 = vertex(x1, y1, lintel, ty, -tx, 0, 1, u1, 0), v3 = vertex(x0, y0, lintel, ty, -tx, 0, 1, u0, 0);
+                mesh.clipped(WINDOW, hex, v0, v1, v2); mesh.clipped(WINDOW, hex, v0, v2, v3);
+            }
+        }
+        // Positions come from the complete facade's phase, so a clipped hex share does not restart the bays.
+        for (int bay = (int) Math.floor((phase - .5f) / LEVEL); bay * LEVEL < phase + length + .5f; bay++) {
+            float at = bay * LEVEL - phase;
+            if (startCorner && at < 1.5f || endCorner && at > length - 1.5f) { continue; }
+            facadeStrip(mesh, hex, PIER, a, tx, ty, Math.max(0, at - .6f), Math.min(length, at + .6f),
+                  .35f, 1.1f, bottom, top);
+        }
+        if (startCorner) { facadePost(mesh, hex, a, tx, ty, .55f, bottom, top); }
+        if (endCorner) { facadePost(mesh, hex, a, tx, ty, length - .55f, bottom, top); }
+    }
+
+    /** A strip of facade relief, measured along its wall and out from its surface. */
+    private static void facadeStrip(GeneratedMesh mesh, List<float[]> hex, String material, float[] a, float tx, float ty,
+          float from, float to, float out, float depth, float bottom, float top) {
+        if (to - from < EPSILON || top - bottom < EPSILON) { return; }
+        float middle = (from + to) / 2;
+        clippedBlock(mesh, hex, material, a[0] + tx * middle + ty * out, a[1] + ty * middle - tx * out,
+              tx, ty, (to - from) / 2, depth / 2, bottom, top);
+    }
+
+    private static void facadePost(GeneratedMesh mesh, List<float[]> hex, float[] a, float tx, float ty, float at,
+          float bottom, float top) {
+        facadeStrip(mesh, hex, PIER, a, tx, ty, at - .8f, at + .8f, .4f, 1.2f, bottom, top);
+        facadeStrip(mesh, hex, FIN_MATERIAL, a, tx, ty, at - .3f, at + .3f, 1.02f, .08f, top - 1.4f, top - .8f);
+        for (float z = bottom + 2; z < top - 2; z += LEVEL) {
+            facadeStrip(mesh, hex, FRAME, a, tx, ty, at - .35f, at + .35f, 1.05f, .15f, z, z + 1.3f);
+            facadeStrip(mesh, hex, LIGHT, a, tx, ty, at - .21f, at + .21f, 1.15f, .08f, z + .2f, z + 1.1f);
+        }
+        for (float z = bottom + 1; z < top - 1; z += 4.5f) {
+            for (float offset : new float[] { -.5f, .5f }) {
+                facadeStrip(mesh, hex, FRAME, a, tx, ty, at + offset - .11f, at + offset + .11f,
+                      1.04f, .1f, z, z + .22f);
+            }
+        }
     }
 
     /**
@@ -1903,6 +2470,21 @@ final class BoardMultiHexBuilding {
         } else {
             mesh.clipped(material, hex, corners[0], corners[1], corners[2]);
             mesh.clipped(material, hex, corners[0], corners[2], corners[3]);
+        }
+        if (material.equals(WALL)) {
+            // Annex and podium facades use the same solid inward backing as the modular kits.
+            double[] p = { corners[0][0], corners[0][1] }, q = { corners[1][0], corners[1][1] };
+            var wall = new KitOutline.Wall(p, q, KitOutline.End.OPEN, KitOutline.End.OPEN, List.of(), false);
+            var body = new GeneratedMesh();
+            KitOutline.wallBody(body, wall, List.of(wall), bottom, top, 0, 2);
+            List<GeneratedMesh.Keep> cuts = new ArrayList<>();
+            if (hex != null) {
+                for (int i = 0; i < hex.size(); i++) {
+                    float[] first = hex.get(i), next = hex.get((i + 1) % hex.size());
+                    cuts.add((x, y) -> (next[0] - first[0]) * (y - first[1]) - (next[1] - first[1]) * (x - first[0]));
+                }
+            }
+            mesh.add(body.clipped(cuts));
         }
     }
 

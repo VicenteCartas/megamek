@@ -20,6 +20,7 @@ import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.BridgeSpan;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
@@ -47,15 +48,21 @@ final class BoardFeatures {
     private static final List<String> ROCKY = List.of("vegetation/pine", "vegetation/tree-dead", "vegetation/pine-tall",
           "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered");
     static final List<String> VOLCANO_TREES = List.of("vegetation/tree-volcano-crown", "vegetation/tree-volcano-forked",
-          "vegetation/tree-volcano-spire");
+          "vegetation/tree-volcano-spire", "vegetation/tree-volcano-upright", "vegetation/tree-volcano-spreading");
     private static final List<String> WETLAND = List.of("vegetation/willow", "vegetation/tree-slender",
           "vegetation/tree-dead", "vegetation/willow", "vegetation/tree", "vegetation/willow-broad",
           "vegetation/willow-broad", "vegetation/birch-spreading", "vegetation/tree-forked");
+    /** Available forest forms; biome lists still choose the regional family and its frequency. */
+    private static final List<String> CANOPY_FORMS = java.util.stream.Stream.of(TEMPERATE, WETLAND,
+          List.of("vegetation/birch-mature", "vegetation/birch-forked", "vegetation/willow-arching")).flatMap(List::stream)
+          .filter(tree -> !BoardTreeCoverage.bare(tree)).distinct().toList();
     private static final List<String> BARREN = List.of("vegetation/tree-dead");
     private static final List<String> DESERT = List.of("vegetation/cactus", "vegetation/palm", "vegetation/tree-dead",
           "vegetation/cactus-flowers", "vegetation/palm-bent", "vegetation/cactus-old", "vegetation/cactus-young",
           "vegetation/cactus-organ");
     private static final List<String> PALMS = List.of("vegetation/palm", "vegetation/palm-bent");
+    private static final List<String> PALM_FORMS = java.util.stream.Stream.concat(PALMS.stream(),
+          java.util.stream.Stream.of("vegetation/palm-compact", "vegetation/palm-arching")).toList();
     private static final List<String> TROPICAL = List.of("vegetation/palm", "vegetation/palm-bent",
           "vegetation/tree-broad", "vegetation/palm", "vegetation/tree-slender", "vegetation/palm-bent",
           "vegetation/palm", "vegetation/tree-forked", "vegetation/palm-bent", "vegetation/tree-layered");
@@ -69,7 +76,7 @@ final class BoardFeatures {
           "mars/finger-crown", "mars/fan-folded", "mars/tube-crown",
           "mars/organ-pipes", "mars/spiral-whorls", "mars/lattice-spires");
     /** Every species that snow turns into its {@code -snow} form: the lists {@link #species} maps on snow. */
-    private static final Set<String> SNOW_FORMS = java.util.stream.Stream.of(TEMPERATE, HIGHLAND, ROCKY, WETLAND,
+    private static final Set<String> SNOW_FORMS = java.util.stream.Stream.of(CANOPY_FORMS, HIGHLAND, ROCKY, WETLAND,
           BARREN, BoardTreeDistribution.PARK, ORCHARD).flatMap(List::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
     private BoardFeatures() { }
 
@@ -230,18 +237,41 @@ final class BoardFeatures {
             placedLimbs.add(limb);
             if (slot / 2 < (slot % 2 == 0 ? arms : legs)) { result.add(limb); }
         }
+        var reference = hex.getBuildingReference();
+        Hex anchor = reference == null || board == null ? null : board.apply(reference.anchor());
+        BoardDecoration authored = anchor == null ? null : anchor.getDecorations().stream()
+              .filter(d -> d.id().equals(reference.id()) && BuildingVolumes.of(d.asset()).present()).findFirst().orElse(null);
+        if (authored != null && hex.containsTerrain(Terrains.BUILDING)) {
+            result.add(new BoardScene.Feature(authored.asset(), 0, 0, 0, 1, hex.terrainLevel(Terrains.BLDG_ELEV),
+                  (float) authored.placement().level(anchor), BoardScene.FeatureKind.BUILDING, 0, false, authored));
+        }
         for (var structure : structureModels.entrySet()) {
+            if (structure.getKey() == Terrains.BUILDING && authored != null) { continue; }
             int heightTerrain = switch (structure.getKey()) {
                 case Terrains.BUILDING -> Terrains.BLDG_ELEV;
                 case Terrains.FUEL_TANK -> Terrains.FUEL_TANK_ELEV;
                 default -> Terrains.INDUSTRIAL;
             };
-            result.add(new BoardScene.Feature(structure.getValue(), 0, 0, 0, 1,
+            var design = hex.getAppearance().get("building");
+            boolean isolated = structure.getKey() == Terrains.BUILDING && !TilesetScenery.buildingConnected(hex, coords, board);
+            float rotation = structure.getKey() == Terrains.BUILDING && design != null && design.rotation() != null
+                  && isolated ? -design.rotation() : 0;
+            float scale = 1;
+            if (isolated && TilesetScenery.generatedKit(structure.getValue())) {
+                scale = (float) (1 - HexAppearance.padding(hex.getAppearance()) / 100);
+                if (HexAppearance.footprint(hex.getAppearance()) == HexAppearance.Footprint.ANGLED) {
+                    // Fit the rotated hex (including its curb) back within the board hex.
+                    double angle = Math.toRadians(30 - Math.floorMod(Math.round(rotation), 60));
+                    scale *= (float) (Math.cos(Math.PI / 6) / Math.cos(angle));
+                }
+            }
+            result.add(new BoardScene.Feature(structure.getValue(), 0, 0, rotation, scale,
                   Math.max(1, hex.terrainLevel(heightTerrain)), 0, switch (structure.getKey()) {
                       case Terrains.BUILDING -> BoardScene.FeatureKind.BUILDING;
                       case Terrains.FUEL_TANK -> BoardScene.FeatureKind.FUEL_TANK;
                       default -> BoardScene.FeatureKind.INDUSTRIAL;
-                  }));
+                  }, 0, false, null, BoardDecoration.Stretch.NONE,
+                  structure.getKey() == Terrains.BUILDING && design != null ? design.colours() : BoardDecoration.Colours.NONE));
         }
         addBridge(hex, result);
         result.addAll(BoardMetalDeposits.capture(hex, coords));
@@ -291,7 +321,7 @@ final class BoardFeatures {
         return result;
     }
 
-    /** A density-independent sequence keeps existing trees when cover increases. Species still follow local stands. */
+    /** Local stands choose the family first; canopy form and population express the captured terrain density. */
     private static List<BoardScene.Feature> coveredWoods(WoodsLayout layout, Coords coords, boolean natural,
           BiPredicate<Float, Float> clear) {
         var coverage = new BoardTreeCoverage(clear);
@@ -308,8 +338,10 @@ final class BoardFeatures {
             float[] origin = coverPosition(index * 73, phase, 31);
             boolean sporeSlot = layout.fungus && !trunks.isEmpty() && layout.shorter(plantIndex) && spores < 3;
             List<String> choices = sporeSlot ? BoardFungus.SPORES : layout.fungus ? BoardFungus.CUPS : layout.species;
-            String asset = natural ? BoardTreeDistribution.species(choices, coords, origin[0], origin[1], random.nextLong())
+            long speciesSeed = natural ? random.nextLong() : coords.getX() * 31L + coords.getY() * 17L + index;
+            String asset = natural ? BoardTreeDistribution.species(choices, coords, origin[0], origin[1], speciesSeed)
                   : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, choices.size()));
+            if (layout.height > 1) { asset = canopyVariant(asset, layout.density, canopies, speciesSeed); }
             boolean cactus = asset.startsWith("vegetation/cactus"), bare = BoardTreeCoverage.bare(asset), rigid = layout.colonies() || cactus;
             boolean canopy = !rigid && !bare;
             if (canopy && canopies >= BoardTreeCoverage.canopyLimit(layout.density)) { break; }
@@ -320,7 +352,7 @@ final class BoardFeatures {
             BoardPlantFootprint bestFootprint = null;
             BoardTreeCoverage.Addition addition = null;
             double bestScore = 0;
-            // Shared milestones keep the sequence stable across densities, while avoiding a large early overshoot.
+            // Shared milestones spread the first crowns while avoiding a large early overshoot.
             float milestone = BoardTreeCoverage.target(coverage.fraction() < BoardTreeCoverage.target(1) - .03f ? 1
                   : coverage.fraction() < BoardTreeCoverage.target(2) - .03f ? 2 : 3);
             // Try full-height widths first, then a compact member of the same colony species if no full body fits.
@@ -485,15 +517,57 @@ final class BoardFeatures {
     }
 
     private static float woodsCrown(WoodsLayout layout, String tree, int index) {
-        float crown;
-        if (layout.low(index)) { crown = .9f; }
-        else if (tree.startsWith("vegetation/birch") || tree.startsWith("vegetation/willow")
-              || tree.startsWith("vegetation/tree") && !tree.startsWith("vegetation/tree-dead")) {
-            // Counts and placement express density; each tree retains its crown size.
-            crown = .9f;
-            if (layout.height >= 3) { crown *= 1.2f; }
-        } else { crown = layout.orchard ? .82f : 1.7f; }
+        float crown = layout.low(index) ? .9f : layout.orchard ? .82f : treeCrown(tree, layout.height);
         return crown * (.9f + (index % 3) * .1f);
+    }
+
+    private static float treeCrown(String tree, float height) {
+        if (tree.startsWith("vegetation/birch") || tree.startsWith("vegetation/willow")
+              || tree.startsWith("vegetation/tree") && !tree.startsWith("vegetation/tree-dead")) {
+            return .9f * (height >= 3 ? 1.2f : 1);
+        }
+        return 1.7f;
+    }
+
+    /** Reference level-two crowns give stable size classes, independent of camera, placement and individual jitter. */
+    private static float canopyFraction(String asset) { return BoardTreeCoverage.crownFraction(asset, treeCrown(asset, 2)); }
+
+    /** Choose a form within the already selected family; never filter the list that determines regional stands. */
+    static String canopyVariant(String selected, int density, int placed, long seed) {
+        if (!(selected.startsWith("vegetation/tree") && !BoardTreeCoverage.bare(selected)
+              || selected.startsWith("vegetation/birch") || selected.startsWith("vegetation/willow")
+              || selected.startsWith("vegetation/pine") || selected.startsWith("vegetation/palm"))) { return selected; }
+        boolean palm = selected.startsWith("vegetation/palm");
+        boolean snow = selected.endsWith("-snow");
+        String stem = snow ? selected.substring(0, selected.length() - 5) : selected;
+        var forms = palm ? PALM_FORMS : stem.startsWith("vegetation/tree-volcano") ? VOLCANO_TREES : CANOPY_FORMS;
+        var variants = forms.stream().filter(asset -> BoardTreeDistribution.sameFamily(asset, stem))
+              .map(asset -> snow ? asset + "-snow" : asset)
+              .sorted(Comparator.comparingDouble(BoardFeatures::canopyFraction)).toList();
+        if (variants.size() < 2) { return selected; }
+        float widest = canopyFraction(variants.getLast());
+        if (widest <= 0) { return selected; }
+        // Families without a medium crown still use their fuller available forms rather than losing their identity.
+        float substantial = Math.min(.08f, widest * .6f);
+        float lightMaximum = palm ? Math.min(.18f, widest * .85f) : .18f;
+        boolean medium = variants.stream().anyMatch(asset -> canopyFraction(asset) >= .08f && canopyFraction(asset) <= lightMaximum);
+        double[] weights = new double[variants.size()];
+        double total = 0;
+        for (int i = 0; i < variants.size(); i++) {
+            float area = canopyFraction(variants.get(i));
+            if (density == 1) {
+                if (medium && area > lightMaximum || area < substantial && placed < 2) { continue; }
+                weights[i] = area < substantial ? .25 : 1;
+            } else if (area >= substantial) {
+                weights[i] = Math.pow(area / widest, density == 2 ? 2 : 4);
+            }
+            total += weights[i];
+        }
+        double choice = new Random(seed).nextDouble() * total;
+        for (int i = 0; i < variants.size(); i++) {
+            if (weights[i] > 0 && (choice -= weights[i]) < 0) { return variants.get(i); }
+        }
+        return selected;
     }
 
     /** Trees reach cover height; fungal and Martian colonies include smaller bodies. Tropical understory stays low. */
@@ -1051,6 +1125,7 @@ final class BoardFeatures {
         List<megamek.common.board.BoardDecoration> objects = new ArrayList<>(RailRoute.derived(hex, owned));
         objects.addAll(hex.getDecorations());
         for (var object : objects) {
+            if (BuildingVolumes.of(object.asset()).present()) { continue; }
             if (liveCrossing(hex, coords, objects, object, ground, deck)) { continue; }
             result.add(feature(hex, object));
             if (RailRoute.kind(object) != RailRoute.Kind.RAIL) { continue; }

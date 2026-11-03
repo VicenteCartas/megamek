@@ -24,10 +24,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 @Tag("on-demand")
 class GpuRoofHoverSmokeTest {
     private static final Coords CENTER = new Coords(4, 4);
-    private static final String LEGACY = "buildings/saxarba/building_heavy/building_heavy_a_68";
+    private static final String SINGLE_HEX = "buildings/debug/debug-authored";
 
     @ParameterizedTest
-    @ValueSource(strings = { LEGACY, GpuBuildingTest.ASSET })
+    @ValueSource(strings = { SINGLE_HEX, GpuBuildingTest.ASSET })
     void hoveringAcrossARoofKeepsTheRoofSelected(String asset) {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);

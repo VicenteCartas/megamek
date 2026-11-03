@@ -301,6 +301,35 @@ final class KitOutline {
         return walls;
     }
 
+    /** Close exposed links for a roof without changing its footprint; its deck and rim share the new mitred outline. */
+    static Piece closedRoof(Piece piece, int closed) {
+        List<Wall> walls = new ArrayList<>(piece.walls());
+        for (int direction = 0; direction < 6; direction++) {
+            if ((closed & 1 << direction) == 0) { continue; }
+            walls.add(new Wall(hexCorner(direction), hexCorner((direction + 5) % 6),
+                  End.OPEN, End.OPEN, List.of(), false));
+        }
+        List<Wall> joined = new ArrayList<>();
+        for (Wall wall : walls) {
+            End start = wall.start(), end = wall.end();
+            List<GeneratedMesh.Keep> keeps = new ArrayList<>(wall.keeps());
+            double[] n = normal(wall.p(), wall.q());
+            for (Wall other : walls) {
+                if (wall == other) { continue; }
+                if (start == End.OPEN && close(wall.p(), other.q())) {
+                    start = End.CORNER;
+                    keeps.add(mitre(wall.p(), n, normal(other.p(), other.q()), wall.q()));
+                }
+                if (end == End.OPEN && close(wall.q(), other.p())) {
+                    end = End.CORNER;
+                    keeps.add(mitre(wall.q(), n, normal(other.p(), other.q()), wall.p()));
+                }
+            }
+            joined.add(new Wall(wall.p(), wall.q(), start, end, keeps, wall.front()));
+        }
+        return new Piece(piece.tags(), piece.direction(), piece.polygons(), joined);
+    }
+
     /**
      * A floor polygon kept {@code by} inside the piece's walls, as convex parts: without the band along each wall's
      * inside. The band runs on {@code by} past a corner end, so that at a concave corner the bands meet where the
@@ -390,20 +419,22 @@ final class KitOutline {
             double turn = cross(u1, u2);
             if (turn <= 1e-6) { continue; }
             double angle = Math.atan2(turn, u1[0] * u2[0] + u1[1] * u2[1]);
-            double reach = radius * Math.tan(angle / 2);
+            Wall firstNow = current.get(first), secondNow = current.get(second);
+            // A compact outline can put a joint closer than the requested corner radius. Do not reverse its wall.
+            double reach = Math.min(radius * Math.tan(angle / 2), .99 * Math.min(firstNow.length(), secondNow.length()));
+            double cornerRadius = reach / Math.tan(angle / 2);
             double[] corner = first.q();
             double[] a = { corner[0] - u1[0] * reach, corner[1] - u1[1] * reach };
             double[] b = { corner[0] + u2[0] * reach, corner[1] + u2[1] * reach };
-            double[] centre = { a[0] - u1[1] * radius, a[1] + u1[0] * radius };
+            double[] centre = { a[0] - u1[1] * cornerRadius, a[1] + u1[0] * cornerRadius };
             double start = Math.atan2(a[1] - centre[1], a[0] - centre[0]);
             List<double[]> arc = new ArrayList<>();
             for (int k = 0; k <= segments; k++) {
                 double at = start + angle * k / segments;
-                arc.add(new double[] { centre[0] + radius * Math.cos(at), centre[1] + radius * Math.sin(at) });
+                arc.add(new double[] { centre[0] + cornerRadius * Math.cos(at), centre[1] + cornerRadius * Math.sin(at) });
             }
             arc.set(0, a);
             arc.set(segments, b);
-            Wall firstNow = current.get(first), secondNow = current.get(second);
             Wall shortened = new Wall(firstNow.p(), a, firstNow.start(), End.ROUND, List.of(), firstNow.front());
             result.set(result.indexOf(firstNow), shortened);
             current.put(first, shortened);
@@ -432,14 +463,72 @@ final class KitOutline {
     }
 
     /**
-     * Every piece a kit of one footprint authors: the corner pieces in their four link states, and for Angled its
-     * whole-hex pieces, alone ({@code lone}, counter-clockwise from its front) and with one link (a hexside wide band
+     * A wall's ends for a band along it (skirt, parapet): each end point and its outward direction there, joined with
+     * the next round wall's (scaled so the bands meet), moved on past a cut or corner end, which the piece's cut or the
+     * wall's mitre trims.
+     */
+    static double[][] offsets(Wall wall, List<Wall> walls) {
+        double[] n = normal(wall.p(), wall.q()), u = direction(wall);
+        double[][] result = new double[4][];
+        for (int k = 0; k < 2; k++) {
+            double[] point = k == 0 ? wall.p() : wall.q();
+            End kind = k == 0 ? wall.start() : wall.end();
+            double sign = k == 0 ? -1 : 1;
+            Wall other = null;
+            if (kind == End.ROUND) {
+                for (var candidate : walls) {
+                    double[] meets = k == 0 ? candidate.q() : candidate.p();
+                    if (candidate != wall && Math.hypot(meets[0] - point[0], meets[1] - point[1]) < 1e-6) {
+                        other = candidate;
+                        break;
+                    }
+                }
+            }
+            if (other != null) {
+                double[] m = normal(other.p(), other.q());
+                double[] half = { n[0] + m[0], n[1] + m[1] };
+                double scale = 2 / (half[0] * half[0] + half[1] * half[1]);
+                result[2 * k] = point;
+                result[2 * k + 1] = new double[] { half[0] * scale, half[1] * scale };
+            } else if (kind == End.CUT || kind == End.CORNER) {
+                result[2 * k] = new double[] { point[0] + u[0] * sign * EXTEND, point[1] + u[1] * sign * EXTEND };
+                result[2 * k + 1] = n;
+            } else {
+                result[2 * k] = point;
+                result[2 * k + 1] = n;
+            }
+        }
+        return result;
+    }
+
+    /** Solid wall backing shared by bay and habitat kits: inward thickness, mitred corners and closed exposed ends. */
+    static void wallBody(GeneratedMesh result, Wall wall, List<Wall> walls, double bottom, double top, double inset, double thickness) {
+        double[][] ends = offsets(wall, walls);
+        double[] a = ends[0], b = ends[2], n = ends[1], m = ends[3];
+        double front = inset + .02, back = inset + thickness;
+        List<double[]> strip = List.of(new double[] { a[0] - n[0] * front, a[1] - n[1] * front },
+              new double[] { b[0] - m[0] * front, b[1] - m[1] * front },
+              new double[] { b[0] - m[0] * back, b[1] - m[1] * back },
+              new double[] { a[0] - n[0] * back, a[1] - n[1] * back });
+        GeneratedMesh body = new GeneratedMesh();
+        body.slab(GeneratedMesh.BUILDING_BODY, strip, bottom, top, true);
+        result.add(body.clipped(wall.keeps()));
+    }
+
+    /**
+     * Every piece a kit of one footprint authors: the corner pieces in their four link states, a compact isolated
+     * building, and for Angled its one-link whole-hex pieces (a hexside wide band
      * ending {@code end} short of the far hexside, its front). An Angled kit {@code turned} is symmetric: its north and
      * north-east corner pieces and a band linked north, which the runtime turns to every corner and link. A kit whose
      * pieces hold something placed in the hex (roof fittings) is not turned: its pieces stand in all six corners, its
-     * bands in all six directions, as the Square cells' always do.
+     * bands in all six directions, as the Square cells' always do. Link caps close exposed hexsides above shorter
+     * neighbours without changing the footprint; they contain walls only, since the connected pieces supply the slabs.
      */
-    static List<Piece> footprint(boolean square, List<double[]> lone, double end, boolean turned) {
+    static List<Piece> footprint(boolean square, double end, boolean turned) {
+        return footprint(square, end, turned, 1);
+    }
+
+    static List<Piece> footprint(boolean square, double end, boolean turned, float scale) {
         int directions = !square && turned ? 1 : 6;
         List<Piece> result = new ArrayList<>();
         for (int direction = 0; direction < directions; direction++) {
@@ -451,10 +540,22 @@ final class KitOutline {
                 result.add(square ? square(tags, direction, first, second) : angled(tags, direction, first, second));
             }
         }
+        // No neighbours need a joining band: leave room for facade details and sidewalks inside this hex.
+        List<double[]> isolated;
+        if (square) {
+            isolated = List.of(new double[] { -A, -A }, new double[] { A, -A }, new double[] { A, A }, new double[] { -A, A });
+        } else {
+            // Keep the facade and its curb inside the hex, with the entrance on the south face.
+            double inset = (H - 5) / H;
+            isolated = List.of(new double[] { -A * inset, -H * inset }, new double[] { A * inset, -H * inset },
+                  new double[] { R * inset, 0 }, new double[] { A * inset, H * inset },
+                  new double[] { -A * inset, H * inset }, new double[] { -R * inset, 0 });
+        }
+        StringBuilder alone = new StringBuilder();
+        isolated = isolated.stream().map(p -> new double[] { p[0] * scale, p[1] * scale }).toList();
+        for (String direction : DIRECTIONS) { alone.append("-end-").append(direction); }
+        result.add(new Piece(alone.toString(), null, List.of(isolated), outlineWalls(isolated, Set.of())));
         if (!square) {
-            StringBuilder alone = new StringBuilder();
-            for (String direction : DIRECTIONS) { alone.append("-end-").append(direction); }
-            result.add(new Piece(alone.toString(), null, List.of(lone), outlineWalls(lone, Set.of())));
             double[][] band = { { -A, -H + end }, { A, -H + end } };
             for (int direction = 0; direction < directions; direction++) {
                 List<double[]> outline = List.of(turnPoint(band[0], direction), turnPoint(band[1], direction),
@@ -463,6 +564,10 @@ final class KitOutline {
                 for (int d = 0; d < 6; d++) { tags.append(d == direction ? "-link-" : "-end-").append(DIRECTIONS[d]); }
                 result.add(new Piece(tags.toString(), null, List.of(outline), outlineWalls(outline, Set.of(2))));
             }
+        }
+        for (int direction = 0; direction < directions; direction++) {
+            var wall = new Wall(hexCorner(direction), hexCorner((direction + 5) % 6), End.OPEN, End.OPEN, List.of(), false);
+            result.add(new Piece("-link-" + DIRECTIONS[direction] + "-cap", null, List.of(), List.of(wall)));
         }
         return result;
     }

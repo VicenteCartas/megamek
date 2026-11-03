@@ -85,6 +85,7 @@ public class TWBoardTransformer {
         Board newBoard = setupBoardFromMapSettings(mapSettings);
         setupOptions(options, newBoard);
         setupPlanetaryConditions(planetaryConditions, newBoard);
+        newBoard.closeOffBoardBuildingExits();
         return newBoard;
     }
 

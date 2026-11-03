@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The side view at 1920x1080 and 1280x800, open and collapsed: its header follows the camera's yaw, the pills stack
+ * The side view starts fully open at 1280x800, then at 1920x1080 and 1280x800, open and collapsed: its header follows the camera's yaw, the pills stack
  * without overlapping, hovering a shared pill highlights the Layers rows and board outlines of all its objects (and a
  * Layers row its pill), and with a card armed a click on a guide places it on that support and a click in the air at a fixed level.
  * An idle open side view renders no new image and the idle editor reads no installed objects; dragging a shared pill moves every car it stands for in one undo step;
@@ -96,10 +96,15 @@ class GpuEditorSideViewSmokeTest {
                         var root = GpuBoardTestUi.stage().getRoot();
                         switch (step) {
                             case 0 -> {
-                                if (root.findActor("editor-hex-section") == null) { GpuBoardTestUi.click("editor-side-view-toggle"); }
-                                next(4);
+                                assertEquals(1280, Gdx.graphics.getWidth());
+                                assertEquals(at.getBoardNum() + " · " + section().looking(), summary(),
+                                      "The initial header must describe the open section");
+                                assertNotNull(root.findActor("editor-section-reveal"), "The section starts fully open, including Reveal");
+                                GpuBoardTestUi.capture(new File(output, "editor-side-view-startup-1280.png"));
+                                next(4); Gdx.graphics.setWindowedMode(1920, 1080);
                             }
                             case 1 -> {
+                                assertEquals(1920, Gdx.graphics.getWidth());
                                 GpuHexSection section = section();
                                 assertEquals(at.getBoardNum() + " · " + section.looking(), summary(),
                                       "The open header names the hex and the direction it looks along");
@@ -159,6 +164,8 @@ class GpuEditorSideViewSmokeTest {
                             }
                             case 10 -> {
                                 assertNull(root.findActor("editor-hex-section"), "Collapsing removes the section");
+                                assertNull(root.findActor("editor-section-reveal"), "Collapsing removes Reveal");
+                                assertTrue(root.findActor("editor-side-view").getHeight() < 44, "A collapsed side view is one line");
                                 assertTrue(summary().startsWith(at.getBoardNum() + " · Ground L1"), "The collapsed line summarises the hex");
                                 GpuBoardTestUi.capture(new File(output, "editor-side-view-collapsed-1920.png"));
                                 next(8); Gdx.graphics.setWindowedMode(1280, 800);
@@ -311,6 +318,6 @@ class GpuEditorSideViewSmokeTest {
     }
 
     private static com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration configuration() {
-        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1920, 1080); return config;
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1280, 800); return config;
     }
 }

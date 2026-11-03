@@ -56,8 +56,9 @@ public class CoreRulesMovement extends RulesMovement {
     @Override
     public boolean isBuildingElevationAllowed(Entity entity, Hex hex, int elevation) {
         // Aerospace deployment uses altitude; below-ground positions can result from a basement collapse.
-        return !(entity instanceof Mek) || entity.isAero() || !hex.containsTerrain(Terrains.BUILDING)
-              || elevation <= 0 || elevation >= hex.terrainLevel(Terrains.BLDG_ELEV);
+        return super.isBuildingElevationAllowed(entity, hex, elevation)
+              && (!(entity instanceof Mek) || entity.isAero() || !hex.containsTerrain(Terrains.BUILDING)
+                    || elevation <= 0 || elevation >= hex.terrainLevel(Terrains.BLDG_ELEV));
     }
 
     /**

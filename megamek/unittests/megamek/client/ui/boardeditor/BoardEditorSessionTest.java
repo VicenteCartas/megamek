@@ -297,7 +297,7 @@ class BoardEditorSessionTest {
         assertEquals(0, session.board().getHex(at).getLevel());
         assertEquals(0, session.board().getHex(2, 2).getLevel());
         send(session, Action.REDO, "", "");
-        Path broken = directory.resolve("future.board2"); Files.writeString(broken, "{\"version\":99}");
+        Path broken = directory.resolve("broken.board2"); Files.writeString(broken, "{broken json");
         assertThrows(java.io.IOException.class, () -> session.open(broken));
         assertEquals(3, session.board().getHex(at).getLevel());
         assertTrue(session.dirty());
@@ -320,7 +320,7 @@ class BoardEditorSessionTest {
     @Test void spaceAndWallPaletteBrushesPaintSaveAndUndoTheirActualTerrain() throws Exception {
         var blueprint = BoardEditorBlueprint.get();
         assertTrue(blueprint.entry("space/empty").sections().contains("ground-water/basic"));
-        assertTrue(blueprint.entry("building/wall").sections().contains("buildings/gameplay"));
+        assertTrue(blueprint.entry("building/wall").sections().contains("buildings/walls"));
         var session = session();
         send(session, Action.CHOOSE_BRUSH, "space", "empty");
         session.pointer(at, 0, 0, false); session.finishStroke();
@@ -1626,7 +1626,7 @@ class BoardEditorSessionTest {
         send(session, Action.ZONES, "", "1, 31");
         Path file = directory.resolve("zone-ids.board2");
         session.save(file);
-        assertTrue(Files.readString(file).contains("deployment_zone:0:1073741825"));
+        assertTrue(Files.readString(file).contains("\"deploymentZones\":[1,31]"));
         Board read = BoardFile.read(file);
         assertEquals(Set.of(at), read.getCustomDeploymentZone(1));
         assertEquals(Set.of(at), read.getCustomDeploymentZone(31));

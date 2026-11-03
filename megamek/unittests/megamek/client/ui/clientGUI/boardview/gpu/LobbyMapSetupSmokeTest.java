@@ -526,8 +526,13 @@ class LobbyMapSetupSmokeTest {
                 UiTestStage.capture("map-preview-buttons-" + mode, 1600, 1080).dispose();
                 ScrollPane list = fixture.body.findActor("map-board-list");
                 float scroll = list.getScrollY();
+                Actor search = fixture.body.findActor("map-search-field");
+                click(ui, search);
+                assertSame(search, ui.stage.getKeyboardFocus());
                 calls.clear();
                 click(ui, fixture.body.findActor("map-board-inspect-1"));
+                assertSame(fixture.body.findActor("map-inspection-image"), ui.stage.getKeyboardFocus(),
+                      "opening a preview transfers focus from the search field to its camera");
                 assertEquals(1, calls.stream().filter(call -> call.startsWith("inspect ")).count());
                 assertTrue(calls.stream().noneMatch(call -> call.startsWith("board ")));
                 assertFalse(fixture.body.findActor("map-layout-panel").isVisible());

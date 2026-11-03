@@ -62,7 +62,8 @@ public final class BoardTreeDistribution {
         return dominant;
     }
 
-    private static boolean sameFamily(String a, String b) {
+    /** Variant selection may change a crown without changing the regional tree family. */
+    public static boolean sameFamily(String a, String b) {
         if (a.startsWith("vegetation/tree-dead") != b.startsWith("vegetation/tree-dead")) { return false; }
         int endA = a.indexOf('-'), endB = b.indexOf('-');
         if (endA < 0) { endA = a.length(); }

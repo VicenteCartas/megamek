@@ -359,8 +359,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String BOARD_GRAPHICS = "BoardGraphics";
     /** The 3D board editor's Layers share of its right column; negative: their natural height. */
     public static final String BOARD_EDITOR_LAYERS_SPLIT = "BoardEditorLayersSplit";
-    /** Whether the 3D board editor's side view is open, as the user last left it. */
-    public static final String BOARD_EDITOR_SIDE_VIEW = "BoardEditorSideView";
     /** Whether the lobby requisition dossier's Readout tab shows the TRO rather than the Summary. */
     public static final String REQUISITION_READOUT_TRO = "RequisitionReadoutTro";
     /** The lobby requisition's kept category tab, weights, tech bases and rules levels. */
@@ -925,7 +923,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
-        store.setDefault(BOARD_EDITOR_SIDE_VIEW, true);
         store.setDefault(REQUISITION_READOUT_TRO, false);
         store.setDefault(REQUISITION_FILTERS, "");
         store.setDefault(LOBBY_CHAT_FOLDED, false);
@@ -2041,14 +2038,6 @@ public class GUIPreferences extends PreferenceStoreProxy {
 
     public void setBoardEditorLayersSplit(float split) {
         store.setValue(BOARD_EDITOR_LAYERS_SPLIT, split);
-    }
-
-    public boolean getBoardEditorSideView() {
-        return store.getBoolean(BOARD_EDITOR_SIDE_VIEW);
-    }
-
-    public void setBoardEditorSideView(boolean open) {
-        store.setValue(BOARD_EDITOR_SIDE_VIEW, open);
     }
 
     public int getWindowPosX() {

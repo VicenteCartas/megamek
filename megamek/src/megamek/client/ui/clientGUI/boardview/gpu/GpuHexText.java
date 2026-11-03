@@ -80,7 +80,8 @@ final class GpuHexText implements Disposable {
             this.textures = List.copyOf(textures);
             this.instances = instances;
             this.ranges = List.copyOf(ranges);
-            mesh = new Mesh(true, 4, 6, new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position"));
+            mesh = new GpuInstancedMesh(4, 6,
+                  new VertexAttributes(new VertexAttribute(VertexAttributes.Usage.Position, 2, "a_position")));
             try {
                 mesh.setVertices(new float[] { 0, 0, 0, 1, 1, 1, 1, 0 });
                 mesh.setIndices(new short[] { 0, 1, 2, 2, 3, 0 });

@@ -43,6 +43,7 @@ import java.util.Vector;
 import megamek.common.Hex;
 import megamek.common.Report;
 import megamek.common.board.Board;
+import megamek.common.board.BuildingInteriors;
 import megamek.common.board.CardinalDirection;
 import megamek.common.board.Coords;
 import megamek.common.board.CubeCoords;
@@ -132,6 +133,7 @@ public class BuildingTerrain implements IBuilding {
         }
 
         int armor = hex.containsTerrain(Terrains.BLDG_ARMOR) ? hex.terrainLevel(Terrains.BLDG_ARMOR) : 0;
+        BuildingInteriors.normalizeBasement(hex);
         BasementType basement = BasementType.getType(hex.terrainLevel(Terrains.BLDG_BASEMENT_TYPE));
         boolean collapsed = hex.terrainLevel(Terrains.BLDG_BASE_COLLAPSED) == 1;
 
@@ -252,6 +254,7 @@ public class BuildingTerrain implements IBuilding {
 
     @Override
     public void collapseBasement(Coords coords, Board board, Vector<Report> vPhaseReport) {
+        if (BuildingInteriors.resolve(board.getHex(coords)) == BuildingInteriors.NO) { return; }
         CubeCoords relative = boardToRelative(coords);
         building.collapseBasement(relative, board, vPhaseReport);
         // Update the board hex
@@ -270,6 +273,11 @@ public class BuildingTerrain implements IBuilding {
     @Override
     public boolean rollBasement(Coords coords, Board board, Vector<Report> vPhaseReport) {
         CubeCoords relative = boardToRelative(coords);
+        if (BuildingInteriors.resolve(board.getHex(coords)) == BuildingInteriors.NO) {
+            building.setBasement(relative, BasementType.NONE);
+            building.setBasementCollapsed(relative, false);
+            return false;
+        }
         boolean changed = building.rollBasement(relative, board, vPhaseReport);
         if (changed) {
             // Update the board hex with the rolled basement type

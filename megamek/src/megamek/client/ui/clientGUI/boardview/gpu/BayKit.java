@@ -30,7 +30,7 @@ final class BayKit {
      * beside the spec ({@code pieces}); the Angled lone hex's outline from its front ({@code lone}) and a single link's
      * band end; the roof slab and the storeys' floors ({@link Slab}); the ground storey's sidewalk ({@code null}: none);
      * and by role (base, floor and roof modules, in the order the runtime picks from) the module's runs, one per level of
-     * detail (the last for any further).
+     * detail (the last for any further). Facade thickness belongs to the authored panels, including their recesses.
      */
     record Spec(String name, String style, String pieces, List<double[]> lone, double bandEnd, Slab roof, Slab floors,
                 Sidewalk sidewalk, Map<String, List<Run>> modules) { }
@@ -65,6 +65,10 @@ final class BayKit {
 
     /** The kit's levels of detail ({@link GeneratedKit#lods}); {@code modelled}, the pieces GLB's levels. */
     static List<RigidGlb.Data> lods(Spec spec, List<ModelData> modelled, boolean square, String name) {
+        return lods(spec, modelled, square, name, 1);
+    }
+
+    static List<RigidGlb.Data> lods(Spec spec, List<ModelData> modelled, boolean square, String name, float footprintScale) {
         for (Slab slab : new Slab[] { spec.roof(), spec.floors() }) {
             if (slab == null || slab.material() == null || !(slab.repeat() > 0) || slab.heights() == null
                   || slab.heights().length == 0) {
@@ -83,26 +87,31 @@ final class BayKit {
         // Slabs and sidewalks under a material of their own: a piece of the same board material keeps its UVs.
         Map<String, Float> boardUVs = new HashMap<>();
         for (Slab slab : new Slab[] { spec.roof(), spec.floors() }) { boardUVs.put(board(slab.material()), (float) slab.repeat()); }
+        boardUVs.put(board(spec.floors().material()) + GeneratedMesh.BUILDING_FLOOR, (float) spec.floors().repeat());
         if (spec.sidewalk() != null) { boardUVs.put(board(spec.sidewalk().material()), (float) spec.sidewalk().repeat()); }
         return GeneratedKit.lods(name, square, modelled, List.copyOf(spec.modules().keySet()),
-              KitOutline.footprint(square, spec.lone(), spec.bandEnd(), true), boardUVs,
-              (role, piece, lod) -> Map.of("", module(spec, modelled, role, piece, lod)));
+              KitOutline.footprint(square, spec.bandEnd(), true, footprintScale), boardUVs,
+              (role, piece, lod) -> Map.of("", module(spec, modelled, role, piece, lod, footprintScale)));
     }
 
     /** One piece of a module: its walls' runs (and sidewalk), its floor or roof slab, cut to its corner. */
-    private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int lod) {
+    private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int lod, float footprintScale) {
         boolean ground = role.startsWith("base"), top = role.startsWith("roof");
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
         var result = new GeneratedMesh();
         for (var wall : piece.walls()) {
-            double[] goesOn = facade(result, run, wall, modelled, lod, top ? ROOF_INSET : 0, ground);
+            double outlineScale = piece.direction() == null && !piece.tags().contains("-link-") ? footprintScale : 1;
+            double[] goesOn = facade(result, run, wall, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale);
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, goesOn[0], goesOn[1]); }
         }
         Slab slab = top ? spec.roof() : spec.floors();
         for (var polygon : piece.polygons()) {
             for (var part : slab.inset() > 0 ? KitOutline.inset(polygon, piece.walls(), slab.inset()) : List.of(polygon)) {
-                flat(result, board(slab.material()), part, slab.height(lod), slab.repeat());
+                // The authored rim has a horizontal lip at this height; keep the deck just underneath it.
+                double height = slab.height(lod) - (top ? .02 : 0);
+                flat(result, board(slab.material()) + (top ? "" : GeneratedMesh.BUILDING_FLOOR), part, height, slab.repeat());
+                if (top) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
             }
         }
         return piece.direction() != null ? result.clipped(KitOutline.sector(piece.direction())) : result;
@@ -114,12 +123,12 @@ final class BayKit {
      * how far it goes on before and after the wall.
      */
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<ModelData> modelled, int lod,
-          double inset, boolean ground) {
+          double inset, boolean ground, double outlineScale) {
         double length = wall.length();
         double[] p = wall.p(), u = KitOutline.direction(wall), n = normal(wall.p(), wall.q());
         double before = goesOn(wall.start()) ? EXTEND : 0, after = goesOn(wall.end()) ? EXTEND : 0;
         var laid = new GeneratedMesh();
-        for (Placed placed : layout(run, wall, length, before, after, ground)) {
+        for (Placed placed : layout(run, wall, length, before, after, ground, outlineScale)) {
             float scale = (float) placed.scale();
             float x = (float) (p[0] + u[0] * placed.start() - n[0] * inset), y = (float) (p[1] + u[1] * placed.start() - n[1] * inset);
             // A piece's x along the wall, stretched; its -y out of the wall.
@@ -142,7 +151,7 @@ final class BayKit {
 
     /** The pieces {@code run} lays along a wall {@code length} long, going on {@code before} and {@code after} it. */
     private static List<Placed> layout(Run run, KitOutline.Wall wall, double length, double before, double after,
-          boolean ground) {
+          boolean ground, double outlineScale) {
         List<Placed> result = new ArrayList<>();
         if (run.under() != null && length + before + after > 1e-6) {
             result.add(new Placed(-before, run.under().piece(), (length + before + after) / run.under().length()));
@@ -154,8 +163,11 @@ final class BayKit {
         double usable = length - 2 * run.margin();
         // A wall no longer than its margins holds no bay.
         if (run.bays() == null || run.bays().isEmpty() || usable <= 1e-6) { return result; }
-        int count = Math.max(1, (int) Math.rint(usable / run.bay()));
-        double scale = usable / (count * run.bay());
+        // Padding changes the space for panels, retaining the unpadded facade proportions.
+        double nominal = length / outlineScale - 2 * run.margin();
+        int fullCount = Math.max(1, (int) Math.rint(nominal / run.bay()));
+        double scale = nominal / (fullCount * run.bay());
+        int count = Math.max(1, (int) Math.ceil(usable / (run.bay() * scale) - 1e-6));
         Set<Integer> doors = ground && run.door() != null ? doors(wall, count) : Set.of();
         // A wall's bays are chosen by where it stands, the same in every piece that holds it.
         double[] p = wall.p(), q = wall.q();

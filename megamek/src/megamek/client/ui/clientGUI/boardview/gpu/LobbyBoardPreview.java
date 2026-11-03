@@ -86,6 +86,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private FrameBuffer target;
     private boolean installed;
     private boolean loadingDrawn;
+    private boolean focusOnReady;
 
     LobbyBoardPreview(UiKit kit, Runnable close) {
         this.kit = kit;
@@ -167,6 +168,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
     }
 
     private void unfocus() {
+        focusOnReady = false;
         input.clear();
         if (getStage() != null) {
             if (getStage().getKeyboardFocus() == image) { getStage().setKeyboardFocus(null); }
@@ -273,6 +275,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         @Override
         public boolean scrolled(InputEvent event, float x, float y, float amountX, float amountY) {
             if (!interactive()) { return false; }
+            focus();
             camera.zoomAt(GpuBattleView.wheelZoom(amountY), x * camera.camera.viewportWidth / image.getWidth(),
                   y * camera.camera.viewportHeight / image.getHeight());
             return true;
@@ -322,6 +325,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         loading.reset(Messages.getString("GpuBoard.previewLoading"));
         loading.setVisible(true);
         focus();
+        focusOnReady = true;
     }
 
     void show(@Nullable BoardSource board) {
@@ -509,6 +513,11 @@ final class LobbyBoardPreview extends Table implements Disposable {
             image.setDrawable(new TextureRegionDrawable(region));
         }
         loading.setVisible(false);
+        if (focusOnReady) {
+            focusOnReady = false;
+            // Loading may outlast the opening gesture; an outside click cancels this focus request.
+            if (getStage().getKeyboardFocus() == null || getStage().getKeyboardFocus() == image) { focus(); }
+        }
         if (hexCard.update(frame.tooltip())) {
             hexCorner.clearChildren();
             if (hexCard.actor().hasChildren()) {

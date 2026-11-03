@@ -31,7 +31,7 @@ final class GeneratedKit {
 
     private GeneratedKit() { }
 
-    /** A role's module for one footprint piece at a level of detail, cut to its corner: by twin ("", "-bend"). */
+    /** A role's module for one footprint piece at a level of detail, cut to its corner: by twin ("", "-bend", "-closed-N"). */
     interface Module {
         Map<String, GeneratedMesh> build(String role, KitOutline.Piece piece, int lod);
     }
@@ -41,7 +41,11 @@ final class GeneratedKit {
      * or a name the spec does not list: its first); it and its pieces GLB read once, until assets reload.
      */
     static ConnectedKit.Kit kit(File spec, boolean square, String variant) {
-        String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant;
+        return kit(spec, square, variant, 1);
+    }
+
+    static ConnectedKit.Kit kit(File spec, boolean square, String variant, float footprintScale) {
+        String key = spec.getAbsolutePath() + (square ? "#square" : "") + "@" + variant + ":" + footprintScale;
         return KITS.computeIfAbsent(key, ignored -> new BoardKit<>(() -> {
             try {
                 JsonNode chosen = variant(JSON.readTree(spec), variant);
@@ -51,8 +55,8 @@ final class GeneratedKit {
                 String name = spec.getName().replaceFirst("\\.json$", "");
                 String style = chosen.path("style").asText();
                 return ConnectedKit.load(List.copyOf(switch (style) {
-                    case "habitat" -> HabitatKit.lods(JSON.treeToValue(chosen, HabitatKit.Spec.class), modelled, square, name);
-                    case "bays" -> BayKit.lods(JSON.treeToValue(chosen, BayKit.Spec.class), modelled, square, name);
+                    case "habitat" -> HabitatKit.lods(JSON.treeToValue(chosen, HabitatKit.Spec.class), modelled, square, name, footprintScale);
+                    case "bays" -> BayKit.lods(JSON.treeToValue(chosen, BayKit.Spec.class), modelled, square, name, footprintScale);
                     default -> throw new IllegalArgumentException("a variant's style is habitat or bays, not " + style);
                 }));
             } catch (IOException | RuntimeException failure) {
@@ -92,9 +96,14 @@ final class GeneratedKit {
             Map<String, GeneratedMesh> nodes = new LinkedHashMap<>();
             for (String role : roles) {
                 for (var piece : pieces) {
+                    // Exposed connections only begin above ground; base caps (and their sidewalks) are never placed.
+                    if (role.startsWith("base") && piece.tags().endsWith("-cap")) { continue; }
                     for (var twin : module.build(role, piece, lod).entrySet()) {
                         String node = kit + "-lod" + lod + "-" + role + piece.tags() + twin.getKey();
-                        if (twin.getValue().parts.isEmpty()) { throw new IllegalStateException("Empty piece " + node); }
+                        // A distant roof without a parapet needs no cap geometry, but keeps the same node contract.
+                        if (twin.getValue().parts.isEmpty() && !(role.startsWith("roof") && piece.tags().endsWith("-cap"))) {
+                            throw new IllegalStateException("Empty piece " + node);
+                        }
                         nodes.put(node, twin.getValue());
                     }
                 }

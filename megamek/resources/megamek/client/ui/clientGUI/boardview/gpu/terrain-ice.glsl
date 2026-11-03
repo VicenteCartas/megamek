@@ -71,35 +71,37 @@ vec3 iceBorder(vec2 world, float z, bool fringe, bool glazed) {
     if (u_iceBoard.x < 1.0) return vec3(1e4, 1e4, 0.0);
     const float width = 30.0, height = 30.0 * BOARD_HEX.y / BOARD_HEX.x;
     int column = int(floor(world.x / (width * .75)));
-    int kinds[9];
-    float levels[9], distances[9];
-    bool wet[9];
-    float own = 1e4, ownDistance = 1e4;
-    bool ownWet = false;
+    float ownDistance = 1e4;
+    ivec2 owner = ivec2(-1);
+    // Find the support geometrically, then stream the neighbours instead of retaining four nine-element arrays.
     for (int i = 0; i < 9; i++) {
         int x = column + i / 3 - 1;
         int y = int(floor(-world.y / height - mod(float(x), 2.0) * .5)) + i % 3 - 1;
-        kinds[i] = -1;
         if (x < 0 || y < 0 || float(x) >= u_iceBoard.x || float(y) >= u_iceBoard.y) continue;
-        vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
-        kinds[i] = int(tile.b * 255.0 + .5);
-        levels[i] = tile.a * 255.0 - 64.0;
-        distances[i] = biomeHexDistance(world - boardHexCenter(x, y));
-        wet[i] = tile.g > .002 || kinds[i] == 2;
-        if (distances[i] < ownDistance) { ownDistance = distances[i]; own = levels[i]; ownWet = wet[i]; }
+        float distance = biomeHexDistance(world - boardHexCenter(x, y));
+        if (distance < ownDistance) { ownDistance = distance; owner = ivec2(x, y); }
     }
+    vec4 support = owner.x >= 0 ? texelFetch(u_biomeHexes, owner, 0) : vec4(0.0);
+    float own = owner.x >= 0 ? support.a * 255.0 - 64.0 : 1e4;
+    bool ownWet = support.g > .002 || int(support.b * 255.0 + .5) == 2;
     if (ownWet && z < own * u_iceLevel - u_iceWaterline) return vec3(-1e4, -1e4, 0.0);
     float ice = 1e4, soft = 1e4, hard = 1e4, glaze = 0.0;
     for (int i = 0; i < 9; i++) {
-        if (kinds[i] < 0) continue;
-        int kind = kinds[i];
-        bool iced = fringe ? (kind == 1 || glazed && kind == 3) && levels[i] == own : kind != 0;
+        int x = column + i / 3 - 1;
+        int y = int(floor(-world.y / height - mod(float(x), 2.0) * .5)) + i % 3 - 1;
+        if (x < 0 || y < 0 || float(x) >= u_iceBoard.x || float(y) >= u_iceBoard.y) continue;
+        vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
+        int kind = int(tile.b * 255.0 + .5);
+        float level = tile.a * 255.0 - 64.0;
+        float distance = biomeHexDistance(world - boardHexCenter(x, y));
+        bool wet = tile.g > .002 || kind == 2;
+        bool iced = fringe ? (kind == 1 || glazed && kind == 3) && level == own : kind != 0;
         if (iced) {
-            if (distances[i] < ice) { ice = distances[i]; glaze = kind == 3 ? 1.0 : 0.0; }
-        } else if (fringe || !wet[i] && levels[i] == own) {
-            soft = min(soft, distances[i]);
+            if (distance < ice) { ice = distance; glaze = kind == 3 ? 1.0 : 0.0; }
+        } else if (fringe || !wet && level == own) {
+            soft = min(soft, distance);
         } else {
-            hard = min(hard, distances[i]);
+            hard = min(hard, distance);
         }
     }
     return vec3(.5 * (soft - ice), .5 * (hard - ice), glaze);
@@ -210,29 +212,38 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy) {
     if (slab < .5) {
         vec3 border = iceBorder(world, v_cloudPosition.z, fringe, u_iceMode > 4.5);
         if (fringe) { thin = border.z; }
-        // The border runs jaggedly either side of the hex edge: each shard of broken ice has its own offset and lean,
-        // with finer splinters along it. Where the far side cannot draw its part, the ice breaks off short instead.
-        vec4 shard = iceFloes(world / 3.2 + vec2(17.3, 4.1));
-        vec4 splinter = iceFloes(world / 1.1 + vec2(5.9, 23.3));
-        float lean = biomeHash(ivec2(floor(shard.y * 7919.0), 3)) * 6.2832;
-        float jag = 3.2 * (2.0 * shard.y - 1.0) + .7 * dot(shard.zw, vec2(cos(lean), sin(lean)))
-              + .8 * (2.0 * splinter.y - 1.0);
-        inside = min(border.x - jag, border.y - abs(jag) - .4);
-        // Cracks open between the shards toward the broken edge and close a few metres in.
-        float near = 1.0 - smoothstep(.5, 4.0, inside);
-        float crack = .2 * near;
-        shattered = (1.0 - smoothstep(crack, crack + pixel, shard.x * 1.6)) * step(.02, near);
-        coverage *= smoothstep(-pixel, pixel, inside) * (1.0 - shattered);
-        if (coverage <= 0.0) {
-            // Meltwater darkens the ground just off the ice.
-            float wet = (1.0 - smoothstep(0.0, 1.2 + pixel, -inside)) * (1.0 - thin);
-            return underlying * (1.0 - .22 * wet);
+        // A site's own cell puts it within sqrt(2) * .9 of the query. The nearest site cannot be farther:
+        // abs(jag) <= 3.2 + .7 * sqrt(2) * .9 + .8 < 5 metres. Beyond the wet rim there is no ice contribution.
+        const float maximumJag = 5.0;
+        if (min(border.x + maximumJag, border.y - .4) <= -1.2 - pixel) return underlying;
+        // Beyond the thickness and pixel-wide rim: full coverage, no cracks, rim or shard lean even at far zoom.
+        if (min(border.x - maximumJag, border.y - maximumJag - .4) >= max(5.0, .12 + pixel)) {
+            inside = 5.0;
+        } else {
+            // The border runs jaggedly either side of the hex edge: each shard of broken ice has its own offset and lean,
+            // with finer splinters along it. Where the far side cannot draw its part, the ice breaks off short instead.
+            vec4 shard = iceFloes(world / 3.2 + vec2(17.3, 4.1));
+            vec4 splinter = iceFloes(world / 1.1 + vec2(5.9, 23.3));
+            float lean = biomeHash(ivec2(floor(shard.y * 7919.0), 3)) * 6.2832;
+            float jag = 3.2 * (2.0 * shard.y - 1.0) + .7 * dot(shard.zw, vec2(cos(lean), sin(lean)))
+                  + .8 * (2.0 * splinter.y - 1.0);
+            inside = min(border.x - jag, border.y - abs(jag) - .4);
+            // Cracks open between the shards toward the broken edge and close a few metres in.
+            float near = 1.0 - smoothstep(.5, 4.0, inside);
+            float crack = .2 * near;
+            shattered = (1.0 - smoothstep(crack, crack + pixel, shard.x * 1.6)) * step(.02, near);
+            coverage *= smoothstep(-pixel, pixel, inside) * (1.0 - shattered);
+            if (coverage <= 0.0) {
+                // Meltwater darkens the ground just off the ice.
+                float wet = (1.0 - smoothstep(0.0, 1.2 + pixel, -inside)) * (1.0 - thin);
+                return underlying * (1.0 - .22 * wet);
+            }
+            thickness = smoothstep(0.0, 5.0, inside);
+            // Fracture faces at the edge and along the open cracks catch the light.
+            rim = max(1.0 - smoothstep(0.0, .12 + pixel, inside),
+                  near * (1.0 - smoothstep(crack, crack + .1 + pixel, shard.x * 1.6)));
+            tilt = (vec2(shard.y, biomeHash(ivec2(floor(shard.y * 6151.0), 11))) - .5) * .16 * (1.0 - thickness);
         }
-        thickness = smoothstep(0.0, 5.0, inside);
-        // Fracture faces at the edge and along the open cracks catch the light.
-        rim = max(1.0 - smoothstep(0.0, .12 + pixel, inside),
-              near * (1.0 - smoothstep(crack, crack + .1 + pixel, shard.x * 1.6)));
-        tilt = (vec2(shard.y, biomeHash(ivec2(floor(shard.y * 6151.0), 11))) - .5) * .16 * (1.0 - thickness);
     }
     vec2 footprint = max(abs(uvDx), abs(uvDy));
     // Shading LOD follows projected texel footprint; mipmaps filter every map with the same derivatives.

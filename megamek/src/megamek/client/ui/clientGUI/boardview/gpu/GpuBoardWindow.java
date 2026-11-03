@@ -331,12 +331,14 @@ public final class GpuBoardWindow {
 
     /**
      * A browser entry's board as the file preview shows it: loaded and converted as the game loads a sheet
-     * ({@link BoardFile#loadSheet}), so the preview, the game and the editor show the same board.
+     * ({@link BoardFile#loadSheet}), then closed at its outer building edges as a finished game map. The editor keeps
+     * those exits so the sheet can join another sheet later.
      *
      * @throws IllegalArgumentException when the file cannot be read as a board
      */
     public static Board loadPreview(File boardFile) {
         Board board = BoardFile.loadSheet(boardFile, false, true);
+        board.closeOffBoardBuildingExits();
         board.setMapName(boardFile.getName());
         return board;
     }
@@ -455,7 +457,7 @@ public final class GpuBoardWindow {
         start(new GpuBoardWindow(null, null, () -> null, owner, editor, editor.game()));
     }
 
-    /** EDT: copy the displayed map before releasing its renderer; editing must not change the lobby's board. */
+    /** EDT: reopen the source sheet or copy an assembled map before releasing its renderer. */
     private void requestEditor() {
         if (!preview || closing) { return; }
         try {

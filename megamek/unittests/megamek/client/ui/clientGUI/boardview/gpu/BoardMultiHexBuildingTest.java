@@ -10,13 +10,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.board.Coords;
 import megamek.common.board.HexTile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardMultiHexBuildingTest {
     private static final Coords CENTRE = new Coords(4, 4);
@@ -45,6 +46,51 @@ class BoardMultiHexBuildingTest {
                 assertMeet(shares.get(CENTRE), shares.get(ring), CENTRE, direction);
                 assertMeet(shares.get(ring), shares.get(ring.translated((direction + 2) % 6)), ring, (direction + 2) % 6);
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 3, 5, 10, 50 })
+    void standaloneDomeGlassStaysOnItsTower(int levels) {
+        for (var design : BoardMultiHexBuilding.Design.values()) {
+            var layout = BoardMultiHexBuilding.layout(design.asset, levels);
+            assertDomeMeetsTower(layout.domes().getFirst(), List.of(layout), levels);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 5, 8, 12 })
+    void raisingOneHexExtendsTheTowerUnderItsDome(int levels) {
+        var heights = flower(3, 1);
+        Coords peak = CENTRE.translated(1);
+        heights.put(peak, levels);
+        for (var design : BoardMultiHexBuilding.Design.values()) {
+            var scene = scene(heights, design.asset, Map.of(), Set.of());
+            var shares = heights.keySet().stream().map(at -> layout(scene, at)).toList();
+            assertDomeMeetsTower(layout(scene, peak).domes().getFirst(), shares, levels);
+        }
+    }
+
+    private static void assertDomeMeetsTower(BoardMultiHexBuilding.Dome dome,
+          List<BoardMultiHexBuilding.Layout> shares, int levels) {
+        List<float[]> glass = new ArrayList<>();
+        for (var share : shares) {
+            var data = BoardMultiHexBuilding.glass(share);
+            if (data != null) { glass.addAll(vertices(data, BoardMultiHexBuilding.GLASS)); }
+        }
+        assertFalse(glass.isEmpty());
+        assertEquals(levels * GpuBuilding.LEVEL_HEIGHT,
+              glass.stream().mapToDouble(vertex -> vertex[2]).max().orElseThrow(), .02,
+              "The dome's apex must follow the edited building height");
+        assertEquals(dome.ring(), glass.stream().mapToDouble(vertex -> vertex[2]).min().orElseThrow(), .02,
+              "The glass must reach the supporting ring instead of floating above it");
+        for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+            List<float[]> walls = new ArrayList<>();
+            for (var share : shares) {
+                walls.addAll(vertices(BoardMultiHexBuilding.model(share, lod), BoardMultiHexBuilding.WALL));
+            }
+            assertEquals(dome.ring(), walls.stream().mapToDouble(vertex -> vertex[2]).max().orElseThrow(), .02,
+                  "The tower walls must extend all the way to the glass at every LOD");
         }
     }
 
@@ -115,6 +161,174 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
+    void equalHeightClustersKeepBothDomesWhenJoinedByANarrowCorridor() {
+        var heights = flower(1, 1);
+        Coords small = CENTRE.translated(0).translated(0).translated(0);
+        for (Coords at : List.of(small, small.translated(0), small.translated(1))) { heights.put(at, 1); }
+        var separate = scene(heights, DOME, Map.of(), Set.of());
+        var largeFit = BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(separate, separate.tile(CENTRE), DOME)).getFirst();
+        var smallFit = BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(separate, separate.tile(small), DOME)).getFirst();
+        heights.put(CENTRE.translated(0).translated(0), 1);
+        var joined = scene(heights, DOME, Map.of(), Set.of());
+        var fits = BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(joined, joined.tile(CENTRE), DOME));
+        assertEquals(2, fits.size(), "A narrow connector must not absorb the smaller, equally high dome");
+        assertTrue(fits.contains(largeFit)); assertTrue(fits.contains(smallFit));
+        assertFalse(layout(joined, CENTRE.translated(0).translated(0)).tunnels().isEmpty());
+    }
+
+    @Test
+    void threeHexCorridorsHaveOneStraightRoofAndNoIntermediateGatehouses() {
+        for (int direction = 0; direction < 6; direction++) {
+            var heights = flower(1, 1);
+            Coords at = CENTRE.translated(direction);
+            List<Coords> corridor = new ArrayList<>();
+            for (int step = 0; step < 3; step++) { at = at.translated(direction); heights.put(at, 1); corridor.add(at); }
+            var scene = scene(heights, DOME, Map.of(), Set.of());
+            var middle = layout(scene, corridor.get(1));
+            assertEquals(1, middle.tunnels().size());
+            assertTrue(middle.domes().stream().allMatch(dome -> dome.modules().isEmpty()), "No repeated radial wings along the corridor");
+            assertEquals(2, middle.tunnels().getFirst().openings().stream().filter(top -> top > 0).count());
+            for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+                var roof = vertices(BoardMultiHexBuilding.model(middle, lod), BoardMultiHexBuilding.ROOF);
+                double area = 0;
+                for (int index = 0; index < roof.size(); index += 3) {
+                    float[] a = roof.get(index), b = roof.get(index + 1), c = roof.get(index + 2);
+                    if (a[5] < .99f || b[5] < .99f || c[5] < .99f) { continue; }
+                    assertEquals(GpuBuilding.LEVEL_HEIGHT, a[2], .01f);
+                    area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
+                }
+                assertEquals(24 * HexTile.HEIGHT, area, 3, "One uninterrupted roof, without overlapping module caps");
+            }
+        }
+    }
+
+    @Test
+    void aNarrowLevelRunIsACorridorButARaisedPeakCanSupportADome() {
+        var heights = new HashMap<Coords, Integer>();
+        for (int row = 2; row <= 6; row++) { heights.put(new Coords(4, row), 1); }
+        var flat = scene(heights, DOME, Map.of(), Set.of());
+        assertTrue(BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(flat, flat.tile(CENTRE), DOME)).isEmpty());
+        assertFalse(layout(flat, CENTRE).tunnels().isEmpty());
+        heights.put(CENTRE, 5);
+        var raised = scene(heights, DOME, Map.of(), Set.of());
+        var fits = BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(raised, raised.tile(CENTRE), DOME));
+        assertEquals(1, fits.size());
+        assertEquals(5 * GpuBuilding.LEVEL_HEIGHT, fits.getFirst().apex(), .01f);
+    }
+
+    @Test
+    void corridorJunctionsCoverTheirArmsAndKeepTheInsideCornersClear() {
+        var heights = new HashMap<Coords, Integer>(); heights.put(CENTRE, 1);
+        for (int direction : new int[] { 0, 2, 4 }) {
+            Coords at = CENTRE;
+            for (int step = 0; step < 2; step++) { at = at.translated(direction); heights.put(at, 1); }
+        }
+        var scene = scene(heights, DOME, Map.of(), Set.of());
+        var junction = layout(scene, CENTRE);
+        assertTrue(junction.domes().isEmpty());
+        var triangles = BoardMultiHexBuilding.triangles(junction);
+        assertTrue(triangles.stream().allMatch(vertex -> Float.isFinite(vertex.x) && Float.isFinite(vertex.y) && Float.isFinite(vertex.z)));
+        var roof = GpuBuildingInterior.area(GpuBuildingInterior.plane(triangles, GpuBuilding.LEVEL_HEIGHT, true));
+        assertTrue(roof.contains(0, 0));
+        for (int direction = 0; direction < 6; direction++) {
+            double angle = Math.toRadians(90 - 60 * direction);
+            assertEquals(direction % 2 == 0, roof.contains(35 * Math.cos(angle), 35 * Math.sin(angle)),
+                  "Only an authored arm reaches hexside " + direction);
+        }
+    }
+
+    @Test
+    void corridorEntrancesStayConnectedAfterReplacingTheGatehouses() {
+        for (boolean hasDome : List.of(false, true)) {
+            var heights = hasDome ? flower(1, 1) : new HashMap<Coords, Integer>();
+            Coords corridor = CENTRE.translated(0).translated(0), approach = corridor.translated(1);
+            for (int row = 1; row <= 3; row++) { heights.put(new Coords(4, row), 1); }
+            for (boolean road : List.of(false, true)) {
+                var scene = scene(heights, DOME, road ? Map.of() : Map.of(approach, 1), Set.of(), Set.of(),
+                      Map.of(), road ? Map.of(approach, 1 << 4) : Map.of());
+                var corridorLayout = layout(scene, corridor);
+                assertEquals(road ? 1 : 0, corridorLayout.corridorGates().size());
+                float ux = (float) Math.cos(Math.PI / 6), uy = .5f;
+                float end = road ? HexTile.HEIGHT / 2f - 2.6f - 9
+                      : corridorLayout.gear().stream().filter(gear -> gear.piece().equals("airlock"))
+                            .map(gear -> gear.x() * ux + gear.y() * uy).findFirst().orElseThrow();
+                float middle = (15 / ux + end) / 2;
+                for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+                    var model = BoardMultiHexBuilding.model(corridorLayout, lod);
+                    var vertices = vertices(model, BoardMultiHexBuilding.FRAME);
+                    vertices.addAll(vertices(model, BoardMultiHexBuilding.ROOF));
+                    List<Vector3> aboveFoundation = new ArrayList<>();
+                    for (int at = 0; at < vertices.size(); at += 3) {
+                        if (vertices.get(at)[2] <= 9 || vertices.get(at + 1)[2] <= 9 || vertices.get(at + 2)[2] <= 9) { continue; }
+                        for (int corner = 0; corner < 3; corner++) {
+                            var v = vertices.get(at + corner); aboveFoundation.add(new Vector3(v[0], v[1], v[2]));
+                        }
+                    }
+                    assertTrue(GpuBuildingInterior.area(aboveFoundation).contains(middle * ux, middle * uy),
+                          "A roof must bridge the gap from the corridor wall to its " + (road ? "vehicle gate" : "airlock"));
+                }
+            }
+        }
+    }
+
+    @Test
+    void gatesStillAttachWhenSeveralCorridorArmsLeaveOnlyAShortCorner() throws Exception {
+        var door = BoardMultiHexBuilding.class.getDeclaredMethod("door", BoardMultiHexBuilding.Layout.class,
+              float.class, float.class, float.class, float.class, float.class);
+        door.setAccessible(true);
+        for (int gateSide = 0; gateSide < 6; gateSide++) {
+            var heights = new HashMap<Coords, Integer>(); heights.put(CENTRE, 1);
+            Set<Set<Coords>> apart = new java.util.HashSet<>();
+            for (int direction = 0; direction < 6; direction++) {
+                if (direction != gateSide) { heights.put(CENTRE.translated(direction), 1); }
+                apart.add(Set.of(CENTRE.translated(direction), CENTRE.translated((direction + 1) % 6)));
+            }
+            var scene = scene(heights, DOME, Map.of(), Set.of(), apart, Map.of(),
+                  Map.of(CENTRE.translated(gateSide), 1 << (gateSide + 3) % 6));
+            var layout = layout(scene, CENTRE);
+            var gate = layout.corridorGates().getFirst();
+            float[] attachment = (float[]) door.invoke(null, layout, 0f, 0f, gate.ux(), gate.uy(), 12f);
+            assertNotNull(attachment, "A short facade must not disconnect the road gate on side " + gateSide);
+            var triangles = BoardMultiHexBuilding.triangles(layout);
+            for (var vertex : triangles) { assertTrue(Float.isFinite(vertex.x) && Float.isFinite(vertex.y) && Float.isFinite(vertex.z)); }
+        }
+    }
+
+    @Test
+    void corridorDockingOnUnevenGroundKeepsItsFoundationBelowItsRoof() {
+        var heights = flower(3, 3);
+        Coords petal = CENTRE.translated(0), first = petal.translated(0), second = first.translated(0);
+        heights.put(first, 1); heights.put(second, 1);
+        var scene = scene(heights, DOME, Map.of(), Set.of(), Set.of(), Map.of(CENTRE, 2), Map.of());
+        var dock = layout(scene, petal);
+        assertFalse(dock.tunnels().isEmpty());
+        for (var tunnel : dock.tunnels()) {
+            assertEquals(GpuBuilding.LEVEL_HEIGHT, tunnel.top(), .001f, "The dock meets the lower corridor roof");
+            assertTrue(tunnel.foot() < tunnel.top() - 1.6f, "Its foundation leaves room for a wall below the bevel");
+        }
+        assertTrue(BoardMultiHexBuilding.triangles(dock).stream().allMatch(v -> Float.isFinite(v.x) && Float.isFinite(v.y) && Float.isFinite(v.z)));
+    }
+
+    @Test
+    void connectedClustersKeepTheirOwnGroundLevelsAndAnnexRoofs() {
+        var heights = flower(1, 1);
+        Map<Coords, Integer> elevations = new HashMap<>(); heights.keySet().forEach(at -> elevations.put(at, 2));
+        Coords small = new Coords(4, 1), annex = new Coords(6, 0);
+        for (Coords at : List.of(small, small.translated(0), small.translated(1), annex)) { heights.put(at, 2); }
+        heights.put(new Coords(4, 2), 3);
+        var scene = scene(heights, DOME, Map.of(), Set.of(), Set.of(), elevations, Map.of());
+        assertEquals(2, BoardMultiHexBuilding.fits(BoardMultiHexBuilding.group(scene, scene.tile(small), DOME)).size());
+        assertEquals(BoardMultiHexBuilding.PLINTH, layout(scene, small).top(), .001f,
+              "Connecting a cluster uphill must not lift the lower dome's equipment and entrances");
+        var terminal = layout(scene, annex);
+        assertTrue(terminal.annex());
+        assertTrue(terminal.tunnels().isEmpty());
+        var dome = terminal.domes().stream().filter(candidate -> !candidate.modules().isEmpty()).findFirst().orElseThrow();
+        assertEquals(2 * GpuBuilding.LEVEL_HEIGHT, dome.foot() + dome.modules().get(3), .001f,
+              "The terminal wing keeps its own roof height, relative to the dome it actually joins");
+    }
+
+    @Test
     void annexBevelsLayPanelsAlongEachEdgeWithoutStretchingOrHexSeams() {
         for (int direction = 0; direction < 6; direction++) {
             var heights = flower(3, 2);
@@ -122,13 +336,13 @@ class BoardMultiHexBuildingTest {
             heights.put(annex, 2);
             var scene = scene(heights, DOME, Map.of(), Set.of());
             for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
-                var caps = vertices(BoardMultiHexBuilding.model(layout(scene, annex), lod), BoardMultiHexBuilding.FRAME);
+                var caps = vertices(BoardMultiHexBuilding.model(layout(scene, annex), lod), BoardMultiHexBuilding.PIER);
                 int checked = 0;
                 for (int i = 0; i < caps.size(); i += 3) {
                     if (!bevel(caps.get(i))) { continue; }
                     var axes = textureAxes(caps.get(i), caps.get(i + 1), caps.get(i + 2));
                     if (axes == null) { continue; }
-                    assertEquals(0, axes[0].z, .002f, "Panel rows follow the horizontal edge, including cut corners");
+                    assertEquals(0, axes[1].z, .002f, "The coping's metal grain follows the horizontal edge, including cut corners");
                     assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002f,
                           "Unwrapping the bevel must not shear its panels");
                     assertEquals(axes[0].len(), axes[1].len(), .01f, "Equal texel density along and across the bevel");
@@ -136,7 +350,7 @@ class BoardMultiHexBuildingTest {
                 }
                 assertTrue(checked > 0, "The annex must include bevel faces");
 
-                var neighbour = vertices(BoardMultiHexBuilding.model(layout(scene, petal), lod), BoardMultiHexBuilding.FRAME);
+                var neighbour = vertices(BoardMultiHexBuilding.model(layout(scene, petal), lod), BoardMultiHexBuilding.PIER);
                 float dx = HexTile.centerX(annex, HexTile.MODEL_WIDTH) - HexTile.centerX(petal, HexTile.MODEL_WIDTH);
                 float dy = HexTile.centerY(annex, HexTile.HEIGHT) - HexTile.centerY(petal, HexTile.HEIGHT);
                 int shared = 0;
@@ -210,6 +424,8 @@ class BoardMultiHexBuildingTest {
                 var data = mesh.data("bending passage", false);
                 var tube = vertices(data, BoardMultiHexBuilding.FRAME);
                 tube.addAll(vertices(data, BoardMultiHexBuilding.PIER));
+                tube.addAll(vertices(data, BoardMultiHexBuilding.WALL));
+                tube.addAll(vertices(data, BoardMultiHexBuilding.ROOF));
                 assertFalse(tube.isEmpty());
                 for (float[] v : tube) {
                     for (float value : v) { assertTrue(Float.isFinite(value)); }
@@ -237,48 +453,67 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void roofFittingsStayWholeAndClearOfTheBevel() {
+    void roofsStayClearForManualEquipmentWhileFacadesHaveWindows() {
         for (int direction = 0; direction < 6; direction++) {
             var heights = flower(3, 2);
             Coords annex = CENTRE.translated(direction).translated(direction);
             heights.put(annex, 2);
             var scene = scene(heights, DOME, Map.of(), Set.of());
-            float area = 0, roofHeight = 2 * GpuBuilding.LEVEL_HEIGHT;
-            for (Coords at : heights.keySet()) {
-                var data = BoardMultiHexBuilding.model(layout(scene, at), 0);
-                var details = vertices(data, "structures/lunar/habitat-roof");
-                var roof = vertices(data, BoardMultiHexBuilding.ROOF);
-                for (int i = 0; i < details.size(); i += 3) {
-                    float[] a = details.get(i), b = details.get(i + 1), c = details.get(i + 2);
-                    area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
-                    // A centroid avoids float differences on a shared hex edge; the fittings' margin keeps their
-                    // complete rectangle inside the flat roof, including the gatehouse's chamfered corners.
-                    float x = (a[0] + b[0] + c[0]) / 3, y = (a[1] + b[1] + c[1]) / 3;
-                    boolean supported = false;
-                    for (int j = 0; j < roof.size(); j += 3) {
-                        float[] p = roof.get(j), q = roof.get(j + 1), r = roof.get(j + 2);
-                        if (p[5] < .999f || Math.abs(p[2] - roofHeight) > .001f) { continue; }
-                        supported |= Intersector.isPointInTriangle(x, y, p[0], p[1], q[0], q[1], r[0], r[1]);
-                    }
-                    assertTrue(supported, "Every fitting sits above the flat roof, clear of its bevel");
+            for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+                var data = BoardMultiHexBuilding.model(layout(scene, annex), lod);
+                assertTrue(vertices(data, "structures/lunar/habitat-roof").isEmpty(), "No automatic rooftop hatches or machinery");
+                assertTrue(vertices(data, "structures/lunar/skylight-glass").isEmpty(), "Skylights are placed manually");
+                var windows = vertices(data, BoardMultiHexBuilding.WINDOW);
+                assertFalse(windows.isEmpty(), "The habitat has pressure windows in its walls");
+                for (var vertex : windows) {
+                    assertEquals(0, vertex[5], .001f, "Glazing is on facades, not automatic roof fittings");
+                    assertTrue(vertex[2] < 2 * GpuBuilding.LEVEL_HEIGHT);
                 }
             }
-            assertEquals(2 * 5.4f * 4.2f + 6 * 6, area, .02f,
-                  "Both complete grilles and the complete hatch survive the cuts into hex shares");
+        }
+    }
+
+    @Test
+    void vehiclePassageCutsFacadeDetailsButPreservesTheWallAboveAndBesideIt() throws Exception {
+        for (float angle : new float[] { -60, -45, 0, 45, 60 }) {
+            float nx = (float) Math.cos(Math.toRadians(angle)), ny = (float) Math.sin(Math.toRadians(angle));
+            var mesh = new GeneratedMesh();
+            float[][] wall = new float[4][];
+            for (int i = 0; i < 4; i++) {
+                float along = i == 0 || i == 3 ? -20 : 20, z = i < 2 ? 0 : 35;
+                wall[i] = new float[] { -ny * along, nx * along, z, nx, ny, 0, 1, 1, 1, 1, (along + 20) / 40, z / 35 };
+            }
+            mesh.quad(BoardMultiHexBuilding.WINDOW, wall[0], wall[1], wall[2], wall[3]);
+            passage(mesh, new float[] { 0, 0, nx, ny, 6, 27 }, new float[] { 18, 0, 1, 0, 6, 20 }, 0);
+            List<Vector3> facade = new ArrayList<>();
+            for (float[] vertex : vertices(mesh.data("facade opening", false), BoardMultiHexBuilding.WINDOW)) {
+                float along = -ny * vertex[0] + nx * vertex[1];
+                facade.add(new Vector3(along, vertex[2], 0));
+                assertEquals((along + 20) / 40, vertex[10], .0001, "Clipped wall UVs retain their phase");
+                assertEquals(vertex[2] / 35, vertex[11], .0001);
+            }
+            var remaining = GpuBuildingInterior.area(facade);
+            assertFalse(remaining.contains(0, 10), "No window or door panel behind the passage");
+            assertTrue(remaining.contains(-17, 10) && remaining.contains(17, 10), "Keep adjacent facade bays");
+            assertTrue(remaining.contains(0, 32), "Keep the upper storey's facade");
         }
     }
 
     private static GeneratedMesh passage(float[] from, float[] to, int lod) throws Exception {
+        var mesh = new GeneratedMesh();
+        passage(mesh, from, to, lod);
+        return mesh;
+    }
+
+    private static void passage(GeneratedMesh mesh, float[] from, float[] to, int lod) throws Exception {
         var method = BoardMultiHexBuilding.class.getDeclaredMethod("passage", GeneratedMesh.class, List.class,
               float[].class, float[].class, int.class);
         method.setAccessible(true);
-        var mesh = new GeneratedMesh();
         List<float[]> hex = new ArrayList<>();
         for (int corner = 0; corner < 6; corner++) {
             hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
         }
         method.invoke(null, mesh, hex, from, to, lod);
-        return mesh;
     }
 
     private static boolean bevel(float[] vertex) { return vertex[5] > .8f && vertex[5] < .95f; }
@@ -329,6 +564,11 @@ class BoardMultiHexBuildingTest {
     /** {@code apart}: pairs of neighbouring hexes of the building that do not connect to each other. */
     private static BoardScene scene(Map<Coords, Integer> heights, String asset, Map<Coords, Integer> rails,
           Set<Coords> fallen, Set<Set<Coords>> apart) {
+        return scene(heights, asset, rails, fallen, apart, Map.of(), Map.of());
+    }
+
+    private static BoardScene scene(Map<Coords, Integer> heights, String asset, Map<Coords, Integer> rails,
+          Set<Coords> fallen, Set<Set<Coords>> apart, Map<Coords, Integer> elevations, Map<Coords, Integer> roads) {
         return BoardSurfaceBlendTest.scene(coords -> {
             var base = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.LUNAR, 0, -1, 0);
             int exits = 0;
@@ -349,7 +589,7 @@ class BoardMultiHexBuildingTest {
                     }
                 }
             }
-            return new BoardScene.Tile(coords, 0, -1, false, 0, base.surface(), null, null, features, List.of(),
+            return new BoardScene.Tile(coords, elevations.getOrDefault(coords, 0), -1, false, roads.getOrDefault(coords, 0), base.surface(), null, null, features, List.of(),
                   BoardLiquid.NONE, null, true, base.road(), base.fireSmoke(), base.biome(), false, false, 0, false,
                   base.groundCover(), false, null, null, Map.of(), cover, false, BoardRoad.Kind.NONE, 0, false, rail);
         });
@@ -370,9 +610,14 @@ class BoardMultiHexBuildingTest {
     /** The vertices (all their attributes) of {@code data}'s parts in board material {@code material}. */
     private static List<float[]> vertices(RigidGlb.Data data, String material) {
         List<float[]> result = new ArrayList<>();
+        Set<String> parts = new java.util.HashSet<>();
+        for (var node : data.nodes) {
+            if (node.parts == null) { continue; }
+            for (var part : node.parts) { if (part.materialId.equals(material)) { parts.add(part.meshPartId); } }
+        }
         for (var mesh : data.meshes) {
             for (var part : mesh.parts) {
-                if (!part.id.equals(material)) { continue; }
+                if (!parts.contains(part.id)) { continue; }
                 for (short index : part.indices) {
                     int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                     float[] vertex = new float[RigidGlb.STRIDE];

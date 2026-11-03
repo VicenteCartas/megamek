@@ -117,6 +117,40 @@ class BuildingElevationRulesTest {
         game.setOptions(game.getOptions());
     }
 
+    @Test
+    void interiorOverridesFilterMovementAndDeploymentTogetherAndKeepTheRoof() {
+        selectRules(OptionsConstants.RULES_TW);
+        var unit = new ConvInfantry(); add(unit);
+        Hex hex = board.getHex(POSITION);
+        BuildingInteriors.set(hex, BuildingInteriors.NO_FLOORS);
+        assertEquals(List.of(0, 4), elevations(unit).stream().map(ElevationOption::elevation).toList());
+        org.junit.jupiter.api.Assertions.assertFalse(unit.isElevationValid(1, hex));
+        assertTrue(unit.isElevationValid(0, hex)); assertTrue(unit.isElevationValid(4, hex));
+        hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_BASEMENT_TYPE, 2));
+        hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_BASE_COLLAPSED, 1));
+        BuildingInteriors.set(hex, BuildingInteriors.NO);
+        assertEquals(megamek.common.enums.BasementType.NONE.ordinal(), hex.terrainLevel(megamek.common.units.Terrains.BLDG_BASEMENT_TYPE));
+        org.junit.jupiter.api.Assertions.assertFalse(hex.containsTerrain(megamek.common.units.Terrains.BLDG_BASE_COLLAPSED));
+        assertEquals(List.of(4), elevations(unit).stream().map(ElevationOption::elevation).toList());
+        org.junit.jupiter.api.Assertions.assertFalse(unit.isElevationValid(0, hex));
+        assertTrue(unit.isElevationValid(4, hex));
+        BuildingInteriors.set(hex, BuildingInteriors.YES);
+        assertEquals(List.of(0, 1, 2, 3, 4), elevations(unit).stream().map(ElevationOption::elevation).toList());
+    }
+
+    @Test
+    void domeAndHangarDefaultsCanBeOverridden() {
+        Hex hex = board.getHex(POSITION);
+        hex.setAppearance(java.util.Map.of("building", new HexAppearance("building/glass-dome", null, null, null)));
+        assertEquals(BuildingInteriors.NO, BuildingInteriors.resolve(hex));
+        BuildingInteriors.set(hex, BuildingInteriors.YES);
+        assertEquals(BuildingInteriors.YES, BuildingInteriors.resolve(hex));
+        BuildingInteriors.set(hex, BuildingInteriors.DEFAULT);
+        hex.setAppearance(java.util.Map.of());
+        hex.addTerrain(new megamek.common.units.Terrain(megamek.common.units.Terrains.BLDG_CLASS, megamek.common.units.IBuilding.HANGAR));
+        assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(hex));
+    }
+
     private void add(Entity unit) {
         unit.setId(1);
         unit.setOwner(player);

@@ -21,8 +21,8 @@ import megamek.logging.MMLogger;
 
 /**
  * A placed object's model bounds, read without the views (the legacy conversion on the server): its GLB's finest level,
- * the group whose name ends {@code -lod0}, in board units with Z up as the 3D board loads it; and the object's footprint
- * on the board plane as placed.
+ * the group whose name ends {@code -lod0}, or the whole model without LOD groups, in board units with Z up as the 3D
+ * board loads it; and the object's footprint on the board plane as placed. Invisible structural helpers are excluded.
  */
 public final class BoardModelBounds {
     private static final MMLogger LOGGER = MMLogger.create(BoardModelBounds.class);
@@ -39,6 +39,7 @@ public final class BoardModelBounds {
      * for a tree's winter form without one ({@code <species>-snow}), the bare species' file.
      */
     public static File file(File root, String asset) {
+        if (asset.startsWith("buildings/")) { return TilesetScenery.customBuildingFile(asset); }
         File own = new File(root, asset + ".glb");
         File bare = asset.endsWith("-snow") ? new File(root, asset.substring(0, asset.length() - "-snow".length()) + ".glb") : null;
         return bare != null && !own.isFile() && bare.isFile() ? bare : own;
@@ -78,15 +79,18 @@ public final class BoardModelBounds {
         if (!file.isFile()) { return NONE; }
         try (InputStream input = Files.newInputStream(file.toPath())) {
             var asset = new GltfAssetReader().readWithoutReferences(input);
-            if (!(asset instanceof GltfAssetV2 binary) || binary.getGltf().getScene() == null) { return NONE; }
+            if (!(asset instanceof GltfAssetV2 binary)) { return NONE; }
             // Bounds need no textures: an external image is never read.
             binary.getImageReferences().forEach(image -> image.getTarget().accept(ByteBuffer.allocate(0)));
             var model = GltfModelCreatorV2.create(binary);
             float[] bounds = { Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
                   Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY, Float.NEGATIVE_INFINITY };
-            // The finest level's group, by its name's ending: a renamed or moved file keeps its levels.
-            for (NodeModel root : model.getSceneModels().get(binary.getGltf().getScene()).getNodeModels()) {
-                if (root.getName() != null && root.getName().endsWith("-lod0")) { extend(root, bounds); }
+            // Whole authored buildings can omit LOD groups; helpers never contribute to visual bounds.
+            int scene = binary.getGltf().getScene() == null ? 0 : binary.getGltf().getScene();
+            var roots = model.getSceneModels().get(scene).getNodeModels();
+            boolean lods = roots.stream().anyMatch(root -> root.getName() != null && root.getName().endsWith("-lod0"));
+            for (NodeModel root : roots) {
+                if (!lods || root.getName() != null && root.getName().endsWith("-lod0")) { extend(root, bounds); }
             }
             return bounds[0] <= bounds[3] ? bounds : NONE;
         } catch (IOException | RuntimeException failure) {
@@ -97,6 +101,7 @@ public final class BoardModelBounds {
 
     /** Every vertex of a node and its children under their global transforms, glTF's Y up turned to the board's Z up. */
     private static void extend(NodeModel node, float[] bounds) {
+        if (BuildingVolumes.helper(node.getName())) { return; }
         float[] m = node.computeGlobalTransform(null);
         for (var mesh : node.getMeshModels()) {
             for (var primitive : mesh.getMeshPrimitiveModels()) {
