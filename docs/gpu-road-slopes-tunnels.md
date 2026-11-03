@@ -72,6 +72,8 @@ and use the column's wall art. A neighbour's wide corridor reserves its sliver o
   saves the slope at least a verge of ground, along runs of at least `WALL_PANELS` panels through the steps' corners;
   shorter stretches, ramps through the road's own hex and taller cliffs recede as without walls. The bank keeps the
   walled slopes standing up to the wall's top, and each run of panels continues one panel past either end.
+  Rounding-width seams between adjoining road mouths produce no soil cut faces and do not split the wall run;
+  panels keep the same five-centimetre joints through those mouths.
 - Concrete is cut vertically. A road ramping across the edge of concrete, and not also between natural hexes, is
   built in concrete (`BoardRoadGrade.poured`): natural ground neither banks into nor stands over it, and its cut faces
   use the concrete hex's walls.
