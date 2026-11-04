@@ -62,10 +62,11 @@ import megamek.common.compute.damage.PreExistingDamageLevel;
 
 /**
  * The lobby's damage editor (L-polish, item 6): the unit's paperdoll on the left, coloured live by the edits with the
- * change from the unit as read, the Whole unit button under it; on the right the picked location's name, stepped through with the chevrons beside it, over its values: armor and
+ * change from the unit as read, or a list of its locations when it has no paperdoll, the Whole unit button under it;
+ * on the right the picked location's name, stepped through with the chevrons beside it, over its values: armor and
  * structure as health bars, hits as boxes and states as switches; under both, the pre-existing damage roller. A click
- * on the doll picks a location. Restore Unit
- * brings every value back to a whole unit; More… keeps the edits and opens the Swing editor for what this one lacks.
+ * on the doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to
+ * edit, such as conventional infantry, shows its values alone.
  */
 final class LobbyDamageView {
     /** The doll's width, and the most height it may take; a tall doll is fitted by its height instead. */
@@ -88,6 +89,7 @@ final class LobbyDamageView {
     private final UiKit.Segmented roller;
     private final UiButton reroll;
     private final Table values = new Table();
+    private final List<UiButton> placeButtons = new ArrayList<>();
     private final ScrollPane valuesScroll;
     /** The picked location, or null for the general values. */
     private UnitDamageForm.Place chosen;
@@ -96,7 +98,7 @@ final class LobbyDamageView {
     private PreExistingDamageLevel rolled;
 
     LobbyDamageView(UiKit kit, UiDialog dialog, UnitDamageForm form, GpuPaperdolls paperdolls,
-          LobbyPromptViews.Edt edt, Runnable applied, Runnable more, Runnable close) {
+          LobbyPromptViews.Edt edt, Runnable applied, Runnable close) {
         this.kit = kit;
         this.form = form;
         places = form.places();
@@ -137,6 +139,8 @@ final class LobbyDamageView {
         body.top().left();
         Table left = new Table();
         left.top();
+        // with only the general values there is nothing to step through, so the unit's values take the dialog
+        boolean located = !places.isEmpty();
         if (geometry != null) {
             float[] bounds = geometry.bounds();
             float width = DOLL_WIDTH;
@@ -146,8 +150,21 @@ final class LobbyDamageView {
                 width = height * bounds[2] / bounds[3];
             }
             left.add(doll).size(width, height).top().row();
+        } else if (located) {
+            // no paperdoll to click, so the locations are a list to pick from
+            Table list = new Table();
+            list.top();
+            for (int index = 0; index < places.size(); index++) {
+                UnitDamageForm.Place place = places.get(index);
+                UiButton button = kit.button("button-toggle" + UiTheme.COMPACT, null, place.name(), null);
+                button.setName("damage-place-" + index);
+                UiKit.onChange(button, () -> choose(place));
+                placeButtons.add(button);
+                list.add(button).growX().padTop(index == 0 ? 0 : space("xxs")).row();
+            }
+            left.add(kit.scrollList(list, true)).growX().height(DOLL_MAX_HEIGHT).top().row();
         }
-        wholeUnit = kit.button("button-secondary" + UiTheme.COMPACT, "unit",
+        wholeUnit = kit.button("button-toggle" + UiTheme.COMPACT, "unit",
               Messages.getString("Lobby.damage.wholeUnit"), null);
         wholeUnit.setName("damage-whole");
         UiKit.onChange(wholeUnit, () -> choose(null));
@@ -170,7 +187,9 @@ final class LobbyDamageView {
         reroll.setName("damage-reroll");
         kit.tip(reroll, true).getActor().setText(Messages.getString("Lobby.damage.reroll"));
         UiKit.onChange(reroll, () -> roll(rolled));
-        body.add(left).top().width(DOLL_WIDTH).padRight(space("xl"));
+        if (located) {
+            body.add(left).top().width(DOLL_WIDTH).padRight(space("xl"));
+        }
 
         Table right = new Table();
         right.top().left();
@@ -185,9 +204,13 @@ final class LobbyDamageView {
         heading.setName("damage-heading");
         heading.setAlignment(Align.center);
         heading.setEllipsis(true);
-        head.add(previous).size(size("control.sm"));
+        if (located) {
+            head.add(previous).size(size("control.sm"));
+        }
         head.add(heading).growX().minWidth(0).padLeft(space("sm")).padRight(space("sm"));
-        head.add(next).size(size("control.sm"));
+        if (located) {
+            head.add(next).size(size("control.sm"));
+        }
         right.add(head).growX().row();
         values.top().left().pad(0, space("md"), space("md"), space("md"));
         valuesScroll = kit.scrollList(values, true);
@@ -201,7 +224,7 @@ final class LobbyDamageView {
                   "text.secondary")).left().padRight(space("lg"));
             rolling.add(roller).growX();
             rolling.add(reroll).size(size("control.sm")).padLeft(space("xs"));
-            body.add(rolling).colspan(2).growX().padTop(space("lg"));
+            body.add(rolling).colspan(located ? 2 : 1).growX().padTop(space("lg"));
         }
 
         dialog.tool(Messages.getString("UnitEditorDialog.preExistingDamage.reset"), () -> {
@@ -211,13 +234,6 @@ final class LobbyDamageView {
             reroll.setDisabled(true);
             refresh();
         }).setName("damage-repair");
-        dialog.tool(Messages.getString("Lobby.damage.more"), () -> {
-            close.run();
-            edt.edt(() -> {
-                form.apply();
-                more.run();
-            }, () -> { });
-        }).setName("damage-more");
         dialog.primary(Messages.getString("Ok.text"), () -> edt.edt(() -> {
             form.apply();
             applied.run();
@@ -270,6 +286,9 @@ final class LobbyDamageView {
         chosen = place;
         heading.setText(place == null ? Messages.getString("Lobby.damage.wholeUnit") : place.name());
         wholeUnit.pressed(place == null);
+        for (int index = 0; index < placeButtons.size(); index++) {
+            placeButtons.get(index).pressed(places.get(index) == place);
+        }
         fillValues();
         refreshDoll();
         valuesScroll.setScrollY(0);

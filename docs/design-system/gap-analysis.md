@@ -1340,15 +1340,27 @@ work for Swing, and item 11 is under investigation.
          stage's focus, and Esc then fell through to the lobby, which ignores it while a dialog is open, so the
          random map settings never closed on Esc. The random map settings no longer pin the page's width to the
          widest tab either, which pushed the advanced view's Theme out of the card; only the height is pinned.
-       - Edit Damage is a libGDX dialog (`LobbyDamageView`, through `LobbyNativeDialogs.damage`) for Meks,
-         ProtoMeks, vehicles and fighters: the unit's paperdoll on the left, coloured live by the edits with the change
-         from the unit as read, and the picked location's values on the right, or the unit's general ones (`SI` on
-         the doll picks those). Armour, rear armour and structure take steppers, systems and equipment hit boxes, and
-         breached and blown off switches; heat, crew hits, fuel and the conditions sit where the Swing editor puts
-         them. Restore Unit makes the unit whole; More… keeps the edits and opens the Swing editor for ammunition,
-         modes and the damage roller. The values live in the toolkit-free `UnitDamageForm`, which writes a partial
-         `DamageEditSpec` through `DamageEditApplier`, so what it does not show stays as it was. Infantry, gun
-         emplacements and large craft keep the Swing editor. `lobby+unitdamage` opens it for a shot.
+       - Edit Damage is a libGDX dialog (`LobbyDamageView`, through `LobbyNativeDialogs.damage`) for every unit the
+         Swing editor takes, which the lobby no longer opens: the unit's paperdoll on the left, coloured live by the
+         edits with the change from the unit as read, and the picked location's values on the right, or the unit's
+         general ones (`SI` on the doll, or Whole Unit, picks those).
+         - Armour, rear armour, structure, ammunition shots, a platoon's troopers and a bay's capacity are health
+           bars (`UiHealthBar`): a drag or a click sets the value in one go, the field types it, and − and + still
+           step it. Systems and equipment take hit boxes; breached, blown off, jammed and the like are switches.
+         - The location dropdown went: the doll picks, and ‹ › chevrons step through the locations. A unit with no
+           doll (battle armour, buildings, capital fighters, gun emplacements) picks from a list of its locations
+           instead; a conventional platoon has only its own values, so the list and chevrons hide.
+         - The damage roller is a row of chips (None, Light, Moderate, Heavy) under the doll; each roll
+           starts again from the unit as read.
+         - Large craft add their systems (CIC or FCS, K-F drive parts, grav decks, docking collars, sail, K-F boom)
+           and their transport bays, a place of their own with each bay's doors; a building edits its power and
+           gunners (stunned turns, killed per hex) instead of a crew.
+         - The values live in the toolkit-free `UnitDamageForm`, which writes a partial `DamageEditSpec` through
+           `DamageEditApplier`, so what it does not show stays as it was. More… (the way to the Swing editor) is
+           gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
+         - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
+           game in play, and the lobby has none yet.
+         - `lobby+unitdamage` opens it for a shot, `+next` steps on a location.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1364,8 +1376,11 @@ work for Swing, and item 11 is under investigation.
        no damage icon when a Game Master keeps it); `escapeClosesADialogWhoseTextFieldHasTheFocus` (Esc with no
        focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card);
        `UnitDamageFormTest` (a Mek's, vehicle's, VTOL's and fighter's places and values, repair, the partial spec
-       written to the unit, no form for infantry or a gun emplacement) and `LobbyDamageSmokeTest` (the doll's left
-       arm clicked, the stepper and a hit box, Restore Unit, and OK writing the armour to the unit).
+       written to the unit, ammunition and weapon switches, the roller, and every kind of unit the Swing editor
+       takes read unchanged and applied: a platoon's troopers, each battle armour trooper, a DropShip's systems and
+       bays, an emplacement, a building's power and gunners) and `LobbyDamageSmokeTest` (the doll's left arm
+       clicked, a bar dragged and a hit box, the chevrons, a roll, Restore Unit, and OK writing the armour to the
+       unit; a squad's location list and a platoon's troopers clicked through the stage).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
@@ -1381,7 +1396,7 @@ work for Swing, and item 11 is under investigation.
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:
-         - the unit damage editor (`UnitEditorDialog`);
+         - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
          - the auto-resolve dialogs: the chance of winning, the progress and the log.
        - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), the map editor's Client

@@ -298,15 +298,14 @@ final class LobbyNativeDialogs {
      * Shows the unit's damage editor over whatever shows.
      *
      * @param applied runs on the Swing thread once OK wrote the edits to the unit
-     * @param more    runs on the Swing thread once More… wrote the edits, to open the Swing editor
      */
-    UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied, Runnable more) {
+    UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied) {
         UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
               "dialog.lg", true, () -> { });
         if (paperdolls == null) {
             paperdolls = new GpuPaperdolls();
         }
-        new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, more, this::close);
+        new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, this::close);
         show(dialog);
         return dialog;
     }

@@ -33,6 +33,7 @@
 package megamek.client.lobby;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -42,46 +43,57 @@ import java.util.function.Consumer;
 
 import megamek.client.ui.Messages;
 import megamek.common.CriticalSlot;
+import megamek.common.bays.Bay;
 import megamek.common.compute.damage.CritAssignment;
 import megamek.common.compute.damage.PreExistingDamageApplier;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.compute.damage.PreExistingDamageResult;
 import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.DockingCollar;
 import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscMounted;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.game.Game;
 import megamek.common.interfaces.ILocationExposureStatus;
+import megamek.common.options.OptionsConstants;
 import megamek.common.rules.SettableHeat;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Aero;
-import megamek.common.units.AeroSpaceFighter;
-import megamek.common.units.ConvFighter;
 import megamek.common.units.Crew;
 import megamek.common.units.DamageEditApplier;
 import megamek.common.units.DamageEditSpec;
+import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
+import megamek.common.units.Jumpship;
 import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
 import megamek.common.units.QuadMek;
 import megamek.common.units.QuadVee;
+import megamek.common.units.SmallCraft;
 import megamek.common.units.Tank;
 import megamek.common.units.VTOL;
 import megamek.common.weapons.attacks.InfantryAttack;
 
 /**
- * The core of a unit's damage for the lobby's own editor: each location's armor, rear armor and structure with its
- * equipment and system hits, and the unit's general state (crew hits, heat, fuel, conditions and the systems that sit
- * in no location), as the Swing {@code UnitEditorDialog} shows them. Read from the unit on the Swing thread, edited by
- * the view on its own, and written back by {@link #apply} as a {@link DamageEditSpec} that carries only what this form
- * edits, and rolled with pre-existing damage by {@link #roll}; ammunition and equipment modes stay in the Swing editor.
+ * A unit's damage for the lobby's own editor, for every kind of unit the Swing {@code UnitEditorDialog} edits: each
+ * location's armor, rear armor and structure with its equipment, ammunition and system hits, a conventional platoon's
+ * troopers left, a large craft's bays, and the unit's general state (crew hits, heat, fuel, conditions and the systems
+ * that sit in no location). Read from the unit on the Swing thread, edited by the view on its own, written back by
+ * {@link #apply} as a {@link DamageEditSpec} that carries only what this form edits, and rolled with pre-existing
+ * damage by {@link #roll}.
  */
 public final class UnitDamageForm {
     /** The most hits a crew member can be given here, as in the Swing editor. */
     public static final int MAX_CREW_HITS = Crew.DEATH;
+    /** The most turns a building's gunners can be left stunned here, as in the Swing editor. */
+    private static final int MAX_STUNNED_TURNS = 20;
+    /** The level of a building location that stands for its whole hex. */
+    private static final int GROUND_FLOOR = 0;
 
     /** How a value is edited. */
     public enum Kind {
@@ -253,9 +265,15 @@ public final class UnitDamageForm {
     /** The hit values a pre-existing damage roll can mark, by what the roll names. */
     private final Map<String, Value> keyed = new HashMap<>();
     private Value structuralIntegrity;
+    /** How many transport bays the unit's bay values cover. */
+    private int bays;
 
     private UnitDamageForm(Entity entity) {
         this.entity = entity;
+        if (entity.isConventionalInfantry()) {
+            readInfantry((Infantry) entity);
+            return;
+        }
         readLocations();
         readCrew();
         readHeat();
@@ -265,18 +283,11 @@ public final class UnitDamageForm {
     }
 
     /**
-     * Whether the lobby's own editor covers the unit: Meks, ProtoMeks, vehicles and fighters, the units with a
-     * paperdoll and no large-craft systems. Infantry, buildings, gun emplacements, capital fighters and large craft
-     * stay in the Swing editor.
+     * Whether the lobby's own editor covers the unit: every unit, as the Swing editor does. Conventional infantry
+     * edits its troopers left, as the Swing editor's infantry panel does; everything else edits its locations.
      */
     public static boolean supported(Entity entity) {
-        if (entity == null || entity instanceof Infantry || entity instanceof GunEmplacement) {
-            return false;
-        }
-        if (entity instanceof Mek || entity instanceof ProtoMek || entity instanceof Tank) {
-            return true;
-        }
-        return (entity instanceof AeroSpaceFighter || entity instanceof ConvFighter) && !entity.isCapitalFighter();
+        return entity != null;
     }
 
     /** Reads the unit's damage; call on the thread that owns the unit. */
@@ -342,6 +353,12 @@ public final class UnitDamageForm {
             spec.stabilizerHits = new Integer[locations];
         } else if (entity instanceof ProtoMek) {
             spec.protoHits = new Integer[locations];
+        }
+        if (bays > 0) {
+            // every bay gets a capacity value, but a bay without doors has no door value to write its zero
+            spec.bayCapacityRemaining = new Double[bays];
+            spec.bayDoorHits = new Integer[bays];
+            Arrays.fill(spec.bayDoorHits, 0);
         }
         for (Value value : values()) {
             value.writer.write(spec, value.value);
@@ -512,7 +529,8 @@ public final class UnitDamageForm {
 
     private void readCrew() {
         Crew crew = entity.getCrew();
-        if (crew == null || crew.getSlotCount() < 1) {
+        // a building's crew is a garrison of gunners, stunned or killed a hex at a time instead of wounded
+        if (crew == null || crew.getSlotCount() < 1 || entity instanceof AbstractBuildingEntity) {
             return;
         }
         for (int slot = 0; slot < crew.getSlotCount(); slot++) {
@@ -541,8 +559,11 @@ public final class UnitDamageForm {
     }
 
     private void readConditions() {
-        general.add(toggle("UnitEditorDialog.status.shutdown", entity.isShutDown(),
-              (spec, value) -> spec.shutdown = value > 0));
+        // a building is shut down exactly when its power is off, which its own switch sets
+        if (!(entity instanceof AbstractBuildingEntity)) {
+            general.add(toggle("UnitEditorDialog.status.shutdown", entity.isShutDown(),
+                  (spec, value) -> spec.shutdown = value > 0));
+        }
         boolean canLieDown = !entity.isAero() && !entity.isAirborne() && !entity.isAirborneVTOLorWIGE();
         if (canLieDown && entity.isMek()) {
             general.add(toggle("UnitEditorDialog.status.prone", entity.isProne(),
@@ -563,6 +584,26 @@ public final class UnitDamageForm {
             }
             general.add(toggle("UnitEditorDialog.status.stealth", on, (spec, value) -> spec.stealth = value > 0));
         }
+        dugIn();
+    }
+
+    /** Dug In, for infantry that can dig in: mechanized infantry cannot (TO:AR p.106). */
+    private void dugIn() {
+        if (entity instanceof Infantry infantry && !infantry.isMechanized()) {
+            general.add(toggle("UnitEditorDialog.status.dugIn", infantry.getDugIn() != Infantry.DUG_IN_NONE,
+                  (spec, value) -> spec.dugIn = value > 0));
+        }
+    }
+
+    /**
+     * Conventional infantry: how many troopers are left, as the Swing editor's infantry panel has it, and whether
+     * they are dug in.
+     */
+    private void readInfantry(Infantry infantry) {
+        general.add(new Value(text("UnitEditorDialog.troopersLeft"), Kind.STEPPER,
+              Math.max(infantry.getShootingStrength(), 0), infantry.getSquadCount() * infantry.getSquadSize(),
+              Repair.FULL, (spec, value) -> spec.internal[0] = value));
+        dugIn();
     }
 
     private void readEquipment() {
@@ -607,6 +648,10 @@ public final class UnitDamageForm {
             target(mounted.getLocation()).add(crit);
             if (mounted instanceof WeaponMounted weapon) {
                 flags(weapon, number, crit);
+                if (entity instanceof AbstractBuildingEntity building && building.isTurretMounted(weapon)) {
+                    crit.flags.add(flag("UnitEditorDialog.building.turretLocked", building.isTurretLocked(weapon),
+                          (spec, value) -> spec.buildingTurretLocked.put(number, value > 0)));
+                }
             }
         }
     }
@@ -665,18 +710,139 @@ public final class UnitDamageForm {
         } else if (entity instanceof ProtoMek) {
             readProtoSystems();
         } else if (entity instanceof Aero aero) {
-            general.add(mark("avionics", boxes("UnitEditorDialog.avionics", aero.getAvionicsHits(), 3,
-                  (spec, value) -> spec.avionicsHits = value)));
+            readAeroSystems(aero);
+        } else if (entity instanceof AbstractBuildingEntity building) {
+            readBuildingSystems(building);
+        }
+    }
+
+    private void readAeroSystems(Aero aero) {
+        boolean jumpship = aero instanceof Jumpship;
+        general.add(mark("avionics", boxes("UnitEditorDialog.avionics", aero.getAvionicsHits(), 3,
+              (spec, value) -> spec.avionicsHits = value)));
+        if (jumpship) {
+            general.add(boxes("UnitEditorDialog.cic", aero.getCICHits(), 3, (spec, value) -> spec.cicHits = value));
+        } else {
             general.add(mark("fcs", boxes("UnitEditorDialog.fcs", aero.getFCSHits(), 3,
                   (spec, value) -> spec.fcsHits = value)));
-            general.add(mark("sensor", boxes("UnitEditorDialog.sensor", aero.getSensorHits(), 3,
-                  (spec, value) -> spec.sensorHits = value)));
-            general.add(mark("engine", boxes("UnitEditorDialog.engine", aero.getEngineHits(), 3,
-                  (spec, value) -> spec.engineHits = value)));
+        }
+        general.add(mark("sensor", boxes("UnitEditorDialog.sensor", aero.getSensorHits(), 3,
+              (spec, value) -> spec.sensorHits = value)));
+        general.add(mark("engine", boxes("UnitEditorDialog.engine", aero.getEngineHits(),
+              aero instanceof Dropship || jumpship ? 6 : 3, (spec, value) -> spec.engineHits = value)));
+        if (!jumpship) {
             general.add(mark("gear", boxes("UnitEditorDialog.landingGear", aero.isGearHit() ? 1 : 0, 1,
                   (spec, value) -> spec.gearHits = value)));
-            general.add(boxes("UnitEditorDialog.lifeSupport", aero.hasLifeSupport() ? 0 : 1, 1,
-                  (spec, value) -> spec.lifeSupportHits = value));
+        }
+        general.add(boxes("UnitEditorDialog.lifeSupport", aero.hasLifeSupport() ? 0 : 1, 1,
+              (spec, value) -> spec.lifeSupportHits = value));
+        if (aero instanceof SmallCraft || jumpship) {
+            general.add(boxes("UnitEditorDialog.leftThruster", aero.getLeftThrustHits(), 4,
+                  (spec, value) -> spec.leftThrusterHits = value));
+            general.add(boxes("UnitEditorDialog.rightThruster", aero.getRightThrustHits(), 4,
+                  (spec, value) -> spec.rightThrusterHits = value));
+        }
+        if (aero instanceof Jumpship ship) {
+            readJumpshipSystems(ship);
+        }
+        if (aero instanceof Dropship dropship) {
+            general.add(boxes("UnitEditorDialog.dropshipCollar", dropship.isDockCollarDamaged() ? 1 : 0, 1,
+                  (spec, value) -> spec.dockCollarHits = value));
+            general.add(boxes("UnitEditorDialog.kfBoom", dropship.isKFBoomDamaged() ? 1 : 0, 1,
+                  (spec, value) -> spec.kfBoomHits = value));
+        }
+        if (aero instanceof SmallCraft || jumpship) {
+            readBays(aero);
+        }
+    }
+
+    /** A JumpShip's grav decks, docking collars, K-F drive and jump sail. */
+    private void readJumpshipSystems(Jumpship ship) {
+        general.add(boxes("UnitEditorDialog.gravDecks", ship.getTotalDamagedGravDeck(), ship.getTotalGravDeck(),
+              (spec, value) -> spec.gravDeckHits = value));
+        int collars = ship.getDockingCollars().size();
+        int damaged = (int) ship.getDockingCollars().stream().filter(DockingCollar::isDamaged).count();
+        general.add(new Value(text("UnitEditorDialog.dockingCollars"), Kind.STEPPER, collars - damaged, collars,
+              Repair.FULL, (spec, value) -> spec.workingDockingCollars = value));
+        general.add(new Value(text("UnitEditorDialog.kfIntegrity"), Kind.STEPPER, ship.getKFIntegrity(),
+              ship.getOKFIntegrity(), Repair.FULL, (spec, value) -> spec.kfIntegrity = value));
+        Game game = ship.getGame();
+        if (game != null
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_AERO_RULES_EXPANDED_KF_DRIVE_DAMAGE)) {
+            general.add(boxes("UnitEditorDialog.driveCoil", ship.getKFDriveCoilHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.driveCoilHits = value));
+            general.add(boxes("UnitEditorDialog.chargingSystem", ship.getKFChargingSystemHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.chargingSystemHits = value));
+            general.add(boxes("UnitEditorDialog.fieldInitiator", ship.getKFFieldInitiatorHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.fieldInitiatorHits = value));
+            general.add(boxes("UnitEditorDialog.driveController", ship.getKFDriveControllerHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.driveControllerHits = value));
+            general.add(boxes("UnitEditorDialog.heliumTank", ship.getKFHeliumTankHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.heliumTankHits = value));
+            if (ship.hasLF()) {
+                general.add(boxes("UnitEditorDialog.lfBattery", ship.getLFBatteryHit() ? 1 : 0, 1,
+                      (spec, value) -> spec.lfBatteryHits = value));
+            }
+        }
+        general.add(new Value(text("UnitEditorDialog.sailIntegrity"), Kind.STEPPER, ship.getSailIntegrity(),
+              ship.getOSailIntegrity(), Repair.FULL, (spec, value) -> spec.sailIntegrity = value));
+    }
+
+    /**
+     * The transport bays, on a place of their own after the locations so a large craft's general values stay short:
+     * each bay's capacity left in whole units with its doors' hits. A cargo bay counts in half tons in the Swing
+     * editor; here a half ton the bay was read with is kept when its number is left alone, and a full bay is its
+     * whole capacity.
+     */
+    private void readBays(Aero aero) {
+        List<Bay> transport = aero.getTransportBays();
+        if (transport.isEmpty()) {
+            return;
+        }
+        bays = transport.size();
+        int key = entity.locations();
+        Place place = places.computeIfAbsent(key, at -> new Place(at, "", text("Lobby.damage.bays")));
+        for (int index = 0; index < transport.size(); index++) {
+            Bay bay = transport.get(index);
+            int at = index;
+            double capacity = bay.getCapacity();
+            double left = Math.clamp(capacity - bay.getBayDamage(), 0, capacity);
+            int full = (int) Math.ceil(capacity);
+            int read = (int) Math.floor(left);
+            add(place, String.format(text("UnitEditorDialog.bayCrit"), bay.getTransporterType(),
+                  bay.getBayNumber()), Kind.STEPPER, read, full, Repair.FULL,
+                  (spec, number) -> spec.bayCapacityRemaining[at] = number == read ? left
+                        : number >= full ? capacity : (double) number);
+            if (bay.getDoors() > 0) {
+                add(place, text("UnitEditorDialog.bayDoors"), Kind.BOXES, bay.getDoors() - bay.getCurrentDoors(),
+                      bay.getDoors(), Repair.CLEAR, (spec, hits) -> spec.bayDoorHits[at] = hits);
+            }
+        }
+    }
+
+    /**
+     * An Advanced Building's own state (TO:AR p. 119): its power switch and how long its gunners stay stunned, and
+     * whether each hex has lost its gunners, on the hex's ground floor.
+     */
+    private void readBuildingSystems(AbstractBuildingEntity building) {
+        Value power = toggle("UnitEditorDialog.building.powerOff", building.isPowerSwitchedOff(),
+              (spec, value) -> spec.buildingPowerSwitchedOff = value > 0);
+        general.add(power);
+        Value stunned = new Value(text("UnitEditorDialog.building.gunnersStunned"), Kind.STEPPER,
+              Math.max(building.getStunnedTurns(), 0), MAX_STUNNED_TURNS, Repair.CLEAR,
+              (spec, value) -> spec.buildingStunnedTurns = value);
+        stunned.tip = text("UnitEditorDialog.building.gunnersStunned.tooltip");
+        general.add(stunned);
+        for (int location = 0; location < building.locations(); location++) {
+            if (building.getLocationLevel(location) != GROUND_FLOOR) {
+                continue;
+            }
+            int at = location;
+            Value killed = new Value(text("UnitEditorDialog.building.gunnersKilled"), Kind.TOGGLE,
+                  building.hasDeadGunners(location) ? 1 : 0, 1, Repair.CLEAR,
+                  (spec, value) -> spec.buildingGunnersKilled.put(at, value > 0));
+            killed.tip = text("UnitEditorDialog.building.gunnersKilled.tooltip");
+            target(location).add(killed);
         }
     }
 
@@ -763,10 +929,17 @@ public final class UnitDamageForm {
         target(tank.hasNoTurret() ? Entity.LOC_NONE : tank.getLocTurret()).add(mark("turretLock",
               boxes("UnitEditorDialog.turretLock", tank.isTurretLocked(0) ? 1 : 0, 1,
                     (spec, value) -> spec.turretLockHits = value)));
-        general.add(boxes("UnitEditorDialog.engine", tank.getEngineHits(), 1,
-              (spec, value) -> spec.engineHits = value));
+        // an emplacement has no engine and does not move, so only its turret and sensors can be hit
+        boolean emplacement = tank instanceof GunEmplacement;
+        if (!emplacement) {
+            general.add(boxes("UnitEditorDialog.engine", tank.getEngineHits(), 1,
+                  (spec, value) -> spec.engineHits = value));
+        }
         general.add(mark("sensor", boxes("UnitEditorDialog.sensor", tank.getSensorHits(), Tank.CRIT_SENSOR_MAX,
               (spec, value) -> spec.sensorHits = value)));
+        if (emplacement) {
+            return;
+        }
         int motive = tank.isImmobile(false) ? 4 : tank.hasHeavyMovementDamage() ? 3
               : tank.hasModerateMovementDamage() ? 2 : tank.hasMinorMovementDamage() ? 1 : 0;
         general.add(mark("motive", boxes("UnitEditorDialog.motiveDamage", motive, 4,

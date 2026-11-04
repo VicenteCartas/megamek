@@ -41,15 +41,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.util.List;
 
+import megamek.common.bays.Bay;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
+import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Crew;
 import megamek.common.units.CrewType;
 import megamek.common.units.DamageEditSpec;
+import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
+import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
 import org.junit.jupiter.api.Test;
@@ -70,15 +74,98 @@ class UnitDamageFormTest {
     }
 
     @Test
-    void coversPaperdollUnitsAndLeavesTheRestToSwing() throws Exception {
-        assertTrue(UnitDamageForm.supported(load("Atlas AS7-D.mtf")));
-        assertTrue(UnitDamageForm.supported(load("Bulldog Medium Tank.blk")));
-        assertTrue(UnitDamageForm.supported(load("SOAR VTOL.blk")));
-        assertTrue(UnitDamageForm.supported(load("Cheetah F-11.blk")));
-        assertFalse(UnitDamageForm.supported(load("Foot Platoon (AFFS) (Laser 3067+).blk")));
-        assertFalse(UnitDamageForm.supported(load("Union (3055).blk")));
-        assertFalse(UnitDamageForm.supported(load("Simple Gun Emplacement (Gauss).blk")));
+    void coversEveryUnitAsTheSwingEditorDoes() throws Exception {
+        for (String file : List.of("Atlas AS7-D.mtf", "Bulldog Medium Tank.blk", "SOAR VTOL.blk",
+              "Cheetah F-11.blk", "Foot Platoon (AFFS) (Laser 3067+).blk", "Afreet Med BA (HH) (Sqd4).blk",
+              "Union (3055).blk", "Simple Gun Emplacement (Gauss).blk", "Simple Building Entity.blk")) {
+            Entity entity = load(file);
+            assertTrue(UnitDamageForm.supported(entity), file);
+            UnitDamageForm form = UnitDamageForm.of(entity);
+            assertFalse(form.changed(), file);
+            form.apply();
+        }
         assertFalse(UnitDamageForm.supported(null));
+    }
+
+    @Test
+    void conventionalInfantryEditsItsTroopersLeft() throws Exception {
+        Infantry platoon = (Infantry) load("Foot Platoon (AFFS) (Laser 3067+).blk");
+        UnitDamageForm form = UnitDamageForm.of(platoon);
+        assertTrue(form.places().isEmpty(), "a platoon has no locations to step through");
+        UnitDamageForm.Value troopers = general(form, "Troopers Left");
+        assertEquals(platoon.getSquadCount() * platoon.getSquadSize(), troopers.max());
+        assertEquals(troopers.max(), troopers.value());
+        assertTrue(platoon.isMechanized() || form.general().stream().anyMatch(v -> v.label().equals("Dug In")));
+        troopers.value(10);
+        form.apply();
+        assertEquals(10, UnitDamageForm.of(platoon).general().get(0).value());
+    }
+
+    @Test
+    void battleArmorEditsEachTrooper() throws Exception {
+        Entity squad = load("Afreet Med BA (HH) (Sqd4).blk");
+        UnitDamageForm form = UnitDamageForm.of(squad);
+        assertTrue(form.places().size() >= 4, "each trooper is a location");
+        UnitDamageForm.Place trooper = form.places().get(0);
+        assertNotNull(trooper.armor());
+        trooper.armor().value(0);
+        form.apply();
+        assertEquals(0, Math.max(squad.getArmor(trooper.location()), 0));
+    }
+
+    @Test
+    void aDropShipCarriesItsLargeCraftSystemsAndBays() throws Exception {
+        Dropship union = (Dropship) load("Union (3055).blk");
+        UnitDamageForm form = UnitDamageForm.of(union);
+        assertEquals(6, general(form, "Engine").max());
+        general(form, "Left Thruster");
+        general(form, "K-F Boom").value(1);
+        general(form, "Docking Collar");
+        UnitDamageForm.Place bays = form.places().get(form.places().size() - 1);
+        assertEquals("Transport bays", bays.name());
+        Bay first = union.getTransportBays().get(0);
+        UnitDamageForm.Value capacity = bays.values().get(0);
+        assertEquals((int) Math.ceil(first.getCapacity()), capacity.max());
+        capacity.value(0);
+        form.apply();
+        assertTrue(union.isKFBoomDamaged());
+        assertEquals(first.getCapacity(), first.getBayDamage(), 0.001, "an emptied bay is all damage");
+
+        UnitDamageForm again = UnitDamageForm.of(union);
+        again.repairAll();
+        again.apply();
+        assertFalse(union.isKFBoomDamaged());
+        assertEquals(0, first.getBayDamage(), 0.001, "a repaired bay holds its whole capacity");
+    }
+
+    @Test
+    void anEmplacementNeitherMovesNorHasAnEngine() throws Exception {
+        UnitDamageForm form = UnitDamageForm.of(load("Simple Gun Emplacement (Gauss).blk"));
+        List<String> general = form.general().stream().map(UnitDamageForm.Value::label).toList();
+        assertFalse(general.contains("Motive Damage"));
+        assertFalse(general.contains("Engine"));
+    }
+
+    @Test
+    void aBuildingEditsItsPowerAndGunnersInsteadOfACrew() throws Exception {
+        AbstractBuildingEntity building = (AbstractBuildingEntity) load("Simple Building Entity.blk");
+        UnitDamageForm form = UnitDamageForm.of(building);
+        List<String> general = form.general().stream().map(UnitDamageForm.Value::label).toList();
+        assertFalse(general.contains("Shutdown"), "the power switch stands in for shutdown");
+        assertTrue(form.general().stream().noneMatch(value -> value.kind() == UnitDamageForm.Kind.STEPPER
+              && value.max() == UnitDamageForm.MAX_CREW_HITS), "a building's gunners are not wounded");
+        assertTrue(form.places().stream().flatMap(place -> place.values().stream())
+              .anyMatch(value -> value.label().equals("Gunners Killed"))
+              || general.contains("Gunners Killed"), "each hex can lose its gunners");
+        general(form, "Power Off").value(1);
+        general(form, "Gunners Stunned").value(2);
+        form.apply();
+        assertTrue(building.isPowerSwitchedOff());
+        assertEquals(2, building.getStunnedTurns());
+    }
+
+    private static UnitDamageForm.Value general(UnitDamageForm form, String label) {
+        return form.general().stream().filter(value -> value.label().equals(label)).findFirst().orElseThrow();
     }
 
     @Test

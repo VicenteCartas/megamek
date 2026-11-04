@@ -161,16 +161,8 @@ final class GpuLobbyTools {
 
         @Override
         public void editDamage(Entity unit, Runnable done) {
-            Runnable swing = () -> {
-                new SwingLobbyPrompts(gui()).editDamage(unit);
-                done.run();
-            };
-            if (!UnitDamageForm.supported(unit)) {
-                swing.run();
-                return;
-            }
             UnitDamageForm form = UnitDamageForm.of(unit);
-            open(dialogs -> dialogs.damage(form, GpuLobbyTools.this::edt, done, swing));
+            open(dialogs -> dialogs.damage(form, GpuLobbyTools.this::edt, done));
         }
 
         @Override

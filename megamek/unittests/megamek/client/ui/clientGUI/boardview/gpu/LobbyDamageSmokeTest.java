@@ -59,7 +59,7 @@ class LobbyDamageSmokeTest {
                   (work, then) -> {
                       work.run();
                       then.run();
-                  }, () -> applied[0]++, () -> { }, () -> closed[0] = true);
+                  }, () -> applied[0]++, () -> closed[0] = true);
             dialog.show(ui.stage, false);
             ui.draw();
             assertEquals("CT", view.chosen().abbr(), "the centre torso shows first");
@@ -194,6 +194,58 @@ class LobbyDamageSmokeTest {
             dialog.close();
             ui.draw();
             assertNull(ui.stage.getRoot().findActor("damage-doll"));
+        });
+    }
+
+    @Test
+    void unitsWithoutADollPickFromAListOrShowTheirValuesAlone() throws Exception {
+        Entity squad = new MekFileParser(new File("testresources/megamek/common/units/Afreet Med BA (HH) (Sqd4).blk"))
+              .getEntity();
+        squad.setGame(new Game());
+        Entity platoon = new MekFileParser(
+              new File("testresources/megamek/common/units/Foot Platoon (AFFS) (Laser 3067+).blk")).getEntity();
+        platoon.setGame(new Game());
+        GpuPaperdolls paperdolls = new GpuPaperdolls(Path.of("../../mm-data/data/images/paperdolls"));
+        UiTestStage.run(ui -> {
+            UnitDamageForm form = UnitDamageForm.of(squad);
+            UiDialog dialog = new UiDialog(ui.kit, "Damage", () -> { }).width("dialog.lg");
+            LobbyDamageView view = new LobbyDamageView(ui.kit, dialog, form, paperdolls,
+                  (work, then) -> {
+                      work.run();
+                      then.run();
+                  }, () -> { }, () -> { });
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertNull(ui.stage.getRoot().findActor("damage-doll"), "no doll for battle armour");
+            UiButton second = find(ui, "damage-place-1");
+            click(ui, second);
+            assertEquals(form.places().get(1), view.chosen(), "the list picks a trooper");
+            assertTrue(second.isChecked(), "and marks it");
+            click(ui, find(ui, "damage-next"));
+            assertEquals(form.places().get(2), view.chosen(), "the chevrons still step");
+            dialog.close();
+            ui.draw();
+
+            UnitDamageForm troops = UnitDamageForm.of(platoon);
+            UiDialog alone = new UiDialog(ui.kit, "Damage", () -> { }).width("dialog.lg");
+            int[] applied = { 0 };
+            new LobbyDamageView(ui.kit, alone, troops, paperdolls,
+                  (work, then) -> {
+                      work.run();
+                      then.run();
+                  }, () -> applied[0]++, () -> { });
+            alone.show(ui.stage, false);
+            ui.draw();
+            assertNull(ui.stage.getRoot().findActor("damage-next"), "nothing to step through");
+            Actor down = find(ui, "damage-value-0-down");
+            click(ui, down);
+            assertEquals(troops.general().get(0).max() - 1, troops.general().get(0).value(), "a trooper falls");
+            click(ui, find(ui, "damage-ok"));
+            assertEquals(1, applied[0]);
+            assertEquals(troops.general().get(0).max() - 1, UnitDamageForm.of(platoon).general().get(0).value(),
+                  "OK writes the troopers left");
+            alone.close();
+            ui.draw();
         });
     }
 
