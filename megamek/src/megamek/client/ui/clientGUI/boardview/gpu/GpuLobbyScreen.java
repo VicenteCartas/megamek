@@ -151,6 +151,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean unitDamagePending;
     /** How many locations the probe steps the damage editor on once it is open: {@code +next}. */
     private int damageStepsPending;
+    /** Whether the probe rolls heavy damage on the damage editor once it is open: {@code +heavy}. */
+    private boolean damageHeavyPending;
     /** The developer switch's clicks and pointer, run through the stage once their time comes. */
     private boolean clickCompactPending;
     private boolean clickFoldPending;
@@ -265,6 +267,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         unitMenuPending = probe.options().contains("unitmenu");
         unitDamagePending = probe.options().contains("unitdamage");
         damageStepsPending = unitDamagePending && probe.options().contains("next") ? 1 : 0;
+        damageHeavyPending = unitDamagePending && probe.options().contains("heavy");
         clickCompactPending = probe.options().contains("clickcompact");
         clickFoldPending = probe.options().contains("fold");
         foldReportPending = clickFoldPending;
@@ -1568,6 +1571,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             if (next != null) {
                 damageStepsPending--;
                 GpuLobbyProbeInput.click(stage, next);
+            }
+        }
+        if (!unitDamagePending && damageHeavyPending) {
+            Actor heavy = probeFind(stage.getRoot(), "damage-roll-heavy");
+            // the dialog lays out on the frame after it opens; a click before that lands nowhere
+            if (heavy != null && heavy.getWidth() > 0) {
+                damageHeavyPending = false;
+                GpuLobbyProbeInput.click(stage, heavy);
             }
         }
         if (clickCompactPending && elapsed > PROBE_CLICK_AT) {

@@ -1350,8 +1350,18 @@ work for Swing, and item 11 is under investigation.
          - The location dropdown went: the doll picks, and ‹ › chevrons step through the locations. A unit with no
            doll (battle armour, buildings, capital fighters, gun emplacements) picks from a list of its locations
            instead; a conventional platoon has only its own values, so the list and chevrons hide.
-         - The damage roller is a row of chips (None, Light, Moderate, Heavy) under the doll; each roll
-           starts again from the unit as read.
+         - The damage roller is a row of level tiles (`UiLevelTiles`: None, Light, Moderate, Heavy) under both
+           columns, each with a pip meter in its colour (`status.success`, `accent.primary`, `status.warning`,
+           `status.danger`); the rolled one lights up, and the die rolls it again. Each roll starts again from the
+           unit as read.
+         - A Mek shows its record sheet's three dolls, as the board's unit sheet does: front armour, and rear armour
+           over structure beside it, each under its caption, and any of them picks a location; with the structure
+           on its own doll, the front doll shows the armour alone. The dialog is extra-large for those; other units
+           keep one doll. The values pane is taller (348), as high as the dialog can grow and still fit a 900 pixel
+           window at the shipped scale.
+         - The lobby's dolls are vivid (`GpuPaperdoll.vivid`): a critical location's red is stronger, with its
+           numbers in `text.primary`, so it stands apart from a damaged amber one, and an exposed location's change
+           takes the dark ink its number does. The board's dolls are unchanged.
          - Large craft add their systems (CIC or FCS, K-F drive parts, grav decks, docking collars, sail, K-F boom)
            and their transport bays, a place of their own with each bay's doors; a building edits its power and
            gunners (stunned turns, killed per hex) instead of a crew.
@@ -1360,7 +1370,7 @@ work for Swing, and item 11 is under investigation.
            gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
          - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
            game in play, and the lobby has none yet.
-         - `lobby+unitdamage` opens it for a shot, `+next` steps on a location.
+         - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1379,7 +1389,8 @@ work for Swing, and item 11 is under investigation.
        written to the unit, ammunition and weapon switches, the roller, and every kind of unit the Swing editor
        takes read unchanged and applied: a platoon's troopers, each battle armour trooper, a DropShip's systems and
        bays, an emplacement, a building's power and gunners) and `LobbyDamageSmokeTest` (the doll's left arm
-       clicked, a bar dragged and a hit box, the chevrons, a roll, Restore Unit, and OK writing the armour to the
+       clicked, a bar dragged and a hit box, the chevrons, a roll lighting its tile, the rear armour and structure
+       dolls clicked, Restore Unit, and OK writing the armour to the
        unit; a squad's location list and a platoon's troopers clicked through the stage).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:

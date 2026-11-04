@@ -983,6 +983,14 @@ public final class UiKit {
     }
 
     /**
+     * A row of level tiles ({@link UiLevelTiles}) named {@code names}, each with a pip meter of its step lit in its
+     * colour role from {@code roles}, such as how much damage to roll.
+     */
+    public UiLevelTiles levelTiles(String[] names, String[] roles) {
+        return new UiLevelTiles(this, names, roles);
+    }
+
+    /**
      * A stepper as {@link #stepper(int, int, int)} led by {@code caption} in small text.secondary, the caption, the
      * buttons and the value all {@link UiStepper#gap()} apart: one group, which stands a larger space from the next.
      */

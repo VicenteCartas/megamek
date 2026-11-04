@@ -21,6 +21,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
+import megamek.client.ui.gdx.UiLevelTiles;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
@@ -32,9 +33,9 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Clicks the lobby's damage editor through the stage: a click on the doll picks the location, the stepper and hit
- * boxes change the form and the doll, Restore Unit brings the unit back whole, Cancel leaves the unit and OK writes
- * the edits to it.
+ * Clicks the lobby's damage editor through the stage: a click on any of a Mek's three dolls picks the location, the
+ * stepper and hit boxes change the form and the doll, a roll lights its level tile, Restore Unit brings the unit back
+ * whole, Cancel leaves the unit and OK writes the edits to it.
  */
 @Tag("on-demand")
 class LobbyDamageSmokeTest {
@@ -111,12 +112,24 @@ class LobbyDamageSmokeTest {
 
             UiButton reroll = find(ui, "damage-reroll");
             assertTrue(reroll.isDisabled(), "nothing to roll again yet");
-            click(ui, find(ui, "damage-roll-heavy"));
+            UiLevelTiles.Tile heavy = find(ui, "damage-roll-heavy");
+            click(ui, heavy);
+            assertTrue(heavy.isChecked(), "the rolled level's tile lights up");
             assertFalse(reroll.isDisabled(), "a heavy roll can be rolled again");
             assertTrue(form.places().stream().anyMatch(place -> place.armor() != null
                   && place.armor().value() < place.armor().max()), "a heavy roll takes armour off");
-            click(ui, find(ui, "damage-roll-none"));
+            UiLevelTiles.Tile none = find(ui, "damage-roll-none");
+            click(ui, none);
+            assertTrue(none.isChecked(), "None lights in its place");
+            assertFalse(heavy.isChecked(), "and Heavy goes dark");
             assertFalse(form.changed(), "None goes back to the unit as read");
+
+            GpuPaperdoll rear = find(ui, "damage-doll-rear");
+            clickAt(ui, rear, spot(rear, "LT"));
+            assertEquals("LT", view.chosen().abbr(), "a click on the rear armor doll picks its location");
+            GpuPaperdoll inside = find(ui, "damage-doll-structure");
+            clickAt(ui, inside, spot(inside, "RL"));
+            assertEquals("RL", view.chosen().abbr(), "a click on the structure doll picks its location");
             clickAt(ui, doll, arm);
             int boxesRow = -1;
             for (int index = 0; index < values.size(); index++) {

@@ -300,11 +300,12 @@ final class LobbyNativeDialogs {
      * @param applied runs on the Swing thread once OK wrote the edits to the unit
      */
     UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied) {
-        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
-              "dialog.lg", true, () -> { });
         if (paperdolls == null) {
             paperdolls = new GpuPaperdolls();
         }
+        // a Mek's front, rear and structure dolls stand side by side, as on the record sheet, so it takes more width
+        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
+              LobbyDamageView.sheet(paperdolls, form) ? "dialog.xl" : "dialog.lg", true, () -> { });
         new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, this::close);
         show(dialog);
         return dialog;

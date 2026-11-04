@@ -57,36 +57,49 @@ import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.gdx.UiLevelTiles;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 
 /**
  * The lobby's damage editor (L-polish, item 6): the unit's paperdoll on the left, coloured live by the edits with the
  * change from the unit as read, or a list of its locations when it has no paperdoll, the Whole unit button under it;
- * on the right the picked location's name, stepped through with the chevrons beside it, over its values: armor and
- * structure as health bars, hits as boxes and states as switches; under both, the pre-existing damage roller. A click
- * on the doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to
- * edit, such as conventional infantry, shows its values alone.
+ * a Mek shows its record sheet's three dolls instead, front armor beside rear armor over structure. On the right the
+ * picked location's name, stepped through with the chevrons beside it, over its values: armor and structure as health
+ * bars, hits as boxes and states as switches; under both, the pre-existing damage roller's level tiles. A click on any
+ * doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to edit, such
+ * as conventional infantry, shows its values alone.
  */
 final class LobbyDamageView {
     /** The doll's width, and the most height it may take; a tall doll is fitted by its height instead. */
     private static final float DOLL_WIDTH = 260;
-    private static final float DOLL_MAX_HEIGHT = 330;
+    private static final float DOLL_MAX_HEIGHT = 340;
+    /** A Mek's front armor doll's height; its rear armor and structure dolls stack beside it in the same height. */
+    private static final float SHEET_HEIGHT = 288;
     /**
      * The values' pane: one height for every location, so picking another never resizes the dialog, and low enough
      * that the dialog fits a 900 pixel high window at the shipped interface scale.
      */
-    private static final float PANE_HEIGHT = 340;
+    private static final float PANE_HEIGHT = 348;
     private static final PreExistingDamageLevel[] LEVELS = PreExistingDamageLevel.values();
+    /** The roller's tiles' colours, from a whole unit to heavy damage. */
+    private static final String[] LEVEL_ROLES = { "status.success", "accent.primary", "status.warning",
+                                                  "status.danger" };
 
     private final UiKit kit;
     private final UnitDamageForm form;
     private final List<UnitDamageForm.Place> places;
     private final GpuPaperdoll doll;
     private final GpuPaperdolls.Doll geometry;
+    /** A Mek's rear armor and structure dolls, as the record sheet shows them, or null for another unit. */
+    private final GpuPaperdoll rearDoll;
+    private final GpuPaperdolls.Doll rearGeometry;
+    private final GpuPaperdoll insideDoll;
+    private final GpuPaperdolls.Doll insideGeometry;
+    private final List<GpuPaperdoll> dolls = new ArrayList<>();
     private final Label heading;
     private final UiButton wholeUnit;
-    private final UiKit.Segmented roller;
+    private final UiLevelTiles roller;
     private final UiButton reroll;
     private final Table values = new Table();
     private final List<UiButton> placeButtons = new ArrayList<>();
@@ -104,36 +117,12 @@ final class LobbyDamageView {
         places = form.places();
         String family = GpuPaperdolls.family(form.entity());
         geometry = family.isEmpty() ? null : paperdolls.doll(family, GpuPaperdolls.ARMOR, Set.of());
-        doll = new GpuPaperdoll(kit.skin);
-        doll.setName("damage-doll");
-        doll.maxFont(16);
-        doll.setTouchable(Touchable.enabled);
-        doll.addListener(new InputListener() {
-            @Override
-            public boolean mouseMoved(InputEvent event, float x, float y) {
-                String picked = doll.pick(x, y);
-                hovered = picked == null ? "" : picked;
-                marks();
-                return false;
-            }
-
-            @Override
-            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
-                if (pointer == -1) {
-                    hovered = "";
-                    marks();
-                }
-            }
-
-            @Override
-            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                if (button != Input.Buttons.LEFT) {
-                    return false;
-                }
-                pickCode(doll.pick(x, y));
-                return true;
-            }
-        });
+        boolean sheet = sheet(paperdolls, form);
+        rearGeometry = sheet ? paperdolls.doll(family, GpuPaperdolls.REAR, Set.of()) : null;
+        insideGeometry = sheet ? paperdolls.doll(family, GpuPaperdolls.STRUCTURE, Set.of()) : null;
+        doll = doll("damage-doll");
+        rearDoll = sheet ? doll("damage-doll-rear") : null;
+        insideDoll = sheet ? doll("damage-doll-structure") : null;
 
         Table body = dialog.body();
         body.top().left();
@@ -141,7 +130,9 @@ final class LobbyDamageView {
         left.top();
         // with only the general values there is nothing to step through, so the unit's values take the dialog
         boolean located = !places.isEmpty();
-        if (geometry != null) {
+        if (sheet) {
+            left.add(sheetDolls()).top().row();
+        } else if (geometry != null) {
             float[] bounds = geometry.bounds();
             float width = DOLL_WIDTH;
             float height = width * bounds[3] / bounds[2];
@@ -174,21 +165,22 @@ final class LobbyDamageView {
         for (int index = 0; index < LEVELS.length; index++) {
             names[index] = Messages.getString("Lobby.damage." + LEVELS[index].name());
         }
-        roller = kit.segmented(UiTheme.TOKEN_SEGMENT + UiTheme.COMPACT, true, names);
+        roller = kit.levelTiles(names, LEVEL_ROLES);
+        roller.setName("damage-roller");
         for (int index = 0; index < LEVELS.length; index++) {
-            UiButton segment = roller.buttons.get(index);
+            UiLevelTiles.Tile tile = roller.tiles.get(index);
             PreExistingDamageLevel level = LEVELS[index];
-            segment.setName("damage-roll-" + level.name().toLowerCase());
-            kit.tip(segment, true).getActor().setText(
+            tile.setName("damage-roll-" + level.name().toLowerCase());
+            kit.tip(tile, true).getActor().setText(
                   Messages.getString("UnitEditorDialog.preExistingDamage." + level.name()));
-            UiKit.onChange(segment, () -> roll(level));
+            UiKit.onChange(tile, () -> roll(level));
         }
         reroll = kit.button("button-icon" + UiTheme.COMPACT, "die", null, null);
         reroll.setName("damage-reroll");
         kit.tip(reroll, true).getActor().setText(Messages.getString("Lobby.damage.reroll"));
         UiKit.onChange(reroll, () -> roll(rolled));
         if (located) {
-            body.add(left).top().width(DOLL_WIDTH).padRight(space("xl"));
+            body.add(left).top().width(sheet ? left.getPrefWidth() : DOLL_WIDTH).padRight(space("xl"));
         }
 
         Table right = new Table();
@@ -248,6 +240,88 @@ final class LobbyDamageView {
     /** The location or general values that show. */
     UnitDamageForm.Place chosen() {
         return chosen;
+    }
+
+    /**
+     * Whether the unit's dolls are a record sheet's: a Mek's front armor, rear armor and structure dolls side by side,
+     * where another unit has one doll.
+     */
+    static boolean sheet(GpuPaperdolls paperdolls, UnitDamageForm form) {
+        String family = GpuPaperdolls.family(form.entity());
+        return !family.isEmpty() && !form.places().isEmpty()
+              && paperdolls.doll(family, GpuPaperdolls.REAR, Set.of()) != null
+              && paperdolls.doll(family, GpuPaperdolls.STRUCTURE, Set.of()) != null;
+    }
+
+    /** A doll whose hovered location the others outline too, and whose click picks a location. */
+    private GpuPaperdoll doll(String name) {
+        GpuPaperdoll made = new GpuPaperdoll(kit.skin);
+        made.setName(name);
+        made.maxFont(16);
+        made.vivid(true);
+        made.setTouchable(Touchable.enabled);
+        made.addListener(new InputListener() {
+            @Override
+            public boolean mouseMoved(InputEvent event, float x, float y) {
+                String picked = made.pick(x, y);
+                hovered = picked == null ? "" : picked;
+                marks();
+                return false;
+            }
+
+            @Override
+            public void exit(InputEvent event, float x, float y, int pointer, Actor toActor) {
+                if (pointer == -1 && (toActor == null || !toActor.isDescendantOf(made))) {
+                    hovered = "";
+                    marks();
+                }
+            }
+
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
+                if (button != Input.Buttons.LEFT) {
+                    return false;
+                }
+                pickCode(made.pick(x, y));
+                return true;
+            }
+        });
+        dolls.add(made);
+        return made;
+    }
+
+    /**
+     * The record sheet's dolls: the front armor at the left, the rear armor and structure stacked at its right in the
+     * same height, each under its caption.
+     */
+    private Table sheetDolls() {
+        float captionGap = space("xs");
+        Label frontCaption = kit.caption(Messages.getString("GpuBoard.hud.unit.frontArmor"), true);
+        float caption = frontCaption.getPrefHeight() + captionGap;
+        float[] front = geometry.bounds();
+        float[] rear = rearGeometry.bounds();
+        float[] inside = insideGeometry.bounds();
+        float frontWidth = SHEET_HEIGHT * front[2] / front[3];
+        float stackGap = space("lg");
+        // the stack's two captions and its gap less the front's caption, shared by the two dolls in proportion
+        float narrow = (SHEET_HEIGHT - caption - stackGap) / (rear[3] / rear[2] + inside[3] / inside[2]);
+        Table frontColumn = new Table();
+        frontColumn.top().left();
+        frontColumn.add(frontCaption).left().padBottom(captionGap).row();
+        frontColumn.add(doll).size(frontWidth, SHEET_HEIGHT).row();
+        Table stack = new Table();
+        stack.top().left();
+        stack.add(kit.caption(Messages.getString("GpuBoard.hud.unit.rearArmor"), true)).left().padBottom(captionGap)
+              .row();
+        stack.add(rearDoll).size(narrow, narrow * rear[3] / rear[2]).row();
+        stack.add(kit.caption(Messages.getString("GpuBoard.hud.common.structure"), true)).left().padTop(stackGap)
+              .padBottom(captionGap).row();
+        stack.add(insideDoll).size(narrow, narrow * inside[3] / inside[2]).row();
+        Table sheet = new Table();
+        sheet.top().left();
+        sheet.add(frontColumn).top().padRight(space("lg"));
+        sheet.add(stack).top();
+        return sheet;
     }
 
     /** Picks the location with the paperdoll region {@code code}, or the general values for structural integrity. */
@@ -407,21 +481,30 @@ final class LobbyDamageView {
             return;
         }
         Map<String, Cell> armor = new HashMap<>();
+        Map<String, Cell> rear = new HashMap<>();
         Map<String, Cell> structure = new HashMap<>();
+        // a record sheet's front doll shows the armor alone, as the structure has its own doll; a lone doll says a
+        // location stripped of armor shows its structure
+        View armorView = insideDoll == null ? View.CARD : View.ARMOR;
         for (UnitDamageForm.Place place : places) {
             UnitDamageForm.Value internal = place.internal();
             UnitDamageForm.Value front = place.armor();
+            UnitDamageForm.Value back = place.rear();
             boolean destroyed = internal != null && internal.value() <= 0;
             boolean crit = place.values().stream().anyMatch(value -> value.kind() == UnitDamageForm.Kind.BOXES
                   && value.value() > 0 || value.locked());
             int remaining = internal == null ? 1 : internal.value();
             if (front != null) {
                 armor.put(place.abbr(), GpuPaperdoll.cell(front.value(), front.max(), destroyed, remaining, crit,
-                      View.CARD).with(false, Math.max(0, front.original() - front.value())));
+                      armorView).with(false, Math.max(0, front.original() - front.value())));
             } else if (internal != null) {
                 armor.put(place.abbr(), GpuPaperdoll.cell(internal.value(), internal.max(), destroyed,
                       internal.value(), crit, View.CARD).with(false, Math.max(0, internal.original()
                       - internal.value())));
+            }
+            if (back != null) {
+                rear.put(place.abbr(), GpuPaperdoll.cell(back.value(), back.max(), destroyed, remaining, false,
+                      View.ARMOR).with(false, Math.max(0, back.original() - back.value())));
             }
             if (internal != null) {
                 structure.put(place.abbr(), GpuPaperdoll.cell(internal.value(), internal.max(), destroyed,
@@ -434,12 +517,21 @@ final class LobbyDamageView {
             structure.put("SI", GpuPaperdoll.cell(si.value(), si.max(), false, si.value(), false, View.STRUCTURE)
                   .with(false, Math.max(0, si.original() - si.value())));
         }
-        doll.show(geometry, armor, structure);
+        if (insideDoll == null) {
+            doll.show(geometry, armor, structure);
+        } else {
+            doll.show(geometry, armor, Map.of());
+            rearDoll.show(rearGeometry, rear, Map.of());
+            insideDoll.show(insideGeometry, Map.of(), structure);
+        }
         marks();
     }
 
     private void marks() {
-        doll.marks(hovered, chosen == null ? "" : chosen.abbr(), "");
+        String picked = chosen == null ? "" : chosen.abbr();
+        for (GpuPaperdoll each : dolls) {
+            each.marks(hovered, picked, "");
+        }
     }
 
     private static float space(String token) {
