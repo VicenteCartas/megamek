@@ -2698,6 +2698,7 @@ class GpuBattleView extends ApplicationAdapter {
         private boolean marquee;
         private int gestureButton;
         private GpuTerrain.DecorationHit editorGrab;
+        private boolean editorAuthoredGrab;
         /** A press on the selection's rotation handle: its drag turns the selection, one undo step. */
         private RotationHandle rotationGrab;
         /** The pointer's angle about the grabbed handle's pivot at the press, and the rotation last sent. */
@@ -2747,15 +2748,16 @@ class GpuBattleView extends ApplicationAdapter {
                 Vector3 point = ray.getEndPoint(new Vector3(), (editorGrab.anchorZ() - ray.origin.z) / ray.direction.z);
                 Coords at = editorGrab.coords();
                 if (!drag || additive) {
-                    var object = scene.tile(at).features().stream().map(BoardScene.Feature::decoration)
+                    var object = scene.tiles().stream().flatMap(tile -> tile.features().stream()).map(BoardScene.Feature::decoration)
                           .filter(java.util.Objects::nonNull).filter(d -> d.id().equals(editorGrab.id())).findFirst().orElse(null);
                     if (object == null) { return; }
+                    editorAuthoredGrab = megamek.common.board.BuildingVolumes.of(object.asset()).present();
                     editorGrabX = point.x - BoardGeometry.centerX(at) - (float) object.x() * BoardGeometry.width();
                     editorGrabY = point.y - BoardGeometry.centerY(at) - (float) object.y() * BoardGeometry.height();
                 }
                 var target = BoardGeometry.tile(scene, point.x - editorGrabX, point.y - editorGrabY);
-                if (target == null) { return; }
-                hovered = target.coords(); hoverZ = Float.NaN; source.setHover(hovered);
+                if (target == null && !editorAuthoredGrab) { return; }
+                hovered = target == null ? at : target.coords(); hoverZ = Float.NaN; source.setHover(hovered);
                 source.editorPointer(at, (point.x - editorGrabX - BoardGeometry.centerX(at)) / BoardGeometry.width(),
                       (point.y - editorGrabY - BoardGeometry.centerY(at)) / BoardGeometry.height(), drag, editorGrab.id(), additive, gestureBoardGeneration);
                 return;

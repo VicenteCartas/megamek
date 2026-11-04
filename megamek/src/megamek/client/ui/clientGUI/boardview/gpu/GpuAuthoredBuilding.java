@@ -35,7 +35,7 @@ import megamek.common.board.TilesetScenery;
 /** One authored placement, assembled in full then cut into hex-owned meshes. Collapsed neighbours do not change the cut. */
 final class GpuAuthoredBuilding {
     record Layout(Coords cell, Coords anchor, BoardDecoration object, double base, int ground, int height,
-          BuildingInteriors interiors, List<Coords> members) { }
+          BuildingInteriors interiors, List<Coords> members, int boardWidth, int boardHeight) { }
     record Slice(List<Model> levels, Model interior, List<Vector3> roof) {
         void dispose() { levels.stream().distinct().forEach(Model::dispose); if (interior != null) { interior.dispose(); } }
     }
@@ -43,6 +43,7 @@ final class GpuAuthoredBuilding {
     record Prepared(Layout layout, List<ModelData> levels, List<List<Vector3>> floors, List<Vector3> columns,
           List<Vector3> roof) { }
     private record Assembly(String asset, List<BuildingVolumes.Module> modules) { }
+    private record Placement(Coords anchor, BoardDecoration object, double base, int width, int height) { }
     private static final Map<String, List<ModelData>> FILES = new ConcurrentHashMap<>();
     private static final Map<Assembly, List<ModelData>> ASSEMBLIES = new ConcurrentHashMap<>();
 
@@ -50,11 +51,15 @@ final class GpuAuthoredBuilding {
 
     static Map<Layout, Prepared> prepare(BoardScene scene, List<BoardScene.Tile> tiles) {
         Map<Layout, Prepared> result = new java.util.LinkedHashMap<>();
+        Map<Placement, List<ModelData>> placements = new java.util.HashMap<>();
         for (var tile : tiles) {
             for (var feature : tile.features()) {
                 if (!supports(feature)) { continue; }
                 Layout layout = layout(scene, tile, feature);
-                result.put(layout, prepare(layout, FILES.computeIfAbsent(feature.asset(), GpuAuthoredBuilding::load)));
+                var key = new Placement(layout.anchor(), layout.object(), layout.base(), scene.width(), scene.height());
+                var whole = placements.computeIfAbsent(key, ignored -> placement(layout,
+                      FILES.computeIfAbsent(feature.asset(), GpuAuthoredBuilding::load)));
+                result.put(layout, slice(layout, whole));
             }
         }
         return Map.copyOf(result);
@@ -70,13 +75,13 @@ final class GpuAuthoredBuilding {
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
         if (feature.kind() == BoardScene.FeatureKind.PROP) {
             return new Layout(tile.coords(), tile.coords(), feature.decoration(), feature.elevation(), tile.elevation(),
-                  0, BuildingInteriors.NO, List.of(tile.coords()));
+                  0, BuildingInteriors.NO, List.of(tile.coords()), scene.width(), scene.height());
         }
         var reference = tile.cover().reference();
         var members = scene.tiles().stream().filter(t -> t.cover().reference() != null
               && t.cover().reference().id().equals(reference.id())).map(BoardScene.Tile::coords).toList();
         return new Layout(tile.coords(), reference.anchor(), feature.decoration(), feature.elevation(), tile.elevation(),
-              tile.cover().height(), tile.cover().interiors(), members);
+              tile.cover().height(), tile.cover().interiors(), members, scene.width(), scene.height());
     }
 
     static List<ModelData> load(String asset) {
@@ -129,15 +134,36 @@ final class GpuAuthoredBuilding {
     }
 
     static Prepared prepare(Layout layout, List<ModelData> source) {
+        return slice(layout, placement(layout, source));
+    }
+
+    /** Cut and seal the whole placement first. Internal member cuts remain open for floors and destruction. */
+    private static List<ModelData> placement(Layout layout, List<ModelData> source) {
         var definition = BuildingVolumes.of(layout.object().asset());
         var object = layout.object();
-        float cx = HexTile.centerX(layout.cell(), HexTile.MODEL_WIDTH), cy = HexTile.centerY(layout.cell(), HexTile.HEIGHT);
-        float x = HexTile.centerX(layout.anchor(), HexTile.MODEL_WIDTH) + (float) object.x() * HexTile.MODEL_WIDTH - cx;
-        float y = HexTile.centerY(layout.anchor(), HexTile.HEIGHT) + (float) object.y() * HexTile.HEIGHT - cy;
+        float x = HexTile.centerX(layout.anchor(), HexTile.MODEL_WIDTH) + (float) object.x() * HexTile.MODEL_WIDTH;
+        float y = HexTile.centerY(layout.anchor(), HexTile.HEIGHT) + (float) object.y() * HexTile.HEIGHT;
         var frame = new Matrix4().translate(x, y, (float) layout.base() * HexTile.LEVEL_HEIGHT)
               .rotate(Vector3.Z, (float) object.rotation()).rotate(Vector3.Y, (float) object.rotationY()).rotate(Vector3.X, (float) object.rotationX())
               .scale((float) (object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1)),
                     (float) (object.scale() * object.stretch().y()), (float) (object.scale() * object.stretch().z()));
+        var assembly = new Assembly(object.asset(), definition.modules(object.levels(), BuildingVolumes.seed(object)));
+        var assembled = ASSEMBLIES.computeIfAbsent(assembly, ignored -> GpuBuilding.lods(source).stream()
+              .<ModelData>map(lod -> assemble(lod, definition, object.levels(), BuildingVolumes.seed(object), new Matrix4())
+                    .data(object.asset(), lod)).toList());
+        var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
+        List<ModelData> levels = new ArrayList<>();
+        for (ModelData lod : assembled) {
+            GeneratedMesh whole = new GeneratedMesh();
+            for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), frame); }
+            levels.add(AuthoredBoardClip.clip(whole, lod, layout.boardWidth(), layout.boardHeight(), solids));
+        }
+        return List.copyOf(levels);
+    }
+
+    private static Prepared slice(Layout layout, List<ModelData> placed) {
+        var object = layout.object();
+        float cx = HexTile.centerX(layout.cell(), HexTile.MODEL_WIDTH), cy = HexTile.centerY(layout.cell(), HexTile.HEIGHT);
         List<GeneratedMesh.Keep> boundaries = new ArrayList<>();
         // The Voronoi cell of the original occupied hex centres equals their shared hex edges. At outside edges it
         // also owns the visual fringe, so decorative overhangs disappear with a member rather than becoming scraps.
@@ -146,14 +172,10 @@ final class GpuAuthoredBuilding {
             double dx = HexTile.centerX(other, HexTile.MODEL_WIDTH) - cx, dy = HexTile.centerY(other, HexTile.HEIGHT) - cy;
             boundaries.add((px, py) -> (dx * dx + dy * dy) * .5 - px * dx - py * dy);
         }
-        var assembly = new Assembly(object.asset(), definition.modules(object.levels(), BuildingVolumes.seed(object)));
-        var assembled = ASSEMBLIES.computeIfAbsent(assembly, ignored -> GpuBuilding.lods(source).stream()
-              .<ModelData>map(lod -> assemble(lod, definition, object.levels(), BuildingVolumes.seed(object), new Matrix4())
-                    .data(object.asset(), lod)).toList());
         List<ModelData> levels = new ArrayList<>();
-        for (ModelData lod : assembled) {
+        for (ModelData lod : placed) {
             GeneratedMesh whole = new GeneratedMesh();
-            for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), frame); }
+            for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), new Matrix4().translate(-cx, -cy, 0)); }
             levels.add(whole.clipped(boundaries).data("authored-" + object.id() + "-" + layout.cell(), lod));
         }
         if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of()); }
@@ -173,7 +195,7 @@ final class GpuAuthoredBuilding {
                 var bounds = middle.getBounds2D();
                 for (double px = Math.ceil(bounds.getMinX() / 22) * 22; px < bounds.getMaxX(); px += 22) {
                     for (double py = Math.ceil(bounds.getMinY() / 22) * 22; py < bounds.getMaxY(); py += 22) {
-                        if (middle.contains(px, py)) { columns.add(new Vector3((float) px - cx, (float) py - cy, z + 9)); }
+                        if (middle.contains(px - .8, py - .8, 1.6, 1.6)) { columns.add(new Vector3((float) px - cx, (float) py - cy, z + 9)); }
                     }
                 }
             }

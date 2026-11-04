@@ -20,6 +20,78 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorAuthoredBuildingTest {
+    @Test void areaLimitUsesTheStructuralProjectionEvenWhenTheModelIsTilted() {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
+        Coords at = new Coords(8, 8);
+        editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
+        editor.pointer(at, 0, 0, false); editor.finishStroke();
+        var original = editor.board().getHex(at).getDecorations().getFirst();
+        editor.command(new Command(Action.SELECT_AT, "8,8", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationX", "17"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationY", "23"), null);
+        var tilted = editor.board().getHex(at).getDecorations().getFirst();
+        assertEquals(17, tilted.rotationX()); assertEquals(23, tilted.rotationY());
+        assertEquals(1, BuildingVolumes.onBoardFraction(at, tilted, 16, 16), 1e-8);
+    }
+
+    @Test void ninetyPercentMayLeaveTheMapButFurtherMovesAreBlockedAndRetainedPartSurvivesReload(@TempDir Path dir) throws Exception {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
+        Coords owner = new Coords(16, 12);
+        editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+        editor.pointer(owner, 0, 0, false); editor.finishStroke();
+        var original = editor.board().getHex(owner).getDecorations().getFirst();
+        var all = members(editor.board(), original.id());
+        editor.command(new Command(Action.SELECT_AT, "16,12", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
+        double accepted = leftOffset(owner, original, .10001), blocked = leftOffset(owner, original, .099);
+        editor.command(new Command(Action.OBJECT_VALUE, "x", Double.toString(accepted)), null);
+        var retained = editor.board().getHex(owner).getDecorations().getFirst();
+        assertEquals(accepted, retained.x());
+        assertTrue(megamek.common.board.HexTile.centerX(owner, megamek.common.board.HexTile.MODEL_WIDTH)
+              + retained.x() * megamek.common.board.HexTile.MODEL_WIDTH < 0, "The pivot is allowed outside while its owner stays in-map");
+        assertEquals(.10001, BuildingVolumes.onBoardFraction(owner, retained, 32, 24), 1e-6);
+        var covered = members(editor.board(), original.id());
+        assertFalse(covered.isEmpty()); assertTrue(covered.size() < all.size());
+        assertEquals(BuildingVolumes.coverage(owner, retained, 32, 24, editor.board()::getHex), covered);
+        editor.command(new Command(Action.OBJECT_VALUE, "x", Double.toString(blocked)), null);
+        assertEquals(retained, editor.board().getHex(owner).getDecorations().getFirst());
+        // Reducing an already outside placement to a tiny prop cannot evade the area limit.
+        editor.command(new Command(Action.OBJECT_VALUE, "scale", ".05"), null);
+        assertEquals(retained, editor.board().getHex(owner).getDecorations().getFirst());
+        editor.save(dir.resolve("edge-hpg.board2"));
+        var loaded = BoardFile.read(dir.resolve("edge-hpg.board2"));
+        assertEquals(retained, loaded.getHex(owner).getDecorations().getFirst());
+        assertEquals(covered, members(loaded, retained.id()));
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(all, members(editor.board(), original.id()));
+        editor.command(new Command(Action.REDO), null);
+        assertEquals(covered, members(editor.board(), original.id()));
+        // A drag keeps the last legal position when a later pointer sample crosses the limit.
+        editor.command(new Command(Action.SELECT_OBJECT, retained.id()), null);
+        editor.pointer(owner, retained.x(), retained.y(), false, retained.id());
+        editor.pointer(owner, accepted + .1, retained.y(), true, retained.id());
+        var dragged = editor.board().getHex(owner).getDecorations().getFirst();
+        assertEquals(accepted + .1, dragged.x(), 1e-8);
+        editor.pointer(owner, blocked, retained.y(), true, retained.id());
+        assertEquals(dragged, editor.board().getHex(owner).getDecorations().getFirst());
+        editor.finishStroke();
+        assertEquals(dragged, editor.board().getHex(owner).getDecorations().getFirst());
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(retained, editor.board().getHex(owner).getDecorations().getFirst());
+    }
+
+    private static double leftOffset(Coords owner, megamek.common.board.BoardDecoration object, double fraction) {
+        double outside = -40, inside = 0;
+        for (int i = 0; i < 35; i++) {
+            double offset = (outside + inside) * .5;
+            var moved = object.transform(offset, object.y(), object.rotation(), object.mirror(), object.scale(), object.placement());
+            if (BuildingVolumes.onBoardFraction(owner, moved, 32, 24) < fraction) { outside = offset; }
+            else { inside = offset; }
+        }
+        return inside;
+    }
+
     @Test void scaleAndAxisStretchRebuildGameplayAndSurviveUndoAndReload(@TempDir Path dir) throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(40, 30), null);
         Coords anchor = new Coords(20, 15);

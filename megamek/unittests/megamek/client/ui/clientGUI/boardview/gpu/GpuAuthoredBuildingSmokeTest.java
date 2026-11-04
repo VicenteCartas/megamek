@@ -28,6 +28,79 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
+    @Test void rendersClippedHpgAndStationWithNeutralCapsAndRestoresTheirGeometryWhenTheBoardGrows() throws Exception {
+        File output = new File("build/gpu-board-review/authored-buildings");
+        Files.createDirectories(output.toPath());
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(12, 12), null);
+        Coords hpg = new Coords(0, 6), station = new Coords(11, 1);
+        place(editor, hpg, "hpg-headquarters", 37);
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchX", "1.15"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchY", ".9"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), null);
+        place(editor, station, "xenobiology-station", -20);
+        editor.command(new Command(Action.OBJECT_VALUE, "levels", "5"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), null);
+        var scene = capture(editor.board());
+        var grown = capture(megamek.common.util.BoardUtilities.resize(editor.board(), 0, 0, 4, 0));
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(10, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    int capped = 0;
+                    for (var prepared : GpuAuthoredBuilding.prepare(scene, scene.tiles()).values()) {
+                        var at = prepared.layout().cell();
+                        float cx = megamek.common.board.HexTile.centerX(at, megamek.common.board.HexTile.MODEL_WIDTH);
+                        float cy = megamek.common.board.HexTile.centerY(at, megamek.common.board.HexTile.HEIGHT);
+                        for (var lod : prepared.levels()) {
+                            var mesh = AuthoredBoardClipTest.mesh(lod);
+                            if (mesh.parts.containsKey(AuthoredBoardClip.CAP)) { capped++; }
+                            for (var part : mesh.parts.values()) {
+                                for (int i = 0; i < part.size; i += RigidGlb.STRIDE) { part.items[i] += cx; part.items[i + 1] += cy; }
+                            }
+                            AuthoredBoardClipTest.assertInside(mesh, scene.width(), scene.height());
+                        }
+                    }
+                    assertTrue(capped > 0);
+                    terrain.update(scene); terrain.animate(1, List.of());
+                    BoardCamera camera = new BoardCamera(); camera.resize(1600, 1000);
+                    camera.setIsometric(true); camera.orbit(-90, 0); camera.camera.zoom = .72f;
+                    camera.center(BoardGeometry.center(hpg, 0).add(170, -20, 120));
+                    frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "hpg-edge.png"));
+                    camera.setIsometric(true); camera.orbit(90, 0); camera.camera.zoom = .25f;
+                    camera.center(BoardGeometry.center(station, 2));
+                    frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "station-edge.png"));
+                    int neutral = 0;
+                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) field(chunk, "props")) {
+                            if (field(prop, "decorationId") == null) { continue; }
+                            var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+                            var cap = instance.getMaterial(AuthoredBoardClip.CAP, false);
+                            if (cap != null) {
+                                var colour = cap.get(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.class,
+                                      com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.Diffuse).color;
+                                assertEquals(.08f, colour.r, .00001f); assertEquals(colour.r, colour.g); assertEquals(colour.g, colour.b);
+                                neutral++;
+                            }
+                        }
+                    }
+                    assertTrue(neutral > 0, "Placement tint must leave the map caps dark grey");
+                    var before = terrain.editorObjects(station).getFirst().bounds().max.x;
+                    terrain.update(grown); terrain.animate(1, List.of());
+                    var after = terrain.editorObjects(station).getFirst().bounds().max.x;
+                    assertTrue(after > before + BoardGeometry.width() * .1f, "Resizing must not reuse the old clipped mesh");
+                    frame.render(terrain, camera, grown); GpuReviewFrame.save(new File(output, "station-edge-grown.png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Authored board-edge review", failure.get()); }
+    }
+
     @Test void rendersBothExamplesAndKeepsTheRemainingSlicesAfterAnchorCollapse() throws Exception {
         File output = new File("build/gpu-board-review/authored-buildings");
         Files.createDirectories(output.toPath());
@@ -93,10 +166,10 @@ class GpuAuthoredBuildingSmokeTest {
                     var bounds = slice.levels().getFirst().calculateBoundingBox(new BoundingBox());
                     assertTrue(bounds.isValid());
                     var hall = assets.authoredBuilding(GpuAuthoredBuilding.prepare(new GpuAuthoredBuilding.Layout(stable.cell(), stable.anchor(), stable.object(),
-                          stable.base(), stable.ground(), stable.height(), BuildingInteriors.NO_FLOORS, stable.members()), GpuAuthoredBuilding.load(stable.object().asset())));
+                          stable.base(), stable.ground(), stable.height(), BuildingInteriors.NO_FLOORS, stable.members(), stable.boardWidth(), stable.boardHeight()), GpuAuthoredBuilding.load(stable.object().asset())));
                     assertEquals(1, hall.interior().getNode("floors").parts.size);
                     var sealed = assets.authoredBuilding(GpuAuthoredBuilding.prepare(new GpuAuthoredBuilding.Layout(stable.cell(), stable.anchor(), stable.object(),
-                          stable.base(), stable.ground(), stable.height(), BuildingInteriors.NO, stable.members()), GpuAuthoredBuilding.load(stable.object().asset())));
+                          stable.base(), stable.ground(), stable.height(), BuildingInteriors.NO, stable.members(), stable.boardWidth(), stable.boardHeight()), GpuAuthoredBuilding.load(stable.object().asset())));
                     assertNull(sealed.interior());
                     BoardCamera camera = new BoardCamera();
                     camera.resize(1600, 1000);

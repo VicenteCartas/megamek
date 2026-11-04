@@ -2,13 +2,20 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Mesh;
+import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.model.MeshPart;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
@@ -18,12 +25,70 @@ import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Disposable;
 
 /** Ruby absorption along the sun's rays, on the nearest opaque receiver in the existing shadow map. */
 final class GpuCrystalTransmission implements Disposable {
     /** The authored ruby material carries optical transmission independently of alpha blending. */
     static boolean ruby(Material material) { return "crystal".equals(material.id); }
+
+    /** Closed convex primitives retain their actual facet planes for internal optical transport. */
+    private static final Map<Mesh, Map<Long, float[]>> VOLUMES = new WeakHashMap<>();
+    static float[] planes(MeshPart part) {
+        long key = ((long) part.offset << 32) | part.size;
+        return VOLUMES.computeIfAbsent(part.mesh, ignored -> new HashMap<>()).computeIfAbsent(key, ignored -> {
+            Mesh mesh = part.mesh;
+            int stride = mesh.getVertexSize() / Float.BYTES;
+            int offset = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES;
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(vertices);
+            short[] indices = new short[part.size];
+            mesh.getIndices(part.offset, part.size, indices, 0);
+            var centre = new Vector3();
+            for (short index : indices) {
+                int at = Short.toUnsignedInt(index) * stride + offset;
+                centre.add(vertices[at], vertices[at + 1], vertices[at + 2]);
+            }
+            centre.scl(1f / indices.length);
+            var planes = new ArrayList<float[]>();
+            var a = new Vector3(); var b = new Vector3(); var c = new Vector3();
+            for (int i = 0; i < indices.length; i += 3) {
+                Vector3[] triangle = { a, b, c };
+                for (int j = 0; j < 3; j++) {
+                    int at = Short.toUnsignedInt(indices[i + j]) * stride + offset;
+                    triangle[j].set(vertices[at], vertices[at + 1], vertices[at + 2]);
+                }
+                b.sub(a); c.sub(a);
+                float edge = Math.max(b.len2(), c.len2());
+                var normal = b.crs(c);
+                // Clipping can leave a microscopic triangle along an existing edge. Its float normal is unstable;
+                // the neighbouring full facet already defines this optical boundary.
+                if (normal.len2() < Math.max(1e-12f, edge * edge * 1e-10f)) { continue; }
+                normal.nor();
+                float distance = normal.dot(a);
+                if (normal.dot(centre) > distance) { normal.scl(-1); distance = -distance; }
+                boolean found = false;
+                for (float[] plane : planes) {
+                    if (normal.x * plane[0] + normal.y * plane[1] + normal.z * plane[2] > .99999f
+                          && Math.abs(distance - plane[3]) < .002f) { found = true; break; }
+                }
+                if (!found) { planes.add(new float[] { normal.x, normal.y, normal.z, distance }); }
+            }
+            if (planes.size() > 32) { throw new IllegalArgumentException("Ruby primitive exceeds 32 optical facets: " + part.id); }
+            for (float[] plane : planes) {
+                for (short index : indices) {
+                    int at = Short.toUnsignedInt(index) * stride + offset;
+                    if (plane[0] * vertices[at] + plane[1] * vertices[at + 1] + plane[2] * vertices[at + 2] > plane[3] + .005f) {
+                        throw new IllegalArgumentException("Ruby optical primitive must be convex: " + part.id);
+                    }
+                }
+            }
+            float[] packed = new float[128];
+            for (int i = 0; i < planes.size(); i++) { System.arraycopy(planes.get(i), 0, packed, i * 4, 4); }
+            return packed;
+        });
+    }
 
     private FrameBuffer target;
     private ShaderProgram shader;

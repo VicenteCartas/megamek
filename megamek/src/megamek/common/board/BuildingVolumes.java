@@ -251,7 +251,7 @@ public final class BuildingVolumes {
         Map<Point, Point> edges = new LinkedHashMap<>();
         for (Coords at : border) {
             for (int corner = 0; corner < 6; corner++) {
-                Coords neighbour = at.translated((7 - corner) % 6);
+                Coords neighbour = at.translated(HexTile.edgeDirection(corner));
                 if (neighbour.getX() >= 0 && neighbour.getX() < width && neighbour.getY() >= 0 && neighbour.getY() < height) { continue; }
                 int next = (corner + 1) % 6;
                 edges.put(new Point(HexTile.cornerX(at, corner, HexTile.MODEL_WIDTH), HexTile.cornerY(at, corner, HexTile.HEIGHT), 0),
@@ -267,7 +267,9 @@ public final class BuildingVolumes {
     /** Geometric structural area retained by the board; independent of half-hex gameplay coverage and decorative props. */
     public static double onBoardFraction(Coords anchor, BoardDecoration object, int width, int height) {
         Area footprint = new Area();
-        roofs(placed(anchor, object, 0)).values().forEach(footprint::add);
+        for (var solid : placed(anchor, object, 0)) {
+            for (var triangle : solid.triangles()) { footprint.add(polygon(List.of(triangle.a(), triangle.b(), triangle.c()))); }
+        }
         double total = area(footprint);
         if (total == 0) { return 0; }
         footprint.intersect(polygon(boardOutline(width, height)));

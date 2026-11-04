@@ -197,7 +197,8 @@ class BoardMultiHexBuildingTest {
                     assertEquals(GpuBuilding.LEVEL_HEIGHT, a[2], .01f);
                     area += Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2;
                 }
-                assertEquals(24 * HexTile.HEIGHT, area, 3, "One uninterrupted roof, without overlapping module caps");
+                // The 30-unit corridor leaves a 22.4-unit panel between its two armored roof-edge beams.
+                assertEquals(22.4 * HexTile.HEIGHT, area, 3, "One uninterrupted roof, without overlapping module caps");
             }
         }
     }

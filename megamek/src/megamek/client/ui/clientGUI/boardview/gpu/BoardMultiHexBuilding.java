@@ -68,7 +68,7 @@ final class BoardMultiHexBuilding {
      * the root where the wing meets the ring, how much wider and how far out; its cap's bevel, in and up.
      */
     private static final float MODULE_HALF = 15, GATEHOUSE = 34, HEAD = 4, MODULE_CHAMFER = 4, ROOT = 10, ROOT_REACH = 10,
-          BEVEL = 3, BEVEL_RISE = 1.6f;
+          BEVEL = 3.8f, BEVEL_RISE = 2.2f;
     /** Geodesic strut length the frequency aims at, and the struts' cross-section. */
     private static final float STRUT_LENGTH = 16, STRUT_WIDTH = .75f, STRUT_OUT = .5f, STRUT_IN = .4f;
     private static final float LEVEL = GpuBuilding.LEVEL_HEIGHT;
@@ -1525,10 +1525,10 @@ final class BoardMultiHexBuilding {
                 // One owning facade carries the complete corner housing, including its small relief over the cut.
                 float[] at = { corner.at().x(), corner.at().y() };
                 if (corner.flat()) {
-                    facadePost(mesh, grown(hex(), 4), at, -corner.normal().y(), corner.normal().x(),
-                          corner.bottom(), tunnel.top() - BEVEL_RISE, .95f, false);
+                    facadePost(mesh, grown(hex(), 6), at, -corner.normal().y(), corner.normal().x(),
+                          corner.bottom(), tunnel.top() - BEVEL_RISE, 1.3f, false);
                 } else {
-                    cornerPost(mesh, grown(hex(), 4), at, corner.normal(), corner.side(),
+                    cornerPost(mesh, grown(hex(), 6), at, corner.normal(), corner.side(),
                           corner.bottom(), tunnel.top() - BEVEL_RISE, corner.external());
                 }
             }
@@ -2237,8 +2237,8 @@ final class BoardMultiHexBuilding {
     }
 
     /** A corner pier's half width, how far a pier stands out, its chamfer; its footing's. */
-    private static final float CORNER_PIER = 2.6f, PIER_DEPTH = 2.1f, PIER_CHAMFER = .75f, FOOTING_GROW = .9f,
-          FOOTING_DEPTH = 3.2f, FOOTING = 2.4f;
+    private static final float CORNER_PIER = 3.3f, PIER_DEPTH = 2.8f, PIER_CHAMFER = .85f, FOOTING_GROW = .9f,
+          FOOTING_DEPTH = 3.2f, FOOTING = .5f;
     /** A pier facing (nx, ny) at (x, y) on a facade, its back buried in the wall even at a corner; on a footing. */
     private static void pier(GeneratedMesh mesh, List<float[]> hex, float x, float y, float nx, float ny, float half, float bottom, float top,
           boolean footing) {
@@ -2255,6 +2255,8 @@ final class BoardMultiHexBuilding {
             face(mesh, hex, PIER, a, b, normal[0], normal[1], bottom, top, 0, u);
         }
         clippedFlat(mesh, hex, PIER, counterClockwise(ring), top);
+        postCap(mesh, hex, ring, top - .6f, top + 1.3f, .55f);
+        postCap(mesh, hex, ring, bottom, bottom + .7f, .55f);
         postDetails(mesh, hex, new float[] { x, y }, tx, ty, 0, bottom, top, PIER_DEPTH, half - PIER_CHAMFER, false);
         if (footing) {
             float grown = half + FOOTING_GROW;
@@ -2481,14 +2483,14 @@ final class BoardMultiHexBuilding {
             if (!dome.joined(angle, 0)) { fin(mesh, hex, dome, (float) angle, fin < 6 ? corner : flat, bottom, top); }
         }
         // The ring roof in bays, one a side: steel ribs on the corners' radial lines and a steel rim along the outline.
-        float rib = .85f, rim = 1.1f;
+        float rib = 1.25f, rim = 1.9f;
         for (int k = 0; k < sides; k++) {
             double angle = 2 * Math.PI * k / sides;
             float ux = (float) Math.cos(angle), uy = (float) Math.sin(angle), reach = (corner - inner) / 2;
             clippedBlock(mesh, hex, PIER, x + ux * (inner + reach), y + uy * (inner + reach), ux, uy, reach, rib, top,
                   top + .95f);
             clippedBlock(mesh, hex, HARDWARE, x + ux * (inner + reach), y + uy * (inner + reach), ux, uy,
-                  reach, .48f, top + .92f, top + 1.02f);
+                  reach, .85f, top + .92f, top + 1.02f);
             for (float at : new float[] { inner + 2, corner - 2 }) {
                 clippedBlock(mesh, hex, PIER, x + ux * at, y + uy * at, ux, uy, .5f, rib + .22f, top, top + 1.1f);
                 fastener(mesh, hex, new Vector3(x + ux * at, y + uy * at, top + 1.12f), Vector3.Z, .18f);
@@ -2691,14 +2693,34 @@ final class BoardMultiHexBuilding {
             }
             outward(mesh, PIER, hex, corners[0], corners[1], corners[2]);
             outward(mesh, PIER, hex, corners[0], corners[2], corners[3]);
+            if (band == 2) {
+                // Fitted gunmetal top plates sit over the dark box beam; leave a narrow joint between plates.
+                float first = (float) Math.floor(phase / 9) * 9 - phase;
+                for (float at = first; at < length; at += 9) {
+                    float lo = Math.max(0, at + .12f), hi = Math.min(length, at + 8.88f);
+                    if (hi <= lo) { continue; }
+                    float[][] plate = new float[4][];
+                    for (int k = 0; k < 4; k++) {
+                        float t = (k == 1 || k == 2 ? hi : lo) / length;
+                        float[] start = corners[k < 2 ? 0 : 3], end = corners[k < 2 ? 1 : 2];
+                        plate[k] = new float[RigidGlb.STRIDE];
+                        for (int channel = 0; channel < RigidGlb.STRIDE; channel++) {
+                            plate[k][channel] = start[channel] + (end[channel] - start[channel]) * t;
+                        }
+                        plate[k][2] += .025f;
+                    }
+                    outward(mesh, HARDWARE, hex, plate[0], plate[1], plate[2]);
+                    outward(mesh, HARDWARE, hex, plate[0], plate[2], plate[3]);
+                }
+            }
             run = next;
         }
-        for (float at = (float) Math.ceil((phase + width) / 6) * 6 - phase; at < length - width; at += 6) {
-            Vector3 centre = new Vector3(a[0] + tx * at - nx * width / 2, a[1] + ty * at - ny * width / 2, top + .27f);
-            surfacePlate(mesh, hex, HARDWARE, centre, new Vector3(tx, ty, 0), new Vector3(-nx, -ny, 0), .025f, width * .35f);
+        for (float at = (float) Math.ceil((phase + width) / 9) * 9 - phase; at < length - width; at += 9) {
+            Vector3 centre = new Vector3(a[0] + tx * at - nx * width / 2, a[1] + ty * at - ny * width / 2, top + .31f);
+            surfacePlate(mesh, hex, HARDWARE, centre, new Vector3(tx, ty, 0), new Vector3(-nx, -ny, 0), .12f, width * .35f);
             for (float inset : new float[] { -.25f, .25f }) {
                 fastener(mesh, hex, new Vector3(centre).add(tx * .28f + nx * width * inset,
-                      ty * .28f + ny * width * inset, .01f), Vector3.Z, .13f);
+                      ty * .28f + ny * width * inset, .015f), Vector3.Z, .13f);
             }
         }
     }
@@ -2760,7 +2782,7 @@ final class BoardMultiHexBuilding {
             float at = bay * LEVEL - phase;
             if (startCorner && at < 1.5f || endCorner && at > length - 1.5f) { continue; }
             if (majorPosts && Math.floorMod(bay, 4) == 0 && (!startCorner || at > 4) && (!endCorner || at < length - 4)) {
-                facadePost(mesh, hex, new float[] { a[0] + tx * at, a[1] + ty * at }, tx, ty, bottom, top, .95f, false);
+                facadePost(mesh, hex, new float[] { a[0] + tx * at, a[1] + ty * at }, tx, ty, bottom, top, 1.3f, false);
                 continue;
             }
             facadeStrip(mesh, hex, PIER, a, tx, ty, Math.max(0, at - .6f), Math.min(length, at + .6f),
@@ -2800,7 +2822,7 @@ final class BoardMultiHexBuilding {
         float turn = first.x() * second.y() - first.y() * second.x();
         if (Math.abs(turn) < .01f) { return; }
         // Keep a fixed physical face width: shallow changes of wall direction must not stretch a post into a fin.
-        float span = 3.7f * Math.abs(turn), high = turn > 0 ? 1.2f : Math.max(1.2f, span - .5f);
+        float span = 5.0f * Math.abs(turn), high = turn > 0 ? 1.6f : Math.max(1.6f, span - .65f);
         float low = high - span, back = Math.min(low, -.5f), bevel = Math.min(.2f, span * .12f);
         List<float[]> outline = new ArrayList<>();
         for (float[] p : new float[][] { { back + bevel, back }, { high - bevel, back }, { high, low + bevel },
@@ -2810,8 +2832,8 @@ final class BoardMultiHexBuilding {
         outline = counterClockwise(outline);
         prism(mesh, hex, PIER, outline, bottom, top, outline.size());
         var collar = grown(outline, .18f);
-        prism(mesh, hex, PIER, collar, bottom, bottom + .75f, collar.size());
-        prism(mesh, hex, PIER, collar, top - .75f, top, collar.size());
+        postCap(mesh, hex, outline, bottom, bottom + .7f, .65f);
+        postCap(mesh, hex, outline, top - .6f, top + BEVEL_RISE + .65f, .65f);
         for (float z = (float) Math.ceil((bottom + 1) / LEVEL) * LEVEL; z < top - 1; z += LEVEL) {
             prism(mesh, hex, PIER, collar, z - .3f, z + .3f, collar.size());
         }
@@ -2831,22 +2853,53 @@ final class BoardMultiHexBuilding {
               at[1] + (first.x() * b - a * second.x()) / cross };
     }
 
+    /** A projecting armored shoe/capital with a sloping shoulder and a fitted lighter top plate. */
+    private static void postCap(GeneratedMesh mesh, List<float[]> hex, List<float[]> outline, float bottom, float top,
+          float growth) {
+        var outer = grown(counterClockwise(outline), growth);
+        var inner = parapets(outer, .3f);
+        float shoulder = Math.max(bottom, top - .4f);
+        prism(mesh, hex, PIER, outer, bottom, shoulder, outer.size());
+        for (int edge = 0; edge < outer.size(); edge++) {
+            int next = (edge + 1) % outer.size();
+            float[] a = outer.get(edge), b = outer.get(next), c = inner.get(edge), d = inner.get(next);
+            float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+            float nx = (b[1] - a[1]) / length, ny = (a[0] - b[0]) / length;
+            Vector3 normal = new Vector3(nx * (top - shoulder), ny * (top - shoulder), .3f).nor();
+            float slope = (float) Math.hypot(.3f, top - shoulder);
+            float[] v0 = vertex(a[0], a[1], shoulder, normal.x, normal.y, normal.z, 1, 0, 0);
+            float[] v1 = vertex(b[0], b[1], shoulder, normal.x, normal.y, normal.z, 1, 0, length / 12);
+            float[] v2 = vertex(d[0], d[1], top, normal.x, normal.y, normal.z, 1, -slope / 12,
+                  ((d[1] - a[1]) * nx - (d[0] - a[0]) * ny) / 12);
+            float[] v3 = vertex(c[0], c[1], top, normal.x, normal.y, normal.z, 1, -slope / 12,
+                  ((c[1] - a[1]) * nx - (c[0] - a[0]) * ny) / 12);
+            outward(mesh, HARDWARE, hex, v0, v1, v2); outward(mesh, HARDWARE, hex, v0, v2, v3);
+        }
+        clippedPolygon(mesh, hex, HARDWARE, inner.stream()
+              .map(p -> vertex(p[0], p[1], top, 0, 0, 1, 1, p[0] / 12, -p[1] / 12)).toList());
+        var bolts = parapets(inner, .35f);
+        for (int corner = 0; corner < bolts.size(); corner += 2) {
+            float[] at = bolts.get(corner);
+            fastener(mesh, hex, new Vector3(at[0], at[1], top + .025f), Vector3.Z, .14f);
+        }
+    }
+
     private static void facadePost(GeneratedMesh mesh, List<float[]> hex, float[] a, float tx, float ty,
           float bottom, float top, float front, boolean marker) {
-        float[][] profile = { { -2, -.5f }, { -2, front - .4f }, { -1.4f, front },
-              { 1.4f, front }, { 2, front - .4f }, { 2, -.5f } };
+        float[][] profile = { { -2.8f, -.5f }, { -2.8f, front - .5f }, { -2.2f, front },
+              { 2.2f, front }, { 2.8f, front - .5f }, { 2.8f, -.5f } };
         List<float[]> outline = new ArrayList<>();
         for (float[] p : profile) {
             outline.add(new float[] { a[0] + tx * p[0] + ty * p[1], a[1] + ty * p[0] - tx * p[1] });
         }
         prism(mesh, hex, PIER, outline, bottom, top, outline.size());
         float collar = (front - .35f) / 2, depth = front + .65f;
-        facadeStrip(mesh, hex, PIER, a, tx, ty, -2.3f, 2.3f, collar, depth, bottom, bottom + .75f);
-        facadeStrip(mesh, hex, PIER, a, tx, ty, -2.3f, 2.3f, collar, depth, top - .75f, top);
+        postCap(mesh, hex, outline, bottom, bottom + .7f, .5f);
+        postCap(mesh, hex, outline, top - .6f, top + BEVEL_RISE + .65f, .5f);
         for (float z = (float) Math.ceil((bottom + 1) / LEVEL) * LEVEL; z < top - 1; z += LEVEL) {
-            facadeStrip(mesh, hex, PIER, a, tx, ty, -2.1f, 2.1f, collar, depth, z - .3f, z + .3f);
+            facadeStrip(mesh, hex, PIER, a, tx, ty, -2.95f, 2.95f, collar, depth, z - .3f, z + .3f);
         }
-        postDetails(mesh, hex, a, tx, ty, 0, bottom, top, front, 1.4f, marker);
+        postDetails(mesh, hex, a, tx, ty, 0, bottom, top, front, 2.2f, marker);
     }
 
     /** The same inset panels, luminous lenses and fastening plates on every exposed corner and ring pier. */

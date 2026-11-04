@@ -4424,7 +4424,9 @@ final class GpuTerrain implements Disposable {
                 continue;
             }
             var authoredLayout = GpuAuthoredBuilding.supports(feature) ? GpuAuthoredBuilding.layout(scene, tile, feature) : null;
-            var authored = authoredLayout == null ? null : assets.authoredBuilding(build.prepared.authored().get(authoredLayout));
+            var authoredPrepared = authoredLayout == null ? null : build.prepared.authored().get(authoredLayout);
+            if (authoredPrepared != null && authoredPrepared.levels().getFirst().meshes.isEmpty()) { continue; }
+            var authored = authoredPrepared == null ? null : assets.authoredBuilding(authoredPrepared);
             boolean generatedIndustrial = BoardIndustrial.supports(feature);
             boolean wallBuilding = BoardWall.building(tile.cover(), feature);
             var wallLayout = BoardWall.supports(feature.asset()) ? BoardWall.layout(scene, tile, feature) : null;
@@ -4493,11 +4495,7 @@ final class GpuTerrain implements Disposable {
             float rootInset = coral ? bounds.getDepth() * .06f : 0;
             float coralScale = coral ? feature.height() * BoardGeometry.level() / (bounds.getDepth() - rootInset) : 0;
             boolean crystal = feature.asset().startsWith("crystal/");
-            float plantingRadius = crystal ? build.coralRootRadii.computeIfAbsent(model,
-                  key -> coralRootRadius(key, bounds.min.z + bounds.getDepth() * .04f))
-                        * BoardTreeCoverage.scale(feature, bounds.getDepth()) * BoardGeometry.hexScale()
-                        * (float) Math.max(feature.stretch().x(), feature.stretch().y())
-                  : coral ? build.coralRootRadii.computeIfAbsent(model,
+            float plantingRadius = coral ? build.coralRootRadii.computeIfAbsent(model,
                   key -> coralRootRadius(key, bounds.min.z + rootInset)) * coralScale
                         * (float) Math.max(feature.stretch().x(), feature.stretch().y()) : BoardRelief.metres(.8f);
             boolean packedColony = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()
@@ -4521,12 +4519,27 @@ final class GpuTerrain implements Disposable {
                 if (naturalPlant) {
                     // A tree stands on its hex's own ground, never over a receding rim or a transition's slope.
                     // Roadside cover keeps its captured route clearance instead of being pulled toward the carriageway.
-                    float[] spot = plantingSurface.relief.settle(px, py,
+                    float[] spot = plantingSurface.relief.settle(px, py, crystal ? 0 :
                           coral && tile.road() != BoardRoad.Kind.NONE ? BoardRelief.metres(.8f) : plantingRadius);
                     px = spot[0]; py = spot[1];
-                    if (crystal && plantingSurface.relief.clearance(px, py) < plantingRadius - .001f) { continue; }
                 }
                 base = naturalPlant ? plantingSurface.height(px, py) : ground.height(px, py);
+                if (crystal && naturalPlant) {
+                    var roots = build.crystalRoots.computeIfAbsent(model,
+                          key -> crystalRoots(key, bounds.min.z + bounds.getDepth() * .04f));
+                    float scale = BoardTreeCoverage.scale(feature, bounds.getDepth()) * unit;
+                    float cosine = (float) Math.cos(Math.toRadians(feature.rotation()));
+                    float sine = (float) Math.sin(Math.toRadians(feature.rotation()));
+                    boolean supported = true;
+                    for (Vector3 root : roots) {
+                        float x = root.x * scale * (float) feature.stretch().x();
+                        float y = root.y * scale * (float) feature.stretch().y();
+                        float rx = px + cosine * x - sine * y, ry = py + sine * x + cosine * y;
+                        if (plantingSurface.relief.clearance(rx, ry) < -.001f) { supported = false; break; }
+                        base = Math.min(base, plantingSurface.height(rx, ry));
+                    }
+                    if (!supported) { continue; }
+                }
                 if (coral) {
                     // Sample the drawn terrain around the roots; a high point must not suspend the rest of the base.
                     for (int sample = 0; sample < 8; sample++) {
@@ -4988,6 +5001,23 @@ final class GpuTerrain implements Disposable {
         return (float) Math.sqrt(radiusSquared);
     }
 
+    /** The actual root outline, not its enclosing circle: narrow crystal fans may stand near a hex or cliff edge. */
+    private static List<Vector3> crystalRoots(Model model, float rootTop) {
+        var result = new ArrayList<Vector3>();
+        for (Mesh mesh : model.meshes) {
+            int stride = mesh.getVertexSize() / Float.BYTES;
+            int position = mesh.getVertexAttribute(VertexAttributes.Usage.Position).offset / Float.BYTES;
+            float[] vertices = new float[mesh.getNumVertices() * stride];
+            mesh.getVertices(vertices);
+            for (int i = position; i < vertices.length; i += stride) {
+                if (vertices[i + 2] > rootTop) { continue; }
+                var root = new Vector3(vertices[i], vertices[i + 1], 0);
+                if (result.stream().noneMatch(p -> p.epsilonEquals(root, .001f))) { result.add(root); }
+            }
+        }
+        return List.copyOf(result);
+    }
+
     private final class ChunkBuild {
         EditorRoutes preview;
         final Chunk chunk = new Chunk();
@@ -5005,6 +5035,7 @@ final class GpuTerrain implements Disposable {
         Material scatterMaterial;
         // Derived once per model while preparing a chunk; no extra model data survives construction.
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
+        final Map<Model, List<Vector3>> crystalRoots = new IdentityHashMap<>();
         final Map<Model, BoundingBox> modelBounds = new IdentityHashMap<>();
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();
@@ -8650,7 +8681,7 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    /** Actual facet geometry for shadows and the editor's wireframe, without making atmosphere depth opaque. */
+    /** Actual boundaries for camera depth, outlines and wireframe; ruby instead transmits light in the sun pass. */
     private void translucentGeometry(Chunk chunk, ModelBatch target, Environment lighting, boolean shadows, boolean sunlight) {
         for (int i = 0; i < chunk.translucentShadows.size; i++) {
             if (!drawn(chunk.translucentOwners.get(i), shadows)) { continue; }

@@ -11,6 +11,21 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class BuildingVolumesTest {
+    @Test void boardPerimeterMatchesTheUnionOfItsHexesIncludingNarrowBoardsAndStaggeredRecesses() {
+        for (int width : new int[] {1, 2, 3, 8}) {
+            for (int height : new int[] {1, 2, 7}) {
+                Area cells = new Area();
+                for (int x = 0; x < width; x++) {
+                    for (int y = 0; y < height; y++) { cells.add(BuildingVolumes.hex(new Coords(x, y))); }
+                }
+                var outline = BuildingVolumes.boardOutline(width, height);
+                assertEquals(outline.size(), Set.copyOf(outline).size());
+                cells.exclusiveOr(BuildingVolumes.polygon(outline));
+                assertEquals(0, BuildingVolumes.area(cells), 1e-7, width + " x " + height);
+            }
+        }
+    }
+
     @Test void dominantHeightUsesAreaWithTallerTiesAndNotTheTallestVertex() {
         Area hex = BuildingVolumes.hex(new Coords(0, 0));
         double center = HexTile.centerX(new Coords(0, 0), HexTile.MODEL_WIDTH);

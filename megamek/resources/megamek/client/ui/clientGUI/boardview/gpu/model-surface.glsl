@@ -8,7 +8,8 @@ uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; co
 uniform float u_modelPaintMask; // 1: the albedo's alpha is a paint mask, where alone the vertex colour tints (model.frag)
 uniform float u_modelPremultiplied; // 1: Godot's premultiplied alpha, only the diffuse share fades (model.frag)
 uniform float u_modelRuby; // inverse absorption reference distance in world units; zero for other materials
-uniform mat4 u_rubyVolume; // one closed crystal's world-to-normalized bounding volume
+uniform mat4 u_rubyVolume; // world to the authored closed crystal
+uniform vec4 u_rubyPlanes[32]; // outward facet normal and plane distance, unused entries zero
 in vec2 v_modelUV;
 #endif
 #ifdef modelReliefFlag
@@ -94,6 +95,52 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
 #endif
 }
 
+#ifdef modelSurfaceFlag
+// Internal refraction through a closed convex crystal. The escaped ray sees the filtered sky/ground environment:
+// inclusions make it translucent, not a clear alpha window onto the scene. Two internal reflections are retained.
+vec3 rubyTransport(vec3 pigment, vec3 normal, vec3 view, float roughness) {
+    vec3 position = (u_rubyVolume * vec4(v_cloudPosition, 1.0)).xyz;
+    vec3 direction = refract(-view, normal, 1.0 / 1.76);
+    float energy = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, vec3(.0758)).r;
+    float path = 0.0;
+    vec3 radiance = vec3(0.0), worldExit = v_cloudPosition;
+    for (int bounce = 0; bounce < 3; bounce++) {
+        vec3 ray = mat3(u_rubyVolume) * direction;
+        float nearest = 1e20;
+        vec3 exitNormal = vec3(0.0);
+        for (int face = 0; face < 32; face++) {
+            float along = dot(u_rubyPlanes[face].xyz, ray);
+            if (along <= 1e-6) continue;
+            float distance = (u_rubyPlanes[face].w - dot(u_rubyPlanes[face].xyz, position)) / along;
+            if (distance > 1e-4 && distance < nearest) { nearest = distance; exitNormal = u_rubyPlanes[face].xyz; }
+        }
+        if (nearest > 1e19) break;
+        path += nearest;
+        worldExit += direction * nearest;
+        vec3 worldNormal = normalize(transpose(mat3(u_rubyVolume)) * exitNormal);
+        vec3 escaped = refract(direction, -worldNormal, 1.76);
+        float fresnel = 1.0;
+        if (dot(escaped, escaped) > 1e-6) {
+            escaped = normalize(escaped);
+            // Exact interior Fresnel tends continuously to one at the critical angle. Retain the reflected share
+            // at every interface, including below TIR, rather than switching between two unrelated exit rays.
+            float ci = max(0.0, dot(direction, worldNormal)), ct = max(0.0, dot(escaped, worldNormal));
+            vec2 ratios = vec2(1.76 * ci - ct, ci - 1.76 * ct) / max(vec2(1.76 * ci + ct, ci + 1.76 * ct), vec2(1e-6));
+            fresnel = .5 * dot(ratios, ratios);
+            vec3 ground = environmentGround(GROUND_ALBEDO);
+            vec3 light = environmentRadiance(escaped, max(.12, roughness), ground, surfaceAmbient(vec3(0.0, 0.0, 1.0)));
+            light = mix(hiddenSky(escaped, ground, GROUND_ALBEDO, light), light, skyVisibility(worldExit, escaped));
+            vec3 absorption = pow(clamp(pigment, vec3(.001), vec3(.95)), vec3(max(.12, path * u_modelRuby)));
+            radiance += light * absorption * energy * (1.0 - fresnel);
+        }
+        energy *= fresnel;
+        position += ray * nearest - exitNormal * .001;
+        direction = reflect(direction, worldNormal);
+    }
+    return radiance;
+}
+#endif
+
 vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 view) {
     albedo = materialReflectance(albedo);
     float roughness = .85, metallic = 0.0, scatter = 0.0;
@@ -118,23 +165,19 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     surface.scatter = scatter;
 #ifdef modelSurfaceFlag
     if (u_modelRuby > 0.0) {
-        // Cloudy corundum has a solid visible boundary, with wavelength-dependent transport inside it.
-        // An oriented-volume chord approximates thickness; it never samples the scenery through the body.
-        vec3 position = clamp((u_rubyVolume * vec4(v_cloudPosition, 1.0)).xyz, vec3(-.999), vec3(.999));
-        vec3 direction = mat3(u_rubyVolume) * (dot(geometric, sunDirection()) < 0.0 ? sunDirection() : -view);
-        vec3 reach = (mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), direction)) - position)
-              / (sign(direction + vec3(1e-12)) * max(abs(direction), vec3(1e-6)));
-        float thickness = max(.2, min(reach.x, min(reach.y, reach.z)) * u_modelRuby);
-        vec3 transmitted = pow(clamp(albedo, vec3(.001), vec3(.95)), vec3(thickness));
         surface.dielectric = .0758;
-        surface.front = vec3(.25);
-        surface.back = min(vec3(1.0) - albedo * surface.front, transmitted * .7) / max(albedo, vec3(.001));
+        surface.front = vec3(.18);
+        surface.back = thinTransmission(albedo, .12);
     }
 #endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
     surface.occlusion = surface.specularOcclusion = texture(u_ambientTexture, v_modelUV + modelShift).r;
 #endif
     surface.emission = emission;
-    return shadeSurface(surface);
+    vec3 lit = shadeSurface(surface);
+#ifdef modelSurfaceFlag
+    if (u_modelRuby > 0.0) lit += .7 * rubyTransport(albedo, geometric, view, roughness);
+#endif
+    return lit;
 }
 #endif

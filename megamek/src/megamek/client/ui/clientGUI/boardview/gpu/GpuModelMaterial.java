@@ -97,17 +97,22 @@ final class GpuModelMaterial extends Attribute {
     static void register(DefaultShader shader) {
         shader.register("u_modelRuby", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, GpuCrystalTransmission.ruby(renderable.material) ? 1f / (8 * BoardGeometry.hexScale()) : 0f);
+                target.set(id, GpuCrystalTransmission.ruby(renderable.material) ? 1f / (18 * BoardGeometry.hexScale()) : 0f);
             }
         });
         shader.register("u_rubyVolume", new BaseShader.LocalSetter() {
             private final Matrix4 inverse = new Matrix4();
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 if (!GpuCrystalTransmission.ruby(renderable.material)) { return; }
-                var extent = renderable.meshPart.halfExtents;
-                inverse.set(renderable.worldTransform).translate(renderable.meshPart.center)
-                      .scale(Math.max(.001f, extent.x), Math.max(.001f, extent.y), Math.max(.001f, extent.z)).inv();
+                inverse.set(renderable.worldTransform).inv();
                 target.set(id, inverse);
+            }
+        });
+        shader.register("u_rubyPlanes[0]", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                if (!GpuCrystalTransmission.ruby(renderable.material)) { return; }
+                float[] planes = GpuCrystalTransmission.planes(renderable.meshPart);
+                target.program.setUniform4fv(target.loc(id), planes, 0, planes.length);
             }
         });
         shader.register("u_modelSurface", new BaseShader.LocalSetter() {

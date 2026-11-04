@@ -37,6 +37,7 @@ final class GpuBuilding implements Disposable {
         if (value == null) { return; }
         var tint = GpuColor.linear(com.badlogic.gdx.graphics.Color.valueOf(value));
         for (var material : instance.materials) {
+            if (AuthoredBoardClip.CAP.equals(material.id)) { continue; }
             var diffuse = material.get(ColorAttribute.class, ColorAttribute.Diffuse);
             if (diffuse == null) { material.set(ColorAttribute.createDiffuse(tint)); }
             else { diffuse.color.mul(tint); }

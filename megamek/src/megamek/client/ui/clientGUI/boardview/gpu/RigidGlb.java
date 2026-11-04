@@ -109,8 +109,8 @@ final class RigidGlb {
         final Map<String, Float> boardUVs = new HashMap<>();
         /**
          * Materials drawn alpha blended, without depth writes, by their Godot blend mode ({@link GodotMaterial#blendMode}):
-         * generated geometry's board materials whose .tres is transparent ({@link GodotMaterial#blended}). A GLB's own
-         * alpha mode decides its materials'.
+         * board materials whose .tres is transparent ({@link GodotMaterial#blended}), including imported GLBs using
+         * those authored materials. Without a board material the GLB's own alpha mode decides.
          */
         final Map<String, Integer> blends = new HashMap<>();
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */

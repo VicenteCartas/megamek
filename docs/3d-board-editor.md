@@ -391,6 +391,11 @@ move/rotation controls. Both the brush and selected placement offer **Scale** an
 applied along the model's local axes before rotation. Gameplay coverage and heights update with the geometry and
 survive undo and save/reload. A placement covering less than half of every hex remains a selectable visual prop,
 with no building height or floors. Uneven scaling also stretches decorative parts such as dishes.
+An authored building may extend beyond the board while at least 10% of its structural footprint remains inside.
+Further moves or transforms are refused, retaining the last valid position. The model is cut at the actual outer
+hex edges, including the staggered recesses, and exposed cuts are sealed in neutral dark grey. Decorative overhangs
+do not count toward the 10% limit. Only in-map hexes receive gameplay height and floors; the original placement
+and its pose are saved, so enlarging the board can reveal its clipped parts again.
 Selecting the whole placement outlines its hidden structural volumes, covered hexes and
 derived heights. A building component's **Select whole building** button finds the placement from any member hex.
 The station exposes **Building levels**; HPG heights are derived from its GLB and are not editable per hex.
