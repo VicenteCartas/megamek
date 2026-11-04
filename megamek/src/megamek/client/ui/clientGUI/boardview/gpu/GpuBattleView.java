@@ -1080,6 +1080,7 @@ class GpuBattleView extends ApplicationAdapter {
         fireControl.renderLabels(boardCamera.camera);
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
+        renderEditorObjectControls();
         renderStage("annotations and UI");
         renderAnnotations();
         renderMarquee();
@@ -1280,8 +1281,7 @@ class GpuBattleView extends ApplicationAdapter {
                     var object = frameObjects(item.coords()).stream()
                           .filter(o -> o.id().equals(item.object())).findFirst();
                     if (object.isPresent()) {
-                        // The outline is the object's own box; only a held drag adds the ground projection of its drop.
-                        drawObjectBox(object.get().outline());
+                        // Only a held drag adds the ground projection of its drop. Object controls draw over the scene.
                         if (boardInput.dragged && boardInput.editorGrab != null) {
                             editorProjection(destination, object.get().anchorLevel() * BoardGeometry.level());
                         }
@@ -1291,19 +1291,12 @@ class GpuBattleView extends ApplicationAdapter {
                 }
             }
             drawAuthoredVolumes(alpha);
-            // The objects hovered in the side view (every one of a shared pill) or Layers.
-            List<String> hoveredObjects = ui instanceof GpuMapHud map ? map.editorHoverObjects() : List.of();
-            if (!hoveredObjects.isEmpty() && state.selected() != null) {
-                lines.setColor(1, 1, 1, alpha);
-                frameObjects(state.selected()).stream().filter(o -> hoveredObjects.contains(o.id())).forEach(object -> drawObjectBox(object.outline()));
-            }
             for (Coords coords : state.movePreview()) {
                 boolean valid = scene.tile(coords) != null;
                 lines.setColor(valid ? .45f : 1, valid ? 1 : .3f, valid ? .8f : .3f, alpha);
                 if (valid && boardInput.editorHexGrab != null) { editorProjection(coords, boardInput.editorPlaneZ); }
                 else { ring(coords, valid ? BoardTacticalGeometry.floatingZ(scene, coords) : BoardGeometry.level()); }
             }
-            drawRotationHandle(alpha);
         }
         lines.end();
         drawCliffEdgeHover(alpha);
@@ -2342,6 +2335,35 @@ class GpuBattleView extends ApplicationAdapter {
         pivot.z = tip.z;
         return new RotationHandle(pivot, base, tip, radius,
               group, group ? 0 : from);
+    }
+
+    /** Selection boxes and handles are editor controls: terrain, water and later scene overlays must not hide them. */
+    private void renderEditorObjectControls() {
+        var state = source.isEditor() ? source.editorState() : null;
+        if (state == null) { return; }
+        Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+        Gdx.gl.glDepthMask(false);
+        lines.setProjectionMatrix(boardCamera.camera.combined);
+        lines.begin(ShapeRenderer.ShapeType.Line);
+        try {
+            lines.setColor(.45f, 1, .8f, 1);
+            for (var item : state.selection()) {
+                if (item.object().isEmpty()) { continue; }
+                frameObjects(item.coords()).stream().filter(object -> object.id().equals(item.object()))
+                      .forEach(object -> drawObjectBox(object.outline()));
+            }
+            // The objects hovered in the side view (every one of a shared pill) or Layers.
+            List<String> hoveredObjects = ui instanceof GpuMapHud map ? map.editorHoverObjects() : List.of();
+            if (!hoveredObjects.isEmpty() && state.selected() != null) {
+                lines.setColor(1, 1, 1, 1);
+                frameObjects(state.selected()).stream().filter(object -> hoveredObjects.contains(object.id()))
+                      .forEach(object -> drawObjectBox(object.outline()));
+            }
+            drawRotationHandle(1);
+        } finally {
+            lines.end();
+            Gdx.gl.glDepthMask(true);
+        }
     }
 
     /** The eight local corners follow the same full transform as the drawn mesh, including pitch, roll and stretch. */

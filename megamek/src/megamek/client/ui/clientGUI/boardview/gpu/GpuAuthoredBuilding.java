@@ -58,9 +58,39 @@ final class GpuAuthoredBuilding {
     // Keep the current and previous snapshots: route previews compare both. Do not retain every intermediate drag.
     private static final List<Cached> SCENES = new ArrayList<>();
     private static final Map<String, List<ModelData>> FILES = new ConcurrentHashMap<>();
+    private static final Map<String, List<RigidGlb.NightLight>> LIGHTS = new ConcurrentHashMap<>();
     private static final Map<Assembly, List<ModelData>> ASSEMBLIES = new ConcurrentHashMap<>();
 
-    static synchronized void reload() { FILES.clear(); ASSEMBLIES.clear(); SCENES.clear(); }
+    static synchronized void reload() { FILES.clear(); LIGHTS.clear(); ASSEMBLIES.clear(); SCENES.clear(); }
+
+    /** Each fixture belongs to one Voronoi slice, including overhangs; clipped-away fixtures contribute no light. */
+    static List<RigidGlb.NightLight> nightLights(Layout layout) {
+        var source = LIGHTS.computeIfAbsent(layout.object().asset(), asset -> RigidGlb.nightLights(TilesetScenery.customBuildingFile(asset)));
+        if (source.isEmpty()) { return List.of(); }
+        var frame = frame(layout.anchor(), layout.object(), layout.base());
+        float sizeScale = lightScale(frame);
+        var board = BuildingVolumes.polygon(BuildingVolumes.boardOutline(layout.boardWidth(), layout.boardHeight()));
+        List<RigidGlb.NightLight> lights = new ArrayList<>();
+        for (var light : source) {
+            Vector3 position = new Vector3(light.position()).mul(frame);
+            if (!board.contains(position.x, position.y)) { continue; }
+            // The stable coordinate tie-break assigns a boundary fixture only once, regardless of tile-list order.
+            Coords owner = layout.members().stream().min(Comparator.<Coords>comparingDouble(at -> {
+                double x = position.x - HexTile.centerX(at, HexTile.MODEL_WIDTH), y = position.y - HexTile.centerY(at, HexTile.HEIGHT);
+                return x * x + y * y;
+            }).thenComparingInt(Coords::getX).thenComparingInt(Coords::getY)).orElse(null);
+            if (!layout.cell().equals(owner)) { continue; }
+            position.sub(HexTile.centerX(owner, HexTile.MODEL_WIDTH), HexTile.centerY(owner, HexTile.HEIGHT), 0);
+            lights.add(new RigidGlb.NightLight(position, light.color(), light.power(), light.size() * sizeScale));
+        }
+        return List.copyOf(lights);
+    }
+
+    /** Maximum transformed basis length: rotating a nonuniform stretch must not change its finite reach. */
+    static float lightScale(Matrix4 frame) {
+        return (float) Math.sqrt(Math.max(new Vector3(1, 0, 0).rot(frame).len2(),
+              Math.max(new Vector3(0, 1, 0).rot(frame).len2(), new Vector3(0, 0, 1).rot(frame).len2())));
+    }
 
     private static synchronized Cached cached(BoardScene scene) {
         SCENES.removeIf(cache -> cache.tiles().get() == null);

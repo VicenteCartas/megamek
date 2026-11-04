@@ -181,6 +181,8 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     // Godot's emission: the map times its tint, plus the constant glow.
     emission = emission * u_modelEmission + u_modelGlow;
 #endif
+    // Apply light controls after combining glTF emission and the shared material's glow.
+    if (u_modelLight.x > 0.0) { emission *= u_modelLight.y; }
     roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
     scatter = clamp(scatter, 0.0, 1.0);

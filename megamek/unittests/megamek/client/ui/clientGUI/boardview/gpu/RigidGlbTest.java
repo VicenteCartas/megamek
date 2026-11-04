@@ -32,6 +32,24 @@ class RigidGlbTest {
 
     private final ObjectMapper json = new ObjectMapper();
 
+    @Test
+    void nightEmissionIsOptInAndSurvivesLodAndGeometryCopies() throws Exception {
+        var document = levels();
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putObject("extras").put("mmNightEmission", true);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            var sliced = new RigidGlb.Data();
+            sliced.inheritMaterials(data);
+            assertEquals(data.nightEmission, sliced.nightEmission);
+        }
+        material.remove("extras");
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            assertTrue(((RigidGlb.Data) level).nightEmission.isEmpty());
+        }
+    }
+
     private ObjectNode document() throws Exception {
         return (ObjectNode) json.readTree("""
               {"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],

@@ -80,12 +80,12 @@ void main() {
     if (u_modelPremultiplied > 0.5) { diffuse.rgb *= diffuse.a * v_opacity; }
 #endif
     if (u_modelLight.x > 0.0) {
-        emissive.rgb *= u_modelLight.y;
         diffuse.rgb *= u_modelLight.z;
     }
 #ifdef lightingFlag
     fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb, modelShading, modelFace, modelView);
 #else
+    if (u_modelLight.x > 0.0) { emissive.rgb *= u_modelLight.y; }
     fragColor.rgb = diffuse.rgb + emissive.rgb;
 #endif
 #ifdef blendedFlag

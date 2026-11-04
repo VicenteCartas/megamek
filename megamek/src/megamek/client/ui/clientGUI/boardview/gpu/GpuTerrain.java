@@ -76,6 +76,7 @@ import com.badlogic.gdx.math.collision.OrientedBoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.common.board.BoardFlag;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuTerrainLayer.MeshBatch;
 import megamek.common.board.BuildingInteriors;
 import megamek.common.board.Coords;
@@ -944,6 +945,7 @@ final class GpuTerrain implements Disposable {
                 "shadow depth")))),
           new GpuOpaqueSorter());
     /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
+    private final Map<ModelInstance, Integer> flagRevisions = new java.util.IdentityHashMap<>();
     private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {
         @Override
         public void terrain(Camera light, List<ModelInstance> units) { renderDepth(light, units, depthBatch, true, true); }
@@ -957,6 +959,9 @@ final class GpuTerrain implements Disposable {
 
         @Override
         public BoundingBox bounds(ModelInstance unit) { return unitBounds(unit); }
+
+        @Override
+        public int revision(ModelInstance unit) { return flagRevisions.getOrDefault(unit, 0); }
     });
 
     void shadersChanged() { refreshShadows(); }
@@ -1460,6 +1465,18 @@ final class GpuTerrain implements Disposable {
     }
 
     private static final class Prop {
+        private List<RigidGlb.NightLight> nightLights = List.of();
+        private List<GpuLavaLighting.Source> drawnLights = List.of();
+
+        private void updateLights(int boardHeight) {
+            if (nightLights.isEmpty()) { return; }
+            Matrix4 transform = instance().transform;
+            float sizeScale = GpuAuthoredBuilding.lightScale(transform);
+            int tile = coords().getX() * boardHeight + coords().getY();
+            drawnLights = nightLights.stream().map(light -> new GpuLavaLighting.Source(tile,
+                  new Vector3(light.position()).mul(transform), light.power(), light.color(), light.size() * sizeScale)).toList();
+        }
+
         private boolean infrastructure;
         private final Coords coords;
         private final BoundingBox bounds;
@@ -2153,7 +2170,7 @@ final class GpuTerrain implements Disposable {
                     opaqueMaterials(one);
                     // A faded object's cut belongs to its transparent draw only.
                     part.material.remove(GpuBuildingCutaway.TYPE);
-                    boolean instanced = GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material);
+                    boolean instanced = !isFlag(prop) && GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material);
                     // An instanced mirror image keeps its model's culling: its batch flips the front face instead.
                     if (instanced) { culling(prop.instance().model, part.material, false, false); }
                     (instanced ? decorationRenderables : looseDecorations).add(part);
@@ -3374,6 +3391,7 @@ final class GpuTerrain implements Disposable {
         tiles = scene.tiles();
         editorPropsInstalled = true;
         lavaLighting.setFungus(chunks.stream().flatMap(chunk -> chunk.fungalLights.stream()).toList());
+        updateBuildingLights();
         installedSettings = rebuild.request.settings();
         if (installedColumns != rebuild.request.columns() && rebuild.request.columns()) {
             // The 3D relief's board-wide layers, once, on a switch to Classic; the ocean follows in animate. The
@@ -3424,7 +3442,7 @@ final class GpuTerrain implements Disposable {
         Set<Model> liveRoutes = new HashSet<>();
         for (Chunk chunk : chunks) {
             for (Prop prop : chunk.props) {
-                if (prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
+                if (isFlag(prop) || prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
             }
             for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
             for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
@@ -3432,7 +3450,7 @@ final class GpuTerrain implements Disposable {
         }
         for (Chunk chunk : detailCache.values()) {
             for (Prop prop : chunk.props) {
-                if (prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
+                if (isFlag(prop) || prop.decorationFeature != null && BoardRail.route(prop.decorationFeature)) { liveRoutes.add(prop.instance.model); }
             }
             for (Prop prop : chunk.props) { if (prop.building != null) { liveBuildings.add(prop.building); } }
             for (Prop prop : chunk.props) { if (prop.industrial || prop.levels != null) { liveIndustrial.add(prop.instance.model); } }
@@ -4450,7 +4468,8 @@ final class GpuTerrain implements Disposable {
             // Both graphics modes use the same finished rail carrier, including road embedding and bridge grades.
             Model model = authored != null ? authored.levels().getFirst() : BoardRail.route(feature) ? routeModel(build, BoardRail.layout(scene, tile, feature, surface,
                         prepared.bridgeShapes()::get))
-                  : placedObject ? assets.slotted(feature.asset())
+                  : placedObject ? (BoardFlag.ASSET.equals(feature.asset())
+                        ? assets.flag(feature.decoration()) : assets.slotted(feature.asset()))
                   : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
                   : wallLayout != null ? assets.wall(wallLayout)
                   : multiHexLayout != null ? assets.multiHexLevels(multiHexLayout).getFirst()
@@ -4498,6 +4517,9 @@ final class GpuTerrain implements Disposable {
                   : new BoundingBox(build.modelBounds.computeIfAbsent(model,
                         unused -> instance.calculateBoundingBox(new BoundingBox())));
             BoundingBox editorBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
+            if (BoardFlag.ASSET.equals(feature.asset())) {
+                editorBounds.set(Vector3.Zero, new Vector3(GpuFlag.WIDTH, 0, GpuFlag.HEIGHT));
+            }
             boolean coral = feature.asset().startsWith("mars/");
             // Coral colonies have wide, uneven mineral roots. Embed that root layer while preserving cover height.
             float rootInset = coral ? bounds.getDepth() * .06f : 0;
@@ -4641,6 +4663,7 @@ final class GpuTerrain implements Disposable {
                             verticalScale * (float) feature.stretch().z());
             }
             bounds.mul(instance.transform);
+            if (BoardFlag.ASSET.equals(feature.asset())) { bounds.set(GpuFlag.bounds(instance.transform)); }
             if (metal && !BoardMetalDeposits.accepts(scene, tile, surface, feature)) { continue; }
             GpuGeysers.Emitter geyser = GpuGeysers.emitter(feature.asset(), instance.transform,
                   GpuGeysers.vent(instance.model));
@@ -4684,6 +4707,8 @@ final class GpuTerrain implements Disposable {
             if (authored != null) {
                 prop.decorationOwner = authoredLayout.anchor(); prop.supportTriangles = authored.roof();
                 prop.editorBounds = new BoundingBox(authoredPrepared.localBounds());
+                prop.nightLights = GpuAuthoredBuilding.nightLights(authoredLayout);
+                prop.updateLights(scene.height());
             }
             if (placedObject || authored != null) { prop.decorationFeature = feature; }
             prop.decorationAnchorZ = instance.transform.val[Matrix4.M23] - feature.elevation() * BoardGeometry.level();
@@ -6688,6 +6713,7 @@ final class GpuTerrain implements Disposable {
     }
 
     private BoundingBox unitBounds(ModelInstance unit) {
+        if (flagRevisions.containsKey(unit)) { return GpuFlag.bounds(unit.transform); }
         return frameBounds == null ? UnitBounds.world(unit) : frameBounds.get(unit);
     }
 
@@ -6734,8 +6760,27 @@ final class GpuTerrain implements Disposable {
             hoverCeiling = Float.MAX_VALUE;
         }
         if (hoverBuilding != null && hoverTile.cover().interiors() == BuildingInteriors.NO_FLOORS) { hoverCeiling = Float.MAX_VALUE; }
+        flagRevisions.clear();
         for (Chunk chunk : chunks) {
             chunk.liquidMaterials.forEach(this::animateLiquid);
+            for (Prop prop : chunk.props) {
+                if (!isFlag(prop)) { continue; }
+                ModelInstance cloth = prop.instance();
+                BoundingBox reach = GpuFlag.bounds(cloth.transform);
+                var obstacles = new ArrayList<BoundingBox>();
+                for (Chunk nearby : chunks) {
+                    if (!nearby.bounds.intersects(reach)) { continue; }
+                    for (Prop solid : nearby.props) {
+                        if (!isFlag(solid) && solid.bounds().intersects(reach)) { obstacles.add(solid.bounds()); }
+                    }
+                }
+                for (ModelInstance unit : units) {
+                    BoundingBox bounds = unitBounds(unit);
+                    if (bounds.intersects(reach)) { obstacles.add(bounds); }
+                }
+                flagRevisions.put(cloth, assets.animateFlag(prop.decorationFeature.decoration(),
+                      cloth.transform, vegetationPhase, wind, vacuum, obstacles, this::flagGroundHeight));
+            }
             if (chunk.cutaways.isEmpty()) { continue; }
             Coords hoverCoords = hoverBuilding != null && chunk.tileMeshes.containsKey(hovered) ? hovered : null;
             boolean unitsHere = false;
@@ -6965,6 +7010,7 @@ final class GpuTerrain implements Disposable {
                     prop.previewCoords = coords;
                     prop.previewInstance = preview;
                     prop.previewBounds = preview == null ? null : preview.calculateBoundingBox(new BoundingBox()).mul(preview.transform);
+                    if (preview != null && isFlag(prop)) { prop.previewBounds.set(GpuFlag.bounds(preview.transform)); }
                     prop.previewAnchorZ = z;
                     if (oldGeyser != null) {
                         chunk.geysers.remove(oldGeyser);
@@ -6999,6 +7045,7 @@ final class GpuTerrain implements Disposable {
                     }
                 }
                 editorMovedProps = moved;
+                updateBuildingLights();
             }
         });
     }
@@ -7013,7 +7060,8 @@ final class GpuTerrain implements Disposable {
         float unit = BoardGeometry.hexScale();
         Matrix4 before = new Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(prop.decorationOwner, original.decoration(), original.elevation()));
         Matrix4 after = new Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(placement.coords(), next.decoration(), next.elevation()));
-        if (java.util.Arrays.equals(before.val, after.val)) { chunk.hiddenInteriors.remove(prop.coords); }
+        boolean originalPose = java.util.Arrays.equals(before.val, after.val);
+        if (originalPose) { chunk.hiddenInteriors.remove(prop.coords); }
         else { chunk.hiddenInteriors.add(prop.coords); }
         Matrix4 delta = after.mul(before.inv());
         prop.previewFeature = next;
@@ -7022,6 +7070,9 @@ final class GpuTerrain implements Disposable {
         prop.previewInstance = copy(prop.instance);
         GpuBuilding.tint(prop.previewInstance, next.colours());
         prop.previewInstance.transform.set(delta).mul(prop.instance.transform);
+        // Like stale interior cuts, lighting waits for the final installed placement after a drag.
+        if (originalPose) { prop.updateLights(coverScene.height()); }
+        else { prop.drawnLights = List.of(); }
         prop.previewBounds = new BoundingBox(prop.bounds).mul(delta);
         if (prop.hoverOpaque != null) { prop.updateHoverOpaque(); }
         chunk.bounds.ext(prop.bounds()); shadowBounds.ext(prop.bounds());
@@ -7034,6 +7085,16 @@ final class GpuTerrain implements Disposable {
      * nothing supports it. The drag preview ({@link #previewEditorObjects}) and the paint preview's ghosts
      * ({@link #editorGhost}) place by it. The caller holds the installed settings.
      */
+    /** Installed terrain only: collision follows the visible chunk through edits and detail changes. No off-board floor. */
+    float flagGroundHeight(Vector3 point) {
+        var tile = coverScene == null ? null : BoardGeometry.tile(coverScene, point.x, point.y);
+        TileMesh mesh = tile == null ? null : editorTile(tile.coords());
+        if (mesh == null) { return Float.NEGATIVE_INFINITY; }
+        Chunk receiving = chunks.get(tile.coords().getX() / CHUNK_SIZE * chunkRows + tile.coords().getY() / CHUNK_SIZE);
+        var support = tacticalSurface(coverScene, receiving, tile.coords(), floor);
+        return BoardSurface.sampleHeight(support.faces(), point.x, point.y, BoardGeometry.groundZ(tile));
+    }
+
     private float editorHeight(Coords coords, BoardScene.Feature feature) {
         var object = feature.decoration();
         float x = BoardGeometry.centerX(coords) + (float) object.x() * BoardGeometry.width();
@@ -8067,6 +8128,7 @@ final class GpuTerrain implements Disposable {
             Ray local = new Ray(new Vector3(ray.origin).add(offset[0] * aside, offset[1] * aside, 0).mul(inverse),
                   new Vector3(ray.direction).rot(inverse));
             boolean found = prop.building != null ? prop.building.hit(local, hit)
+                  : isFlag(prop) ? Intersector.intersectRayTriangles(local, triangles(prop.instance().model), hit)
                   : Intersector.intersectRayTriangles(local, prop.pickingTriangles != null ? prop.pickingTriangles
                         : featureTriangles.computeIfAbsent(prop.pickingModel, GpuTerrain::triangles), hit);
             if (found) {
@@ -8302,6 +8364,11 @@ final class GpuTerrain implements Disposable {
         render(camera, prepassStage, colourStage, true);
     }
 
+    private void updateBuildingLights() {
+        lavaLighting.setBuildings(chunks.stream().flatMap(chunk -> chunk.props.stream())
+              .flatMap(prop -> prop.drawnLights.stream()).toList());
+    }
+
     private void render(Camera camera, Runnable prepassStage, Runnable colourStage, boolean view) {
         // A changed lighting configuration returns every surface to its generic program before anything draws.
         if (familyPrograms.configure(environment)) {
@@ -8323,7 +8390,7 @@ final class GpuTerrain implements Disposable {
         shadingPass++;
         packKeptProps();
         updateDetail(camera);
-        lavaLighting.update(coverScene, terrain);
+        lavaLighting.update(coverScene, terrain, 1 - environmentLighting.daylight());
         if (terrain) {
             groundDamage.update(coverScene);
             surfaceScars.update(coverScene);
@@ -8742,7 +8809,7 @@ final class GpuTerrain implements Disposable {
         }
         for (int i = 0; i < chunk.looseDecorations.size; i++) {
             Prop owner = chunk.looseOwners.get(i);
-            if (!drawn(owner, shadows) || !shadows && chunk.faded.contains(owner)) { continue; }
+            if (!drawn(owner, shadows) || shadows && isFlag(owner) || !shadows && chunk.faded.contains(owner)) { continue; }
             Renderable part = chunk.looseDecorations.get(i);
             part.shader = null;
             part.environment = environment;
@@ -8801,6 +8868,11 @@ final class GpuTerrain implements Disposable {
 
     /** This frame's nearest water, for fog to stop at; null when the frame drew no water. */
     Texture waterDepth() { return waterVisible() ? waterDepth.nearest() : null; }
+
+    private static boolean isFlag(Prop prop) {
+        return prop.decorationFeature != null
+              && BoardFlag.ASSET.equals(prop.decorationFeature.asset());
+    }
 
     void setWind(BoardAtmosphere.Effects effects) {
         double angle = Math.toRadians(effects.windDirection());
@@ -8946,10 +9018,15 @@ final class GpuTerrain implements Disposable {
 
     void renderShadows(Camera view, List<ModelInstance> units) {
         if (view != null) { updateDetail(view); }
-        if (lifts != null) {
+        if (lifts != null || !flagRevisions.isEmpty()) {
             // Moving lifts cast like units, over the cached terrain's shadow, which leaves them out.
             units = new ArrayList<>(units);
-            units.addAll(lifts.models);
+            if (lifts != null) { units.addAll(lifts.models); }
+            for (Chunk chunk : chunks) {
+                for (Prop prop : chunk.props) {
+                    if (isFlag(prop) && drawn(prop, true)) { units.add(prop.instance()); }
+                }
+            }
         }
         shadowMap.render(view, units, shadowBounds, environment.shadowMap != null,
               atmosphere == null || atmosphere.hasDirectLight());

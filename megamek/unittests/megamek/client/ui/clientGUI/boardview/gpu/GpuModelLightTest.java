@@ -18,6 +18,36 @@ import org.mockito.ArgumentCaptor;
 
 class GpuModelLightTest {
     @Test
+    void nightWindowsFollowAtmosphereAndFrozenViewsWithoutRebuildingMaterials() {
+        var shader = mock(DefaultShader.class);
+        GpuModelLight.register(shader, () -> 0);
+        var setter = ArgumentCaptor.forClass(BaseShader.Setter.class);
+        verify(shader).register(eq("u_modelLight"), setter.capture());
+        var target = mock(BaseShader.class);
+        var draw = new Renderable();
+        var window = new GpuModelLight(1, 0, 1, true);
+        var environment = new GpuEnvironmentLighting();
+        environment.set(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(12, 0, 0, 2.5f, 0, 0)));
+        var frozenDay = environment.copy();
+        int hash = window.hashCode();
+        setter.getValue().set(target, 4, draw, new Material(window, environment));
+        verify(target).set(4, 1f, 0f, 1f);
+
+        environment.set(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(0, 0, 0, 2.5f, 0, 0)));
+        clearInvocations(target);
+        setter.getValue().set(target, 4, draw, new Material(window.copy(), environment));
+        verify(target).set(4, 1f, 1f, 1f);
+        assertEquals(hash, window.hashCode(), "A clock change must not invalidate material/instance batches");
+        clearInvocations(target);
+        setter.getValue().set(target, 4, draw, new Material(window, frozenDay));
+        verify(target).set(4, 1f, 0f, 1f);
+
+        clearInvocations(target);
+        setter.getValue().set(target, 4, draw, new Material(new GpuModelLight(2, 0, 1), frozenDay));
+        verify(target).set(4, 1f, 2f, 1f);
+    }
+
+    @Test
     void steadyAndBlinkingLightsUseMaterialSettingsWithoutChangingBatchKeys() {
         var shader = mock(DefaultShader.class);
         double[] seconds = { 0 };
@@ -53,7 +83,8 @@ class GpuModelLightTest {
         assertTrue(first.same(copy, true));
         assertEquals(first.hashCode(), copy.hashCode());
         for (var light : new GpuModelLight[] {
-              new GpuModelLight(2, 1, .06f), new GpuModelLight(1, 2, .06f), new GpuModelLight(1, 1, 1)
+              new GpuModelLight(2, 1, .06f), new GpuModelLight(1, 2, .06f), new GpuModelLight(1, 1, 1),
+              new GpuModelLight(1, 1, .06f, true)
         }) {
             var other = GpuTreeInstances.instancedMaterial(new Material("Lamp", light));
             assertFalse(first.same(other, true), "Different light controls cannot share an instanced draw");

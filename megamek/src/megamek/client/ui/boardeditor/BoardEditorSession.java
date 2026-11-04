@@ -3865,6 +3865,7 @@ public final class BoardEditorSession {
 
     private BoardDecoration objectValue(BoardDecoration d, String property, String value) {
         require(!RailRoute.isRoute(d), Messages.getString("BoardEditor.routeExtend"));
+        if (property.startsWith("flag.")) { return d.withFlag(d.flag().with(property.substring(5), value)); }
         if (property.equals("levels")) { return d.withLevels(Math.max(1, Integer.parseInt(value))); }
         double x = d.x(), y = d.y(), rotation = d.rotation(), scale = d.scale();
         double rotationX = d.rotationX(), rotationY = d.rotationY();
@@ -3905,7 +3906,7 @@ public final class BoardEditorSession {
             default -> throw new IllegalArgumentException("Unknown object property " + property);
         }
         return new BoardDecoration(d.id(), d.kind(), d.asset(), name, x, y, rotation, mirror, scale, placement, order, clipToHex,
-              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels());
+              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels(), d.flag());
     }
 
     private static void copyInto(Hex source, Hex target) {

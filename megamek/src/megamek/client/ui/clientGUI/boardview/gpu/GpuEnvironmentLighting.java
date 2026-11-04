@@ -41,6 +41,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     private Texture texture;
     private GpuLightingEnvironment image;
     private float shadowStrength = 1, imageGain = 1;
+    private float daylight = 1;
     /** The board's sky occlusion by its relief (borrowed), else this lighting's own neutral one (owned, made on use). */
     private GpuSkyVisibility skyVisibility;
     private GpuSkyVisibility neutralSky;
@@ -139,6 +140,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     void set(BoardAtmosphere.Lighting lighting) {
         sky.set(lighting.environmentSky()); horizon.set(lighting.environmentHorizon());
         shadowStrength = lighting.shadowStrength(); imageGain = lighting.environmentGain();
+        daylight = lighting.daylight();
         if (image != lighting.environmentImage()) {
             image = lighting.environmentImage();
             if (texture != null) { texture.dispose(); texture = null; texture(); }
@@ -152,13 +154,17 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     }
 
     /** Uniform upper-hemisphere radiance has the same E/pi as this diffuse ambient color. */
-    void set(Color ambient) { sky.set(ambient); horizon.set(ambient); }
+    void set(Color ambient) { sky.set(ambient); horizon.set(ambient); daylight = 1; }
+
+    /** The atmosphere's daylight share, retained with this render snapshot. */
+    float daylight() { return daylight; }
 
     /** Copy the actual sky uniforms into a view's owned cache snapshot without exposing mutable colors. */
     void appendColors(FloatArray values) {
         values.add(sky.r, sky.g, sky.b);
         values.add(horizon.r, horizon.g, horizon.b);
         values.add(shadowStrength, imageGain);
+        values.add(daylight);
         // The cache already compares floating-point snapshots; encode identity losslessly as two 16-bit words.
         int identity = System.identityHashCode(image);
         values.add(identity & 65535, identity >>> 16);
@@ -265,6 +271,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     @Override public Attribute copy() {
         var copy = new GpuEnvironmentLighting(); copy.sky.set(sky); copy.horizon.set(horizon);
         copy.image = image; copy.imageGain = imageGain; copy.shadowStrength = shadowStrength;
+        copy.daylight = daylight;
         copy.skyVisibility = skyVisibility;
         copy.original = original != null ? original : this;
         copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;

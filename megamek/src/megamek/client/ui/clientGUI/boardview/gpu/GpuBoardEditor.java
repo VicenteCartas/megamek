@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import megamek.common.board.BoardFlag;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -1333,6 +1334,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             onChange(span, () -> send(action, prefix + "clipToHex", Boolean.toString(!span.isTicked())));
             brushRow(span, mirror, brushNumber(UiKit.text("BoardEditor.paintOrder"), object.drawOrder(), -20, 20, 1, action, prefix + "order"));
         }
+        if (BoardFlag.ASSET.equals(object.asset())) { flag(object, true); }
         var asset = blueprint.asset(object.asset());
         if (asset != null && asset.snap() != null) {
             var magnetic = ui.checkbox(UiKit.text("BoardEditor.magnetic"), brush.magnetic()); magnetic.setName("editor-magnetic");
@@ -2066,6 +2068,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             colourRows(List.of(new RigidGlb.ColourSlot(UiKit.text("BoardEditor.buildingTint"), "#ffffff", BoardBridgeTruss.BODY.presets())),
                   object.colours(), (slot, value) -> send(Action.OBJECT_VALUE, "colour0", value));
         } else { colours(object); }
+        if (BoardFlag.ASSET.equals(object.asset())) { flag(object, false); }
         if (BoardFeatures.hasSnowForm(object.asset())) {
             // On by default: the tree takes its winter form on a snow surface; off keeps this tree bare there.
             UiButton snow = button(UiKit.text("BoardEditor.snow"), () -> send(Action.OBJECT_VALUE, "bare", Boolean.toString(!object.bare())));
@@ -2165,7 +2168,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             Table swatches = new Table();
             swatches.left();
             for (var preset : slot.presets()) {
-                if (swatches.getCells().size % 10 == 0 && swatches.getCells().size > 0) { swatches.row(); }
                 Actor swatch = swatch(preset, preset.colour().equals(current), choose);
                 swatch.setName("editor-colour-" + index + "-" + swatches.getCells().size);
                 swatches.add(swatch).left();
@@ -2175,7 +2177,52 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
     }
 
+    private void flag(BoardDecoration object, boolean brush) {
+        var flag = object.flag();
+        Action action = brush ? Action.BRUSH_VALUE : Action.OBJECT_VALUE;
+        String prefix = brush ? "object:" : "";
+        List<Actor> controls = new ArrayList<>();
+        Consumer<Actor> add = actor -> { if (brush) { controls.add(actor); } else { detail.add(actor).growX().row(); } };
+        if (!brush) { heading(UiKit.text("BoardEditor.flag")); }
+        add.accept(hint(UiKit.text("BoardEditor.flag.anchor")));
+        add.accept(choice(UiKit.text("BoardEditor.flag.pattern"), UiKit.text("BoardEditor.flag.pattern." + flag.pattern()),
+              BoardFlag.PATTERNS.stream().map(pattern ->
+                    new Option(UiKit.text("BoardEditor.flag.pattern." + pattern), pattern)).toList(),
+              value -> send(action, prefix + "flag.pattern", value)));
+        List<Option> emblems = new ArrayList<>();
+        emblems.add(new Option(UiKit.text("BoardEditor.flag.none"), ""));
+        blueprint.assets().stream().filter(asset -> asset.id().startsWith("decal/emblems/"))
+              .forEach(asset -> emblems.add(new Option(asset.label(), asset.id())));
+        String selected = emblems.stream().filter(option -> option.id().equals(flag.emblem())).map(Option::label)
+              .findFirst().orElse(flag.emblem());
+        add.accept(choice(UiKit.text("BoardEditor.flag.emblem"), selected, emblems,
+              value -> send(action, prefix + "flag.emblem", value)));
+        String[] properties = { "x", "y", "scale" };
+        double[] values = { flag.x(), flag.y(), flag.scale() };
+        for (int i = 0; i < properties.length; i++) {
+            String label = UiKit.text("BoardEditor.flag." + properties[i]), target = prefix + "flag." + properties[i];
+            double min = i == 2 ? .05 : -1, max = i == 2 ? 4 : 1, step = i == 2 ? .05 : .01;
+            add.accept(brush ? brushNumber(label, values[i], min, max, step, action, target)
+                  : numeric(label, values[i], min, max, step, action, target));
+        }
+        add.accept(angle(UiKit.text("BoardEditor.flag.rotation"), flag.rotation(), brush, action, prefix + "flag.rotation"));
+        if (brush) {
+            var slots = colourSlots(object.asset());
+            for (int i = 0; i < slots.size(); i++) {
+                int index = i;
+                String colour = object.colours().slot(i) == null ? slots.get(i).colour() : object.colours().slot(i);
+                add.accept(inputRow(slots.get(i).name(), colour, value -> send(action, prefix + "colour" + index, value)));
+            }
+            brushRows.add(controls);
+        }
+    }
+
     private List<RigidGlb.ColourSlot> colourSlots(String model) {
+        if (BoardFlag.ASSET.equals(model)) {
+            return java.util.stream.IntStream.range(0, 4).mapToObj(index -> new RigidGlb.ColourSlot(
+                  UiKit.text("BoardEditor.flag.colour", Integer.toString(index + 1)),
+                  BoardFlag.COLOURS.get(index), BoardBridgeTruss.BODY.presets())).toList();
+        }
         return colourSlots.computeIfAbsent(model, asset -> {
             var source = RigidGlb.source(new java.io.File(Configuration.dataDir(), "models/board"), asset);
             try { return source.file().isFile() ? RigidGlb.colourSlots(source.file()) : List.of(); }
@@ -2349,8 +2396,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return field;
     }
     private void input(String label, String value, Consumer<String> commit) {
+        detail.add(inputRow(label, value, commit)).row();
+    }
+    private Table inputRow(String label, String value, Consumer<String> commit) {
         Table row = new Table(); row.add(ui.label(label, "hud-small", 12, UiTheme.MUTED)).left().padRight(8);
-        row.add(textField(label, value, commit)).growX().minWidth(0).height(29); detail.add(row).row();
+        row.add(textField(label, value, commit)).growX().minWidth(0).height(29); return row;
     }
     /**
      * Board settings in three sections: Map (the board's own settings: Arena, exit roads to pavement, tags), Whole board

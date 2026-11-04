@@ -74,6 +74,43 @@ final class RigidGlb {
     /** Encoded bytes are retained for managed GPU texture recreation; external files keep a shared path key. */
     record Image(String key, byte[] encoded, String file, int minFilter, int magFilter, int wrapS, int wrapT) { }
 
+    /** A finite night light: file positions are glTF Y-up; decoded positions use the board's Z-up model units. */
+    record NightLight(Vector3 position, Vector3 color, float power, float size) { }
+
+    static List<NightLight> nightLights(File file) {
+        try {
+            Object extras = document(file).get("extras");
+            Object lights = extras instanceof Map<?, ?> values ? values.get("mmNightLights") : null;
+            if (lights == null) { return List.of(); }
+            require(lights instanceof List<?>, "mmNightLights must be a list");
+            List<NightLight> result = new ArrayList<>();
+            for (Object value : (List<?>) lights) {
+                require(value instanceof Map<?, ?>, "Night light must be an object");
+                var light = (Map<?, ?>) value;
+                Vector3 position = lightVector(light.get("position")).mul(Z_UP);
+                Vector3 color = lightVector(light.get("color"));
+                float power = lightNumber(light.get("power")), size = lightNumber(light.get("size"));
+                require(power > 0 && size > 0 && color.x >= 0 && color.y >= 0 && color.z >= 0,
+                      "Night light needs positive power/size and nonnegative linear RGB");
+                result.add(new NightLight(position, color, power, size));
+            }
+            return List.copyOf(result);
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Cannot read night lights from " + file, error);
+        }
+    }
+
+    private static Vector3 lightVector(Object value) {
+        require(value instanceof List<?> items && items.size() == 3, "Light vector needs three numbers");
+        var items = (List<?>) value;
+        return new Vector3(lightNumber(items.get(0)), lightNumber(items.get(1)), lightNumber(items.get(2)));
+    }
+
+    private static float lightNumber(Object value) {
+        require(value instanceof Number number && Float.isFinite(number.floatValue()), "Light value must be finite");
+        return ((Number) value).floatValue();
+    }
+
     /**
      * A material's finish: roughness, metallic and subsurface scattering factors over its optional finish map (an image
      * key, {@link GpuMaterialMaps.Layout#METALLIC_ROUGHNESS}), its emission map's tint and its constant glow (both
@@ -102,6 +139,8 @@ final class RigidGlb {
         final Set<String> paintMasks = new HashSet<>();
         /** Explicit building paint regions (material extras {@code mmBuildingPaint}); absent means keep the finish. */
         final Set<String> buildingPaint = new HashSet<>();
+        /** Authored emission that fades out in daylight (material extras {@code mmNightEmission}). */
+        final Set<String> nightEmission = new HashSet<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
         final Set<String> labels = new HashSet<>();
         /**
@@ -126,6 +165,7 @@ final class RigidGlb {
             surfaces.putAll(source.surfaces);
             paintMasks.addAll(source.paintMasks);
             buildingPaint.addAll(source.buildingPaint);
+            nightEmission.addAll(source.nightEmission);
             labels.addAll(source.labels);
             boardUVs.putAll(source.boardUVs);
             blends.putAll(source.blends);
@@ -652,6 +692,8 @@ final class RigidGlb {
      * leaves out, each sampled as the base colour is. Its factors and maps replace the GLB's own metallic-roughness.
      */
     private static Surface boardSurface(GodotMaterial board, Image base, ModelMaterial target, Data result) {
+        boolean night = board.flag("metadata/mmNightEmission", false);
+        if (night) { result.nightEmission.add(target.id); }
         String sampler = base.key().substring(base.file().length());
         java.util.function.Function<File, String> image = file -> {
             String path = file.toPath().toAbsolutePath().normalize().toString();
@@ -660,11 +702,13 @@ final class RigidGlb {
             return copy.key();
         };
         var finish = GpuMaterialMaps.modelFinish(board);
+        boolean ownGlow = night && target.emissive != null
+              && target.emissive.r + target.emissive.g + target.emissive.b > 0;
         for (int usage : new int[] { ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT, ModelTexture.USAGE_EMISSIVE }) {
             File map = switch (usage) {
                 case ModelTexture.USAGE_NORMAL -> board.normal();
                 case ModelTexture.USAGE_AMBIENT -> board.occlusion();
-                default -> finish.emission();
+                default -> ownGlow ? null : finish.emission();
             };
             boolean present = target.textures != null && java.util.stream.StreamSupport.stream(target.textures.spliterator(),
                   false).anyMatch(texture -> texture.usage == usage);
@@ -672,8 +716,10 @@ final class RigidGlb {
         }
         Relief relief = finish.heightmap() == null ? null : new Relief(image.apply(finish.heightmap()), finish.depthU(),
               finish.depthV(), finish.minimumLayers(), finish.maximumLayers());
+        // An authored lamp/window may choose its own night colour on a shared glass finish. Do not add the
+        // library's default window glow to that explicit glTF emission (e.g. a cool stadium floodlight lens).
         return new Surface(finish.roughness(), finish.metallic(), finish.scatter(),
-              finish.map() == null ? null : image.apply(finish.map()), finish.tint(), finish.glow(), relief, true);
+              finish.map() == null ? null : image.apply(finish.map()), finish.tint(), ownGlow ? new float[3] : finish.glow(), relief, true);
     }
 
     private static Path imagePath(FileHandle file, Path root, String value) throws IOException {
@@ -711,6 +757,7 @@ final class RigidGlb {
                 if (material.getExtras() instanceof Map<?, ?> extras) {
                     if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmBuildingPaint"))) { result.buildingPaint.add(target.id); }
+                    if (Boolean.TRUE.equals(extras.get("mmNightEmission"))) { result.nightEmission.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmLabel"))) { result.labels.add(target.id); }
                     if (extras.get("mmBoardUV") instanceof Number repeat) {
                         require(repeat.floatValue() > 0, "mmBoardUV is a positive repeat");

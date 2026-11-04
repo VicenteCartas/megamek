@@ -61,6 +61,7 @@ final class GpuUnitShader extends DefaultShader {
         GpuLavaLighting.register(this);
         GpuAmbientOcclusion.register(this);
         GpuModelMaterial.register(this);
+        GpuModelLight.register(this, () -> 0);
         register("u_normalMaps", new BaseShader.GlobalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable part, Attributes attributes) { target.set(id, 1f); }

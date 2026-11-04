@@ -47,6 +47,7 @@ public final class BoardModelBounds {
 
     /** The model's bounds (min x, y, z, max x, y, z), read once per file; null when it is missing or unreadable. */
     public static float[] bounds(String asset) {
+        if (BoardFlag.ASSET.equals(asset)) { return new float[] { 0, 0, 0, BoardFlag.WIDTH, 0, BoardFlag.HEIGHT }; }
         File file = file(new File(Configuration.dataDir(), "models/board"), asset).getAbsoluteFile();
         float[] bounds = BOUNDS.computeIfAbsent(file, BoardModelBounds::read);
         return bounds == NONE ? null : bounds;

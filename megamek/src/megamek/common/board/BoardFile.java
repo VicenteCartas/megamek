@@ -36,6 +36,14 @@ import megamek.common.util.BoardUtilities;
 public final class BoardFile {
     public static final String EXTENSION = ".board2";
     public static final int VERSION = 3;
+    private static BoardFlag flag(JsonNode object) {
+        if (!object.has("flag")) { return BoardFlag.DEFAULT; }
+        JsonNode flag = object.get("flag");
+        requireObject(flag);
+        return new BoardFlag(string(flag, "pattern", "solid"), string(flag, "emblem", ""),
+              number(flag, "x", 0), number(flag, "y", 0), number(flag, "scale", 1), number(flag, "rotation", 0));
+    }
+
     private static final ObjectMapper JSON = new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -355,7 +363,7 @@ public final class BoardFile {
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
                       bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
                       string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
-                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0)));
+                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object)));
             }
             hex.setDecorations(values);
         }
@@ -480,6 +488,14 @@ public final class BoardFile {
                 if (value.connections() != 0) { object.put("connections", value.connections()); }
                 if (value.tracks() != 0) { object.put("tracks", value.tracks()); }
                 if (value.pillars()) { object.put("pillars", true); }
+                if (BoardFlag.ASSET.equals(value.asset())) {
+                    var flag = value.flag();
+                    var settings = object.putObject("flag");
+                    settings.put("pattern", flag.pattern());
+                    settings.put("emblem", flag.emblem());
+                    settings.put("x", flag.x()); settings.put("y", flag.y());
+                    settings.put("scale", flag.scale()); settings.put("rotation", flag.rotation());
+                }
                 if (value.levels() > 0) { object.put("levels", value.levels()); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }
                 if (!value.stretch().equals(BoardDecoration.Stretch.NONE)) {

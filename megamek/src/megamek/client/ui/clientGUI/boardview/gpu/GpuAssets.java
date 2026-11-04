@@ -39,8 +39,10 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.common.board.BoardFlag;
 import megamek.common.Configuration;
 import megamek.common.board.TilesetScenery;
+import megamek.common.board.BoardDecoration;
 
 /** GL-thread ownership of shared models, repeating terrain materials, and animated liquid frames. */
 final class GpuAssets implements Disposable {
@@ -1226,6 +1228,31 @@ final class GpuAssets implements Disposable {
         return result;
     }
 
+    private record FlagKey(String id, BoardFlag artwork, BoardDecoration.Colours colours) {
+        FlagKey(BoardDecoration object) { this(object.id(), object.flag(), object.colours()); }
+    }
+    private final Map<FlagKey, GpuFlag> flags = new HashMap<>();
+    private record FlagPaint(BoardFlag artwork, BoardDecoration.Colours colours) { }
+    private final Map<FlagPaint, Texture> flagPaints = new HashMap<>();
+
+    Model flag(BoardDecoration object) {
+        return flags.computeIfAbsent(new FlagKey(object), key -> new GpuFlag(flagPaints.computeIfAbsent(
+              new FlagPaint(object.flag(), object.colours()), paint -> GpuFlag.texture(paint.artwork(), paint.colours())))).model;
+    }
+
+    int animateFlag(BoardDecoration object, com.badlogic.gdx.math.Matrix4 transform, float phase,
+          com.badlogic.gdx.math.Vector3 wind, boolean vacuum, List<com.badlogic.gdx.math.collision.BoundingBox> obstacles,
+          java.util.function.ToDoubleFunction<com.badlogic.gdx.math.Vector3> ground) {
+        GpuFlag flag = flags.get(new FlagKey(object));
+        if (flag == null) { return 0; }
+        flag.animate(transform, phase, wind, vacuum, obstacles, ground);
+        return flag.revision;
+    }
+
+    private Model flagPreview() {
+        return models.computeIfAbsent(BoardFlag.ASSET, key -> new Model(GpuFlag.data()));
+    }
+
     /**
      * A placed object's model, in every view: a model with colour slots is one shared mesh whose placements pass their
      * colours per draw ({@link RigidGlb#colourSlotMesh}, applied by model-colour-slots.glsl); another model is the model
@@ -1235,6 +1262,7 @@ final class GpuAssets implements Disposable {
 
     /** {@link #slotted(String)} at a mesh level ({@link #objectLevels}). */
     Model slotted(String name, int level) {
+        if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
         var source = RigidGlb.source(root, name);
         if (!source.file().isFile()) { return missing(name, "no model file " + source.file().getPath()); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
@@ -1255,6 +1283,7 @@ final class GpuAssets implements Disposable {
      * the marked box, so missing authored references remain editable and visible instead of aborting the board renderer.
      */
     Model decoration(String name, megamek.common.board.BoardDecoration.Colours colours) {
+        if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
         var file = RigidGlb.source(root, name).file();
         return file.isFile() ? model(name, colours) : missing(name, "no model file " + file.getPath());
     }
@@ -1401,6 +1430,16 @@ final class GpuAssets implements Disposable {
             return true;
         });
         retain(this.routes, liveModels);
+        flags.values().removeIf(flag -> {
+            if (liveModels.contains(flag.model)) { return false; }
+            flag.model.dispose(); return true;
+        });
+        var livePaints = new java.util.HashSet<Texture>();
+        flags.values().forEach(flag -> livePaints.add(flag.paint));
+        flagPaints.values().removeIf(paint -> {
+            if (livePaints.contains(paint)) { return false; }
+            paint.dispose(); return true;
+        });
         interiors.entrySet().removeIf(entry -> {
             if (liveModels.contains(entry.getKey().shell()) || this.models.containsValue(entry.getKey().shell())) { return false; }
             entry.getValue().dispose(); return true;
@@ -1462,6 +1501,7 @@ final class GpuAssets implements Disposable {
     }
 
     Model lodModel(String name, int level) {
+        if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
         if (BoardWall.supports(name)) { return wallLevels(name, 1).get(level); }
         if (BoardMultiHexBuilding.supports(name)) { return multiHexLevels(BoardMultiHexBuilding.layout(name, 1)).get(level); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
@@ -1935,6 +1975,8 @@ final class GpuAssets implements Disposable {
         interiors.values().forEach(Model::dispose);
         interiors.clear();
         models.values().forEach(Model::dispose);
+        flags.values().forEach(flag -> flag.model.dispose()); flags.clear();
+        flagPaints.values().forEach(Texture::dispose); flagPaints.clear();
         materials.values().forEach(Texture::dispose);
         liquids.values().forEach(animation -> animation.frames().forEach(Texture::dispose));
         models.clear();

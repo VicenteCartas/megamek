@@ -17,6 +17,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -32,6 +33,293 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
+    /** A patch of field, away from all fixtures, in the arena's centred overhead capture. */
+    private static float centreBrightness() {
+        var image = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(580, 430, 40, 40);
+        try {
+            float total = 0;
+            for (int y = 0; y < 40; y++) {
+                for (int x = 0; x < 40; x++) {
+                    int rgba = image.getPixel(x, y);
+                    total += ((rgba >>> 24) + ((rgba >>> 16) & 255) + ((rgba >>> 8) & 255)) / (3f * 255);
+                }
+            }
+            return total / 1600;
+        } finally { image.dispose(); }
+    }
+
+    @Test void civicCitadelKeepsSteppedFloorsAndNightGlazingAcrossLods() throws Exception {
+        File output = new File("build/gpu-board-review/civic-citadel");
+        Files.createDirectories(output.toPath());
+        Coords at = new Coords(4, 4);
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
+        place(editor, at, "civic-citadel", 0);
+        var scene = capture(editor.board());
+        assertEquals(14, scene.tile(at).cover().height());
+        assertEquals(List.of(2, 2, 3, 3, 14), scene.tiles().stream()
+              .filter(t -> t.cover().reference() != null).map(t -> t.cover().height()).sorted().toList());
+        var slices = GpuAuthoredBuilding.prepare(scene, scene.tiles());
+        for (var prepared : slices.values()) {
+            assertEquals(prepared.layout().height(), prepared.floors().size(), "Each occupied level gets a generated floor");
+        }
+        editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#729bdc"), null, true);
+        var tinted = scene.withTiles(BoardTiles.captureAll(editor.board()));
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 1100); config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                GpuTerrain terrain = new GpuTerrain(); GpuAssets assets = new GpuAssets();
+                GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(10, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    int[] windows = new int[2], lamps = new int[2];
+                    for (var prepared : slices.values()) {
+                        var model = assets.authoredBuilding(prepared);
+                        for (int lod = 0; lod < 2; lod++) {
+                            for (Material material : model.levels().get(lod).materials) {
+                                if (material.has(ColorAttribute.Emissive)) {
+                                    assertFalse(material.has(GpuBuildingPaint.TYPE), "Windows and lamps must not take wall tint");
+                                    var light = material.get(GpuModelLight.class, GpuModelLight.TYPE);
+                                    if (material.id.contains("fortress-glass")) {
+                                        assertNotNull(light, "Night-window control must survive hex slicing");
+                                        assertEquals(true, field(light, "nightOnly"));
+                                        windows[lod]++;
+                                    } else { lamps[lod]++; }
+                                }
+                            }
+                        }
+                    }
+                    for (int lod = 0; lod < 2; lod++) { assertTrue(windows[lod] > 0); assertTrue(lamps[lod] > 0); }
+                    BoardCamera camera = new BoardCamera(); camera.resize(1200, 1100);
+                    terrain.update(scene);
+                    record View(String name, float yaw, float pitch, boolean top) { }
+                    var views = List.of(new View("isometric", 45, BoardCamera.ISOMETRIC_TILT, false), new View("front", 0, 80, false),
+                          new View("side", 90, 80, false), new View("back", 180, 80, false), new View("top", 0, 0, true));
+                    int[] selectedLod = {0};
+                    try (var lodChoice = org.mockito.Mockito.mockStatic(TreeLod.class, call -> {
+                        if (call.getMethod().getName().equals("level") && call.getArguments().length == 3
+                              && call.getArgument(0) == TreeLod.PROPS) { return selectedLod[0]; }
+                        return call.callRealMethod();
+                    })) {
+                        for (int lod = 0; lod < 2; lod++) {
+                            selectedLod[0] = lod;
+                            for (View view : views) {
+                                camera.setIsometric(!view.top());
+                                if (!view.top()) { camera.orbit(view.yaw() - 45, view.pitch() - BoardCamera.ISOMETRIC_TILT); }
+                                camera.camera.zoom = view.top() ? .22f : .33f;
+                                camera.center(BoardGeometry.center(at, 0).add(0, 0, view.top() ? 0 : 125));
+                                terrain.animate(1, List.of()); frame.render(terrain, camera, scene);
+                                int inspected = 0;
+                                for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                                    for (Object prop : (List<?>) field(chunk, "props")) {
+                                        if (field(prop, "decorationId") == null) { continue; }
+                                        assertEquals(lod, field(prop, "lod")); inspected++;
+                                    }
+                                }
+                                assertTrue(inspected > 0);
+                                GpuReviewFrame.save(new File(output, "lod" + lod + "-" + view.name() + ".png"));
+                            }
+                        }
+                        camera.setIsometric(true); camera.camera.zoom = .33f;
+                        camera.center(BoardGeometry.center(at, 0).add(0, 0, 125));
+                        frame.configure(new BoardAtmosphere.Settings(23, 0, 0,
+                              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                        for (int lod = 0; lod < 2; lod++) {
+                            selectedLod[0] = lod; terrain.animate(1, List.of()); frame.render(terrain, camera, scene);
+                            GpuReviewFrame.save(new File(output, "lod" + lod + "-night.png"));
+                        }
+                        frame.configure(new BoardAtmosphere.Settings(10, 0, 0,
+                              BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                        terrain.update(tinted);
+                        for (int lod = 0; lod < 2; lod++) {
+                            selectedLod[0] = lod; terrain.animate(1, List.of()); frame.render(terrain, camera, tinted);
+                            GpuReviewFrame.save(new File(output, "lod" + lod + "-tint.png"));
+                        }
+                        int painted = 0;
+                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) field(chunk, "props")) {
+                                painted += assertPaint((ModelInstance) field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
+                            }
+                        }
+                        assertTrue(painted > 0);
+                        terrain.update(scene); selectedLod[0] = 0;
+                        camera.orbit(0, -15); camera.camera.zoom = .22f;
+                        camera.center(BoardGeometry.center(at, 0).add(0, 0, 140));
+                        terrain.animate(1, List.of(), .25f, at, 6 * BoardGeometry.level());
+                        assertFalse(faded(terrain).isEmpty(), "The shaft opens to its generated interior");
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, "interior.png"));
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Civic citadel review", failure.get()); }
+    }
+
+    @Test void civicAssetsKeepMaterialsAndLightsAcrossSlicedLods() throws Exception {
+        File output = new File("build/gpu-board-review/civic-emission");
+        Files.createDirectories(output.toPath());
+        var names = List.of("frontier-church", "classic-church", "civic-arena", "neo-futurist-arena");
+        var locations = List.of(new Coords(3, 4), new Coords(9, 4), new Coords(3, 11), new Coords(10, 11));
+        var editor = new BoardEditorSession();
+        editor.open(Board.createEmptyBoard(16, 17), null);
+        for (int i = 0; i < names.size(); i++) { place(editor, locations.get(i), names.get(i), 0); }
+        var scene = capture(editor.board());
+        for (Coords at : locations) {
+            editor.command(new Command(Action.SELECT_AT, at.getX() + "," + at.getY(), ""), null);
+            editor.command(new Command(Action.SELECT_OBJECT, editor.board().getHex(at).getDecorations().getFirst().id()), null);
+            editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#729bdc"), null, true);
+        }
+        var tinted = scene.withTiles(BoardTiles.captureAll(editor.board()));
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(1200, 900);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                GpuAssets assets = new GpuAssets();
+                GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(23, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    var illuminated = new java.util.HashSet<String>();
+                    for (var entry : GpuAuthoredBuilding.prepare(scene, scene.tiles()).entrySet()) {
+                        var model = assets.authoredBuilding(entry.getValue());
+                        for (int lod = 0; lod < model.levels().size(); lod++) {
+                            for (Material material : model.levels().get(lod).materials) {
+                                var light = material.get(ColorAttribute.class, ColorAttribute.Emissive);
+                                if (light == null || light.color.r + light.color.g + light.color.b == 0) { continue; }
+                                assertFalse(material.id.contains("#paint"), "Tintable walls must remain unlit: " + material.id);
+                                assertTrue(material.id.contains("#emission") || material.id.contains("dome-window"),
+                                      "Only lamps, displays and window maps emit: " + material.id);
+                                if (material.id.contains("glass") || material.id.contains("dome-window")) {
+                                    var control = material.get(GpuModelLight.class, GpuModelLight.TYPE);
+                                    assertNotNull(control, "Window day/night metadata survives slicing and LODs");
+                                    assertEquals(true, field(control, "nightOnly"));
+                                }
+                                illuminated.add(entry.getKey().object().asset() + ":" + lod);
+                            }
+                        }
+                    }
+                    for (String name : names) {
+                        for (int lod = 0; lod < 2; lod++) {
+                            assertTrue(illuminated.contains("buildings/authored/" + name + ":" + lod),
+                                  name + " LOD" + lod + "; illuminated slices: " + illuminated);
+                        }
+                    }
+                    BoardCamera camera = new BoardCamera();
+                    camera.resize(1200, 900);
+                    camera.setIsometric(true);
+                    terrain.update(scene);
+                    var localLights = (GpuLavaLighting) field(terrain, "lavaLighting");
+                    @SuppressWarnings("unchecked")
+                    var installedLights = (List<GpuLavaLighting.Source>) field(localLights, "buildings");
+                    assertEquals(16, installedLights.size(), "Eight fixtures per arena, once each across all slices and LODs");
+                    for (int i = 0; i < names.size(); i++) {
+                        camera.setIsometric(true);
+                        camera.camera.zoom = i < 2 ? .21f : .30f;
+                        var target = BoardGeometry.center(locations.get(i), 1);
+                        if (i < 2) { target.add(0, 36, 18); }
+                        camera.center(target);
+                        terrain.animate(1, List.of());
+                        frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, names.get(i) + "-night.png"));
+                        if (i >= 2) {
+                            camera.setIsometric(false);
+                            camera.center(BoardGeometry.center(locations.get(i), 0));
+                            frame.render(terrain, camera, scene);
+                            float lit = centreBrightness();
+                            GpuReviewFrame.save(new File(output, names.get(i) + "-night-lit-top.png"));
+                            localLights.setBuildings(List.of());
+                            frame.render(terrain, camera, scene);
+                            float unlit = centreBrightness();
+                            GpuReviewFrame.save(new File(output, names.get(i) + "-night-without-floodlights.png"));
+                            assertTrue(lit > unlit + .03f, names.get(i) + " field must receive light, not just fixture glow: " + lit + " vs " + unlit);
+                            localLights.setBuildings(installedLights);
+                        }
+                    }
+                    // Compare the shipped LODs at the same size: distance must not disguise missing faces or colour jumps.
+                    File exterior = new File(output, "exteriors");
+                    Files.createDirectories(exterior.toPath());
+                    frame.configure(new BoardAtmosphere.Settings(10, 0, 0,
+                          BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                    for (int i = 0; i < names.size(); i++) {
+                        camera.setIsometric(true); camera.camera.zoom = i < 2 ? .21f : .30f;
+                        var target = BoardGeometry.center(locations.get(i), 1);
+                        if (i < 2) { target.add(0, 36, 18); }
+                        camera.center(target); frame.render(terrain, camera, scene);
+                        GpuReviewFrame.save(new File(output, names.get(i) + "-day.png"));
+                    }
+                    record View(String name, float yaw, float pitch, boolean top) { }
+                    var views = List.of(new View("front", -45, 25.26439f, false), new View("back", 135, 25.26439f, false),
+                          new View("side", 45, 25.26439f, false), new View("top", 0, 0, true),
+                          new View("entrance", -45, 20, false));
+                    int[] selectedLod = {0};
+                    try (var lodChoice = org.mockito.Mockito.mockStatic(TreeLod.class, call -> {
+                        if (call.getMethod().getName().equals("level") && call.getArguments().length == 3
+                              && call.getArgument(0) == TreeLod.PROPS) { return selectedLod[0]; }
+                        return call.callRealMethod();
+                    })) {
+                        for (int lod = 0; lod < 2; lod++) {
+                            final int requested = lod;
+                            selectedLod[0] = requested;
+                            for (int i = 0; i < names.size(); i++) {
+                                for (View view : views) {
+                                    camera.setIsometric(!view.top());
+                                    if (!view.top()) { camera.orbit(view.yaw(), view.pitch()); }
+                                    camera.camera.zoom = i < 2 ? .17f : .25f;
+                                    var target = BoardGeometry.center(locations.get(i), 0);
+                                    if (i < 2) { target.add(0, 32, 35); }
+                                    else { target.add(0, 0, 20); }
+                                    camera.center(target);
+                                    terrain.animate(1, List.of());
+                                    frame.render(terrain, camera, scene);
+                                    int inspected = 0;
+                                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                                        for (Object prop : (List<?>) field(chunk, "props")) {
+                                            if (!(field(prop, "decorationFeature") instanceof BoardScene.Feature feature)
+                                                  || !feature.asset().equals("buildings/authored/" + names.get(i))) { continue; }
+                                            assertEquals(requested, field(prop, "lod"), "Review must draw the requested LOD");
+                                            inspected++;
+                                        }
+                                    }
+                                    assertTrue(inspected > 0, names.get(i));
+                                    GpuReviewFrame.save(new File(exterior, names.get(i) + "-lod" + lod + "-" + view.name() + ".png"));
+                                }
+                            }
+                        }
+                        terrain.update(tinted);
+                        for (int lod = 0; lod < 2; lod++) {
+                            selectedLod[0] = lod;
+                            for (int i = 0; i < names.size(); i++) {
+                                camera.setIsometric(true);
+                                camera.camera.zoom = i < 2 ? .17f : .25f;
+                                var target = BoardGeometry.center(locations.get(i), 0);
+                                target.add(0, i < 2 ? 32 : 0, i < 2 ? 35 : 20);
+                                camera.center(target);
+                                terrain.animate(1, List.of());
+                                frame.render(terrain, camera, tinted);
+                                GpuReviewFrame.save(new File(exterior, names.get(i) + "-lod" + lod + "-tint.png"));
+                            }
+                        }
+                        int painted = 0;
+                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) field(chunk, "props")) {
+                                painted += assertPaint((ModelInstance) field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
+                            }
+                        }
+                        assertTrue(painted > 0, "Civic assets expose marked wall/panel paint regions");
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Civic asset review", failure.get()); }
+    }
+
     @Test void heldAuthoredDragHidesInteriorsAndOnlyRebuildsOnRelease() throws Exception {
         Coords at = new Coords(5, 5);
         var setup = new FutureTask<GpuMapSource>(() -> {

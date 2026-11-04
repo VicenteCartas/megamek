@@ -233,3 +233,51 @@ taller roof. Areas are unioned, with higher solids masking lower ones at the sam
 horizontal sections of the solids, preserving courtyards. The renderer slices the assembled artwork and interiors
 into hex-owned pieces. Outer visual overhangs belong to their nearest occupied hex and disappear with it. Derived
 meshes are never serialized.
+
+### Flags
+
+`scenery/flag` is one generated visual `prop` (stable UID `clothflg`). It uses the ordinary
+`scale`, `stretch`, XYZ rotations, placement and four-entry `colours` array. The local X=0
+edge is attached; the cloth extends along +X, with +Z up. Rotate the object to change the
+attachment direction, including a vertically hung banner. It has no pole or gameplay effect.
+
+The optional `flag` object contains:
+
+```json
+"flag": {
+  "pattern": "horizontal-3",
+  "emblem": "decal/emblems/star-league",
+  "x": 0,
+  "y": 0,
+  "scale": 1,
+  "rotation": 0
+}
+```
+
+Patterns: `solid`, `horizontal-2`, `vertical-2`, `horizontal-3`, `vertical-3`, `sectors-3`,
+`diagonal`, `diagonal-reverse`, `cross`, `nordic-cross`, `saltire`, `quarters`, `chevron`, `canton`.
+Colours default to red, white, blue and gold, in slot order. Stripes run top-to-bottom or
+left-to-right; quarters run top-left, top-right, bottom-left, bottom-right. Crosses use
+slot 1 over slot 0; chevron/canton use slot 2 over a two-colour field.
+
+The default pattern is solid. Empty `emblem` means none. An emblem must name a decal in
+`decals/emblems`. Its offset is measured in cloth widths/heights from the centre (positive
+Y is up), with default `(0, 0)`. Scale 1 fits the emblem to half the cloth height while
+preserving its aspect ratio; rotation is counterclockwise degrees. The reverse side shows
+the same cloth artwork from behind, including the naturally mirrored emblem.
+
+The 3D editor and game deform the same subdivided cloth mesh, using the shared weather
+wind direction and animation clock. Gravity and wind act in world space, independent of
+rotation, mirroring and scale. Calm weather retains a 0.1 breeze; vacuum suppresses flutter.
+The fixed local left edge stays attached while the free cloth hangs down and lifts downwind.
+Swept cloth segments slide against nearby buildings, props and units using coarse world
+bounding boxes. Ground contact samples the installed terrain support along cloth segments,
+including slopes and height transitions, with a small clearance; no floor is invented outside
+the board. This is a procedural drape, not a full cloth solver: no self-collision or detailed
+concave contact; an attachment inside a solid or below ground remains
+where authored. Identical artwork shares one texture while each flag keeps its own mesh.
+Colour, animated shadow and picking passes use the current mesh. The editor's pattern/emblem controls work
+on both the placement brush and selected objects; sampling, copying and undo preserve them.
+
+`scenery/steel-stick` is a separate steel prop (24 units tall, 0.7 diameter), available in
+Parks with the flag; ordinary object scaling, stretching, rotation and placement apply.

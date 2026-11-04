@@ -34,6 +34,9 @@ final class GpuTerrainShadows implements Disposable {
 
         /** A unit's bounds in the world, which hold all it casts. */
         BoundingBox bounds(ModelInstance unit);
+
+        /** Revision of a deforming caster whose transform and node pose can remain unchanged. */
+        default int revision(ModelInstance unit) { return 0; }
     }
 
     /**
@@ -211,7 +214,7 @@ final class GpuTerrainShadows implements Disposable {
         boolean changed = shadowDirty || !shadowProjectionValid || units.size() != shadowModels.size();
         for (int index = 0; index < units.size(); index++) {
             ModelInstance unit = units.get(index);
-            poses[index] = shadowPose(unit);
+            poses[index] = 31 * shadowPose(unit) + casters.revision(unit);
             moved[index] = index >= shadowModels.size() || unit.model != shadowModels.get(index)
                   || !Arrays.equals(unit.transform.val, shadowTransforms.get(index).val) || poses[index] != shadowPoses.get(index);
             changed |= moved[index];

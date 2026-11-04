@@ -38,6 +38,42 @@ class GpuModelMaterialSmokeTest {
     private static final int SIZE = 256;
 
     @Test
+    void nightEmissionSwitchesBothGltfAndLibraryGlowWithoutChangingTheSurface() {
+        nativeCheck(output -> {
+            var model = new ModelBuilder().createBox(120, 120, 4,
+                  new Material(ColorAttribute.createDiffuse(Color.BLACK), new GpuLinearColors(),
+                        ColorAttribute.createEmissive(.2f, .1f, .02f, 1), new GpuModelLight(1, 0, 1, true),
+                        new GpuModelMaterial(1, 1, 0, null, new float[] { 1, 1, 1 },
+                              new float[] { .1f, .1f, .1f }, false, new float[4])),
+                  VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
+            var object = new ModelInstance(model);
+            var batch = new ModelBatch(GpuUnitShader.provider());
+            var environment = new Environment();
+            var lighting = new GpuEnvironmentLighting();
+            environment.set(lighting, ColorAttribute.createAmbientLight(0, 0, 0, 1));
+            int pixel = (SIZE / 2 * SIZE + SIZE / 2) * 4;
+            try {
+                for (boolean iso : new boolean[] { false, true }) {
+                    var camera = camera(iso);
+                    for (int hour : new int[] { 12, 0, 12 }) {
+                        lighting.set(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0, 2.5f, 0, 0)));
+                        draw(output, batch, object, camera, environment);
+                        float[] actual = output.linearPixels();
+                        float[] expected = hour == 0 ? new float[] { .3f, .2f, .12f } : new float[3];
+                        for (int c = 0; c < 3; c++) {
+                            assertEquals(expected[c], actual[pixel + c], .002,
+                                  "All emission follows day/night in the native model shader; hour=" + hour);
+                        }
+                    }
+                }
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally {
+                batch.dispose(); model.dispose(); lighting.dispose();
+            }
+        });
+    }
+
+    @Test
     void buildingPaintRespectsAtlasMasksInLitAndUnlitRendering() {
         nativeCheck(output -> {
             Texture fixed = texture(0xbfbfbf00), mixed = texture(0xbfbfbf80), wall = texture(0xbfbfbfff);
