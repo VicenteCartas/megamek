@@ -40,9 +40,9 @@ class GpuAuthoredNightLightsTest {
             var expectedNight = new java.util.HashSet<>(source.nightEmission);
             expectedNight.add("structures/lunar/habitat-wall");
             assertEquals(expectedNight, generated.get(lod).nightEmission);
-            for (String id : source.emissionOff) {
-                assertTrue(java.util.Arrays.stream(generated.get(lod).materials.toArray()).anyMatch(m -> m.id.equals(id)));
-            }
+            var used = new java.util.HashSet<String>();
+            for (var material : generated.get(lod).materials) { used.add(material.id); }
+            assertTrue(used.containsAll(source.emissionOff));
         }
     }
 
