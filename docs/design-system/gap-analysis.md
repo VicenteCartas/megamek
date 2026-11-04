@@ -1307,13 +1307,19 @@ work for Swing, and item 11 is under investigation.
          board stops it) and the random map settings beside its line (`LobbyBattlefield.rolled`). Loading and
          saving the map setup were already in the map setup's footer; the Board Editor joins them there
          (`LobbyMapSetupView.Action.BOARD_EDITOR`).
+       - Unit cards act in place, and the unit menu no longer cascades (`LobbyForcesPanel`). A wide card of the local
+         player's unit shows Configure, C3 (for a unit with C3, opening the network manager on it) and Delete as icons
+         beside its ⋮; a compact row keeps only the ⋮. In the menu, a submenu replaces the list in the same popover,
+         under the submenu's name and a Back row (Left and Esc go back too), instead of opening up to four
+         popovers side by side. `lobby+unitmenu+unitsub` shows a submenu.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
        `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
        stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
        the name line; `LobbyBattlefieldToolsSmokeTest`, `LobbyMapSetupSmokeTest` (Board Editor) and
-       `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`.
+       `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
+       icons and the submenu's Back, Esc and Left, clicked through the stage).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

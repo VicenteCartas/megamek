@@ -624,6 +624,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public void c3(int unitId) {
+                window.c3Unit(unitId);
+            }
+
+            @Override
             public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
                 window.dropForces(unitIds, formationIds, target);
             }
@@ -859,6 +864,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     void unitMenu(List<LobbyMenuEntry> entries) {
         if (forces != null) {
             forces.showMenu(entries);
+            GpuLobbyProbe probe = window.probe();
+            if (probe != null && probe.options().contains("unitsub")) {
+                forces.openFirstSubmenu();
+            }
         }
     }
 

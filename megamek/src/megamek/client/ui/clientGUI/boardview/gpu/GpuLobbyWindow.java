@@ -1308,6 +1308,15 @@ public final class GpuLobbyWindow {
         });
     }
 
+    /** Any thread: opens the C3 network manager on one unit, as the unit menu's C3 items do. */
+    void c3Unit(int unitId) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                openC3(List.of(unitId));
+            }
+        });
+    }
+
     /** EDT: opens the C3 network manager in the forces' place, the units it opens on picked. */
     private void openC3(List<Integer> units) {
         Player local = gui.getClient().getLocalPlayer();

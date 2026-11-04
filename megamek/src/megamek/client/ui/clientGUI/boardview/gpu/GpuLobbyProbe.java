@@ -97,7 +97,8 @@ import org.lwjgl.glfw.GLFW;
  *     <li>{@code lobby+formations}: puts the player's first units in a formation and a sub-formation, and shows the
  *     forces as formations.</li>
  *     <li>{@code lobby+compact}: shows the forces as compact rows.</li>
- *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot.</li>
+ *     <li>{@code lobby+unitmenu}: opens the menu of the player's first unit before the shot; {@code +unitsub} then
+ *     opens its first submenu in its place.</li>
  *     <li>{@code lobby+zones}: deploys the player at the west edge and the bots at the east, so the map shows
  *     zones.</li>
  *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in

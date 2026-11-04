@@ -495,6 +495,10 @@ class LobbyTogglesSmokeTest {
         }
 
         @Override
+        public void c3(int unitId) {
+        }
+
+        @Override
         public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
         }
 

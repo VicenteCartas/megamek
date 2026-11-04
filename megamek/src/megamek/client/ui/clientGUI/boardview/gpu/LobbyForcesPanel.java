@@ -58,7 +58,9 @@ import megamek.client.ui.gdx.UiTheme;
  * unit only its rough description, as the Swing unit table does.
  *
  * <p>A click selects a card, Ctrl adds or removes one and Shift a run of them; a right click or a card's ⋮ opens the
- * unit menu for the selection, which the window builds ({@link megamek.client.lobby.LobbyUnitMenu}). A double click configures an editable unit. In the formations, units and formations are dragged onto a
+ * unit menu for the selection, which the window builds ({@link megamek.client.lobby.LobbyUnitMenu}); a submenu opens in
+ * the menu's place with a Back row. A wide card of the local player's unit also shows Configure, C3 (for a C3 unit) and
+ * Delete beside its ⋮, and a double click configures it. In the formations, units and formations are dragged onto a
  * formation, onto a unit in one, or onto the strip that shows at the end to leave their formation, as in the Swing force
  * tree; the card that would take the drop rises under an accent edge.</p>
  */
@@ -66,8 +68,6 @@ final class LobbyForcesPanel {
     /** The views of the view row's switch. */
     static final int UNITS = 0;
     static final int FORMATIONS = 1;
-    /** The deepest menu: the unit menu and its submenus. */
-    private static final int MENU_LEVELS = 5;
 
     /** The forces column's commands that the window runs, most through a Swing dialog. */
     enum Command {
@@ -81,6 +81,9 @@ final class LobbyForcesPanel {
         void sort(int index);
 
         void configure(int unitId);
+
+        /** Opens the C3 network manager on this unit. */
+        void c3(int unitId);
 
         void drop(List<Integer> unitIds, List<Integer> formationIds, Target target);
 
@@ -116,7 +119,13 @@ final class LobbyForcesPanel {
     private final ScrollPane scroll;
     private final Table dropStrip;
     private final DragAndDrop dragAndDrop = new DragAndDrop();
-    private final List<UiPopover> menus = new ArrayList<>();
+    /** The unit menu and the forces column's ⋮ menu; a submenu opens in its place, not beside it. */
+    private final UiPopover menu;
+    /** The open unit menu's entries and header, and the submenu it shows as indices into the entries. */
+    private List<LobbyMenuEntry> menuEntries = List.of();
+    private String menuTitle = "";
+    private String menuDetail = "";
+    private final List<Integer> menuPath = new ArrayList<>();
     private UiSelect sortSelect;
     private List<String> sortNames = List.of();
 
@@ -139,11 +148,8 @@ final class LobbyForcesPanel {
         this.kit = kit;
         this.actions = actions;
         this.sprites = sprites;
-        for (int level = 0; level < MENU_LEVELS; level++) {
-            UiPopover menu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
-            menu.setName("lobby-unit-menu-" + level);
-            menus.add(menu);
-        }
+        menu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
+        menu.setName("lobby-unit-menu");
 
         panel = kit.panel(true);
         UiButton randomArmy = kit.button("button-secondary" + UiTheme.COMPACT, null,
@@ -228,14 +234,19 @@ final class LobbyForcesPanel {
         return panel;
     }
 
-    /** Adds the unit menus to {@code layer}, above the columns; once, before the panel shows a snapshot. */
+    /** Adds the unit menu to {@code layer}, above the columns; once, before the panel shows a snapshot. */
     void attach(Group layer) {
-        menus.forEach(layer::addActor);
+        layer.addActor(menu);
     }
 
-    /** One Escape step in the unit menus: closes the deepest open one; true when one was open. */
+    /** One Escape step in the unit menu: back out of a submenu, or close it; true when one was open. */
     boolean back() {
-        return menus.getFirst().back();
+        if (menu.isVisible() && !menuPath.isEmpty()) {
+            menuPath.removeLast();
+            fillMenu();
+            return true;
+        }
+        return menu.back();
     }
 
     /** Shows compact rows, or the full cards; the choice holds through later snapshots. */
@@ -577,7 +588,25 @@ final class LobbyForcesPanel {
             openMenuUnder(more);
         });
         unitMenuButtons.put(unit.id(), more);
-        side.add(more).size(size("control.sm")).right().padLeft(compact ? space("sm") : 0);
+        if (compact) {
+            side.add(more).size(size("control.sm")).right().padLeft(space("sm"));
+        } else {
+            // A wide card's own actions sit in a row under its BV; the rest wait in the ⋮ menu
+            Table tools = new Table();
+            tools.right();
+            if (unit.editable()) {
+                tools.add(cardTool(unit, "settings", "Lobby.card.configure", "configure",
+                      () -> actions.configure(unit.id()))).size(size("control.sm"));
+                if (unit.c3()) {
+                    tools.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())))
+                          .size(size("control.sm"));
+                }
+                tools.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
+                      () -> actions.delete(List.of(unit.id()), List.of()))).size(size("control.sm"));
+            }
+            tools.add(more).size(size("control.sm"));
+            side.add(tools).right().padTop(space("xs"));
+        }
         card.add(side).top().padLeft(space("sm")).minWidth(sideMin(compact));
 
         unitCards.put(unit.id(), card);
@@ -600,6 +629,15 @@ final class LobbyForcesPanel {
             dragAndDrop.addTarget(dropTarget(card, Target.unit(unit.id())));
         }
         return card;
+    }
+
+    /** One of a wide card's action icons, named {@code lobby-unit-<what>-<id>}. */
+    private UiButton cardTool(LobbyUnit unit, String icon, String tipKey, String what, Runnable action) {
+        UiButton tool = kit.button("button-icon" + UiTheme.COMPACT, icon, null, null);
+        tool.setName("lobby-unit-" + what + "-" + unit.id());
+        kit.tip(tool, true).getActor().setText(Messages.getString(tipKey));
+        UiKit.onChange(tool, action);
+        return tool;
     }
 
     /** The most weapons a card's sheet names before "+n"; its tooltip lists them all. */
@@ -1020,7 +1058,6 @@ final class LobbyForcesPanel {
 
     /** The forces column's ⋮ menu: the unit list commands, random names and skills, C3 and a new formation. */
     private void openForcesMenu(Actor button) {
-        UiPopover menu = menus.getFirst();
         if (menu.isVisible()) {
             menu.cancel();
             return;
@@ -1046,14 +1083,14 @@ final class LobbyForcesPanel {
 
     private void command(UiMenuList items, String key, boolean enabled, Command command) {
         items.item(Messages.getString(key), null, null, false, enabled, () -> {
-            menus.getFirst().cancel();
+            menu.cancel();
             actions.command(command);
         });
     }
 
     private void openMenuUnder(Actor button) {
-        if (menus.getFirst().isVisible()) {
-            menus.getFirst().cancel();
+        if (menu.isVisible()) {
+            menu.cancel();
             return;
         }
         Vector2 corner = button.localToStageCoordinates(new Vector2(0, 0));
@@ -1062,7 +1099,7 @@ final class LobbyForcesPanel {
 
     /** Asks the window for the unit menu of the selection, to open at stage point ({@code x}, {@code y}). */
     private void openMenuAt(float x, float y, @Nullable Actor face) {
-        menus.getFirst().cancel();
+        menu.cancel();
         List<Integer> units = List.copyOf(selectedUnits);
         List<Integer> formations = formationsView() ? List.copyOf(selectedFormations) : List.of();
         if (units.isEmpty() && formations.isEmpty()) {
@@ -1104,49 +1141,108 @@ final class LobbyForcesPanel {
     void showMenu(List<LobbyMenuEntry> entries) {
         MenuAnchor at = pendingMenu;
         pendingMenu = null;
-        UiPopover menu = menus.getFirst();
         if (at == null || entries.isEmpty() || menu.getStage() == null) {
             return;
         }
-        UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-        fillMenu(items, entries, List.of(), 0);
-        menu.header(at.title(), at.detail().isEmpty() ? null : at.detail()).content(items);
+        menuEntries = entries;
+        menuTitle = at.title();
+        menuDetail = at.detail();
+        menuPath.clear();
+        fillMenu();
         menu.openedFrom(at.face());
         menu.showAt(at.x(), at.y());
     }
 
-    private void fillMenu(UiMenuList items, List<LobbyMenuEntry> entries, List<Integer> prefix, int level) {
-        for (int index = 0; index < entries.size(); index++) {
-            LobbyMenuEntry entry = entries.get(index);
+    /**
+     * Fills the unit menu with the entries at {@link #menuPath}: its top, or a submenu under the submenu's name with a
+     * Back row. A submenu replaces the list in the same popover, so the menu never fans out into a cascade; Left and
+     * Escape go back up.
+     */
+    private void fillMenu() {
+        List<LobbyMenuEntry> level = menuEntries;
+        String title = menuTitle;
+        String detail = menuDetail;
+        for (int index : menuPath) {
+            LobbyMenuEntry opened = level.get(index);
+            title = opened.label();
+            detail = menuTitle;
+            level = opened.children();
+        }
+        UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
+        items.setName("lobby-unit-menu-items");
+        if (!menuPath.isEmpty()) {
+            UiButton back = items.item("\u2039  " + Messages.getString("Lobby.unitMenu.back"), null, null, false, true,
+                  this::menuUp);
+            back.setName("lobby-unit-menu-back");
+            items.separator();
+        }
+        items.addListener(new InputListener() {
+            @Override
+            public boolean keyDown(InputEvent event, int keycode) {
+                if (keycode != Input.Keys.LEFT || menuPath.isEmpty()) {
+                    return false;
+                }
+                menuUp();
+                return true;
+            }
+        });
+        for (int index = 0; index < level.size(); index++) {
+            LobbyMenuEntry entry = level.get(index);
             if (entry.separator()) {
                 items.separator();
                 continue;
             }
-            List<Integer> path = new ArrayList<>(prefix);
+            List<Integer> path = new ArrayList<>(menuPath);
             path.add(index);
             UiButton item;
-            if (entry.submenu() && level + 1 < MENU_LEVELS) {
-                UiButton[] opener = new UiButton[1];
-                opener[0] = items.item(entry.label(), null, null, true, entry.enabled(), () -> {
-                    UiMenuList children = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-                    fillMenu(children, entry.children(), path, level + 1);
-                    UiPopover submenu = menus.get(level + 1);
-                    submenu.header(null, null).content(children);
-                    menus.get(level).cascade(submenu, opener[0]);
+            if (entry.submenu()) {
+                item = items.item(entry.label(), null, null, true, entry.enabled(), () -> {
+                    menuPath.add(path.getLast());
+                    fillMenu();
                 });
-                item = opener[0];
             } else {
-                List<Integer> chosen = List.copyOf(path);
-                item = items.item(entry.label(), null, entry.checked(), false, entry.enabled() && !entry.submenu(),
-                      () -> {
-                          menus.getFirst().cancel();
-                          actions.choose(chosen);
-                      });
+                item = items.item(entry.label(), null, entry.checked(), false, entry.enabled(), () -> {
+                    menu.cancel();
+                    actions.choose(List.copyOf(path));
+                });
             }
             if (!entry.tooltip().isBlank()) {
                 kit.tip(item, true).getActor().setText(entry.tooltip());
             }
         }
+        menu.header(title, detail.isEmpty() ? null : detail).content(items);
+        if (menu.isVisible() && menu.getStage() != null) {
+            menu.reposition();
+            menu.getStage().setKeyboardFocus(items);
+        }
+    }
+
+    /** Goes from a submenu back up to the menu it is in. */
+    private void menuUp() {
+        if (!menuPath.isEmpty()) {
+            menuPath.removeLast();
+            fillMenu();
+        }
+    }
+
+    /** For the developer switch: opens the open unit menu's first submenu that may be chosen; false when it has none. */
+    boolean openFirstSubmenu() {
+        if (!menu.isVisible() || !menuPath.isEmpty()) {
+            return false;
+        }
+        for (int index = 0; index < menuEntries.size(); index++) {
+            if (menuEntries.get(index).submenu() && menuEntries.get(index).enabled()) {
+                menuPath.add(index);
+                fillMenu();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The open unit menu's submenu, as indices from its top; empty at the top. For tests. */
+    List<Integer> menuPath() {
+        return List.copyOf(menuPath);
     }
 
     /** Whether a unit is selected; for tests of the panel's selection. */
