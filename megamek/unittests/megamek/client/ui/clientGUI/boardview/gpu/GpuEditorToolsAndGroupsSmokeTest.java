@@ -205,6 +205,23 @@ class GpuEditorToolsAndGroupsSmokeTest {
             assertTrue(bx0 > 0, "The press lies inside the window, left of the board");
             Vector2 outside = stage.screenToStageCoordinates(new Vector2(bx0, by0));
             assertNull(stage.hit(outside.x, outside.y, true), "The press must be clear of editor panels");
+            for (int modifiers : List.of(InputEvent.SHIFT_DOWN_MASK, InputEvent.CTRL_DOWN_MASK)) {
+                GpuBoardTestUi.withModifiers(modifiers, () -> input.touchDown(bx0, by0, 0, Input.Buttons.LEFT));
+                input.touchUp(bx0, by0, 0, Input.Buttons.LEFT); settle(view, source);
+                assertEquals(List.of("loose"), objects(source), "Modified background clicks keep the selection");
+            }
+            clickAt(new Vector2(bx0, by0)); settle(view, source);
+            assertTrue(source.editorState().selection().isEmpty(), "Clicking the background clears an object selection");
+            assertNull(source.editorState().selected(), "Deselecting also clears the inspected hex");
+            assertFalse(GpuBoardTestUi.shown(stage.getRoot().findActor("editor-inspector")));
+            click(view, new Coords(2, 2), Input.Buttons.LEFT); settle(view, source);
+            assertEquals(List.of(""), objects(source));
+            clickAt(new Vector2(bx0, by0)); settle(view, source);
+            assertTrue(source.editorState().selection().isEmpty(), "Clicking the background clears a hex selection");
+            assertNull(source.editorState().selected());
+            clickAt(loose); settle(view, source);
+            assertEquals(List.of("loose"), objects(source));
+
             GpuBoardTestUi.withModifiers(0, () -> input.touchDown(bx0, by0, 0, Input.Buttons.LEFT));
             input.touchDragged((bx0 + x1) / 2, (by0 + y1) / 2, 0);
             input.touchDragged(x1, y1, 0); settle(view, source);

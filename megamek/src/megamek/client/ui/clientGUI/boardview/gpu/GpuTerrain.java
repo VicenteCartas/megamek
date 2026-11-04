@@ -7092,7 +7092,7 @@ final class GpuTerrain implements Disposable {
         if (mesh == null) { return Float.NEGATIVE_INFINITY; }
         Chunk receiving = chunks.get(tile.coords().getX() / CHUNK_SIZE * chunkRows + tile.coords().getY() / CHUNK_SIZE);
         var support = tacticalSurface(coverScene, receiving, tile.coords(), floor);
-        return BoardSurface.sampleHeight(support.faces(), point.x, point.y, BoardGeometry.groundZ(tile));
+        return BoardSurface.sampleHeight(support.faces(), point.x, point.y, BoardGeometry.groundZ(tile), true);
     }
 
     private float editorHeight(Coords coords, BoardScene.Feature feature) {

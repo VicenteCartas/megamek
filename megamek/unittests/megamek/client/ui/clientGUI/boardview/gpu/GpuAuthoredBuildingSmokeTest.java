@@ -49,6 +49,7 @@ class GpuAuthoredBuildingSmokeTest {
     }
 
     @Test void civicCitadelKeepsSteppedFloorsAndNightGlazingAcrossLods() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
         File output = new File("build/gpu-board-review/civic-citadel");
         Files.createDirectories(output.toPath());
         Coords at = new Coords(4, 4);
@@ -72,7 +73,7 @@ class GpuAuthoredBuildingSmokeTest {
                 GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(10, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    int[] windows = new int[2], lamps = new int[2];
+                    int[] windows = new int[2], lamps = new int[2], dark = new int[2];
                     for (var prepared : slices.values()) {
                         var model = assets.authoredBuilding(prepared);
                         for (int lod = 0; lod < 2; lod++) {
@@ -82,14 +83,21 @@ class GpuAuthoredBuildingSmokeTest {
                                     var light = material.get(GpuModelLight.class, GpuModelLight.TYPE);
                                     if (material.id.contains("fortress-glass")) {
                                         assertNotNull(light, "Night-window control must survive hex slicing");
-                                        assertEquals(true, field(light, "nightOnly"));
-                                        windows[lod]++;
+                                        if (material.id.contains("#emission-off")) {
+                                            assertEquals(new GpuModelLight(0, 0, 1), light);
+                                            dark[lod]++;
+                                        } else {
+                                            assertEquals(true, field(light, "nightOnly"));
+                                            windows[lod]++;
+                                        }
                                     } else { lamps[lod]++; }
                                 }
                             }
                         }
                     }
-                    for (int lod = 0; lod < 2; lod++) { assertTrue(windows[lod] > 0); assertTrue(lamps[lod] > 0); }
+                    for (int lod = 0; lod < 2; lod++) {
+                        assertTrue(windows[lod] > 0); assertTrue(lamps[lod] > 0); assertTrue(dark[lod] > 0);
+                    }
                     BoardCamera camera = new BoardCamera(); camera.resize(1200, 1100);
                     terrain.update(scene);
                     record View(String name, float yaw, float pitch, boolean top) { }
@@ -106,7 +114,7 @@ class GpuAuthoredBuildingSmokeTest {
                             for (View view : views) {
                                 camera.setIsometric(!view.top());
                                 if (!view.top()) { camera.orbit(view.yaw() - 45, view.pitch() - BoardCamera.ISOMETRIC_TILT); }
-                                camera.camera.zoom = view.top() ? .22f : .33f;
+                                camera.camera.zoom = view.top() ? .30f : .33f;
                                 camera.center(BoardGeometry.center(at, 0).add(0, 0, view.top() ? 0 : 125));
                                 terrain.animate(1, List.of()); frame.render(terrain, camera, scene);
                                 int inspected = 0;

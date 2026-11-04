@@ -32,6 +32,7 @@ final class GpuFlag {
     static final ToDoubleFunction<Vector3> NO_GROUND = point -> Double.NEGATIVE_INFINITY;
     private static final int FACE_VERTICES = (COLUMNS + 1) * (ROWS + 1);
     private final float[] vertices = new float[FACE_VERTICES * 2 * 8];
+    private final float[] previousVertices = new float[vertices.length];
     final Model model;
     final Texture paint;
     int revision;
@@ -83,7 +84,8 @@ final class GpuFlag {
     /** A conservative world-space reach, including nonuniform scale and mirroring. */
     static BoundingBox bounds(Matrix4 transform) {
         Vector3 root = new Vector3().mul(transform), top = new Vector3(0, 0, HEIGHT).mul(transform);
-        float reach = new Vector3(WIDTH, 0, 0).rot(transform).len();
+        // Include the small elastic allowance used when resolving contact, plus collision clearance.
+        float reach = new Vector3(WIDTH, 0, 0).rot(transform).len() * 1.1f + .05f * BoardGeometry.hexScale();
         var result = new BoundingBox(root, top);
         result.min.sub(reach, reach, reach); result.max.add(reach, reach, reach);
         return result.set(result.min, result.max);
@@ -96,13 +98,19 @@ final class GpuFlag {
         Vector3 rest = new Vector3(1, 0, 0).rot(transform);
         float segment = rest.len() * WIDTH / COLUMNS;
         rest.nor();
-        float strength = vacuum ? 0 : Math.min(1, Math.max(.1f, wind.z));
-        Vector3 breeze = new Vector3(wind.x, wind.y, 0);
+        float strength = vacuum ? 0 : Math.min(1, Math.max(.15f, wind.z));
+        float verticalSeam = Math.abs(new Vector3(0, 0, 1).rot(transform).nor().z);
+        Vector3 breeze = vacuum ? new Vector3(rest.x, rest.y, 0) : new Vector3(wind.x, wind.y, 0);
         if (breeze.isZero()) { breeze.set(0, 1, 0); }
         breeze.nor();
         Vector3 across = new Vector3(-breeze.y, breeze.x, 0);
-        Vector3 force = new Vector3(breeze).scl(4 * strength * strength).add(0, 0, -1);
+        // Cloth has bending stiffness: a vertical seam must not collapse the whole sheet onto a single line.
+        // Keep the spread downwind, even when the authored fly points upwind or the placement is mirrored.
+        Vector3 force = new Vector3(breeze).scl(Math.max(4 * strength * strength, .55f * verticalSeam)).add(0, 0, -1);
         Vector3 point = new Vector3(), previous = new Vector3(), direction = new Vector3(), probe = new Vector3();
+        Vector3 candidate = new Vector3();
+        obstacles = obstacles.stream().map(box -> attachmentBounds(box, transform)).toList();
+        boolean contact = false;
         for (int row = 0, at = 0; row <= ROWS; row++) {
             float v = (float) row / ROWS;
             point.set(0, 0, (1 - v) * HEIGHT).mul(transform);
@@ -110,19 +118,33 @@ final class GpuFlag {
                 float u = (float) column / COLUMNS;
                 if (column > 0) {
                     previous.set(point);
-                    float folds = strength * (.6f * (float) Math.sin(u * 12 - phase * 3 + v * 2)
+                    float folds = .22f * verticalSeam * (float) Math.sin(v * Math.PI * 2 + u * 7)
+                          + strength * (.6f * (float) Math.sin(u * 12 - phase * 3 + v * 2)
                           + .2f * (float) Math.sin(u * 23 - phase * 5 - v * 4));
                     // A short bend at the seam preserves its orientation; the free cloth follows gravity and wind.
                     direction.set(force).mulAdd(rest, .35f * (float) Math.exp(-12 * u)).mulAdd(across, folds).nor();
                     point.mulAdd(direction, segment);
+                    candidate.set(point);
                     for (int pass = 0; pass < 2; pass++) {
                         for (BoundingBox obstacle : obstacles) { slide(previous, point, obstacle); }
                         ground(previous, point, ground, probe);
                     }
+                    // Ground projection must not leave the cloth inside a low overhang or another prop.
+                    for (BoundingBox obstacle : obstacles) { slide(previous, point, obstacle); }
+                    if (point.z < ground.applyAsDouble(point) || inside(point, obstacles)) {
+                        point.set(previous);
+                    }
+                    contact |= !point.epsilonEquals(candidate, .00001f);
                 }
                 vertices[at] = point.x; vertices[at + 1] = point.y; vertices[at + 2] = point.z;
                 vertices[at + 6] = u; vertices[at + 7] = v;
             }
+        }
+        float ceiling = bounds(transform).max.z;
+        if (ground != NO_GROUND) { contact |= groundSurface(vertices, ground, obstacles, ceiling, probe, previous); }
+        if (contact) {
+            float rowLength = new Vector3(0, 0, HEIGHT / ROWS).rot(transform).len();
+            relax(vertices, segment, rowLength, ground, obstacles, ceiling);
         }
         // Return to mesh-local space only after gravity, wind and contact have been resolved.
         for (int at = 0; at < FACE_VERTICES * 8; at += 8) {
@@ -151,6 +173,11 @@ final class GpuFlag {
 
     /** Sweep each cloth segment, then slide its endpoint on the first box face (also catches thin props). */
     static void slide(Vector3 start, Vector3 end, BoundingBox box) {
+        slide(start, end, box, true);
+    }
+
+    private static void slide(Vector3 start, Vector3 end, BoundingBox box, boolean travel) {
+        if (!box.isValid()) { return; }
         if (box.contains(start)) { return; } // An authored attachment inside a solid cannot be moved.
         float enter = 0, leave = 1, face = 0;
         int axis = -1;
@@ -164,9 +191,137 @@ final class GpuFlag {
             leave = Math.min(leave, far);
             if (enter > leave) { return; }
         }
+        if (axis < 0) { return; }
+        float dx = end.x - start.x, dy = end.y - start.y, dz = end.z - start.z;
+        float length = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        float tx = axis == 0 ? 0 : dx, ty = axis == 1 ? 0 : dy, tz = axis == 2 ? 0 : dz;
+        float tangent = (float) Math.sqrt(tx * tx + ty * ty + tz * tz);
+        float remaining = travel ? tangent == 0 ? 0 : length * (1 - enter) / tangent : 1 - enter;
+        end.set(start.x + enter * dx + tx * remaining, start.y + enter * dy + ty * remaining,
+              start.z + enter * dz + tz * remaining);
         if (axis == 0) { end.x = face; }
         if (axis == 1) { end.y = face; }
         if (axis == 2) { end.z = face; }
+    }
+
+    /** A coarse box may enclose empty space around a roof. Use one attachment plane for the whole rigid seam. */
+    static BoundingBox attachmentBounds(BoundingBox box, Matrix4 transform) {
+        Vector3 root = new Vector3().mul(transform), top = new Vector3(0, 0, HEIGHT).mul(transform);
+        float mountingGap = new Vector3(WIDTH / COLUMNS, 0, 0).rot(transform).len();
+        float enter = 0, leave = 1;
+        for (int axis = 0; axis < 3; axis++) {
+            float start = component(root, axis), delta = component(top, axis) - start;
+            float low = component(box.min, axis) - mountingGap, high = component(box.max, axis) + mountingGap;
+            if (Math.abs(delta) < .000001f) { if (start < low || start > high) { return box; } continue; }
+            float a = (low - start) / delta, b = (high - start) / delta;
+            enter = Math.max(enter, Math.min(a, b)); leave = Math.min(leave, Math.max(a, b));
+            if (enter > leave) { return box; }
+        }
+        // Choose the face that needs the smallest correction to put every seam vertex outside the box.
+        int face = 0; float distance = Float.POSITIVE_INFINITY;
+        for (int axis = 0; axis < 3; axis++) {
+            float lo = Math.min(component(root, axis), component(top, axis));
+            float hi = Math.max(component(root, axis), component(top, axis));
+            float lower = hi - component(box.min, axis), upper = component(box.max, axis) - lo;
+            if (lower < distance) { distance = lower; face = axis * 2; }
+            if (upper < distance) { distance = upper; face = axis * 2 + 1; }
+        }
+        var adjusted = new BoundingBox(box);
+        int axis = face / 2;
+        float edge = face % 2 == 0 ? Math.max(component(box.min, axis), Math.max(component(root, axis), component(top, axis)) + .02f)
+              : Math.min(component(box.max, axis), Math.min(component(root, axis), component(top, axis)) - .02f);
+        Vector3 corner = face % 2 == 0 ? adjusted.min : adjusted.max;
+        if (axis == 0) { corner.x = edge; } else if (axis == 1) { corner.y = edge; } else { corner.z = edge; }
+        if (adjusted.min.x > adjusted.max.x || adjusted.min.y > adjusted.max.y || adjusted.min.z > adjusted.max.z) {
+            return new BoundingBox().inf();
+        }
+        float wallSpan = axis == 0 ? box.getHeight() : box.getWidth();
+        float flyLength = new Vector3(WIDTH, 0, 0).rot(transform).len();
+        if (axis != 2 && wallSpan >= flyLength * .25f) {
+            // A mounting wall is one barrier for the connected sheet. Letting individual rows wrap onto
+            // the coarse box's roof/back face creates incompatible paths and long triangles between them.
+            BoundingBox reach = bounds(transform);
+            if (axis != 0) { adjusted.min.x = Math.min(adjusted.min.x, reach.min.x); adjusted.max.x = Math.max(adjusted.max.x, reach.max.x); }
+            if (axis != 1) { adjusted.min.y = Math.min(adjusted.min.y, reach.min.y); adjusted.max.y = Math.max(adjusted.max.y, reach.max.y); }
+            adjusted.min.z = Math.min(adjusted.min.z, reach.min.z); adjusted.max.z = Math.max(adjusted.max.z, reach.max.z);
+        }
+        return adjusted.set(adjusted.min, adjusted.max);
+    }
+
+    private static boolean inside(Vector3 point, List<BoundingBox> obstacles) {
+        for (BoundingBox obstacle : obstacles) { if (obstacle.contains(point)) { return true; } }
+        return false;
+    }
+
+    /** Contacts must not pull neighboring rows apart into long, pointed triangles. Compress and fold as a connected sheet. */
+    private static void relax(float[] vertices, float columnLength, float rowLength, ToDoubleFunction<Vector3> ground,
+          List<BoundingBox> obstacles, float ceiling) {
+        float[] before = new float[FACE_VERTICES * 8];
+        Vector3 start = new Vector3(), point = new Vector3();
+        float diagonal = (float) Math.sqrt(columnLength * columnLength + rowLength * rowLength);
+        for (int pass = 0; pass < 32; pass++) {
+            System.arraycopy(vertices, 0, before, 0, before.length);
+            for (int row = 0; row <= ROWS; row++) {
+                for (int column = 0; column <= COLUMNS; column++) {
+                    int a = row * (COLUMNS + 1) + column;
+                    if (column < COLUMNS) { limit(vertices, a, a + 1, columnLength); }
+                    if (row < ROWS) { limit(vertices, a, a + COLUMNS + 1, rowLength); }
+                    if (row < ROWS && column < COLUMNS) {
+                        limit(vertices, a, a + COLUMNS + 2, diagonal);
+                        limit(vertices, a + 1, a + COLUMNS + 1, diagonal);
+                    }
+                }
+            }
+            for (int vertex = 0; vertex < FACE_VERTICES; vertex++) {
+                if (vertex % (COLUMNS + 1) == 0) { continue; }
+                int at = vertex * 8;
+                start.set(before[at], before[at + 1], before[at + 2]);
+                point.set(vertices[at], vertices[at + 1], vertices[at + 2]);
+                point.z = Math.min(ceiling, Math.max(point.z, (float) ground.applyAsDouble(point)));
+                for (BoundingBox obstacle : obstacles) { slide(start, point, obstacle, false); }
+                if (inside(point, obstacles) || point.z < ground.applyAsDouble(point)) { point.set(start); }
+                vertices[at] = point.x; vertices[at + 1] = point.y; vertices[at + 2] = point.z;
+            }
+        }
+        // Finish from the fixed edge outward. Symmetric relaxation alone can leave strain concentrated
+        // in the first column, where a wall pins the sheet's normal motion.
+        for (int column = 1; column <= COLUMNS; column++) {
+            for (int row = 0; row <= ROWS; row++) {
+                int vertex = row * (COLUMNS + 1) + column, at = vertex * 8;
+                start.set(vertices[at], vertices[at + 1], vertices[at + 2]);
+                for (int pass = 0; pass < 12; pass++) {
+                    cap(vertices, vertex, vertex - 1, columnLength * 1.05f);
+                    if (row > 0) { cap(vertices, vertex, vertex - COLUMNS - 1, rowLength * 1.05f); }
+                }
+                point.set(vertices[at], vertices[at + 1], vertices[at + 2]);
+                if (inside(point, obstacles) || point.z < ground.applyAsDouble(point)) {
+                    vertices[at] = start.x; vertices[at + 1] = start.y; vertices[at + 2] = start.z;
+                }
+            }
+        }
+        if (ground != NO_GROUND) { groundSurface(vertices, ground, obstacles, ceiling, point, start); }
+    }
+
+    private static void cap(float[] vertices, int vertex, int anchor, float length) {
+        int a = anchor * 8, b = vertex * 8;
+        float x = vertices[b] - vertices[a], y = vertices[b + 1] - vertices[a + 1], z = vertices[b + 2] - vertices[a + 2];
+        float distance = (float) Math.sqrt(x * x + y * y + z * z);
+        if (distance <= length) { return; }
+        vertices[b] = vertices[a] + x * length / distance;
+        vertices[b + 1] = vertices[a + 1] + y * length / distance;
+        vertices[b + 2] = vertices[a + 2] + z * length / distance;
+    }
+
+    private static void limit(float[] vertices, int a, int b, float length) {
+        boolean pinnedA = a % (COLUMNS + 1) == 0, pinnedB = b % (COLUMNS + 1) == 0;
+        if (pinnedA && pinnedB) { return; }
+        a *= 8; b *= 8;
+        float x = vertices[b] - vertices[a], y = vertices[b + 1] - vertices[a + 1], z = vertices[b + 2] - vertices[a + 2];
+        float distance = (float) Math.sqrt(x * x + y * y + z * z);
+        if (distance <= length * 1.05f) { return; }
+        float correction = (distance - length * 1.05f) / distance / (pinnedA || pinnedB ? 1 : 2);
+        if (!pinnedA) { vertices[a] += x * correction; vertices[a + 1] += y * correction; vertices[a + 2] += z * correction; }
+        if (!pinnedB) { vertices[b] -= x * correction; vertices[b + 1] -= y * correction; vertices[b + 2] -= z * correction; }
     }
 
     private static float component(Vector3 value, int axis) { return axis == 0 ? value.x : axis == 1 ? value.y : value.z; }
@@ -174,24 +329,72 @@ final class GpuFlag {
     /** Lift the segment clear of the installed ground; stop at steep steps rather than stretching onto their tops. */
     static void ground(Vector3 start, Vector3 end, ToDoubleFunction<Vector3> height, Vector3 probe) {
         float length2 = start.dst2(end), raised = end.z;
+        float clearance = Math.min(.05f * BoardGeometry.hexScale(), (float) Math.sqrt(length2) * .1f);
         float dx = end.x - start.x, dy = end.y - start.y;
         int samples = Math.max(4, Math.min(256, (int) Math.ceil(Math.sqrt(dx * dx + dy * dy) / (.5f * BoardGeometry.hexScale()))));
         for (int sample = 1; sample <= samples; sample++) {
             float t = (float) sample / samples;
             probe.set(start).lerp(end, t);
             float floor = (float) height.applyAsDouble(probe);
-            if (Float.isFinite(floor)) { raised = Math.max(raised, start.z + (floor + .05f - start.z) / t); }
+            // Ramp clearance from the pinned/contact end, rather than demanding a full gap infinitesimally after it.
+            if (Float.isFinite(floor)) { raised = Math.max(raised, start.z + (floor - start.z) / t + clearance); }
         }
         if (raised <= end.z) { return; }
         end.z = raised;
         if (start.dst2(end) > length2 + .0001f) { end.set(start); }
     }
 
+    /** The ground can also intersect between rows. Check cross-row edges, diagonals and triangle interiors. */
+    private static boolean groundSurface(float[] vertices, ToDoubleFunction<Vector3> ground,
+          List<BoundingBox> obstacles, float ceiling, Vector3 probe, Vector3 start) {
+        boolean changed = false;
+        for (int row = 0; row < ROWS; row++) {
+            for (int column = 0; column < COLUMNS; column++) {
+                int a = row * (COLUMNS + 1) + column, b = a + COLUMNS + 1;
+                changed |= groundTriangle(vertices, a, a + 1, b, ground, obstacles, ceiling, probe, start);
+                changed |= groundTriangle(vertices, a + 1, b + 1, b, ground, obstacles, ceiling, probe, start);
+            }
+        }
+        return changed;
+    }
+
+    private static boolean groundTriangle(float[] vertices, int a, int b, int c, ToDoubleFunction<Vector3> ground,
+          List<BoundingBox> obstacles, float ceiling, Vector3 probe, Vector3 start) {
+        boolean changed = false;
+        for (int sample = 0; sample < 4; sample++) {
+            float wa = sample == 3 ? 1f / 3 : sample == 0 ? 0 : .5f;
+            float wb = sample == 3 ? 1f / 3 : sample == 1 ? 0 : .5f;
+            float wc = sample == 3 ? 1f / 3 : sample == 2 ? 0 : .5f;
+            probe.set(vertices[a * 8] * wa + vertices[b * 8] * wb + vertices[c * 8] * wc,
+                  vertices[a * 8 + 1] * wa + vertices[b * 8 + 1] * wb + vertices[c * 8 + 1] * wc,
+                  vertices[a * 8 + 2] * wa + vertices[b * 8 + 2] * wb + vertices[c * 8 + 2] * wc);
+            float movable = (a % (COLUMNS + 1) == 0 ? 0 : wa) + (b % (COLUMNS + 1) == 0 ? 0 : wb)
+                  + (c % (COLUMNS + 1) == 0 ? 0 : wc);
+            if (movable == 0) { continue; }
+            float lift = ((float) ground.applyAsDouble(probe) - probe.z) / movable;
+            if (!(lift > 0)) { continue; }
+            for (int vertex : new int[] { a, b, c }) {
+                if (vertex % (COLUMNS + 1) == 0) { continue; }
+                int at = vertex * 8;
+                start.set(vertices[at], vertices[at + 1], vertices[at + 2]);
+                probe.set(start); probe.z = Math.min(ceiling, start.z + lift + .001f * BoardGeometry.hexScale());
+                for (BoundingBox obstacle : obstacles) { slide(start, probe, obstacle); }
+                if (inside(probe, obstacles)) { probe.set(start); }
+                // A ceiling can limit draping. Never lower an already valid ground contact into the terrain.
+                vertices[at + 2] = Math.max(start.z, probe.z);
+                changed |= vertices[at + 2] > start.z;
+            }
+        }
+        return changed;
+    }
+
     void animate(Matrix4 transform, float phase, Vector3 wind, boolean vacuum, List<BoundingBox> obstacles,
           ToDoubleFunction<Vector3> ground) {
         deform(vertices, transform, phase, wind, vacuum, obstacles, ground);
+        if (java.util.Arrays.equals(vertices, previousVertices)) { return; }
         model.meshes.first().setVertices(vertices);
         model.meshParts.forEach(part -> part.update());
+        System.arraycopy(vertices, 0, previousVertices, 0, vertices.length);
         revision++;
     }
 

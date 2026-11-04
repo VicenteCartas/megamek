@@ -28,8 +28,10 @@ import org.junit.jupiter.api.Test;
 class GpuFlagSmokeTest {
     @Test void flagsRenderAndAnimateInTheSharedBoardScene() throws Exception {
         Coords at = new Coords(1, 1);
+        var session = new AtomicReference<BoardEditorSession>();
         FutureTask<GpuMapSource> setup = new FutureTask<>(() -> {
             var editor = new BoardEditorSession();
+            session.set(editor);
             Board board = Board.createEmptyBoard(3, 3);
             for (int x = 0; x < 3; x++) {
                 for (int y = 0; y < 3; y++) { board.setHex(x, y, new Hex(0, "", "lunar")); }
@@ -97,9 +99,18 @@ class GpuFlagSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "flag-back.png"));
                             source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.SAMPLE,
                                   "", ""), source.takeFrame().boardGeneration());
-                        } else {
+                        } else if (step == 3) {
                             assertEquals("horizontal-3", source.editorState().activeBrush().object().flag().pattern());
                             GpuBoardTestUi.capture(new File(output, "flag-brush.png"));
+                            SwingUtilities.invokeAndWait(() -> {
+                                session.get().game().getPlanetaryConditions().setWind(megamek.common.planetaryConditions.Wind.CALM);
+                                session.get().command(new BoardEditorSession.Command(BoardEditorSession.Action.SELECT_OBJECT, "", "flag"), null);
+                                session.get().command(new BoardEditorSession.Command(BoardEditorSession.Action.OBJECT_VALUE, "rotationY", "0"), null);
+                                source.refresh();
+                            });
+                        } else {
+                            checkCalmPicking(terrain, source.takeFrame().scene());
+                            GpuBoardTestUi.capture(new File(output, "flag-calm.png"));
                             Gdx.app.exit(); return;
                         }
                         step++; after = frames() + 12;
@@ -125,8 +136,10 @@ class GpuFlagSmokeTest {
                 assertEquals(before[at + 2], after[at + 2]);
             }
             flag.animate(new Matrix4(), 0, new Vector3(0, 1, 1), true, List.of(), GpuFlag.NO_GROUND); mesh.getVertices(before);
+            int revision = flag.revision;
             flag.animate(new Matrix4(), 1, new Vector3(0, 1, 1), true, List.of(), GpuFlag.NO_GROUND); mesh.getVertices(after);
             assertArrayEquals(before, after, "Vacuum has no wind response");
+            assertEquals(revision, flag.revision, "Unchanged cloth must not invalidate cached shadows");
         } finally { flag.model.dispose(); paint.dispose(); }
     }
 
@@ -187,7 +200,42 @@ class GpuFlagSmokeTest {
                 Vector3 point = new Vector3(vertices[at], vertices[at + 1], vertices[at + 2]).mul(flag.transform);
                 assertTrue(point.y > root.y - 5, "The scene must feed nearby solid bounds into the rendered cloth");
             }
+            // A building whose coarse box partly encloses the authored seam used to split the flag into a spike.
+            wall.transform.setToTranslation(root.x, root.y - 9.8f, root.z + 4).scale(.15f, 400, .06f);
+            terrain.animate(1, List.of(wall));
+            flag.model.meshes.first().getVertices(vertices);
+            float maximum = 0;
+            for (int row = 0; row <= GpuFlag.ROWS; row++) {
+                for (int column = 1; column <= GpuFlag.COLUMNS; column++) {
+                    int index = row * (GpuFlag.COLUMNS + 1) + column;
+                    Vector3 current = clothPoint(vertices, index, flag.transform);
+                    maximum = Math.max(maximum, current.dst(clothPoint(vertices, index - 1, flag.transform)) / (3 * GpuFlag.WIDTH / GpuFlag.COLUMNS));
+                    if (row > 0) { maximum = Math.max(maximum, current.dst(clothPoint(vertices, index - GpuFlag.COLUMNS - 1, flag.transform)) / (3 * GpuFlag.HEIGHT / GpuFlag.ROWS)); }
+                }
+            }
+            assertTrue(maximum < 1.6f, "The rendered cloth must stay connected at a building: " + maximum);
         } finally { wind.set(original); wallModel.dispose(); }
+    }
+
+    private static Vector3 clothPoint(float[] vertices, int index, Matrix4 transform) {
+        return new Vector3(vertices[index * 8], vertices[index * 8 + 1], vertices[index * 8 + 2]).mul(transform);
+    }
+
+    private static void checkCalmPicking(GpuTerrain terrain, BoardScene scene) throws Exception {
+        var field = GpuTerrain.class.getDeclaredField("flagRevisions"); field.setAccessible(true);
+        var flags = (java.util.Map<?, ?>) field.get(terrain);
+        var flag = (com.badlogic.gdx.graphics.g3d.ModelInstance) flags.keySet().iterator().next();
+        float[] vertices = new float[flag.model.meshes.first().getNumVertices() * 8];
+        flag.model.meshes.first().getVertices(vertices);
+        int index = 8 * (GpuFlag.COLUMNS + 1) + 16;
+        Vector3 a = clothPoint(vertices, index, flag.transform), b = clothPoint(vertices, index + 1, flag.transform);
+        Vector3 c = clothPoint(vertices, index + GpuFlag.COLUMNS + 1, flag.transform);
+        Vector3 center = new Vector3(a).add(b).add(c).scl(1f / 3);
+        Vector3 normal = b.sub(a).crs(c.sub(a)).nor();
+        assertFalse(normal.isZero(), "The calm flag must have a real surface to select");
+        var hit = terrain.decorationHit(scene, new com.badlogic.gdx.math.collision.Ray(new Vector3(center).mulAdd(normal, 3), normal.scl(-1)));
+        assertNotNull(hit, "The displayed calm cloth must remain pickable");
+        assertEquals("flag", hit.id());
     }
 
     private static void checkTerrainContact(GpuTerrain terrain) throws Exception {

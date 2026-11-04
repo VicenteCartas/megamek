@@ -2755,11 +2755,16 @@ final class BoardSurface {
 
     /** Shared triangle sampler for ground support and embedded rock placement. */
     static float sampleHeight(List<Face> geometry, float x, float y, float fallback) {
+        return sampleHeight(geometry, x, y, fallback, false);
+    }
+
+    /** Solid contact may include ice; placement's existing ground-only queries retain their original behavior. */
+    static float sampleHeight(List<Face> geometry, float x, float y, float fallback, boolean includeIce) {
         float height = Float.NEGATIVE_INFINITY, nearby = Float.NEGATIVE_INFINITY;
         // One query shares one settings snapshot; avoid a thread-local lookup for every rejected triangle.
         float tolerance = .001f * BoardGeometry.hexScale();
         for (Face face : geometry) {
-            if (face.finish() != Finish.ICE && face.finish() != Finish.DRESSING) {
+            if ((includeIce || face.finish() != Finish.ICE) && face.finish() != Finish.DRESSING) {
                 float exact = face.height(x, y, 0);
                 if (Float.isFinite(exact)) { height = Math.max(height, exact); }
                 else { nearby = Math.max(nearby, face.height(x, y, tolerance)); }

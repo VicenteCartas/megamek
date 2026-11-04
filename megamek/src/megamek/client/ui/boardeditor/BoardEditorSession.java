@@ -712,7 +712,7 @@ public final class BoardEditorSession {
                 case CHOOSE_BRUSH -> chooseBrush(command.target(), command.value());
                 case BRUSH_VALUE -> configureBrush(command.target(), command.value());
                 case SAMPLE -> sampleBrush();
-                case CLEAR_SELECTION -> { selection.clear(); selectedObject = ""; }
+                case CLEAR_SELECTION -> { selection.clear(); selected = null; selectedObject = ""; }
                 case DELETE_SELECTION -> deleteSelection();
                 case ADD_COMPONENT -> edit(hex -> addComponent(hex, blueprint.component(command.value())));
                 case REMOVE_COMPONENT -> {

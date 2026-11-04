@@ -112,6 +112,8 @@ final class GeneratedKit {
             var source = (RigidGlb.Data) modelled.get(lod);
             generated.buildingPaint.addAll(source.buildingPaint);
             generated.paintMasks.addAll(source.paintMasks);
+            generated.nightEmission.addAll(source.nightEmission);
+            generated.emissionOff.addAll(source.emissionOff);
             result.add(generated);
         }
         return result;

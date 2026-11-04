@@ -37,7 +37,7 @@ class GpuFlagTest {
                             Vector3 fly = point(mesh, row, GpuFlag.COLUMNS, transform).sub(root);
                             assertTrue(fly.z < 0, "Gravity always points down");
                             if (strength == 1) { assertTrue(fly.y < -30, "North-to-south wind must stay south after any transform"); }
-                            else { assertTrue(fly.z < -34, "Calm cloth hangs by almost its full length"); }
+                            else { assertTrue(fly.z < -28, "Calm cloth still hangs down while retaining a usable spread"); }
                             for (int column = 1; column <= GpuFlag.COLUMNS; column++) {
                                 Vector3 current = point(mesh, row, column, transform);
                                 assertTrue(reach.contains(current));
@@ -54,7 +54,7 @@ class GpuFlagTest {
     @Test void calmUsesASmallBreezeWhileVacuumHasNoFlutter() {
         Matrix4 transform = new Matrix4();
         float[] calm = cloth(transform, 0, new Vector3(0, 1, 0), false, List.of());
-        assertArrayEquals(calm, cloth(transform, 0, new Vector3(0, 1, .1f), false, List.of()));
+        assertArrayEquals(calm, cloth(transform, 0, new Vector3(0, 1, .15f), false, List.of()));
         assertFalse(java.util.Arrays.equals(calm, cloth(transform, 1, new Vector3(0, 1, 0), false, List.of())));
         assertArrayEquals(cloth(transform, 0, new Vector3(0, 1, 1), true, List.of()),
               cloth(transform, 3, new Vector3(0, -1, 1), true, List.of()));
@@ -75,7 +75,8 @@ class GpuFlagTest {
         GpuFlag.slide(new Vector3(-10, 0, 0), endpoint,
               new BoundingBox(new Vector3(0, -5, -5), new Vector3(.01f, 5, 5)));
         assertTrue(endpoint.x < 0, "Sweeps catch an obstacle even when both endpoints are outside it");
-        assertEquals(2, endpoint.z);
+        assertTrue(endpoint.z >= 2, "Blocked motion slides along the face rather than compressing the cloth row");
+        assertTrue(endpoint.dst(new Vector3(-10, 0, 0)) <= new Vector3(20, 2, 2).len());
     }
 
     @Test void clothRestsAboveFlatAndSlopedGroundInCalmAndWindAfterTransforming() {
@@ -127,5 +128,96 @@ class GpuFlagTest {
         end.set(4, 0, -3);
         GpuFlag.ground(start, end, GpuFlag.NO_GROUND, new Vector3());
         assertEquals(new Vector3(4, 0, -3), end, "There is no invented ground outside the board");
+    }
+
+    @Test void calmClothKeepsWidthFoldsAndAPickableSurface() {
+        for (float mirror : new float[] { -1, 1 }) {
+            for (float phase : new float[] { 0, 1, 3 }) {
+                Matrix4 transform = new Matrix4().scale(mirror, 1, 1);
+                float[] vertices = cloth(transform, phase, new Vector3(1, 0, 0), false, List.of());
+                var bounds = new BoundingBox().inf();
+                float area = 0;
+                for (int row = 0; row <= GpuFlag.ROWS; row++) {
+                    for (int column = 0; column <= GpuFlag.COLUMNS; column++) { bounds.ext(point(vertices, row, column, transform)); }
+                }
+                short[] indices = GpuFlag.data().meshes.first().parts[0].indices;
+                for (int i = 0; i < indices.length / 2; i += 3) {
+                    Vector3 a = vertex(vertices, indices[i], transform), b = vertex(vertices, indices[i + 1], transform);
+                    Vector3 c = vertex(vertices, indices[i + 2], transform);
+                    area += b.sub(a).crs(c.sub(a)).len() / 2;
+                }
+                assertTrue(bounds.getWidth() > GpuFlag.WIDTH * .35f, "A calm flag must retain usable downwind width");
+                assertTrue(bounds.getHeight() > GpuFlag.WIDTH * .025f, "Static folds must give the surface depth");
+                assertTrue(area > GpuFlag.WIDTH * GpuFlag.HEIGHT * .35f, "The sheet must not collapse onto a line");
+            }
+        }
+    }
+
+    private static Vector3 vertex(float[] vertices, int index, Matrix4 transform) {
+        return new Vector3(vertices[index * 8], vertices[index * 8 + 1], vertices[index * 8 + 2]).mul(transform);
+    }
+
+    @Test void contactAtGroundLevelDoesNotCollapseSmallFlagsOrPushThemIntoOverhangs() {
+        Vector3 end = new Vector3(.001f, 0, -.01f);
+        GpuFlag.ground(new Vector3(), end, p -> 0, new Vector3());
+        assertTrue(end.z > 0 && end.x > 0, "Clearance must scale down and start from the attachment");
+        var roof = new BoundingBox(new Vector3(-10, -10, .03f), new Vector3(10, 10, 1));
+        Matrix4 transform = new Matrix4().translate(0, 0, .01f).rotate(Vector3.Y, 90).scale(.01f, .01f, .01f);
+        float[] vertices = GpuFlag.data().meshes.first().vertices;
+        GpuFlag.deform(vertices, transform, 0, new Vector3(1, 0, 0), false, List.of(roof), p -> 0);
+        for (int i = 0; i < vertices.length / 8; i++) {
+            Vector3 point = vertex(vertices, i, transform);
+            assertTrue(point.z >= -.00001f);
+            assertFalse(roof.contains(point), "Terrain correction must not put cloth inside an overhang");
+        }
+    }
+
+    @Test void terrainBetweenClothRowsCannotPokeThroughTheSheet() {
+        Matrix4 transform = new Matrix4().translate(0, 0, 2).rotate(Vector3.Y, 90);
+        java.util.function.ToDoubleFunction<Vector3> ground = p -> Math.max(0, .6 - 2 * Math.abs(p.x - .375));
+        float[] vertices = GpuFlag.data().meshes.first().vertices;
+        GpuFlag.deform(vertices, transform, 0, new Vector3(0, -1, 0), false, List.of(), ground);
+        for (int column = 1; column <= GpuFlag.COLUMNS; column++) {
+            Vector3 midpoint = point(vertices, GpuFlag.ROWS - 1, column, transform)
+                  .lerp(point(vertices, GpuFlag.ROWS, column, transform), .5f);
+            assertTrue(midpoint.z >= ground.applyAsDouble(midpoint) - .002, "Cross-row terrain contact was missed");
+        }
+    }
+
+    @Test void buildingContactPreservesTheConnectedSheetAndDoesNotSplitTheAttachment() {
+        for (float mirror : new float[] { -1, 1 }) {
+            Matrix4 transform = new Matrix4().translate(0, 0, 5).scale(mirror, 1, 1);
+            var building = new BoundingBox(new Vector3(-5, -10, 0), new Vector3(5, .2f, 12));
+            BoundingBox collider = GpuFlag.attachmentBounds(building, transform);
+            float[] vertices = cloth(transform, 1, new Vector3(0, -1, .65f), false, List.of(building));
+            float maximum = 0;
+            String worst = "";
+            for (int row = 0; row <= GpuFlag.ROWS; row++) {
+                assertTrue(point(vertices, row, 0, transform).epsilonEquals(
+                      new Vector3(0, 0, 5 + (1 - (float) row / GpuFlag.ROWS) * GpuFlag.HEIGHT), .0001f));
+                for (int column = 1; column <= GpuFlag.COLUMNS; column++) {
+                    Vector3 current = point(vertices, row, column, transform);
+                    assertFalse(collider.contains(current));
+                    maximum = Math.max(maximum, current.dst(point(vertices, row, column - 1, transform)) / (GpuFlag.WIDTH / GpuFlag.COLUMNS));
+                    if (row > 0) { maximum = Math.max(maximum, current.dst(point(vertices, row - 1, column, transform)) / (GpuFlag.HEIGHT / GpuFlag.ROWS)); }
+                    if (maximum > 1.5f && worst.isEmpty()) { worst = " at row " + row + ", column " + column + ": " + current; }
+                }
+            }
+            assertTrue(maximum < 1.5f, "Collision must not create stretched spikes between rows: " + maximum + worst);
+        }
+    }
+
+    @Test void solidGroundContactIncludesIceWithoutChangingPlacementHeightQueries() {
+        var bed = new BoardSurface.Face(new Vector3(0, 0, -4), new Vector3(10, 0, -4), new Vector3(0, 10, -4), BoardSurface.Finish.BED);
+        var ice = new BoardSurface.Face(new Vector3(0, 0, 0), new Vector3(10, 0, 0), new Vector3(0, 10, 0), BoardSurface.Finish.ICE);
+        assertEquals(-4, BoardSurface.sampleHeight(List.of(bed, ice), 1, 1, -4));
+        assertEquals(0, BoardSurface.sampleHeight(List.of(bed, ice), 1, 1, -4, true));
+    }
+
+    @Test void aNearbySteelStickMustNotBecomeAnInfiniteWall() {
+        var stick = new BoundingBox(new Vector3(-.35f, -.35f, 0), new Vector3(.35f, .35f, 24));
+        var contact = GpuFlag.attachmentBounds(stick, new Matrix4().translate(.5f, 0, 4));
+        assertEquals(stick.min, contact.min);
+        assertEquals(stick.max, contact.max);
     }
 }

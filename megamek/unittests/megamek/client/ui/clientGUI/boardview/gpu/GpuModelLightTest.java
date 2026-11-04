@@ -18,6 +18,21 @@ import org.mockito.ArgumentCaptor;
 
 class GpuModelLightTest {
     @Test
+    void explicitOffKeepsGlassDiffuseAndOverridesDefaultSignalLighting() {
+        var off = new GpuModelLight(0, 0, 1);
+        var material = new Material("Amber", off);
+        GpuTrafficSignal.mark("scenery/road/traffic-signal", material);
+        assertEquals(off, material.get(GpuModelLight.class, GpuModelLight.TYPE));
+        var shader = mock(DefaultShader.class);
+        GpuModelLight.register(shader, () -> .25);
+        var setter = ArgumentCaptor.forClass(BaseShader.Setter.class);
+        verify(shader).register(eq("u_modelLight"), setter.capture());
+        var target = mock(BaseShader.class);
+        setter.getValue().set(target, 4, new Renderable(), material.copy());
+        verify(target).set(4, 1f, 0f, 1f);
+    }
+
+    @Test
     void nightWindowsFollowAtmosphereAndFrozenViewsWithoutRebuildingMaterials() {
         var shader = mock(DefaultShader.class);
         GpuModelLight.register(shader, () -> 0);

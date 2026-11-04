@@ -17,6 +17,35 @@ import org.junit.jupiter.api.Test;
 
 /** Fixture positions must follow the same transformed, clipped ownership as the visible stadium. */
 class GpuAuthoredNightLightsTest {
+    @Test void generatedKitKeepsSurfaceOverridesThroughAssembly() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var root = new java.io.File(megamek.common.Configuration.dataDir(), "models");
+        var file = new java.io.File(root, "buildings/lunar_habitat/lunar_habitat.json");
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var spec = json.readTree(file).get(0);
+        var pieces = RigidGlb.loadLods(new com.badlogic.gdx.files.FileHandle(
+              new java.io.File(file.getParentFile(), spec.get("pieces").asText())), root.toPath());
+        for (var level : pieces) {
+            var data = (RigidGlb.Data) level;
+            // Model a kit piece with both a night light and an explicit per-surface override.
+            // The habitat's windows are generated from its atlas, rather than a piece in this source GLB.
+            String surface = data.materials.first().id;
+            data.nightEmission.add(surface);
+            data.emissionOff.add(surface);
+        }
+        var generated = HabitatKit.lods(json.treeToValue(spec, HabitatKit.Spec.class), pieces, true, "review");
+        for (int lod = 0; lod < generated.size(); lod++) {
+            var source = (RigidGlb.Data) pieces.get(lod);
+            assertEquals(source.emissionOff, generated.get(lod).emissionOff);
+            var expectedNight = new java.util.HashSet<>(source.nightEmission);
+            expectedNight.add("structures/lunar/habitat-wall");
+            assertEquals(expectedNight, generated.get(lod).nightEmission);
+            for (String id : source.emissionOff) {
+                assertTrue(java.util.Arrays.stream(generated.get(lod).materials.toArray()).anyMatch(m -> m.id.equals(id)));
+            }
+        }
+    }
+
     @Test void sharedWindowMaterialsControlGeneratedKitsWithoutLightingTheirWalls() {
         com.badlogic.gdx.utils.GdxNativesLoader.load();
         var data = new RigidGlb.Data();

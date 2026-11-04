@@ -268,11 +268,16 @@ the same cloth artwork from behind, including the naturally mirrored emblem.
 
 The 3D editor and game deform the same subdivided cloth mesh, using the shared weather
 wind direction and animation clock. Gravity and wind act in world space, independent of
-rotation, mirroring and scale. Calm weather retains a 0.1 breeze; vacuum suppresses flutter.
+rotation, mirroring and scale. Calm weather retains a 0.15 breeze; vacuum suppresses flutter.
+Minimum downwind spread and shallow folds keep calm cloth visible and pickable instead of
+collapsing along the attachment. A horizontal attachment still lets a banner hang down.
 The fixed local left edge stays attached while the free cloth hangs down and lifts downwind.
 Swept cloth segments slide against nearby buildings, props and units using coarse world
-bounding boxes. Ground contact samples the installed terrain support along cloth segments,
-including slopes and height transitions, with a small clearance; no floor is invented outside
+bounding boxes. Contact preserves the cloth's connected rows and columns instead of stretching
+them into spikes. When coarse bounds enclose the rigid attachment, their nearest face is
+trimmed to a common attachment plane for that flag. Ground contact samples the installed
+terrain support along cloth segments and across triangle edges/interiors, including ice,
+slopes and height transitions, with a scale-aware clearance; no floor is invented outside
 the board. This is a procedural drape, not a full cloth solver: no self-collision or detailed
 concave contact; an attachment inside a solid or below ground remains
 where authored. Identical artwork shares one texture while each flag keeps its own mesh.

@@ -33,6 +33,30 @@ class RigidGlbTest {
     private final ObjectMapper json = new ObjectMapper();
 
     @Test
+    void emissionOffPreservesTheAuthoredLightAndSurvivesLodCopies() throws Exception {
+        var document = levels();
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
+        var extras = material.putObject("extras").put("mmEmission", "off").put("mmNightEmission", true);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertEquals(java.util.Set.of("paint"), data.emissionOff);
+            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            assertEquals(.4f, data.materials.first().emissive.r, 1e-6);
+            var sliced = new RigidGlb.Data(); sliced.inheritMaterials(data);
+            assertEquals(data.emissionOff, sliced.emissionOff);
+        }
+        extras.remove("mmEmission");
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            assertTrue(((RigidGlb.Data) level).emissionOff.isEmpty());
+            assertEquals(.4f, level.materials.first().emissive.r, 1e-6);
+        }
+        extras.put("mmEmission", "invalid");
+        var invalid = file(document, false);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(invalid));
+    }
+
+    @Test
     void nightEmissionIsOptInAndSurvivesLodAndGeometryCopies() throws Exception {
         var document = levels();
         var material = (ObjectNode) document.get("materials").get(0);

@@ -2798,7 +2798,12 @@ class GpuBattleView extends ApplicationAdapter {
                 return;
             }
             var hit = editorHit(ray, state);
-            if (hit == null) { return; }
+            if (hit == null) {
+                if (!drag && gestureModifiers == 0) {
+                    source.editorCommand(new Command(Action.CLEAR_SELECTION), gestureBoardGeneration);
+                }
+                return;
+            }
             // A route drawn by hand: the hover, which shows its preview, follows the drag (mouseMoved leaves it alone).
             if (drawingRoute()) { hovered = hit.coords(); hoverZ = Float.NaN; source.setHover(hovered); }
             Vector3 point = ray.getEndPoint(new Vector3(), (float) Math.sqrt(hit.distance()));

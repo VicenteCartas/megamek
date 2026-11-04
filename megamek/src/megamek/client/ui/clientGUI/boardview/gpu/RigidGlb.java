@@ -141,6 +141,8 @@ final class RigidGlb {
         final Set<String> buildingPaint = new HashSet<>();
         /** Authored emission that fades out in daylight (material extras {@code mmNightEmission}). */
         final Set<String> nightEmission = new HashSet<>();
+        /** Per-surface opt-out of both model emission and the shared material's emission. */
+        final Set<String> emissionOff = new HashSet<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
         final Set<String> labels = new HashSet<>();
         /**
@@ -166,6 +168,7 @@ final class RigidGlb {
             paintMasks.addAll(source.paintMasks);
             buildingPaint.addAll(source.buildingPaint);
             nightEmission.addAll(source.nightEmission);
+            emissionOff.addAll(source.emissionOff);
             labels.addAll(source.labels);
             boardUVs.putAll(source.boardUVs);
             blends.putAll(source.blends);
@@ -755,6 +758,10 @@ final class RigidGlb {
                 target.id = changes.containsKey("name") ? (String) changes.get("name") : material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
                 if (material.getExtras() instanceof Map<?, ?> extras) {
+                    Object emissionMode = extras.get("mmEmission");
+                    require(emissionMode == null || "inherit".equals(emissionMode) || "off".equals(emissionMode),
+                          "mmEmission must be inherit or off");
+                    if ("off".equals(emissionMode)) { result.emissionOff.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmBuildingPaint"))) { result.buildingPaint.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmNightEmission"))) { result.nightEmission.add(target.id); }

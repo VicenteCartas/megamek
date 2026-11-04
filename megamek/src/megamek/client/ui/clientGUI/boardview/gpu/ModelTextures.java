@@ -118,7 +118,9 @@ final class ModelTextures {
                 if (glb.buildingPaint.contains(material.id)) {
                     material.set(new GpuBuildingPaint(com.badlogic.gdx.graphics.Color.WHITE));
                 }
-                if (glb.nightEmission.contains(material.id)) {
+                if (glb.emissionOff.contains(material.id)) {
+                    material.set(new GpuModelLight(0, 0, 1));
+                } else if (glb.nightEmission.contains(material.id)) {
                     material.set(new GpuModelLight(1, 0, 1, true));
                 }
             });

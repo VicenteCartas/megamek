@@ -16,6 +16,8 @@ The editor's Menu also has the old editor's file and help commands (parity batch
 
 ## Editing
 
+A plain left-click on the sky or anywhere outside the map clears the current selection and hex details.
+
 Fuel tanks have one card under **Industry**. Their weights may differ across connected hexes, and their models have no
 building interiors. The former Buildings → Tank farm card and four obsolete Heavy Industrial A–D cards are removed
 from the palette; the obsolete industrial designs also leave the building design picker, while saved maps retain them.
