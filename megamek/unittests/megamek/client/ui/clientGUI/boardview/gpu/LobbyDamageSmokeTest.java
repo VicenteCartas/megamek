@@ -22,6 +22,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Crew;
@@ -135,6 +136,48 @@ class LobbyDamageSmokeTest {
             click(ui, box);
             assertEquals(1, hits.value());
 
+            String binAt = atlas.getLocationAbbr(atlas.getAmmo().get(0).getLocation());
+            clickAt(ui, doll, spot(doll, binAt));
+            List<UnitDamageForm.Value> binValues = view.chosen().values();
+            int binRow = -1;
+            for (int index = 0; index < binValues.size(); index++) {
+                if (binValues.get(index).hits() != null) {
+                    binRow = index;
+                    break;
+                }
+            }
+            assertTrue(binRow >= 0, binAt + " has an ammunition bin");
+            UnitDamageForm.Value shots = binValues.get(binRow);
+            int full = shots.value();
+            Actor binHit = find(ui, "damage-value-" + binRow + "-hits-0");
+            reveal(ui, binHit);
+            click(ui, binHit);
+            assertEquals(0, shots.value(), "a hit empties the bin");
+            UiHealthBar shotsBar = find(ui, "damage-value-" + binRow);
+            assertTrue(shotsBar.disabled(), "and holds its bar");
+            assertEquals(0, shotsBar.value());
+            binHit = find(ui, "damage-value-" + binRow + "-hits-0");
+            click(ui, binHit);
+            assertEquals(full, shots.value(), "clearing the hit fills it back");
+            assertFalse(((UiHealthBar) find(ui, "damage-value-" + binRow)).disabled());
+
+            WeaponMounted gun = atlas.getWeaponList().stream().filter(WeaponMounted::canJam).findFirst()
+                  .orElseThrow();
+            clickAt(ui, doll, spot(doll, atlas.getLocationAbbr(gun.getLocation())));
+            List<UnitDamageForm.Value> gunValues = view.chosen().values();
+            int gunRow = -1;
+            for (int index = 0; index < gunValues.size(); index++) {
+                if (!gunValues.get(index).flags().isEmpty()) {
+                    gunRow = index;
+                    break;
+                }
+            }
+            assertTrue(gunRow >= 0, "the autocannon has its state switches");
+            Actor jam = find(ui, "damage-value-" + gunRow + "-flag-0");
+            reveal(ui, jam);
+            click(ui, jam);
+            assertTrue(gunValues.get(gunRow).flags().get(0).on(), "the switch jams the weapon");
+            clickAt(ui, doll, arm);
             click(ui, find(ui, "damage-repair"));
             assertEquals(armor, form.place("LA").armor().value(), "Restore Unit fills the armour");
             assertEquals(0, hits.value(), "and clears the hits");

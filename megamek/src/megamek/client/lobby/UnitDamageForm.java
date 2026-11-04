@@ -46,6 +46,7 @@ import megamek.common.compute.damage.CritAssignment;
 import megamek.common.compute.damage.PreExistingDamageApplier;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.compute.damage.PreExistingDamageResult;
+import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscMounted;
@@ -110,7 +111,10 @@ public final class UnitDamageForm {
         private final int original;
         private final Repair repair;
         private final Writer writer;
+        private final List<Value> flags = new ArrayList<>();
         private Consumer<Value> changed;
+        private Value hits;
+        private String tip;
         private int value;
 
         private Value(String label, Kind kind, int value, int max, Repair repair, Writer writer) {
@@ -156,6 +160,26 @@ public final class UnitDamageForm {
 
         public boolean on() {
             return value > 0;
+        }
+
+        /** The hit boxes that go with this number, such as an ammunition bin's, or null. */
+        public Value hits() {
+            return hits;
+        }
+
+        /** The switches of a weapon's state that go with its hit boxes: jammed, fired and a locked mount. */
+        public List<Value> flags() {
+            return Collections.unmodifiableList(flags);
+        }
+
+        /** Whether the number is held at nothing by its hits: a bin that is hit holds no ammunition. */
+        public boolean locked() {
+            return hits != null && hits.on();
+        }
+
+        /** What the value means, for a tooltip, or null. */
+        public String tip() {
+            return tip;
         }
 
         /** Back to the value it was read with, without the change hook: a roll starts from the unit as read. */
@@ -411,9 +435,18 @@ public final class UnitDamageForm {
     }
 
     private List<Value> values() {
+        List<Value> shown = new ArrayList<>();
+        places.values().forEach(place -> shown.addAll(place.values));
+        shown.addAll(general);
         List<Value> all = new ArrayList<>();
-        places.values().forEach(place -> all.addAll(place.values));
-        all.addAll(general);
+        for (Value value : shown) {
+            // a number's hits come first, so repairing them gives back the number before it is filled
+            if (value.hits != null) {
+                all.add(value.hits);
+            }
+            all.add(value);
+            all.addAll(value.flags);
+        }
         return all;
     }
 
@@ -565,9 +598,61 @@ public final class UnitDamageForm {
                 label += " (" + entity.getLocationAbbr(mounted.getLocation()) + "/"
                       + entity.getLocationAbbr(mounted.getSecondLocation()) + ")";
             }
-            target(mounted.getLocation()).add(mark("eq:" + number, new Value(label, Kind.BOXES, hits,
-                  Math.max(slots, 1), Repair.CLEAR, (spec, value) -> spec.equipmentHits.put(number, value))));
+            Value crit = mark("eq:" + number, new Value(label, Kind.BOXES, hits, Math.max(slots, 1), Repair.CLEAR,
+                  (spec, value) -> spec.equipmentHits.put(number, value)));
+            if (mounted instanceof AmmoMounted bin) {
+                target(mounted.getLocation()).add(shots(bin, number, crit));
+                continue;
+            }
+            target(mounted.getLocation()).add(crit);
+            if (mounted instanceof WeaponMounted weapon) {
+                flags(weapon, number, crit);
+            }
         }
+    }
+
+    /**
+     * An ammunition bin's shots, with its hit boxes: a hit empties the bin and clearing the hit fills it back to what
+     * it held, as in the Swing editor; a bin read as hit holds nothing and comes back full.
+     */
+    private Value shots(AmmoMounted bin, int number, Value crit) {
+        int full = bin.isOneShot() ? 1 : bin.getOriginalShots() > 0 ? bin.getOriginalShots() : bin.getType().getShots();
+        full = Math.max(full, bin.getBaseShotsLeft());
+        Value shots = new Value(crit.label, Kind.STEPPER, crit.on() ? 0 : Math.min(bin.getBaseShotsLeft(), full), full,
+              Repair.FULL, (spec, value) -> spec.ammoShots.put(number, value));
+        shots.hits = crit;
+        int[] before = { crit.on() ? full : shots.value };
+        crit.changed = hit -> {
+            if (hit.on() && shots.value > 0) {
+                before[0] = shots.value;
+                shots.value(0);
+            } else if (!hit.on() && shots.value == 0) {
+                shots.value(before[0]);
+            }
+        };
+        return shots;
+    }
+
+    /** A weapon's state switches beside its hit boxes, where a rule can put it in that state. */
+    private static void flags(WeaponMounted weapon, int number, Value crit) {
+        if (weapon.canJam()) {
+            crit.flags.add(flag("UnitEditorDialog.weaponJammed", weapon.isJammed(),
+                  (spec, value) -> spec.weaponJammed.put(number, value > 0)));
+        }
+        if (weapon.isOneShot()) {
+            crit.flags.add(flag("UnitEditorDialog.weaponFired", weapon.isFired(),
+                  (spec, value) -> spec.weaponFired.put(number, value > 0)));
+        }
+        if (weapon.hasDirectionalTorsoMount()) {
+            crit.flags.add(flag("UnitEditorDialog.mountLocked", weapon.isDirectionalMountLocked(),
+                  (spec, value) -> spec.directionalMountLocked.put(number, value > 0)));
+        }
+    }
+
+    private static Value flag(String key, boolean on, Writer writer) {
+        Value flag = new Value(text(key), Kind.TOGGLE, on ? 1 : 0, 1, Repair.CLEAR, writer);
+        flag.tip = text(key + ".tooltip");
+        return flag;
     }
 
     private void readSystems() {

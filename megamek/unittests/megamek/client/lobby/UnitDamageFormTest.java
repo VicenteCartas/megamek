@@ -43,6 +43,7 @@ import java.util.List;
 
 import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Crew;
@@ -117,7 +118,7 @@ class UnitDamageFormTest {
             assertEquals(atlas.getOArmor(location), atlas.getArmor(location));
             assertEquals(atlas.getOInternal(location), atlas.getInternal(location));
         }
-        assertEquals(1, ammo.getBaseShotsLeft(), "ammunition is left to the Swing editor");
+        assertEquals(1, ammo.getBaseShotsLeft(), "an unchanged bin keeps its shots");
     }
 
     @Test
@@ -243,6 +244,61 @@ class UnitDamageFormTest {
             form.roll(PreExistingDamageLevel.HEAVY);
             assertTrue(form.changed(), file);
         }
+    }
+
+    @Test
+    void aHitBinHoldsNoAmmunitionAndClearingTheHitFillsItBack() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        AmmoMounted ammo = atlas.getAmmo().get(0);
+        UnitDamageForm form = UnitDamageForm.of(atlas);
+        List<UnitDamageForm.Value> bins = form.place(atlas.getLocationAbbr(ammo.getLocation())).values().stream()
+              .filter(value -> value.hits() != null && value.label().equals(ammo.getName())).toList();
+        assertFalse(bins.isEmpty());
+        assertEquals(UnitDamageForm.Kind.STEPPER, bins.get(0).kind());
+        assertEquals(ammo.getBaseShotsLeft(), bins.get(0).max());
+        bins.forEach(bin -> bin.value(3));
+        form.apply();
+        assertEquals(3, ammo.getBaseShotsLeft());
+
+        UnitDamageForm again = UnitDamageForm.of(atlas);
+        UnitDamageForm.Value bin = again.place(atlas.getLocationAbbr(ammo.getLocation())).values().stream()
+              .filter(value -> value.hits() != null && value.label().equals(ammo.getName())).findFirst().orElseThrow();
+        assertEquals(3, bin.value());
+        bin.hits().value(1);
+        assertTrue(bin.locked());
+        assertEquals(0, bin.value(), "a hit bin is empty");
+        bin.hits().value(0);
+        assertFalse(bin.locked());
+        assertEquals(3, bin.value(), "clearing the hit gives back what the bin held");
+        bin.hits().value(1);
+        again.repairAll();
+        assertEquals(bin.max(), bin.value(), "repair clears the hit and fills the bin");
+    }
+
+    @Test
+    void aWeaponThatCanJamCarriesTheSwitch() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        WeaponMounted autocannon = atlas.getWeaponList().stream().filter(WeaponMounted::canJam).findFirst()
+              .orElseThrow();
+        UnitDamageForm form = UnitDamageForm.of(atlas);
+        UnitDamageForm.Value hits = value(form.place(atlas.getLocationAbbr(autocannon.getLocation())),
+              autocannon.getName());
+        UnitDamageForm.Value jammed = hits.flags().stream().filter(flag -> flag.label().equals("Jammed"))
+              .findFirst().orElseThrow();
+        assertEquals(UnitDamageForm.Kind.TOGGLE, jammed.kind());
+        assertNotNull(jammed.tip());
+        jammed.value(1);
+        assertTrue(form.changed());
+        form.apply();
+        assertTrue(autocannon.isJammed());
+
+        UnitDamageForm again = UnitDamageForm.of(atlas);
+        again.repairAll();
+        again.apply();
+        assertFalse(autocannon.isJammed());
+        assertTrue(atlas.getWeaponList().stream().filter(weapon -> !weapon.canJam()).allMatch(weapon ->
+              value(form.place(atlas.getLocationAbbr(weapon.getLocation())), weapon.getName()).flags().stream()
+                    .noneMatch(flag -> flag.label().equals("Jammed"))), "only weapons a rule can jam");
     }
 
     private static List<String> labels(UnitDamageForm.Place place) {

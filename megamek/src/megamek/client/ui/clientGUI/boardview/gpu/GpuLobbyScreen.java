@@ -149,6 +149,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean menuPending;
     private boolean unitMenuPending;
     private boolean unitDamagePending;
+    /** How many locations the probe steps the damage editor on once it is open: {@code +next}. */
+    private int damageStepsPending;
     /** The developer switch's clicks and pointer, run through the stage once their time comes. */
     private boolean clickCompactPending;
     private boolean clickFoldPending;
@@ -262,6 +264,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         menuPending = probe.options().contains("menu");
         unitMenuPending = probe.options().contains("unitmenu");
         unitDamagePending = probe.options().contains("unitdamage");
+        damageStepsPending = unitDamagePending && probe.options().contains("next") ? 1 : 0;
         clickCompactPending = probe.options().contains("clickcompact");
         clickFoldPending = probe.options().contains("fold");
         foldReportPending = clickFoldPending;
@@ -1558,6 +1561,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             } else if (elapsed > probe.shotAt() - 1) {
                 unitDamagePending = false;
                 LOGGER.warn("The lobby probe found no unit with a damage icon");
+            }
+        }
+        if (!unitDamagePending && damageStepsPending > 0) {
+            Actor next = probeFind(stage.getRoot(), "damage-next");
+            if (next != null) {
+                damageStepsPending--;
+                GpuLobbyProbeInput.click(stage, next);
             }
         }
         if (clickCompactPending && elapsed > PROBE_CLICK_AT) {

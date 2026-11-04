@@ -64,6 +64,7 @@ import megamek.client.ui.design.DesignTokens;
 public final class UiHealthBar extends Table {
     /** Above this many points the ticks mark every ten instead of every five. */
     private static final int FIVE_TICKS_UP_TO = 60;
+    private static final float DISABLED_ALPHA = .4f;
 
     private final int max;
     private final int original;
@@ -75,6 +76,7 @@ public final class UiHealthBar extends Table {
     private final Label delta;
     private int value;
     private boolean typing;
+    private boolean disabled;
 
     UiHealthBar(UiKit kit, int value, int max, int original) {
         this.max = Math.max(0, max);
@@ -92,13 +94,14 @@ public final class UiHealthBar extends Table {
         Label most = kit.typeLabel("/ " + this.max, "small", "text.secondary");
         delta = kit.typeLabel("", "small", "status.danger");
         delta.setAlignment(Align.right);
+        // the number columns are at least three digits wide, so the bars of a form's rows line up
+        String digits = "0".repeat(Math.max(3, String.valueOf(this.max).length()));
         add(down).size(control);
         add(bar).growX().height(control).padLeft(gap).padRight(gap);
         add(up).size(control);
-        add(field).width(width(kit, "0".repeat(String.valueOf(this.max).length())) + 2 * space("lg")).height(control)
-              .padLeft(space("sm"));
-        add(most).width(width(kit, "/ " + this.max)).padLeft(gap);
-        add(delta).width(width(kit, "\u2212" + this.max)).padLeft(gap);
+        add(field).width(width(kit, digits) + 2 * space("lg")).height(control).padLeft(space("sm"));
+        add(most).width(width(kit, "/ " + digits)).padLeft(gap);
+        add(delta).width(width(kit, "\u2212" + digits)).padLeft(gap);
         down.addListener(stepping(-1));
         up.addListener(stepping(1));
         field.addListener(new ChangeListener() {
@@ -140,6 +143,19 @@ public final class UiHealthBar extends Table {
         return max;
     }
 
+    /** Holds the bar where it is, such as an ammunition bin that is hit: no input, dimmed. */
+    public void disabled(boolean disabled) {
+        this.disabled = disabled;
+        setTouchable(disabled ? Touchable.disabled : Touchable.childrenOnly);
+        field.setDisabled(disabled);
+        bar.setColor(1, 1, 1, disabled ? DISABLED_ALPHA : 1);
+        show();
+    }
+
+    public boolean disabled() {
+        return disabled;
+    }
+
     /** The bar itself, to click, drag and wheel through the stage. */
     public Actor bar() {
         return bar;
@@ -175,6 +191,10 @@ public final class UiHealthBar extends Table {
     }
 
     private void set(int next, boolean user) {
+        if (disabled && user) {
+            show();
+            return;
+        }
         int clamped = MathUtils.clamp(next, 0, max);
         if (clamped == value) {
             show();
@@ -192,8 +212,8 @@ public final class UiHealthBar extends Table {
             field.setText(String.valueOf(value));
             field.setCursorPosition(field.getText().length());
         }
-        down.setDisabled(value <= 0);
-        up.setDisabled(value >= max);
+        down.setDisabled(disabled || value <= 0);
+        up.setDisabled(disabled || value >= max);
         int change = value - original;
         delta.setText(change == 0 ? "" : change < 0 ? "\u2212" + -change : "+" + change);
         delta.setColor(UiTheme.tokenColor(change < 0 ? "status.danger" : "status.success"));
@@ -304,7 +324,7 @@ public final class UiHealthBar extends Table {
 
         @Override
         public float getPrefWidth() {
-            return 8 * space("xxxl");
+            return 4 * space("xxxl");
         }
 
         @Override

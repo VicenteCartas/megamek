@@ -297,12 +297,35 @@ final class LobbyDamageView {
             String name = "damage-value-" + index;
             if (value.kind() == UnitDamageForm.Kind.STEPPER) {
                 // a bar takes the row's width under its label, as a stat block in a game shows it
-                values.add(label).left().growX().minWidth(0).colspan(2).padTop(index == 0 ? 0 : space("md")).row();
-                values.add(bar(value, name)).growX().colspan(2).padTop(space("xxs")).row();
+                float top = index == 0 ? 0 : space("md");
+                if (value.hits() != null) {
+                    // an ammunition bin: its hit boxes sit on its name's row, its shots in the bar under it
+                    values.add(label).left().growX().minWidth(0).padTop(top);
+                    values.add(boxes(value.hits(), name + "-hits", true)).right().padLeft(space("lg")).padTop(top)
+                          .row();
+                } else {
+                    values.add(label).left().growX().minWidth(0).colspan(2).padTop(top).row();
+                }
+                UiHealthBar bar = bar(value, name);
+                bar.disabled(value.locked());
+                values.add(bar).growX().colspan(2).padTop(space("xxs")).row();
                 continue;
             }
             values.add(label).left().growX().minWidth(0).padTop(gap);
             values.add(control(value, name)).right().padLeft(space("lg")).padTop(gap).row();
+            List<UnitDamageForm.Value> flags = value.flags();
+            for (int flag = 0; flag < flags.size(); flag++) {
+                // a weapon's state sits under its hit boxes, indented as part of it
+                UnitDamageForm.Value state = flags.get(flag);
+                Label caption = kit.typeLabel(state.label(), "small", "text.secondary");
+                caption.setEllipsis(true);
+                Actor toggle = control(state, name + "-flag-" + flag);
+                if (state.tip() != null) {
+                    kit.tip(toggle, true).getActor().setText(state.tip());
+                }
+                values.add(caption).left().growX().minWidth(0).padLeft(space("lg")).padTop(space("xxs"));
+                values.add(toggle).right().padLeft(space("lg")).padTop(space("xxs")).row();
+            }
         }
     }
 
@@ -331,6 +354,11 @@ final class LobbyDamageView {
             });
             return toggle;
         }
+        return boxes(value, name, false);
+    }
+
+    /** Hit boxes; {@code rebuild} when other rows follow them, such as a bin's shots that a hit empties. */
+    private Table boxes(UnitDamageForm.Value value, String name, boolean rebuild) {
         Table boxes = new Table();
         List<UiChoice> checks = new ArrayList<>();
         for (int box = 0; box < value.max(); box++) {
@@ -340,6 +368,10 @@ final class LobbyDamageView {
             UiKit.onChange(check, () -> {
                 // a click on a hit box past the hits hits up to it; on the last hit, clears that one
                 value.value(check.isChecked() ? at + 1 : at);
+                if (rebuild) {
+                    refresh();
+                    return;
+                }
                 for (int each = 0; each < checks.size(); each++) {
                     checks.get(each).setChecked(each < value.value());
                 }
@@ -362,7 +394,7 @@ final class LobbyDamageView {
             UnitDamageForm.Value front = place.armor();
             boolean destroyed = internal != null && internal.value() <= 0;
             boolean crit = place.values().stream().anyMatch(value -> value.kind() == UnitDamageForm.Kind.BOXES
-                  && value.value() > 0);
+                  && value.value() > 0 || value.locked());
             int remaining = internal == null ? 1 : internal.value();
             if (front != null) {
                 armor.put(place.abbr(), GpuPaperdoll.cell(front.value(), front.max(), destroyed, remaining, crit,
