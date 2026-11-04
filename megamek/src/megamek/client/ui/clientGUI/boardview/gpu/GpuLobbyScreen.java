@@ -559,11 +559,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
-            public void toggleGameMaster() {
-                window.toggleGameMaster();
-            }
-
-            @Override
             public void botSettings(int id) {
                 window.botSettings(id);
             }

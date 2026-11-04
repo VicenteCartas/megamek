@@ -89,7 +89,7 @@ import org.lwjgl.glfw.GLFW;
  *     without it makes the window {@value #NARROW_WIDTH} by {@value #NARROW_HEIGHT}, which folds the battlefield into
  *     its rail. Either keeps the window's saved size as it was.</li>
  *     <li>{@code lobby+rail}: opens the folded battlefield from its rail.</li>
- *     <li>{@code lobby+menu}: opens the first bot's player menu (the first player's without bots) before the shot.</li>
+ *     <li>{@code lobby+menu}: opens the first local player's deployment picker before the shot.</li>
  *     <li>{@code lobby+chat}: has the player and each bot say a line in the chat as they join.</li>
  *     <li>{@code lobby+fold}: clicks the chat's fold button through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s
  *     in, keeping the client's fold preference as it was, then has the player and each bot say a line

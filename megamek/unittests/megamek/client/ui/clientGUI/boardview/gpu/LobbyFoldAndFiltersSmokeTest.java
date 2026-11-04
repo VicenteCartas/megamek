@@ -226,10 +226,6 @@ class LobbyFoldAndFiltersSmokeTest {
         }
 
         @Override
-        public void toggleGameMaster() {
-        }
-
-        @Override
         public void botSettings(int id) {
         }
 

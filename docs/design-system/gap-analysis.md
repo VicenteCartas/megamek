@@ -1293,9 +1293,21 @@ work for Swing, and item 11 is under investigation.
          and ☰ in the corner, as a game's menu button. The shortcuts stay (Alt+C, Ctrl+S, Ctrl+Shift+S, Ctrl+L,
          Ctrl+Shift+L). A MekHQ lobby offers no
          loading here either.
+       - Player cards without a menu (`LobbyPlayersPanel`): the ⋮ button, the right click and the player menu's
+         submenus are gone. On the local player's own cards and their bots' cards, the team and the deployment area
+         are quiet buttons on the second line: Team opens a flat list of teams with the current one checked, and
+         the deployment button opens the start positions as the player settings' compass, with the map's custom
+         zones under it. A rail under the ready mark holds icons for the player settings, a bot's own settings and
+         Remove bot; a disconnected player's card offers Replace with a bot. The rail keeps the forces line's full
+         width; on the line itself the icons cut "3 units" short. The swatch still opens the camouflage and a
+         double click the player settings. The Game Master item left the card for the top bar's seat
+         (`LobbyPlayersPanel.Actions.toggleGameMaster` is gone). `lobby+menu` now opens the deployment picker.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
-       `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`.
+       `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
+       `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
+       stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
+       the name line.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
