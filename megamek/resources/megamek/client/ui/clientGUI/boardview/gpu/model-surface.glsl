@@ -61,6 +61,9 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
     vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
     geometric = visibleFace(dx, dy, view);
     vec3 normal = modelVertexNormal(geometric);
+    // Reflections reverse triangle winding without reversing the inverse-transpose normal. Orient the authored
+    // frame to the visible geometric face, so mirrored and two-sided props agree independently of glFrontFace.
+    float visibleSide = dot(normal, geometric) < 0.0 ? -1.0 : 1.0;
 #if defined(modelSurfaceFlag) && (defined(normalTextureFlag) || defined(modelReliefFlag))
     // Derive the glTF tangent frame from the original mesh UVs, independent of projected unit camouflage.
     // Degenerate UVs keep the geometric normal; mirrored UVs preserve their handedness.
@@ -86,13 +89,10 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
         }
     }
 #endif
+    normal *= visibleSide;
     // main() calls this before any discard, and every branch above has joined again.
     surfaceVariance += normalVariance(dFdx(normal), dFdy(normal));
-#ifdef normalFlag
-    return gl_FrontFacing ? normal : -normal;
-#else
     return normal;
-#endif
 }
 
 #ifdef modelSurfaceFlag
@@ -189,8 +189,9 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
 #ifdef modelSurfaceFlag
     if (u_modelRuby > 0.0) {
         surface.dielectric = .0758;
-        surface.front = vec3(.18);
-        surface.back = thinTransmission(albedo, .12);
+        // Natural cloudy ruby partitions non-reflected light between inclusions (60%) and clearer paths (40%).
+        surface.front = vec3(.45);
+        surface.back = thinTransmission(albedo, .15);
     }
 #endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
@@ -199,7 +200,7 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     surface.emission = emission;
     vec3 lit = shadeSurface(surface);
 #ifdef modelSurfaceFlag
-    if (u_modelRuby > 0.0) lit += .7 * rubyTransport(albedo, geometric, view, roughness);
+    if (u_modelRuby > 0.0) lit += .4 * rubyTransport(albedo, geometric, view, roughness);
 #endif
     return lit;
 }
