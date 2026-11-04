@@ -387,7 +387,7 @@ final class LobbyPlayersPanel {
         Image swatch = camo == null ? kit.solid(new Color(player.colour() << 8 | 0xFF)) : new Image(camo, Scaling.fill);
         swatch.setName("lobby-player-swatch-" + player.id());
         float swatchSize = size("icon.lg");
-        card.add(swatch).size(swatchSize).top().padRight(space("md"));
+        card.add(swatch).size(swatchSize).padRight(space("md"));
         if (player.local()) {
             kit.tip(swatch, true).getActor().setText(Messages.getString("Lobby.camo"));
             swatch.addListener(new ClickListener() {
@@ -398,23 +398,26 @@ final class LobbyPlayersPanel {
             });
         }
 
-        Table lines = new Table();
-        lines.top().left().defaults().left();
-        lines.add(nameRow(player)).growX().minWidth(0).row();
-        lines.add(player.local() ? placeRow(player) : startRow(player)).growX().minWidth(0).padTop(space("xxs"))
-              .row();
+        // The swatch, the name and the ready mark share the first line; the rows under it run the card's full width
+        card.add(nameRow(player)).growX().minWidth(0);
+        card.add(readyMark(player)).size(size("control.sm")).padLeft(space("xs")).row();
+        card.add(player.local() ? placeRow(player) : startRow(player)).colspan(3).growX().minWidth(0)
+              .padTop(space("xs")).row();
+        // The totals, with the card's tools at the end of their line
+        Table third = new Table();
+        third.left();
         String forces = player.hidden() ? Messages.getString("Lobby.hidden")
               : Messages.getString("Lobby.totals", player.bv(), player.tons(), player.units());
         Label forcesLabel = kit.typeLabel(forces, "small", "text.secondary");
         forcesLabel.setEllipsis(true);
-        lines.add(forcesLabel).growX().minWidth(0).padTop(space("xxs"));
-        card.add(lines).growX().minWidth(0).top();
-
-        Table side = new Table();
-        side.top();
-        side.add(readyMark(player)).size(size("control.sm")).row();
-        cardActions(side, player);
-        card.add(side).top().padLeft(space("xs"));
+        third.add(forcesLabel).growX().minWidth(0);
+        Table tools = new Table();
+        tools.setName("lobby-player-tools-" + player.id());
+        cardActions(tools, player);
+        if (tools.hasChildren()) {
+            third.add(tools).right().padLeft(space("xs"));
+        }
+        card.add(third).colspan(3).growX().minWidth(0).padTop(space("xxs"));
 
         if (!player.hidden()) {
             HorizontalGroup icons = unitIcons(player.id());
@@ -574,34 +577,33 @@ final class LobbyPlayersPanel {
     }
 
     /**
-     * The icons under the ready mark: the player settings for the local player and their bots, a bot's own settings
-     * and its removal, and for a disconnected player, a bot to take their place. The lines beside them keep their width.
+     * The icons at the end of the totals line: the player settings for the local player and their bots, a
+     * bot's own settings and its removal, and for a disconnected player, a bot to take their place.
      */
     private void cardActions(Table strip, PlayerRow player) {
         int id = player.id();
         if (player.localBot()) {
-            strip.add(cardAction("bot", "Lobby.botSettings", "lobby-player-bot-" + id, () -> actions.botSettings(id))).size(size("control.sm")).row();
+            cardAction(strip, "bot", "Lobby.botSettings", "lobby-player-bot-" + id, () -> actions.botSettings(id));
         }
         if (player.local()) {
-            strip.add(cardAction("settings", "Lobby.playerSettings", "lobby-player-settings-" + id,
-                  () -> actions.playerSettings(id))).size(size("control.sm")).row();
+            cardAction(strip, "settings", "Lobby.playerSettings", "lobby-player-settings-" + id,
+                  () -> actions.playerSettings(id));
         }
         if (player.localBot()) {
-            strip.add(cardAction("close", "Lobby.removeBot", "lobby-player-remove-" + id,
-                  () -> actions.removeBot(id))).size(size("control.sm")).row();
+            cardAction(strip, "close", "Lobby.removeBot", "lobby-player-remove-" + id, () -> actions.removeBot(id));
         }
         if (player.ghost()) {
-            strip.add(cardAction("bot", "Lobby.replaceBot", "lobby-player-replace-" + id,
-                  () -> actions.replaceWithBot(id))).size(size("control.sm")).row();
+            cardAction(strip, "bot", "Lobby.replaceBot", "lobby-player-replace-" + id,
+                  () -> actions.replaceWithBot(id));
         }
     }
 
-    private UiButton cardAction(String icon, String tipKey, String name, Runnable action) {
+    private void cardAction(Table strip, String icon, String tipKey, String name, Runnable action) {
         UiButton button = kit.button("button-icon" + UiTheme.COMPACT, icon, null, null);
         button.setName(name);
         kit.tip(button, true).getActor().setText(Messages.getString(tipKey));
         UiKit.onChange(button, () -> choose(action));
-        return button;
+        strip.add(button).size(size("control.sm")).padLeft(strip.hasChildren() ? space("xxs") : 0);
     }
 
     /** The local player's ready toggle; another player's ready mark. */

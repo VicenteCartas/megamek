@@ -49,6 +49,7 @@ import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -122,6 +123,47 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialog.isOpen());
             click(ui, lobby);
             assertEquals(1, behind[0], "the lobby takes clicks again once it closes");
+        });
+    }
+
+    @Test
+    void escapeClosesADialogWhoseTextFieldHasTheFocus() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> said.add("cancel")).width("dialog.sm");
+            UiTextField name = ui.kit.input("Vicente", false);
+            dialog.body().add(name).width(200);
+            dialog.primary("OK", () -> said.add("ok"));
+            dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(name, ui.stage.getKeyboardFocus(), "the text field takes the first focus");
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel"), said, "Escape cancels though the text field takes every key");
+        });
+    }
+
+    @Test
+    void theFirstFocusIsTheFirstButtonNotTheTitleBarClose() {
+        UiTestStage.run(ui -> {
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            Button first = ui.kit.button("button-quiet", null, "First", null);
+            dialog.body().add(first).row();
+            dialog.body().add(ui.kit.button("button-quiet", null, "Second", null));
+            dialog.cancelButton("Close");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(first, ui.stage.getKeyboardFocus(), "a dialog without OK starts on its first button");
+            dialog.close();
+
+            UiDialog withOk = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            withOk.body().add(ui.kit.button("button-quiet", null, "Other", null));
+            Button ok = withOk.primary("OK", () -> { });
+            withOk.cancelButton("Cancel");
+            withOk.show(ui.stage, false);
+            ui.draw();
+            assertEquals(ok, ui.stage.getKeyboardFocus(), "OK takes the first focus when there is one");
+            withOk.close();
         });
     }
 

@@ -307,6 +307,35 @@ class LobbyMapSetupSmokeTest {
     }
 
     @Test
+    void theRandomMapSettingsKeepTheirSizeAcrossTheTabs() {
+        UiTestStage.run(ui -> {
+            server();
+            RandomMapForm form = new RandomMapForm(server, settings -> { });
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyRandomMapView view = dialogs.randomMap(form, List.of("", "snow"), new RandomHost());
+            for (String mode : List.of("random-normal", "random-advanced")) {
+                click(ui, view.control(mode));
+                ui.draw();
+                Actor card = view.control("random-tabs");
+                while (!"dialog".equals(card.getName())) {
+                    card = card.getParent();
+                }
+                float width = card.getWidth();
+                float height = card.getHeight();
+                for (String tab : List.of("civilization", "elevation", "natural", "water", "effects")) {
+                    Actor control = view.control("random-tab-" + tab);
+                    assertNotNull(control, tab);
+                    click(ui, control);
+                    ui.draw();
+                    assertEquals(width, card.getWidth(), .5f, mode + " " + tab + " keeps the dialog's width");
+                    assertEquals(height, card.getHeight(), .5f, mode + " " + tab + " keeps the dialog's height");
+                }
+            }
+            dialogs.dispose();
+        });
+    }
+
+    @Test
     void theOddBoardWarningRemembersDontShowAgain() {
         UiTestStage.run(ui -> {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);

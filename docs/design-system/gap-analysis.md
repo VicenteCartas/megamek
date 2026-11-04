@@ -1312,6 +1312,17 @@ work for Swing, and item 11 is under investigation.
          beside its ⋮; a compact row keeps only the ⋮. In the menu, a submenu replaces the list in the same popover,
          under the submenu's name and a Back row (Left and Esc go back too), instead of opening up to four
          popovers side by side. `lobby+unitmenu+unitsub` shows a submenu.
+       - Every kit dialog answers Esc, even with a text field focused (`UiDialog`): libGDX's `TextField` takes every
+         key, so Esc never reached the modal and the player settings, which open on their name, stayed open. The
+         dialog's first focus is now its first text field, else its primary button, else its first control outside
+         the title bar, so the system menu starts on Resume rather than the title bar's ×.
+       - A tidier player card (`LobbyPlayersPanel`): the swatch, name, chips and ready mark share the first line, so
+         YOU and the ready circle line up; the team and deployment pickers run the card's full width under it,
+         starting under the swatch; and the card's icons (settings, bot settings, Remove bot, Replace with a bot)
+         end the totals line, in the ready mark's column, rather than a rail that left space under the swatch. A
+         bot's card no longer cuts its team short.
+       - The random map settings keep one size (`LobbyRandomMapView`): the page takes the size of the largest tab,
+         measured once for the normal view and once for the advanced view, so the tabs no longer jump.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1319,7 +1330,9 @@ work for Swing, and item 11 is under investigation.
        stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
        the name line; `LobbyBattlefieldToolsSmokeTest`, `LobbyMapSetupSmokeTest` (Board Editor) and
        `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
-       icons and the submenu's Back, Esc and Left, clicked through the stage).
+       icons and the submenu's Back, Esc and Left, clicked through the stage);
+       `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and
+       `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
