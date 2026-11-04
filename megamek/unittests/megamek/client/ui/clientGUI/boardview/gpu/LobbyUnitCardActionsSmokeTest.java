@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
@@ -43,14 +45,30 @@ class LobbyUnitCardActionsSmokeTest {
             forces.show(forces(unit(1, true, true), unit(2, true, false), unit(3, false, false)));
             ui.draw();
 
+            click(ui, panel.findActor("lobby-unit-view-1"));
             click(ui, panel.findActor("lobby-unit-configure-1"));
+            click(ui, panel.findActor("lobby-unit-camo-1"));
             click(ui, panel.findActor("lobby-unit-c3-1"));
+            click(ui, panel.findActor("lobby-unit-alpha-1"));
             click(ui, panel.findActor("lobby-unit-delete-2"));
-            assertEquals(List.of("configure 1", "c3 1", "delete [2]"), actions.log);
+            click(ui, panel.findActor("lobby-unit-view-3"));
+            assertEquals(List.of("VIEW 1", "configure 1", "INDI_CAMO 1", "c3 1", "ALPHASTRIKE 1", "delete [2]",
+                  "VIEW 3"), actions.log);
 
             assertNull(panel.findActor("lobby-unit-c3-2"), "a unit without C3 has no C3 icon");
             assertNull(panel.findActor("lobby-unit-configure-3"), "another player's unit has no actions of its own");
+            assertNull(panel.findActor("lobby-unit-camo-3"));
             assertNull(panel.findActor("lobby-unit-delete-3"));
+
+            Table tools = panel.findActor("lobby-unit-tools-1");
+            assertEquals(7, tools.getChildren().size, "seven icons with the ⋮");
+            assertEquals(2, tools.getRows(), "in two rows of at most four");
+            assertEquals(tools.getChildren().peek(), unitMore(panel), "the ⋮ comes last");
+
+            actions.log.clear();
+            click(ui, unitMore(panel));
+            assertEquals(List.of("menu [1] [ALPHASTRIKE, CONFIGURE, DELETE, INDI_CAMO, VIEW]"), actions.log,
+                  "the card's ⋮ leaves out what its icons offer");
 
             forces.compact(true);
             ui.draw();
@@ -72,7 +90,7 @@ class LobbyUnitCardActionsSmokeTest {
             Actor more = unitMore(panel);
             assertNotNull(more);
             click(ui, more);
-            assertEquals(List.of("menu [1]"), actions.log);
+            assertEquals(List.of("menu [1] [ALPHASTRIKE, CONFIGURE, DELETE, INDI_CAMO, VIEW]"), actions.log);
             forces.showMenu(List.of(LobbyMenuEntry.item("View...", true), LobbyMenuEntry.SEPARATOR,
                   LobbyMenuEntry.submenu("Deploy", true, List.of(LobbyMenuEntry.item("Round 1", true),
                         LobbyMenuEntry.item("Round 2", true))),
@@ -207,8 +225,14 @@ class LobbyUnitCardActionsSmokeTest {
         }
 
         @Override
-        public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
-            log.add("menu " + unitIds);
+        public void unitCommand(int unitId, String name) {
+            log.add(name + " " + unitId);
+        }
+
+        @Override
+        public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView,
+              Set<String> omit) {
+            log.add("menu " + unitIds + " " + new TreeSet<>(omit));
         }
 
         @Override

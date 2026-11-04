@@ -1323,6 +1323,12 @@ work for Swing, and item 11 is under investigation.
          bot's card no longer cuts its team short.
        - The random map settings keep one size (`LobbyRandomMapView`): the page takes the size of the largest tab,
          measured once for the normal view and once for the advanced view, so the tabs no longer jump.
+       - More of a unit's actions on its wide card: View (eye) and Alpha Strike stats for any unit the local player
+         can see, and for their own Configure, Camouflage, C3 and Delete, at most four to a row with the ⋮ last in
+         the corner. An icon runs the unit menu's own command on the unit (`LobbyUnitMenu.unitCommand`, through
+         `GpuLobbyWindow.unitCommand`), and the card's ⋮ leaves those items out (`LobbyUnitMenu.of(…, omit)`). A
+         right click, a compact row's ⋮ or a menu for several units keeps them all. Edit Damage stays in the menu,
+         since only the menu knows when a Game Master takes it away.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1332,7 +1338,9 @@ work for Swing, and item 11 is under investigation.
        `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
        icons and the submenu's Back, Esc and Left, clicked through the stage);
        `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and
-       `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`.
+       `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`;
+       `LobbyUnitMenuTest.aCardsIconsLeaveTheirItemsOutOfItsMenu` and `aCardIconRunsTheMenusCommandOnItsUnit`, and
+       `LobbyUnitCardActionsSmokeTest` (every icon clicked, two rows of at most four, the ⋮'s menu without them).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

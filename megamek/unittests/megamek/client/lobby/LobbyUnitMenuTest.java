@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.lobby;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -10,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import megamek.client.AbstractClient;
 import megamek.client.Client;
@@ -123,6 +126,30 @@ class LobbyUnitMenuTest {
         LobbyUnitMenu.BotLance botLance = LobbyUnitMenu.botLance(game, lance);
         assertTrue(botLance != null && botLance.owner() == bot);
         assertTrue(botLance.unitIds().containsAll(List.of(locust.getId(), stinger.getId())));
+    }
+
+    @Test
+    void aCardsIconsLeaveTheirItemsOutOfItsMenu() {
+        Entity hunchback = mek(local, "Hunchback");
+        Set<String> icons = Set.of(LobbyUnitMenu.LMP_VIEW, LobbyUnitMenu.LMP_CONFIGURE, LobbyUnitMenu.LMP_DELETE);
+
+        LobbyUnitMenu menu = LobbyUnitMenu.of(client, commands, List.of(hunchback), List.of(), false, icons);
+        List<String> names = leafCommands(menu).stream().map(LobbyUnitMenu::name).toList();
+
+        assertTrue(names.stream().noneMatch(icons::contains), names::toString);
+        assertTrue(names.contains(LobbyUnitMenu.LMP_INDI_CAMO), "what the card has no icon for stays");
+        assertFalse(menu.entries().getFirst().separator(), "the menu does not start with a separator");
+        assertFalse(menu.entries().getLast().separator());
+    }
+
+    @Test
+    void aCardIconRunsTheMenusCommandOnItsUnit() {
+        Entity hunchback = mek(local, "Hunchback");
+        String command = LobbyUnitMenu.unitCommand(LobbyUnitMenu.LMP_VIEW, hunchback.getId());
+
+        assertTrue(leafCommands(menu(List.of(hunchback), List.of(), false)).contains(command), command);
+        assertEquals(LobbyUnitMenu.LMP_VIEW, LobbyUnitMenu.name(command));
+        assertEquals(LobbyUnitMenu.LMP_DELETE, LobbyUnitMenu.name(LobbyUnitMenu.LMP_DELETE));
     }
 
     @Test

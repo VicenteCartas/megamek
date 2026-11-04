@@ -1259,7 +1259,7 @@ public final class GpuLobbyWindow {
      * Any thread: builds the unit menu for these units and formations and sends its items to the screen; the menu stays
      * here until one is chosen.
      */
-    void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+    void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView, Set<String> omit) {
         SwingUtilities.invokeLater(() -> {
             if (closing) {
                 return;
@@ -1270,7 +1270,8 @@ public final class GpuLobbyWindow {
                   .toList();
             List<LobbyMenuEntry> entries;
             try {
-                unitMenu = LobbyUnitMenu.of(gui.getClient(), gui.lobbyCommands(), entities, formations, formationsView);
+                unitMenu = LobbyUnitMenu.of(gui.getClient(), gui.lobbyCommands(), entities, formations, formationsView,
+                      omit);
                 entries = unitMenu.entries();
             } catch (RuntimeException failure) {
                 LOGGER.error(failure, "The lobby could not read the unit menu");
@@ -1294,18 +1295,32 @@ public final class GpuLobbyWindow {
             unitMenu = null;
             String command = (menu == null) ? null : menu.command(path);
             if (!closing && command != null) {
-                List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
-                if (c3Units != null) {
-                    openC3(c3Units);
-                    return;
-                }
-                if (tools.unitCommand(command)) {
-                    return;
-                }
-                new SwingLobbyUnitActions(gui, files).run(command);
-                refreshSoon();
+                runUnitCommand(command);
             }
         });
+    }
+
+    /** Any thread: runs the unit menu's command {@code name} on one unit, as a unit card's icon does. */
+    void unitCommand(int unitId, String name) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                runUnitCommand(LobbyUnitMenu.unitCommand(name, unitId));
+            }
+        });
+    }
+
+    /** EDT: runs a unit menu command, natively where the lobby has its own dialog for it. */
+    private void runUnitCommand(String command) {
+        List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
+        if (c3Units != null) {
+            openC3(c3Units);
+            return;
+        }
+        if (tools.unitCommand(command)) {
+            return;
+        }
+        new SwingLobbyUnitActions(gui, files).run(command);
+        refreshSoon();
     }
 
     /** Any thread: opens the C3 network manager on one unit, as the unit menu's C3 items do. */

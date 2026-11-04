@@ -37,6 +37,7 @@ import megamek.client.lobby.LobbyForces.Owner;
 import megamek.client.lobby.LobbyForces.Row;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.LobbyForcesController.Target;
 import megamek.client.ui.design.DesignTokens;
@@ -87,11 +88,17 @@ final class LobbyForcesPanel {
 
         void drop(List<Integer> unitIds, List<Integer> formationIds, Target target);
 
+        /** Runs the unit menu's command {@code name}, such as {@link LobbyUnitMenu#LMP_VIEW}, on one unit. */
+        void unitCommand(int unitId, String name);
+
         /** Deletes the selection through the same command and confirmation as the unit menu. */
         void delete(List<Integer> unitIds, List<Integer> formationIds);
 
-        /** Asks for the unit menu of these units and formations, which comes back through {@link #showMenu}. */
-        void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView);
+        /**
+         * Asks for the unit menu of these units and formations, which comes back through {@link #showMenu}, without
+         * the items whose commands are in {@code omit}.
+         */
+        void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView, Set<String> omit);
 
         /** Chooses the item at {@code path} of the unit menu that last came back. */
         void choose(List<Integer> path);
@@ -139,6 +146,8 @@ final class LobbyForcesPanel {
     private final Map<Integer, Table> unitCards = new HashMap<>();
     private final Map<Integer, Table> formationRows = new HashMap<>();
     private final Map<Integer, Actor> unitMenuButtons = new HashMap<>();
+    /** The unit menu commands each wide card offers as icons, which its ⋮ menu leaves out. */
+    private final Map<Integer, Set<String>> cardCommands = new HashMap<>();
     private final List<Object[]> order = new ArrayList<>();
     /** The card a Shift click runs from: a unit id, or a formation id as its negation less one. */
     private Integer anchor;
@@ -357,6 +366,7 @@ final class LobbyForcesPanel {
         unitCards.clear();
         formationRows.clear();
         unitMenuButtons.clear();
+        cardCommands.clear();
         order.clear();
         if (shown.units().isEmpty() && shown.formations().isEmpty()) {
             list.add(emptyState()).growX().padTop(space("xxxl")).padLeft(space("xl")).padRight(space("xl"));
@@ -591,20 +601,47 @@ final class LobbyForcesPanel {
         if (compact) {
             side.add(more).size(size("control.sm")).right().padLeft(space("sm"));
         } else {
-            // A wide card's own actions sit in a row under its BV; the rest wait in the ⋮ menu
-            Table tools = new Table();
-            tools.right();
-            if (unit.editable()) {
-                tools.add(cardTool(unit, "settings", "Lobby.card.configure", "configure",
-                      () -> actions.configure(unit.id()))).size(size("control.sm"));
-                if (unit.c3()) {
-                    tools.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())))
-                          .size(size("control.sm"));
-                }
-                tools.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
-                      () -> actions.delete(List.of(unit.id()), List.of()))).size(size("control.sm"));
+            // A wide card's own actions sit under its BV, four to a row with the ⋮ last; its menu leaves them out
+            List<UiButton> icons = new ArrayList<>();
+            Set<String> offered = new HashSet<>();
+            if (!unit.hidden()) {
+                icons.add(commandTool(unit, "show", "Lobby.card.view", "view", LobbyUnitMenu.LMP_VIEW, offered));
             }
-            tools.add(more).size(size("control.sm"));
+            if (unit.editable()) {
+                icons.add(cardTool(unit, "settings", "Lobby.card.configure", "configure",
+                      () -> actions.configure(unit.id())));
+                offered.add(LobbyUnitMenu.LMP_CONFIGURE);
+                icons.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
+                      offered));
+                if (unit.c3()) {
+                    icons.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())));
+                }
+            }
+            if (!unit.hidden()) {
+                icons.add(commandTool(unit, "stats", "Lobby.card.alphaStrike", "alpha",
+                      LobbyUnitMenu.LMP_ALPHA_STRIKE, offered));
+            }
+            if (unit.editable()) {
+                icons.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
+                      () -> actions.delete(List.of(unit.id()), List.of())));
+                offered.add(LobbyUnitMenu.LMP_DELETE);
+            }
+            icons.add(more);
+            if (!offered.isEmpty()) {
+                cardCommands.put(unit.id(), Set.copyOf(offered));
+            }
+            Table tools = new Table();
+            tools.setName("lobby-unit-tools-" + unit.id());
+            tools.right();
+            int perRow = 4;
+            int first = icons.size() % perRow == 0 ? perRow : icons.size() % perRow;
+            for (int index = 0; index < icons.size(); index++) {
+                if (index == first || (index > first && (index - first) % perRow == 0)) {
+                    tools.row();
+                }
+                // The first row holds the remainder, so the ⋮ always ends a full last row in the corner
+                tools.add(icons.get(index)).size(size("control.sm"));
+            }
             side.add(tools).right().padTop(space("xs"));
         }
         card.add(side).top().padLeft(space("sm")).minWidth(sideMin(compact));
@@ -638,6 +675,13 @@ final class LobbyForcesPanel {
         kit.tip(tool, true).getActor().setText(Messages.getString(tipKey));
         UiKit.onChange(tool, action);
         return tool;
+    }
+
+    /** A card icon running the unit menu's command {@code name} on the unit, which its ⋮ menu then leaves out. */
+    private UiButton commandTool(LobbyUnit unit, String icon, String tipKey, String what, String name,
+          Set<String> offered) {
+        offered.add(name);
+        return cardTool(unit, icon, tipKey, what, () -> actions.unitCommand(unit.id(), name));
     }
 
     /** The most weapons a card's sheet names before "+n"; its tooltip lists them all. */
@@ -1121,7 +1165,10 @@ final class LobbyForcesPanel {
                         .mapToDouble(LobbyUnit::tons).sum()), units.size());
         }
         pendingMenu = new MenuAnchor(x, y, face, title, detail);
-        actions.menu(units, formations, formationsView());
+        // Opened from a card's ⋮ for that unit alone, the menu leaves out what the card's icons already offer
+        Set<String> omit = (face != null && units.size() == 1 && formations.isEmpty())
+              ? cardCommands.getOrDefault(units.getFirst(), Set.of()) : Set.of();
+        actions.menu(units, formations, formationsView(), omit);
     }
 
     /** For the developer switch: opens the menu of the first of the local player's units; false when none shows. */

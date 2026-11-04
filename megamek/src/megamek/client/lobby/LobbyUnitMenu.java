@@ -150,8 +150,9 @@ public final class LobbyUnitMenu {
 
     private final List<Node> nodes;
 
-    private LobbyUnitMenu(Item popup) {
-        nodes = nodes(popup.children);
+    private LobbyUnitMenu(Item popup, Set<String> omit) {
+        nodes = nodes(popup.children.stream()
+              .filter(item -> item.command == null || !omit.contains(name(item.command))).toList());
     }
 
     /**
@@ -163,7 +164,29 @@ public final class LobbyUnitMenu {
      */
     public static LobbyUnitMenu of(Client client, LobbyCommands commands, List<Entity> entities, List<Force> forces,
           boolean forceView) {
-        return new LobbyUnitMenu(getPopup(client, commands, entities, forces, forceView));
+        return of(client, commands, entities, forces, forceView, Set.of());
+    }
+
+    /**
+     * As {@link #of(Client, LobbyCommands, List, List, boolean)}, leaving out the top-level items whose commands are in
+     * {@code omit}, such as those a unit's card already offers as icons.
+     *
+     * @param omit command names such as {@link #LMP_VIEW}
+     */
+    public static LobbyUnitMenu of(Client client, LobbyCommands commands, List<Entity> entities, List<Force> forces,
+          boolean forceView, Set<String> omit) {
+        return new LobbyUnitMenu(getPopup(client, commands, entities, forces, forceView), omit);
+    }
+
+    /** @return the command that runs the menu item {@code name}, such as {@link #LMP_VIEW}, on one unit */
+    public static String unitCommand(String name, int unitId) {
+        return name + NO_INFO + "|" + unitId;
+    }
+
+    /** @return the name of {@code command}, such as {@link #LMP_VIEW}, without its information and units */
+    public static String name(String command) {
+        int bar = command.indexOf('|');
+        return bar < 0 ? command : command.substring(0, bar);
     }
 
     /** @return the menu's entries */

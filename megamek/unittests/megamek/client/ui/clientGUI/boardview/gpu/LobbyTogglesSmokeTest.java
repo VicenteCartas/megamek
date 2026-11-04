@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.Input;
@@ -323,7 +324,8 @@ class LobbyTogglesSmokeTest {
             int[] menus = new int[1];
             LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions() {
                 @Override
-                public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+                public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView,
+                      Set<String> omit) {
                     menus[0]++;
                 }
             }, id -> null);
@@ -507,7 +509,12 @@ class LobbyTogglesSmokeTest {
         }
 
         @Override
-        public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+        public void unitCommand(int unitId, String name) {
+        }
+
+        @Override
+        public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView,
+              Set<String> omit) {
         }
 
         @Override

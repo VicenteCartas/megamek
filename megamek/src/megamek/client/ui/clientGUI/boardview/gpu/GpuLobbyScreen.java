@@ -639,8 +639,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
-            public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
-                window.unitMenu(unitIds, formationIds, formationsView);
+            public void unitCommand(int unitId, String name) {
+                window.unitCommand(unitId, name);
+            }
+
+            @Override
+            public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView,
+                  Set<String> omit) {
+                window.unitMenu(unitIds, formationIds, formationsView, omit);
             }
 
             @Override
