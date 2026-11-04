@@ -1466,6 +1466,7 @@ public final class GpuLobbyWindow {
         switch (action) {
             case LOAD -> loadMapSetup();
             case SAVE -> saveMapSetup();
+            case BOARD_EDITOR -> battlefieldCommand(LobbyBattlefieldController.Command.BOARD_EDITOR);
             case RANDOM_MAP -> openRandomMap();
             case CONDITIONS -> openConditions();
             case PREVIEW_3D -> {

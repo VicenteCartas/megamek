@@ -371,7 +371,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
         players.attach(stage.getRoot());
         forces.attach(stage.getRoot());
-        battlefield.attach(stage.getRoot());
         topBar.attach(stage.getRoot());
         nativeDialogs = new LobbyNativeDialogs(kit, stage, motion);
         stage.addListener(new InputListener() {
@@ -385,7 +384,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     return readyKey(keycode);
                 }
                 // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
-                if (topBar.back() || players.back() || forces.back() || battlefield.back()) {
+                if (topBar.back() || players.back() || forces.back()) {
                     return true;
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
@@ -999,7 +998,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private void closeMenus() {
         boolean closed = true;
         while (closed) {
-            closed = topBar.back() || players.back() || forces.back() || battlefield.back();
+            closed = topBar.back() || players.back() || forces.back();
         }
     }
 

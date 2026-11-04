@@ -156,7 +156,8 @@ class LobbyMapSetupSmokeTest {
 
             click(ui, body.findActor("map-load"));
             click(ui, body.findActor("map-random-settings"));
-            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP")), calls.toString());
+            click(ui, body.findActor("map-board-editor"));
+            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP", "run BOARD_EDITOR")), calls.toString());
 
             click(ui, body.findActor("map-medium-space"));
             assertEquals(MapSettings.MEDIUM_SPACE, fixture.form.settings().getMedium(), "the segmented control sets the map type");

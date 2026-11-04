@@ -3,9 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
 
-import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
-import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -21,15 +19,14 @@ import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPictureCard;
-import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
 
 /**
  * The lobby's right column: the battlefield. The map as the minimap draws it with the deployment zones, which opens the
- * map setup; the map's size and the planetary conditions; the rules that matter most and the victory conditions, each
+ * map setup, as Change map does, with the 3D preview beside it; a map rolled at launch adds its dice and random map
+ * settings beside the map's line; the map's size and the planetary conditions; the rules that matter most and the victory conditions, each
  * with Change; and auto-resolve, folded. Its body moves into the centre as a view while the column is folded into its
  * rail, and back when it unfolds. Every action goes to the window ({@link Actions}), which runs the Swing lobby's own.
  */
@@ -66,7 +63,9 @@ final class LobbyBattlefieldPanel {
     private final UiTextField runs;
     private final UiTextField threads;
     private final UiButton runAutoResolve;
-    private final UiPopover menu;
+    private final Table rolledTools = new Table();
+    private final UiButton generate;
+    private final UiButton randomMap;
     private LobbyBattlefield shown = LobbyBattlefield.EMPTY;
     private boolean autoResolveOpen;
     private boolean updating;
@@ -74,8 +73,6 @@ final class LobbyBattlefieldPanel {
     LobbyBattlefieldPanel(UiKit kit, Actions actions) {
         this.kit = kit;
         this.actions = actions;
-        menu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
-        menu.setName("lobby-battlefield-menu");
         panel = kit.panel(true);
 
         Table content = new Table();
@@ -88,18 +85,24 @@ final class LobbyBattlefieldPanel {
         content.add(map).growX().row();
 
         mapLine = wrapped(kit.typeLabel("", "body.strong", "text.primary"));
-        content.add(mapLine).growX().padTop(space("sm")).row();
+        generate = tool("die", "Lobby.battlefield.generate", "lobby-battlefield-generate", Command.GENERATE);
+        randomMap = tool("tune", "Lobby.battlefield.randomMap", "lobby-battlefield-random-map", Command.RANDOM_MAP);
+        rolledTools.add(generate);
+        rolledTools.add(randomMap).padLeft(space("xxs"));
+        Table mapRow = new Table();
+        mapRow.add(mapLine).growX().minWidth(0);
+        mapRow.add(rolledTools).right().top().padLeft(space("xs"));
+        content.add(mapRow).growX().padTop(space("sm")).row();
         UiButton editMap = kit.button("button-secondary" + UiTheme.COMPACT, null,
               Messages.getString("Lobby.battlefield.editMap"), null);
+        editMap.setName("lobby-battlefield-change-map");
         kit.tip(editMap, true).getActor().setText(Messages.getString("Lobby.battlefield.mapTooltip"));
         UiKit.onChange(editMap, () -> actions.command(Command.MAP_SETUP));
-        UiButton more = kit.button("button-icon" + UiTheme.COMPACT, "more-vert", null, null);
-        kit.tip(more, true).getActor().setText(Messages.getString("Lobby.battlefield.more"));
-        UiKit.onChange(more, () -> openMenu(more));
         Table mapTools = new Table();
         mapTools.left();
         mapTools.add(editMap);
-        mapTools.add(more).padLeft(space("xs"));
+        mapTools.add(tool("cube", "Lobby.battlefield.preview3D", "lobby-battlefield-preview-3d", Command.PREVIEW_3D))
+              .padLeft(space("xs"));
         content.add(mapTools).left().padTop(space("sm")).row();
 
         conditionsChange = change("Lobby.battlefield.conditions.tooltip", Command.CONDITIONS);
@@ -150,6 +153,15 @@ final class LobbyBattlefieldPanel {
     private static Label wrapped(Label label) {
         label.setWrap(true);
         return label;
+    }
+
+    /** An icon button named {@code name} that runs {@code command}, with its message as the tooltip. */
+    private UiButton tool(String icon, String tipKey, String name, Command command) {
+        UiButton button = kit.button("button-icon" + UiTheme.COMPACT, icon, null, null);
+        button.setName(name);
+        kit.tip(button, true).getActor().setText(Messages.getString(tipKey));
+        UiKit.onChange(button, () -> actions.command(command));
+        return button;
     }
 
     /** A quiet Change button that runs {@code command}. */
@@ -255,16 +267,6 @@ final class LobbyBattlefieldPanel {
         panel.add(body).grow();
     }
 
-    /** Adds the column's menu to {@code layer}, above the columns; once, before the panel shows a snapshot. */
-    void attach(Group layer) {
-        layer.addActor(menu);
-    }
-
-    /** One Escape step: closes the column's menu; true when it was open. */
-    boolean back() {
-        return menu.back();
-    }
-
     /**
      * Shows the map's picture at {@code aspect} (its height over its width), or, without one, that it is being drawn
      * or that there is none.
@@ -282,6 +284,9 @@ final class LobbyBattlefieldPanel {
         mapLine.setText(battlefield.mapLine().isBlank() ? Messages.getString("Lobby.noMap") : battlefield.mapLine());
         conditions.setText(battlefield.conditions());
         conditionsChange.setDisabled(battlefield.space());
+        rolledTools.setVisible(battlefield.rolled());
+        generate.setDisabled(!battlefield.generable());
+        randomMap.setDisabled(battlefield.space());
         rulesLine.setText(battlefield.rulesLine());
         if (!battlefield.notableRules().equals(before.notableRules()) || ruleChips.getCells().isEmpty()) {
             fillRuleChips(battlefield.notableRules());
@@ -319,41 +324,6 @@ final class LobbyBattlefieldPanel {
             kit.tip(rest, true).getActor().setText(String.join(", ", rules.subList(RULE_CHIPS, rules.size())));
             ruleChips.add(rest);
         }
-    }
-
-    /**
-     * The map's ⋮ menu: the random map settings, the map setup's files, generating the battlefield now, the 3D preview
-     * and the board editor, as the Swing lobby's map tab offers them; space disables what the Swing lobby disables.
-     */
-    private void openMenu(Actor button) {
-        if (menu.isVisible()) {
-            menu.cancel();
-            return;
-        }
-        if (menu.getStage() == null) {
-            return;
-        }
-        boolean ground = !shown.space();
-        UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-        command(items, "Lobby.battlefield.randomMap", ground, Command.RANDOM_MAP);
-        command(items, "Lobby.battlefield.generate", shown.generable(), Command.GENERATE);
-        items.separator();
-        command(items, "Lobby.battlefield.loadMapSetup", ground, Command.LOAD_MAP_SETUP);
-        command(items, "Lobby.battlefield.saveMapSetup", ground, Command.SAVE_MAP_SETUP);
-        items.separator();
-        command(items, "Lobby.battlefield.preview3D", true, Command.PREVIEW_3D);
-        command(items, "Lobby.battlefield.boardEditor", true, Command.BOARD_EDITOR);
-        menu.header(null, null).content(items);
-        menu.openedFrom(button);
-        Vector2 corner = button.localToStageCoordinates(new Vector2(0, 0));
-        menu.showAt(corner.x, corner.y);
-    }
-
-    private void command(UiMenuList items, String key, boolean enabled, Command command) {
-        items.item(Messages.getString(key), null, null, false, enabled, () -> {
-            menu.cancel();
-            actions.command(command);
-        });
     }
 
     /** For the developer switch: opens the auto-resolve settings. */

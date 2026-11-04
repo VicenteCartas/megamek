@@ -1302,12 +1302,18 @@ work for Swing, and item 11 is under investigation.
          width; on the line itself the icons cut "3 units" short. The swatch still opens the camouflage and a
          double click the player settings. The Game Master item left the card for the top bar's seat
          (`LobbyPlayersPanel.Actions.toggleGameMaster` is gone). `lobby+menu` now opens the deployment picker.
+       - The battlefield column without its ⋮ menu (`LobbyBattlefieldPanel`): a cube icon beside Change map previews
+         the map in 3D, and a map rolled at launch shows a die (Generate battlefield, enabled when no surprise
+         board stops it) and the random map settings beside its line (`LobbyBattlefield.rolled`). Loading and
+         saving the map setup were already in the map setup's footer; the Board Editor joins them there
+         (`LobbyMapSetupView.Action.BOARD_EDITOR`).
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
        `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
        stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
-       the name line.
+       the name line; `LobbyBattlefieldToolsSmokeTest`, `LobbyMapSetupSmokeTest` (Board Editor) and
+       `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
