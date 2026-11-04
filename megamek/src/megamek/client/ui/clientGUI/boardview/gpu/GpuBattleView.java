@@ -2288,7 +2288,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /**
      * The handle that turns the Select tool's selection about the vertical axis through its {@code pivot}: one object or
-     * decal, or one whole group about its members' centre. One object's handle attaches to its local +X side and turns
+     * decal, or one whole group about its members' centre. One object's handle attaches to its local +X bottom edge and turns
      * with its box. A group's handle uses the collective world envelope. The circle stays a readable size on screen.
      * {@code from} is what a drag's turn adds to: the object's rotation, or 0 for a group, whose value is its turn.
      */
@@ -2323,10 +2323,10 @@ class GpuBattleView extends ApplicationAdapter {
             outward = new Vector3(camera.direction).crs(camera.up); outward.z = 0; outward.nor();
             Vector3 centre = box.getCenter(new Vector3());
             float reach = Math.abs(outward.x) * box.getWidth() / 2 + Math.abs(outward.y) * box.getHeight() / 2;
-            base = new Vector3(centre.x, centre.y, box.max.z).mulAdd(outward, reach);
+            base = new Vector3(centre.x, centre.y, box.min.z).mulAdd(outward, reach);
         } else {
             var local = outline.getBounds();
-            base = local.getCenter(new Vector3()); base.x = local.max.x;
+            base = local.getCenter(new Vector3()); base.x = local.max.x; base.z = local.min.z;
             base.mul(outline.getTransform());
             outward = new Vector3(Vector3.X).rot(outline.getTransform()).nor();
         }

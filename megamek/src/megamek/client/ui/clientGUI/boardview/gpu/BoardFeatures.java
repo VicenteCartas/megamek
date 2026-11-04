@@ -14,6 +14,9 @@ import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Quaternion;
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.WoodsClearingTracker;
 import megamek.common.board.BoardDecoration;
@@ -1091,24 +1094,28 @@ final class BoardFeatures {
      * The frame of authored scenery (a feature with {@link BoardScene.Feature#authoredPlacement}) anchored at (x, y) on
      * the supporting plane {@code base}: the drawn model's and its ground cut's ({@link BoardGroundCut}).
      */
-    static com.badlogic.gdx.math.Matrix4 authoredTransform(float x, float y, float base, BoardScene.Feature feature) {
+    static Matrix4 authoredTransform(float x, float y, float base, BoardScene.Feature feature) {
         float scale = feature.scale() * BoardGeometry.hexScale();
-        return new com.badlogic.gdx.math.Matrix4().setToTranslation(x, y,
+        return new Matrix4().setToTranslation(x, y,
                     base + feature.elevation() * BoardGeometry.MODEL_LEVEL_HEIGHT * BoardGeometry.hexScale())
-              .rotate(com.badlogic.gdx.math.Vector3.Z, feature.rotation()).scale(scale * (float) feature.stretch().x(),
+              .rotate(new Quaternion(Vector3.Z, feature.rotation())).scale(scale * (float) feature.stretch().x(),
                     scale * (float) feature.stretch().y(), scale * (float) feature.stretch().z());
     }
 
+    /** Matrix4's axis/angle overload shares scratch state; placements run on workers and the render thread. */
+    static Matrix4 rotateDecoration(Matrix4 frame, BoardDecoration object) {
+        Quaternion turn = new Quaternion();
+        return frame.rotate(turn.set(Vector3.Z, (float) object.rotation()))
+              .rotate(turn.set(Vector3.Y, (float) object.rotationY())).rotate(turn.set(Vector3.X, (float) object.rotationX()));
+    }
+
     /** The same authored frame drives the drawn model, picking, shadows and ground-cover clearance. */
-    static com.badlogic.gdx.math.Matrix4 decorationTransform(Coords coords, BoardScene.Feature feature, float z) {
+    static Matrix4 decorationTransform(Coords coords, BoardScene.Feature feature, float z) {
         var object = feature.decoration();
         float scale = feature.scale() * RailRoute.visualScale(feature.asset()) * BoardGeometry.hexScale();
-        return new com.badlogic.gdx.math.Matrix4().setToTranslation(
+        return rotateDecoration(new Matrix4().setToTranslation(
                     BoardGeometry.centerX(coords) + feature.x() * BoardGeometry.hexScale(),
-                    BoardGeometry.centerY(coords) + feature.y() * BoardGeometry.hexScale(), z)
-              .rotate(com.badlogic.gdx.math.Vector3.Z, (float) object.rotation())
-              .rotate(com.badlogic.gdx.math.Vector3.Y, (float) object.rotationY())
-              .rotate(com.badlogic.gdx.math.Vector3.X, (float) object.rotationX())
+                    BoardGeometry.centerY(coords) + feature.y() * BoardGeometry.hexScale(), z), object)
               .scale(scale * (float) feature.stretch().x() * (object.mirror() ? -1 : 1), scale * (float) feature.stretch().y(),
                     scale * (float) feature.stretch().z());
     }

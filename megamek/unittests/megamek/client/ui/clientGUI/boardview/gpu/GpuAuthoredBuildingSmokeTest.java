@@ -353,7 +353,7 @@ class GpuAuthoredBuildingSmokeTest {
         place(editor, arena, "civic-arena", -12);
         place(editor, church, "frontier-church", 0);
         editor.board().setDescription("Authored buildings: HPG headquarters, a two-hex frontier church and a compact oval civic arena. "
-              + "Structural helpers define the floors; the antenna, church spire and arena fins are decorative. The arena field is open.");
+              + "Structural helpers define the floors; the antenna, church crown and arena scoreboard are decorative. The arena field is open.");
         editor.save(output.toPath().resolve("Authored Buildings.board2"));
         Board board = BoardFile.read(output.toPath().resolve("Authored Buildings.board2"));
         var original = capture(board);

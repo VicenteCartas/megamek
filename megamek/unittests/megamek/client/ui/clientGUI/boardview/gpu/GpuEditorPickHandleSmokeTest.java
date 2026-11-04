@@ -322,6 +322,7 @@ class GpuEditorPickHandleSmokeTest {
     private static void assertHandleAttached(GpuBattleView view, GpuTerrain terrain, Coords coords, String id) throws Exception {
         var box = terrain.editorObjects(coords).stream().filter(o -> o.id().equals(id)).findFirst().orElseThrow().outline();
         Vector3 expected = box.getBounds().getCenter(new Vector3()); expected.x = box.getBounds().max.x;
+        expected.z = box.getBounds().min.z;
         expected.mul(box.getTransform());
         assertTrue(expected.epsilonEquals(component(handle(view), "base"), .001f), "The displayed handle uses the current prop pose, including after release");
     }

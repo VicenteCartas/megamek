@@ -195,8 +195,7 @@ final class GpuAuthoredBuilding {
     static Matrix4 frame(Coords anchor, BoardDecoration object, double base) {
         float x = HexTile.centerX(anchor, HexTile.MODEL_WIDTH) + (float) object.x() * HexTile.MODEL_WIDTH;
         float y = HexTile.centerY(anchor, HexTile.HEIGHT) + (float) object.y() * HexTile.HEIGHT;
-        return new Matrix4().translate(x, y, (float) base * HexTile.LEVEL_HEIGHT)
-              .rotate(Vector3.Z, (float) object.rotation()).rotate(Vector3.Y, (float) object.rotationY()).rotate(Vector3.X, (float) object.rotationX())
+        return BoardFeatures.rotateDecoration(new Matrix4().setToTranslation(x, y, (float) base * HexTile.LEVEL_HEIGHT), object)
               .scale((float) (object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1)),
                     (float) (object.scale() * object.stretch().y()), (float) (object.scale() * object.stretch().z()));
     }

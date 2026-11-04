@@ -93,13 +93,11 @@ class GpuEditorOrientedBoundsSmokeTest {
                             Grip turned = attached(this, source, at, id);
                             assertGripFollowsSweep(this, held, turned, source.editorState().objects().getFirst().rotation() - 23);
                             beforeRelease = turned.tip();
-                            dump(this, id, "held");
                             GpuBoardTestUi.capture(new File(output, "held.png"));
                             Vector2 point = screen(this, swept(held, 52));
                             Gdx.input.getInputProcessor().touchUp(Math.round(point.x), Math.round(point.y), 0, Input.Buttons.LEFT);
                         } else if (step == 4) {
                             Grip released = attached(this, source, at, id);
-                            dump(this, id, "released");
                             GpuBoardTestUi.capture(new File(output, "released.png"));
                             assertGripPosition(this, beforeRelease, released.tip(), "Release and the sliced rebuild must not snap the handle");
                             source.editorCommand(new Command(Action.UNDO), source.takeFrame().boardGeneration());
@@ -140,27 +138,6 @@ class GpuEditorOrientedBoundsSmokeTest {
 
     private record Grip(Vector3 base, Vector3 tip, Vector3 pivot) { }
 
-    private static void dump(GpuBattleView view, String id, String label) throws Exception {
-        var field = GpuBattleView.class.getDeclaredField("terrain"); field.setAccessible(true);
-        Object terrain = field.get(view);
-        field = GpuTerrain.class.getDeclaredField("chunks"); field.setAccessible(true);
-        for (Object chunk : (Iterable<?>) field.get(terrain)) {
-            var props = chunk.getClass().getDeclaredField("props"); props.setAccessible(true);
-            for (Object prop : (Iterable<?>) props.get(chunk)) {
-                var identity = prop.getClass().getDeclaredField("decorationId"); identity.setAccessible(true);
-                if (!id.equals(identity.get(prop))) { continue; }
-                StringBuilder line = new StringBuilder("BOUNDS " + label);
-                for (String name : List.of("coords", "editorBounds", "decorationFeature", "previewFeature")) {
-                    var value = prop.getClass().getDeclaredField(name); value.setAccessible(true);
-                    Object data = value.get(prop);
-                    if (data instanceof BoardScene.Feature feature) { data = feature.decoration().rotation() + " / base " + feature.elevation(); }
-                    line.append(' ').append(name).append('=').append(data);
-                }
-                System.out.println(line);
-            }
-        }
-    }
-
     private static Grip attached(GpuBattleView view, GpuMapSource source, Coords at, String id) throws Exception {
         var field = GpuBattleView.class.getDeclaredField("terrain"); field.setAccessible(true);
         var drawn = ((GpuTerrain) field.get(view)).editorObjects(at).stream().filter(o -> o.id().equals(id)).findFirst().orElseThrow();
@@ -181,7 +158,8 @@ class GpuEditorOrientedBoundsSmokeTest {
         Vector3 local = new Vector3(grip.base()).mul(new Matrix4(box.getTransform()).inv());
         Vector3 centre = box.getBounds().getCenter(new Vector3());
         assertEquals(box.getBounds().max.x, local.x, .002, "Handle starts on the box's +X side");
-        assertEquals(centre.y, local.y, .002); assertEquals(centre.z, local.z, .002);
+        assertEquals(centre.y, local.y, .002);
+        assertEquals(box.getBounds().min.z, local.z, .002, "The Z handle attaches at the base, not halfway up the side");
         assertTrue(new Vector3(grip.tip()).sub(grip.base()).nor().epsilonEquals(axisX, .0001f), "The stem follows the object, not the camera");
         return grip;
     }
