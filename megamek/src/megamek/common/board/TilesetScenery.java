@@ -382,6 +382,10 @@ public final class TilesetScenery {
                   || asset.startsWith("buildings/") && buildingFile(asset).customExists())) { models.put(terrain, asset); }
         }
         String generic = genericBuilding(hex);
+        // Only an explicit modern design overrides the gameplay weight/class. Old tileset artwork must not
+        // displace the modular kit merely because a retired GLB still exists in a user's data directory.
+        if (generic != null && (BoardGenerator.exists(generic, Terrains.BUILDING)
+              || buildingFile(generic).customExists())) { models.putIfAbsent(Terrains.BUILDING, generic); }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
             images.add(definitions.select(hex).base());
@@ -405,10 +409,6 @@ public final class TilesetScenery {
                 }
             }
         }
-        // Generic buildings use their gameplay weight/class, including old roof/fluff artwork choices. Only an
-        // explicit design takes precedence.
-        if (generic != null && (BoardGenerator.exists(generic, Terrains.BUILDING)
-              || buildingFile(generic).customExists())) { models.putIfAbsent(Terrains.BUILDING, generic); }
         if (connected && singleHexBuilding(models.get(Terrains.BUILDING))) { models.put(Terrains.BUILDING, generic); }
         models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> kitVariant(footprint(asset,
               HexAppearance.footprint(hex.getAppearance())), HexAppearance.kitVariant(hex.getAppearance())));

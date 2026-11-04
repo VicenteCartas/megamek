@@ -22,6 +22,30 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorAuthoredBuildingTest {
+    @Test void debugSpecialPlacesAndScalesAnAuthoredBuildingWithSavedMembers(@TempDir Path dir) throws Exception {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
+        Coords at = new Coords(4, 4);
+        String asset = "buildings/debug/debug-authored";
+        editor.command(new Command(Action.ASSET, asset), null);
+        assertEquals(asset, editor.snapshot().activeBrush().object().asset());
+        editor.pointer(at, 0, 0, false); editor.finishStroke();
+        var object = editor.board().getHex(at).getDecorations().getFirst();
+        assertEquals(0, object.levels(), "The demo has fixed authored heights");
+        var expected = Map.of(at, 2, at.translated(1), 4);
+        assertEquals(expected, members(editor.board(), object.id()),
+              "The default sample occupies exactly two hexes with different heights");
+        editor.command(new Command(Action.SELECT_AT, "4,4", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, object.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "scale", "1.5"), null);
+        var enlarged = members(editor.board(), object.id());
+        assertTrue(enlarged.size() > 2, "Scaling expands the authored footprint");
+        assertEquals(java.util.Set.of(3, 6), java.util.Set.copyOf(enlarged.values()));
+        var file = dir.resolve("debug-authored.board2"); editor.save(file);
+        assertEquals(enlarged, members(BoardFile.read(file), object.id()));
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(expected, members(editor.board(), object.id()));
+    }
+
     @Test void authoredTiltCommandsKeepTheBrushGameplayAndUndoHistoryUnchanged() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);

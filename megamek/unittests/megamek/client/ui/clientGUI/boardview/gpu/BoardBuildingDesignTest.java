@@ -78,7 +78,7 @@ class BoardBuildingDesignTest {
         shared.dispose();
     }
 
-    @Test void placeholderAndAuthoredKitsLoadThroughTheRealConnectedKitContract() {
+    @Test void placeholderKitsUseConnectedPiecesAndTheAuthoredDemoUsesVolumes() {
         for (int weight = 1; weight <= 4; weight++) {
             for (int buildingClass = 0; buildingClass <= 3; buildingClass++) {
                 Hex hex = new Hex(0, "building:" + weight + ":0;bldg_class:" + buildingClass + ";bldg_elev:2", "");
@@ -99,10 +99,11 @@ class BoardBuildingDesignTest {
             }
         }
         String authored = "buildings/debug/debug-authored";
-        assertTrue(TilesetScenery.singleHexBuilding(authored));
-        var kit = GpuBuilding.kit(authored);
-        assertTrue(kit.pieces().stream().allMatch(ConnectedKit.Piece::core));
-        assertEquals(Set.of("base0", "floor0", "roof0"), kit.roles().keySet());
+        assertFalse(TilesetScenery.singleHexBuilding(authored));
+        assertTrue(megamek.common.board.BuildingVolumes.of(authored).present());
+        var data = (RigidGlb.Data) GpuAuthoredBuilding.load(authored).getFirst();
+        assertEquals(Set.of("structures/buildings/debug-panels#paint"), data.buildingPaint,
+              "The demo paints its walls while preserving the neutral roofs, labels and storey bands");
         assertFalse(TilesetScenery.singleHexBuilding("buildings/lunar_habitat/lunar_habitat"));
         assertFalse(TilesetScenery.singleHexBuilding("buildings/fuel_tanks/fuel_tank_light"));
     }

@@ -16,6 +16,29 @@ import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Test;
 
 class GpuAuthoredPartitionTest {
+    @Test void debugAuthoredAssetUsesItsVolumesForInteriorFloorsAndRoofSupport() {
+        GdxNativesLoader.load();
+        var at = new Coords(4, 4);
+        var object = new BoardDecoration("debug", "prop", "buildings/debug/debug-authored", null,
+              0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0);
+        var members = List.of(at, at.translated(1));
+        for (Coords cell : members) {
+            int height = cell.equals(at) ? 2 : 4;
+            var layout = new GpuAuthoredBuilding.Layout(cell, at, object, 0, 0, height, BuildingInteriors.YES, members, 9, 9);
+            var prepared = GpuAuthoredBuilding.prepare(layout, GpuAuthoredBuilding.load(object.asset()));
+            assertEquals(height, prepared.floors().size());
+            float notchX = cell.equals(at) ? -20 : 59 - HexTile.MODEL_WIDTH * .75f;
+            float notchY = cell.equals(at) ? 5 : 55 - HexTile.HEIGHT * .5f;
+            for (var floor : prepared.floors()) {
+                assertTrue(covers(floor, 0, 0), "Each storey has a usable interior");
+                assertFalse(covers(floor, notchX, notchY), "Generated floors must not fill the authored notch");
+            }
+            assertFalse(prepared.roof().isEmpty(), "The helper's top supplies roof supports");
+            assertTrue(prepared.roof().stream().allMatch(p -> p.z == height * HexTile.LEVEL_HEIGHT));
+            assertFalse(prepared.levels().getFirst().meshes.isEmpty(), "The visible shell survives hex slicing");
+        }
+    }
+
     @Test void sharesConserveSurfaceAreaAndOwnOnlyTheirVoronoiRegionIncludingDistantOverhangs() {
         GdxNativesLoader.load();
         var mesh = new GeneratedMesh();
@@ -48,6 +71,14 @@ class GpuAuthoredPartitionTest {
             double width = 290 * .9, depth = 180 * 1.1, height = 30 * 1.2;
             assertEquals(2 * (width * depth + width * height + depth * height), area, 1.5, "No missing or duplicate exterior at " + rotation);
         }
+    }
+
+    private static boolean covers(List<Vector3> triangles, float x, float y) {
+        for (int i = 0; i < triangles.size(); i += 3) {
+            var a = triangles.get(i); var b = triangles.get(i + 1); var c = triangles.get(i + 2);
+            if (com.badlogic.gdx.math.Intersector.isPointInTriangle(x, y, a.x, a.y, b.x, b.y, c.x, c.y)) { return true; }
+        }
+        return false;
     }
 
     private static Vector3 point(float[] vertices, int at) { return new Vector3(vertices[at], vertices[at + 1], vertices[at + 2]); }

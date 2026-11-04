@@ -11,6 +11,23 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class BuildingVolumesTest {
+    @Test void debugBuildingHasTwoFixedHeightsAndPreservesBothNotches() {
+        var definition = BuildingVolumes.of("buildings/debug/debug-authored");
+        assertTrue(definition.present()); assertFalse(definition.modular());
+        assertEquals(2, definition.solids().size());
+        var solids = definition.assemble(9, 12);
+        assertEquals(Set.of(36.0, 72.0), BuildingVolumes.roofs(solids).keySet(), "Fixed wings are not stacked modules");
+        for (double z : new double[] {9, 27, 45, 63}) {
+            var floor = BuildingVolumes.section(solids, z);
+            assertEquals(z < 36, floor.contains(0, 0));
+            assertTrue(floor.contains(68, 29));
+            assertFalse(floor.contains(-20, 5), "The low wing's side notch stays open");
+            assertFalse(floor.contains(59, 55), "The tower's end notch stays open");
+        }
+        assertEquals(0, BuildingVolumes.area(BuildingVolumes.section(solids, 72.5)), .001,
+              "The roof slab and height label do not create another gameplay level");
+    }
+
     @Test void areaLimitUsesTheWholeStructuralProjectionForTiltedSourceData() {
         var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/xenobiology-station", null,
               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);

@@ -91,39 +91,25 @@ class BoardEditorBuildingTest {
     }
 
     @Test
-    void authoredBuildingRotatesAndTintsThenSwitchesToGenericOnConnectionInOneUndoStep(@TempDir Path directory) throws Exception {
-        Coords first = new Coords(2, 2), second = first.translated(0);
-        var editor = new BoardEditorSession();
-        editor.open(Board.createEmptyBoard(5, 5), null);
-        editor.command(new Command(Action.CHOOSE_BRUSH, "building", "building/debug-authored"), null);
-        editor.pointer(first, 0, 0, false); editor.finishStroke();
-        editor.command(new Command(Action.DESIGN_ROTATION, "building", "45"), null);
-        editor.command(new Command(Action.BUILDING_COLOUR, "#72949b"), null);
-        var original = editor.board().getHex(first).getAppearance().get("building");
-        assertEquals(45, original.rotation());
-        assertEquals("#72949b", original.colours().slot(0));
-        assertEquals("buildings/debug/debug-authored", TilesetScenery.structureModels(editor.board().getHex(first)).get(Terrains.BUILDING));
-        Path file = directory.resolve("authored.board2");
-        editor.save(file); editor.open(file);
-        assertEquals(original, editor.board().getHex(first).getAppearance().get("building"));
-        editor.command(new Command(Action.CHOOSE_BRUSH, "building", ""), null);
-        editor.pointer(second, 0, 0, false); editor.finishStroke();
-        editor.command(new Command(Action.SELECT_AT, "2,2", ""), null);
-        editor.command(new Command(Action.AUTO_EDGES, "building"), null);
-        assertTrue(editor.snapshot().buildingConnected());
-        assertEquals(TilesetScenery.genericBuilding(editor.board().getHex(first)),
-              TilesetScenery.structureModels(editor.board().getHex(first)).get(Terrains.BUILDING));
-        var connected = editor.board().getHex(first).getAppearance().get("building");
-        assertTrue(connected == null || connected.rotation() == null && connected.variant() == null);
-        editor.command(new Command(Action.UNDO), null);
-        assertEquals(original, editor.board().getHex(first).getAppearance().get("building"));
-        assertEquals(0, editor.board().getHex(first).getTerrain(Terrains.BUILDING).getExits());
-        // Incoming-only connections suppress an authored kit too, even in a file that has not been edited yet.
-        Hex neighbour = editor.board().getHex(second);
-        neighbour.getTerrain(Terrains.BUILDING).setExits(8);
-        Hex hex = editor.board().getHex(first);
-        assertTrue(TilesetScenery.buildingConnected(hex, first, editor.board()::getHex));
-        assertEquals(TilesetScenery.genericBuilding(hex), TilesetScenery.structureModels(hex, true).get(Terrains.BUILDING));
+    void legacyDebugAppearanceUsesTheWeightBasedKitAfterSaving(@TempDir Path directory) throws Exception {
+        var board = Board.createEmptyBoard(6, 3);
+        var colour = megamek.common.board.BoardDecoration.Colours.of("#72949b");
+        for (int weight = 1; weight <= 4; weight++) {
+            Hex hex = new Hex(0, "building:" + weight + ":0;bldg_elev:2;bldg_cf:60;bldg_basement_type:1", "");
+            hex.setAppearance(Map.of("building", new HexAppearance("building/debug-authored", null, null, null, colour, 45)));
+            board.setHex(new Coords(weight, 1), hex);
+        }
+        var editor = new BoardEditorSession(); editor.open(board, null);
+        Path file = directory.resolve("legacy-debug.board2"); editor.save(file); editor.open(file);
+        for (int weight = 1; weight <= 4; weight++) {
+            Hex hex = editor.board().getHex(weight, 1);
+            String model = TilesetScenery.structureModels(hex).get(Terrains.BUILDING);
+            assertEquals(TilesetScenery.genericBuilding(hex), model);
+            assertTrue(TilesetScenery.generatedKit(model));
+            assertTrue(hex.getDecorations().isEmpty(), "A legacy single-hex look must not place the two-hex demo");
+            assertEquals(colour, hex.getAppearance().get("building").colours());
+            assertEquals(45, hex.getAppearance().get("building").rotation());
+        }
     }
 
     @Test

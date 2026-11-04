@@ -2950,8 +2950,12 @@ final class BoardMultiHexBuilding {
                         plate[k][0] += normal.x * .035f; plate[k][1] += normal.y * .035f; plate[k][2] += normal.z * .035f;
                         if (band == 0) {
                             plate[k][2] += k < 2 ? .18f : -.18f;
-                            plate[k][10] += (k < 2 ? -.18f : .18f) / 12;
                         }
+                        // The joints and bolts are modeled. Keep the trim's baked edge rows off these fitted plates.
+                        // U follows the member; V samples its clean middle with the same physical texel scale.
+                        plate[k][10] = (phase + (plate[k][0] - a[0]) * tx + (plate[k][1] - a[1]) * ty) / 12;
+                        plate[k][11] = .5f + (band == 0 ? (z[0] + z[1]) / 2 - plate[k][2]
+                              : (plate[k][0] - a[0]) * nx + (plate[k][1] - a[1]) * ny + width / 2) / 12;
                     }
                     outward(mesh, HARDWARE, hex, plate[0], plate[1], plate[2]);
                     outward(mesh, HARDWARE, hex, plate[0], plate[2], plate[3]);
@@ -2960,18 +2964,14 @@ final class BoardMultiHexBuilding {
                             fastener(mesh, hex, new Vector3(a[0] + tx * end + nx * .08f,
                                   a[1] + ty * end + ny * .08f, top - 1.15f), new Vector3(nx, ny, 0), .18f);
                         }
+                    } else if (band == 2) {
+                        for (float[] bolt : plateBolts(List.of(plate), .18f)) {
+                            fastener(mesh, hex, new Vector3(bolt[0], bolt[1], top + .295f), Vector3.Z, .18f);
+                        }
                     }
                 }
             }
             run = next;
-        }
-        for (float at = (float) Math.ceil((phase + width) / 9) * 9 - phase; at < length - width; at += 9) {
-            Vector3 centre = new Vector3(a[0] + tx * at - nx * width / 2, a[1] + ty * at - ny * width / 2, top + .31f);
-            surfacePlate(mesh, hex, HARDWARE, centre, new Vector3(tx, ty, 0), new Vector3(-nx, -ny, 0), .12f, width * .35f);
-            for (float inset : new float[] { -.25f, .25f }) {
-                fastener(mesh, hex, new Vector3(centre).add(tx * .28f + nx * width * inset,
-                      ty * .28f + ny * width * inset, .015f), Vector3.Z, .18f);
-            }
         }
     }
 
@@ -3213,6 +3213,29 @@ final class BoardMultiHexBuilding {
           float growth) {
         var outer = grown(counterClockwise(outline), growth);
         var inner = parapets(outer, .3f);
+        var plate = parapets(inner, .28f);
+        // Orient the finish with the cap, not the board. A relative tolerance keeps equivalent edges stable.
+        int longest = 0;
+        float lengthSquared = 0;
+        for (int edge = 0; edge < outline.size(); edge++) {
+            float[] a = outline.get(edge), b = outline.get((edge + 1) % outline.size());
+            float squared = (b[0] - a[0]) * (b[0] - a[0]) + (b[1] - a[1]) * (b[1] - a[1]);
+            if (squared > lengthSquared * 1.001f) { longest = edge; lengthSquared = squared; }
+        }
+        float[] start = outline.get(longest), end = outline.get((longest + 1) % outline.size());
+        float tx = (end[0] - start[0]) / (float) Math.sqrt(lengthSquared);
+        float ty = (end[1] - start[1]) / (float) Math.sqrt(lengthSquared);
+        float minU = Float.POSITIVE_INFINITY, maxU = Float.NEGATIVE_INFINITY;
+        float minV = Float.POSITIVE_INFINITY, maxV = Float.NEGATIVE_INFINITY;
+        for (float[] p : inner) {
+            float x = p[0] - start[0], y = p[1] - start[1];
+            float u = x * tx + y * ty, v = x * ty - y * tx;
+            minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+            minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+        }
+        float centreU = (minU + maxU) / 2, centreV = (minV + maxV) / 2;
+        // Large transition collars also stay between the texture's baked seam/bolt rows, without stretching texels.
+        float repeat = Math.max(12, (maxV - minV) / .8f);
         float shoulder = Math.max(bottom, top - .4f);
         prism(mesh, hex, PIER, outer, bottom, shoulder, outer.size());
         for (int edge = 0; edge < outer.size(); edge++) {
@@ -3222,24 +3245,68 @@ final class BoardMultiHexBuilding {
             float nx = (b[1] - a[1]) / length, ny = (a[0] - b[0]) / length;
             Vector3 normal = new Vector3(nx * (top - shoulder), ny * (top - shoulder), .3f).nor();
             float slope = (float) Math.hypot(.3f, top - shoulder);
-            float[] v0 = vertex(a[0], a[1], shoulder, normal.x, normal.y, normal.z, 1, 0, 0);
-            float[] v1 = vertex(b[0], b[1], shoulder, normal.x, normal.y, normal.z, 1, 0, length / 12);
-            float[] v2 = vertex(d[0], d[1], top, normal.x, normal.y, normal.z, 1, -slope / 12,
-                  ((d[1] - a[1]) * nx - (d[0] - a[0]) * ny) / 12);
-            float[] v3 = vertex(c[0], c[1], top, normal.x, normal.y, normal.z, 1, -slope / 12,
-                  ((c[1] - a[1]) * nx - (c[0] - a[0]) * ny) / 12);
+            float[] v0 = vertex(a[0], a[1], shoulder, normal.x, normal.y, normal.z, 1, 0, .5f + slope / (2 * repeat));
+            float[] v1 = vertex(b[0], b[1], shoulder, normal.x, normal.y, normal.z, 1, length / repeat, .5f + slope / (2 * repeat));
+            float[] v2 = vertex(d[0], d[1], top, normal.x, normal.y, normal.z, 1,
+                  ((d[1] - a[1]) * nx - (d[0] - a[0]) * ny) / repeat, .5f - slope / (2 * repeat));
+            float[] v3 = vertex(c[0], c[1], top, normal.x, normal.y, normal.z, 1,
+                  ((c[1] - a[1]) * nx - (c[0] - a[0]) * ny) / repeat, .5f - slope / (2 * repeat));
             outward(mesh, HARDWARE, hex, v0, v1, v2); outward(mesh, HARDWARE, hex, v0, v2, v3);
         }
-        clippedPolygon(mesh, hex, PIER, inner.stream()
-              .map(p -> vertex(p[0], p[1], top, 0, 0, 1, 1, p[0] / 12, -p[1] / 12)).toList());
-        var plate = parapets(inner, .28f);
-        clippedPolygon(mesh, hex, HARDWARE, plate.stream()
-              .map(p -> vertex(p[0], p[1], top + .035f, 0, 0, 1, 1, p[0] / 12, -p[1] / 12)).toList());
-        var bolts = parapets(plate, .28f);
-        for (int corner = 0; corner < bolts.size(); corner += 2) {
-            float[] at = bolts.get(corner);
-            fastener(mesh, hex, new Vector3(at[0], at[1], top + .075f), Vector3.Z, .23f);
+        for (boolean inset : new boolean[] { false, true }) {
+            List<float[]> laid = new ArrayList<>();
+            for (float[] p : inset ? plate : inner) {
+                float x = p[0] - start[0], y = p[1] - start[1];
+                laid.add(vertex(p[0], p[1], top + (inset ? .035f : 0), 0, 0, 1, 1,
+                      .5f + (x * tx + y * ty - centreU) / repeat, .5f + (x * ty - y * tx - centreV) / repeat));
+            }
+            clippedPolygon(mesh, hex, inset ? HARDWARE : PIER, laid);
         }
+        for (float[] at : plateBolts(plate, .18f)) {
+            fastener(mesh, hex, new Vector3(at[0], at[1], top + .045f), Vector3.Z, .18f);
+        }
+    }
+
+    /** Fasteners follow the fitted plate's corners, with whole washers inside and one bolt per small chamfer. */
+    private static List<float[]> plateBolts(List<float[]> plate, float radius) {
+        var outline = counterClockwise(plate);
+        var inset = outline;
+        float clearance = radius * 1.45f + .2f;
+        for (int edge = 0; edge < outline.size() && !inset.isEmpty(); edge++) {
+            float[] a = outline.get(edge), b = outline.get((edge + 1) % outline.size());
+            float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (length < EPSILON) { continue; }
+            float nx = (b[1] - a[1]) / length, ny = (a[0] - b[0]) / length;
+            inset = clip(inset, nx, ny, nx * a[0] + ny * a[1] - clearance, false);
+        }
+        if (inset.isEmpty()) { return List.of(); }
+        // Group adjoining short bevel edges as a whole, including the wraparound, rather than skipping vertex indices.
+        float spacing = radius * 3.6f;
+        int first = 0, size = inset.size();
+        for (; first < size; first++) {
+            float[] a = inset.get(first), b = inset.get((first + 1) % size);
+            if (Math.hypot(b[0] - a[0], b[1] - a[1]) >= spacing) { break; }
+        }
+        List<float[]> bolts = new ArrayList<>();
+        int index = (first + 1) % size, remaining = size;
+        while (remaining > 0) {
+            float x = 0, y = 0;
+            int count = 0;
+            float[] start = inset.get(index), end = start;
+            do {
+                float[] at = inset.get(index), next = inset.get((index + 1) % size);
+                end = at;
+                x += at[0]; y += at[1]; count++; remaining--; index = (index + 1) % size;
+                if (Math.hypot(next[0] - at[0], next[1] - at[1]) >= spacing) { break; }
+            } while (remaining > 0);
+            // A narrow cap can connect two valid corner bolts through a short intermediate bevel vertex.
+            if (count > 2 && Math.hypot(end[0] - start[0], end[1] - start[1]) >= spacing) {
+                bolts.add(start); bolts.add(end);
+            } else {
+                bolts.add(new float[] { x / count, y / count });
+            }
+        }
+        return bolts;
     }
 
     private static void facadePost(GeneratedMesh mesh, List<float[]> hex, float[] a, float tx, float ty,
@@ -3327,7 +3394,7 @@ final class BoardMultiHexBuilding {
             float u = i == 0 || i == 3 ? -1 : 1, v = i < 2 ? -1 : 1;
             Vector3 p = new Vector3(centre).mulAdd(right, u * halfWidth).mulAdd(up, v * halfHeight);
             corners[i] = vertex(p.x, p.y, p.z, normal.x, normal.y, normal.z, 1,
-                  (u + 1) * halfWidth / 12, (v + 1) * halfHeight / 12);
+                  .5f + u * halfWidth / 12, .5f + v * halfHeight / 12);
         }
         outward(mesh, material, hex, corners[0], corners[1], corners[2]);
         outward(mesh, material, hex, corners[0], corners[2], corners[3]);

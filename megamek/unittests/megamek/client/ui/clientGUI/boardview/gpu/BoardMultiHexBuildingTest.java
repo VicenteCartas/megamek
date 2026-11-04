@@ -518,33 +518,124 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void pillarCapPlatesAndSlopingShouldersKeepSquareTexels() throws Exception {
+    void pillarCapFinishFollowsRotationAndTranslationWithoutStretching() throws Exception {
         var method = BoardMultiHexBuilding.class.getDeclaredMethod("postCap", GeneratedMesh.class, List.class,
               List.class, float.class, float.class, float.class);
         method.setAccessible(true);
         List<float[]> hex = new ArrayList<>();
         for (int corner = 0; corner < 6; corner++) {
-            hex.add(new float[] { HexTile.cornerOffsetX(corner, 100), HexTile.cornerOffsetY(corner, 86.6f) });
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
         }
-        var mesh = new GeneratedMesh();
-        method.invoke(null, mesh, hex, List.of(new float[] { -4, -3 }, new float[] { 4, -3 },
-              new float[] { 5, 2 }, new float[] { -3, 4 }), 0f, 2f, .5f);
-        var plates = vertices(mesh.data("pillar-cap", false), BoardMultiHexBuilding.HARDWARE);
-        int tops = 0, shoulders = 0;
-        for (int i = 0; i < plates.size(); i += 3) {
-            float[] a = plates.get(i), b = plates.get(i + 1), c = plates.get(i + 2);
-            var ab = new Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-            var ac = new Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
-            if (ab.crs(ac).len() < .2f) { continue; } // Ignore the small round fastener heads.
-            var axes = textureAxes(a, b, c);
-            assertNotNull(axes);
-            assertEquals(12, axes[0].len(), .01, "The top and shoulders use the same physical texture scale");
-            assertEquals(12, axes[1].len(), .01);
-            assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002,
-                  "Angled plate edges must not shear the metal grain or its normal map");
-            if (a[5] > .99f) { tops++; } else { shoulders++; }
+        List<float[]> reference = new ArrayList<>();
+        for (int degrees : new int[] { 0, 30, 90, 210 }) {
+            float cos = (float) Math.cos(Math.toRadians(degrees)), sin = (float) Math.sin(Math.toRadians(degrees));
+            float x = degrees == 0 ? 0 : 64, y = degrees == 0 ? 0 : -37;
+            var outline = List.of(new float[] { -4, -3 }, new float[] { 4, -3 }, new float[] { 5, 2 }, new float[] { -3, 4 })
+                  .stream().map(p -> new float[] { x + cos * p[0] - sin * p[1], y + sin * p[0] + cos * p[1] }).toList();
+            var mesh = new GeneratedMesh();
+            method.invoke(null, mesh, hex, outline, 0f, 2f, .5f);
+            var plates = vertices(mesh.data("pillar-cap", false), BoardMultiHexBuilding.HARDWARE);
+            int tops = 0, shoulders = 0;
+            for (int i = 0; i < plates.size(); i += 3) {
+                float[] a = plates.get(i), b = plates.get(i + 1), c = plates.get(i + 2);
+                var ab = new Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+                var ac = new Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+                if (ab.crs(ac).len() < .2f) { continue; } // Ignore the small round fastener heads.
+                var axes = textureAxes(a, b, c);
+                assertNotNull(axes);
+                assertEquals(12, axes[0].len(), .01, "The top and shoulders use the same physical texture scale");
+                assertEquals(12, axes[1].len(), .01);
+                assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002,
+                      "Angled plate edges must not shear the metal grain or its normal map");
+                for (float[] v : List.of(a, b, c)) {
+                    assertTrue(v[11] >= .1f && v[11] <= .9f, "Baked seam and bolt rows must not cross the fitted cap");
+                    if (degrees == 0) { reference.add(v); continue; }
+                    float originalX = (v[0] - x) * cos + (v[1] - y) * sin;
+                    float originalY = -(v[0] - x) * sin + (v[1] - y) * cos;
+                    assertTrue(reference.stream().anyMatch(r -> Math.abs(r[0] - originalX) < .001f
+                                && Math.abs(r[1] - originalY) < .001f && Math.abs(r[2] - v[2]) < .001f
+                                && Math.abs(r[10] - v[10]) < .001f && Math.abs(r[11] - v[11]) < .001f),
+                          "Rotating and moving a cap must carry its texture orientation and phase with it");
+                }
+                if (a[5] > .99f) { tops++; } else { shoulders++; }
+            }
+            assertTrue(tops > 0 && shoulders > 0);
         }
-        assertTrue(tops > 0 && shoulders > 0);
+    }
+
+    @Test
+    void copingPlateFinishFollowsItsMemberWithoutExtraTextureJoints() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("coping", GeneratedMesh.class, List.class,
+              float[].class, float[].class, float[].class, float[].class, float.class, float.class);
+        method.setAccessible(true);
+        List<float[]> hex = new ArrayList<>();
+        for (int corner = 0; corner < 6; corner++) {
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
+        }
+        for (int degrees : new int[] { 0, 30, 90, 210 }) {
+            float cos = (float) Math.cos(Math.toRadians(degrees)), sin = (float) Math.sin(Math.toRadians(degrees));
+            var outline = List.of(new float[] { 0, 0 }, new float[] { 36, 0 }, new float[] { 3.8f, 3.8f }, new float[] { 32.2f, 3.8f })
+                  .stream().map(p -> new float[] { 64 + cos * p[0] - sin * p[1], -37 + sin * p[0] + cos * p[1] }).toList();
+            var mesh = new GeneratedMesh();
+            method.invoke(null, mesh, hex, outline.get(0), outline.get(1), outline.get(2), outline.get(3), 20f, 3.5f);
+            var plates = vertices(mesh.data("coping", false), BoardMultiHexBuilding.HARDWARE);
+            int tops = 0, fronts = 0;
+            for (int i = 0; i < plates.size(); i += 3) {
+                float[] a = plates.get(i), b = plates.get(i + 1), c = plates.get(i + 2);
+                var ab = new Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+                var ac = new Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+                if (ab.crs(ac).len() < .2f) { continue; }
+                var axes = textureAxes(a, b, c);
+                assertNotNull(axes);
+                assertEquals(1, Math.abs(axes[0].cpy().nor().dot(new Vector3(cos, sin, 0))), .002f,
+                      "Hardware finish must run along the wall, including mitered ends and joint straps");
+                assertEquals(12, axes[0].len(), .02f);
+                assertEquals(12, axes[1].len(), .02f);
+                assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002f);
+                for (float[] v : List.of(a, b, c)) {
+                    assertTrue(v[11] >= .1f && v[11] <= .9f, "Baked trim joints must not cross physical coping plates");
+                }
+                if (a[5] > .99f) { tops++; } else { fronts++; }
+            }
+            assertTrue(tops > 0 && fronts > 0);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void topPlateBoltsRespectChamfersMiteredEndsAndWasherClearance() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("plateBolts", List.class, float.class);
+        method.setAccessible(true);
+        var cap = List.of(new float[] { -3, -.82f }, new float[] { 3, -.82f }, new float[] { 3, .22f },
+              new float[] { 2.4f, .82f }, new float[] { -2.4f, .82f }, new float[] { -3, .22f });
+        var rail = List.of(new float[] { 0, 0 }, new float[] { 9, 0 }, new float[] { 7.5f, 2.8f }, new float[] { 1.5f, 2.8f });
+        for (var plate : List.of(cap, rail)) {
+            var reference = (List<float[]>) method.invoke(null, plate, .18f);
+            assertEquals(4, reference.size(), "Chamfer vertices must not turn four corner fasteners into an uneven three-bolt pattern");
+            for (float[] bolt : reference) {
+                for (int edge = 0; edge < plate.size(); edge++) {
+                    float[] a = plate.get(edge), b = plate.get((edge + 1) % plate.size());
+                    double distance = ((b[0] - a[0]) * (bolt[1] - a[1]) - (b[1] - a[1]) * (bolt[0] - a[0]))
+                          / Math.hypot(b[0] - a[0], b[1] - a[1]);
+                    assertTrue(distance >= .18f * 1.45f + .19f, "The whole washer needs a visible margin inside every plate edge");
+                }
+                assertTrue(reference.stream().anyMatch(other -> Math.abs(other[0] - (plate == cap ? -bolt[0] : 9 - bolt[0])) < .001f
+                            && Math.abs(other[1] - bolt[1]) < .001f), "Symmetric plates need symmetric fastening patterns");
+            }
+            for (int shift = 0; shift < plate.size(); shift++) {
+                List<float[]> reordered = new ArrayList<>(plate);
+                Collections.rotate(reordered, shift);
+                Collections.reverse(reordered);
+                var bolts = (List<float[]>) method.invoke(null, reordered, .18f);
+                assertEquals(reference.size(), bolts.size());
+                for (float[] bolt : bolts) {
+                    assertTrue(reference.stream().anyMatch(r -> Math.hypot(r[0] - bolt[0], r[1] - bolt[1]) < .001),
+                          "Changing vertex order must not move the bolts");
+                }
+            }
+        }
+        var sliver = List.of(new float[] { 0, 0 }, new float[] { .7f, 0 }, new float[] { .7f, 3 }, new float[] { 0, 3 });
+        assertTrue(((List<float[]>) method.invoke(null, sliver, .18f)).isEmpty(), "A partial plate too small for a washer gets no bolt");
     }
 
     @Test

@@ -159,7 +159,6 @@ class GpuBuildingConnectionsSmokeTest {
             }
             kits.add("buildings/lunar_habitat/lunar_habitat");
             kits.add("buildings/lunar_habitat/lunar_habitat@parapet");
-            kits.add("buildings/debug/debug-authored");
             for (String asset : kits) {
                 for (var footprint : HexAppearance.Footprint.values()) {
                     String design = TilesetScenery.footprint(asset, footprint);

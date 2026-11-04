@@ -20,6 +20,35 @@ class TilesetSceneryFilesTest {
     private static final String ASSET = "buildings/saxarba/test/hall_12";
 
     @Test
+    void retiredTilesetModelsCannotOverrideTheModularWeightAndClass(@TempDir Path root) throws Exception {
+        File previous = Configuration.dataDir();
+        try {
+            prepare(root);
+            Files.writeString(root.resolve("models/board/classic/tileset/classic.tileset"),
+                  "super * \"building:*\" \"\" \"" + ASSET + "\"\n");
+            Path legacy = root.resolve("models/board/" + ASSET + ".glb");
+            Files.createDirectories(legacy.getParent()); Files.writeString(legacy, "retired model");
+            for (int weight = 1; weight <= 4; weight++) {
+                for (int kind = 0; kind <= 3; kind++) {
+                    Hex hex = new Hex(0, "building:" + weight + ";bldg_class:" + kind + ";bldg_elev:2", "");
+                    String expected = TilesetScenery.genericBuilding(hex);
+                    Path kit = root.resolve("models/" + expected + ".json");
+                    Files.createDirectories(kit.getParent()); Files.writeString(kit, "[]");
+                }
+            }
+            Configuration.setDataDir(root.toFile()); TilesetScenery.reload();
+            for (int weight = 1; weight <= 4; weight++) {
+                for (int kind = 0; kind <= 3; kind++) {
+                    Hex hex = new Hex(0, "building:" + weight + ";bldg_class:" + kind + ";bldg_elev:2", "");
+                    assertEquals(TilesetScenery.genericBuilding(hex), TilesetScenery.structureModels(hex).get(Terrains.BUILDING));
+                }
+            }
+        } finally {
+            Configuration.setDataDir(previous); TilesetScenery.reload();
+        }
+    }
+
+    @Test
     void filePrecedenceMissingModelsAndVariantsFollowTheAssetReloadGeneration(@TempDir Path root) throws Exception {
         File previous = Configuration.dataDir();
         try {
