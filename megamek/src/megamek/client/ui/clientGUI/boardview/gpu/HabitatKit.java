@@ -103,7 +103,7 @@ final class HabitatKit {
         roles.add("base0");
         for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
         for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
-        return GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
+        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
             boolean roof = role.startsWith("roof");
             // The deck must be inset along the same walls as its rim. A separate cap would sit under the open deck.
             if (roof && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
@@ -148,6 +148,11 @@ final class HabitatKit {
             }
             return result;
         });
+        for (var level : levels) {
+            level.buildingPaint.add(spec.materials().get("wall"));
+            level.paintMasks.add(spec.materials().get("wall"));
+        }
+        return levels;
     }
 
     // ---- Surfaces ------------------------------------------------------------------------------------------------------

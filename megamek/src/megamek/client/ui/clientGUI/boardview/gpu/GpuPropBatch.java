@@ -99,7 +99,7 @@ final class GpuPropBatch implements Disposable {
               && value.meshPart.primitiveType == GL20.GL_TRIANGLES && value.meshPart.size > 0
               && value.meshPart.mesh.getNumIndices() > 0 && Arrays.equals(value.worldTransform.val, IDENTITY)
               && ((mask & ~(ColorAttribute.Diffuse | TextureAttribute.Diffuse | GpuModelMaterial.TYPE
-                    | GpuLinearColors.TYPE | BOARD_MAPS)) == 0 || GpuTerrain.batchableSculpt(value.material));
+                    | GpuLinearColors.TYPE | GpuBuildingPaint.TYPE | BOARD_MAPS)) == 0 || GpuTerrain.batchableSculpt(value.material));
     }
 
     /**

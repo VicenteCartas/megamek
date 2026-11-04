@@ -9,7 +9,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.imageio.ImageIO;
 
+import com.badlogic.gdx.graphics.g3d.model.data.ModelTexture;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.board.Coords;
@@ -258,6 +260,8 @@ class BoardMultiHexBuildingTest {
                     var model = BoardMultiHexBuilding.model(corridorLayout, lod);
                     var vertices = vertices(model, BoardMultiHexBuilding.FRAME);
                     vertices.addAll(vertices(model, BoardMultiHexBuilding.ROOF));
+                    vertices.addAll(vertices(model, BoardMultiHexBuilding.PIER));
+                    vertices.addAll(vertices(model, BoardMultiHexBuilding.HARDWARE));
                     List<Vector3> aboveFoundation = new ArrayList<>();
                     for (int at = 0; at < vertices.size(); at += 3) {
                         if (vertices.get(at)[2] <= 9 || vertices.get(at + 1)[2] <= 9 || vertices.get(at + 2)[2] <= 9) { continue; }
@@ -372,19 +376,30 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void ringPiersUseWhiteFixturesWithoutOverlappingYellowCornerLamps() throws Exception {
-        var method = BoardMultiHexBuilding.class.getDeclaredMethod("podium", GeneratedMesh.class, List.class,
-              BoardMultiHexBuilding.Dome.class);
+    void ringPierFixturesFollowExposedFacesAndKeepWhiteFeet() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("pier", GeneratedMesh.class, List.class,
+              float.class, float.class, float.class, float.class, float.class, float.class, float.class, boolean.class);
         method.setAccessible(true);
         List<float[]> hex = new ArrayList<>();
         for (int corner = 0; corner < 6; corner++) {
             hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
         }
-        var mesh = new GeneratedMesh();
-        method.invoke(null, mesh, hex, BoardMultiHexBuilding.layout(DOME, 3).domes().getFirst());
-        var data = mesh.data("ring-piers", false);
-        assertFalse(vertices(data, BoardMultiHexBuilding.LIGHT).isEmpty());
-        assertTrue(vertices(data, BoardMultiHexBuilding.MARKER).isEmpty(), "Polygonal ring bays use white support lamps");
+        for (boolean exposed : new boolean[] { true, false }) {
+            var mesh = new GeneratedMesh();
+            method.invoke(null, mesh, hex, 0f, 0f, 1f, 0f, 3.3f, 6f, 54f, exposed);
+            var data = mesh.data("ring-piers", false);
+            var white = vertices(data, BoardMultiHexBuilding.LIGHT);
+            var amber = vertices(data, BoardMultiHexBuilding.MARKER);
+            assertFalse(white.isEmpty());
+            assertEquals(exposed, !amber.isEmpty(), "Only ring corners exposed to the apron have amber head lamps");
+            for (var normal : List.of(new Vector3(1, 0, 0), new Vector3(0, 1, 0), new Vector3(0, -1, 0))) {
+                assertTrue(white.stream().anyMatch(v -> v[2] < 8 && v[3] * normal.x + v[4] * normal.y > .99f),
+                      "The radial front and both exposed returns have small white foot lamps");
+                assertTrue((exposed ? amber : white).stream().anyMatch(v -> v[2] > 50 && v[3] * normal.x + v[4] * normal.y > .99f),
+                      "Each exposed face has a head fixture");
+            }
+            assertTrue(amber.stream().allMatch(v -> v[2] > 50), "Every bottom light remains white");
+        }
     }
 
     @Test
@@ -420,8 +435,9 @@ class BoardMultiHexBuildingTest {
     @Test
     void slopedPassageRoofKeepsLongitudinalPanelsWithoutShearing() throws Exception {
         for (float height : new float[] { 15, 30, 45 }) {
-            var mesh = passage(new float[] { 0, 0, 1, 0, 6, height }, new float[] { 20, 0, 1, 0, 6, 20 }, 0);
-            var roof = vertices(mesh.data("passage", false), BoardMultiHexBuilding.ROOF);
+            // The farther mesh retains the same armor skins without overlaid fastening plates.
+            var mesh = passage(new float[] { 0, 0, 1, 0, 6, height }, new float[] { 20, 0, 1, 0, 6, 20 }, 1);
+            var roof = vertices(mesh.data("passage", false), BoardMultiHexBuilding.HARDWARE);
             assertFalse(roof.isEmpty());
             for (int i = 0; i < roof.size(); i += 3) {
                 var axes = textureAxes(roof.get(i), roof.get(i + 1), roof.get(i + 2));
@@ -443,6 +459,7 @@ class BoardMultiHexBuildingTest {
                 tube.addAll(vertices(data, BoardMultiHexBuilding.PIER));
                 tube.addAll(vertices(data, BoardMultiHexBuilding.WALL));
                 tube.addAll(vertices(data, BoardMultiHexBuilding.ROOF));
+                tube.addAll(vertices(data, BoardMultiHexBuilding.HARDWARE));
                 assertFalse(tube.isEmpty());
                 for (float[] v : tube) {
                     for (float value : v) { assertTrue(Float.isFinite(value)); }
@@ -562,7 +579,7 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void pillarLightsReachTheModelAsEmissionAtEveryLevelOfDetail() {
+    void pillarLightsReachTheModelAsEmissionAtEveryLevelOfDetail() throws Exception {
         var heights = flower(3, 2);
         Coords annex = CENTRE.translated(0).translated(0);
         heights.put(annex, 2);
@@ -576,8 +593,19 @@ class BoardMultiHexBuildingTest {
                   "White pillar lenses emit HDR light independently of the sunlight, like the fortress wall lamps");
             var marker = ((RigidGlb.Data) data).surfaces.get(BoardMultiHexBuilding.MARKER);
             assertNotNull(marker, "External corners carry amber head lamps as well as white foot markers");
-            assertTrue(marker.glow()[0] > marker.glow()[1] * 1.5f && marker.glow()[1] > marker.glow()[2] * 10,
-                  "Amber markers retain their warm emission rather than becoming another white rectangle");
+            var material = data.materials.select(m -> m.id.equals(BoardMultiHexBuilding.MARKER)).iterator().next();
+            var map = material.textures.select(t -> t.usage == ModelTexture.USAGE_EMISSIVE).iterator().next();
+            var image = data.images.get(map.fileName);
+            assertNotNull(image, "The bounded amber lens must retain its emission map in the generated model");
+            var bitmap = ImageIO.read(new java.io.File(image.file()));
+            int core = bitmap.getRGB(bitmap.getWidth() / 2, bitmap.getHeight() / 2), rim = bitmap.getRGB(0, 0);
+            int red = core >>> 16 & 255, green = core >>> 8 & 255, blue = core & 255;
+            assertTrue(red > green * 1.2 && green > blue * 2,
+                  "The luminous core remains warm gold rather than white");
+            assertTrue((rim >>> 16 & 255) < red / 2, "A darker amber rim preserves the lens shape around the brighter core");
+            assertTrue(marker.tint()[0] > 1, "The sampled emission uses HDR energy, independently of sunlight");
+            assertTrue(vertices(data, BoardMultiHexBuilding.MARKER).stream().allMatch(v ->
+                  v[10] >= 0 && v[10] <= 1 && v[11] >= 0 && v[11] <= 1), "Every head fixture samples its complete bounded lens");
         }
     }
 
@@ -629,6 +657,36 @@ class BoardMultiHexBuildingTest {
         }
     }
 
+    @Test
+    void gateRearBulkheadSealsAroundTheSmallerNeckWithoutClosingIt() throws Exception {
+        var mesh = new GeneratedMesh();
+        var housing = BoardMultiHexBuilding.class.getDeclaredMethod("gateHousing", GeneratedMesh.class, List.class,
+              float.class, float.class, float.class, float.class, float.class);
+        housing.setAccessible(true);
+        housing.invoke(null, mesh, wideHex(), 0f, 0f, 1f, 0f, 6f);
+        passage(mesh, new float[] { -30, 0, 1, 0, 6, 20 }, new float[] { -9, 0, 1, 0, 6, 20 }, 0);
+        List<Vector3> rear = new ArrayList<>();
+        var body = vertices(mesh.data("gate rear seal", false), BoardMultiHexBuilding.PIER);
+        for (int at = 0; at < body.size(); at += 3) {
+            boolean onRear = true;
+            for (int corner = 0; corner < 3; corner++) {
+                float[] vertex = body.get(at + corner);
+                onRear &= Math.abs(vertex[0] + 9) < .001 && vertex[3] < -.99;
+            }
+            if (onRear) {
+                for (int corner = 0; corner < 3; corner++) {
+                    float[] vertex = body.get(at + corner);
+                    rear.add(new Vector3(vertex[1], vertex[2], 0));
+                }
+            }
+        }
+        var seal = GpuBuildingInterior.area(rear);
+        assertFalse(seal.contains(0, 10), "The vehicle neck remains open through the rear bulkhead");
+        assertFalse(seal.contains(-9, 8) || seal.contains(9, 8), "Keep the full usable neck width clear");
+        assertTrue(seal.contains(-11.5, 8) && seal.contains(11.5, 8), "Seal both side gaps between the larger hood and its neck");
+        assertTrue(seal.contains(0, 19), "Seal the gap above the lower passage roof");
+    }
+
     private static GeneratedMesh passage(float[] from, float[] to, int lod) throws Exception {
         var mesh = new GeneratedMesh();
         passage(mesh, from, to, lod);
@@ -639,11 +697,15 @@ class BoardMultiHexBuildingTest {
         var method = BoardMultiHexBuilding.class.getDeclaredMethod("passage", GeneratedMesh.class, List.class,
               float[].class, float[].class, int.class);
         method.setAccessible(true);
+        method.invoke(null, mesh, wideHex(), from, to, lod);
+    }
+
+    private static List<float[]> wideHex() {
         List<float[]> hex = new ArrayList<>();
         for (int corner = 0; corner < 6; corner++) {
             hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
         }
-        method.invoke(null, mesh, hex, from, to, lod);
+        return hex;
     }
 
     private static boolean bevel(float[] vertex) { return vertex[5] > .8f && vertex[5] < .95f; }

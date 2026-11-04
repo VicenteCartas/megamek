@@ -1578,7 +1578,6 @@ final class GpuTerrain implements Disposable {
          */
         private ModelInstance level(int level, ModelInstance source) {
             ModelInstance result = building != null ? building.instance(level) : new ModelInstance(levels.get(level));
-            GpuBuilding.tint(result, buildingColours);
             result.transform.set(source.transform);
             result.userData = source.userData;
             for (Material material : result.materials) {
@@ -1600,6 +1599,7 @@ final class GpuTerrain implements Disposable {
                 }
                 if (previous == null) { culling(result, material, state.has(BlendingAttribute.Type)); }
             }
+            GpuBuilding.tint(result, source == previewInstance && previewFeature != null ? previewFeature.colours() : buildingColours);
             return result;
         }
 
@@ -1607,7 +1607,7 @@ final class GpuTerrain implements Disposable {
         ModelInstance near() { return lod == 0 ? instance() : level(0, instance()); }
 
         private void updateHoverOpaque() {
-            hoverOpaque = copy(instance);
+            hoverOpaque = copy(instance());
             for (Material material : hoverOpaque.materials) {
                 var clip = material.get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);
                 // Every material of a hovered placement carries the clip; a missing one draws uncut, never throws.
@@ -6131,7 +6131,7 @@ final class GpuTerrain implements Disposable {
             boolean curves = supports != null && !preparedPatch.flat() && !tile.liquid().volcanic();
             if (curves) { material = GpuTessellation.curvedCopy(material); }
             overlay.addTriangles(material, meshes -> GpuRoads.write(meshes, preparedPatch.triangles(), patch, mask, surface,
-                  preparedPatch.flat(), vertexCoat, coverage, curves, curves ? supports : null));
+                  preparedPatch.source().coords(), preparedPatch.flat(), vertexCoat, coverage, curves, curves ? supports : null));
         }
         overlay.route = false;
     }
@@ -6996,8 +6996,7 @@ final class GpuTerrain implements Disposable {
         if (placement == null) { return false; }
         var next = placement.feature();
         var original = prop.decorationFeature;
-        if (!original.asset().equals(next.asset()) || !original.colours().equals(next.colours())
-              || original.decoration().levels() != next.decoration().levels()) { return false; }
+        if (!original.asset().equals(next.asset()) || original.decoration().levels() != next.decoration().levels()) { return false; }
         if (next.equals(prop.previewFeature == null ? original : prop.previewFeature) && placement.coords().equals(prop.owner())) { return false; }
         float unit = BoardGeometry.hexScale();
         Matrix4 before = new Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(prop.decorationOwner, original.decoration(), original.elevation()));
@@ -7007,8 +7006,10 @@ final class GpuTerrain implements Disposable {
         prop.previewOwner = placement.coords();
         prop.previewAnchorZ = next.elevation() * BoardGeometry.level();
         prop.previewInstance = copy(prop.instance);
+        GpuBuilding.tint(prop.previewInstance, next.colours());
         prop.previewInstance.transform.set(delta).mul(prop.instance.transform);
         prop.previewBounds = new BoundingBox(prop.bounds).mul(delta);
+        if (prop.hoverOpaque != null) { prop.updateHoverOpaque(); }
         TileMesh tile = chunk.tileMeshes.get(prop.coords);
         if (tile != null) {
             for (Prop floor : tile.props) {

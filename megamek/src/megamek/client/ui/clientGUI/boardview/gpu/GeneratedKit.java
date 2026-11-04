@@ -108,7 +108,11 @@ final class GeneratedKit {
                     }
                 }
             }
-            result.add(GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs));
+            var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
+            var source = (RigidGlb.Data) modelled.get(lod);
+            generated.buildingPaint.addAll(source.buildingPaint);
+            generated.paintMasks.addAll(source.paintMasks);
+            result.add(generated);
         }
         return result;
     }

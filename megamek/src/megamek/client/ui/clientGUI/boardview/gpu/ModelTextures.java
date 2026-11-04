@@ -114,6 +114,11 @@ final class ModelTextures {
         }
         if (data instanceof RigidGlb.Data glb) {
             model.materials.forEach(material -> material.set(new GpuLinearColors()));
+            model.materials.forEach(material -> {
+                if (glb.buildingPaint.contains(material.id)) {
+                    material.set(new GpuBuildingPaint(com.badlogic.gdx.graphics.Color.WHITE));
+                }
+            });
             glb.surfaces.forEach((id, surface) -> {
                 var material = model.getMaterial(id);
                 var relief = surface.relief();

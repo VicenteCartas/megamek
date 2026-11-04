@@ -101,11 +101,17 @@ final class BoardTiles implements AutoCloseable {
 
     BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
           Set<String> buildingReferences) {
+        return preview(board, coords, hex, pending, buildingReferences, new BoardScene.PixelPool());
+    }
+
+    /** One pending event shares its immutable pixels, without retaining them in the document's pool. */
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
+          Set<String> buildingReferences, BoardScene.PixelPool previewImages) {
         if (hex == null) { hex = pending.apply(coords); }
         if (hex == null) { return null; }
         artwork.invalidate(coords);
         try {
-            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), pending, buildingReferences);
+            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, previewImages, pending, buildingReferences);
         } finally { artwork.invalidate(coords); }
     }
 

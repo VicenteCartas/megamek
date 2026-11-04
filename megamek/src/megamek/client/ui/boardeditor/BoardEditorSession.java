@@ -2842,6 +2842,7 @@ public final class BoardEditorSession {
     /** Saved member heights cannot be rebaked without the placement's structural geometry. */
     private void checkBuildingGeometry(Coords owner, BoardDecoration original, BoardDecoration object) {
         if ((original == null || !BuildingVolumes.sameGeometry(original, object)) && BuildingVolumes.of(object.asset()).present()) {
+            checkBuildingTilt(object.asset(), object.rotationX(), object.rotationY());
             require(BuildingVolumes.onBoardFraction(owner, object, board().getWidth(), board().getHeight()) >= .1 - 1e-6,
                   Messages.getString("BoardEditor.buildingOutside"));
         }
@@ -2852,6 +2853,15 @@ public final class BoardEditorSession {
                     require(ref == null || !ref.id().equals(object.id()), Messages.getString("BoardEditor.buildingAssetMissing"));
                 }
             }
+        }
+    }
+
+    /** Gameplay roofs and floors are horizontal; structural buildings may pivot only around their vertical axis. */
+    private static void checkBuildingTilt(String asset, double rotationX, double rotationY) {
+        if (BuildingVolumes.of(asset).present()) {
+            require(Math.abs(Math.IEEEremainder(rotationX, 360)) < 1e-7
+                        && Math.abs(Math.IEEEremainder(rotationY, 360)) < 1e-7,
+                  Messages.getString("BoardEditor.buildingTilt"));
         }
     }
 
@@ -2903,9 +2913,10 @@ public final class BoardEditorSession {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
         }
-        checkBuildingGeometry(selected, current, next);
         // A cropped structure can retain its center outside the board, owned by a surviving member.
-        var destination = current.x() == next.x() && current.y() == next.y()
+        boolean samePosition = current.x() == next.x() && current.y() == next.y();
+        if (samePosition) { checkBuildingGeometry(selected, current, next); }
+        var destination = samePosition
               ? Map.entry(new Selection(selected, next.id()), next) : positioned(selected, next);
         selection.add(new Selection(selected, selectedObject));
         moveObjects(Map.of(destination.getKey(), destination.getValue()));
@@ -3869,6 +3880,9 @@ public final class BoardEditorSession {
                 }
             }
             default -> throw new IllegalArgumentException("Unknown object property " + property);
+        }
+        if (property.equals("rotationX") || property.equals("rotationY")) {
+            checkBuildingTilt(d.asset(), rotationX, rotationY);
         }
         return new BoardDecoration(d.id(), d.kind(), d.asset(), name, x, y, rotation, mirror, scale, placement, order, clipToHex,
               rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels());

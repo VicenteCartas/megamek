@@ -21,6 +21,25 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardBuildingDesignTest {
+    @Test void mixedFacadeAtlasesProtectWindowsAndRoofs() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var root = java.nio.file.Path.of("data/models/board/textures/structures");
+        var habitat = javax.imageio.ImageIO.read(root.resolve("lunar/habitat-wall_albedo.png").toFile());
+        assertEquals(0, habitat.getRGB(40, 65) >>> 24, "Upper window stays unpainted");
+        assertEquals(0, habitat.getRGB(40, 325) >>> 24, "Lower window stays unpainted");
+        assertEquals(255, habitat.getRGB(40, 130) >>> 24, "Upper wall panel receives tint");
+        assertEquals(255, habitat.getRGB(40, 390) >>> 24, "Lower wall panel receives tint");
+        var light = javax.imageio.ImageIO.read(root.resolve("buildings/light-far_albedo.png").toFile());
+        assertEquals(0, light.getRGB(83, 233) >>> 24, "Baked glass stays unpainted at far LOD");
+        assertEquals(0, light.getRGB(118, 400) >>> 24, "Baked roof stays unpainted at far LOD");
+        assertEquals(255, light.getRGB(250, 270) >>> 24, "Baked facade receives tint at far LOD");
+        for (var lod : GpuBuilding.kit("buildings/lunar_habitat/lunar_habitat").lods()) {
+            var data = (RigidGlb.Data) lod;
+            assertTrue(data.buildingPaint.contains("structures/lunar/habitat-wall"));
+            assertTrue(data.paintMasks.contains("structures/lunar/habitat-wall"));
+        }
+    }
+
     @Test void buildingFeaturesCarryTintAndOnlyIsolatedBuildingsRotate() {
         Coords at = new Coords(2, 2);
         Hex hex = new Hex(0, "building:1:0;bldg_elev:2;bldg_cf:15", "");
@@ -41,14 +60,21 @@ class BoardBuildingDesignTest {
     @Test void tintChangesOnlyThePlacementsMaterialAndKeepsItsOriginalShading() {
         Model shared = new Model();
         var original = new Color(.8f, .6f, .4f, .7f);
-        shared.materials.add(new Material("wall", ColorAttribute.createDiffuse(original)));
+        shared.materials.add(new Material("wall", ColorAttribute.createDiffuse(original), new GpuBuildingPaint(Color.WHITE)));
         ModelInstance first = new ModelInstance(shared), second = new ModelInstance(shared);
         first.materials.add(shared.materials.first().copy()); second.materials.add(shared.materials.first().copy());
+        first.materials.add(new Material("glass", ColorAttribute.createDiffuse(original)));
         GpuBuilding.tint(first, BoardDecoration.Colours.of("#72949b"));
-        Color expected = original.cpy().mul(GpuColor.linear(Color.valueOf("72949b")));
-        assertEquals(expected, first.materials.first().get(ColorAttribute.class, ColorAttribute.Diffuse).color);
+        Color expected = GpuColor.linear(Color.valueOf("72949b"));
+        assertEquals(expected, first.materials.first().get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE).colour);
+        assertEquals(original, first.materials.first().get(ColorAttribute.class, ColorAttribute.Diffuse).color);
+        assertFalse(first.getMaterial("glass").has(GpuBuildingPaint.TYPE));
+        assertEquals(original, first.getMaterial("glass").get(ColorAttribute.class, ColorAttribute.Diffuse).color);
         assertEquals(original, second.materials.first().get(ColorAttribute.class, ColorAttribute.Diffuse).color);
         assertEquals(original, shared.materials.first().get(ColorAttribute.class, ColorAttribute.Diffuse).color);
+        assertEquals(Color.WHITE, shared.materials.first().get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE).colour);
+        GpuBuilding.tint(first, BoardDecoration.Colours.NONE);
+        assertEquals(Color.WHITE, first.materials.first().get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE).colour);
         shared.dispose();
     }
 
@@ -62,6 +88,12 @@ class BoardBuildingDesignTest {
                     assertNotNull(kit, asset);
                     assertTrue(kit.roles().keySet().stream().anyMatch(role -> role.startsWith("base")));
                     assertTrue(kit.roles().keySet().stream().anyMatch(role -> role.startsWith("floor")));
+                    for (var lod : kit.lods()) {
+                        var data = (RigidGlb.Data) lod;
+                        assertFalse(data.buildingPaint.isEmpty(), asset + " retains paint regions through kit generation");
+                        assertTrue(data.buildingPaint.stream().noneMatch(id -> id.contains("glass") || id.contains("roof")),
+                              asset + " excludes glazing and roof finishes");
+                    }
                     assertTrue(kit.roles().keySet().stream().anyMatch(role -> role.startsWith("roof")));
                 }
             }

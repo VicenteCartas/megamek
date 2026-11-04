@@ -532,6 +532,9 @@ class RigidGlbTest {
         var crate = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
         assertEquals(java.util.Set.of("cargo-crate"), crate.paintMasks);
         assertEquals(java.util.Set.of("cargo-crate-stencil"), crate.labels);
+        var slotted = (RigidGlb.Data) RigidGlb.colourSlotMesh(crate);
+        assertEquals(crate.paintMasks, slotted.paintMasks, "Shared colour meshes retain the albedo paint mask");
+        assertEquals(crate.labels, slotted.labels);
         var label = java.util.Arrays.stream(crate.meshes.first().parts).filter(part -> part.id.equals("cargo-crate-label"))
               .findFirst().orElseThrow();
         java.util.Set<Integer> places = new java.util.TreeSet<>();

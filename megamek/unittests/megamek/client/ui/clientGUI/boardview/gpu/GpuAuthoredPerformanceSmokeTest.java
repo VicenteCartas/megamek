@@ -27,19 +27,36 @@ import org.junit.jupiter.api.Test;
 @Tag("gpu-benchmark")
 class GpuAuthoredPerformanceSmokeTest {
     @Test void timesPaintHoverPublication() throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
-            editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
-            var source = new GpuMapSource(editor.game(), null, editor);
-            try {
-                for (int i = 0; i < 6; i++) {
-                    source.editorHover(new Coords(13 + i % 3, 10), 0, 0, "ground");
-                    long start = System.nanoTime(); source.refresh(); source.takeFrame();
-                    System.out.printf("PERF authored paint-publication run=%d time=%.2fms%n", i, millis(start));
-                    assertFalse(source.editorPreview().routes().isEmpty());
-                }
-            } finally { source.close(); }
-        });
+        try (var recording = new Recording(Configuration.getConfiguration("profile"))) {
+            recording.start();
+            SwingUtilities.invokeAndWait(() -> {
+                var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
+                editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+                var source = new GpuMapSource(editor.game(), null, editor);
+                try {
+                    for (int i = 0; i < 12; i++) {
+                        source.editorHover(new Coords(13 + i % 3, 10), 0, 0, "ground");
+                        long start = System.nanoTime(); source.refresh(); source.takeFrame();
+                        System.out.printf("PERF authored paint-publication run=%d time=%.2fms%n", i, millis(start));
+                        assertFalse(source.editorPreview().routes().isEmpty());
+                    }
+                    Coords at = new Coords(13, 10);
+                    editor.pointer(at, 0, 0, false); editor.finishStroke();
+                    editor.command(new Command(Action.TOOL, "SELECT"), null);
+                    editor.command(new Command(Action.SELECT_AT, "13,10", ""), null);
+                    editor.command(new Command(Action.SELECT_OBJECT, editor.board().getHex(at).getDecorations().getFirst().id()), null);
+                    source.refresh();
+                    for (int i = 0; i < 12; i++) {
+                        long start = System.nanoTime();
+                        editor.command(new Command(Action.OBJECT_VALUE, "rotation", Integer.toString(i * 3)), null, true);
+                        source.refresh(); source.takeFrame();
+                        System.out.printf("PERF authored rotation-publication run=%d time=%.2fms%n", i, millis(start));
+                    }
+                } finally { source.close(); }
+            });
+            Path output = Path.of("build/gpu-board-review/authored-buildings/publication.jfr");
+            Files.createDirectories(output.getParent()); recording.stop(); recording.dump(output);
+        }
     }
 
     @Test void timesPlacementDragRotationAndMeshPreparation() throws Exception {

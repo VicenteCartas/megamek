@@ -12,7 +12,10 @@ import javax.swing.SwingUtilities;
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -28,7 +31,7 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
-    @Test void previewsAuthoredTransformsBeforeRebuildingAnyChunks() throws Exception {
+    @Test void previewsAuthoredTransformsAndPaintBeforeRebuildingAnyChunks() throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(24, 20), null);
         for (int x = 0; x < 24; x++) { for (int y = 0; y < 20; y++) { editor.board().getHex(x, y).setLevel(3); } }
         Coords at = new Coords(11, 9);
@@ -36,7 +39,9 @@ class GpuAuthoredBuildingSmokeTest {
         BoardScene original = capture(editor.board());
         List<BoardScene> poses = new java.util.ArrayList<>();
         for (var edit : List.of(new Command(Action.OBJECT_VALUE, "x", ".25"), new Command(Action.OBJECT_VALUE, "rotation", "37"),
-              new Command(Action.OBJECT_VALUE, "scale", ".8"), new Command(Action.OBJECT_VALUE, "stretchY", "1.2"))) {
+              new Command(Action.OBJECT_VALUE, "scale", ".8"), new Command(Action.OBJECT_VALUE, "stretchY", "1.2"),
+              new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), new Command(Action.OBJECT_VALUE, "colour0", "#729bdc"),
+              new Command(Action.OBJECT_VALUE, "colour0", ""))) {
             editor.command(edit, null, true);
             poses.add(original.withTiles(BoardTiles.captureAll(editor.board())));
         }
@@ -49,21 +54,28 @@ class GpuAuthoredBuildingSmokeTest {
                 try {
                     BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.center(BoardGeometry.center(at, 3));
                     terrain.update(original); GpuTerrainLodSmokeTest.settle(terrain, null, original, camera);
+                    terrain.animate(1, List.of(), .25f, at, 3 * BoardGeometry.level());
                     var models = new java.util.HashSet<com.badlogic.gdx.graphics.g3d.Model>();
+                    var materials = new java.util.IdentityHashMap<Material, Material>();
                     for (Object chunk : (List<?>) field(terrain, "chunks")) {
                         for (Object prop : (List<?>) field(chunk, "props")) {
-                            if (field(prop, "decorationId") != null) { models.add(((com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance")).model); }
+                            if (field(prop, "decorationId") == null) { continue; }
+                            var installed = (ModelInstance) field(prop, "instance");
+                            models.add(installed.model);
+                            for (var material : installed.materials) { materials.put(material, material.copy()); }
                         }
                     }
                     var start = original.tile(at).features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
                     for (BoardScene pose : poses) {
                         var next = pose.tile(at).features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
+                        String colour = next.colours().slot(0);
+                        Color tint = colour == null ? Color.WHITE : GpuColor.linear(Color.valueOf(colour));
                         long clock = System.nanoTime(); terrain.previewEditorObjects(pose);
                         System.out.printf("PERF authored immediate-transform=%.2fms%n", (System.nanoTime() - clock) / 1_000_000.0);
                         float unit = BoardGeometry.hexScale();
                         var delta = new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, next.decoration(), 3))
                               .mul(new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, start.decoration(), 3)).inv());
-                        int shares = 0;
+                        int shares = 0, painted = 0, fixed = 0;
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
                             for (Object prop : (List<?>) field(chunk, "props")) {
                                 if (field(prop, "decorationId") == null) { continue; }
@@ -71,10 +83,30 @@ class GpuAuthoredBuildingSmokeTest {
                                 var preview = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "previewInstance");
                                 assertNotNull(preview); assertSame(installed.model, preview.model); assertTrue(models.contains(preview.model));
                                 assertArrayEquals(new com.badlogic.gdx.math.Matrix4(delta).mul(installed.transform).val, preview.transform.val, .001f);
+                                painted += assertPaint(preview, tint);
+                                assertPaint(installed, Color.WHITE);
+                                for (var material : installed.materials) {
+                                    assertEquals(materials.get(material), material, "Preview must not change installed material state");
+                                }
+                                for (var material : preview.materials) {
+                                    Material expected = materials.get(installed.getMaterial(material.id)).copy();
+                                    Material actual = material.copy();
+                                    expected.remove(GpuBuildingPaint.TYPE); actual.remove(GpuBuildingPaint.TYPE);
+                                    assertEquals(expected, actual, "Paint leaves each surface's base finish unchanged");
+                                    if (!material.has(GpuBuildingPaint.TYPE)) { fixed++; }
+                                }
+                                if (field(prop, "hoverOpaque") instanceof ModelInstance hovered) { assertPaint(hovered, tint); }
+                                // The side view requests near geometry even when the main view installed a farther LOD.
+                                var level = prop.getClass().getDeclaredMethod("level", int.class, ModelInstance.class);
+                                level.setAccessible(true);
+                                assertPaint((ModelInstance) level.invoke(prop, 0, preview), tint);
                                 shares++;
                             }
                         }
                         assertTrue(shares > 40);
+                        // Some slices contain only unpainted dishes or equipment; the whole building has both kinds.
+                        assertTrue(painted > 0, "Authored material metadata must identify its paintable surfaces");
+                        assertTrue(fixed > 0, "The building must retain fixed material finishes");
                         var shown = terrain.editorObjects(at).getFirst();
                         assertEquals(3, shown.anchorLevel(), .0001);
                         assertEquals(BoardGeometry.centerX(at) + next.decoration().x() * BoardGeometry.width(), shown.anchor().x, .001);
@@ -85,6 +117,19 @@ class GpuAuthoredBuildingSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Authored immediate preview", failure.get()); }
+    }
+
+    private static int assertPaint(ModelInstance instance, Color expected) {
+        int painted = 0;
+        for (var material : instance.materials) {
+            var paint = material.get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE);
+            if (paint == null) { continue; }
+            assertEquals(expected.r, paint.colour.r, 1e-6);
+            assertEquals(expected.g, paint.colour.g, 1e-6);
+            assertEquals(expected.b, paint.colour.b, 1e-6);
+            painted++;
+        }
+        return painted;
     }
 
     @Test void rendersClippedHpgAndStationWithNeutralCapsAndRestoresTheirGeometryWhenTheBoardGrows() throws Exception {

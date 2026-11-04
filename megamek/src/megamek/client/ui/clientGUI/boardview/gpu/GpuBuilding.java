@@ -13,7 +13,6 @@ import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Intersector;
@@ -31,16 +30,14 @@ import megamek.common.board.BuildingInteriors;
  * heights. Only the kit's meshes and generated interiors own GPU resources.
  */
 final class GpuBuilding implements Disposable {
-    /** Building-wide multiplicative tint, applied only to a placement's copied materials, never the shared kit. */
+    /** Paint only authored wall/panel surfaces; glass, equipment and generated interiors keep their own finish. */
     static void tint(ModelInstance instance, BoardDecoration.Colours colours) {
         String value = colours.slot(0);
-        if (value == null) { return; }
-        var tint = GpuColor.linear(com.badlogic.gdx.graphics.Color.valueOf(value));
+        var tint = value == null ? com.badlogic.gdx.graphics.Color.WHITE
+              : GpuColor.linear(com.badlogic.gdx.graphics.Color.valueOf(value));
         for (var material : instance.materials) {
-            if (AuthoredBoardClip.CAP.equals(material.id)) { continue; }
-            var diffuse = material.get(ColorAttribute.class, ColorAttribute.Diffuse);
-            if (diffuse == null) { material.set(ColorAttribute.createDiffuse(tint)); }
-            else { diffuse.color.mul(tint); }
+            if (!material.has(GpuBuildingPaint.TYPE) || AuthoredBoardClip.CAP.equals(material.id)) { continue; }
+            material.set(new GpuBuildingPaint(tint));
         }
     }
 

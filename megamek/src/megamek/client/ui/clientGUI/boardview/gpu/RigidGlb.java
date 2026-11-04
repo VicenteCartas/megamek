@@ -100,6 +100,8 @@ final class RigidGlb {
         final Map<String, Surface> surfaces = new HashMap<>();
         /** Materials whose albedo alpha is a paint mask (extras {@code mmPaintMask}, {@link GpuModelMaterial#paintMask}). */
         final Set<String> paintMasks = new HashSet<>();
+        /** Explicit building paint regions (material extras {@code mmBuildingPaint}); absent means keep the finish. */
+        final Set<String> buildingPaint = new HashSet<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
         final Set<String> labels = new HashSet<>();
         /**
@@ -116,6 +118,18 @@ final class RigidGlb {
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
         byte[] slots = new byte[0];
         List<ColourSlot> colourSlots = List.of();
+
+        /** Shared material metadata survives geometry assembly, clipping and colour-slot copies. */
+        void inheritMaterials(Data source) {
+            images.putAll(source.images);
+            alphaTests.putAll(source.alphaTests);
+            surfaces.putAll(source.surfaces);
+            paintMasks.addAll(source.paintMasks);
+            buildingPaint.addAll(source.buildingPaint);
+            labels.addAll(source.labels);
+            boardUVs.putAll(source.boardUVs);
+            blends.putAll(source.blends);
+        }
     }
 
     /**
@@ -438,10 +452,7 @@ final class RigidGlb {
         result.materials.addAll(source.materials);
         result.nodes.addAll(source.nodes);
         result.animations.addAll(source.animations);
-        result.images.putAll(source.images);
-        result.alphaTests.putAll(source.alphaTests);
-        result.surfaces.putAll(source.surfaces);
-        result.boardUVs.putAll(source.boardUVs);
+        result.inheritMaterials(source);
         result.slots = source.slots;
         result.colourSlots = source.colourSlots;
         ModelMesh mesh = source.meshes.first(), slotted = new ModelMesh();
@@ -699,6 +710,7 @@ final class RigidGlb {
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
                 if (material.getExtras() instanceof Map<?, ?> extras) {
                     if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
+                    if (Boolean.TRUE.equals(extras.get("mmBuildingPaint"))) { result.buildingPaint.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmLabel"))) { result.labels.add(target.id); }
                     if (extras.get("mmBoardUV") instanceof Number repeat) {
                         require(repeat.floatValue() > 0, "mmBoardUV is a positive repeat");

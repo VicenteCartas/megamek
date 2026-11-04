@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -33,11 +32,11 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Real tileset selection and native rendering of construction families, doors, and circular tank roofs. */
+/** Native catalog selection, shared materials and gameplay heights of building kits, tanks and industrial scenery. */
 @Tag("on-demand")
 class GpuBuildingMaterialsSmokeTest {
     @Test
-    void selectedRoofFamiliesUseSmallContextualWallTextures() throws Exception {
+    void selectedBuildingFamiliesUseTheirKitAndIndustrialMaterials() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
@@ -91,21 +90,21 @@ class GpuBuildingMaterialsSmokeTest {
                         checkMaterials(scene);
                         terrain = new GpuTerrain();
                         outputFrame = new GpuSceneTestOutput();
-                        terrain.update(scene);
-                        checkHeights(scene, terrain);
-                        BoardGeometry.Tuning previous = BoardGeometry.tuning();
-                        try {
-                            BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1, 1, 12, previous.gridShade()));
-                            terrain.update(scene);
-                            checkHeights(scene, terrain);
-                        } finally {
-                            BoardGeometry.tune(previous);
-                            terrain.update(scene);
-                        }
                         camera = new BoardCamera();
                         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                         camera.setIsometric(true);
                         camera.fit(scene);
+                        installScene();
+                        checkHeights(scene, terrain);
+                        BoardGeometry.Tuning previous = BoardGeometry.tuning();
+                        try {
+                            BoardGeometry.tune(new BoardGeometry.Tuning(1.5f, 1, 1, 12, previous.gridShade()));
+                            installScene();
+                            checkHeights(scene, terrain);
+                        } finally {
+                            BoardGeometry.tune(previous);
+                            installScene();
+                        }
                     } catch (Throwable error) {
                         failure.set(error);
                         Gdx.app.exit();
@@ -118,11 +117,7 @@ class GpuBuildingMaterialsSmokeTest {
                         return;
                     }
                     try {
-                        terrain.animate(0, List.of());
-                        terrain.renderShadows(List.of());
-                        outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
-                        terrain.render(camera.camera);
-                        outputFrame.display();
+                        draw();
                         File output = new File(System.getProperty("megamek.gpu.screenshots"));
                         if (++frames == 4) {
                             GpuBoardTestUi.capture(new File(output, "building-material-families.png"));
@@ -139,6 +134,7 @@ class GpuBuildingMaterialsSmokeTest {
                             camera.center(BoardGeometry.center(new Coords(3, 6), 1));
                         } else if (frames == 16) {
                             GpuBoardTestUi.capture(new File(output, "building-material-tanks-industrial.png"));
+                            assertEquals(java.util.Map.of(), terrain.takeMissingAssets(), "Catalog entries must load their real geometry");
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                             Gdx.app.exit();
                         }
@@ -146,6 +142,23 @@ class GpuBuildingMaterialsSmokeTest {
                         failure.set(error);
                         Gdx.app.exit();
                     }
+                }
+
+                private void draw() {
+                    terrain.animate(0, List.of());
+                    terrain.renderShadows(List.of());
+                    outputFrame.begin(0.035f, 0.055f, 0.075f, 1);
+                    terrain.render(camera.camera);
+                    outputFrame.display();
+                }
+
+                private void installScene() throws Exception {
+                    terrain.update(scene);
+                    // A geometry-scale change invalidates material pages; fill them before testing runtime picking.
+                    draw();
+                    terrain.update(scene);
+                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    assertTrue(terrain.ready(scene), "Catalog rendering and picking require the completed loading stage");
                 }
 
                 @Override
@@ -157,7 +170,7 @@ class GpuBuildingMaterialsSmokeTest {
                 }
             }, GpuBoardWindow.configuration(false));
         }
-        assertNull(failure.get(), () -> String.valueOf(failure.get()));
+        if (failure.get() != null) { throw new AssertionError("Building catalog rendering", failure.get()); }
     }
 
     private static void checkMaterials(BoardScene scene) throws IOException {
@@ -167,26 +180,33 @@ class GpuBuildingMaterialsSmokeTest {
                 for (var feature : tile.features()) {
                     if (!feature.asset().startsWith("buildings/")) { continue; }
                     assertTrue(tile.detailedGround(), "Structures must not replace the native ground: " + tile.coords());
-                    // A kit (the fuel tanks') carries its own shared materials; the facades dress the legacy models.
-                    if (megamek.common.board.TilesetScenery.customBuildingFile(feature.asset()).isFile()) { continue; }
                     assertEquals(BoardScene.Surface.GRASS, tile.surface());
-                    String family = tile.coords().getY() == 6 ? "industrial"
-                          : tile.coords().getY() == 4 ? "fortress" : tile.coords().getY() == 2 ? "hangar"
-                          : List.of("light", "medium", "heavy", "hard").get((tile.coords().getX() - 1) / 2);
-                    String role = family.equals("fortress") || family.equals("hangar") ? "shell" : "wall";
-                    var model = assets.model(feature.asset());
-                    BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
-                    assertEquals(0, bounds.min.z, .0001f, feature.asset());
-                    assertEquals(18, bounds.max.z, .0001f, "Buildings must be one level tall in a GLB viewer");
-                    var wall = model.getMaterial(role);
-                    assertNotNull(wall, feature.asset());
-                    Texture texture = wall.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture;
-                    assertSame(assets.material("structures/facades/facade-" + family), texture, feature.asset());
-                    assertEquals(128, texture.getWidth());
-                    assertEquals(128, texture.getHeight());
-                    assertEquals(Texture.TextureWrap.Repeat, texture.getUWrap());
+                    if (BoardIndustrial.supports(feature)) {
+                        // A generator key is not a standalone GLB: inspect the actual generated plant.
+                        var model = assets.industrial(BoardIndustrial.layout(scene, tile, feature));
+                        for (var material : model.materials) {
+                            var diffuse = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
+                            assertNotNull(diffuse, feature.asset() + " " + material.id);
+                            assertSame(assets.material("structures/industrial/" + material.id),
+                                  diffuse.textureDescription.texture, feature.asset() + " " + material.id);
+                        }
+                    } else {
+                        var building = assets.building(feature.asset(), Math.round(feature.height()),
+                              ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature), false);
+                        assertNotNull(building, "Catalog entry must supply a building kit: " + feature.asset());
+                        for (int lod = 0; lod < building.lodCount(); lod++) {
+                            var instance = building.instance(lod);
+                            assertTrue(instance.calculateBoundingBox(new BoundingBox()).isValid(), feature.asset() + " LOD " + lod);
+                            if (feature.kind() == BoardScene.FeatureKind.BUILDING) {
+                                assertTrue(java.util.stream.StreamSupport.stream(instance.materials.spliterator(), false)
+                                      .anyMatch(material -> material.has(GpuBuildingPaint.TYPE)),
+                                      feature.asset() + " LOD " + lod + " retains its paintable surfaces after upload");
+                            }
+                        }
+                    }
                 }
             }
+            assertEquals(java.util.Map.of(), assets.takeMissing(), "Catalog material checks must not use missing-model cubes");
             for (var surface : BoardScene.Surface.values()) {
                 // Classic walls are the Classic tiles in terrain/classic; each loads at its authored size.
                 var source = ImageIO.read(new File(Configuration.dataDir(), "models/board/textures/" + surface.classicWall + "_albedo.png"));

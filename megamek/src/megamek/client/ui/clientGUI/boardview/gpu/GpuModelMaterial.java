@@ -167,6 +167,14 @@ final class GpuModelMaterial extends Attribute {
                 target.set(id, attributes.get(GpuModelMaterial.class, TYPE).paintMask ? 1f : 0f);
             }
         });
+        shader.register("u_buildingPaint", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var paint = attributes.get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE);
+                if (paint == null) { target.set(id, 1f, 1f, 1f); }
+                else { target.set(id, paint.colour.r, paint.colour.g, paint.colour.b); }
+            }
+        });
         shader.register("u_modelGlow", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {

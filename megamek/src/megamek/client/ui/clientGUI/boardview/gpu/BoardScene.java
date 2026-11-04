@@ -1251,6 +1251,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     static final class PixelPool {
         private final Map<Pixels, Pixels> images = new HashMap<>();
         private final Map<Integer, int[]> buffers = new HashMap<>();
+        private final Map<Pixels, Boolean> visible = new HashMap<>();
 
         Pixels capture(BufferedImage image, Pixels previous) {
             if (image == null) {
@@ -1273,7 +1274,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         Pixels captureOverlay(BufferedImage image, Pixels previous) {
             Pixels pixels = capture(image, previous);
-            return pixels == null || Arrays.stream(pixels.argb).allMatch(pixel -> (pixel >>> 24) == 0) ? null : pixels;
+            return pixels != null && visible.computeIfAbsent(pixels,
+                  value -> Arrays.stream(value.argb).anyMatch(pixel -> (pixel >>> 24) != 0)) ? pixels : null;
         }
 
         void retain(List<Tile> tiles) {
@@ -1286,11 +1288,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 used.add(tile.tilesetScenery());
             }
             images.keySet().retainAll(used);
+            visible.keySet().retainAll(images.keySet());
         }
 
         void clear() {
             images.clear();
             buffers.clear();
+            visible.clear();
         }
     }
 }

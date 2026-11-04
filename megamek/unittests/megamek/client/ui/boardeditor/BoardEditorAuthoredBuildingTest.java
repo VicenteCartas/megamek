@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BuildingInteriors;
 import megamek.common.board.BuildingVolumes;
@@ -20,19 +22,72 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorAuthoredBuildingTest {
-    @Test void areaLimitUsesTheStructuralProjectionEvenWhenTheModelIsTilted() {
+    @Test void authoredTiltCommandsKeepTheBrushGameplayAndUndoHistoryUnchanged() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);
         editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
+        var brush = editor.snapshot().activeBrush().object();
+        for (String axis : List.of("rotationX", "rotationY")) {
+            editor.command(new Command(Action.BRUSH_VALUE, "object:" + axis, "17"), null);
+            assertEquals(brush, editor.snapshot().activeBrush().object());
+            assertFalse(editor.snapshot().canUndo());
+        }
         editor.pointer(at, 0, 0, false); editor.finishStroke();
         var original = editor.board().getHex(at).getDecorations().getFirst();
+        var covered = members(editor.board(), original.id());
+        assertFalse(covered.isEmpty());
         editor.command(new Command(Action.SELECT_AT, "8,8", ""), null);
         editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
-        editor.command(new Command(Action.OBJECT_VALUE, "rotationX", "17"), null);
-        editor.command(new Command(Action.OBJECT_VALUE, "rotationY", "23"), null);
-        var tilted = editor.board().getHex(at).getDecorations().getFirst();
-        assertEquals(17, tilted.rotationX()); assertEquals(23, tilted.rotationY());
-        assertEquals(1, BuildingVolumes.onBoardFraction(at, tilted, 16, 16), 1e-8);
+        for (String axis : List.of("rotationX", "rotationY")) {
+            editor.command(new Command(Action.OBJECT_VALUE, axis, "23"), null);
+            assertEquals(original, editor.board().getHex(at).getDecorations().getFirst());
+            assertEquals(covered, members(editor.board(), original.id()));
+        }
+        // Rejected tilts add no history entry: undo removes the original placement, and redo restores it whole.
+        editor.command(new Command(Action.UNDO), null);
+        assertTrue(editor.board().getHex(at).getDecorations().isEmpty());
+        assertTrue(members(editor.board(), original.id()).isEmpty());
+        editor.command(new Command(Action.REDO), null);
+        assertEquals(original, editor.board().getHex(at).getDecorations().getFirst());
+        assertEquals(covered, members(editor.board(), original.id()));
+        editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotation", "37"), null);
+        assertEquals(37, editor.board().getHex(at).getDecorations().getFirst().rotation());
+        assertFalse(members(editor.board(), original.id()).isEmpty(), "Z rotation retains gameplay coverage");
+    }
+
+    @Test void sampledTiltedAuthoredBuildingsCannotBypassPlacementValidation() {
+        var board = Board.createEmptyBoard(16, 16);
+        Coords source = new Coords(5, 5), target = new Coords(10, 10);
+        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/xenobiology-station", null,
+              0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);
+        board.getHex(source).setDecorations(List.of(tilted));
+        var editor = new BoardEditorSession(); editor.open(board, null);
+        editor.command(new Command(Action.SELECT_AT, "5,5", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, tilted.id()), null);
+        editor.command(new Command(Action.SAMPLE), null);
+        editor.pointer(target, 0, 0, false); editor.finishStroke();
+        assertTrue(editor.board().getHex(target).getDecorations().isEmpty());
+        assertEquals(List.of(tilted), editor.board().getHex(source).getDecorations());
+        assertFalse(editor.snapshot().canUndo());
+    }
+
+    @Test void fullTurnsStayUprightAndOrdinaryPropsCanStillTilt() {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
+        Coords at = new Coords(8, 8);
+        editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:rotationX", "360"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:rotationY", "-720"), null);
+        editor.pointer(at, 0, 0, false); editor.finishStroke();
+        var building = editor.board().getHex(at).getDecorations().getFirst();
+        assertEquals(360, building.rotationX()); assertEquals(-720, building.rotationY());
+        assertFalse(members(editor.board(), building.id()).isEmpty());
+        editor.command(new Command(Action.ASSET, "scenery/vehicles/car"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:rotationX", "17"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:rotationY", "23"), null);
+        editor.pointer(new Coords(1, 1), 0, 0, false); editor.finishStroke();
+        var car = editor.board().getHex(1, 1).getDecorations().getFirst();
+        assertEquals(17, car.rotationX()); assertEquals(23, car.rotationY());
     }
 
     @Test void ninetyPercentMayLeaveTheMapButFurtherMovesAreBlockedAndRetainedPartSurvivesReload(@TempDir Path dir) throws Exception {

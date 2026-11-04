@@ -340,7 +340,7 @@ final class ConnectedKit {
 
     /** Adds {@code source}'s materials, with their images and finishes, to {@code result} for its placed nodes. */
     static void materials(RigidGlb.Data result, RigidGlb.Data source) {
-        result.images.putAll(source.images);
+        result.inheritMaterials(source);
         // libGDX Array reuses its iterator: immutable kit data is read concurrently by terrain workers.
         for (int index = 0; index < source.materials.size; index++) {
             var material = source.materials.get(index);
@@ -351,9 +351,6 @@ final class ConnectedKit {
             copy.shininess = material.shininess; copy.opacity = material.opacity; copy.textures = material.textures;
             result.materials.add(copy);
         }
-        result.surfaces.putAll(source.surfaces);
-        result.alphaTests.putAll(source.alphaTests);
-        result.boardUVs.putAll(source.boardUVs);
     }
 
     /**

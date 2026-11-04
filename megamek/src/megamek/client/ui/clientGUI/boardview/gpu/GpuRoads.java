@@ -1005,7 +1005,7 @@ final class GpuRoads {
      * triangles where water clipping or material subdivision split its face ({@code supports}, GpuTerrain.coatSupports).
      */
     static void write(Supplier<MeshPartBuilder> meshes, List<BoardTacticalGeometry.Triangle> triangles,
-          Patch patch, Mask mask, BoardSurface surface, boolean flat, float coat, float coverage, boolean tessellated,
+          Patch patch, Mask mask, BoardSurface surface, Coords source, boolean flat, float coat, float coverage, boolean tessellated,
           Function<BoardSurface.Face, List<MeshPartBuilder.VertexInfo>> supports) {
         Map<Vector3, Vector3> normals = new HashMap<>();
         Map<BoardTacticalGeometry.Triangle, BoardSurface.Face> ground = new HashMap<>();
@@ -1025,7 +1025,7 @@ final class GpuRoads {
         }
         float repeat = BoardRelief.detailMetres(patch.repeat()) * coverage;
         if (slab(patch) && patch.lift() >= SLAB_RISE) {
-            sides(meshes, patch.shape(), triangles, mask, surface, coat, tessellated, lift, repeat);
+            sides(meshes, patch.shape(), source, triangles, mask, surface, coat, tessellated, lift, repeat);
         }
         for (var t : triangles) {
             Vector3 fallback = new Vector3(t.b()).sub(t.a()).crs(new Vector3(t.c()).sub(t.a())).nor();
@@ -1058,16 +1058,18 @@ final class GpuRoads {
     }
 
     /**
-     * A raised slab road's sides: along its {@code shape}'s outline (tile pixels about the hex centre), in short runs that
+     * A raised slab road's sides: along its {@code shape}'s outline (tile pixels about the source hex centre), in short runs that
      * follow the coat's lifted terrain ({@code triangles}), from the deck down to below the ground, facing out, textured
      * as the coat's edge (its kerb's steel), its mask read just inside the edge. Where the coat runs on into a
-     * neighbour's, a pixel past the hex, the side stands under that neighbour's deck.
+     * neighbour's, a pixel past the hex, the side stands under that neighbour's deck. Clip original edges to this
+     * receiving hex; shifting the whole outline here would duplicate distant end faces, while adding cut caps would
+     * put a wall across the road at every hex boundary.
      */
-    private static void sides(Supplier<MeshPartBuilder> meshes, Area shape, List<BoardTacticalGeometry.Triangle> triangles,
+    private static void sides(Supplier<MeshPartBuilder> meshes, Area shape, Coords source, List<BoardTacticalGeometry.Triangle> triangles,
           Mask mask, BoardSurface surface, float coat, boolean tessellated, float lift, float repeat) {
         if (triangles.isEmpty()) { return; }
-        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(surface.tile.coords());
-        float cy = BoardGeometry.centerY(surface.tile.coords()), depth = 1.6f * lift, inside = .4f;
+        float scale = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(source);
+        float cy = BoardGeometry.centerY(source), depth = 1.6f * lift, inside = .4f;
         float[] point = new float[6], start = null, last = null;
         for (var outline = shape.getPathIterator(null, .25); !outline.isDone(); outline.next()) {
             int type = outline.currentSegment(point);
@@ -1079,13 +1081,17 @@ final class GpuRoads {
             if (last == null || next == null) { continue; }
             float dx = next[0] - last[0], dy = next[1] - last[1], length = (float) Math.hypot(dx, dy);
             if (length > 1e-4f) {
+                var interval = BoardGeometry.crossing(new Vector3(cx + last[0] * scale, cy + last[1] * scale, 0),
+                      new Vector3(cx + next[0] * scale, cy + next[1] * scale, 0), surface.tile.coords());
+                if (interval == null || interval[1] - interval[0] < 1e-6f) { last = next; continue; }
                 float nx = dy / length, ny = -dx / length;
                 // Out of the coat.
                 if (shape.contains(last[0] + dx / 2 + nx * inside, last[1] + dy / 2 + ny * inside)) { nx = -nx; ny = -ny; }
                 Vector3 normal = new Vector3(nx, ny, 0);
-                int runs = Math.max(1, (int) Math.ceil(length / 3));
+                int runs = Math.max(1, (int) Math.ceil(length * (interval[1] - interval[0]) / 3));
                 for (int run = 0; run < runs; run++) {
-                    float t0 = (float) run / runs, t1 = (float) (run + 1) / runs;
+                    float t0 = interval[0] + (interval[1] - interval[0]) * run / runs;
+                    float t1 = interval[0] + (interval[1] - interval[0]) * (run + 1) / runs;
                     float ax = last[0] + dx * t0, ay = last[1] + dy * t0, bx = last[0] + dx * t1, by = last[1] + dy * t1;
                     Vector3 a = new Vector3(cx + ax * scale, cy + ay * scale, 0), b = new Vector3(cx + bx * scale, cy + by * scale, 0);
                     a.z = deck(triangles, a.x, a.y);

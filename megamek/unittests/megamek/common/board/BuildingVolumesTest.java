@@ -11,6 +11,12 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class BuildingVolumesTest {
+    @Test void areaLimitUsesTheWholeStructuralProjectionForTiltedSourceData() {
+        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/xenobiology-station", null,
+              0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);
+        assertEquals(1, BuildingVolumes.onBoardFraction(new Coords(8, 8), tilted, 16, 16), 1e-8);
+    }
+
     @Test void boardPerimeterMatchesTheUnionOfItsHexesIncludingNarrowBoardsAndStaggeredRecesses() {
         for (int width : new int[] {1, 2, 3, 8}) {
             for (int height : new int[] {1, 2, 7}) {

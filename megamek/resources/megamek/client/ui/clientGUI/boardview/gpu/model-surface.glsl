@@ -1,16 +1,19 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Imported glTF surfaces fill a Surface from their material maps and are lit by shadeSurface, as the terrain is.
+#ifdef modelSurfaceFlag
+uniform float u_modelPaintMask; // Albedo alpha selects paint rather than opacity, in lit and unlit views.
+uniform vec3 u_buildingPaint; // Placement colour on explicitly paintable building surfaces; white elsewhere.
+in vec2 v_modelUV;
+uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit material previews.
+#endif
 #ifdef lightingFlag
 #ifdef modelSurfaceFlag
 uniform vec4 u_modelSurface; // roughness, metallic and scattering factors; finish map present
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
-uniform float u_modelPaintMask; // 1: the albedo's alpha is a paint mask, where alone the vertex colour tints (model.frag)
-uniform float u_modelPremultiplied; // 1: Godot's premultiplied alpha, only the diffuse share fades (model.frag)
 uniform float u_modelRuby; // inverse absorption reference distance in world units; zero for other materials
 uniform mat4 u_rubyVolume; // world to the authored closed crystal
 uniform vec4 u_rubyPlanes[32]; // outward facet normal and plane distance, unused entries zero
-in vec2 v_modelUV;
 #endif
 #ifdef modelReliefFlag
 uniform sampler2D u_modelHeight; // white high

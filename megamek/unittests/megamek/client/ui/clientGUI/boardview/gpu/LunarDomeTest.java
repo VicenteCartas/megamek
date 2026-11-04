@@ -105,7 +105,7 @@ class LunarDomeTest {
         var corner = tunnel.corners().stream().filter(c ->
               Math.hypot(c.at().x() + 38.670956, c.at().y() - 5.0091085) < 2).findFirst().orElseThrow();
         var cut = corner.chamfer();
-        assertNotNull(cut, "The prominent2413 upper corner must be clipped even though the ground boundary is straight");
+        assertNotNull(cut, "The prominent 2413 upper corner must be clipped even though the ground boundary is straight");
         assertEquals(18, cut.bottom(), .001);
         assertEquals(0, Math.min(cut.firstBottom(), cut.sideBottom()), .001);
         List<Vector3> lower = new ArrayList<>();
@@ -144,6 +144,29 @@ class LunarDomeTest {
             markers++;
         }
         assertTrue(markers >= 3);
+        List<Vector3> collar = new ArrayList<>();
+        for (var part : post.parts.entrySet()) {
+            if (!part.getKey().equals(BoardMultiHexBuilding.PIER) && !part.getKey().equals(BoardMultiHexBuilding.HARDWARE)) { continue; }
+            var vertices = part.getValue();
+            for (int at = 0; at < vertices.size; at += 3 * RigidGlb.STRIDE) {
+                boolean onTransition = true;
+                for (int cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
+                    int index = at + cornerIndex * RigidGlb.STRIDE;
+                    onTransition &= vertices.items[index + 5] > 0 && vertices.items[index + 2] >= cut.bottom() - .31f
+                          && vertices.items[index + 2] <= cut.bottom() + .8f;
+                }
+                if (onTransition) {
+                    for (int cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
+                        int index = at + cornerIndex * RigidGlb.STRIDE;
+                        collar.add(new Vector3(vertices.items[index], vertices.items[index + 1], vertices.items[index + 2]));
+                    }
+                }
+            }
+        }
+        Area exposed = new Area(restored); exposed.subtract(GpuBuildingInterior.area(collar));
+        exposed.subtract(new Area(new BasicStroke(.03f).createStrokedShape(restored)));
+        assertTrue(areaSize(exposed) < .05,
+              "The fitted collar must reach the original lower corner, leaving no pale roof sliver outside its inset upper wall");
     }
 
     @Test
@@ -194,9 +217,9 @@ class LunarDomeTest {
                         for (short index : part.indices) {
                             int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                             var v = mesh.vertices;
-                            assertEquals((v[at] + HexTile.centerX(coords, HexTile.MODEL_WIDTH)) / 9, v[at + 10], .0001,
+                            assertEquals((v[at] + HexTile.centerX(coords, HexTile.MODEL_WIDTH)) / 36, v[at + 10], .0001,
                                   coords.getBoardNum() + " roof U must continue across the hex boundary");
-                            assertEquals(-(v[at + 1] + HexTile.centerY(coords, HexTile.HEIGHT)) / 9, v[at + 11], .0001,
+                            assertEquals(-(v[at + 1] + HexTile.centerY(coords, HexTile.HEIGHT)) / 36, v[at + 11], .0001,
                                   coords.getBoardNum() + " roof V must use the same panel scale and orientation");
                             checked++;
                         }
@@ -235,8 +258,8 @@ class LunarDomeTest {
                             float determinant = du1 * dv2 - du2 * dv1;
                             var u = ab.cpy().scl(dv2).mulAdd(ac, -dv1).scl(1 / determinant);
                             var w = ac.cpy().scl(du1).mulAdd(ab, -du2).scl(1 / determinant);
-                            assertEquals(9, u.len(), .03, "Ring roof U must retain the panel scale");
-                            assertEquals(9, w.len(), .03, "Ring roof V must retain the panel scale");
+                            assertEquals(36, u.len(), .03, "Ring roof U must retain the panel scale");
+                            assertEquals(36, w.len(), .03, "Ring roof V must retain the panel scale");
                             assertEquals(0, u.cpy().nor().dot(w.cpy().nor()), .002, "Ring panels must be square");
                             double angle = Math.atan2((v[a + 1] + v[b + 1] + v[c + 1]) / 3 - dome.y(),
                                   (v[a] + v[b] + v[c]) / 3 - dome.x());
@@ -385,36 +408,153 @@ class LunarDomeTest {
     void corridorCapsCoverTheirFootprintsWithoutFoldedOrOverlappingBevels() throws Exception {
         for (var entry : LAYOUTS.entrySet()) {
             for (var tunnel : entry.getValue().tunnels()) {
-                var data = cap(tunnel);
-                List<Vector3> roof = new ArrayList<>(); double total = 0;
-                for (var mesh : data.meshes) {
-                    for (var part : mesh.parts) {
-                        // Inset fittings and fastener heads deliberately overlay the structural skin.
-                        if (!part.id.equals(BoardMultiHexBuilding.ROOF) && !part.id.equals(BoardMultiHexBuilding.PIER)) { continue; }
-                        for (int at = 0; at < part.indices.length; at += 3) {
-                            int ia = Short.toUnsignedInt(part.indices[at]) * RigidGlb.STRIDE;
-                            int ib = Short.toUnsignedInt(part.indices[at + 1]) * RigidGlb.STRIDE;
-                            int ic = Short.toUnsignedInt(part.indices[at + 2]) * RigidGlb.STRIDE;
-                            float[] v = mesh.vertices;
-                            if (v[ia + 5] <= 0 || v[ib + 5] <= 0 || v[ic + 5] <= 0) { continue; }
-                            // The solid wall backing has a horizontal cap below the bevel; it is not part of the roof.
-                            if (v[ia + 5] > .999f && v[ib + 5] > .999f && v[ic + 5] > .999f
-                                  && v[ia + 2] < tunnel.top() - .001f) { continue; }
-                            for (int start : new int[] { ia, ib, ic }) { roof.add(new Vector3(v[start], v[start + 1], v[start + 2])); }
-                            var a = roof.get(roof.size() - 3); var b = roof.get(roof.size() - 2); var c = roof.getLast();
-                            total += Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2;
+                Area footprint = area(tunnel.outline());
+                for (var cut : tunnel.chamfers()) { footprint.subtract(cut.removed()); }
+                assertRoofCoverage(footprint, capSurface(tunnel), entry.getKey().getBoardNum());
+            }
+        }
+    }
+
+    @Test
+    void chamferCrossingSameHeightHexSharesKeepsOneContinuousRoof() throws Exception {
+        float diagonal = (float) Math.sqrt(.5);
+        var normal = new BoardMultiHexBuilding.Point(diagonal, -diagonal);
+        var side = new BoardMultiHexBuilding.Point(diagonal, diagonal);
+        List<BoardMultiHexBuilding.Point> footprint = List.of(new BoardMultiHexBuilding.Point(-18, -36),
+              new BoardMultiHexBuilding.Point(-3, -51), new BoardMultiHexBuilding.Point(12, -36),
+              new BoardMultiHexBuilding.Point(-3, -21));
+        var cut = new BoardMultiHexBuilding.Chamfer(new BoardMultiHexBuilding.Point(12, -36), normal, side, 4, 0, 0);
+        // The tip is exactly on the north hexside. Each half must draw its part of the same diagonal and coping.
+        var south = new BoardMultiHexBuilding.Tunnel(List.of(footprint.get(0), footprint.get(2), footprint.get(3)),
+              List.of(36f, 0f, 0f), 6, 36, new BoardMultiHexBuilding.Point(0, 0), List.of(), List.of(cut));
+        var north = new BoardMultiHexBuilding.Tunnel(List.of(new BoardMultiHexBuilding.Point(-18, 36),
+              new BoardMultiHexBuilding.Point(-3, 21), new BoardMultiHexBuilding.Point(12, 36)),
+              List.of(0f, 0f, 36f), 6, 36, new BoardMultiHexBuilding.Point(0, -72), List.of(),
+              List.of(new BoardMultiHexBuilding.Chamfer(new BoardMultiHexBuilding.Point(12, 36), normal, side, 4, 0, 0)));
+        List<Vector3> roof = new ArrayList<>(capSurface(south));
+        for (Vector3 point : capSurface(north)) { roof.add(new Vector3(point).add(0, -72, 0)); }
+        Area expected = area(footprint); expected.subtract(cut.removed());
+        assertEquals(442, areaSize(expected), .01, "The four-unit corner cut removes eight square units from the diamond");
+        assertRoofCoverage(expected, roof, "The two shares of the clipped tip");
+    }
+
+    @Test
+    void remappingRoofEdgesKeepsDisjointCollinearWallClosed() throws Exception {
+        // Two arms meet the same north hexside, but only the left arm has a neighbour reaching this roof.
+        List<BoardMultiHexBuilding.Point> outline = List.of(new BoardMultiHexBuilding.Point(-18, -36),
+              new BoardMultiHexBuilding.Point(-6, -36), new BoardMultiHexBuilding.Point(-6, -10),
+              new BoardMultiHexBuilding.Point(6, -10), new BoardMultiHexBuilding.Point(6, -36),
+              new BoardMultiHexBuilding.Point(18, -36), new BoardMultiHexBuilding.Point(18, 0),
+              new BoardMultiHexBuilding.Point(-18, 0));
+        var openings = List.of(36f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+        var tunnel = new BoardMultiHexBuilding.Tunnel(outline, openings, 6, 36,
+              new BoardMultiHexBuilding.Point(0, 0), List.of(), List.of());
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("corridorOpenings", List.class, BoardMultiHexBuilding.Tunnel.class);
+        method.setAccessible(true);
+        var mapped = method.invoke(null, outline.stream().map(point -> new float[] { point.x(), point.y() }).toList(), tunnel);
+        assertEquals(openings, mapped, "Sharing an infinite line must not transfer an opening across the notch into the closed right arm");
+    }
+
+    @Test
+    void chamferPreservesDifferentOpeningHeightsAlongOneStraightWall() throws Exception {
+        var tunnel = straightOpeningTransition(36);
+        Area expectedRoof = area(tunnel.outline()); expectedRoof.subtract(tunnel.chamfers().getFirst().removed());
+        assertRoofCoverage(expectedRoof, capSurface(tunnel), "The straight wall's opening transition");
+        // Area joins the two collinear north edges. Their distinct opening heights must survive that operation.
+        Area drawn = wallOnPlane(tunnel, 1, -36);
+        drawn.intersect(new Area(new Rectangle2D.Float(-18, 10, 36, 15)));
+        drawn.exclusiveOr(new Area(new Rectangle2D.Float(0, 10, 18, 15)));
+        assertTrue(areaSize(drawn) < .01, "The left half stays open and the right half keeps its wall after the unrelated corner cut");
+    }
+
+    @Test
+    void partialOpeningKeepsBothFacadePlanesAndClosesTheirShortReturn() throws Exception {
+        var tunnel = straightOpeningTransition(18);
+        Area right = wallOnPlane(tunnel, 1, -36), left = wallOnPlane(tunnel, 1, -34.9f);
+        Area jamb = wallOnPlane(tunnel, 0, 0);
+        assertTrue(right.contains(9, 12), "The closed right wall continues below the left opening");
+        assertFalse(left.contains(-9, 12), "The left wall does not close the passage below its lower neighbour's roof");
+        assertFalse(jamb.contains(-35.45, 12), "The return only closes the exposed upper facade");
+        right.intersect(new Area(new Rectangle2D.Float(-18, 19, 36, 11)));
+        right.exclusiveOr(new Area(new Rectangle2D.Float(0, 19, 18, 11)));
+        assertTrue(areaSize(right) < .01, "The right facade stays on its own plane, without slanting towards the inset wall");
+        left.intersect(new Area(new Rectangle2D.Float(-18, 19, 36, 11)));
+        left.exclusiveOr(new Area(new Rectangle2D.Float(-18, 19, 18, 11)));
+        assertTrue(areaSize(left) < .01, "The left facade keeps the full extent of its inset plane");
+        jamb.intersect(new Area(new Rectangle2D.Float(-36, 19, 1.1f, 11)));
+        jamb.exclusiveOr(new Area(new Rectangle2D.Float(-36, 19, 1.1f, 11)));
+        assertTrue(areaSize(jamb) < .01, "A short transverse return closes the gap between the two parallel facade planes");
+        Area expectedRoof = area(tunnel.outline()); expectedRoof.subtract(tunnel.chamfers().getFirst().removed());
+        assertRoofCoverage(expectedRoof, capSurface(tunnel), "The partial-height opening transition");
+    }
+
+    private static BoardMultiHexBuilding.Tunnel straightOpeningTransition(float opening) {
+        List<BoardMultiHexBuilding.Point> outline = List.of(new BoardMultiHexBuilding.Point(-18, -36),
+              new BoardMultiHexBuilding.Point(0, -36), new BoardMultiHexBuilding.Point(18, -36),
+              new BoardMultiHexBuilding.Point(18, 0), new BoardMultiHexBuilding.Point(-18, 0));
+        var cut = new BoardMultiHexBuilding.Chamfer(new BoardMultiHexBuilding.Point(18, 0),
+              new BoardMultiHexBuilding.Point(1, 0), new BoardMultiHexBuilding.Point(0, 1), 4, 0, 0);
+        return new BoardMultiHexBuilding.Tunnel(outline, List.of(opening, 0f, 0f, 0f, 0f), 6, 36,
+              new BoardMultiHexBuilding.Point(0, 0), List.of(), List.of(cut));
+    }
+
+    /** Project the actual negative-facing wall triangles on a fixed X or Y plane into along-wall/height coordinates. */
+    private static Area wallOnPlane(BoardMultiHexBuilding.Tunnel tunnel, int axis, float position) throws Exception {
+        List<Vector3> front = new ArrayList<>();
+        for (var mesh : cap(tunnel).meshes) {
+            for (var part : mesh.parts) {
+                if (!part.id.equals(BoardMultiHexBuilding.WALL)) { continue; }
+                for (int at = 0; at < part.indices.length; at += 3) {
+                    boolean onFront = true;
+                    for (int corner = 0; corner < 3; corner++) {
+                        int index = Short.toUnsignedInt(part.indices[at + corner]) * RigidGlb.STRIDE;
+                        onFront &= Math.abs(mesh.vertices[index + axis] - position) < .01 && mesh.vertices[index + 3 + axis] < -.99;
+                    }
+                    if (onFront) {
+                        for (int corner = 0; corner < 3; corner++) {
+                            int index = Short.toUnsignedInt(part.indices[at + corner]) * RigidGlb.STRIDE;
+                            front.add(new Vector3(mesh.vertices[index + 1 - axis], mesh.vertices[index + 2], 0));
                         }
                     }
                 }
-                Area footprint = area(tunnel.outline()), drawn = GpuBuildingInterior.area(roof);
-                for (var cut : tunnel.chamfers()) { footprint.subtract(cut.removed()); }
-                Area difference = new Area(drawn); difference.exclusiveOr(footprint);
-                difference.subtract(new Area(new BasicStroke(.03f).createStrokedShape(footprint)));
-                // Triangle welding rounds to .001 model units; tolerate only the resulting hairline differences.
-                assertTrue(areaSize(difference) < .05, entry.getKey().getBoardNum() + " has a hole or a bevel outside its walls: " + areaSize(difference));
-                assertEquals(areaSize(footprint), total, .3, entry.getKey().getBoardNum() + " has overlapping roof triangles");
             }
         }
+        return GpuBuildingInterior.area(front);
+    }
+
+    private static List<Vector3> capSurface(BoardMultiHexBuilding.Tunnel tunnel) throws Exception {
+        List<Vector3> roof = new ArrayList<>();
+        for (var mesh : cap(tunnel).meshes) {
+            for (var part : mesh.parts) {
+                // Inset fittings and fastener heads deliberately overlay the structural skin.
+                if (!part.id.equals(BoardMultiHexBuilding.ROOF) && !part.id.equals(BoardMultiHexBuilding.PIER)) { continue; }
+                for (int at = 0; at < part.indices.length; at += 3) {
+                    int ia = Short.toUnsignedInt(part.indices[at]) * RigidGlb.STRIDE;
+                    int ib = Short.toUnsignedInt(part.indices[at + 1]) * RigidGlb.STRIDE;
+                    int ic = Short.toUnsignedInt(part.indices[at + 2]) * RigidGlb.STRIDE;
+                    float[] v = mesh.vertices;
+                    if (v[ia + 5] <= 0 || v[ib + 5] <= 0 || v[ic + 5] <= 0) { continue; }
+                    // The solid wall backing has a horizontal cap below the bevel; it is not part of the roof.
+                    if (v[ia + 5] > .999f && v[ib + 5] > .999f && v[ic + 5] > .999f
+                          && v[ia + 2] < tunnel.top() - .001f) { continue; }
+                    for (int start : new int[] { ia, ib, ic }) { roof.add(new Vector3(v[start], v[start + 1], v[start + 2])); }
+                }
+            }
+        }
+        return roof;
+    }
+
+    private static void assertRoofCoverage(Area footprint, List<Vector3> roof, String label) {
+        double total = 0;
+        for (int index = 0; index < roof.size(); index += 3) {
+            var a = roof.get(index); var b = roof.get(index + 1); var c = roof.get(index + 2);
+            total += Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2;
+        }
+        Area difference = GpuBuildingInterior.area(roof); difference.exclusiveOr(footprint);
+        difference.subtract(new Area(new BasicStroke(.03f).createStrokedShape(footprint)));
+        // Triangle welding rounds to .001 model units; tolerate only the resulting hairline differences.
+        assertTrue(areaSize(difference) < .05, label + " has a hole or a bevel outside its walls: " + areaSize(difference));
+        assertEquals(areaSize(footprint), total, .3, label + " has overlapping roof triangles");
     }
 
     private static RigidGlb.Data cap(BoardMultiHexBuilding.Tunnel tunnel) throws Exception {
@@ -437,15 +577,6 @@ class LunarDomeTest {
         Path2D.Float path = new Path2D.Float(); path.moveTo(outline.getFirst().x(), outline.getFirst().y());
         for (var point : outline) { path.lineTo(point.x(), point.y()); }
         path.closePath(); return new Area(path);
-    }
-
-    private static double polygonArea(List<BoardMultiHexBuilding.Point> outline) {
-        double sum = 0;
-        for (int index = 0; index < outline.size(); index++) {
-            var a = outline.get(index); var b = outline.get((index + 1) % outline.size());
-            sum += a.x() * b.y() - a.y() * b.x();
-        }
-        return Math.abs(sum) / 2;
     }
 
     private static double areaSize(Area area) {

@@ -21,7 +21,7 @@ class GpuAuthoredPartitionTest {
         var mesh = new GeneratedMesh();
         mesh.slab("body", List.of(new double[] {-120, -90}, new double[] {170, -90}, new double[] {170, 90}, new double[] {-120, 90}), 0, 30, true);
         var materials = new ModelData(); var material = new ModelMaterial(); material.id = "body"; materials.materials.add(material);
-        var source = mesh.data("partition-fixture", materials);
+        var source = mesh.data("partition-fixture-lod0", materials);
         var anchor = new Coords(3, 3);
         var members = List.of(new Coords(2, 2), new Coords(4, 2), anchor, new Coords(2, 4), new Coords(4, 4));
         for (double rotation : List.of(0.0, 37.0, 90.0)) {

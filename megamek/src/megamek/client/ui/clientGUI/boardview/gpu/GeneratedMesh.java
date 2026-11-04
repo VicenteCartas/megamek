@@ -284,13 +284,7 @@ final class GeneratedMesh {
         data.id = id;
         data.materials.addAll(source.materials);
         if (source instanceof RigidGlb.Data rigid) {
-            data.images.putAll(rigid.images);
-            data.alphaTests.putAll(rigid.alphaTests);
-            data.surfaces.putAll(rigid.surfaces);
-            data.paintMasks.addAll(rigid.paintMasks);
-            data.labels.addAll(rigid.labels);
-            data.boardUVs.putAll(rigid.boardUVs);
-            data.blends.putAll(rigid.blends);
+            data.inheritMaterials(rigid);
         }
         parts.forEach((material, vertices) -> {
             // Triangles remain whole; split large authored models across meshes with 16-bit indices.
