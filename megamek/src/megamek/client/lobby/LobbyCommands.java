@@ -4,6 +4,7 @@ package megamek.client.lobby;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -20,6 +21,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import jakarta.annotation.Nullable;
+import megamek.MMConstants;
 import megamek.client.AbstractClient;
 import megamek.client.Client;
 import megamek.client.bot.BotClient;
@@ -78,6 +80,8 @@ public class LobbyCommands {
     public static final String GAME_MASTER_ALLOW_COMMAND = "/allowGM";
     public static final String GAME_MASTER_DENY_COMMAND = "/denyGM";
     public static final String GAME_MASTER_WITHDRAW_COMMAND = "/cancelGM";
+    /** The chat command that has the server send the game to this client, which writes it to a file. */
+    public static final String LOCAL_SAVE_COMMAND = "/localsave";
 
     public static final int MIN_MAP_SIZE = 1;
     public static final int MAX_MAP_SIZE = 20;
@@ -200,6 +204,37 @@ public class LobbyCommands {
         for (AbstractClient botClient : localBots().values()) {
             botClient.sendDone(done);
         }
+    }
+
+    // endregion
+
+    // region The game
+
+    /**
+     * Saves the game to {@code file}, as the Swing client's Save Game does: the server sends the game and this client
+     * writes it there, adding ".sav.gz" unless the name has it. {@code saved} then gets the file written, or null when
+     * it could not be.
+     */
+    public void saveGame(File file, Consumer<File> saved) {
+        client().setSaveCompletionCallback(saved);
+        client().setAwaitingSave(true);
+        client().sendChat(localSaveCommand(file));
+    }
+
+    /** Saves the game to the quick save file in the save game folder, without asking; {@code saved} as above. */
+    public void quickSave(Consumer<File> saved) {
+        client().setSaveCompletionCallback(saved);
+        client().sendChat(LOCAL_SAVE_COMMAND + ' ' + MMConstants.QUICKSAVE_FILE + ' ' + MMConstants.QUICKSAVE_PATH);
+    }
+
+    /**
+     * The chat command that saves the game to {@code file}. The command's words are split on spaces, so a space in the
+     * folder becomes the "|" the server turns back into one, and a space in the name an underscore.
+     */
+    static String localSaveCommand(File file) {
+        File folder = file.getAbsoluteFile().getParentFile();
+        String path = (folder == null) ? MMConstants.QUICKSAVE_PATH : folder.getPath();
+        return LOCAL_SAVE_COMMAND + ' ' + file.getName().strip().replace(' ', '_') + ' ' + path.replace(' ', '|');
     }
 
     // endregion

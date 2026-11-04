@@ -44,7 +44,9 @@ public final class RequisitionCatalog {
         AEROSPACE("aerospace", Set.of(UnitType.AEROSPACE_FIGHTER, UnitType.CONV_FIGHTER, UnitType.SMALL_CRAFT,
               UnitType.AERO)),
         LARGE_CRAFT("largeCraft", Set.of(UnitType.DROPSHIP, UnitType.JUMPSHIP, UnitType.WARSHIP,
-              UnitType.SPACE_STATION));
+              UnitType.SPACE_STATION)),
+        OTHER("other", Set.of(UnitType.HANDHELD_WEAPON, UnitType.MOBILE_STRUCTURE, UnitType.ADVANCED_BUILDING,
+              UnitType.BATTLEFIELD_SUPPORT_ASSET));
 
         private final String key;
         private final Set<Integer> types;
@@ -188,7 +190,11 @@ public final class RequisitionCatalog {
         DROPSHIP(Category.LARGE_CRAFT, UnitType.DROPSHIP),
         JUMPSHIP(Category.LARGE_CRAFT, UnitType.JUMPSHIP),
         WARSHIP(Category.LARGE_CRAFT, UnitType.WARSHIP),
-        SPACE_STATION(Category.LARGE_CRAFT, UnitType.SPACE_STATION);
+        SPACE_STATION(Category.LARGE_CRAFT, UnitType.SPACE_STATION),
+        HANDHELD_WEAPON(Category.OTHER, UnitType.HANDHELD_WEAPON),
+        MOBILE_STRUCTURE(Category.OTHER, UnitType.MOBILE_STRUCTURE),
+        ADVANCED_BUILDING(Category.OTHER, UnitType.ADVANCED_BUILDING),
+        BATTLEFIELD_SUPPORT_ASSET(Category.OTHER, UnitType.BATTLEFIELD_SUPPORT_ASSET);
 
         private final Category category;
         private final int unitType;
@@ -257,9 +263,12 @@ public final class RequisitionCatalog {
             roles = Set.copyOf(roles);
         }
 
-        /** Whether the weight chips apply to {@code category}; they mean nothing to DropShips and WarShips. */
+        /**
+         * Whether the weight chips apply to {@code category}; they mean nothing to DropShips and WarShips, nor to
+         * handheld weapons, structures and support assets.
+         */
         public static boolean weighs(Category category) {
-            return category != Category.LARGE_CRAFT;
+            return (category != Category.LARGE_CRAFT) && (category != Category.OTHER);
         }
 
         public Filters withWeights(Set<Weight> next) {

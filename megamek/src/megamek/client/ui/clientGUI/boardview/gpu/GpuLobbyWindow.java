@@ -1151,6 +1151,34 @@ public final class GpuLobbyWindow {
         });
     }
 
+    /** Any thread: asks for a file through the system's dialog and saves the game to it, as the menu bar's Save did. */
+    void saveGame() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && !swingDialogs.blocked()) {
+                files.saveGame(file -> gui.lobbyCommands().saveGame(file, this::saved));
+            }
+        });
+    }
+
+    /** Any thread: saves the game to the quick save file without asking, as the menu bar's Quick Save did. */
+    void quickSave() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                gui.lobbyCommands().quickSave(this::saved);
+            }
+        });
+    }
+
+    /** Swing thread: tells the player in the chat where the game was saved, or that it was not. */
+    private void saved(@Nullable File file) {
+        ChatterBox chat = gui.getChatterBox();
+        if (chat != null) {
+            chat.systemMessage((file == null) ? Messages.getString("Lobby.save.failed")
+                  : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+            queueRefresh();
+        }
+    }
+
     /** Any thread: opens the configuration of the editable unit {@code id}. */
     void configureUnit(int id) {
         forces(controller -> controller.configure(id));

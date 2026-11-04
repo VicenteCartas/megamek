@@ -61,6 +61,10 @@ final class LobbyNativeDialogs {
     private static final float OPTIONS_CHROME = 180;
     private static final float OPTIONS_MIN_PANE = 280;
     private static final float OPTIONS_MAX_PANE = 760;
+    /** What the camo chooser's card takes besides its tree and grid: title, search, preview, footer and gaps. */
+    private static final float CAMO_CHROME = 320;
+    private static final float CAMO_MIN_GRID = 240;
+    private static final float CAMO_MAX_GRID = 560;
     private ExecutorService pictures;
     /** The dialogs that show, the top one first, each with what to do once it has closed. */
     private final Deque<Open> open = new ArrayDeque<>();
@@ -117,10 +121,18 @@ final class LobbyNativeDialogs {
             });
         }
         camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog,
-              "dialog.lg"),
-              chosen, this::close);
+              "dialog.lg"), camoGridHeight(), chosen, this::close);
         show(dialog);
         return camoView;
+    }
+
+    /**
+     * The height the camo chooser's tree and grid take: the window less its margins and the chooser's other rows, so
+     * a tall window shows more camos at a glance.
+     */
+    private float camoGridHeight() {
+        float space = DesignTokens.shipped().space().get("xxxl");
+        return Math.clamp(stage.getHeight() - 2 * space - CAMO_CHROME, CAMO_MIN_GRID, CAMO_MAX_GRID);
     }
 
     /**

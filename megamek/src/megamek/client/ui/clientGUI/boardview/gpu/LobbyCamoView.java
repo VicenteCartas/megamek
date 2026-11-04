@@ -78,8 +78,7 @@ final class LobbyCamoView {
     static final int THUMBNAILS = 320;
     static final int THUMBNAIL_PIXELS = 84;
     private static final String TREE_PREFIX = "camo:";
-    private static final float CARD = 104;
-    private static final float GRID_HEIGHT = 300;
+    private static final float CARD = 72;
     private static final float TREE_WIDTH = 220;
     private static final float PREVIEW = 96;
     /** Below this body width the tree goes above the grid. */
@@ -126,12 +125,13 @@ final class LobbyCamoView {
      * @param catalog   the camo directory as first read
      * @param choice    the camo being chosen; its {@link CamoChoice#individual} offers Reset
      * @param assets    whether a previewed unit is a Battlefield Support Asset, which shows the marker overlay
-     * @param bodyWidth the width the body has, which decides the columns
-     * @param confirmed takes the confirmed camo
-     * @param close     closes the dialog
+     * @param bodyWidth  the width the body has, which decides the columns
+     * @param gridHeight the height the tree and the grid share, as the window leaves
+     * @param confirmed  takes the confirmed camo
+     * @param close      closes the dialog
      */
     LobbyCamoView(UiKit kit, UiDialog dialog, Source source, CamoCatalog catalog, CamoChoice choice, boolean assets,
-          Executor worker, float bodyWidth, Consumer<Camouflage> confirmed, Runnable close) {
+          Executor worker, float bodyWidth, float gridHeight, Consumer<Camouflage> confirmed, Runnable close) {
         this.kit = kit;
         this.dialog = dialog;
         this.source = source;
@@ -185,11 +185,12 @@ final class LobbyCamoView {
 
         Table browse = new Table();
         if (stacked) {
-            browse.add(treeScroll).growX().height(GRID_HEIGHT / 2).row();
-            browse.add(gridStack).grow().height(GRID_HEIGHT).padTop(gap);
+            float treeHeight = gridHeight / 3;
+            browse.add(treeScroll).growX().height(treeHeight).row();
+            browse.add(gridStack).grow().height(gridHeight - treeHeight - gap).padTop(gap);
         } else {
-            browse.add(treeScroll).width(TREE_WIDTH).height(GRID_HEIGHT).top();
-            browse.add(gridStack).grow().height(GRID_HEIGHT).padLeft(gap);
+            browse.add(treeScroll).width(TREE_WIDTH).height(gridHeight).top();
+            browse.add(gridStack).grow().height(gridHeight).padLeft(gap);
         }
         body.add(browse).growX().padTop(space("md")).row();
 

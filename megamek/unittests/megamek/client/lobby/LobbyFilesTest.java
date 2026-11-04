@@ -103,6 +103,24 @@ class LobbyFilesTest {
     }
 
     @Test
+    void aGameSaveAsksForASaveFileInTheSaveGameFolderAndPassesItOn() {
+        LobbyFiles.Ask ask = files.ask(LobbyFiles.Route.SAVE_GAME, null);
+        assertTrue(ask.save());
+        assertEquals(new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(), ask.directory());
+        assertEquals(Messages.getString("Lobby.files.saveGame"), ask.title());
+        assertEquals(List.of("sav.gz", "sav"), ask.extensions());
+
+        File chosen = answer("my game.sav.gz");
+        List<File> saved = new ArrayList<>();
+        files.saveGame(saved::add);
+        assertEquals(List.of(chosen), saved);
+
+        answer(null);
+        files.saveGame(saved::add);
+        assertEquals(1, saved.size(), "a cancel saves nothing");
+    }
+
+    @Test
     void gameOptionsSaveAndLoadBack() {
         Vector<IBasicOption> saved = new Vector<>();
         saved.add(new BasicOption(OptionsConstants.BASE_FRIENDLY_FIRE, true));

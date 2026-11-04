@@ -330,7 +330,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, window::leave, window::ready, this::goTo);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, window::saveGame, window::quickSave,
+              window::leave, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -405,8 +406,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     }
 
     /**
-     * The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, and the Client Settings key
-     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, unless a text field has the keys.
+     * The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, the Client Settings key
+     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, and the save keys (LOCAL_SAVE, Ctrl+S, and
+     * QUICK_SAVE, Ctrl+Shift+S) save the game, unless a text field has the keys.
      */
     private boolean readyKey(int keycode) {
         if (stage.getKeyboardFocus() instanceof TextField) {
@@ -417,6 +419,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         KeyCommandBind settings = KeyCommandBind.CLIENT_SETTINGS;
         if (key == settings.key && modifiers == settings.modifiers) {
             window.openSettings();
+            return true;
+        }
+        KeyCommandBind save = KeyCommandBind.LOCAL_SAVE;
+        if (key == save.key && modifiers == save.modifiers) {
+            window.saveGame();
+            return true;
+        }
+        KeyCommandBind quickSave = KeyCommandBind.QUICK_SAVE;
+        if (key == quickSave.key && modifiers == quickSave.modifiers) {
+            window.quickSave();
             return true;
         }
         KeyCommandBind bind = KeyCommandBind.DONE;

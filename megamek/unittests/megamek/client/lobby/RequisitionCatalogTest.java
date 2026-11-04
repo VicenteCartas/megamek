@@ -141,6 +141,40 @@ class RequisitionCatalogTest {
     }
 
     @Test
+    void otherTakesTheTypesNoDepartmentHas() {
+        for (int type : List.of(UnitType.HANDHELD_WEAPON, UnitType.MOBILE_STRUCTURE, UnitType.ADVANCED_BUILDING,
+              UnitType.BATTLEFIELD_SUPPORT_ASSET)) {
+            assertTrue(Category.OTHER.contains(UnitType.getTypeName(type)), UnitType.getTypeName(type));
+        }
+        assertFalse(Category.OTHER.contains(UnitType.getTypeName(UnitType.MEK)));
+        assertEquals(4, ExactType.of(Category.OTHER).size());
+        assertFalse(Filters.weighs(Category.OTHER));
+    }
+
+    @Test
+    void everyUnitTypeHasADepartment() {
+        for (int type = 0; type < UnitType.SIZE; type++) {
+            String name = UnitType.getTypeName(type);
+            boolean placed = false;
+            for (Category category : Category.values()) {
+                placed |= (category != Category.ALL) && category.contains(name);
+            }
+            assertTrue(placed, name);
+        }
+    }
+
+    @Test
+    void everyTypeAndCategoryHasItsText() {
+        for (Category category : Category.values()) {
+            assertFalse(megamek.client.ui.Messages.getString(category.messageKey()).startsWith("!"),
+                  category.messageKey());
+        }
+        for (ExactType type : ExactType.values()) {
+            assertFalse(megamek.client.ui.Messages.getString(type.messageKey()).startsWith("!"), type.messageKey());
+        }
+    }
+
+    @Test
     void singleTypeCategoriesOfferNoTypeRow() {
         assertTrue(ExactType.of(Category.MEKS).isEmpty());
         assertEquals(5, ExactType.of(Category.VEHICLES).size());

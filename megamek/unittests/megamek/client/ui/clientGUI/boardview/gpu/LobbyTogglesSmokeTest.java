@@ -85,7 +85,7 @@ class LobbyTogglesSmokeTest {
         UiTestStage.run(ui -> {
             int[] opened = new int[1];
             LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
-                  () -> opened[0]++, () -> { }, () -> { }, warning -> { });
+                  () -> opened[0]++, () -> { }, () -> { }, () -> { }, () -> { }, warning -> { });
             bar.attach(ui.stage.getRoot());
             ui.window.addActor(bar);
             bar.setBounds(100, 600, 1200, 80);
@@ -93,6 +93,42 @@ class LobbyTogglesSmokeTest {
             ui.draw();
             click(ui, bar.findActor("lobby-settings"));
             assertEquals(1, opened[0], "a click on the gear opens Client Settings");
+            bar.remove();
+        });
+    }
+
+    @Test
+    void theGameMenuInTheTopBarSavesTheGame() {
+        UiTestStage.run(ui -> {
+            int[] saves = new int[2];
+            LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
+                  () -> { }, () -> saves[0]++, () -> saves[1]++, () -> { }, () -> { }, warning -> { });
+            bar.attach(ui.stage.getRoot());
+            ui.window.addActor(bar);
+            bar.setBounds(100, 600, 1200, 80);
+            bar.validate();
+            ui.draw();
+            Actor menu = ui.stage.getRoot().findActor("lobby-game-menu-popover");
+            assertFalse(menu.isVisible(), "the menu starts closed");
+
+            click(ui, bar.findActor("lobby-game-menu"));
+            ui.draw();
+            assertTrue(menu.isVisible(), "a click on the ⋮ opens the game menu");
+            click(ui, ui.stage.getRoot().findActor("Lobby.gameMenu.save"));
+            ui.draw();
+            assertEquals(1, saves[0], "Save game… asks where to save");
+            assertFalse(menu.isVisible(), "choosing an item closes the menu");
+
+            click(ui, bar.findActor("lobby-game-menu"));
+            ui.draw();
+            click(ui, ui.stage.getRoot().findActor("Lobby.gameMenu.quickSave"));
+            ui.draw();
+            assertEquals(1, saves[1], "Quick save saves at once");
+
+            click(ui, bar.findActor("lobby-game-menu"));
+            ui.draw();
+            assertTrue(bar.back(), "Escape closes the open menu");
+            assertFalse(menu.isVisible());
             bar.remove();
         });
     }

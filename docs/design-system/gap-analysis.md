@@ -1246,6 +1246,20 @@ work for Swing, and item 11 is under investigation.
          MegaMekLab still compile.
        Checks: `MapSettingsTest`, `MapSettingsDataTest`, `MapSetupFormTest`, `LobbyMapSetupControllerTest`,
        `MinimapTerrainTest` and `LobbyMapSetupSmokeTest`.
+     - Tester feedback round on `lobby-followups`:
+       - Camo chooser (Illiani): the tiles shrink from 104 to 72 px, so a `dialog.lg` dialog shows six columns.
+         The grid's height now follows the window (`LobbyNativeDialogs.camoGridHeight`, 240–560 px) instead of a
+         fixed 300 px.
+       - Saving in the lobby: the top bar gains a ⋮ game menu next to the settings gear, with "Save game…" (the
+         system file dialog, in `savegames`, `LobbyFiles.Route.SAVE_GAME`) and "Quick save". Ctrl+S
+         (`LOCAL_SAVE`) and Ctrl+Shift+S (`QUICK_SAVE`) do the same. Both send the `/localsave` command that the
+         Swing menu bar sends (`LobbyCommands.saveGame`, `quickSave`). The chat then says where the game was
+         saved, or that it was not (`AbstractClient.setSaveCompletionCallback`).
+       - Add unit (Lanceman): a new "Other" tab and type filter hold the four unit types no tab had: handheld
+         weapons, mobile structures, advanced buildings and battlefield support assets
+         (`RequisitionCatalog.Category.OTHER`). A test checks that every `UnitType` has a tab.
+       Checks: `RequisitionCatalogTest`, `LobbyFilesTest`, `LobbyCommandsTest`,
+       `LobbyTogglesSmokeTest.theGameMenuInTheTopBarSavesTheGame` and `LobbyNativeDialogsSmokeTest`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

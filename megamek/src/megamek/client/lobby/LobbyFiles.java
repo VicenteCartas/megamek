@@ -25,8 +25,8 @@ import megamek.logging.MMLogger;
 import megamek.utilities.xml.MMXMLUtility;
 
 /**
- * The files the lobby saves and loads through a file dialog: game options, ammunition loadouts, unit lists and unit
- * sprites. Each route asks its {@link Chooser} for a file with the folder, title and file types the Swing choosers
+ * The files the lobby saves and loads through a file dialog: game options, ammunition loadouts, unit lists, unit
+ * sprites and the game itself. Each route asks its {@link Chooser} for a file with the folder, title and file types the Swing choosers
  * used, then reads or writes it, telling the player through the {@link Report} what went wrong, with the Swing
  * client's messages. The unit list routes remember the folder last used, as the Swing client's choosers do.
  * <p>
@@ -37,6 +37,8 @@ public final class LobbyFiles {
     /** The folder of the game options files, as the Swing game options dialog opens it. */
     static final File OPTIONS_FOLDER = new File("mmconf");
     private static final String MUL = "mul";
+    private static final String SAVE = MMConstants.SAVE_FILE_EXT.substring(1);
+    private static final String SAVE_GZ = MMConstants.SAVE_FILE_GZ_EXT.substring(1);
 
     /** The file dialogs the lobby opens. */
     public enum Route {
@@ -46,7 +48,8 @@ public final class LobbyFiles {
         LOAD_LOADOUT(false),
         SAVE_UNIT_LIST(true),
         LOAD_UNIT_LIST(false),
-        EXPORT_SPRITE(true);
+        EXPORT_SPRITE(true),
+        SAVE_GAME(true);
 
         private final boolean save;
 
@@ -145,7 +148,24 @@ public final class LobbyFiles {
                   null);
             case EXPORT_SPRITE -> new Ask(route, null, Messages.getString("ExportUnitSpriteDialog.title"),
                   Messages.getString("Lobby.files.pngFiles"), List.of("png"), (name == null) ? null : name + ".png");
+            case SAVE_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
+                  Messages.getString("Lobby.files.saveGame"), Messages.getString("Lobby.files.saveGames"),
+                  List.of(SAVE_GZ, SAVE), null);
         };
+    }
+
+    // ---- The game
+
+    /**
+     * Asks for a file to save the game to, in the save game folder, and hands it to {@code save}; nothing when
+     * cancelled. The server writes the game, so the file chosen is only its name and folder.
+     */
+    public void saveGame(Consumer<File> save) {
+        chooser.choose(ask(Route.SAVE_GAME, null), file -> {
+            if (file != null) {
+                save.accept(file);
+            }
+        });
     }
 
     // ---- Game options

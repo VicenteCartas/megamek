@@ -19,6 +19,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -103,6 +104,27 @@ class LobbyCommandsTest {
     @Test
     void ownUnitIsSentByTheLocalClient() {
         assertSame(client, commands.correctSender(unitOf(local)));
+    }
+
+    @Test
+    void aSaveSendsTheLocalSaveCommandWithSpacesKeptApart() {
+        File file = new File(new File("My Games", "camp aign"), "Battle of Tukayyid.sav.gz");
+        String folder = file.getAbsoluteFile().getParent().replace(' ', '|');
+        assertEquals("/localsave Battle_of_Tukayyid.sav.gz " + folder, LobbyCommands.localSaveCommand(file));
+
+        Consumer<File> saved = ignored -> { };
+        commands.saveGame(file, saved);
+        verify(client).setSaveCompletionCallback(saved);
+        verify(client).setAwaitingSave(true);
+        verify(client).sendChat("/localsave Battle_of_Tukayyid.sav.gz " + folder);
+    }
+
+    @Test
+    void aQuickSaveSavesToTheQuickSaveFile() {
+        Consumer<File> saved = ignored -> { };
+        commands.quickSave(saved);
+        verify(client).setSaveCompletionCallback(saved);
+        verify(client).sendChat("/localsave quicksave ./savegames");
     }
 
     @Test
