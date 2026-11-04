@@ -554,7 +554,8 @@ final class LobbyPlayersPanel {
               Messages.getString("Lobby.assignTeam"));
         team.setName("lobby-player-team-" + player.id());
         UiKit.onChange(team, () -> openTeams(player.id(), team));
-        row.add(team).left().minWidth(0);
+        // The quiet button's inset would push its icon right of the swatch's edge, so the row starts that far left
+        row.add(team).left().minWidth(0).padLeft(-team.getPadLeft());
         String start = player.start().isEmpty() ? Messages.getString("Lobby.deployment") : player.start();
         String tip = Messages.getString("Lobby.deployment")
               + (player.startValid() ? "" : "\n\n" + Messages.getString("Lobby.startInvalid"));

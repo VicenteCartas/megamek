@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.actions.TemporalAction;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -114,6 +115,13 @@ public final class UiDialog {
                 return event.getTarget() == layer && key(keycode);
             }
         });
+        // A slider or a closing list drops the keyboard focus; the card takes it back so Escape still reaches it
+        layer.addAction(Actions.forever(Actions.run(() -> {
+            Stage stage = layer.getStage();
+            if (stage != null && stage.getKeyboardFocus() == null && UiModal.active(stage) == layer) {
+                stage.setKeyboardFocus(card);
+            }
+        })));
         layer.addCaptureListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {

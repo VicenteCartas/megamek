@@ -322,6 +322,9 @@ class LobbyMapSetupSmokeTest {
                 }
                 float width = card.getWidth();
                 float height = card.getHeight();
+                Actor theme = view.control("random-theme");
+                float right = theme.localToActorCoordinates(card, new Vector2(theme.getWidth(), 0)).x;
+                assertTrue(right <= width, mode + " keeps the theme inside the dialog");
                 for (String tab : List.of("civilization", "elevation", "natural", "water", "effects")) {
                     Actor control = view.control("random-tab-" + tab);
                     assertNotNull(control, tab);
@@ -331,6 +334,10 @@ class LobbyMapSetupSmokeTest {
                     assertEquals(height, card.getHeight(), .5f, mode + " " + tab + " keeps the dialog's height");
                 }
             }
+            assertTrue(dialogs.isOpen());
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen(), "Escape closes the random map settings");
             dialogs.dispose();
         });
     }

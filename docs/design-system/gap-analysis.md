@@ -1329,6 +1329,17 @@ work for Swing, and item 11 is under investigation.
          `GpuLobbyWindow.unitCommand`), and the card's ⋮ leaves those items out (`LobbyUnitMenu.of(…, omit)`). A
          right click, a compact row's ⋮ or a menu for several units keeps them all. Edit Damage stays in the menu,
          since only the menu knows when a Game Master takes it away.
+       - The card's icons settle into two rows (`LobbyForcesPanel`): the first always holds the main actions, View,
+         Configure, Delete and the ⋮; the second, under it, the secondary ones a unit may lack: Edit Damage (when the
+         local player may edit it, now carried on `LobbyUnit.damage` from `LobbyCommands.canEditDamage`; under a Game
+         Master everyone else finds it, greyed with the reason, in the ⋮ menu), Camouflage and C3. Alpha Strike
+         stats, a Swing dialog, go back into the menu.
+       - The team picker's icon lines up with the swatch and the totals: its row starts the quiet button's inset to
+         the left (`LobbyPlayersPanel`).
+       - A dialog that loses its keyboard focus takes it back (`UiDialog`): a slider or a closing popover drops the
+         stage's focus, and Esc then fell through to the lobby, which ignores it while a dialog is open, so the
+         random map settings never closed on Esc. The random map settings no longer pin the page's width to the
+         widest tab either, which pushed the advanced view's Theme out of the card; only the height is pinned.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1340,7 +1351,9 @@ work for Swing, and item 11 is under investigation.
        `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and
        `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`;
        `LobbyUnitMenuTest.aCardsIconsLeaveTheirItemsOutOfItsMenu` and `aCardIconRunsTheMenusCommandOnItsUnit`, and
-       `LobbyUnitCardActionsSmokeTest` (every icon clicked, two rows of at most four, the ⋮'s menu without them).
+       `LobbyUnitCardActionsSmokeTest` (every icon clicked, the main and secondary rows, the ⋮'s menu without them,
+       no damage icon when a Game Master keeps it); `escapeClosesADialogWhoseTextFieldHasTheFocus` (Esc with no
+       focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

@@ -140,6 +140,11 @@ class LobbyNativeDialogsSmokeTest {
             assertEquals(name, ui.stage.getKeyboardFocus(), "the text field takes the first focus");
             ui.stage.keyDown(Input.Keys.ESCAPE);
             assertEquals(List.of("cancel"), said, "Escape cancels though the text field takes every key");
+
+            ui.stage.setKeyboardFocus(null);
+            ui.stage.act(1 / 60f);
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel", "cancel"), said, "Escape cancels once a slider dropped the focus");
         });
     }
 

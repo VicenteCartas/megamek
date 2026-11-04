@@ -42,32 +42,44 @@ class LobbyUnitCardActionsSmokeTest {
             LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, actions, id -> null);
             forces.attach(ui.stage.getRoot());
             Table panel = place(ui, forces.panel());
-            forces.show(forces(unit(1, true, true), unit(2, true, false), unit(3, false, false)));
+            forces.show(forces(unit(1, true, true), unit(2, true, false), unit(3, false, false),
+                  unit(4, true, false, false)));
             ui.draw();
 
             click(ui, panel.findActor("lobby-unit-view-1"));
             click(ui, panel.findActor("lobby-unit-configure-1"));
+            click(ui, panel.findActor("lobby-unit-damage-1"));
             click(ui, panel.findActor("lobby-unit-camo-1"));
             click(ui, panel.findActor("lobby-unit-c3-1"));
-            click(ui, panel.findActor("lobby-unit-alpha-1"));
             click(ui, panel.findActor("lobby-unit-delete-2"));
             click(ui, panel.findActor("lobby-unit-view-3"));
-            assertEquals(List.of("VIEW 1", "configure 1", "INDI_CAMO 1", "c3 1", "ALPHASTRIKE 1", "delete [2]",
+            assertEquals(List.of("VIEW 1", "configure 1", "DAMAGE 1", "INDI_CAMO 1", "c3 1", "delete [2]",
                   "VIEW 3"), actions.log);
 
+            assertNull(panel.findActor("lobby-unit-alpha-1"), "Alpha Strike stats stay in the menu");
             assertNull(panel.findActor("lobby-unit-c3-2"), "a unit without C3 has no C3 icon");
             assertNull(panel.findActor("lobby-unit-configure-3"), "another player's unit has no actions of its own");
             assertNull(panel.findActor("lobby-unit-camo-3"));
             assertNull(panel.findActor("lobby-unit-delete-3"));
+            assertNull(panel.findActor("lobby-unit-secondary-3"), "nor a second row");
+            assertNull(panel.findActor("lobby-unit-damage-4"), "damage only a Game Master may edit has no icon");
+            assertNotNull(panel.findActor("lobby-unit-camo-4"));
 
-            Table tools = panel.findActor("lobby-unit-tools-1");
-            assertEquals(7, tools.getChildren().size, "seven icons with the ⋮");
-            assertEquals(2, tools.getRows(), "in two rows of at most four");
-            assertEquals(tools.getChildren().peek(), unitMore(panel), "the ⋮ comes last");
+            Table first = (Table) panel.findActor("lobby-unit-configure-1").getParent();
+            assertEquals(List.of("lobby-unit-view-1", "lobby-unit-configure-1", "lobby-unit-delete-1"),
+                  Arrays.stream(first.getChildren().toArray()).limit(3).map(Actor::getName).toList(),
+                  "the first row holds the main actions");
+            assertEquals(4, first.getChildren().size, "and ends with the ⋮");
+            Table second = panel.findActor("lobby-unit-secondary-1");
+            assertEquals(List.of("lobby-unit-damage-1", "lobby-unit-camo-1", "lobby-unit-c3-1"),
+                  Arrays.stream(second.getChildren().toArray()).map(Actor::getName).toList(),
+                  "the second row the secondary ones");
+            assertEquals(first.localToStageCoordinates(new Vector2()).x,
+                  second.localToStageCoordinates(new Vector2()).x, 0.5f, "both rows start at the same edge");
 
             actions.log.clear();
             click(ui, unitMore(panel));
-            assertEquals(List.of("menu [1] [ALPHASTRIKE, CONFIGURE, DELETE, INDI_CAMO, VIEW]"), actions.log,
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, INDI_CAMO, VIEW]"), actions.log,
                   "the card's ⋮ leaves out what its icons offer");
 
             forces.compact(true);
@@ -90,7 +102,7 @@ class LobbyUnitCardActionsSmokeTest {
             Actor more = unitMore(panel);
             assertNotNull(more);
             click(ui, more);
-            assertEquals(List.of("menu [1] [ALPHASTRIKE, CONFIGURE, DELETE, INDI_CAMO, VIEW]"), actions.log);
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, INDI_CAMO, VIEW]"), actions.log);
             forces.showMenu(List.of(LobbyMenuEntry.item("View...", true), LobbyMenuEntry.SEPARATOR,
                   LobbyMenuEntry.submenu("Deploy", true, List.of(LobbyMenuEntry.item("Round 1", true),
                         LobbyMenuEntry.item("Round 2", true))),
@@ -182,8 +194,12 @@ class LobbyUnitCardActionsSmokeTest {
     }
 
     private static LobbyUnit unit(int id, boolean editable, boolean c3) {
+        return unit(id, editable, c3, editable);
+    }
+
+    private static LobbyUnit unit(int id, boolean editable, boolean c3, boolean damage) {
         return new LobbyUnit(id, 1, "Unit " + id, "", "", 50, 1000, "1,000", "", "", List.of(), 0,
-              LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, editable, c3, null);
+              LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, editable, c3, null, damage);
     }
 
     /** The units under their owner, so the units view draws their cards. */

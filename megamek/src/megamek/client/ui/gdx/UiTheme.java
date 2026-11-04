@@ -195,7 +195,7 @@ public final class UiTheme implements Disposable {
           // smart_toy (a bot) and palette (camouflage)
           Map.entry("more-vert", 0xE5D4), Map.entry("add", 0xE145), Map.entry("check-circle", 0xE86C),
           Map.entry("radio-unchecked", 0xE836), Map.entry("hourglass", 0xE88B), Map.entry("bot", 0xF06C),
-          Map.entry("palette", 0xE40A), Map.entry("stats", 0xE26B),
+          Map.entry("palette", 0xE40A), Map.entry("build", 0xE869),
           // The lobby's unit cards: hub (a C3 network) and delete
           Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,

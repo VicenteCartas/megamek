@@ -601,46 +601,50 @@ final class LobbyForcesPanel {
         if (compact) {
             side.add(more).size(size("control.sm")).right().padLeft(space("sm"));
         } else {
-            // A wide card's own actions sit under its BV, four to a row with the ⋮ last; its menu leaves them out
-            List<UiButton> icons = new ArrayList<>();
+            // A wide card's own actions sit under its BV, and its menu leaves them out: the main ones on the first
+            // row with the ⋮ last, the secondary ones, which some units lack, on a second row under them
+            List<UiButton> main = new ArrayList<>();
+            List<UiButton> secondary = new ArrayList<>();
             Set<String> offered = new HashSet<>();
             if (!unit.hidden()) {
-                icons.add(commandTool(unit, "show", "Lobby.card.view", "view", LobbyUnitMenu.LMP_VIEW, offered));
+                main.add(commandTool(unit, "show", "Lobby.card.view", "view", LobbyUnitMenu.LMP_VIEW, offered));
             }
             if (unit.editable()) {
-                icons.add(cardTool(unit, "settings", "Lobby.card.configure", "configure",
+                main.add(cardTool(unit, "settings", "Lobby.card.configure", "configure",
                       () -> actions.configure(unit.id())));
                 offered.add(LobbyUnitMenu.LMP_CONFIGURE);
-                icons.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
-                      offered));
-                if (unit.c3()) {
-                    icons.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())));
-                }
-            }
-            if (!unit.hidden()) {
-                icons.add(commandTool(unit, "stats", "Lobby.card.alphaStrike", "alpha",
-                      LobbyUnitMenu.LMP_ALPHA_STRIKE, offered));
-            }
-            if (unit.editable()) {
-                icons.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
+                main.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
                       () -> actions.delete(List.of(unit.id()), List.of())));
                 offered.add(LobbyUnitMenu.LMP_DELETE);
+                // Under a Game Master only they may; everyone else finds it, greyed with the reason, in the ⋮ menu
+                if (unit.damage()) {
+                    secondary.add(commandTool(unit, "build", "Lobby.card.damage", "damage",
+                          LobbyUnitMenu.LMP_DAMAGE, offered));
+                }
+                secondary.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
+                      offered));
+                if (unit.c3()) {
+                    secondary.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())));
+                }
             }
-            icons.add(more);
+            main.add(more);
             if (!offered.isEmpty()) {
                 cardCommands.put(unit.id(), Set.copyOf(offered));
             }
             Table tools = new Table();
             tools.setName("lobby-unit-tools-" + unit.id());
             tools.right();
-            int perRow = 4;
-            int first = icons.size() % perRow == 0 ? perRow : icons.size() % perRow;
-            for (int index = 0; index < icons.size(); index++) {
-                if (index == first || (index > first && (index - first) % perRow == 0)) {
-                    tools.row();
-                }
-                // The first row holds the remainder, so the ⋮ always ends a full last row in the corner
-                tools.add(icons.get(index)).size(size("control.sm"));
+            Table first = new Table();
+            first.right();
+            main.forEach(icon -> first.add(icon).size(size("control.sm")));
+            tools.add(first).right().row();
+            if (!secondary.isEmpty()) {
+                Table second = new Table();
+                second.setName("lobby-unit-secondary-" + unit.id());
+                second.left();
+                secondary.forEach(icon -> second.add(icon).size(size("control.sm")));
+                // Under the first row's left end, so the two rows read as one block of icons
+                tools.add(second).left();
             }
             side.add(tools).right().padTop(space("xs"));
         }

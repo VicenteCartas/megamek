@@ -72,9 +72,8 @@ final class LobbyRandomMapView {
     private final List<String> themes;
     private final Table page = new Table();
     private Cell<Table> pageCell;
-    /** The largest tab of the normal and of the advanced view, so switching tabs never resizes the dialog. */
+    /** The tallest tab of the normal and of the advanced view, so switching tabs never resizes the dialog. */
     private final float[] tallest = { -1, -1 };
-    private final float[] widest = { -1, -1 };
     private final Label problem;
     private final UiButton ok;
     private final UiButton save;
@@ -196,11 +195,10 @@ final class LobbyRandomMapView {
             for (Tab each : Tab.values()) {
                 fillTab(each);
                 tallest[view] = Math.max(tallest[view], page.getPrefHeight());
-                widest[view] = Math.max(widest[view], page.getPrefWidth());
             }
         }
         fillTab(Tab.values()[Math.max(0, tabs.getSelectedIndex())]);
-        pageCell.minSize(widest[view], tallest[view]);
+        pageCell.minHeight(tallest[view]);
         dialog.card().invalidateHierarchy();
         showProblem();
     }
