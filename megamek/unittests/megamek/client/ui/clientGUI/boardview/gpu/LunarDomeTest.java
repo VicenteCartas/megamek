@@ -98,6 +98,55 @@ class LunarDomeTest {
     }
 
     @Test
+    void raisedCornerCutKeepsItsLowerFloorAndExposedGroundMarker() throws Exception {
+        var layout = LAYOUTS.get(new Coords(23, 12));
+        var tunnel = layout.tunnels().stream().filter(t -> t.corners().stream().anyMatch(c ->
+              Math.hypot(c.at().x() + 38.670956, c.at().y() - 5.0091085) < 2)).findFirst().orElseThrow();
+        var corner = tunnel.corners().stream().filter(c ->
+              Math.hypot(c.at().x() + 38.670956, c.at().y() - 5.0091085) < 2).findFirst().orElseThrow();
+        var cut = corner.chamfer();
+        assertNotNull(cut, "The prominent2413 upper corner must be clipped even though the ground boundary is straight");
+        assertEquals(18, cut.bottom(), .001);
+        assertEquals(0, Math.min(cut.firstBottom(), cut.sideBottom()), .001);
+        List<Vector3> lower = new ArrayList<>();
+        for (var mesh : cap(tunnel).meshes) {
+            for (var part : mesh.parts) {
+                if (!part.id.equals(BoardMultiHexBuilding.ROOF)) { continue; }
+                for (int i = 0; i < part.indices.length; i += 3) {
+                    int[] indices = { Short.toUnsignedInt(part.indices[i]) * RigidGlb.STRIDE,
+                          Short.toUnsignedInt(part.indices[i + 1]) * RigidGlb.STRIDE,
+                          Short.toUnsignedInt(part.indices[i + 2]) * RigidGlb.STRIDE };
+                    boolean onLowerRoof = true;
+                    for (int at : indices) { onLowerRoof &= Math.abs(mesh.vertices[at + 2] - cut.bottom()) < .001; }
+                    if (onLowerRoof) {
+                        for (int at : indices) { lower.add(new Vector3(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2])); }
+                    }
+                }
+            }
+        }
+        Area restored = cut.removed(); restored.intersect(area(tunnel.outline()));
+        assertTrue(areaSize(restored) > 1, "Exercise a real upper-tier cut");
+        Area missing = new Area(restored); missing.subtract(GpuBuildingInterior.area(lower));
+        missing.subtract(new Area(new BasicStroke(.03f).createStrokedShape(restored)));
+        assertTrue(areaSize(missing) < .05, "The connected lower floor must remain beneath the clipped upper corner");
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("chamferPost", GeneratedMesh.class, List.class,
+              BoardMultiHexBuilding.Corner.class, float.class);
+        method.setAccessible(true);
+        var post = new GeneratedMesh(); method.invoke(null, post, hex(), corner, tunnel.top() - 2.2f);
+        var white = post.parts.get(BoardMultiHexBuilding.LIGHT);
+        var groundNormal = cut.firstBottom() == 0 ? cut.normal() : cut.side();
+        int markers = 0;
+        for (int i = 0; i < white.size; i += RigidGlb.STRIDE) {
+            var v = white.items;
+            if (v[i + 2] > 2 || v[i + 3] * groundNormal.x() + v[i + 4] * groundNormal.y() < .99f) { continue; }
+            assertTrue((v[i] - cut.at().x()) * groundNormal.x() + (v[i + 1] - cut.at().y()) * groundNormal.y() > .2,
+                  "The ground marker must stand outside the restored original wall, not inside the upper diagonal cut");
+            markers++;
+        }
+        assertTrue(markers >= 3);
+    }
+
+    @Test
     void flatSupportAt2313IsCentredBetweenTheTwoTallerSections() {
         var posts = LAYOUTS.get(new Coords(22, 12)).tunnels().stream().flatMap(tunnel -> tunnel.corners().stream())
               .filter(BoardMultiHexBuilding.Corner::flat).toList();
@@ -358,22 +407,21 @@ class LunarDomeTest {
                     }
                 }
                 Area footprint = area(tunnel.outline()), drawn = GpuBuildingInterior.area(roof);
+                for (var cut : tunnel.chamfers()) { footprint.subtract(cut.removed()); }
                 Area difference = new Area(drawn); difference.exclusiveOr(footprint);
                 difference.subtract(new Area(new BasicStroke(.03f).createStrokedShape(footprint)));
                 // Triangle welding rounds to .001 model units; tolerate only the resulting hairline differences.
                 assertTrue(areaSize(difference) < .05, entry.getKey().getBoardNum() + " has a hole or a bevel outside its walls: " + areaSize(difference));
-                assertEquals(polygonArea(tunnel.outline()), total, .3, entry.getKey().getBoardNum() + " has overlapping roof triangles");
+                assertEquals(areaSize(footprint), total, .3, entry.getKey().getBoardNum() + " has overlapping roof triangles");
             }
         }
     }
 
     private static RigidGlb.Data cap(BoardMultiHexBuilding.Tunnel tunnel) throws Exception {
-        var method = BoardMultiHexBuilding.class.getDeclaredMethod("moduleBlock", GeneratedMesh.class, List.class, List.class,
-              float.class, float.class, List.class, BoardMultiHexBuilding.Point.class);
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("corridorBlock", GeneratedMesh.class, BoardMultiHexBuilding.Tunnel.class);
         method.setAccessible(true);
         var mesh = new GeneratedMesh();
-        method.invoke(null, mesh, hex(), tunnel.outline().stream().map(p -> new float[] { p.x(), p.y() }).toList(),
-              tunnel.foot(), tunnel.top(), tunnel.openings(), tunnel.origin());
+        method.invoke(null, mesh, tunnel);
         return mesh.data("corridor-cap", false);
     }
 

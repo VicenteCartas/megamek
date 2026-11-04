@@ -1806,10 +1806,8 @@ public final class BoardEditorSession {
                     change(spot, hex -> {
                         int level = hex.getLevel(); String theme = hex.getTheme();
                         copyInto(sample, hex);
-                        if (tool == Tool.PAINT) {
-                            if (!brushElevation) { hex.setLevel(level); }
-                            if (!brushTheme) { hex.setTheme(theme); }
-                        }
+                        if (tool == Tool.ERASE || !brushElevation) { hex.setLevel(level); }
+                        if (tool == Tool.PAINT && !brushTheme) { hex.setTheme(theme); }
                     });
                 }
             } else if (!paintTemplate.getDecorations().isEmpty()) {
@@ -1878,8 +1876,11 @@ public final class BoardEditorSession {
                 // A Theme card paints no ground field: the hex keeps its sand, mud, swamp and the rest.
                 boolean theme = brushKey.startsWith(THEME_BRUSH);
                 require(!theme || tool == Tool.PAINT, Messages.getString("BoardEditor.themeNoErase"));
-                selected = at; selectedObject = ""; component = brushComponent;
-                var definition = blueprint.component(brushComponent);
+                // A ground eraser on a roof or floor removes the pointed building, keeping the ground beneath it.
+                String target = tool == Tool.ERASE && brushComponent.equals("ground") && "building".equals(receiver)
+                      ? "building" : brushComponent;
+                selected = at; selectedObject = ""; component = target;
+                var definition = blueprint.component(target);
                 List<Coords> spots = new ArrayList<>();
                 for (Coords spot : brush(at)) {
                     if (!painted.add(spot)) { continue; }
@@ -1892,7 +1893,7 @@ public final class BoardEditorSession {
                             var style = paintTemplate.getAppearance().get(brushComponent);
                             if (brushComponent.equals("road")) { style = colonyFinish(hex, style); }
                             styles.put(brushComponent, brushComponent.equals("bridge") ? retype(style).apply(styles.get("bridge")) : style);
-                        } else { styles.remove(brushComponent); }
+                        } else { styles.remove(target); }
                         hex.setAppearance(styles);
                         if (tool != Tool.ERASE && brushComponent.equals("ground")) {
                             if (brushTheme) { hex.setTheme(paintTemplate.getTheme()); }

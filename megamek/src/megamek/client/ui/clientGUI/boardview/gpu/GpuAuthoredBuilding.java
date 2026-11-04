@@ -183,6 +183,8 @@ final class GpuAuthoredBuilding {
             var clipped = AuthoredBoardClip.clip(whole, lod, layout.boardWidth(), layout.boardHeight(), solids);
             var mesh = new GeneratedMesh();
             for (var node : clipped.nodes) { mesh.placed(clipped, node, new Matrix4()); }
+            // Only its material metadata is needed after conversion; do not retain a second copy of every vertex.
+            clipped.meshes.clear(); clipped.nodes.clear();
             levels.add(new Geometry(clipped, mesh));
         }
         return new Whole(List.copyOf(levels), solids, BuildingVolumes.roofs(solids), new ConcurrentHashMap<>());

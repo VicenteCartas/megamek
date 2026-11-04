@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import jdk.jfr.Configuration;
@@ -25,6 +26,22 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 @Tag("gpu-benchmark")
 class GpuAuthoredPerformanceSmokeTest {
+    @Test void timesPaintHoverPublication() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
+            editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+            var source = new GpuMapSource(editor.game(), null, editor);
+            try {
+                for (int i = 0; i < 6; i++) {
+                    source.editorHover(new Coords(13 + i % 3, 10), 0, 0, "ground");
+                    long start = System.nanoTime(); source.refresh(); source.takeFrame();
+                    System.out.printf("PERF authored paint-publication run=%d time=%.2fms%n", i, millis(start));
+                    assertFalse(source.editorPreview().routes().isEmpty());
+                }
+            } finally { source.close(); }
+        });
+    }
+
     @Test void timesPlacementDragRotationAndMeshPreparation() throws Exception {
         GdxNativesLoader.load();
         try (var recording = new Recording(Configuration.getConfiguration("profile"))) {

@@ -37,6 +37,8 @@ final class BoardTiles implements AutoCloseable {
     /** Every hex is recaptured next; else {@link #dirty} (null: none). */
     private boolean all = true;
     private Rectangle dirty;
+    /** A placement edit changes the pose of every saved share, including members outside the dirty rectangle. */
+    private final Set<String> dirtyBuildings = new java.util.HashSet<>();
     /** The boards the tripwire reported, each once. */
     private final Set<Board> warned = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -58,17 +60,23 @@ final class BoardTiles implements AutoCloseable {
     void changed(Coords coords) {
         if (coords == null) {
             all = true;
+            dirtyBuildings.clear();
             artwork.clear();
             return;
         }
         Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
         // A member can be remote from its owner. Losing its last reference changes the owner's prop fallback.
         if (board != null && board.contains(coords)) {
+            board.getHex(coords).getDecorations().stream().filter(object -> megamek.common.board.BuildingVolumes.of(object.asset()).present())
+                  .forEach(object -> dirtyBuildings.add(object.id()));
             var current = board.getHex(coords).getBuildingReference();
             int index = coords.getX() * board.getHeight() + coords.getY();
             var previous = index < tiles.size() ? tiles.get(index).cover().reference() : null;
             for (var reference : new megamek.common.board.BuildingVolumes.Reference[] { current, previous }) {
-                if (reference != null) { area.add(new Rectangle(reference.anchor().getX(), reference.anchor().getY(), 1, 1)); }
+                if (reference != null) {
+                    dirtyBuildings.add(reference.id());
+                    area.add(new Rectangle(reference.anchor().getX(), reference.anchor().getY(), 1, 1));
+                }
             }
         }
         dirty = dirty == null ? area : dirty.union(area);
@@ -148,9 +156,24 @@ final class BoardTiles implements AutoCloseable {
                 captured.accept(coords, art);
             }
         }
+        if (!all && !dirtyBuildings.isEmpty()) {
+            for (int index = 0; index < next.size(); index++) {
+                var previous = next.get(index);
+                var reference = previous.cover().reference();
+                Coords at = previous.coords();
+                if (reference == null || !dirtyBuildings.contains(reference.id()) || area.contains(at.getX(), at.getY())) { continue; }
+                Hex hex = drawn(board, at);
+                // Only the owning decoration changed: reuse the member's cached terrain artwork.
+                var art = artwork.capture(board, at, hex);
+                var tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex, board::getBuildingAt, buildingReferences);
+                next.set(index, tile.equals(previous) ? previous : tile);
+                captured.accept(at, art);
+            }
+        }
         tiles = List.copyOf(next);
         all = false;
         dirty = null;
+        dirtyBuildings.clear();
         return tiles;
     }
 

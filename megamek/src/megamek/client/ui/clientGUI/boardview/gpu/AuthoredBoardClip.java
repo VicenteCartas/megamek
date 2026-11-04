@@ -95,9 +95,15 @@ final class AuthoredBoardClip {
             double length = Math.hypot(b.x() - a.x(), b.y() - a.y());
             Edge edge = new Edge(a.x(), a.y(), (b.x() - a.x()) / length, (b.y() - a.y()) / length, length);
             Area coplanar = new Area(), section = section(whole, edge, coplanar);
+            Area span = new Area(new Rectangle2D.Double(0, -1e8, edge.length(), 2e8));
+            section.intersect(span);
+            Path2D combined = new Path2D.Double(section);
             // Helpers seal occupiable rooms too; the open courtyard remains outside their structural union.
-            for (GeneratedMesh helper : helpers) { section.add(section(helper, edge, new Area())); }
-            section.intersect(new Area(new Rectangle2D.Double(0, -1e8, edge.length(), 2e8)));
+            // Trim to this edge before the union, and sweep the canonical Area contours together just once.
+            for (GeneratedMesh helper : helpers) {
+                Area room = section(helper, edge, new Area()); room.intersect(span); combined.append(room, false);
+            }
+            section = new Area(combined);
             section.subtract(coplanar);
             for (var triangle : BoardTacticalGeometry.flat(section, 0)) {
                 result.triangle(CAP, edge.vertex(triangle.a().x, triangle.a().y), edge.vertex(triangle.b().x, triangle.b().y), edge.vertex(triangle.c().x, triangle.c().y));

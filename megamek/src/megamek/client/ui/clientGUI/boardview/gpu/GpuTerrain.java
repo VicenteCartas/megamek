@@ -8003,7 +8003,8 @@ final class GpuTerrain implements Disposable {
                         nearest = distance;
                         result = prop.coords();
                         hardSurface = prop.hardSurface;
-                        receiver = prop.receiver == null ? "ground" : prop.receiver;
+                        receiver = prop.receiver != null ? prop.receiver
+                              : Float.isNaN(prop.floorZ) ? "ground" : "building";
                     }
                 }
             }

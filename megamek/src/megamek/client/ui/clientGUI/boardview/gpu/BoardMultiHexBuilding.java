@@ -191,14 +191,37 @@ final class BoardMultiHexBuilding {
     record Gate(float x, float y, float ux, float uy, float floor) { }
 
     /** A facade support owned by one share; turns retain both adjoining wall normals, flat posts repeat one. */
-    record Corner(Point at, Point normal, Point side, float bottom, boolean external, boolean flat) { }
+    record Corner(Point at, Point normal, Point side, float bottom, boolean external, boolean flat, Chamfer chamfer) { }
+
+    /** One exposed corner cut, shared by its shell and its complete armored support. */
+    record Chamfer(Point at, Point normal, Point side, float reach, float firstBottom, float sideBottom) {
+        float bottom() { return Math.max(firstBottom, sideBottom); }
+        Point a() { return new Point(at.x() + normal.y() * reach, at.y() - normal.x() * reach); }
+        Point b() { return new Point(at.x() - side.y() * reach, at.y() + side.x() * reach); }
+
+        /** The removed wedge extends beyond the original walls so their relief is cut with the shell. */
+        Area removed() {
+            var a = a(); var b = b();
+            float[] pa = { a.x(), a.y() }, pb = { b.x(), b.y() }, origin = { at.x(), at.y() };
+            // The existing height-step facade is inset1.1 units. Cover that offset, without reaching another wing.
+            var line = shifted(pa, pb, 0);
+            return area(List.of(meet(line, shifted(pa, origin, -1.2f)),
+                  meet(line, shifted(origin, pb, -1.2f)), cornerPoint(origin, normal, side, 1.2f, 1.2f)));
+        }
+    }
+
+    private record Facade(List<Corner> supports, List<Chamfer> chamfers) { }
 
     /** A winding-aware turn of a board-space outline, before assigning its exposed height and material. */
-    private record Turn(Point at, Point normal, Point side, boolean convex) { }
+    private record Turn(Point at, Point normal, Point side, boolean convex, float cutback) { }
 
     /** One corridor outline clipped to this hex; each edge opens up to its neighbour's roof, or zero for a wall. */
-    record Tunnel(List<Point> outline, List<Float> openings, float foot, float top, Point origin, List<Corner> corners) {
-        Tunnel { outline = List.copyOf(outline); openings = List.copyOf(openings); corners = List.copyOf(corners); }
+    record Tunnel(List<Point> outline, List<Float> openings, float foot, float top, Point origin, List<Corner> corners,
+          List<Chamfer> chamfers) {
+        Tunnel {
+            outline = List.copyOf(outline); openings = List.copyOf(openings);
+            corners = List.copyOf(corners); chamfers = List.copyOf(chamfers);
+        }
     }
 
     private record Link(Point from, Point to, int firstDome, int secondDome, float top) { }
@@ -524,7 +547,8 @@ final class BoardMultiHexBuilding {
         for (Corridor corridor : corridors(tile, spans, !annex(fits, tile.coords()))) {
             var openings = openings(scene, tile, corridor, spans, fits, reach, neighbours);
             var corners = corridorCorners(scene, tile, asset, corridor, openings, spans, fits, group, reach, neighbours, foot);
-            result.add(new Tunnel(corridor.outline(), openings, Math.min(foot, corridor.top() - 3), corridor.top(), origin, corners));
+            result.add(new Tunnel(corridor.outline(), openings, Math.min(foot, corridor.top() - 3), corridor.top(), origin,
+                  corners.supports(), corners.chamfers()));
         }
         return List.copyOf(result);
     }
@@ -559,7 +583,7 @@ final class BoardMultiHexBuilding {
     }
 
     /** Recover the joined facade before detecting corners: a shared cut is not itself a structural turn. */
-    private static List<Corner> corridorCorners(BoardScene scene, BoardScene.Tile tile, String asset, Corridor own,
+    private static Facade corridorCorners(BoardScene scene, BoardScene.Tile tile, String asset, Corridor own,
           List<Float> openings, List<Span> spans, List<Fit> fits, List<Member> group, Float[] reach, Map<Coords, List<Corridor>> neighbours,
           float foot) {
         Point origin = centre(tile.coords());
@@ -596,13 +620,14 @@ final class BoardMultiHexBuilding {
         var outside = boundaries(footprint);
         var turns = turns(joined);
         List<Corner> result = new ArrayList<>();
+        List<Chamfer> chamfers = new ArrayList<>();
         for (Turn turn : turns) {
             Point at = turn.at();
             Vector3 outward = new Vector3(turn.normal().x() + turn.side().x(), turn.normal().y() + turn.side().y(), 0).nor();
             Point normal = new Point(outward.x, outward.y);
             // Give a complete pillar to the facade just inside its corner. Exact shared cuts use board order,
             // rather than splitting the lens/body at a hex boundary or drawing two overlaid columns.
-            if (!owns(owners, tile.coords(), at, normal)) { continue; }
+            boolean owner = owns(owners, tile.coords(), at, normal);
             // A convex upper corner beside an exterior-to-ground wall is external even when a lower wing
             // continues along that straight facade. Turns wholly over a lower roof remain white supports.
             boolean ground = exteriorNormal(outside, at) != null;
@@ -617,11 +642,31 @@ final class BoardMultiHexBuilding {
                     }
                 }
             }
-            result.add(new Corner(new Point(at.x() - origin.x(), at.y() - origin.y()),
-                  turn.normal(), turn.side(), bottom, external, false));
+            Point localAt = new Point(at.x() - origin.x(), at.y() - origin.y());
+            Chamfer chamfer = null;
+            if (turn.convex() && turn.cutback() >= 2 && fits.stream().noneMatch(fit ->
+                  Math.hypot(at.x() - fit.x(), at.y() - fit.y()) < fit.podium() + 1)) {
+                var world = new Chamfer(at, turn.normal(), turn.side(), turn.cutback(), 0, 0);
+                Area wedge = world.removed(); wedge.intersect(joined);
+                float firstBottom = ground ? 0 : bottom, sideBottom = firstBottom;
+                for (var lower : lowerRoofs.entrySet()) {
+                    if (lower.getKey().contains(world.a().x() + turn.normal().x() * 3, world.a().y() + turn.normal().y() * 3)) {
+                        firstBottom = Math.max(firstBottom, lower.getValue());
+                    }
+                    if (lower.getKey().contains(world.b().x() + turn.side().x() * 3, world.b().y() + turn.side().y() * 3)) {
+                        sideBottom = Math.max(sideBottom, lower.getValue());
+                    }
+                }
+                Area share = new Area(local); share.intersect(wedge);
+                if (!share.isEmpty()) {
+                    chamfer = new Chamfer(localAt, turn.normal(), turn.side(), turn.cutback(), firstBottom, sideBottom);
+                    chamfers.add(chamfer);
+                }
+            }
+            if (owner) { result.add(new Corner(localAt, turn.normal(), turn.side(), bottom, external, false, chamfer)); }
         }
         result.addAll(flatPosts(scene, tile, asset, own.top(), local, spans, fits, group, neighbours, outside));
-        return List.copyOf(result);
+        return new Facade(List.copyOf(result), List.copyOf(chamfers));
     }
 
     /** A short, gentle return beside a substantial corner keeps its wall seam rather than a second crowded column. */
@@ -666,7 +711,7 @@ final class BoardMultiHexBuilding {
                 if (exterior == null || exterior.x() * normal.x() + exterior.y() * normal.y() < .99
                       || !local.intersects(at.x() - normal.x() * .1 - .02, at.y() - normal.y() * .1 - .02, .04, .04)
                       || !owns(owners, tile.coords(), at, normal)) { continue; }
-                result.add(new Corner(new Point(at.x() - origin.x(), at.y() - origin.y()), normal, normal, 0, false, true));
+                result.add(new Corner(new Point(at.x() - origin.x(), at.y() - origin.y()), normal, normal, 0, false, true, null));
             }
         }
         return result;
@@ -690,8 +735,11 @@ final class BoardMultiHexBuilding {
                 Vector3 outgoing = new Vector3(next[0] - at[0], next[1] - at[1], 0).nor();
                 float turn = incoming.x * outgoing.y - incoming.y * outgoing.x;
                 if (Math.abs(turn) < .01f) { continue; }
+                float cutback = Math.min(MODULE_CHAMFER, .3f * Math.min(
+                      (float) Math.hypot(at[0] - previous[0], at[1] - previous[1]),
+                      (float) Math.hypot(next[0] - at[0], next[1] - at[1])));
                 boundary.add(new Turn(new Point(at[0], at[1]), new Point(incoming.y, -incoming.x),
-                      new Point(outgoing.y, -outgoing.x), turn > 0));
+                      new Point(outgoing.y, -outgoing.x), turn > 0, cutback));
             }
             // Only adjoining turns can crowd a short return. Another wing across a narrow gap is unrelated.
             for (int i = 0; i < boundary.size(); i++) {
@@ -1518,13 +1566,13 @@ final class BoardMultiHexBuilding {
             if (layout.design() == Design.BIODOME) { garden(mesh, dome); }
         }
         for (Tunnel tunnel : layout.tunnels()) {
-            var outline = tunnel.outline().stream().map(point -> new float[] { point.x(), point.y() }).toList();
-            prism(mesh, hex(), PLINTH_MATERIAL, outline, 0, tunnel.foot(), outline.size());
-            moduleBlock(mesh, hex(), outline, tunnel.foot(), tunnel.top(), tunnel.openings(), tunnel.origin());
+            corridorBlock(mesh, tunnel);
             for (Corner corner : tunnel.corners()) {
                 // One owning facade carries the complete corner housing, including its small relief over the cut.
                 float[] at = { corner.at().x(), corner.at().y() };
-                if (corner.flat()) {
+                if (corner.chamfer() != null) {
+                    chamferPost(mesh, grown(hex(), 9), corner, tunnel.top() - BEVEL_RISE);
+                } else if (corner.flat()) {
                     facadePost(mesh, grown(hex(), 6), at, -corner.normal().y(), corner.normal().x(),
                           corner.bottom(), tunnel.top() - BEVEL_RISE, 1.3f, false);
                 } else {
@@ -1543,6 +1591,68 @@ final class BoardMultiHexBuilding {
             }
         }
         return mesh;
+    }
+
+    /** Cut the actual shell at each exposed tier; keep the lower connected floor beneath an upper corner cut. */
+    private static void corridorBlock(GeneratedMesh mesh, Tunnel tunnel) {
+        var outline = tunnel.outline().stream().map(point -> new float[] { point.x(), point.y() }).toList();
+        Area original = area(outline), upper = new Area(original);
+        for (Chamfer chamfer : tunnel.chamfers()) { upper.subtract(chamfer.removed()); }
+        for (var loop : outlines(upper)) {
+            var walls = counterClockwise(loop);
+            var openings = corridorOpenings(walls, tunnel);
+            prism(mesh, hex(), PLINTH_MATERIAL, walls, 0, tunnel.foot(), walls.size());
+            moduleBlock(mesh, hex(), walls, tunnel.foot(), tunnel.top(), openings, tunnel.origin());
+        }
+        for (Chamfer chamfer : tunnel.chamfers()) {
+            if (chamfer.bottom() <= EPSILON) { continue; }
+            Area fill = chamfer.removed(); fill.intersect(original);
+            for (var loop : outlines(fill)) {
+                var walls = counterClockwise(loop);
+                var openings = corridorOpenings(walls, tunnel);
+                prism(mesh, hex(), PLINTH_MATERIAL, walls, 0, Math.min(tunnel.foot(), chamfer.bottom()), walls.size());
+                for (int edge = 0; edge < walls.size(); edge++) {
+                    float bottom = Math.max(tunnel.foot(), openings.get(edge));
+                    if (bottom >= chamfer.bottom() - EPSILON) { continue; }
+                    float[] a = walls.get(edge), b = walls.get((edge + 1) % walls.size());
+                    float length = (float) Math.hypot(b[0] - a[0], b[1] - a[1]);
+                    float tx = (b[0] - a[0]) / length, ty = (b[1] - a[1]) / length;
+                    float phase = (a[0] + tunnel.origin().x()) * tx + (a[1] + tunnel.origin().y()) * ty;
+                    face(mesh, hex(), WALL, a, b, ty, -tx, bottom, chamfer.bottom(),
+                          phase / WALL_REPEAT, (phase + length) / WALL_REPEAT);
+                    facadeDetails(mesh, hex(), a, b, bottom, chamfer.bottom(), phase, false, false, false);
+                }
+                var roof = walls.stream().map(p -> {
+                    float[] v = deck(p[0], p[1], chamfer.bottom(), 1); roofUV(v, tunnel.origin()); return v;
+                }).toList();
+                clippedPolygon(mesh, hex(), ROOF, roof);
+            }
+        }
+    }
+
+    /** Existing shared edges retain their opening height; a new diagonal starts at its supporting lower roof. */
+    private static List<Float> corridorOpenings(List<float[]> outline, Tunnel tunnel) {
+        List<Float> result = new ArrayList<>();
+        for (int edge = 0; edge < outline.size(); edge++) {
+            float[] a = outline.get(edge), b = outline.get((edge + 1) % outline.size());
+            float height = 0;
+            for (int old = 0; old < tunnel.outline().size(); old++) {
+                Point p = tunnel.outline().get(old), q = tunnel.outline().get((old + 1) % tunnel.outline().size());
+                if (Line2D.ptLineDist(p.x(), p.y(), q.x(), q.y(), a[0], a[1]) < .02
+                      && Line2D.ptLineDist(p.x(), p.y(), q.x(), q.y(), b[0], b[1]) < .02) {
+                    height = Math.max(height, tunnel.openings().get(old));
+                }
+            }
+            for (Chamfer cut : tunnel.chamfers()) {
+                Point p = cut.a(), q = cut.b();
+                if (Line2D.ptLineDist(p.x(), p.y(), q.x(), q.y(), a[0], a[1]) < .02
+                      && Line2D.ptLineDist(p.x(), p.y(), q.x(), q.y(), b[0], b[1]) < .02) {
+                    height = Math.max(height, cut.bottom());
+                }
+            }
+            result.add(height);
+        }
+        return List.copyOf(result);
     }
 
     /** Exact near-level triangles: picking and clearance. */
@@ -2607,8 +2717,7 @@ final class BoardMultiHexBuilding {
         List<float[]> cap = walls;
         List<float[]> roof;
         List<float[]> facades = walls;
-        if (openings == null) { roof = parapets(walls, BEVEL); }
-        else {
+        if (openings != null) {
             // A height-step facade lies on the hex cut. Recess its cladding so its relief stays in this share;
             // the full-depth floor bands close the ledges up to the adjoining roof and the coping.
             facades = facadeOutline(walls, openings, top);
@@ -2620,13 +2729,8 @@ final class BoardMultiHexBuilding {
                 cap.add(meet(shifted(walls.get(before), walls.get(index), openings.get(before) >= top - EPSILON ? -2 * BEVEL : 0),
                       shifted(walls.get(index), walls.get(after), openings.get(index) >= top - EPSILON ? -2 * BEVEL : 0)));
             }
-            roof = new ArrayList<>();
-            for (int index = 0; index < walls.size(); index++) {
-                int before = (index + walls.size() - 1) % walls.size(), after = (index + 1) % walls.size();
-                roof.add(meet(shifted(cap.get(before), cap.get(index), openings.get(before) >= top - EPSILON ? 0 : BEVEL),
-                      shifted(cap.get(index), cap.get(after), openings.get(index) >= top - EPSILON ? 0 : BEVEL)));
-            }
         }
+        roof = roofInset(cap, openings, top);
         float along = 0;
         for (int edge = 0; edge < walls.size(); edge++) {
             int next = (edge + 1) % walls.size();
@@ -2667,6 +2771,49 @@ final class BoardMultiHexBuilding {
                   (dx * uy - dy * ux) / ROOF_REPEAT));
         }
         clippedPolygon(mesh, hex, ROOF, laid);
+    }
+
+    /** A short diagonal can disappear inside a broad coping; collapse that inset edge instead of folding it. */
+    private static List<float[]> roofInset(List<float[]> outline, List<Float> openings, float top) {
+        int size = outline.size();
+        List<float[]> lines = new ArrayList<>(), roof = new ArrayList<>();
+        boolean[] collapsed = new boolean[size];
+        for (int i = 0; i < size; i++) {
+            lines.add(shifted(outline.get(i), outline.get((i + 1) % size),
+                  openings != null && openings.get(i) >= top - EPSILON ? 0 : BEVEL));
+            roof.add(outline.get(i));
+        }
+        for (int remaining = size; remaining >= 3; remaining--) {
+            for (int i = 0; i < size; i++) {
+                if (collapsed[i]) { continue; }
+                int before = (i + size - 1) % size;
+                while (collapsed[before]) { before = (before + size - 1) % size; }
+                float[] point = meet(lines.get(before), lines.get(i));
+                for (int at = (before + 1) % size; ; at = (at + 1) % size) {
+                    roof.set(at, point);
+                    if (at == i) { break; }
+                }
+            }
+            int folded = -1;
+            for (int i = 0; i < size; i++) {
+                if (collapsed[i]) { continue; }
+                int next = (i + 1) % size;
+                float[] a = outline.get(i), b = outline.get(next), c = roof.get(i), d = roof.get(next);
+                if ((b[0] - a[0]) * (d[0] - c[0]) + (b[1] - a[1]) * (d[1] - c[1]) < -.001f) { folded = i; break; }
+            }
+            if (folded < 0) { break; }
+            if (remaining == 3) {
+                // No flat roof remains in a very narrow tip. The three coping faces meet at its interior centre.
+                float[] centre = new float[2];
+                for (int i = 0; i < size; i++) {
+                    if (!collapsed[i]) { centre[0] += outline.get(i)[0] / 3; centre[1] += outline.get(i)[1] / 3; }
+                }
+                java.util.Collections.fill(roof, centre);
+                break;
+            }
+            collapsed[folded] = true;
+        }
+        return roof;
     }
 
     /** Boxed metal coping: a vertical fascia, narrow edge chamfers and a broad flat cap with fitted joints. */
@@ -2813,6 +2960,49 @@ final class BoardMultiHexBuilding {
             float low = openings == null ? bottom : Math.max(bottom, Math.min(openings.get(before), openings.get(i)));
             cornerPost(mesh, hex, b, new Point(incoming.y, -incoming.x), new Point(outgoing.y, -outgoing.x),
                   low, top, turn > 0);
+        }
+    }
+
+    /** A corner housing wraps both walls: its broad faces and their lamps follow the walls, not their bisector. */
+    private static void chamferPost(GeneratedMesh mesh, List<float[]> hex, Corner corner, float top) {
+        Chamfer cut = corner.chamfer();
+        Point a = cut.a(), b = cut.b();
+        float[] first = { a.x() + cut.normal().y() * 2.2f, a.y() - cut.normal().x() * 2.2f };
+        float[] last = { b.x() - cut.side().y() * 2.2f, b.y() + cut.side().x() * 2.2f };
+        float[] pa = { a.x(), a.y() }, pb = { b.x(), b.y() };
+        List<float[]> profile = counterClockwise(List.of(
+              new float[] { first[0] + cut.normal().x() * 1.2f, first[1] + cut.normal().y() * 1.2f },
+              meet(shifted(first, pa, -1.2f), shifted(pa, pb, -1.2f)),
+              meet(shifted(pa, pb, -1.2f), shifted(pb, last, -1.2f)),
+              new float[] { last[0] + cut.side().x() * 1.2f, last[1] + cut.side().y() * 1.2f },
+              new float[] { last[0] - cut.side().x() * 1.2f, last[1] - cut.side().y() * 1.2f },
+              new float[] { first[0] - cut.normal().x() * 1.2f, first[1] - cut.normal().y() * 1.2f }));
+        float upperBottom = Math.max(corner.bottom(), cut.bottom());
+        prism(mesh, hex, PIER, profile, upperBottom, top, profile.size());
+        postCap(mesh, hex, profile, top, top + BEVEL_RISE + .4f, .4f);
+        postCap(mesh, hex, profile, upperBottom, upperBottom + .7f, .4f);
+        // A tier cut rests on a lower roof. Its exterior return continues down the original flat wall to ground.
+        for (int arm = 0; arm < 2; arm++) {
+            Point normal = arm == 0 ? cut.normal() : cut.side();
+            float bottom = Math.max(corner.bottom(), arm == 0 ? cut.firstBottom() : cut.sideBottom());
+            if (bottom >= upperBottom - EPSILON) { continue; }
+            float[] end = arm == 0 ? first : last;
+            var stem = counterClockwise(List.of(
+                  new float[] { cut.at().x() + normal.x() * 1.2f, cut.at().y() + normal.y() * 1.2f },
+                  new float[] { end[0] + normal.x() * 1.2f, end[1] + normal.y() * 1.2f },
+                  new float[] { end[0] - normal.x() * 1.2f, end[1] - normal.y() * 1.2f },
+                  new float[] { cut.at().x() - normal.x() * 1.2f, cut.at().y() - normal.y() * 1.2f }));
+            prism(mesh, hex, PIER, stem, bottom, upperBottom, stem.size());
+            postCap(mesh, hex, stem, bottom, bottom + .7f, .4f);
+        }
+        // One housing spans the diagonal and its short returns, with fixtures on its three exposed faces.
+        for (int edge = 0; edge < 3; edge++) {
+            float[] p = profile.get(edge), q = profile.get(edge + 1);
+            float length = (float) Math.hypot(q[0] - p[0], q[1] - p[1]);
+            float tx = (q[0] - p[0]) / length, ty = (q[1] - p[1]) / length;
+            float bottom = Math.max(corner.bottom(), edge == 0 ? cut.firstBottom() : edge == 2 ? cut.sideBottom() : cut.bottom());
+            postDetails(mesh, hex, new float[] { (p[0] + q[0]) / 2, (p[1] + q[1]) / 2 }, tx, ty,
+                  0, bottom, top, 0, length / 2, corner.external());
         }
     }
 
