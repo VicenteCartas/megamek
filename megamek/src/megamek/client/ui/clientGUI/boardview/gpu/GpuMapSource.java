@@ -611,9 +611,10 @@ final class GpuMapSource implements BoardSource {
               : editor.preview(hover.coords(), hover.x(), hover.y(), hover.receiver());
         if (next != shownPreview) {
             shownPreview = next;
+            java.util.function.Function<Coords, Hex> pending = at -> next.after().getOrDefault(at, board.getHex(at));
+            var references = BoardTiles.referenceIds(board, pending);
             previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
-                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex,
-                        at -> next.after().getOrDefault(at, board.getHex(at))));
+                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex, pending, references));
         }
         return previewData;
     }

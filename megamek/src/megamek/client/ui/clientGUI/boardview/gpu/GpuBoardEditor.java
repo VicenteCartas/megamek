@@ -1310,7 +1310,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         ui.tip(precision).getActor().setText(UiKit.text("BoardEditor.precision.tooltip"));
         brushRow(precision);
         if (BuildingVolumes.of(object.asset()).present()) {
-            brushRow(rotations(object, true, action));
+            brushRow(rotations(object, true, action), brushNumber(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, action, prefix + "scale"));
+            brushRow(stretch(object, true, action));
             if (BuildingVolumes.of(object.asset()).modular()) {
                 brushRow(brushNumber(UiKit.text("BoardEditor.assembledLevels"), Math.max(1, object.levels()), 1, 20, 1, action, prefix + "levels"));
             } else { brushRow(hint(UiKit.text("BoardEditor.authoredHeight"))); }
@@ -2050,10 +2051,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         number(UiKit.text("BoardEditor.offsetEast"), object.x(), -4, 4, .01, Action.OBJECT_VALUE, "x");
         number(UiKit.text("BoardEditor.offsetNorth"), object.y(), -4, 4, .01, Action.OBJECT_VALUE, "y");
         detail.add(rotations(object, false, Action.OBJECT_VALUE)).row();
-        if (!authored) {
-            number(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, Action.OBJECT_VALUE, "scale");
-            detail.add(stretch(object, false, Action.OBJECT_VALUE)).row();
-        }
+        number(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, Action.OBJECT_VALUE, "scale");
+        detail.add(stretch(object, false, Action.OBJECT_VALUE)).row();
         if (object.kind().equals("decal")) {
             UiButton overflow = button(UiKit.text("BoardEditor.spanNeighbours"),
                   () -> send(Action.OBJECT_VALUE, "clipToHex", Boolean.toString(!object.clipToHex())));

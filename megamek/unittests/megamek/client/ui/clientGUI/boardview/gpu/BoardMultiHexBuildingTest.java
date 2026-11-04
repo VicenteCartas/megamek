@@ -371,6 +371,22 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
+    void ringPiersUseWhiteFixturesWithoutOverlappingYellowCornerLamps() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("podium", GeneratedMesh.class, List.class,
+              BoardMultiHexBuilding.Dome.class);
+        method.setAccessible(true);
+        List<float[]> hex = new ArrayList<>();
+        for (int corner = 0; corner < 6; corner++) {
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 1000), HexTile.cornerOffsetY(corner, 866) });
+        }
+        var mesh = new GeneratedMesh();
+        method.invoke(null, mesh, hex, BoardMultiHexBuilding.layout(DOME, 3).domes().getFirst());
+        var data = mesh.data("ring-piers", false);
+        assertFalse(vertices(data, BoardMultiHexBuilding.LIGHT).isEmpty());
+        assertTrue(vertices(data, BoardMultiHexBuilding.MARKER).isEmpty(), "Polygonal ring bays use white support lamps");
+    }
+
+    @Test
     void podiumRibsAndRimsRunTheirMetalGrainAlongThePiece() {
         var heights = flower(3, 2);
         var scene = scene(heights, DOME, Map.of(), Set.of());
@@ -382,8 +398,8 @@ class BoardMultiHexBuildingTest {
             for (int i = 0; i < metal.size(); i += 3) {
                 float[] a = metal.get(i), b = metal.get(i + 1), c = metal.get(i + 2);
                 if (a[5] < .999f || b[5] < .999f || c[5] < .999f) { continue; }
-                boolean rib = Math.abs(a[2] - dome.ring() - .55f) < .002f;
-                boolean rim = Math.abs(a[2] - dome.ring() - .9f) < .002f;
+                boolean rib = Math.abs(a[2] - dome.ring() - .95f) < .002f;
+                boolean rim = Math.abs(a[2] - dome.ring() - .25f) < .002f;
                 if (!rib && !rim) { continue; }
                 var axes = textureAxes(a, b, c);
                 if (axes == null) { continue; }
@@ -401,7 +417,7 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
-    void slopedPassageRoofKeepsSquarePanels() throws Exception {
+    void slopedPassageRoofKeepsLongitudinalPanelsWithoutShearing() throws Exception {
         for (float height : new float[] { 15, 30, 45 }) {
             var mesh = passage(new float[] { 0, 0, 1, 0, 6, height }, new float[] { 20, 0, 1, 0, 6, 20 }, 0);
             var roof = vertices(mesh.data("passage", false), BoardMultiHexBuilding.ROOF);
@@ -409,7 +425,7 @@ class BoardMultiHexBuildingTest {
             for (int i = 0; i < roof.size(); i += 3) {
                 var axes = textureAxes(roof.get(i), roof.get(i + 1), roof.get(i + 2));
                 if (axes == null) { continue; }
-                assertEquals(axes[0].len(), axes[1].len(), .002f, "The slope must not stretch square roof panels");
+                assertEquals(axes[0].len(), 2 * axes[1].len(), .002f, "Passage plates run twice as far along the tunnel as across it");
                 assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002f);
             }
         }
@@ -453,6 +469,88 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
+    void cornerPillarsFollowBothWallsWithHeadAndFootLightsOnEachFace() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("cornerPost", GeneratedMesh.class, List.class,
+              float[].class, BoardMultiHexBuilding.Point.class, BoardMultiHexBuilding.Point.class,
+              float.class, float.class, boolean.class);
+        method.setAccessible(true);
+        List<float[]> hex = new ArrayList<>();
+        for (int corner = 0; corner < 6; corner++) {
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 100), HexTile.cornerOffsetY(corner, 86.6f) });
+        }
+        var mesh = new GeneratedMesh();
+        var first = new BoardMultiHexBuilding.Point(0, -1);
+        var side = new BoardMultiHexBuilding.Point(1, 0);
+        method.invoke(null, mesh, hex, new float[] { 0, 0 }, first, side, 0f, 90f, true);
+        var data = mesh.data("corner-pillar", false);
+        assertEquals(0, vertices(data, BoardMultiHexBuilding.PIER).stream().mapToDouble(v -> v[2]).min().orElseThrow(), .001);
+        var yellow = vertices(data, BoardMultiHexBuilding.MARKER);
+        var white = vertices(data, BoardMultiHexBuilding.LIGHT);
+        assertTrue(yellow.stream().allMatch(v -> v[2] > 86), "Only the head lamps may be yellow");
+        assertTrue(white.stream().allMatch(v -> v[2] < 2), "Both foot markers must be white");
+        var lamps = new ArrayList<>(yellow); lamps.addAll(white);
+        for (var normal : List.of(first, side)) {
+            var face = lamps.stream().filter(v -> v[3] * normal.x() + v[4] * normal.y() > .99).toList();
+            assertTrue(face.stream().anyMatch(v -> v[2] > 86), "Each wall-aligned face has a head lamp");
+            assertTrue(face.stream().anyMatch(v -> v[2] < 2), "Each wall-aligned face has a small ground-level marker");
+            assertTrue(face.stream().allMatch(v -> v[2] < 2 || v[2] > 86), "No repeated storey lamps");
+        }
+        assertTrue(lamps.stream().allMatch(v -> Math.abs(v[3]) < .01 || Math.abs(v[4]) < .01),
+              "The fixtures follow the walls rather than a diagonal corner bisector");
+    }
+
+    @Test
+    void tallPillarsHaveOnlyAHeadLightAndASmallerFootLight() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("facadePost", GeneratedMesh.class, List.class,
+              float[].class, float.class, float.class, float.class, float.class, float.class, boolean.class);
+        method.setAccessible(true);
+        List<float[]> hex = new ArrayList<>();
+        for (int corner = 0; corner < 6; corner++) {
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 100), HexTile.cornerOffsetY(corner, 86.6f) });
+        }
+        for (boolean external : new boolean[] { false, true }) {
+            var mesh = new GeneratedMesh();
+            method.invoke(null, mesh, hex, new float[] { 0, 0 }, 1f, 0f, 6f, 90f, 2.8f, external);
+            var data = mesh.data("pillar", false);
+            var white = vertices(data, BoardMultiHexBuilding.LIGHT);
+            var yellow = vertices(data, BoardMultiHexBuilding.MARKER);
+            assertTrue(white.stream().anyMatch(v -> v[2] < 12), "Every foot marker is white, including external pillars");
+            assertTrue(yellow.stream().allMatch(v -> v[2] > 84), "Yellow is reserved for external head lamps");
+            if (external) { assertTrue(white.stream().allMatch(v -> v[2] < 12)); }
+            else { assertTrue(yellow.isEmpty()); }
+            var lamps = new ArrayList<>(white); lamps.addAll(yellow);
+            assertFalse(lamps.isEmpty());
+            float footWidth = 0, headWidth = 0;
+            for (float[] v : lamps) {
+                assertTrue(v[2] < 12 || v[2] > 84, "Intermediate storeys must not add more lamps");
+                if (v[2] < 12) { footWidth = Math.max(footWidth, Math.abs(v[0])); }
+                else { headWidth = Math.max(headWidth, Math.abs(v[0])); }
+            }
+            assertTrue(footWidth > 0 && headWidth > 2 * footWidth, "The foot marker is much smaller than the head lamp");
+        }
+    }
+
+    @Test
+    void pillarLightsReachTheModelAsEmissionAtEveryLevelOfDetail() {
+        var heights = flower(3, 2);
+        Coords annex = CENTRE.translated(0).translated(0);
+        heights.put(annex, 2);
+        var scene = scene(heights, DOME, Map.of(), Set.of());
+        for (int lod = 0; lod < BoardMultiHexBuilding.LODS; lod++) {
+            var data = BoardMultiHexBuilding.model(layout(scene, annex), lod);
+            assertFalse(vertices(data, BoardMultiHexBuilding.LIGHT).isEmpty());
+            var finish = ((RigidGlb.Data) data).surfaces.get(BoardMultiHexBuilding.LIGHT);
+            assertNotNull(finish, "The lamp's authored emission must survive the generated model material conversion");
+            assertTrue(finish.glow()[0] > 1 && finish.glow()[1] > 1 && finish.glow()[2] > 1,
+                  "White pillar lenses emit HDR light independently of the sunlight, like the fortress wall lamps");
+            var marker = ((RigidGlb.Data) data).surfaces.get(BoardMultiHexBuilding.MARKER);
+            assertNotNull(marker, "External corners carry amber head lamps as well as white foot markers");
+            assertTrue(marker.glow()[0] > marker.glow()[1] * 1.5f && marker.glow()[1] > marker.glow()[2] * 10,
+                  "Amber markers retain their warm emission rather than becoming another white rectangle");
+        }
+    }
+
+    @Test
     void roofsStayClearForManualEquipmentWhileFacadesHaveWindows() {
         for (int direction = 0; direction < 6; direction++) {
             var heights = flower(3, 2);
@@ -480,21 +578,22 @@ class BoardMultiHexBuildingTest {
             var mesh = new GeneratedMesh();
             float[][] wall = new float[4][];
             for (int i = 0; i < 4; i++) {
-                float along = i == 0 || i == 3 ? -20 : 20, z = i < 2 ? 0 : 35;
-                wall[i] = new float[] { -ny * along, nx * along, z, nx, ny, 0, 1, 1, 1, 1, (along + 20) / 40, z / 35 };
+                float along = i == 0 || i == 3 ? -36 : 36, z = i < 2 ? 0 : 35;
+                wall[i] = new float[] { -ny * along, nx * along, z, nx, ny, 0, 1, 1, 1, 1, (along + 36) / 72, z / 35 };
             }
             mesh.quad(BoardMultiHexBuilding.WINDOW, wall[0], wall[1], wall[2], wall[3]);
-            passage(mesh, new float[] { 0, 0, nx, ny, 6, 27 }, new float[] { 18, 0, 1, 0, 6, 20 }, 0);
+            // The road stays straight even when it enters an angled facade; the whole mouth is recessed inside.
+            passage(mesh, new float[] { -22, 0, 1, 0, 6, 27 }, new float[] { 18, 0, 1, 0, 6, 20 }, 0);
             List<Vector3> facade = new ArrayList<>();
             for (float[] vertex : vertices(mesh.data("facade opening", false), BoardMultiHexBuilding.WINDOW)) {
                 float along = -ny * vertex[0] + nx * vertex[1];
                 facade.add(new Vector3(along, vertex[2], 0));
-                assertEquals((along + 20) / 40, vertex[10], .0001, "Clipped wall UVs retain their phase");
+                assertEquals((along + 36) / 72, vertex[10], .0001, "Clipped wall UVs retain their phase");
                 assertEquals(vertex[2] / 35, vertex[11], .0001);
             }
             var remaining = GpuBuildingInterior.area(facade);
             assertFalse(remaining.contains(0, 10), "No window or door panel behind the passage");
-            assertTrue(remaining.contains(-17, 10) && remaining.contains(17, 10), "Keep adjacent facade bays");
+            assertTrue(remaining.contains(-13 / nx, 10) && remaining.contains(13 / nx, 10), "Keep facade outside the angled opening");
             assertTrue(remaining.contains(0, 32), "Keep the upper storey's facade");
         }
     }

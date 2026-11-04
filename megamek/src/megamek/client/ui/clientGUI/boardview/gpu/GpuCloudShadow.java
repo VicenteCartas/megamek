@@ -37,6 +37,7 @@ final class GpuCloudShadow {
                     ? "#define modelReliefFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
               + (lighting != null ? "#define environmentLightingFlag\n" : "")
+              + (lighting != null && lighting.crystals != null ? "#define crystalTransmissionFlag\n" : "")
               + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
               + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);

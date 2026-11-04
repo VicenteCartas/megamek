@@ -87,6 +87,9 @@ final class GpuTerrainShadows implements Disposable {
     private final GpuShadowLight.SlabCamera boardShadowFit = new GpuShadowLight.SlabCamera();
     private boolean shadowBoardWide;
     private boolean shadowDirty;
+    private long revision;
+
+    long revision() { return revision; }
     // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
     private int refinedShadowFrames = -1;
     // The battle view's scene (setScene): its longer side in pixels, 0 for none, and High shadows (Display tab); the map's
@@ -189,6 +192,7 @@ final class GpuTerrainShadows implements Disposable {
         }
         if (!directLight) {
             if (!shadowEmpty) {
+                revision++;
                 shadow.begin();
                 shadow.end();
                 shadowBase = null;
@@ -331,6 +335,7 @@ final class GpuTerrainShadows implements Disposable {
         }
         shadowProjectionValid = true;
         shadowDirty = false;
+        revision++;
     }
 
     /**

@@ -35,7 +35,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
      */
     static boolean specularAntialiasing = true;
     /** The {@link #flags} bits: the features below. */
-    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16;
+    static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16,
+          CRYSTAL_TRANSMISSION = 32;
     private final Color sky = new Color(), horizon = new Color();
     private Texture texture;
     private GpuLightingEnvironment image;
@@ -56,6 +57,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     GpuAmbientOcclusion ambientOcclusion;
     /** The board's local lights (borrowed from its terrain): uniforms only. */
     GpuLavaLighting lavaLighting;
+    GpuCrystalTransmission crystals;
     /** The board has biomes (GpuBiomeSurface.mark): biomeMaskFlag. */
     boolean biomes;
     /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
@@ -66,7 +68,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     /** The features this lighting carries, as a program key's part beside its environment's mask. */
     int flags() {
         return (cloudShadow != null ? CLOUD_SHADOW : 0) | (ambientOcclusion != null ? AMBIENT_OCCLUSION : 0)
-              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (antialiasing ? ANTIALIASING : 0);
+              | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (antialiasing ? ANTIALIASING : 0)
+              | (crystals != null ? CRYSTAL_TRANSMISSION : 0);
     }
 
     /** An environment's (or a draw's combined attributes') lighting, or null. */
@@ -184,6 +187,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     }
 
     static void register(DefaultShader shader) {
+        GpuCrystalTransmission.register(shader);
         GpuSkyVisibility.register(shader);
         shader.register("u_shadowStrength", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
@@ -264,6 +268,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         copy.skyVisibility = skyVisibility;
         copy.original = original != null ? original : this;
         copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;
+        copy.crystals = crystals;
         copy.biomes = biomes; copy.antialiasing = antialiasing;
         return copy;
     }

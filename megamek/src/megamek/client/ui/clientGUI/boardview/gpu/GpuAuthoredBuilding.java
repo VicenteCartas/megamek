@@ -63,11 +63,15 @@ final class GpuAuthoredBuilding {
     private GpuAuthoredBuilding() { }
 
     static boolean supports(BoardScene.Feature feature) {
-        return feature.kind() == BoardScene.FeatureKind.BUILDING && feature.decoration() != null
+        return (feature.kind() == BoardScene.FeatureKind.BUILDING || feature.kind() == BoardScene.FeatureKind.PROP) && feature.decoration() != null
               && BuildingVolumes.of(feature.asset()).present();
     }
 
     static Layout layout(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        if (feature.kind() == BoardScene.FeatureKind.PROP) {
+            return new Layout(tile.coords(), tile.coords(), feature.decoration(), feature.elevation(), tile.elevation(),
+                  0, BuildingInteriors.NO, List.of(tile.coords()));
+        }
         var reference = tile.cover().reference();
         var members = scene.tiles().stream().filter(t -> t.cover().reference() != null
               && t.cover().reference().id().equals(reference.id())).map(BoardScene.Tile::coords).toList();
@@ -152,6 +156,7 @@ final class GpuAuthoredBuilding {
             for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), frame); }
             levels.add(whole.clipped(boundaries).data("authored-" + object.id() + "-" + layout.cell(), lod));
         }
+        if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of()); }
         var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
         Area cell = BuildingVolumes.hex(layout.cell());
         List<List<Vector3>> floors = new ArrayList<>();

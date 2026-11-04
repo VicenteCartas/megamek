@@ -24,6 +24,32 @@ import org.junit.jupiter.api.Test;
  */
 class BoardTilesTest {
     @Test
+    void onlyPlacementsWithoutSavedMembershipUseTheVisualPropFallback() {
+        Coords owner = new Coords(1, 1), remote = new Coords(5, 5);
+        Board board = Board.createEmptyBoard(7, 7);
+        var object = new megamek.common.board.BoardDecoration("small-hpg", "prop", "buildings/authored/hpg-headquarters",
+              null, 0, 0, 90, false, .05, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        board.getHex(owner).setDecorations(List.of(object));
+        try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+            int index = owner.getX() * board.getHeight() + owner.getY();
+            var tiny = capture.tiles(board, (at, art) -> { }).get(index);
+            var feature = tiny.features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
+            assertEquals(BoardScene.FeatureKind.PROP, feature.kind());
+            assertEquals(object, feature.decoration());
+            assertEquals(0, feature.height());
+
+            // Membership is authoritative even with an uncovered owner or a fully collapsed remote member.
+            board.getHex(remote).setBuildingReference(new megamek.common.board.BuildingVolumes.Reference(object.id(), owner));
+            capture.changed(remote);
+            assertTrue(capture.tiles(board, (at, art) -> { }).get(index).features().stream().noneMatch(GpuAuthoredBuilding::supports));
+            board.getHex(remote).setBuildingReference(null);
+            capture.changed(remote);
+            assertEquals(feature, capture.tiles(board, (at, art) -> { }).get(index).features().stream()
+                  .filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow());
+        }
+    }
+
+    @Test
     void aRoadEditThatSilentlyChangesANeighboursExitsRecapturesThatNeighbourInTheGame() throws Exception {
         Coords road = new Coords(3, 3), extension = road.translated(3), distant = new Coords(8, 8);
         Hex[] hexes = new Hex[10 * 10];

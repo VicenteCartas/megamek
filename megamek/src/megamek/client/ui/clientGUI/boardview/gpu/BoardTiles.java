@@ -62,6 +62,15 @@ final class BoardTiles implements AutoCloseable {
             return;
         }
         Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
+        // A member can be remote from its owner. Losing its last reference changes the owner's prop fallback.
+        if (board != null && board.contains(coords)) {
+            var current = board.getHex(coords).getBuildingReference();
+            int index = coords.getX() * board.getHeight() + coords.getY();
+            var previous = index < tiles.size() ? tiles.get(index).cover().reference() : null;
+            for (var reference : new megamek.common.board.BuildingVolumes.Reference[] { current, previous }) {
+                if (reference != null) { area.add(new Rectangle(reference.anchor().getX(), reference.anchor().getY(), 1, 1)); }
+            }
+        }
         dirty = dirty == null ? area : dirty.union(area);
         for (int x = area.x; x < area.x + area.width; x++) {
             for (int y = area.y; y < area.y + area.height; y++) { artwork.invalidate(new Coords(x, y)); }
@@ -79,12 +88,29 @@ final class BoardTiles implements AutoCloseable {
 
     /** Preview neighbours come from the same pending edit, including rail corridors and ground clearance. */
     BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending) {
+        return preview(board, coords, hex, pending, referenceIds(board, pending));
+    }
+
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
+          Set<String> buildingReferences) {
         if (hex == null) { hex = pending.apply(coords); }
         if (hex == null) { return null; }
         artwork.invalidate(coords);
         try {
-            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), pending);
+            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), pending, buildingReferences);
         } finally { artwork.invalidate(coords); }
+    }
+
+    /** A capture-time snapshot of saved membership, including collapsed hexes; never inferred from current artwork. */
+    static Set<String> referenceIds(Board board, java.util.function.Function<Coords, Hex> hexes) {
+        Set<String> result = new java.util.HashSet<>();
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                Hex hex = hexes.apply(new Coords(x, y));
+                if (hex != null && hex.getBuildingReference() != null) { result.add(hex.getBuildingReference().id()); }
+            }
+        }
+        return result;
     }
 
     /** Rereads the artwork (the 3D views' asset reload); every hex is recaptured. */
@@ -105,6 +131,7 @@ final class BoardTiles implements AutoCloseable {
             changed(null);
         }
         if (!all && dirty == null) { return tiles; }
+        Set<String> buildingReferences = referenceIds(board, board::getHex);
         Rectangle area = all ? new Rectangle(0, 0, width, height) : dirty.intersection(new Rectangle(0, 0, width, height));
         List<BoardScene.Tile> next = tiles.size() == width * height ? new ArrayList<>(tiles)
               : new ArrayList<>(Collections.nCopies(width * height, null));
@@ -116,7 +143,7 @@ final class BoardTiles implements AutoCloseable {
                 BoardArtwork.HexImage art = artwork.capture(board, coords, hex);
                 BoardScene.Tile previous = next.get(index);
                 BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex,
-                      board::getBuildingAt);
+                      board::getBuildingAt, buildingReferences);
                 next.set(index, tile.equals(previous) ? previous : tile);
                 captured.accept(coords, art);
             }

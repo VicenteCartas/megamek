@@ -243,6 +243,7 @@ final class GpuEditorPreview implements Disposable {
     private static boolean routed(Hex hex, Coords at) {
         return hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.BRIDGE, Terrains.BUILDING)
               || hex.getBuildingReference() != null
+              || hex.getDecorations().stream().anyMatch(object -> BuildingVolumes.of(object.asset()).present())
               || BoardFeatures.decorations(hex, at).stream().anyMatch(feature -> BoardRail.route(feature)
                     || BoardFeatures.terrainOwned(feature.decoration()));
     }

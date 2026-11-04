@@ -40,6 +40,23 @@ class BuildingVolumesTest {
         assertTrue(lower > upper * 1.5);
         assertEquals(0, BuildingVolumes.area(BuildingVolumes.section(solids, 55)), .001,
               "The pedestal, bearing, reflector and aerials have no floors");
+        Area first = BuildingVolumes.section(solids, 9);
+        Area second = BuildingVolumes.section(solids, 27);
+        Area third = BuildingVolumes.section(solids, 45);
+        // Exposed one-level terraces in the registered source map. The last
+        // point is inside the partially covered 0802 hex, just north of its center.
+        for (double[] point : new double[][] {{-561.09375, 108}, {-561.09375, -108},
+              {-561.09375, -174}, {124.6875, 72}, {249.375, 72}}) {
+            assertTrue(first.contains(point[0], point[1]), "The source terrace is present");
+            assertFalse(second.contains(point[0], point[1]), "A terrace remains one level high");
+        }
+        // Opposing circular service bays occupy 1014/1214/1414 and 1002/1202/1402.
+        for (double x : new double[] {-436.40625, -311.71875, -187.03125}) {
+            for (double y : new double[] {-180, 180}) {
+                assertTrue(second.contains(x, y), "The service bay follows the source hex lattice");
+                assertFalse(third.contains(x, y), "The service bay is two levels high");
+            }
+        }
     }
 
     @Test void researchStationRepeatsItsAuthoredVolumesAndKeepsItsOpenCourtyard() {

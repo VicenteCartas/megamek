@@ -2313,7 +2313,7 @@ public final class BoardEditorSession {
             boolean fixed = object.placement().mode().equals("absolute");
             BoardDecoration next = objectValue(object, fixed ? "level" : "offset",
                   Double.toString(fixed ? target : target - (level.level() - object.placement().offset())));
-            checkBuildingGeometry(object, next);
+            checkBuildingGeometry(selected, object, next);
             change(selected, h -> h.setDecorations(h.getDecorations().stream().map(d -> d.id().equals(key) ? next : d).toList()));
         } else if (key.equals("ground")) {
             change(selected, h -> h.setLevel(whole));
@@ -2839,7 +2839,11 @@ public final class BoardEditorSession {
     }
 
     /** Saved member heights cannot be rebaked without the placement's structural geometry. */
-    private void checkBuildingGeometry(BoardDecoration original, BoardDecoration object) {
+    private void checkBuildingGeometry(Coords owner, BoardDecoration original, BoardDecoration object) {
+        if ((original == null || !BuildingVolumes.sameGeometry(original, object)) && BuildingVolumes.of(object.asset()).present()) {
+            require(BuildingVolumes.onBoardFraction(owner, object, board().getWidth(), board().getHeight()) >= .1 - 1e-6,
+                  Messages.getString("BoardEditor.buildingOutside"));
+        }
         if (original != null && !BuildingVolumes.sameGeometry(original, object) && !BuildingVolumes.of(object.asset()).present()) {
             for (int x = 0; x < board().getWidth(); x++) {
                 for (int y = 0; y < board().getHeight(); y++) {
@@ -2853,10 +2857,12 @@ public final class BoardEditorSession {
     /** XY is normalized to the same odd-column lattice as the board renderer, with north-positive Y. */
     private Map.Entry<Selection, BoardDecoration> positioned(Coords owner, BoardDecoration object) {
         var original = board().getHex(owner).getDecorations().stream().filter(o -> o.id().equals(object.id())).findFirst().orElse(null);
-        checkBuildingGeometry(original, object);
+        checkBuildingGeometry(owner, original, object);
         var cube = owner.toCube();
         double q = cube.q() + object.x() / .75, r = cube.r() - object.y() - object.x() / 1.5;
         Coords target = new megamek.common.board.CubeCoords(q, r, -q - r).roundToNearestHex().toOffset();
+        // The in-map owner retains an authored building whose actual pivot has crossed the edge.
+        if (!board().contains(target) && BuildingVolumes.of(object.asset()).present()) { target = owner; }
         require(board().contains(target), Messages.getString("BoardEditor.objectOutside"));
         double x = object.x() + (owner.getX() - target.getX()) * .75;
         double y = object.y() + (target.getY() - owner.getY()) + ((target.getX() & 1) - (owner.getX() & 1)) * .5;
@@ -2896,7 +2902,7 @@ public final class BoardEditorSession {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
         }
-        checkBuildingGeometry(current, next);
+        checkBuildingGeometry(selected, current, next);
         // A cropped structure can retain its center outside the board, owned by a surviving member.
         var destination = current.x() == next.x() && current.y() == next.y()
               ? Map.entry(new Selection(selected, next.id()), next) : positioned(selected, next);

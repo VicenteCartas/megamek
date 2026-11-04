@@ -773,6 +773,7 @@ final class RigidGlb {
                       : GpuMaterialMaps.boardMaterial(new File(base.file()), GpuMaterialMaps.boardTextures());
                 result.surfaces.put(target.id, board == null ? new Surface(roughness, metallic, surfaceMap)
                       : boardSurface(board, base, target, result));
+                if (board != null && board.blended()) { result.blends.put(target.id, board.blendMode()); }
                 result.materials.add(target);
                 materials.put(material, target.id);
             }

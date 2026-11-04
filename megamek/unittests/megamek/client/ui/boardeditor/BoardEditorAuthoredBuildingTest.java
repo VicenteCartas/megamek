@@ -20,6 +20,89 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorAuthoredBuildingTest {
+    @Test void scaleAndAxisStretchRebuildGameplayAndSurviveUndoAndReload(@TempDir Path dir) throws Exception {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(40, 30), null);
+        Coords anchor = new Coords(20, 15);
+        editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+        editor.pointer(anchor, 0, 0, false); editor.finishStroke();
+        var object = editor.board().getHex(anchor).getDecorations().getFirst();
+        var original = members(editor.board(), object.id());
+        editor.command(new Command(Action.SELECT_AT, "20,15", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, object.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "scale", "1.25"), null);
+        var enlarged = members(editor.board(), object.id());
+        assertTrue(enlarged.size() > original.size());
+        assertEquals(4, enlarged.values().stream().mapToInt(Integer::intValue).max().orElseThrow());
+
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchX", "1.5"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchY", ".8"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchZ", "2"), null);
+        var stretched = members(editor.board(), object.id());
+        assertNotEquals(enlarged.keySet(), stretched.keySet());
+        // The dish remains a prop: only the three-level structural roof scales to 7.5 levels.
+        assertEquals(8, stretched.values().stream().mapToInt(Integer::intValue).max().orElseThrow());
+        editor.save(dir.resolve("scaled-hpg.board2"));
+        Board loaded = BoardFile.read(dir.resolve("scaled-hpg.board2"));
+        var saved = loaded.getHex(anchor).getDecorations().getFirst();
+        assertEquals(1.25, saved.scale());
+        assertEquals(1.5, saved.stretch().x());
+        assertEquals(.8, saved.stretch().y());
+        assertEquals(2, saved.stretch().z());
+        assertEquals(stretched, members(loaded, object.id()));
+        for (Coords cell : original.keySet()) {
+            if (!stretched.containsKey(cell)) { assertNull(loaded.getHex(cell).getBuildingReference()); }
+        }
+        for (int i = 0; i < 3; i++) { editor.command(new Command(Action.UNDO), null); }
+        assertEquals(enlarged, members(editor.board(), object.id()));
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(original, members(editor.board(), object.id()));
+    }
+
+    @Test void authoredBrushPlacesItsScaleAndAxisStretch() {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(36, 30), null);
+        Coords anchor = new Coords(18, 15);
+        editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:rotation", "90"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:scale", "1.25"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:stretchX", "1.5"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:stretchY", ".8"), null);
+        editor.pointer(anchor, 0, 0, false); editor.finishStroke();
+        var object = editor.board().getHex(anchor).getDecorations().getFirst();
+        assertEquals(90, object.rotation());
+        assertEquals(1.25, object.scale());
+        assertEquals(1.5, object.stretch().x());
+        assertEquals(.8, object.stretch().y());
+        assertEquals(4, members(editor.board(), object.id()).values().stream().mapToInt(Integer::intValue).max().orElseThrow());
+    }
+
+    @Test void belowHalfHexCoverageKeepsPlacementWithoutGameplayAndCanBeEnlargedAgain(@TempDir Path dir) throws Exception {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
+        Coords anchor = new Coords(16, 12);
+        editor.command(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), null);
+        editor.pointer(anchor, 0, 0, false); editor.finishStroke();
+        var original = editor.board().getHex(anchor).getDecorations().getFirst();
+        var covered = members(editor.board(), original.id());
+        assertFalse(covered.isEmpty());
+        editor.command(new Command(Action.SELECT_AT, "16,12", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "scale", ".05"), null);
+        assertTrue(members(editor.board(), original.id()).isEmpty());
+        for (Coords at : covered.keySet()) {
+            assertFalse(editor.board().getHex(at).containsTerrain(Terrains.BUILDING));
+            assertFalse(editor.board().getHex(at).containsTerrain(Terrains.BLDG_ELEV));
+        }
+        editor.save(dir.resolve("prop-hpg.board2"));
+        Board loaded = BoardFile.read(dir.resolve("prop-hpg.board2"));
+        assertEquals(.05, loaded.getHex(anchor).getDecorations().getFirst().scale());
+        assertTrue(members(loaded, original.id()).isEmpty());
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(covered, members(editor.board(), original.id()));
+        editor.command(new Command(Action.REDO), null);
+        assertTrue(members(editor.board(), original.id()).isEmpty());
+        editor.command(new Command(Action.OBJECT_VALUE, "scale", "1"), null);
+        assertEquals(covered, members(editor.board(), original.id()));
+    }
+
     @Test void placementRotationPrecisionMoveUndoAndReloadKeepOneInstanceAndItsGameplay(@TempDir Path dir) throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(18, 18), null);
         Coords anchor = new Coords(7, 7);

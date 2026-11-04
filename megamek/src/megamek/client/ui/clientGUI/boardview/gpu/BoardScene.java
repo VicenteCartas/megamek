@@ -114,12 +114,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
-        return captureTile(hex, pixels, previous, terrainImages, board, coords -> null);
+        return captureTile(hex, pixels, previous, terrainImages, board, (Set<String>) null);
+    }
+
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
+          java.util.function.Function<Coords, megamek.common.Hex> board, Set<String> buildingReferences) {
+        return captureTile(hex, pixels, previous, terrainImages, board, coords -> null, buildingReferences);
     }
 
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board,
-          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings) {
+          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings, Set<String> buildingReferences) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
@@ -127,7 +132,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               BoardFeatures.surface(hex),
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery()),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery(),
+                    megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences),
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
               BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),

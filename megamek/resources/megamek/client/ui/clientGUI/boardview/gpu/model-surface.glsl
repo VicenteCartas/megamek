@@ -7,6 +7,8 @@ uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
 uniform float u_modelPaintMask; // 1: the albedo's alpha is a paint mask, where alone the vertex colour tints (model.frag)
 uniform float u_modelPremultiplied; // 1: Godot's premultiplied alpha, only the diffuse share fades (model.frag)
+uniform float u_modelRuby; // inverse absorption reference distance in world units; zero for other materials
+uniform mat4 u_rubyVolume; // one closed crystal's world-to-normalized bounding volume
 in vec2 v_modelUV;
 #endif
 #ifdef modelReliefFlag
@@ -114,6 +116,21 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     Surface surface = opaqueSurface(albedo, normal, geometric, roughness, 0.0, surfaceVisibility());
     metallicShare(surface, metallic);
     surface.scatter = scatter;
+#ifdef modelSurfaceFlag
+    if (u_modelRuby > 0.0) {
+        // Cloudy corundum has a solid visible boundary, with wavelength-dependent transport inside it.
+        // An oriented-volume chord approximates thickness; it never samples the scenery through the body.
+        vec3 position = clamp((u_rubyVolume * vec4(v_cloudPosition, 1.0)).xyz, vec3(-.999), vec3(.999));
+        vec3 direction = mat3(u_rubyVolume) * (dot(geometric, sunDirection()) < 0.0 ? sunDirection() : -view);
+        vec3 reach = (mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), direction)) - position)
+              / (sign(direction + vec3(1e-12)) * max(abs(direction), vec3(1e-6)));
+        float thickness = max(.2, min(reach.x, min(reach.y, reach.z)) * u_modelRuby);
+        vec3 transmitted = pow(clamp(albedo, vec3(.001), vec3(.95)), vec3(thickness));
+        surface.dielectric = .0758;
+        surface.front = vec3(.25);
+        surface.back = min(vec3(1.0) - albedo * surface.front, transmitted * .7) / max(albedo, vec3(.001));
+    }
+#endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
     surface.occlusion = surface.specularOcclusion = texture(u_ambientTexture, v_modelUV + modelShift).r;
 #endif

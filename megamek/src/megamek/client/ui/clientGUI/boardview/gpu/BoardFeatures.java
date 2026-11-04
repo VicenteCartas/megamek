@@ -205,9 +205,15 @@ final class BoardFeatures {
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, natural, null);
+    }
+
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          boolean natural, Set<String> buildingReferences) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
-            List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board));
+            List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board, buildingReferences));
             chasm.addAll(roadControls(hex, coords, board, false));
             addBridge(hex, chasm);
             return List.copyOf(chasm);
@@ -280,14 +286,14 @@ final class BoardFeatures {
             result.add(new BoardScene.Feature(ELEVATOR_SHAFT, 0, 0, 0, 1, 0, 0, BoardScene.FeatureKind.SHAFT));
         }
         if (BoardBackdrop.capture(hex).present()) {
-            result.addAll(decorations(hex, coords, board));
+            result.addAll(decorations(hex, coords, board, buildingReferences));
             result.addAll(roadControls(hex, coords, board, true));
             return List.copyOf(result);
         }
         result.addAll(woods(hex, coords, board, natural));
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
-        result.addAll(decorations(hex, coords, board));
+        result.addAll(decorations(hex, coords, board, buildingReferences));
         result.addAll(roadControls(hex, coords, board, true));
         return List.copyOf(result);
     }
@@ -328,7 +334,7 @@ final class BoardFeatures {
         List<BoardScene.Feature> result = new ArrayList<>(), trunks = new ArrayList<>();
         List<BoardPlantFootprint> solids = new ArrayList<>();
         var prepared = new HashMap<BoardPlantFootprint.Key, BoardPlantFootprint>();
-        float target = layout.colonies() ? 1 : BoardTreeCoverage.target(layout.density);
+        float target = layout.colonies() || layout.crystal ? 1 : BoardTreeCoverage.target(layout.density);
         int failed = 0, cacti = 0, spores = 0, bareTrees = 0, canopies = 0;
         for (int index = 0; index < 128; index++) {
             if (layout.colonies() && trunks.size() >= BoardTreeCoverage.colonyLimit(3)) { break; }
@@ -342,9 +348,9 @@ final class BoardFeatures {
             String asset = natural ? BoardTreeDistribution.species(choices, coords, origin[0], origin[1], speciesSeed)
                   : choices.get(Math.floorMod(coords.getX() * 31 + coords.getY() * 17 + index, choices.size()));
             if (layout.height > 1) { asset = canopyVariant(asset, layout.density, canopies, speciesSeed); }
-            boolean cactus = asset.startsWith("vegetation/cactus"), bare = BoardTreeCoverage.bare(asset), rigid = layout.colonies() || cactus;
-            boolean canopy = !rigid && !bare;
-            if (canopy && canopies >= BoardTreeCoverage.canopyLimit(layout.density)) { break; }
+            boolean cactus = asset.startsWith("vegetation/cactus"), bare = BoardTreeCoverage.bare(asset), rigid = rigid(asset);
+            boolean canopy = layout.crystal || !rigid && !bare;
+            if (canopy && canopies >= BoardTreeCoverage.canopyLimit(layout.crystal ? 3 : layout.density)) { break; }
             if (cactus && cacti >= BoardTreeCoverage.cactusLimit(layout.density)) { break; }
             if (bare && bareTrees >= BoardTreeCoverage.bareLimit(layout.density)) { break; }
             float rotation = natural ? random.nextFloat() * 360 : index * 137.5f;
@@ -413,6 +419,14 @@ final class BoardFeatures {
             }
             if (trunks.size() >= minimum && coverage.fraction() >= target) { break; }
         }
+        if (layout.crystal) {
+            // Rigid crystals express density as a share of one unchanged packing, with distinct readable tiers.
+            int total = result.size();
+            int reserve = total >= 3 ? 3 - Math.min(3, layout.density) : 0;
+            int count = Math.min(total - reserve, Math.min(BoardTreeCoverage.canopyLimit(layout.density),
+                  Math.max(1, Math.round(total * BoardTreeCoverage.target(layout.density)))));
+            return result.subList(0, count);
+        }
         return layout.colonies() ? colonyCover(result, layout.density) : result;
     }
 
@@ -467,7 +481,7 @@ final class BoardFeatures {
 
     /** Local visual choices derived from the hex; terrain density and cover height remain game state. */
     private record WoodsLayout(List<String> species, int density, float height, int count, boolean orchard,
-          boolean fungus, boolean mars, boolean understory) {
+          boolean fungus, boolean mars, boolean understory, boolean crystal) {
         boolean colonies() { return fungus || mars; }
         boolean low(int index) { return understory && index % 2 == 1; }
         boolean shorter(int index) {
@@ -479,21 +493,26 @@ final class BoardFeatures {
     private static WoodsLayout woodsLayout(Hex hex) {
         boolean jungle = hex.containsTerrain(Terrains.JUNGLE);
         String theme = hex.getTheme() == null ? "" : hex.getTheme().toLowerCase(Locale.ROOT);
-        boolean mars = theme.contains("mars"), volcano = theme.contains("volcan");
+        var appearance = hex.getAppearance().get("vegetation");
+        boolean crystal = appearance != null && "woods/crystal".equals(appearance.variant());
+        boolean mars = !crystal && theme.contains("mars"), volcano = !crystal && theme.contains("volcan");
         BoardScene.Surface ground = surface(hex);
-        boolean fungus = !mars && !volcano && ground == BoardScene.Surface.FUNGUS;
-        boolean orchard = !mars && !volcano && !fungus && orchard(hex);
+        boolean fungus = !crystal && !mars && !volcano && ground == BoardScene.Surface.FUNGUS;
+        boolean orchard = !crystal && !mars && !volcano && !fungus && orchard(hex);
         int density = hex.terrainLevel(jungle ? Terrains.JUNGLE : Terrains.WOODS);
         float height = Math.max(1, hex.terrainLevel(Terrains.FOLIAGE_ELEV));
         List<String> plants;
-        if (mars) { plants = MARS_CORALS; }
+        if (crystal) {
+            plants = height == 1 ? List.of("crystal/cover-low-fan", "crystal/cover-low-crown", "crystal/cover-low-ridge")
+                  : List.of("crystal/cover-spire", "crystal/cover-forked", "crystal/cover-fan", "crystal/cover-crown");
+        } else if (mars) { plants = MARS_CORALS; }
         else if (volcano) { plants = height == 1 ? shrubVariants("vegetation/foliage-volcano") : VOLCANO_TREES; }
         else if (fungus) { plants = BoardFungus.COVER; }
         else if (orchard) { plants = orchardSpecies(hex); }
         else { plants = height == 1 ? shrubVariants(shrub(hex, jungle)) : species(hex, jungle); }
         int count = density >= 3 ? 9 : density == 2 ? 6 : 4; // Only orchards use fixed rows.
-        boolean understory = ground == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano;
-        return new WoodsLayout(plants, density, height, count, orchard, fungus, mars, understory);
+        boolean understory = ground == BoardScene.Surface.TROPICAL && height > 1 && !orchard && !volcano && !crystal;
+        return new WoodsLayout(plants, density, height, count, orchard, fungus, mars, understory, crystal);
     }
 
     /** Preserve orchard rows, their established seed sequence and the existing road-clearance retries. */
@@ -517,6 +536,7 @@ final class BoardFeatures {
     }
 
     private static float woodsCrown(WoodsLayout layout, String tree, int index) {
+        if (layout.crystal) { return 1.2f; }
         float crown = layout.low(index) ? .9f : layout.orchard ? .82f : treeCrown(tree, layout.height);
         return crown * (.9f + (index % 3) * .1f);
     }
@@ -572,6 +592,7 @@ final class BoardFeatures {
 
     /** Trees reach cover height; fungal and Martian colonies include smaller bodies. Tropical understory stays low. */
     private static float woodsHeight(WoodsLayout layout, String tree, int index) {
+        if (layout.crystal) { return layout.height; }
         if (layout.low(index)) { return .4f + (index % 3) * .06f; }
         if (layout.shorter(index)) {
             if (layout.mars) { return layout.height * (.6f + (index % 3) * .05f); }
@@ -584,7 +605,7 @@ final class BoardFeatures {
     /** Fungal colonies and Mars corals: solid bodies, fitted to their height with their proportions kept. */
     static boolean solid(String asset) { return asset.startsWith("fungus/") || asset.startsWith("mars/"); }
 
-    static boolean rigid(String asset) { return solid(asset) || asset.startsWith("vegetation/cactus"); }
+    static boolean rigid(String asset) { return solid(asset) || asset.startsWith("vegetation/cactus") || asset.startsWith("crystal/"); }
 
     /** Captured counterparts of BoardRoad.nearbyWays; no game connection is added for visual overhang. */
     private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board) {
@@ -1110,22 +1131,30 @@ final class BoardFeatures {
      * and no stops.
      */
     static List<BoardScene.Feature> decorations(Hex hex, Coords coords) {
-        return decorations(hex, coords, RailRoute.Corridor.NONE, RailRoute.Corridor.NONE);
+        return decorations(hex, coords, RailRoute.Corridor.NONE, RailRoute.Corridor.NONE, null);
     }
 
-    private static List<BoardScene.Feature> decorations(Hex hex, Coords coords, Function<Coords, Hex> board) {
-        return decorations(hex, coords, RailRoute.corridor(hex, coords, board), RailRoute.corridor(hex, coords, board, true));
+    private static List<BoardScene.Feature> decorations(Hex hex, Coords coords, Function<Coords, Hex> board,
+          Set<String> buildingReferences) {
+        return decorations(hex, coords, RailRoute.corridor(hex, coords, board), RailRoute.corridor(hex, coords, board, true), buildingReferences);
     }
 
     private static List<BoardScene.Feature> decorations(Hex hex, Coords coords,
-          RailRoute.Corridor ground, RailRoute.Corridor deck) {
+          RailRoute.Corridor ground, RailRoute.Corridor deck, Set<String> buildingReferences) {
         List<BoardScene.Feature> result = new ArrayList<>();
         int bridgeExits = hex.containsTerrain(Terrains.BRIDGE) ? hex.getTerrain(Terrains.BRIDGE).getExits() : 0;
         String owned = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":";
         List<megamek.common.board.BoardDecoration> objects = new ArrayList<>(RailRoute.derived(hex, owned));
         objects.addAll(hex.getDecorations());
         for (var object : objects) {
-            if (BuildingVolumes.of(object.asset()).present()) { continue; }
+            if (BuildingVolumes.of(object.asset()).present()) {
+                // Saved references include collapsed members; only a placement with none is a visual prop.
+                // Callers without board context leave authored models to the shared building preview path.
+                if (buildingReferences == null || buildingReferences.contains(object.id())) { continue; }
+                result.add(new BoardScene.Feature(object.asset(), 0, 0, 0, 1, 0,
+                      (float) object.placement().level(hex), BoardScene.FeatureKind.PROP, 0, false, object));
+                continue;
+            }
             if (liveCrossing(hex, coords, objects, object, ground, deck)) { continue; }
             result.add(feature(hex, object));
             if (RailRoute.kind(object) != RailRoute.Kind.RAIL) { continue; }

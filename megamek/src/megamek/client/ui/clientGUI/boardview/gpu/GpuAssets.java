@@ -1731,7 +1731,8 @@ final class GpuAssets implements Disposable {
             texture.setWrap(wrap, wrap);
             if (repeating && (file.parent().name().equals("surfaces") || file.parent().name().equals("roads")
                   || file.parent().name().equals("ice") || file.parent().name().equals("industrial")
-                  || file.parent().name().equals("lunar"))) {
+                  || file.parent().name().equals("lunar")
+                  || file.parent().name().equals("common") && file.name().startsWith("matte-steel_"))) {
                 // Detailed materials retain full resolution; mipmaps and supported anisotropy handle distance.
                 texture.setAnisotropicFilter(8);
             } else if (repeating) {

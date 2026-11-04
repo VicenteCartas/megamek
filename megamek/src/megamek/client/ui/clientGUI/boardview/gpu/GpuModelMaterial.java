@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.math.Matrix4;
 
 /**
  * A model's finish (RigidGlb.Surface): roughness, metallic and subsurface scattering factors over an optional map
@@ -94,6 +95,21 @@ final class GpuModelMaterial extends Attribute {
     }
 
     static void register(DefaultShader shader) {
+        shader.register("u_modelRuby", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, GpuCrystalTransmission.ruby(renderable.material) ? 1f / (8 * BoardGeometry.hexScale()) : 0f);
+            }
+        });
+        shader.register("u_rubyVolume", new BaseShader.LocalSetter() {
+            private final Matrix4 inverse = new Matrix4();
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                if (!GpuCrystalTransmission.ruby(renderable.material)) { return; }
+                var extent = renderable.meshPart.halfExtents;
+                inverse.set(renderable.worldTransform).translate(renderable.meshPart.center)
+                      .scale(Math.max(.001f, extent.x), Math.max(.001f, extent.y), Math.max(.001f, extent.z)).inv();
+                target.set(id, inverse);
+            }
+        });
         shader.register("u_modelSurface", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {

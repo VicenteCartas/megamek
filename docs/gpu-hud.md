@@ -142,6 +142,10 @@ actor, calls MegaMek's own code and republishes the frame.
   MegaMek's own board tool. So does a unit that walks on (walk-on deployment) until MegaMek's click on its entry hex
   places it; the planner then continues from the entry and keeps the placement (the DEPLOY step) at the start of the
   path, as it keeps a jump's start.
+- Toggling Walk backwards preserves the current route and waypoints. Each pinned segment keeps its forward or
+  backward steps in the movement display's path; the new direction applies when plotting the next segment from the
+  last waypoint. Turning at that waypoint updates its facing, so later segments keep the turn and its MP cost.
+  Undo restores the steps, waypoint facing and direction together; switching to or from jumping clears the route.
 - The fire orders read and change `FiringDisplay`'s queue through its own methods; the queue is the one source of
   the orders. While another own unit acts, a unit's orders wait as its draft, and "Resolve phase" declares the
   drafts on the following own turns.

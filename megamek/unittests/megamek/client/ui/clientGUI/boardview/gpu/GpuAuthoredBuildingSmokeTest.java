@@ -34,7 +34,7 @@ class GpuAuthoredBuildingSmokeTest {
         var editor = new BoardEditorSession();
         editor.open(Board.createEmptyBoard(32, 24), null);
         Coords hpg = new Coords(13, 10), lab = new Coords(28, 10);
-        place(editor, hpg, "hpg-headquarters", 19);
+        place(editor, hpg, "hpg-headquarters", 0);
         place(editor, lab, "xenobiology-station", -12);
         editor.save(output.toPath().resolve("Authored Buildings.board2"));
         Board board = BoardFile.read(output.toPath().resolve("Authored Buildings.board2"));
@@ -64,6 +64,18 @@ class GpuAuthoredBuildingSmokeTest {
         assertTrue(collapsed.tile(hpg).features().stream().noneMatch(GpuAuthoredBuilding::supports));
         assertEquals(1, board.getHex(hpg).getDecorations().size());
 
+        var smallEditor = new BoardEditorSession(); smallEditor.open(Board.createEmptyBoard(6, 4), null);
+        for (String asset : List.of("hpg-headquarters", "xenobiology-station")) {
+            smallEditor.command(new Command(Action.ASSET, "buildings/authored/" + asset), null);
+            smallEditor.command(new Command(Action.BRUSH_VALUE, "object:scale", ".05"), null);
+            if (asset.equals("xenobiology-station")) { smallEditor.command(new Command(Action.BRUSH_VALUE, "object:levels", "5"), null); }
+            smallEditor.pointer(new Coords(asset.equals("hpg-headquarters") ? 2 : 4, 2), 0, 0, false);
+            smallEditor.finishStroke();
+        }
+        var smallScene = capture(smallEditor.board());
+        assertTrue(smallScene.tiles().stream().allMatch(t -> t.cover().reference() == null && t.cover().height() == 0));
+        assertEquals(2, smallScene.tiles().stream().flatMap(t -> t.features().stream()).filter(GpuAuthoredBuilding::supports).count());
+
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1600, 1000);
@@ -92,12 +104,24 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.camera.zoom = 1.15f;
                     terrain.update(original);
                     for (Coords focus : List.of(hpg, lab)) {
+                        camera.setIsometric(true);
                         camera.camera.zoom = focus.equals(hpg) ? 1.15f : .32f;
-                        camera.center(BoardGeometry.center(focus, 1));
+                        var target = BoardGeometry.center(focus, 1);
+                        if (focus.equals(hpg)) {
+                            camera.orbit(-90, 0);
+                            target.add(-65, 0, 180);
+                        }
+                        camera.center(target);
                         terrain.animate(1, List.of());
                         frame.render(terrain, camera, original);
                         GpuReviewFrame.save(new File(output, focus.equals(hpg) ? "hpg.png" : "station.png"));
                     }
+                    // Review the small receiver and relay at the distance where their near details matter.
+                    camera.setIsometric(true);
+                    camera.camera.zoom = .27f;
+                    camera.center(BoardGeometry.center(hpg, 0).add(310, 110, 38));
+                    frame.render(terrain, camera, original);
+                    GpuReviewFrame.save(new File(output, "hpg-sensors.png"));
                     camera.camera.zoom = .5f;
                     camera.center(BoardGeometry.center(hpg, 1));
                     terrain.animate(1, List.of(), .25f, hpg, (original.tile(hpg).cover().height() - 1) * BoardGeometry.level());
@@ -125,6 +149,50 @@ class GpuAuthoredBuildingSmokeTest {
                     terrain.animate(1, List.of());
                     frame.render(terrain, camera, collapsed);
                     GpuReviewFrame.save(new File(output, "collapsed.png"));
+                    for (var entry : GpuAuthoredBuilding.prepare(smallScene, smallScene.tiles()).entrySet()) {
+                        var prepared = entry.getValue();
+                        assertTrue(prepared.floors().isEmpty()); assertTrue(prepared.roof().isEmpty()); assertTrue(prepared.columns().isEmpty());
+                        var prop = assets.authoredBuilding(prepared);
+                        assertNull(prop.interior());
+                        assertTrue(prop.levels().getFirst().calculateBoundingBox(new BoundingBox()).isValid());
+                    }
+                    terrain.update(smallScene);
+                    terrain.animate(1, List.of());
+                    camera.camera.zoom = .18f;
+                    camera.center(BoardGeometry.center(new Coords(3, 2), 0));
+                    frame.render(terrain, camera, smallScene);
+                    GpuReviewFrame.save(new File(output, "small-props.png"));
+                    int selectable = 0;
+                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) field(chunk, "props")) {
+                            if (field(prop, "decorationId") == null) { continue; }
+                            selectable++;
+                            assertTrue(((List<?>) field(prop, "supportTriangles")).isEmpty());
+                            assertNotEquals("building", field(prop, "receiver"));
+                        }
+                    }
+                    assertEquals(2, selectable);
+                    for (Coords owner : List.of(new Coords(2, 2), new Coords(4, 2))) {
+                        var shown = terrain.editorObjects(owner).getFirst();
+                        assertTrue(shown.shown());
+                        boolean picked = false;
+                        for (int x = 1; x < 10 && !picked; x++) {
+                            for (int y = 1; y < 10 && !picked; y++) {
+                                var ray = new com.badlogic.gdx.math.collision.Ray(new com.badlogic.gdx.math.Vector3(
+                                      shown.bounds().min.x + shown.bounds().getWidth() * x / 10,
+                                      shown.bounds().min.y + shown.bounds().getHeight() * y / 10, shown.bounds().max.z + 20),
+                                      new com.badlogic.gdx.math.Vector3(0, 0, -1));
+                                var hit = terrain.decorationHit(smallScene, ray);
+                                picked = hit != null && hit.id().equals(shown.id()) && hit.coords().equals(owner);
+                            }
+                        }
+                        assertTrue(picked, "Small authored prop remains selectable");
+                    }
+                    terrain.setFluffHidden(true);
+                    for (Coords owner : List.of(new Coords(2, 2), new Coords(4, 2))) {
+                        assertFalse(terrain.editorObjects(owner).getFirst().shown());
+                    }
+                    terrain.setFluffHidden(false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }

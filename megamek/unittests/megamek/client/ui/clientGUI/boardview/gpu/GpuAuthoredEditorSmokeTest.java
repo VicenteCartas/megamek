@@ -66,6 +66,11 @@ class GpuAuthoredEditorSmokeTest {
                         var texts = GpuBoardTestUi.texts(GpuBoardTestUi.stage().getRoot().findActor("editor-details"));
                         if (step == 0) {
                             assertTrue(texts.contains(Messages.getString("BoardEditor.authoredHeight")), texts.toString());
+                            assertTrue(texts.stream().anyMatch(text -> text.startsWith(Messages.getString("BoardEditor.scale"))), texts.toString());
+                            assertTrue(texts.contains(Messages.getString("BoardEditor.stretch")), texts.toString());
+                            for (String axis : List.of("w", "l", "h")) {
+                                assertTrue(texts.contains(Messages.getString("BoardEditor.stretch." + axis)), texts.toString());
+                            }
                             GpuBoardTestUi.capture(new File(output, "hpg-editor.png"));
                             source.editorCommand(new Command(Action.SELECT_AT, "28,7", ""), source.takeFrame().boardGeneration());
                             source.editorCommand(new Command(Action.SELECT_OBJECT, ids[1]), source.takeFrame().boardGeneration());
@@ -87,9 +92,14 @@ class GpuAuthoredEditorSmokeTest {
                             if (field(preview, "built") != source.editorPreview() || field(preview, "comparing") != null) { return; }
                             assertFalse(((java.util.Collection<?>) field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
                                   + source.editorPreview().label() + ", hexes " + source.editorPreview().hexes() + ", routes " + source.editorPreview().routes().keySet());
-                            GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : "station-ghost.png"));
+                            GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : step == 4 ? "station-ghost.png" : "small-station-ghost.png"));
                             if (step == 3) {
                                 source.editorCommand(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), source.takeFrame().boardGeneration());
+                            } else if (step == 4) {
+                                source.editorCommand(new Command(Action.BRUSH_VALUE, "object:scale", ".05"), source.takeFrame().boardGeneration());
+                            } else if (step == 5) {
+                                assertTrue(source.editorPreview().routes().values().stream().allMatch(tile -> tile.cover().reference() == null));
+                                Gdx.app.exit();
                             } else { Gdx.app.exit(); }
                         }
                         step++; nextFrame = frames() + 15; deadline = System.nanoTime() + (step >= 3 ? 30_000_000_000L : 120_000_000_000L);

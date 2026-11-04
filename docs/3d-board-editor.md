@@ -39,6 +39,19 @@ Three mutually connected neighbouring hexes form a solid junction. Corridor roof
 orientation; the dome ring lays square panels along each straight bay between its ribs.
 Corridors and dome rings share framed wall panels, pressure-window bands and structural ribs. Their roofs remain
 clear: equipment, hatches and skylights are placed manually in the 3D editor.
+Vehicle passages stay on the road's centreline, including entrances directly into building corners. The recessed
+mouth cuts the walls, windows and frame members to the passage's rounded rectangular profile. Rigid panelled skins
+and spaced structural hoops replace vehicle bellows; small airlock ducts retain their flexible design.
+Borders, pillars and tunnel ribs reuse the palette's `structures/common/matte-steel`, tinted charcoal like the wall kits.
+Bevelled corner housings share inset panels and emissive light fixtures across corridor corners, height steps and dome-ring piers. Each continuous
+exposed pillar face has one top light and one smaller white foot light. Top lights are white on flat sides and
+re-entrant supports, larger amber lenses at true external corners. Corner housings follow both wall faces, and exterior columns reach ground level.
+Pillars follow the joined facade, so shared hex cuts do not omit a support.
+The ring ribs and roof borders have fastening plates. Roof plating has flush 4.5-unit panels with fine seams,
+square X-slotted connectors at the joins and a lighter grid crossing the panel centres.
+The dedicated `structures/lunar/dome-*` materials have editable Material Maker sources in mm-data. Lunar materials
+and the shared steel retain their authored texture resolution with mipmapping and anisotropic filtering instead
+of a forced 128-pixel mip.
 Dragging a connection between domed buildings preserves their existing heights and designs and extends the dome
 design across the new corridor hexes. The layout is recalculated from the board, with no extra placement markers
 in `.board2`.
@@ -374,7 +387,11 @@ The current workspace provides the native authoring path above, not every legacy
 
 Buildings → Authored buildings contains **HPG headquarters** (fixed, stepped heights) and **Xenobiology research
 station** (repeatable laboratory storeys around an open courtyard). Use Precision placement and the existing object
-move/rotation controls. Selecting the whole placement outlines its hidden structural volumes, covered hexes and
+move/rotation controls. Both the brush and selected placement offer **Scale** and independent **W / L / H** stretch,
+applied along the model's local axes before rotation. Gameplay coverage and heights update with the geometry and
+survive undo and save/reload. A placement covering less than half of every hex remains a selectable visual prop,
+with no building height or floors. Uneven scaling also stretches decorative parts such as dishes.
+Selecting the whole placement outlines its hidden structural volumes, covered hexes and
 derived heights. A building component's **Select whole building** button finds the placement from any member hex.
 The station exposes **Building levels**; HPG heights are derived from its GLB and are not editable per hex.
 
@@ -386,7 +403,7 @@ including the anchor hex, without moving other sections.
 No interiors also means no basement: conflicting basement settings are ignored. Otherwise an omitted basement is
 unknown, and saving omits that default. No floors still permits a basement.
 
-The example map is `data/boards/examples/16x12 Authored Buildings.board2`. Authoring instructions and reproducible
+The example map is `data/boards/examples/32x24 Authored Buildings.board2`. Authoring instructions and reproducible
 Blender sources are in `mm-data/tools/buildings/README-authored.md`. The current volume contract uses closed solids
 with horizontal, level-aligned tops. It does not infer gameplay space from decorative meshes or support multiple
 independent buildings in one gameplay hex.

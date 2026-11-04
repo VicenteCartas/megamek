@@ -64,6 +64,77 @@ class LunarDomeTest {
     }
 
     @Test
+    void junctionAt2212RetainsExposedSupportsAcrossSharedCuts() {
+        var tunnel = LAYOUTS.get(new Coords(21, 11)).tunnels().getFirst();
+        var courtyard = tunnel.corners().stream().filter(corner ->
+              Math.hypot(corner.at().x() - 41.5625, corner.at().y()) < 2).findFirst().orElseThrow();
+        assertFalse(courtyard.external(), "A turn over the lower roof uses a white pillar");
+        assertEquals(18, courtyard.bottom(), .001, "Its foot lamp must sit on the lower roof, not the hidden ground");
+        var exterior = tunnel.corners().stream().filter(corner ->
+              Math.hypot(corner.at().x() - 23.672792, corner.at().y() + 30.990892) < 2).findFirst().orElseThrow();
+        assertTrue(exterior.external(), "The tall convex pillar meeting the straight exterior facade uses yellow lamps");
+        assertEquals(0, exterior.bottom(), .001, "An exterior pillar reaches the building bottom, including its plinth");
+        assertTrue(tunnel.corners().stream().noneMatch(corner -> Math.hypot(corner.at().x(), corner.at().y() - 36) < 2),
+              "A straight shared cut must not become another corner pillar");
+        double x = courtyard.at().x() + tunnel.origin().x(), y = courtyard.at().y() + tunnel.origin().y();
+        long owners = LAYOUTS.values().stream().flatMap(layout -> layout.tunnels().stream())
+              .filter(other -> Math.abs(other.top() - tunnel.top()) < .01)
+              .flatMap(other -> other.corners().stream().filter(corner -> Math.hypot(
+                    corner.at().x() + other.origin().x() - x, corner.at().y() + other.origin().y() - y) < .05)).count();
+        assertEquals(1, owners, "The complete shared-cut pillar and its lamps must have exactly one owner");
+    }
+
+    @Test
+    void tallStepPillarAt2413KeepsBothWallFacesAndReachesGround() {
+        var corner = LAYOUTS.get(new Coords(23, 12)).tunnels().stream().flatMap(tunnel -> tunnel.corners().stream())
+              .filter(pillar -> Math.hypot(pillar.at().x() + 38.670956, pillar.at().y() - 5.0091085) < 2)
+              .findFirst().orElseThrow();
+        assertTrue(corner.external());
+        assertEquals(-Math.sqrt(3) / 2, corner.normal().x(), .002, "The housing retains the incoming wall face");
+        assertEquals(.5, corner.normal().y(), .002);
+        assertEquals(-.5, corner.side().x(), .002, "The other face follows the exterior wall rather than a 45-degree bisector");
+        assertEquals(-Math.sqrt(3) / 2, corner.side().y(), .002);
+        assertEquals(0, corner.bottom(), .001);
+    }
+
+    @Test
+    void flatSupportAt2313IsCentredBetweenTheTwoTallerSections() {
+        var posts = LAYOUTS.get(new Coords(22, 12)).tunnels().stream().flatMap(tunnel -> tunnel.corners().stream())
+              .filter(BoardMultiHexBuilding.Corner::flat).toList();
+        var post = posts.stream().filter(pillar -> Math.hypot(pillar.at().x() + 7.5, pillar.at().y() + 12.99) < .1)
+              .findFirst().orElseThrow();
+        assertFalse(post.external(), "The centred flat support uses white lamps");
+        assertEquals(post.normal(), post.side(), "A flat support has one exposed face");
+        assertEquals(0, post.bottom());
+        assertEquals(1, posts.size(), "The low frontage has one centred support, not a phase-dependent extra post near its end");
+    }
+
+    @Test
+    void concaveGroundPillarAt2612ReachesGroundWithoutCrowdingTheSmallReturn() {
+        var posts = LAYOUTS.get(new Coords(25, 11)).tunnels().stream().flatMap(tunnel -> tunnel.corners().stream()).toList();
+        var inner = posts.stream().filter(pillar -> Math.hypot(pillar.at().x(), pillar.at().y() - 22.92) < .1)
+              .findFirst().orElseThrow();
+        assertFalse(inner.external(), "The substantial concave corner keeps white head lamps");
+        assertEquals(0, inner.bottom(), .001, "A white column on the ground boundary also extends through the foundation");
+        assertTrue(posts.stream().noneMatch(pillar -> Math.hypot(pillar.at().x() - 9.684, pillar.at().y() - 11.73) < .1),
+              "The short 19-degree return beside the main corner must not add a crowded second column");
+        assertTrue(posts.stream().anyMatch(pillar -> pillar.external()
+              && Math.hypot(pillar.at().x() - 15, pillar.at().y() - 8.66) < .1), "Keep the substantial outer corner");
+    }
+
+    @Test
+    void nearbyDisconnectedWingDoesNotRemoveAConcaveSupport() throws Exception {
+        Area footprint = area(List.of(new BoardMultiHexBuilding.Point(-30, -20), new BoardMultiHexBuilding.Point(30, -20),
+              new BoardMultiHexBuilding.Point(30, 0), new BoardMultiHexBuilding.Point(0, -5), new BoardMultiHexBuilding.Point(-30, 0)));
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("turns", Area.class);
+        method.setAccessible(true);
+        assertEquals(5, ((List<?>) method.invoke(null, footprint)).size(), "The gentle concave turn has no crowded neighbour");
+        footprint.add(new Area(new Rectangle2D.Float(2, -2, 4, 4)));
+        assertEquals(9, ((List<?>) method.invoke(null, footprint)).size(),
+              "A corner across the gap adds four supports without removing the original wing's concave support");
+    }
+
+    @Test
     void corridorRoofPanelsKeepTheirScaleAndOrientationAcrossHexes() throws Exception {
         int checked = 0;
         for (Coords coords : List.of(new Coords(21, 11), new Coords(22, 11), new Coords(22, 12))) {
@@ -74,9 +145,9 @@ class LunarDomeTest {
                         for (short index : part.indices) {
                             int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                             var v = mesh.vertices;
-                            assertEquals((v[at] + HexTile.centerX(coords, HexTile.MODEL_WIDTH)) / 12, v[at + 10], .0001,
+                            assertEquals((v[at] + HexTile.centerX(coords, HexTile.MODEL_WIDTH)) / 9, v[at + 10], .0001,
                                   coords.getBoardNum() + " roof U must continue across the hex boundary");
-                            assertEquals(-(v[at + 1] + HexTile.centerY(coords, HexTile.HEIGHT)) / 12, v[at + 11], .0001,
+                            assertEquals(-(v[at + 1] + HexTile.centerY(coords, HexTile.HEIGHT)) / 9, v[at + 11], .0001,
                                   coords.getBoardNum() + " roof V must use the same panel scale and orientation");
                             checked++;
                         }
@@ -115,8 +186,8 @@ class LunarDomeTest {
                             float determinant = du1 * dv2 - du2 * dv1;
                             var u = ab.cpy().scl(dv2).mulAdd(ac, -dv1).scl(1 / determinant);
                             var w = ac.cpy().scl(du1).mulAdd(ab, -du2).scl(1 / determinant);
-                            assertEquals(12, u.len(), .03, "Ring roof U must retain the panel scale");
-                            assertEquals(12, w.len(), .03, "Ring roof V must retain the panel scale");
+                            assertEquals(9, u.len(), .03, "Ring roof U must retain the panel scale");
+                            assertEquals(9, w.len(), .03, "Ring roof V must retain the panel scale");
                             assertEquals(0, u.cpy().nor().dot(w.cpy().nor()), .002, "Ring panels must be square");
                             double angle = Math.atan2((v[a + 1] + v[b + 1] + v[c + 1]) / 3 - dome.y(),
                                   (v[a] + v[b] + v[c]) / 3 - dome.x());
@@ -267,20 +338,23 @@ class LunarDomeTest {
             for (var tunnel : entry.getValue().tunnels()) {
                 var data = cap(tunnel);
                 List<Vector3> roof = new ArrayList<>(); double total = 0;
-                for (var part : data.meshes) {
-                    for (int at = 0; at < part.vertices.length; at += 3 * RigidGlb.STRIDE) {
-                        if (part.vertices[at + 5] <= 0 || part.vertices[at + RigidGlb.STRIDE + 5] <= 0
-                              || part.vertices[at + 2 * RigidGlb.STRIDE + 5] <= 0) { continue; }
-                        // The solid wall backing has a horizontal cap below the bevel; it is not part of the roof.
-                        if (part.vertices[at + 5] > .999f && part.vertices[at + RigidGlb.STRIDE + 5] > .999f
-                              && part.vertices[at + 2 * RigidGlb.STRIDE + 5] > .999f
-                              && part.vertices[at + 2] < tunnel.top() - .001f) { continue; }
-                        for (int vertex = 0; vertex < 3; vertex++) {
-                            int start = at + vertex * RigidGlb.STRIDE;
-                            roof.add(new Vector3(part.vertices[start], part.vertices[start + 1], part.vertices[start + 2]));
+                for (var mesh : data.meshes) {
+                    for (var part : mesh.parts) {
+                        // Inset fittings and fastener heads deliberately overlay the structural skin.
+                        if (!part.id.equals(BoardMultiHexBuilding.ROOF) && !part.id.equals(BoardMultiHexBuilding.PIER)) { continue; }
+                        for (int at = 0; at < part.indices.length; at += 3) {
+                            int ia = Short.toUnsignedInt(part.indices[at]) * RigidGlb.STRIDE;
+                            int ib = Short.toUnsignedInt(part.indices[at + 1]) * RigidGlb.STRIDE;
+                            int ic = Short.toUnsignedInt(part.indices[at + 2]) * RigidGlb.STRIDE;
+                            float[] v = mesh.vertices;
+                            if (v[ia + 5] <= 0 || v[ib + 5] <= 0 || v[ic + 5] <= 0) { continue; }
+                            // The solid wall backing has a horizontal cap below the bevel; it is not part of the roof.
+                            if (v[ia + 5] > .999f && v[ib + 5] > .999f && v[ic + 5] > .999f
+                                  && v[ia + 2] < tunnel.top() - .001f) { continue; }
+                            for (int start : new int[] { ia, ib, ic }) { roof.add(new Vector3(v[start], v[start + 1], v[start + 2])); }
+                            var a = roof.get(roof.size() - 3); var b = roof.get(roof.size() - 2); var c = roof.getLast();
+                            total += Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2;
                         }
-                        var a = roof.get(roof.size() - 3); var b = roof.get(roof.size() - 2); var c = roof.getLast();
-                        total += Math.abs((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)) / 2;
                     }
                 }
                 Area footprint = area(tunnel.outline()), drawn = GpuBuildingInterior.area(roof);

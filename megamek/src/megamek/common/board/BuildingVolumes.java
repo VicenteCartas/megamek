@@ -243,6 +243,37 @@ public final class BuildingVolumes {
         return result;
     }
 
+    /** The board's actual hex perimeter, counter-clockwise in model units, including its staggered recesses. */
+    public static List<Point> boardOutline(int width, int height) {
+        Set<Coords> border = new LinkedHashSet<>();
+        for (int x = 0; x < width; x++) { border.add(new Coords(x, 0)); border.add(new Coords(x, height - 1)); }
+        for (int y = 0; y < height; y++) { border.add(new Coords(0, y)); border.add(new Coords(width - 1, y)); }
+        Map<Point, Point> edges = new LinkedHashMap<>();
+        for (Coords at : border) {
+            for (int corner = 0; corner < 6; corner++) {
+                Coords neighbour = at.translated((7 - corner) % 6);
+                if (neighbour.getX() >= 0 && neighbour.getX() < width && neighbour.getY() >= 0 && neighbour.getY() < height) { continue; }
+                int next = (corner + 1) % 6;
+                edges.put(new Point(HexTile.cornerX(at, corner, HexTile.MODEL_WIDTH), HexTile.cornerY(at, corner, HexTile.HEIGHT), 0),
+                      new Point(HexTile.cornerX(at, next, HexTile.MODEL_WIDTH), HexTile.cornerY(at, next, HexTile.HEIGHT), 0));
+            }
+        }
+        List<Point> result = new ArrayList<>();
+        Point first = edges.keySet().iterator().next(), point = first;
+        do { result.add(point); point = edges.get(point); } while (!point.equals(first));
+        return List.copyOf(result);
+    }
+
+    /** Geometric structural area retained by the board; independent of half-hex gameplay coverage and decorative props. */
+    public static double onBoardFraction(Coords anchor, BoardDecoration object, int width, int height) {
+        Area footprint = new Area();
+        roofs(placed(anchor, object, 0)).values().forEach(footprint::add);
+        double total = area(footprint);
+        if (total == 0) { return 0; }
+        footprint.intersect(polygon(boardOutline(width, height)));
+        return area(footprint) / total;
+    }
+
     /** Largest projected top area within one hex; floating point seam tolerances still make exact ties choose taller. */
     public static double dominant(Map<Double, Area> roofs, Area cell) {
         double largest = -1, roof = 0, tolerance = area(cell) * 1e-6;
