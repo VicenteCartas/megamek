@@ -1340,6 +1340,15 @@ work for Swing, and item 11 is under investigation.
          stage's focus, and Esc then fell through to the lobby, which ignores it while a dialog is open, so the
          random map settings never closed on Esc. The random map settings no longer pin the page's width to the
          widest tab either, which pushed the advanced view's Theme out of the card; only the height is pinned.
+       - Edit Damage is a libGDX dialog (`LobbyDamageView`, through `LobbyNativeDialogs.damage`) for Meks,
+         ProtoMeks, vehicles and fighters: the unit's paperdoll on the left, coloured live by the edits with the change
+         from the unit as read, and the picked location's values on the right, or the unit's general ones (`SI` on
+         the doll picks those). Armour, rear armour and structure take steppers, systems and equipment hit boxes, and
+         breached and blown off switches; heat, crew hits, fuel and the conditions sit where the Swing editor puts
+         them. Restore Unit makes the unit whole; More… keeps the edits and opens the Swing editor for ammunition,
+         modes and the damage roller. The values live in the toolkit-free `UnitDamageForm`, which writes a partial
+         `DamageEditSpec` through `DamageEditApplier`, so what it does not show stays as it was. Infantry, gun
+         emplacements and large craft keep the Swing editor. `lobby+unitdamage` opens it for a shot.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
@@ -1353,7 +1362,10 @@ work for Swing, and item 11 is under investigation.
        `LobbyUnitMenuTest.aCardsIconsLeaveTheirItemsOutOfItsMenu` and `aCardIconRunsTheMenusCommandOnItsUnit`, and
        `LobbyUnitCardActionsSmokeTest` (every icon clicked, the main and secondary rows, the ⋮'s menu without them,
        no damage icon when a Game Master keeps it); `escapeClosesADialogWhoseTextFieldHasTheFocus` (Esc with no
-       focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card).
+       focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card);
+       `UnitDamageFormTest` (a Mek's, vehicle's, VTOL's and fighter's places and values, repair, the partial spec
+       written to the unit, no form for infantry or a gun emplacement) and `LobbyDamageSmokeTest` (the doll's left
+       arm clicked, the stepper and a hit box, Restore Unit, and OK writing the armour to the unit).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

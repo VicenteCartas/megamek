@@ -28,6 +28,7 @@ import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.TrainOrderForm;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
@@ -81,6 +82,8 @@ final class LobbyNativeDialogs {
     private LobbyRandomArmyView randomArmyView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
+    /** The paperdoll drawings, read once the damage editor first opens. */
+    private GpuPaperdolls paperdolls;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -287,6 +290,23 @@ final class LobbyNativeDialogs {
         UiDialog dialog = begin(Messages.getString("BattlefieldSupportAssetDamageDialog.title"), "dialog.sm", true,
               () -> { });
         LobbyPromptViews.assetDamage(kit, dialog, form, edt, applied, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * Shows the unit's damage editor over whatever shows.
+     *
+     * @param applied runs on the Swing thread once OK wrote the edits to the unit
+     * @param more    runs on the Swing thread once More… wrote the edits, to open the Swing editor
+     */
+    UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied, Runnable more) {
+        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
+              "dialog.lg", true, () -> { });
+        if (paperdolls == null) {
+            paperdolls = new GpuPaperdolls();
+        }
+        new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, more, this::close);
         show(dialog);
         return dialog;
     }

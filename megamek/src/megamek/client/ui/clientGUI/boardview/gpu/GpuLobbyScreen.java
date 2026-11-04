@@ -148,6 +148,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean railPending;
     private boolean menuPending;
     private boolean unitMenuPending;
+    private boolean unitDamagePending;
     /** The developer switch's clicks and pointer, run through the stage once their time comes. */
     private boolean clickCompactPending;
     private boolean clickFoldPending;
@@ -260,6 +261,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         railPending = probe.options().contains("rail");
         menuPending = probe.options().contains("menu");
         unitMenuPending = probe.options().contains("unitmenu");
+        unitDamagePending = probe.options().contains("unitdamage");
         clickCompactPending = probe.options().contains("clickcompact");
         clickFoldPending = probe.options().contains("fold");
         foldReportPending = clickFoldPending;
@@ -1508,6 +1510,22 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         return clicks;
     }
 
+    /** The first actor under {@code root} whose name starts with {@code prefix}, depth first. */
+    private static @Nullable Actor probeFind(Actor root, String prefix) {
+        if (root.getName() != null && root.getName().startsWith(prefix)) {
+            return root;
+        }
+        if (root instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                Actor found = probeFind(child, prefix);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     /** Scrolls the dialog's body so that {@code target} shows in the middle. */
     private static void probeReveal(UiDialog dialog, @Nullable Actor target) {
         if (target == null) {
@@ -1531,6 +1549,17 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         double elapsed = (System.nanoTime() - start) / 1e9;
+        if (unitDamagePending && elapsed > PROBE_CLICK_AT) {
+            // the units arrive from the server a moment after the lobby shows; looks until a second before the shot
+            Actor damage = probeFind(stage.getRoot(), "lobby-unit-damage-");
+            if (damage != null) {
+                unitDamagePending = false;
+                GpuLobbyProbeInput.click(stage, damage);
+            } else if (elapsed > probe.shotAt() - 1) {
+                unitDamagePending = false;
+                LOGGER.warn("The lobby probe found no unit with a damage icon");
+            }
+        }
         if (clickCompactPending && elapsed > PROBE_CLICK_AT) {
             clickCompactPending = false;
             GpuLobbyProbeInput.click(stage, forces.compactToggle());
