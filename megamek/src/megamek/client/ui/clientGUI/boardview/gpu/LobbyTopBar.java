@@ -28,14 +28,14 @@ import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.client.ui.util.KeyCommandBind;
 
 /**
  * The lobby's top bar, over the art without a panel, as the reference's ready bar: the BRIEFING title with where the
  * game runs and its map under it at the start; the ready count, a Battle Value chip per side and the warnings to heed
  * before Ready in the middle, centred on the whole bar, more sides folding into one chip that lists them; at the end
- *  only actions: the Game Master's seat, the Client Settings gear, the game's ⋮ menu (saving), then Leave and Ready, Ready
-  * last so it holds the edge. Ready turns green with a check once the player is ready, and
+ * only actions: the Game Master's seat, Ready, then the ☰ button that opens the system menu (saving, loading,
+ * settings and leaving the lobby, which Esc opens too), last in the corner as a game's menu button. Ready turns green
+ * with a check once the player is ready, and
  * a click on it while a red warning stands lights the red warnings instead.
  */
 final class LobbyTopBar extends WidgetGroup {
@@ -62,22 +62,17 @@ final class LobbyTopBar extends WidgetGroup {
     private final TextTooltip doneTip;
     private final UiPopover sidesPopover;
     private final UiPopover warningsPopover;
-    private final UiPopover gameMenu;
-    private final GameActions gameActions;
     private final float gap = space("lg");
     private final List<Button> blockerChips = new ArrayList<>();
     private LobbySnapshot shown = LobbySnapshot.EMPTY;
     private String shortcut = "";
     private boolean narrow;
 
-    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable settingsAction, GameActions gameActions,
-          Runnable leaveAction, Runnable readyAction, Consumer<Warning> warningAction) {
+    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable menuAction, Runnable readyAction,
+          Consumer<Warning> warningAction) {
         this.kit = kit;
         this.seat = seat;
         this.warningAction = warningAction;
-        this.gameActions = gameActions;
-        gameMenu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
-        gameMenu.setName("lobby-game-menu-popover");
         sidesPopover = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
         sidesPopover.setName("lobby-sides");
         warningsPopover = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
@@ -88,17 +83,10 @@ final class LobbyTopBar extends WidgetGroup {
         subtitle.setEllipsis(true);
         heading.add(subtitle).left().minWidth(0).padTop(space("xxs"));
 
-        UiButton settings = kit.button("button-icon", "settings", null, null);
-        settings.setName("lobby-settings");
-        kit.tip(settings, true).getActor().setText(Messages.getString("Lobby.settingsTip",
-              KeyCommandBind.getDesc(KeyCommandBind.CLIENT_SETTINGS)));
-        UiKit.onChange(settings, settingsAction);
-        UiButton more = kit.button("button-icon", "more-vert", null, null);
-        more.setName("lobby-game-menu");
-        kit.tip(more, true).getActor().setText(Messages.getString("Lobby.gameMenu.tip"));
-        UiKit.onChange(more, () -> openGameMenu(more));
-        UiButton leave = kit.button("button-secondary", null, Messages.getString("Lobby.leave"), null);
-        UiKit.onChange(leave, leaveAction);
+        UiButton menu = kit.button("button-icon", "menu", null, null);
+        menu.setName("lobby-menu");
+        kit.tip(menu, true).getActor().setText(Messages.getString("Lobby.menu.tip"));
+        UiKit.onChange(menu, menuAction);
         ready = kit.button("button-primary", null, Messages.getString("Lobby.ready"), null);
         ready.setName("lobby-ready");
         UiKit.onChange(ready, readyAction);
@@ -108,14 +96,12 @@ final class LobbyTopBar extends WidgetGroup {
         done.setVisible(false);
         readyTip = kit.tip(ready, true);
         doneTip = kit.tip(done, true);
-        // Leave and both of Ready's faces share the widest one's width, so nothing moves when Ready changes face
-        float width = Math.max(leave.getPrefWidth(), Math.max(ready.getPrefWidth(), done.getPrefWidth()));
+        // Both of Ready's faces share the wider one's width, so nothing moves when Ready changes face
+        float width = Math.max(ready.getPrefWidth(), done.getPrefWidth());
         Stack readyFaces = new Stack(ready, done);
         trailing.add(seat).padRight(space("sm"));
-        trailing.add(settings).padRight(space("xs"));
-        trailing.add(more).padRight(space("sm"));
-        trailing.add(leave).minWidth(width).padRight(space("sm"));
-        trailing.add(readyFaces).minWidth(width);
+        trailing.add(readyFaces).minWidth(width).padRight(space("sm"));
+        trailing.add(menu);
 
         addActor(heading);
         addActor(chips);
@@ -130,60 +116,12 @@ final class LobbyTopBar extends WidgetGroup {
     void attach(Group layer) {
         layer.addActor(sidesPopover);
         layer.addActor(warningsPopover);
-        layer.addActor(gameMenu);
         seat.attach(layer);
     }
 
     /** One Escape step: closes an open popover; true when one was open. */
     boolean back() {
-        return sidesPopover.back() || warningsPopover.back() || gameMenu.back() || seat.back();
-    }
-
-    /** The ⋮ menu of the game itself: saving it and loading another, as the old menu bar's File menu. */
-    private void openGameMenu(Actor trigger) {
-        if (gameMenu.isVisible()) {
-            gameMenu.cancel();
-            return;
-        }
-        if (gameMenu.getStage() == null) {
-            return;
-        }
-        UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-        gameItem(items, "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, gameActions::save);
-        gameItem(items, "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, gameActions::quickSave);
-        if (gameActions.loads()) {
-            items.separator();
-            gameItem(items, "Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, gameActions::load);
-            gameItem(items, "Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, gameActions::quickLoad);
-        }
-        gameMenu.header(null, null).content(items);
-        gameMenu.openedFrom(trigger);
-        Vector2 corner = trigger.localToStageCoordinates(new Vector2(0, 0));
-        gameMenu.showAt(corner.x, corner.y);
-    }
-
-    private void gameItem(UiMenuList items, String key, KeyCommandBind binding, Runnable action) {
-        UiButton item = items.item(Messages.getString(key), KeyCommandBind.getDesc(binding), null, false, true, () -> {
-            gameMenu.cancel();
-            action.run();
-        });
-        item.setName(key);
-    }
-
-    /** What the ⋮ game menu does. */
-    interface GameActions {
-        void save();
-
-        void quickSave();
-
-        /** Asks for a saved game and leaves the lobby to load it. */
-        void load();
-
-        /** Leaves the lobby to load the quick save. */
-        void quickLoad();
-
-        /** Whether this lobby offers loading at all. */
-        boolean loads();
+        return sidesPopover.back() || warningsPopover.back() || seat.back();
     }
 
     /** The Ready key's name for the tooltips, such as "Ctrl+Enter", or empty for none. */

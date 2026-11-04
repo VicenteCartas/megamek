@@ -1286,7 +1286,16 @@ work for Swing, and item 11 is under investigation.
          Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
          Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window still asks in Swing, since
          its exit path belongs to hud-v3.
-       Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`.
+       - A system menu, as a game's pause menu (`LobbyNativeDialogs.systemMenu`): Resume, Save game…, Quick save,
+         Load game…, Quick load, Settings and Leave lobby, one column of buttons in groups, with each shortcut in its
+         tooltip. Esc opens it once nothing else is left to close, and closes it again. The top bar's gear, ⋮ game
+         menu and Leave button become one ☰ button that opens it, so the bar ends with the Game Master's seat, Ready
+         and ☰ in the corner, as a game's menu button. The shortcuts stay (Alt+C, Ctrl+S, Ctrl+Shift+S, Ctrl+L,
+         Ctrl+Shift+L). A MekHQ lobby offers no
+         loading here either.
+       Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
+       `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
+       `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

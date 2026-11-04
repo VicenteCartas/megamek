@@ -330,8 +330,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, gameActions(), window::leave,
-              window::ready, this::goTo);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, this::openSystemMenu, window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -400,9 +399,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     centre.back();
                     return true;
                 }
-                return false;
+                openSystemMenu();
+                return true;
             }
         });
+    }
+
+    /** GPU thread: opens the system menu, which Esc opens once nothing else is left to close. */
+    void openSystemMenu() {
+        nativeDialog(dialogs -> dialogs.systemMenu(systemActions()));
     }
 
     /**
@@ -480,9 +485,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
-    /** The top bar's ⋮ game menu, which the window runs on the Swing thread. */
-    private LobbyTopBar.GameActions gameActions() {
-        return new LobbyTopBar.GameActions() {
+    /** The system menu's actions, which the window runs on the Swing thread. */
+    private LobbyNativeDialogs.SystemActions systemActions() {
+        return new LobbyNativeDialogs.SystemActions() {
             @Override
             public void save() {
                 window.saveGame();
@@ -506,6 +511,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public boolean loads() {
                 return GpuLobbyWindow.loadsGames();
+            }
+
+            @Override
+            public void settings() {
+                window.openSettings();
+            }
+
+            @Override
+            public void leave() {
+                window.leave();
             }
         };
     }

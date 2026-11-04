@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -81,28 +82,28 @@ class LobbyTogglesSmokeTest {
     }
 
     @Test
-    void theSettingsGearInTheTopBarOpensTheSettings() {
+    void theMenuButtonInTheTopBarOpensTheSystemMenu() {
         UiTestStage.run(ui -> {
             int[] opened = new int[1];
             LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
-                  () -> opened[0]++, new CountingGameActions(true), () -> { }, () -> { }, warning -> { });
+                  () -> opened[0]++, () -> { }, warning -> { });
             bar.attach(ui.stage.getRoot());
             ui.window.addActor(bar);
             bar.setBounds(100, 600, 1200, 80);
             bar.validate();
             ui.draw();
-            click(ui, bar.findActor("lobby-settings"));
-            assertEquals(1, opened[0], "a click on the gear opens Client Settings");
+            click(ui, bar.findActor("lobby-menu"));
+            assertEquals(1, opened[0], "a click on the menu button opens the system menu");
             bar.remove();
         });
     }
 
-    /** Counts what the ⋮ game menu asks for: save, quick save, load, quick load. */
-    private static final class CountingGameActions implements LobbyTopBar.GameActions {
-        final int[] runs = new int[4];
+    /** Counts what the system menu asks for: save, quick save, load, quick load, settings, leave. */
+    private static final class CountingSystemActions implements LobbyNativeDialogs.SystemActions {
+        final int[] runs = new int[6];
         private final boolean loads;
 
-        CountingGameActions(boolean loads) {
+        CountingSystemActions(boolean loads) {
             this.loads = loads;
         }
 
@@ -130,69 +131,62 @@ class LobbyTogglesSmokeTest {
         public boolean loads() {
             return loads;
         }
+
+        @Override
+        public void settings() {
+            runs[4]++;
+        }
+
+        @Override
+        public void leave() {
+            runs[5]++;
+        }
     }
 
-    private static void choose(UiTestStage ui, LobbyTopBar bar, String item) {
-        click(ui, bar.findActor("lobby-game-menu"));
+    private static void choose(UiTestStage ui, LobbyNativeDialogs dialogs, CountingSystemActions actions,
+          String item) {
+        dialogs.systemMenu(actions);
         ui.draw();
         click(ui, ui.stage.getRoot().findActor(item));
         ui.draw();
+        assertFalse(dialogs.isOpen(), item + " closes the menu");
     }
 
     @Test
-    void theGameMenuInTheTopBarSavesAndLoadsTheGame() {
+    void theSystemMenuSavesLoadsOpensTheSettingsAndLeaves() {
         UiTestStage.run(ui -> {
-            CountingGameActions actions = new CountingGameActions(true);
-            LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
-                  () -> { }, actions, () -> { }, () -> { }, warning -> { });
-            bar.attach(ui.stage.getRoot());
-            ui.window.addActor(bar);
-            bar.setBounds(100, 600, 1200, 80);
-            bar.validate();
-            ui.draw();
-            Actor menu = ui.stage.getRoot().findActor("lobby-game-menu-popover");
-            assertFalse(menu.isVisible(), "the menu starts closed");
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            CountingSystemActions actions = new CountingSystemActions(true);
+            choose(ui, dialogs, actions, "Lobby.menu.resume");
+            assertArrayEquals(new int[6], actions.runs, "Resume only closes the menu");
+            choose(ui, dialogs, actions, "Lobby.gameMenu.save");
+            choose(ui, dialogs, actions, "Lobby.gameMenu.quickSave");
+            choose(ui, dialogs, actions, "Lobby.gameMenu.load");
+            choose(ui, dialogs, actions, "Lobby.gameMenu.quickLoad");
+            choose(ui, dialogs, actions, "Lobby.menu.settings");
+            choose(ui, dialogs, actions, "Lobby.menu.leave");
+            assertArrayEquals(new int[] { 1, 1, 1, 1, 1, 1 }, actions.runs, "each button does its one thing");
 
-            click(ui, bar.findActor("lobby-game-menu"));
+            dialogs.systemMenu(actions);
             ui.draw();
-            assertTrue(menu.isVisible(), "a click on the ⋮ opens the game menu");
-            click(ui, ui.stage.getRoot().findActor("Lobby.gameMenu.save"));
+            ui.stage.keyDown(Input.Keys.ESCAPE);
             ui.draw();
-            assertEquals(1, actions.runs[0], "Save game… asks where to save");
-            assertFalse(menu.isVisible(), "choosing an item closes the menu");
-
-            choose(ui, bar, "Lobby.gameMenu.quickSave");
-            assertEquals(1, actions.runs[1], "Quick save saves at once");
-            choose(ui, bar, "Lobby.gameMenu.load");
-            assertEquals(1, actions.runs[2], "Load game… asks for a saved game");
-            choose(ui, bar, "Lobby.gameMenu.quickLoad");
-            assertEquals(1, actions.runs[3], "Quick load loads the quick save");
-
-            click(ui, bar.findActor("lobby-game-menu"));
-            ui.draw();
-            assertTrue(bar.back(), "Escape closes the open menu");
-            assertFalse(menu.isVisible());
-            bar.remove();
+            assertFalse(dialogs.isOpen(), "Escape resumes");
+            assertArrayEquals(new int[] { 1, 1, 1, 1, 1, 1 }, actions.runs);
+            dialogs.dispose();
         });
     }
 
     @Test
     void aLobbyThatCannotLoadOffersOnlySaving() {
         UiTestStage.run(ui -> {
-            LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
-                  () -> { }, new CountingGameActions(false), () -> { }, () -> { }, warning -> { });
-            bar.attach(ui.stage.getRoot());
-            ui.window.addActor(bar);
-            bar.setBounds(100, 600, 1200, 80);
-            bar.validate();
-            ui.draw();
-            click(ui, bar.findActor("lobby-game-menu"));
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            dialogs.systemMenu(new CountingSystemActions(false));
             ui.draw();
             assertTrue(ui.stage.getRoot().findActor("Lobby.gameMenu.save") != null);
             assertEquals(null, ui.stage.getRoot().findActor("Lobby.gameMenu.load"), "a MekHQ game loads nothing");
             assertEquals(null, ui.stage.getRoot().findActor("Lobby.gameMenu.quickLoad"));
-            bar.back();
-            bar.remove();
+            dialogs.dispose();
         });
     }
 
