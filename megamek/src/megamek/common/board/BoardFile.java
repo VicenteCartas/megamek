@@ -316,6 +316,7 @@ public final class BoardFile {
                 var colours = colours(style);
                 Integer rotation = style.has("rotation") ? integer(style, "rotation", 0) : null;
                 double padding = style.path("padding").asDouble();
+                // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
                 if (variant == null && asset == null && material == null && control == null
                       && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) { return; }
                 HexAppearance value = new HexAppearance(variant, asset,

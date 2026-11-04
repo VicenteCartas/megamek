@@ -131,12 +131,7 @@ final class BoardComponents {
                 }
             }
             if (appearances != null && appearances.has(owner)) { component.set("appearance", appearances.get(owner).deepCopy()); }
-            // These controls belong to a real building or a retained, collapsed authored member. Old editor erasures
-            // could leave them on empty ground; preserve visual assets and props, but do not save those orphan controls.
-            if (owner.equals("building") && appearances != null
-                  && (hex.containsTerrain(Terrains.BUILDING) || hex.getBuildingReference() != null)) {
-                buildingAppearance(component, appearances);
-            }
+            if (owner.equals("building") && appearances != null) { buildingAppearance(component, appearances); }
             if (!component.isEmpty()) { components.set(owner, component); }
         });
         if (components.isEmpty()) { node.remove("components"); }

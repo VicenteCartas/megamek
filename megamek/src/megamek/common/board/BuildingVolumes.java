@@ -255,14 +255,24 @@ public final class BuildingVolumes {
         return result;
     }
 
-    /** Covered hexes and baked gameplay heights. Largest roof area wins; equal areas choose the taller roof. */
+    /** A covered hex's baked gameplay height, and the area of the placement's exposed roofs over it (model units). */
+    public record Cover(int height, double area) { }
+
+    /** Covered hexes and baked gameplay heights ({@link #covers}). */
     public static Map<Coords, Integer> coverage(Coords anchor, BoardDecoration object, int width, int height, Function<Coords, Hex> board) {
+        Map<Coords, Integer> result = new LinkedHashMap<>();
+        covers(anchor, object, width, height, board).forEach((at, cover) -> result.put(at, cover.height()));
+        return result;
+    }
+
+    /** Covered hexes, what each holds and how much of it. Largest roof area wins; equal areas choose the taller roof. */
+    public static Map<Coords, Cover> covers(Coords anchor, BoardDecoration object, int width, int height, Function<Coords, Hex> board) {
         double base = object.placement().level(board.apply(anchor));
         Map<Double, Area> roofs = roofs(placed(anchor, object, base));
         Area footprint = new Area();
         roofs.values().forEach(footprint::add);
         var bounds = footprint.getBounds2D();
-        Map<Coords, Integer> result = new LinkedHashMap<>();
+        Map<Coords, Cover> result = new LinkedHashMap<>();
         int minX = Math.max(0, (int) Math.floor(bounds.getMinX() / (HexTile.MODEL_WIDTH * .75)) - 1);
         int maxX = Math.min(width - 1, (int) Math.ceil(bounds.getMaxX() / (HexTile.MODEL_WIDTH * .75)) + 1);
         int minY = Math.max(0, (int) Math.floor(-bounds.getMaxY() / HexTile.HEIGHT) - 2);
@@ -280,10 +290,10 @@ public final class BuildingVolumes {
                     return above;
                 }));
                 covered.intersect(cell);
-                double cellArea = area(cell);
-                if (area(covered) + cellArea * 1e-6 < cellArea * .5) { continue; }
+                double cellArea = area(cell), coveredArea = area(covered);
+                if (coveredArea + cellArea * 1e-6 < cellArea * .5) { continue; }
                 double roof = dominant(roofs, cell, ground * LEVEL + .00001);
-                result.put(at, Math.max(1, (int) Math.ceil(roof / LEVEL - ground - 1e-5)));
+                result.put(at, new Cover(Math.max(1, (int) Math.ceil(roof / LEVEL - ground - 1e-5)), coveredArea));
             }
         }
         return result;

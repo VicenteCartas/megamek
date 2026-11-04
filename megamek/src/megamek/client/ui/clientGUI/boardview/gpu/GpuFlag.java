@@ -18,6 +18,7 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelMesh;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelMeshPart;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelNodePart;
+import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -33,6 +34,13 @@ final class GpuFlag {
     private static final int FACE_VERTICES = (COLUMNS + 1) * (ROWS + 1);
     private final float[] vertices = new float[FACE_VERTICES * 2 * 8];
     private final float[] previousVertices = new float[vertices.length];
+    private final Matrix4 groundPose = new Matrix4();
+    private int groundScene = -1;
+    private GroundGrid groundGrid;
+    /** What vacuum cloth was last resolved against: without wind, the same inputs give the same sheet. */
+    private ToDoubleFunction<Vector3> settledGround;
+    private List<BoundingBox> settledObstacles;
+    private final Matrix4 settledPose = new Matrix4();
     final Model model;
     final Texture paint;
     int revision;
@@ -45,6 +53,45 @@ final class GpuFlag {
                   new GpuModelMaterial(.95f, 0, null),
                   com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.createDiffuse(Color.WHITE));
         } catch (RuntimeException | Error failure) { model.dispose(); throw failure; }
+    }
+
+    /**
+     * The installed ground under a flag's reach, read once per pose and terrain: a frame's cloth reads this table
+     * thousands of times instead of searching the hexes' faces. Interpolates slopes; a step inside a cell is its top.
+     */
+    static final class GroundGrid implements ToDoubleFunction<Vector3> {
+        private static final int CELLS = 48;
+        private final float minX, minY, cellX, cellY;
+        private final float[] heights = new float[(CELLS + 1) * (CELLS + 1)];
+        private float top = Float.NEGATIVE_INFINITY;
+
+        GroundGrid(BoundingBox reach, ToDoubleFunction<Vector3> ground) {
+            minX = reach.min.x; minY = reach.min.y;
+            cellX = reach.getWidth() / CELLS; cellY = reach.getHeight() / CELLS;
+            Vector3 probe = new Vector3();
+            for (int y = 0, at = 0; y <= CELLS; y++) {
+                for (int x = 0; x <= CELLS; x++, at++) {
+                    heights[at] = (float) ground.applyAsDouble(probe.set(minX + x * cellX, minY + y * cellY, reach.max.z));
+                    if (Float.isFinite(heights[at])) { top = Math.max(top, heights[at]); }
+                }
+            }
+        }
+
+        /** The highest ground anywhere in the reach, or negative infinity with none: cloth above it needs no query. */
+        float top() { return top; }
+
+        @Override public double applyAsDouble(Vector3 point) {
+            float x = MathUtils.clamp((point.x - minX) / cellX, 0, CELLS), y = MathUtils.clamp((point.y - minY) / cellY, 0, CELLS);
+            int column = Math.min((int) x, CELLS - 1), row = Math.min((int) y, CELLS - 1);
+            float u = x - column, v = y - row;
+            int at = row * (CELLS + 1) + column;
+            float a = heights[at], b = heights[at + 1], c = heights[at + CELLS + 1], d = heights[at + CELLS + 2];
+            float low = Math.min(a, Math.min(b, Math.min(c, d))), high = Math.max(a, Math.max(b, Math.max(c, d)));
+            // Off the board has no floor: a cell at its edge keeps the nearer corner's answer.
+            if (!Float.isFinite(low)) { return v < .5f ? u < .5f ? a : b : u < .5f ? c : d; }
+            if (high - low > 2 * Math.max(cellX, cellY)) { return high; }
+            return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+        }
     }
 
     static ModelData data() {
@@ -110,6 +157,7 @@ final class GpuFlag {
         Vector3 point = new Vector3(), previous = new Vector3(), direction = new Vector3(), probe = new Vector3();
         Vector3 candidate = new Vector3();
         obstacles = obstacles.stream().map(box -> attachmentBounds(box, transform)).toList();
+        float top = top(ground);
         boolean contact = false;
         for (int row = 0, at = 0; row <= ROWS; row++) {
             float v = (float) row / ROWS;
@@ -127,11 +175,11 @@ final class GpuFlag {
                     candidate.set(point);
                     for (int pass = 0; pass < 2; pass++) {
                         for (BoundingBox obstacle : obstacles) { slide(previous, point, obstacle); }
-                        ground(previous, point, ground, probe);
+                        ground(previous, point, ground, probe, top);
                     }
                     // Ground projection must not leave the cloth inside a low overhang or another prop.
                     for (BoundingBox obstacle : obstacles) { slide(previous, point, obstacle); }
-                    if (point.z < ground.applyAsDouble(point) || inside(point, obstacles)) {
+                    if (below(point, ground, top) || inside(point, obstacles)) {
                         point.set(previous);
                     }
                     contact |= !point.epsilonEquals(candidate, .00001f);
@@ -141,10 +189,10 @@ final class GpuFlag {
             }
         }
         float ceiling = bounds(transform).max.z;
-        if (ground != NO_GROUND) { contact |= groundSurface(vertices, ground, obstacles, ceiling, probe, previous); }
+        contact |= groundSurface(vertices, ground, top, obstacles, ceiling, probe, previous);
         if (contact) {
             float rowLength = new Vector3(0, 0, HEIGHT / ROWS).rot(transform).len();
-            relax(vertices, segment, rowLength, ground, obstacles, ceiling);
+            relax(vertices, segment, rowLength, ground, top, obstacles, ceiling);
         }
         // Return to mesh-local space only after gravity, wind and contact have been resolved.
         for (int at = 0; at < FACE_VERTICES * 8; at += 8) {
@@ -255,10 +303,11 @@ final class GpuFlag {
 
     /** Contacts must not pull neighboring rows apart into long, pointed triangles. Compress and fold as a connected sheet. */
     private static void relax(float[] vertices, float columnLength, float rowLength, ToDoubleFunction<Vector3> ground,
-          List<BoundingBox> obstacles, float ceiling) {
+          float top, List<BoundingBox> obstacles, float ceiling) {
         float[] before = new float[FACE_VERTICES * 8];
         Vector3 start = new Vector3(), point = new Vector3();
         float diagonal = (float) Math.sqrt(columnLength * columnLength + rowLength * rowLength);
+        // After the first pass a vertex no constraint moved is already valid; once none moves, later passes change nothing.
         for (int pass = 0; pass < 32; pass++) {
             System.arraycopy(vertices, 0, before, 0, before.length);
             for (int row = 0; row <= ROWS; row++) {
@@ -272,16 +321,22 @@ final class GpuFlag {
                     }
                 }
             }
+            boolean moved = false;
             for (int vertex = 0; vertex < FACE_VERTICES; vertex++) {
                 if (vertex % (COLUMNS + 1) == 0) { continue; }
                 int at = vertex * 8;
+                if (pass > 0 && vertices[at] == before[at] && vertices[at + 1] == before[at + 1]
+                      && vertices[at + 2] == before[at + 2]) { continue; }
+                moved = true;
                 start.set(before[at], before[at + 1], before[at + 2]);
                 point.set(vertices[at], vertices[at + 1], vertices[at + 2]);
-                point.z = Math.min(ceiling, Math.max(point.z, (float) ground.applyAsDouble(point)));
+                if (point.z <= top) { point.z = Math.min(ceiling, Math.max(point.z, (float) ground.applyAsDouble(point))); }
+                else { point.z = Math.min(ceiling, point.z); }
                 for (BoundingBox obstacle : obstacles) { slide(start, point, obstacle, false); }
-                if (inside(point, obstacles) || point.z < ground.applyAsDouble(point)) { point.set(start); }
+                if (inside(point, obstacles) || below(point, ground, top)) { point.set(start); }
                 vertices[at] = point.x; vertices[at + 1] = point.y; vertices[at + 2] = point.z;
             }
+            if (!moved) { break; }
         }
         // Finish from the fixed edge outward. Symmetric relaxation alone can leave strain concentrated
         // in the first column, where a wall pins the sheet's normal motion.
@@ -294,12 +349,22 @@ final class GpuFlag {
                     if (row > 0) { cap(vertices, vertex, vertex - COLUMNS - 1, rowLength * 1.05f); }
                 }
                 point.set(vertices[at], vertices[at + 1], vertices[at + 2]);
-                if (inside(point, obstacles) || point.z < ground.applyAsDouble(point)) {
+                if (point.equals(start)) { continue; }
+                if (inside(point, obstacles) || below(point, ground, top)) {
                     vertices[at] = start.x; vertices[at + 1] = start.y; vertices[at + 2] = start.z;
                 }
             }
         }
-        if (ground != NO_GROUND) { groundSurface(vertices, ground, obstacles, ceiling, point, start); }
+        groundSurface(vertices, ground, top, obstacles, ceiling, point, start);
+    }
+
+    /** The highest ground {@code ground} can answer: a grid knows it, none has none, and any other may be anywhere. */
+    private static float top(ToDoubleFunction<Vector3> ground) {
+        return ground instanceof GroundGrid grid ? grid.top() : ground == NO_GROUND ? Float.NEGATIVE_INFINITY : Float.POSITIVE_INFINITY;
+    }
+
+    private static boolean below(Vector3 point, ToDoubleFunction<Vector3> ground, float top) {
+        return point.z < top && point.z < ground.applyAsDouble(point);
     }
 
     private static void cap(float[] vertices, int vertex, int anchor, float length) {
@@ -328,8 +393,14 @@ final class GpuFlag {
 
     /** Lift the segment clear of the installed ground; stop at steep steps rather than stretching onto their tops. */
     static void ground(Vector3 start, Vector3 end, ToDoubleFunction<Vector3> height, Vector3 probe) {
+        ground(start, end, height, probe, top(height));
+    }
+
+    private static void ground(Vector3 start, Vector3 end, ToDoubleFunction<Vector3> height, Vector3 probe, float top) {
         float length2 = start.dst2(end), raised = end.z;
         float clearance = Math.min(.05f * BoardGeometry.hexScale(), (float) Math.sqrt(length2) * .1f);
+        // Both ends above the highest ground: every sample's lift would stay under the segment.
+        if (start.z >= top && end.z >= top + clearance) { return; }
         float dx = end.x - start.x, dy = end.y - start.y;
         int samples = Math.max(4, Math.min(256, (int) Math.ceil(Math.sqrt(dx * dx + dy * dy) / (.5f * BoardGeometry.hexScale()))));
         for (int sample = 1; sample <= samples; sample++) {
@@ -345,12 +416,16 @@ final class GpuFlag {
     }
 
     /** The ground can also intersect between rows. Check cross-row edges, diagonals and triangle interiors. */
-    private static boolean groundSurface(float[] vertices, ToDoubleFunction<Vector3> ground,
+    private static boolean groundSurface(float[] vertices, ToDoubleFunction<Vector3> ground, float top,
           List<BoundingBox> obstacles, float ceiling, Vector3 probe, Vector3 start) {
+        if (top == Float.NEGATIVE_INFINITY) { return false; }
         boolean changed = false;
         for (int row = 0; row < ROWS; row++) {
             for (int column = 0; column < COLUMNS; column++) {
                 int a = row * (COLUMNS + 1) + column, b = a + COLUMNS + 1;
+                // A quad wholly above the highest ground holds no sample under it.
+                if (Math.min(Math.min(vertices[a * 8 + 2], vertices[(a + 1) * 8 + 2]),
+                      Math.min(vertices[b * 8 + 2], vertices[(b + 1) * 8 + 2])) >= top) { continue; }
                 changed |= groundTriangle(vertices, a, a + 1, b, ground, obstacles, ceiling, probe, start);
                 changed |= groundTriangle(vertices, a + 1, b + 1, b, ground, obstacles, ceiling, probe, start);
             }
@@ -388,9 +463,24 @@ final class GpuFlag {
         return changed;
     }
 
+    /** The grid for this pose and terrain ({@code scene}, a revision the caller bumps when either source changes). */
+    GroundGrid ground(Matrix4 transform, int scene, ToDoubleFunction<Vector3> source) {
+        if (groundGrid == null || groundScene != scene || !java.util.Arrays.equals(groundPose.val, transform.val)) {
+            groundGrid = new GroundGrid(bounds(transform), source);
+            groundScene = scene;
+            groundPose.set(transform);
+        }
+        return groundGrid;
+    }
+
     void animate(Matrix4 transform, float phase, Vector3 wind, boolean vacuum, List<BoundingBox> obstacles,
           ToDoubleFunction<Vector3> ground) {
+        if (vacuum && settledGround == ground && obstacles.equals(settledObstacles)
+              && java.util.Arrays.equals(settledPose.val, transform.val)) { return; }
         deform(vertices, transform, phase, wind, vacuum, obstacles, ground);
+        settledGround = vacuum ? ground : null;
+        settledObstacles = obstacles;
+        settledPose.set(transform);
         if (java.util.Arrays.equals(vertices, previousVertices)) { return; }
         model.meshes.first().setVertices(vertices);
         model.meshParts.forEach(part -> part.update());

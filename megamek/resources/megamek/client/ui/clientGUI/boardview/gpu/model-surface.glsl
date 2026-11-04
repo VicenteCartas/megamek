@@ -11,9 +11,12 @@ uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit
 uniform vec4 u_modelSurface; // roughness, metallic and scattering factors; finish map present
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
-uniform float u_modelRuby; // inverse absorption reference distance in world units; zero for other materials
+#ifdef modelRubyFlag
+uniform float u_modelRuby; // inverse absorption reference distance in world units
 uniform mat4 u_rubyVolume; // world to the authored closed crystal
-uniform vec4 u_rubyPlanes[32]; // outward facet normal and plane distance, unused entries zero
+uniform vec4 u_rubyPlanes[32]; // outward facet normal and plane distance
+uniform int u_rubyFacets; // the used entries of u_rubyPlanes
+#endif
 #endif
 #ifdef modelReliefFlag
 uniform sampler2D u_modelHeight; // white high
@@ -98,7 +101,7 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
     return normal;
 }
 
-#ifdef modelSurfaceFlag
+#ifdef modelRubyFlag
 // The environment deliberately omits the sun. Its refracted image is the finite solar disk convolved with a
 // normalized angular lobe: roughness broadens and dims the highlight without changing its integrated energy.
 vec3 rubySun(vec3 position, vec3 direction, float roughness) {
@@ -133,7 +136,7 @@ vec3 rubyTransport(vec3 pigment, vec3 normal, vec3 view, float roughness) {
         vec3 ray = mat3(u_rubyVolume) * direction;
         float nearest = 1e20;
         vec3 exitNormal = vec3(0.0);
-        for (int face = 0; face < 32; face++) {
+        for (int face = 0; face < u_rubyFacets; face++) {
             float along = dot(u_rubyPlanes[face].xyz, ray);
             if (along <= 1e-6) continue;
             float distance = (u_rubyPlanes[face].w - dot(u_rubyPlanes[face].xyz, position)) / along;
@@ -191,21 +194,19 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     Surface surface = opaqueSurface(albedo, normal, geometric, roughness, 0.0, surfaceVisibility());
     metallicShare(surface, metallic);
     surface.scatter = scatter;
-#ifdef modelSurfaceFlag
-    if (u_modelRuby > 0.0) {
-        surface.dielectric = .0758;
-        // Natural cloudy ruby partitions non-reflected light between inclusions (60%) and clearer paths (40%).
-        surface.front = vec3(.45);
-        surface.back = thinTransmission(albedo, .15);
-    }
+#ifdef modelRubyFlag
+    surface.dielectric = .0758;
+    // Natural cloudy ruby partitions non-reflected light between inclusions (60%) and clearer paths (40%).
+    surface.front = vec3(.45);
+    surface.back = thinTransmission(albedo, .15);
 #endif
 #if defined(modelSurfaceFlag) && defined(ambientTextureFlag)
     surface.occlusion = surface.specularOcclusion = texture(u_ambientTexture, v_modelUV + modelShift).r;
 #endif
     surface.emission = emission;
     vec3 lit = shadeSurface(surface);
-#ifdef modelSurfaceFlag
-    if (u_modelRuby > 0.0) lit += .4 * rubyTransport(albedo, geometric, view, roughness);
+#ifdef modelRubyFlag
+    lit += .4 * rubyTransport(albedo, geometric, view, roughness);
 #endif
     return lit;
 }

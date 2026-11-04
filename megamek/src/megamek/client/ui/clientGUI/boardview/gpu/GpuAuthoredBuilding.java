@@ -12,7 +12,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.GL20;
@@ -51,17 +53,56 @@ final class GpuAuthoredBuilding {
     private record Placement(Coords anchor, BoardDecoration object, double base, int width, int height) { }
     private record Geometry(ModelData source, GeneratedMesh mesh) { }
     private record Whole(List<Geometry> levels, List<BuildingVolumes.Solid> solids, Map<Double, Area> roofs,
-          Map<Double, Area> sections) { }
+          Map<Double, Area> sections, AtomicInteger sliced) { }
     /** Derived CPU geometry shared by workers of one immutable tile snapshot; never owns GPU resources. */
     private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height,
           Map<String, List<Coords>> members, Map<Placement, Whole> placements, Map<Layout, Prepared> slices) { }
     // Keep the current and previous snapshots: route previews compare both. Do not retain every intermediate drag.
     private static final List<Cached> SCENES = new ArrayList<>();
-    private static final Map<String, List<ModelData>> FILES = new ConcurrentHashMap<>();
+    private static final GeometryCache<String> FILES = new GeometryCache<>();
     private static final Map<String, List<RigidGlb.NightLight>> LIGHTS = new ConcurrentHashMap<>();
-    private static final Map<Assembly, List<ModelData>> ASSEMBLIES = new ConcurrentHashMap<>();
+    private static final GeometryCache<Assembly> ASSEMBLIES = new GeometryCache<>();
 
     static synchronized void reload() { FILES.clear(); LIGHTS.clear(); ASSEMBLIES.clear(); SCENES.clear(); }
+
+    /**
+     * Source and assembled models, least recently used first, within a heap budget: a modular kit has a model per module
+     * combination, and a missed one only costs its rebuild. Two workers may build one once; either result is the same.
+     */
+    private static final class GeometryCache<K> {
+        private static final long BYTES = 128L << 20;
+        private final Map<K, List<ModelData>> entries = new java.util.LinkedHashMap<>(16, .75f, true);
+        private long bytes;
+
+        List<ModelData> get(K key, Supplier<List<ModelData>> build) {
+            synchronized (this) {
+                var found = entries.get(key);
+                if (found != null) { return found; }
+            }
+            var built = build.get();
+            synchronized (this) {
+                if (entries.putIfAbsent(key, built) == null) { bytes += weight(built); }
+                // The newest stays, however large: its placement is about to use it.
+                for (var eldest = entries.entrySet().iterator(); bytes > BYTES && entries.size() > 1 && eldest.hasNext(); ) {
+                    var entry = eldest.next();
+                    if (entry.getValue() == built) { continue; }
+                    bytes -= weight(entry.getValue());
+                    eldest.remove();
+                }
+            }
+            return built;
+        }
+
+        synchronized void clear() { entries.clear(); bytes = 0; }
+
+        private static long weight(List<ModelData> levels) {
+            long floats = 0;
+            for (ModelData level : levels) {
+                for (var mesh : level.meshes) { floats += mesh.vertices.length; }
+            }
+            return floats * Float.BYTES;
+        }
+    }
 
     /** Each fixture belongs to one Voronoi slice, including overhangs; clipped-away fixtures contribute no light. */
     static List<RigidGlb.NightLight> nightLights(Layout layout) {
@@ -118,9 +159,16 @@ final class GpuAuthoredBuilding {
                 if (!supports(feature)) { continue; }
                 Layout layout = layout(scene, tile, feature);
                 var key = new Placement(layout.anchor(), layout.object(), layout.base(), scene.width(), scene.height());
-                var whole = cache.placements().computeIfAbsent(key, ignored -> placement(layout,
-                      FILES.computeIfAbsent(feature.asset(), GpuAuthoredBuilding::load)));
-                result.put(layout, cache.slices().computeIfAbsent(layout, ignored -> slice(layout, whole)));
+                Prepared prepared = cache.slices().get(layout);
+                if (prepared == null) {
+                    var whole = cache.placements().computeIfAbsent(key, ignored -> placement(layout,
+                          FILES.get(feature.asset(), () -> load(feature.asset()))));
+                    prepared = cache.slices().computeIfAbsent(layout, ignored -> slice(layout, whole));
+                    // Every share cut: the whole placement's copy of its geometry has done its work in this snapshot.
+                    int sliced = whole.sliced().incrementAndGet();
+                    if (sliced >= layout.members().size()) { cache.placements().remove(key); }
+                }
+                result.put(layout, prepared);
             }
         }
         return Map.copyOf(result);
@@ -203,7 +251,7 @@ final class GpuAuthoredBuilding {
         var object = layout.object();
         var frame = frame(layout.anchor(), object, layout.base());
         var assembly = new Assembly(object.asset(), definition.modules(object.levels(), BuildingVolumes.seed(object)));
-        var assembled = ASSEMBLIES.computeIfAbsent(assembly, ignored -> GpuBuilding.lods(source).stream()
+        var assembled = ASSEMBLIES.get(assembly, () -> GpuBuilding.lods(source).stream()
               .<ModelData>map(lod -> assemble(lod, definition, object.levels(), BuildingVolumes.seed(object), new Matrix4())
                     .data(object.asset(), lod)).toList());
         var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
@@ -218,7 +266,7 @@ final class GpuAuthoredBuilding {
             clipped.meshes.clear(); clipped.nodes.clear();
             levels.add(new Geometry(clipped, mesh));
         }
-        return new Whole(List.copyOf(levels), solids, BuildingVolumes.roofs(solids), new ConcurrentHashMap<>());
+        return new Whole(List.copyOf(levels), solids, BuildingVolumes.roofs(solids), new ConcurrentHashMap<>(), new AtomicInteger());
     }
 
     /** The authored frame in model units, shared with the immediate editor transform preview. */

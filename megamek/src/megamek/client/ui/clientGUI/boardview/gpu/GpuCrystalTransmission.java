@@ -84,7 +84,7 @@ final class GpuCrystalTransmission implements Disposable {
                     }
                 }
             }
-            float[] packed = new float[128];
+            float[] packed = new float[planes.size() * 4];
             for (int i = 0; i < planes.size(); i++) { System.arraycopy(planes.get(i), 0, packed, i * 4, 4); }
             return packed;
         });

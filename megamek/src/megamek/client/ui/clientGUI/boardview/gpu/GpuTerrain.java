@@ -454,6 +454,7 @@ final class GpuTerrain implements Disposable {
                 private long globalsPass = -1;
                 private final long instances = instanceMask(renderable);
                 private final int iceMode = GpuIceShader.mode(renderable.material);
+                private final boolean ruby = GpuCrystalTransmission.ruby(renderable.material);
                 private final int environmentFlags = GpuEnvironmentLighting.flags(renderable.environment);
                 private final VertexAttributes createdLayout = renderable.meshPart.mesh.getVertexAttributes();
                 private final long vertexLayout = GpuSurfaceScars.receiverLayout(createdLayout);
@@ -468,7 +469,7 @@ final class GpuTerrain implements Disposable {
                           && (!fill && !cached
                                 || GpuMaterialCache.charted(other.meshPart.mesh.getVertexAttributes()) == charted)
                           && sameMaterialVariant(other.material, iceMode, linearTexture, ordinaryFamily, waterMode,
-                                flowingMagma)
+                                flowingMagma, ruby)
                           // A shadow map changes the compiled samplers without changing the environment's mask.
                           && shadowMap == (other.environment != null && other.environment.shadowMap != null)
                           && tessellates(other) == tessellated
@@ -944,8 +945,13 @@ final class GpuTerrain implements Disposable {
                 GpuShaderSource.read("shadow-depth.frag"), "// SHADOW_MAP_PASS", "#define SHADOW_PASS\n//",
                 "shadow depth")))),
           new GpuOpaqueSorter());
-    /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
     private final Map<ModelInstance, Integer> flagRevisions = new java.util.IdentityHashMap<>();
+    /** Bumped when installed chunks change, the ground under the flags' grids (GpuFlag.ground). */
+    private int flagScene;
+    private int flagFrame;
+    /** The view last drawn: cloth outside it holds its pose. Null until one draws, or for a view-less render. */
+    private Camera flagView;
+    /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
     private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {
         @Override
         public void terrain(Camera light, List<ModelInstance> units) { renderDepth(light, units, depthBatch, true, true); }
@@ -1381,8 +1387,9 @@ final class GpuTerrain implements Disposable {
      * attribute mask but use different programs, including on shader reload.
      */
     private static boolean sameMaterialVariant(Material material, int iceMode, boolean linearTexture,
-          int ordinaryFamily, GpuWaterShader.Mode waterMode, boolean flowingMagma) {
+          int ordinaryFamily, GpuWaterShader.Mode waterMode, boolean flowingMagma, boolean ruby) {
         return GpuIceShader.mode(material) == iceMode && linearDiffuse(material) == linearTexture
+              && GpuCrystalTransmission.ruby(material) == ruby
               && GpuSurfaceBlend.ordinaryFamily(material) == ordinaryFamily && waterMode(material) == waterMode
               && flowingMagma(material) == flowingMagma;
     }
@@ -1934,6 +1941,14 @@ final class GpuTerrain implements Disposable {
     }
 
     private static final class Chunk implements Disposable {
+        /** The flags among {@link #props}: every frame animates them, and a built chunk's props do not change. */
+        private List<Prop> flags;
+
+        List<Prop> flags() {
+            if (flags == null) { flags = props.stream().filter(GpuTerrain::isFlag).toList(); }
+            return flags;
+        }
+
         TerrainLod lod;
         /** A Classic chunk: its opaque layer holds the tileset columns, its tiles' support is their column. */
         boolean columns;
@@ -3390,6 +3405,7 @@ final class GpuTerrain implements Disposable {
         coverScene = scene;
         tiles = scene.tiles();
         editorPropsInstalled = true;
+        flagScene++;
         lavaLighting.setFungus(chunks.stream().flatMap(chunk -> chunk.fungalLights.stream()).toList());
         updateBuildingLights();
         installedSettings = rebuild.request.settings();
@@ -3513,7 +3529,7 @@ final class GpuTerrain implements Disposable {
                   && GpuTessellation.curved(sample.material) == GpuTessellation.curved(material)
                   && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
                         GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
-                        flowingMagma(sample.material))
+                        flowingMagma(sample.material), GpuCrystalTransmission.ruby(sample.material))
                   && sample.meshPart.mesh.getVertexAttributes().equals(attributes)
                   && Objects.equals(sample.meshPart.mesh.getInstancedAttributes(), instances)) {
                 // One sample stands for its programs. A blend the cache draws takes the place of one it cannot (sand),
@@ -3668,6 +3684,7 @@ final class GpuTerrain implements Disposable {
 
     private void replaceDetail(int index, Chunk next) {
         scarSurfaceRevision++;
+        flagScene++;
         Chunk old = chunks.set(index, next);
         // Level tops of one family are the same at every detail: the cache keeps their pages and forgets only the old
         // materials. Tops that follow the detail (detailTops) rebuild theirs.
@@ -6726,6 +6743,30 @@ final class GpuTerrain implements Disposable {
         animate(delta, units, buildingAlpha, null, Float.NaN);
     }
 
+    /** Cloth out of the last drawn view holds its pose, as does cloth waiting for its turn; first it takes one at all. */
+    private void animateFlag(Prop prop, List<ModelInstance> units, boolean turn) {
+        GpuFlag flag = assets.flagCloth(prop.decorationFeature.decoration());
+        if (flag == null) { return; }
+        ModelInstance cloth = prop.instance();
+        BoundingBox reach = GpuFlag.bounds(cloth.transform);
+        if (flag.revision == 0 || turn && (flagView == null || flagView.frustum.boundsInFrustum(reach))) {
+            var obstacles = new ArrayList<BoundingBox>();
+            for (Chunk nearby : chunks) {
+                if (!nearby.bounds.intersects(reach)) { continue; }
+                for (Prop solid : nearby.props) {
+                    if (!isFlag(solid) && solid.bounds().intersects(reach)) { obstacles.add(solid.bounds()); }
+                }
+            }
+            for (ModelInstance unit : units) {
+                BoundingBox bounds = unitBounds(unit);
+                if (bounds.intersects(reach)) { obstacles.add(bounds); }
+            }
+            flag.animate(cloth.transform, vegetationPhase, wind, vacuum, obstacles,
+                  flag.ground(cloth.transform, flagScene, this::flagGroundHeight));
+        }
+        flagRevisions.put(cloth, flag.revision);
+    }
+
     void animate(float delta, List<ModelInstance> units, float buildingAlpha, Coords hovered, float hoverFloorZ) {
         float nextBuilding = MathUtils.clamp(buildingAlpha, 0, 1);
         boolean changedOpacity = nextBuilding != buildingOpacity;
@@ -6761,26 +6802,13 @@ final class GpuTerrain implements Disposable {
         }
         if (hoverBuilding != null && hoverTile.cover().interiors() == BuildingInteriors.NO_FLOORS) { hoverCeiling = Float.MAX_VALUE; }
         flagRevisions.clear();
+        // At a steady frame rate each flag moves on every other frame, half of them each frame.
+        boolean everyFrame = delta > 1 / 40f;
+        flagFrame++;
+        int flagIndex = 0;
         for (Chunk chunk : chunks) {
             chunk.liquidMaterials.forEach(this::animateLiquid);
-            for (Prop prop : chunk.props) {
-                if (!isFlag(prop)) { continue; }
-                ModelInstance cloth = prop.instance();
-                BoundingBox reach = GpuFlag.bounds(cloth.transform);
-                var obstacles = new ArrayList<BoundingBox>();
-                for (Chunk nearby : chunks) {
-                    if (!nearby.bounds.intersects(reach)) { continue; }
-                    for (Prop solid : nearby.props) {
-                        if (!isFlag(solid) && solid.bounds().intersects(reach)) { obstacles.add(solid.bounds()); }
-                    }
-                }
-                for (ModelInstance unit : units) {
-                    BoundingBox bounds = unitBounds(unit);
-                    if (bounds.intersects(reach)) { obstacles.add(bounds); }
-                }
-                flagRevisions.put(cloth, assets.animateFlag(prop.decorationFeature.decoration(),
-                      cloth.transform, vegetationPhase, wind, vacuum, obstacles, this::flagGroundHeight));
-            }
+            for (Prop prop : chunk.flags()) { animateFlag(prop, units, everyFrame || (flagFrame + flagIndex++ & 1) == 0); }
             if (chunk.cutaways.isEmpty()) { continue; }
             Coords hoverCoords = hoverBuilding != null && chunk.tileMeshes.containsKey(hovered) ? hovered : null;
             boolean unitsHere = false;
@@ -7079,12 +7107,6 @@ final class GpuTerrain implements Disposable {
         return true;
     }
 
-    /**
-     * The height an editor placement of {@code feature} in {@code coords} stands at on the installed terrain, before its
-     * elevation: its support beneath its anchor ({@link #decorationHeight}) as the drawn chunks have it; not finite where
-     * nothing supports it. The drag preview ({@link #previewEditorObjects}) and the paint preview's ghosts
-     * ({@link #editorGhost}) place by it. The caller holds the installed settings.
-     */
     /** Installed terrain only: collision follows the visible chunk through edits and detail changes. No off-board floor. */
     float flagGroundHeight(Vector3 point) {
         var tile = coverScene == null ? null : BoardGeometry.tile(coverScene, point.x, point.y);
@@ -7095,6 +7117,12 @@ final class GpuTerrain implements Disposable {
         return BoardSurface.sampleHeight(support.faces(), point.x, point.y, BoardGeometry.groundZ(tile), true);
     }
 
+    /**
+     * The height an editor placement of {@code feature} in {@code coords} stands at on the installed terrain, before its
+     * elevation: its support beneath its anchor ({@link #decorationHeight}) as the drawn chunks have it; not finite where
+     * nothing supports it. The drag preview ({@link #previewEditorObjects}) and the paint preview's ghosts
+     * ({@link #editorGhost}) place by it. The caller holds the installed settings.
+     */
     private float editorHeight(Coords coords, BoardScene.Feature feature) {
         var object = feature.decoration();
         float x = BoardGeometry.centerX(coords) + (float) object.x() * BoardGeometry.width();
@@ -8370,6 +8398,7 @@ final class GpuTerrain implements Disposable {
     }
 
     private void render(Camera camera, Runnable prepassStage, Runnable colourStage, boolean view) {
+        if (view) { flagView = camera; }
         // A changed lighting configuration returns every surface to its generic program before anything draws.
         if (familyPrograms.configure(environment)) {
             terrainBatch.clear();
@@ -9023,8 +9052,8 @@ final class GpuTerrain implements Disposable {
             units = new ArrayList<>(units);
             if (lifts != null) { units.addAll(lifts.models); }
             for (Chunk chunk : chunks) {
-                for (Prop prop : chunk.props) {
-                    if (isFlag(prop) && drawn(prop, true)) { units.add(prop.instance()); }
+                for (Prop prop : chunk.flags()) {
+                    if (drawn(prop, true)) { units.add(prop.instance()); }
                 }
             }
         }

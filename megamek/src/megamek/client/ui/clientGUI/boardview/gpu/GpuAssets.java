@@ -1240,14 +1240,8 @@ final class GpuAssets implements Disposable {
               new FlagPaint(object.flag(), object.colours()), paint -> GpuFlag.texture(paint.artwork(), paint.colours())))).model;
     }
 
-    int animateFlag(BoardDecoration object, com.badlogic.gdx.math.Matrix4 transform, float phase,
-          com.badlogic.gdx.math.Vector3 wind, boolean vacuum, List<com.badlogic.gdx.math.collision.BoundingBox> obstacles,
-          java.util.function.ToDoubleFunction<com.badlogic.gdx.math.Vector3> ground) {
-        GpuFlag flag = flags.get(new FlagKey(object));
-        if (flag == null) { return 0; }
-        flag.animate(transform, phase, wind, vacuum, obstacles, ground);
-        return flag.revision;
-    }
+    /** The placed flag's cloth, null while no installed chunk draws it. */
+    GpuFlag flagCloth(BoardDecoration object) { return flags.get(new FlagKey(object)); }
 
     private Model flagPreview() {
         return models.computeIfAbsent(BoardFlag.ASSET, key -> new Model(GpuFlag.data()));

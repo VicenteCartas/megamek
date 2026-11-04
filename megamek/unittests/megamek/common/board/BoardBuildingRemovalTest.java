@@ -81,14 +81,13 @@ class BoardBuildingRemovalTest {
     }
 
     @Test
-    void staleMembersCanBeErasedAndOrphanAppearanceIsNotSaved(@TempDir Path dir) throws Exception {
+    void staleMembersCanBeErased(@TempDir Path dir) throws Exception {
         Board board = BoardFile.readNative("""
-              {"format":"megamek-board","version":3,"size":{"width":3,"height":1},"hexes":[
+              {"format":"megamek-board","version":3,"size":{"width":2,"height":1},"hexes":[
                {"at":[1,1],"elevation":0,"decorations":[{"id":"stale-building","kind":"prop",
                 "asset":"buildings/debug/debug-authored","position":[0.2,0.1],"placement":{"mode":"surface",
                 "receiver":{"terrain":"ground","surface":"top"},"offset":0}}]},
-               {"at":[2,1],"elevation":0,"structure":{"id":"stale-building","anchor":[1,1]}},
-               {"at":[3,1],"elevation":0,"components":{"building":{"appearance":{"kitVariant":"default"}}}}]}
+               {"at":[2,1],"elevation":0,"structure":{"id":"stale-building","anchor":[1,1]}}]}
               """);
         var editor = new BoardEditorSession(); editor.open(board, null);
         editor.command(new Command(Action.SELECT_AT, "1,0", ""), null);
@@ -96,9 +95,7 @@ class BoardBuildingRemovalTest {
         assertTrue(editor.board().getHex(0, 0).getDecorations().isEmpty());
         assertNull(editor.board().getHex(1, 0).getBuildingReference());
         Path file = dir.resolve("repaired.board2"); editor.save(file);
-        String saved = Files.readString(file);
-        assertFalse(saved.contains("stale-building")); assertFalse(saved.contains("kitVariant"));
-        assertTrue(BoardFile.read(file).getHex(2, 0).getAppearance().isEmpty());
+        assertFalse(Files.readString(file).contains("stale-building"));
         editor.command(new Command(Action.UNDO), null);
         assertEquals("stale-building", editor.board().getHex(0, 0).getDecorations().getFirst().id());
         assertNotNull(editor.board().getHex(1, 0).getBuildingReference());

@@ -3473,7 +3473,10 @@ public final class BoardEditorSession {
             }
         }
         var definition = blueprint.component("building");
-        for (String id : changed) {
+        Set<Coords> freed = new LinkedHashSet<>();
+        Set<String> rebuilt = new LinkedHashSet<>();
+        // Removed placements first: the hexes they free are open to the placements after them.
+        for (String id : changed.stream().sorted(Comparator.comparing(id -> after.containsKey(id))).toList()) {
             var members = old.getOrDefault(id, Map.of());
             var next = after.get(id);
             var previousObject = before.get(id);
@@ -3495,24 +3498,104 @@ public final class BoardEditorSession {
                     hex.removeTerrain(Terrains.BLDG_INTERIORS);
                 });
             }
+            freed.addAll(members.keySet());
             if (next == null) { continue; }
-            Coords anchor = next.getKey(); BoardDecoration object = next.getValue();
-            var covered = BuildingVolumes.coverage(anchor, object, board().getWidth(), board().getHeight(), board()::getHex);
-            for (var member : covered.entrySet()) {
-                Coords at = member.getKey();
-                Hex previous = members.get(at), source = previous != null && previous.containsTerrain(Terrains.BUILDING) ? previous : template;
+            claimBuildingHexes(id, next.getKey(), next.getValue(), members, template, null, rebuilt);
+        }
+        reclaimBuildingHexes(freed, rebuilt);
+        authoredExits(rebuilt);
+    }
+
+    private Map<Coords, BuildingVolumes.Cover> covers(Coords anchor, BoardDecoration object) {
+        return BuildingVolumes.covers(anchor, object, board().getWidth(), board().getHeight(), board()::getHex);
+    }
+
+    /**
+     * Gives an authored placement the hexes it covers ({@code only}: of these, or all). Placements may overlap: a hex
+     * another one holds goes to whichever has more of its roof over it, on equal shares the taller, then the holder.
+     * The other keeps its model and its remaining hexes.
+     */
+    private void claimBuildingHexes(String id, Coords anchor, BoardDecoration object, Map<Coords, Hex> members, Hex template,
+          Set<Coords> only, Set<String> rebuilt) {
+        var definition = blueprint.component("building");
+        rebuilt.add(id);
+        for (var member : covers(anchor, object).entrySet()) {
+            Coords at = member.getKey();
+            if (only != null && !only.contains(at)) { continue; }
+            var holder = board().getHex(at).getBuildingReference();
+            if (holder != null && !holder.id().equals(id)) {
+                if (!outweighs(member.getValue(), holder, at)) { continue; }
+                rebuilt.add(holder.id());
+            }
+            Hex previous = members.get(at), source = previous != null && previous.containsTerrain(Terrains.BUILDING) ? previous : template;
+            change(at, hex -> {
+                if (previous == null || previous.containsTerrain(Terrains.BUILDING)) {
+                    paintFields(hex, source, definition);
+                    BuildingInteriors.set(hex, BuildingInteriors.choice(source));
+                    hex.addTerrain(new Terrain(Terrains.BUILDING, source.terrainLevel(Terrains.BUILDING), true, 0));
+                    hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, member.getValue().height()));
+                }
+                hex.setBuildingReference(new BuildingVolumes.Reference(id, anchor));
+            });
+        }
+    }
+
+    private boolean outweighs(BuildingVolumes.Cover cover, BuildingVolumes.Reference holder, Coords at) {
+        var object = board().getHex(holder.anchor()).getDecorations().stream()
+              .filter(candidate -> candidate.id().equals(holder.id())).findFirst().orElse(null);
+        var held = object == null ? null : covers(holder.anchor(), object).get(at);
+        if (held == null) { return true; }
+        boolean equalShares = Math.abs(cover.area() - held.area()) <= Math.max(cover.area(), held.area()) * 1e-3;
+        return equalShares ? cover.height() > held.height() : cover.area() > held.area();
+    }
+
+    /** Hexes a moved or removed placement let go of return to whichever other placement covers most of them. */
+    private void reclaimBuildingHexes(Set<Coords> freed, Set<String> rebuilt) {
+        freed.removeIf(at -> board().getHex(at).containsTerrain(Terrains.BUILDING) || board().getHex(at).getBuildingReference() != null);
+        if (freed.isEmpty()) { return; }
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Coords anchor = new Coords(x, y);
+                for (var object : board().getHex(anchor).getDecorations()) {
+                    if (!BuildingVolumes.of(object.asset()).present()) { continue; }
+                    claimBuildingHexes(object.id(), anchor, object, Map.of(), memberSample(object.id()), freed, rebuilt);
+                }
+            }
+        }
+    }
+
+    /** The building terrain a placement's hexes share, for a hex it gains. */
+    private Hex memberSample(String id) {
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Hex hex = board().getHex(x, y);
+                var reference = hex.getBuildingReference();
+                if (reference != null && reference.id().equals(id) && hex.containsTerrain(Terrains.BUILDING)) { return hex.duplicate(); }
+            }
+        }
+        return paintTemplate.containsTerrain(Terrains.BUILDING) ? paintTemplate
+              : new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null);
+    }
+
+    /** A placement's hexes connect to its own other hexes, whichever ones its neighbours won. */
+    private void authoredExits(Set<String> rebuilt) {
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Coords at = new Coords(x, y);
+                Hex hex = board().getHex(at);
+                var reference = hex.getBuildingReference();
+                var building = hex.getTerrain(Terrains.BUILDING);
+                if (reference == null || building == null || !rebuilt.contains(reference.id())) { continue; }
                 int sides = 0;
-                for (int side = 0; side < 6; side++) { if (covered.containsKey(at.translated(side))) { sides |= 1 << side; } }
-                int exits = sides;
-                change(at, hex -> {
-                    if (previous == null || previous.containsTerrain(Terrains.BUILDING)) {
-                        paintFields(hex, source, definition);
-                        BuildingInteriors.set(hex, BuildingInteriors.choice(source));
-                        hex.addTerrain(new Terrain(Terrains.BUILDING, source.terrainLevel(Terrains.BUILDING), true, exits));
-                        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, member.getValue()));
-                    }
-                    hex.setBuildingReference(new BuildingVolumes.Reference(id, anchor));
-                });
+                for (int side = 0; side < 6; side++) {
+                    Coords next = at.translated(side);
+                    var other = board().contains(next) ? board().getHex(next).getBuildingReference() : null;
+                    if (other != null && other.id().equals(reference.id())) { sides |= 1 << side; }
+                }
+                int exits = sides, level = building.getLevel();
+                if (building.getExits() != exits || !building.hasExitsSpecified()) {
+                    change(at, current -> current.addTerrain(new Terrain(Terrains.BUILDING, level, true, exits)));
+                }
             }
         }
     }

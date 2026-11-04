@@ -43,6 +43,8 @@ final class GpuUnitShader extends DefaultShader {
     private final boolean displayOutput;
     /** The features of the environment lighting this program was built for (GpuCloudShadow.prefix). */
     private final int environmentFlags;
+    /** Only ruby materials compile its optics (GpuCloudShadow.prefix); DefaultShader.canRender cannot tell them apart. */
+    private final boolean ruby;
 
     private GpuUnitShader(Renderable renderable, Config config, boolean displayOutput, boolean encodeOutput) {
         super(renderable, config, GpuGlsl.compile("GPU unit material", GpuCloudShadow.prefix(renderable, config)
@@ -50,6 +52,7 @@ final class GpuUnitShader extends DefaultShader {
               config.vertexShader, displayOutput ? config.fragmentShader : GpuSceneRadiance.fragment(config.fragmentShader)));
         this.displayOutput = displayOutput;
         environmentFlags = GpuEnvironmentLighting.flags(renderable.environment);
+        ruby = GpuCrystalTransmission.ruby(renderable.material);
         registerMaterialColors(this, true);
         GpuCloudShadow.register(this);
         GpuEnvironmentLighting.register(this);
@@ -90,7 +93,8 @@ final class GpuUnitShader extends DefaultShader {
     /** DefaultShader.canRender compares the environment's mask, which leaves out its lighting's features. */
     @Override
     public boolean canRender(Renderable renderable) {
-        return super.canRender(renderable) && GpuEnvironmentLighting.flags(renderable.environment) == environmentFlags;
+        return super.canRender(renderable) && GpuEnvironmentLighting.flags(renderable.environment) == environmentFlags
+              && GpuCrystalTransmission.ruby(renderable.material) == ruby;
     }
 
     static DefaultShaderProvider provider() {

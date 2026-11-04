@@ -22,6 +22,47 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class BoardEditorAuthoredBuildingTest {
+    @Test void overlappingPlacementsShareHexesByMajorityAndAFreedHexReturns() {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
+        String asset = "buildings/debug/debug-authored";
+        Coords first = new Coords(4, 4), second = first.translated(1);
+        editor.command(new Command(Action.ASSET, asset), null);
+        editor.pointer(first, 0, 0, false); editor.finishStroke();
+        var a = editor.board().getHex(first).getDecorations().getFirst();
+        editor.command(new Command(Action.ASSET, asset), null);
+        editor.pointer(second, 0, 0, false); editor.finishStroke();
+        var b = editor.board().getHex(second).getDecorations().getFirst();
+        assertEquals(contestWinner(editor, first, a, second, b, second), editor.board().getHex(second).getBuildingReference().id());
+        assertFalse(members(editor.board(), b.id()).isEmpty(), "The later placement keeps the hexes nobody else holds");
+
+        // Taller by far, the later placement also wins wherever the shares are equal.
+        editor.command(new Command(Action.SELECT_AT, second.getX() + "," + second.getY(), ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, b.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchZ", "4"), null);
+        var tall = editor.board().getHex(second).getDecorations().stream().filter(o -> o.id().equals(b.id())).findFirst().orElseThrow();
+        assertEquals(contestWinner(editor, first, a, second, tall, second), editor.board().getHex(second).getBuildingReference().id());
+
+        // Whoever owns the contested hex, removing it hands the hex to the other: it never ends up with no building.
+        String owner = editor.board().getHex(second).getBuildingReference().id(), other = owner.equals(a.id()) ? b.id() : a.id();
+        Coords ownerAnchor = owner.equals(a.id()) ? first : second;
+        editor.command(new Command(Action.SELECT_AT, ownerAnchor.getX() + "," + ownerAnchor.getY(), ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, owner), null);
+        editor.command(new Command(Action.DELETE_SELECTION), null);
+        assertEquals(other, editor.board().getHex(second).getBuildingReference().id());
+        assertTrue(editor.board().getHex(second).containsTerrain(Terrains.BUILDING));
+        editor.command(new Command(Action.UNDO), null);
+        assertEquals(owner, editor.board().getHex(second).getBuildingReference().id());
+    }
+
+    /** The larger share of the hex, on equal shares the taller; a remaining tie stays with the first, its holder. */
+    private static String contestWinner(BoardEditorSession editor, Coords firstAnchor, BoardDecoration first,
+          Coords secondAnchor, BoardDecoration second, Coords at) {
+        var one = BuildingVolumes.covers(firstAnchor, first, 9, 9, editor.board()::getHex).get(at);
+        var two = BuildingVolumes.covers(secondAnchor, second, 9, 9, editor.board()::getHex).get(at);
+        boolean equalShares = Math.abs(one.area() - two.area()) <= Math.max(one.area(), two.area()) * 1e-3;
+        return (equalShares ? two.height() > one.height() : two.area() > one.area()) ? second.id() : first.id();
+    }
+
     @Test void debugSpecialPlacesAndScalesAnAuthoredBuildingWithSavedMembers(@TempDir Path dir) throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
         Coords at = new Coords(4, 4);
