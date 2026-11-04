@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -31,6 +32,81 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
+    @Test void heldAuthoredDragHidesInteriorsAndOnlyRebuildsOnRelease() throws Exception {
+        Coords at = new Coords(5, 5);
+        var setup = new FutureTask<GpuMapSource>(() -> {
+            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(12, 12), null);
+            editor.command(new Command(Action.ASSET, "buildings/debug/debug-authored"), null);
+            editor.pointer(at, 0, 0, false); editor.finishStroke();
+            editor.command(new Command(Action.TOOL, "SELECT"), null);
+            return new GpuMapSource(editor.game(), null, editor);
+        });
+        SwingUtilities.invokeAndWait(setup);
+        var source = setup.get();
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900);
+        config.setInitialVisible(false); config.useVsync(false); config.setForegroundFPS(60);
+        try (var previews = org.mockito.Mockito.mockStatic(GpuEditorTerrainPreviews.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
+            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+            new Lwjgl3Application(new GpuBattleView(source) {
+                final long deadline = System.nanoTime() + 180_000_000_000L;
+                List<BoardScene.Tile> installed;
+                int phase, held;
+                String id;
+                @Override public void create() {
+                    super.create();
+                    boardCamera.center(BoardGeometry.center(at, 1)); boardCamera.camera.zoom = .3f;
+                }
+                @Override public void render() {
+                    try {
+                        super.render();
+                        assertTrue(System.nanoTime() < deadline, "Authored drag must settle at phase " + phase);
+                        var terrain = (GpuTerrain) field(this, "terrain");
+                        if (GpuBoardTestUi.loading(this)) { return; }
+                        if (phase == 0) {
+                            if (terrain.busy()) { return; }
+                            installed = ((BoardScene) field(terrain, "coverScene")).tiles();
+                            id = installed.stream().flatMap(t -> t.features().stream()).filter(GpuAuthoredBuilding::supports)
+                                  .findFirst().orElseThrow().decoration().id();
+                            long generation = source.takeFrame().boardGeneration();
+                            source.editorPointer(at, 0, 0, false, id, generation);
+                            source.editorPointer(at, .25, .15, true, id, generation);
+                            phase = 1;
+                        } else if (phase == 1) {
+                            if (!source.editorAuthoredGesture()) { return; }
+                            assertSame(installed, ((BoardScene) field(terrain, "coverScene")).tiles());
+                            assertSame(installed, field(field(this, "skyVisibility"), "tiles"),
+                                  "Sky occlusion must not search intermediate drag positions");
+                            assertNull(field(terrain, "requested"), "Holding a drag must not queue terrain work");
+                            assertNull(field(terrain, "rebuild"), "Even a paused drag must not start slicing");
+                            int hidden = 0;
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                                hidden += ((java.util.Set<?>) field(chunk, "hiddenInteriors")).size();
+                            }
+                            assertTrue(hidden > 0, "The old grey interiors remain hidden throughout the gesture");
+                            if (++held == 30) { source.editorPointer(at, .45, .3, true, id, source.takeFrame().boardGeneration()); }
+                            if (held == 90) { source.endEditorStroke(); phase = 2; }
+                        } else {
+                            if (source.editorAuthoredGesture() || terrain.busy()
+                                  || installed == ((BoardScene) field(terrain, "coverScene")).tiles()) { return; }
+                            int floors = 0;
+                            for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                                assertTrue(((java.util.Set<?>) field(chunk, "hiddenInteriors")).isEmpty());
+                                for (Object prop : (List<?>) field(chunk, "props")) {
+                                    if (!Float.isNaN((float) field(prop, "floorZ"))) { floors++; }
+                                }
+                            }
+                            assertTrue(floors > 0, "Generated floors return at the released placement");
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                            Gdx.app.exit();
+                        }
+                    } catch (Throwable error) { failure.set(error); Gdx.app.exit(); }
+                }
+            }, config);
+        } finally { SwingUtilities.invokeAndWait(source::close); }
+        if (failure.get() != null) { throw new AssertionError("Held authored drag", failure.get()); }
+    }
+
     @Test void debugDemoShowsTwoHeightsGeneratedFloorsAndIndependentHexCollapse() throws Exception {
         File output = new File("build/gpu-board-review/authored-buildings");
         Files.createDirectories(output.toPath());
@@ -124,7 +200,19 @@ class GpuAuthoredBuildingSmokeTest {
                               .mul(new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, start.decoration(), 3)).inv());
                         int shares = 0, painted = 0, fixed = 0;
                         for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                            var hidden = (java.util.Set<?>) field(chunk, "hiddenInteriors");
                             for (Object prop : (List<?>) field(chunk, "props")) {
+                                if (!Float.isNaN((float) field(prop, "floorZ"))) {
+                                    assertEquals(pose != original, hidden.contains(field(prop, "coords")),
+                                          "Moved interiors hide until fresh cuts install");
+                                    assertNull(field(prop, "previewInstance"), "Floors are not transformed on each drag event");
+                                    var drawn = terrain.getClass().getDeclaredMethod("drawn", prop.getClass(), boolean.class);
+                                    drawn.setAccessible(true);
+                                    for (boolean shadows : List.of(false, true)) {
+                                        assertEquals(pose == original, drawn.invoke(terrain, prop, shadows),
+                                              "Stale floors must disappear from both colour and depth/shadow passes");
+                                    }
+                                }
                                 if (field(prop, "decorationId") == null) { continue; }
                                 var installed = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
                                 var preview = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "previewInstance");
@@ -158,6 +246,10 @@ class GpuAuthoredBuildingSmokeTest {
                         assertEquals(3, shown.anchorLevel(), .0001);
                         assertEquals(BoardGeometry.centerX(at) + next.decoration().x() * BoardGeometry.width(), shown.anchor().x, .001);
                     }
+                    terrain.update(poses.getFirst());
+                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        assertTrue(((java.util.Set<?>) field(chunk, "hiddenInteriors")).isEmpty(), "Committed interiors reappear");
+                    }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { terrain.dispose(); Gdx.app.exit(); }
@@ -179,17 +271,16 @@ class GpuAuthoredBuildingSmokeTest {
         return painted;
     }
 
-    @Test void rendersClippedHpgAndStationWithNeutralCapsAndRestoresTheirGeometryWhenTheBoardGrows() throws Exception {
+    @Test void rendersClippedHpgAndArenaWithNeutralCapsAndRestoresTheirGeometryWhenTheBoardGrows() throws Exception {
         File output = new File("build/gpu-board-review/authored-buildings");
         Files.createDirectories(output.toPath());
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(12, 12), null);
-        Coords hpg = new Coords(0, 6), station = new Coords(11, 1);
+        Coords hpg = new Coords(0, 6), arena = new Coords(11, 1);
         place(editor, hpg, "hpg-headquarters", 37);
         editor.command(new Command(Action.OBJECT_VALUE, "stretchX", "1.15"), null);
         editor.command(new Command(Action.OBJECT_VALUE, "stretchY", ".9"), null);
         editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), null);
-        place(editor, station, "xenobiology-station", -20);
-        editor.command(new Command(Action.OBJECT_VALUE, "levels", "5"), null);
+        place(editor, arena, "civic-arena", -20);
         editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), null);
         var scene = capture(editor.board());
         var grown = capture(megamek.common.util.BoardUtilities.resize(editor.board(), 0, 4, 0, 0));
@@ -222,8 +313,8 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.center(BoardGeometry.center(hpg, 0).add(170, -20, 120));
                     frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "hpg-edge.png"));
                     camera.setIsometric(true); camera.orbit(90, 0); camera.camera.zoom = .25f;
-                    camera.center(BoardGeometry.center(station, 2));
-                    frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "station-edge.png"));
+                    camera.center(BoardGeometry.center(arena, 2));
+                    frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "arena-edge.png"));
                     int neutral = 0;
                     for (Object chunk : (List<?>) field(terrain, "chunks")) {
                         for (Object prop : (List<?>) field(chunk, "props")) {
@@ -239,11 +330,11 @@ class GpuAuthoredBuildingSmokeTest {
                         }
                     }
                     assertTrue(neutral > 0, "Placement tint must leave the map caps dark grey");
-                    var before = terrain.editorObjects(station).getFirst().bounds().max.x;
+                    var before = terrain.editorObjects(arena).getFirst().bounds().max.x;
                     terrain.update(grown); terrain.animate(1, List.of());
-                    var after = terrain.editorObjects(station).getFirst().bounds().max.x;
+                    var after = terrain.editorObjects(arena).getFirst().bounds().max.x;
                     assertTrue(after > before + BoardGeometry.width() * .1f, "Resizing must not reuse the old clipped mesh");
-                    frame.render(terrain, camera, grown); GpuReviewFrame.save(new File(output, "station-edge-grown.png"));
+                    frame.render(terrain, camera, grown); GpuReviewFrame.save(new File(output, "arena-edge-grown.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
@@ -252,14 +343,17 @@ class GpuAuthoredBuildingSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Authored board-edge review", failure.get()); }
     }
 
-    @Test void rendersBothExamplesAndKeepsTheRemainingSlicesAfterAnchorCollapse() throws Exception {
+    @Test void rendersAuthoredExamplesAndKeepsTheRemainingSlicesAfterAnchorCollapse() throws Exception {
         File output = new File("build/gpu-board-review/authored-buildings");
         Files.createDirectories(output.toPath());
         var editor = new BoardEditorSession();
         editor.open(Board.createEmptyBoard(32, 24), null);
-        Coords hpg = new Coords(13, 10), lab = new Coords(28, 10);
+        Coords hpg = new Coords(13, 10), arena = new Coords(28, 10), church = new Coords(28, 17);
         place(editor, hpg, "hpg-headquarters", 0);
-        place(editor, lab, "xenobiology-station", -12);
+        place(editor, arena, "civic-arena", -12);
+        place(editor, church, "frontier-church", 0);
+        editor.board().setDescription("Authored buildings: HPG headquarters, a two-hex frontier church and a compact oval civic arena. "
+              + "Structural helpers define the floors; the antenna, church spire and arena fins are decorative. The arena field is open.");
         editor.save(output.toPath().resolve("Authored Buildings.board2"));
         Board board = BoardFile.read(output.toPath().resolve("Authored Buildings.board2"));
         var original = capture(board);
@@ -292,10 +386,9 @@ class GpuAuthoredBuildingSmokeTest {
         for (int x = 0; x < 6; x++) {
             for (int y = 0; y < 4; y++) { smallEditor.board().getHex(x, y).setLevel(3); }
         }
-        for (String asset : List.of("hpg-headquarters", "xenobiology-station")) {
+        for (String asset : List.of("hpg-headquarters", "civic-arena")) {
             smallEditor.command(new Command(Action.ASSET, "buildings/authored/" + asset), null);
             smallEditor.command(new Command(Action.BRUSH_VALUE, "object:scale", ".05"), null);
-            if (asset.equals("xenobiology-station")) { smallEditor.command(new Command(Action.BRUSH_VALUE, "object:levels", "5"), null); }
             smallEditor.pointer(new Coords(asset.equals("hpg-headquarters") ? 2 : 4, 2), 0, 0, false);
             smallEditor.finishStroke();
         }
@@ -330,18 +423,19 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.setIsometric(true);
                     camera.camera.zoom = 1.15f;
                     terrain.update(original);
-                    for (Coords focus : List.of(hpg, lab)) {
+                    for (Coords focus : List.of(hpg, arena, church)) {
                         camera.setIsometric(true);
-                        camera.camera.zoom = focus.equals(hpg) ? 1.15f : .32f;
+                        camera.camera.zoom = focus.equals(hpg) ? 1.15f : focus.equals(arena) ? .27f : .19f;
                         var target = BoardGeometry.center(focus, 1);
                         if (focus.equals(hpg)) {
                             camera.orbit(-90, 0);
                             target.add(-65, 0, 180);
                         }
+                        if (focus.equals(church)) { target.add(0, 36, 18); }
                         camera.center(target);
                         terrain.animate(1, List.of());
                         frame.render(terrain, camera, original);
-                        GpuReviewFrame.save(new File(output, focus.equals(hpg) ? "hpg.png" : "station.png"));
+                        GpuReviewFrame.save(new File(output, focus.equals(hpg) ? "hpg.png" : focus.equals(arena) ? "arena.png" : "church.png"));
                     }
                     // Review the small receiver and relay at the distance where their near details matter.
                     camera.setIsometric(true);
@@ -455,6 +549,10 @@ class GpuAuthoredBuildingSmokeTest {
     }
 
     private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner);
+        for (Class<?> type = owner.getClass(); type != null; type = type.getSuperclass()) {
+            try { var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(owner); }
+            catch (NoSuchFieldException ignored) { /* The native view extends GpuBattleView. */ }
+        }
+        throw new NoSuchFieldException(name);
     }
 }

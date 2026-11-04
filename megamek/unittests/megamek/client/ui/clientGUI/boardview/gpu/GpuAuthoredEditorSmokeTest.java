@@ -33,7 +33,7 @@ class GpuAuthoredEditorSmokeTest {
             var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 24), null);
             for (int i = 0; i < 2; i++) {
                 Coords at = i == 0 ? hpg : lab;
-                editor.command(new Command(Action.ASSET, "buildings/authored/" + (i == 0 ? "hpg-headquarters" : "xenobiology-station")), null);
+                editor.command(new Command(Action.ASSET, "buildings/authored/" + (i == 0 ? "hpg-headquarters" : "civic-arena")), null);
                 editor.pointer(at, 0, 0, false); editor.finishStroke();
                 ids[i] = editor.board().getHex(at).getDecorations().getFirst().id();
             }
@@ -75,16 +75,16 @@ class GpuAuthoredEditorSmokeTest {
                             source.editorCommand(new Command(Action.SELECT_AT, "28,7", ""), source.takeFrame().boardGeneration());
                             source.editorCommand(new Command(Action.SELECT_OBJECT, ids[1]), source.takeFrame().boardGeneration());
                         } else if (step == 1) {
-                            assertTrue(texts.stream().anyMatch(text -> text.startsWith(Messages.getString("BoardEditor.assembledLevels"))), texts.toString());
-                            source.editorCommand(new Command(Action.OBJECT_VALUE, "levels", "5"), source.takeFrame().boardGeneration());
+                            assertTrue(texts.contains(Messages.getString("BoardEditor.authoredHeight")), texts.toString());
+                            source.editorCommand(new Command(Action.OBJECT_VALUE, "stretchZ", "2"), source.takeFrame().boardGeneration());
                             source.editorCommand(new Command(Action.BUILDING_INTERIORS, "2"), source.takeFrame().boardGeneration());
                         } else if (step == 2) {
                             assertEquals(2, source.editorState().buildingInteriors());
                             var members = source.takeFrame().scene().tiles().stream().filter(tile -> tile.cover().reference() != null
                                   && tile.cover().reference().id().equals(ids[1])).toList();
                             assertFalse(members.isEmpty());
-                            assertTrue(members.stream().allMatch(tile -> tile.cover().height() == 5));
-                            GpuBoardTestUi.capture(new File(output, "station-editor.png"));
+                            assertTrue(members.stream().allMatch(tile -> tile.cover().height() == 2));
+                            GpuBoardTestUi.capture(new File(output, "arena-editor.png"));
                             source.editorCommand(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), source.takeFrame().boardGeneration());
                         } else {
                             var preview = field(this, "editorPreview");
@@ -92,9 +92,9 @@ class GpuAuthoredEditorSmokeTest {
                             if (field(preview, "built") != source.editorPreview() || field(preview, "comparing") != null) { return; }
                             assertFalse(((java.util.Collection<?>) field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
                                   + source.editorPreview().label() + ", hexes " + source.editorPreview().hexes() + ", routes " + source.editorPreview().routes().keySet());
-                            GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : step == 4 ? "station-ghost.png" : "small-station-ghost.png"));
+                            GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : step == 4 ? "arena-ghost.png" : "small-arena-ghost.png"));
                             if (step == 3) {
-                                source.editorCommand(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), source.takeFrame().boardGeneration());
+                                source.editorCommand(new Command(Action.ASSET, "buildings/authored/civic-arena"), source.takeFrame().boardGeneration());
                             } else if (step == 4) {
                                 source.editorCommand(new Command(Action.BRUSH_VALUE, "object:scale", ".05"), source.takeFrame().boardGeneration());
                             } else if (step == 5) {

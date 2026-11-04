@@ -95,6 +95,12 @@ public final class BuildingVolumes {
 
     public static long seed(BoardDecoration object) { return object.id().hashCode(); }
 
+    /** Full turns keep the building upright; any other X/Y rotation disables its interior floors. */
+    public static boolean tilted(BoardDecoration object) {
+        return Math.abs(Math.IEEEremainder(object.rotationX(), 360)) > 1e-7
+              || Math.abs(Math.IEEEremainder(object.rotationY(), 360)) > 1e-7;
+    }
+
     /** Cosmetic metadata never changes coverage or revives collapsed building hexes. */
     public static boolean sameGeometry(BoardDecoration a, BoardDecoration b) {
         return a.asset().equals(b.asset()) && a.x() == b.x() && a.y() == b.y() && a.rotation() == b.rotation()
@@ -197,15 +203,28 @@ public final class BuildingVolumes {
               .map(t -> new Triangle(t.a(), t.c(), t.b())).toList()) : solid).toList();
     }
 
-    /** Exposed horizontal tops only: upper volumes subtract their area from lower roofs. Antennas never take part. */
+    /**
+     * Exposed upward faces of structural volumes, excluding decorative geometry. Slopes are projected in level-high
+     * bands so a tilted volume supplies horizontal gameplay roofs at different heights. Higher bands cover lower ones.
+     */
     public static Map<Double, Area> roofs(List<Solid> solids) {
         Map<Double, Path2D.Double> paths = new java.util.TreeMap<>(Comparator.reverseOrder());
         for (Solid solid : solids) {
             for (Triangle t : solid.triangles()) {
-                if (Math.abs(t.a().z() - t.b().z()) > .001 || Math.abs(t.a().z() - t.c().z()) > .001) { continue; }
                 double cross = (t.b().x() - t.a().x()) * (t.c().y() - t.a().y()) - (t.b().y() - t.a().y()) * (t.c().x() - t.a().x());
                 if (cross <= .00001) { continue; }
-                triangle(paths.computeIfAbsent(Math.rint(t.a().z() * 1000) / 1000, ignored -> new Path2D.Double()), t);
+                double min = Math.min(t.a().z(), Math.min(t.b().z(), t.c().z()));
+                double max = Math.max(t.a().z(), Math.max(t.b().z(), t.c().z()));
+                if (max - min <= .001) {
+                    triangle(paths.computeIfAbsent(Math.rint(max * 1000) / 1000, ignored -> new Path2D.Double()), t);
+                    continue;
+                }
+                for (double top = (Math.floor(min / LEVEL) + 1) * LEVEL; top < max + LEVEL - .00001; top += LEVEL) {
+                    var band = clipHeight(clipHeight(List.of(t.a(), t.b(), t.c()), top - LEVEL, true), top, false);
+                    if (band.size() < 3) { continue; }
+                    Path2D.Double path = paths.computeIfAbsent(top, ignored -> new Path2D.Double());
+                    for (int i = 1; i + 1 < band.size(); i++) { triangle(path, new Triangle(band.getFirst(), band.get(i), band.get(i + 1))); }
+                }
             }
         }
         Map<Double, Area> caps = new java.util.TreeMap<>(Comparator.reverseOrder());
@@ -217,6 +236,23 @@ public final class BuildingVolumes {
             covered.add(original);
         }
         return caps;
+    }
+
+    /** Clip one convex face at a horizontal plane, retaining its original winding. */
+    private static List<Point> clipHeight(List<Point> points, double z, boolean above) {
+        List<Point> result = new ArrayList<>();
+        if (points.isEmpty()) { return result; }
+        Point a = points.getLast();
+        for (Point b : points) {
+            boolean keepA = above ? a.z() >= z : a.z() <= z, keepB = above ? b.z() >= z : b.z() <= z;
+            if (keepA != keepB) {
+                double t = (z - a.z()) / (b.z() - a.z());
+                result.add(new Point(a.x() + t * (b.x() - a.x()), a.y() + t * (b.y() - a.y()), z));
+            }
+            if (keepB) { result.add(b); }
+            a = b;
+        }
+        return result;
     }
 
     /** Covered hexes and baked gameplay heights. Largest roof area wins; equal areas choose the taller roof. */
@@ -231,15 +267,23 @@ public final class BuildingVolumes {
         int maxX = Math.min(width - 1, (int) Math.ceil(bounds.getMaxX() / (HexTile.MODEL_WIDTH * .75)) + 1);
         int minY = Math.max(0, (int) Math.floor(-bounds.getMaxY() / HexTile.HEIGHT) - 2);
         int maxY = Math.min(height - 1, (int) Math.ceil(-bounds.getMinY() / HexTile.HEIGHT) + 1);
+        Map<Integer, Area> exposed = new LinkedHashMap<>();
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 Coords at = new Coords(x, y);
-                Area cell = hex(at), covered = new Area(cell);
-                covered.intersect(footprint);
+                // Tilting around the base can bury part of a volume. Buried surfaces contribute no building height.
+                int ground = board.apply(at).getLevel();
+                Area cell = hex(at);
+                Area covered = new Area(exposed.computeIfAbsent(ground, ignored -> {
+                    Area above = new Area();
+                    roofs.forEach((z, area) -> { if (z > ground * LEVEL + .00001) { above.add(area); } });
+                    return above;
+                }));
+                covered.intersect(cell);
                 double cellArea = area(cell);
                 if (area(covered) + cellArea * 1e-6 < cellArea * .5) { continue; }
-                double roof = dominant(roofs, cell);
-                result.put(at, Math.max(1, (int) Math.ceil(roof / LEVEL - board.apply(at).getLevel() - 1e-5)));
+                double roof = dominant(roofs, cell, ground * LEVEL + .00001);
+                result.put(at, Math.max(1, (int) Math.ceil(roof / LEVEL - ground - 1e-5)));
             }
         }
         return result;
@@ -292,8 +336,13 @@ public final class BuildingVolumes {
 
     /** Largest projected top area within one hex; floating point seam tolerances still make exact ties choose taller. */
     public static double dominant(Map<Double, Area> roofs, Area cell) {
+        return dominant(roofs, cell, Double.NEGATIVE_INFINITY);
+    }
+
+    private static double dominant(Map<Double, Area> roofs, Area cell, double above) {
         double largest = -1, roof = 0, tolerance = area(cell) * 1e-6;
         for (var cap : roofs.entrySet().stream().sorted(Map.Entry.comparingByKey(Comparator.reverseOrder())).toList()) {
+            if (cap.getKey() <= above) { continue; }
             Area intersection = new Area(cap.getValue()); intersection.intersect(cell);
             double size = area(intersection);
             if (size > largest + tolerance) { largest = size; roof = cap.getKey(); }

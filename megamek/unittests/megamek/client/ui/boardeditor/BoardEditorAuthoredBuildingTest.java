@@ -46,44 +46,64 @@ class BoardEditorAuthoredBuildingTest {
         assertEquals(expected, members(editor.board(), object.id()));
     }
 
-    @Test void authoredTiltCommandsKeepTheBrushGameplayAndUndoHistoryUnchanged() {
+    @Test void authoredTiltCommandsBakeRoofsWithoutFloorsAndSurviveUndoAndReload(@TempDir Path dir) throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);
-        editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
-        var brush = editor.snapshot().activeBrush().object();
+        editor.command(new Command(Action.ASSET, "buildings/debug/debug-authored"), null);
+        editor.command(new Command(Action.BRUSH_VALUE, "object:scale", "2"), null);
         for (String axis : List.of("rotationX", "rotationY")) {
-            editor.command(new Command(Action.BRUSH_VALUE, "object:" + axis, "17"), null);
-            assertEquals(brush, editor.snapshot().activeBrush().object());
+            editor.command(new Command(Action.BRUSH_VALUE, "object:" + axis, "45"), null);
             assertFalse(editor.snapshot().canUndo());
         }
+        var brush = editor.snapshot().activeBrush();
+        assertEquals(45, brush.object().rotationX()); assertEquals(45, brush.object().rotationY());
+        assertEquals(2, brush.property("bldg_interiors").value());
+        editor.command(new Command(Action.BRUSH_VALUE, "terrain:bldg_interiors", "1"), null);
+        assertEquals(2, editor.snapshot().activeBrush().property("bldg_interiors").value(), "Tilt cannot gain floors from a brush override");
         editor.pointer(at, 0, 0, false); editor.finishStroke();
         var original = editor.board().getHex(at).getDecorations().getFirst();
         var covered = members(editor.board(), original.id());
         assertFalse(covered.isEmpty());
+        assertTrue(covered.values().stream().distinct().count() > 1, "Tilted volumes supply several roof heights");
+        for (Coords cell : covered.keySet()) {
+            var hex = editor.board().getHex(cell);
+            assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(hex));
+            var infantry = new megamek.common.units.ConvInfantry();
+            assertTrue(BuildingInteriors.allows(infantry, hex, hex.terrainLevel(Terrains.BLDG_ELEV)), "The roof remains usable");
+            if (hex.terrainLevel(Terrains.BLDG_ELEV) > 1) { assertFalse(BuildingInteriors.allows(infantry, hex, 1)); }
+        }
         editor.command(new Command(Action.SELECT_AT, "8,8", ""), null);
         editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
-        for (String axis : List.of("rotationX", "rotationY")) {
-            editor.command(new Command(Action.OBJECT_VALUE, axis, "23"), null);
-            assertEquals(original, editor.board().getHex(at).getDecorations().getFirst());
-            assertEquals(covered, members(editor.board(), original.id()));
-        }
-        // Rejected tilts add no history entry: undo removes the original placement, and redo restores it whole.
+        editor.command(new Command(Action.BUILDING_INTERIORS, "1"), null);
+        for (Coords cell : covered.keySet()) { assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(editor.board().getHex(cell))); }
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationX", "23"), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationY", "-31"), null);
+        var rotated = editor.board().getHex(at).getDecorations().getFirst();
+        assertEquals(23, rotated.rotationX()); assertEquals(-31, rotated.rotationY());
+        var changed = members(editor.board(), original.id());
+        assertFalse(changed.isEmpty()); assertNotEquals(covered, changed);
+        var file = dir.resolve("tilted.board2"); editor.save(file);
+        Board loaded = BoardFile.read(file);
+        assertEquals(rotated, loaded.getHex(at).getDecorations().getFirst());
+        assertEquals(changed, members(loaded, original.id()));
+        for (Coords cell : changed.keySet()) { assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(loaded.getHex(cell))); }
         editor.command(new Command(Action.UNDO), null);
-        assertTrue(editor.board().getHex(at).getDecorations().isEmpty());
-        assertTrue(members(editor.board(), original.id()).isEmpty());
-        editor.command(new Command(Action.REDO), null);
+        editor.command(new Command(Action.UNDO), null);
         assertEquals(original, editor.board().getHex(at).getDecorations().getFirst());
         assertEquals(covered, members(editor.board(), original.id()));
+        editor.command(new Command(Action.REDO), null);
+        editor.command(new Command(Action.REDO), null);
+        assertEquals(changed, members(editor.board(), original.id()));
         editor.command(new Command(Action.SELECT_OBJECT, original.id()), null);
         editor.command(new Command(Action.OBJECT_VALUE, "rotation", "37"), null);
         assertEquals(37, editor.board().getHex(at).getDecorations().getFirst().rotation());
         assertFalse(members(editor.board(), original.id()).isEmpty(), "Z rotation retains gameplay coverage");
     }
 
-    @Test void sampledTiltedAuthoredBuildingsCannotBypassPlacementValidation() {
+    @Test void sampledTiltedAuthoredBuildingsRetainTheirRotationAndCannotGainFloors() {
         var board = Board.createEmptyBoard(16, 16);
         Coords source = new Coords(5, 5), target = new Coords(10, 10);
-        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/xenobiology-station", null,
+        var tilted = new BoardDecoration("tilted", "prop", "buildings/debug/debug-authored", null,
               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);
         board.getHex(source).setDecorations(List.of(tilted));
         var editor = new BoardEditorSession(); editor.open(board, null);
@@ -91,15 +111,42 @@ class BoardEditorAuthoredBuildingTest {
         editor.command(new Command(Action.SELECT_OBJECT, tilted.id()), null);
         editor.command(new Command(Action.SAMPLE), null);
         editor.pointer(target, 0, 0, false); editor.finishStroke();
-        assertTrue(editor.board().getHex(target).getDecorations().isEmpty());
+        var placed = editor.board().getHex(target).getDecorations().getFirst();
+        assertEquals(17, placed.rotationX()); assertEquals(23, placed.rotationY());
+        var covered = members(editor.board(), placed.id()); assertFalse(covered.isEmpty());
+        for (Coords cell : covered.keySet()) { assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(editor.board().getHex(cell))); }
         assertEquals(List.of(tilted), editor.board().getHex(source).getDecorations());
-        assertFalse(editor.snapshot().canUndo());
+        editor.command(new Command(Action.UNDO), null);
+        assertTrue(editor.board().getHex(target).getDecorations().isEmpty());
+    }
+
+    @Test void memberEditsCannotEnableTiltedFloorsAndUprightBuildingsCanEnableThemAgain() {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(12, 12), null);
+        var anchor = new Coords(6, 6);
+        editor.command(new Command(Action.ASSET, "buildings/debug/debug-authored"), null);
+        editor.pointer(anchor, 0, 0, false); editor.finishStroke();
+        var object = editor.board().getHex(anchor).getDecorations().getFirst();
+        editor.command(new Command(Action.SELECT_AT, "6,6", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, object.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationX", "45"), null);
+        var covered = members(editor.board(), object.id()); assertFalse(covered.isEmpty());
+        var cell = covered.keySet().iterator().next();
+        editor.command(new Command(Action.SELECT_AT, cell.getX() + "," + cell.getY(), ""), null);
+        editor.command(new Command(Action.TERRAIN, "bldg_interiors", "1"), null);
+        assertEquals(BuildingInteriors.NO_FLOORS, BuildingInteriors.resolve(editor.board().getHex(cell)));
+        editor.command(new Command(Action.SELECT_AT, "6,6", ""), null);
+        editor.command(new Command(Action.SELECT_OBJECT, object.id()), null);
+        editor.command(new Command(Action.OBJECT_VALUE, "rotationX", "0"), null);
+        editor.command(new Command(Action.BUILDING_INTERIORS, "1"), null);
+        for (Coords member : members(editor.board(), object.id()).keySet()) {
+            assertEquals(BuildingInteriors.YES, BuildingInteriors.resolve(editor.board().getHex(member)));
+        }
     }
 
     @Test void fullTurnsStayUprightAndOrdinaryPropsCanStillTilt() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);
-        editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationX", "360"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationY", "-720"), null);
         editor.pointer(at, 0, 0, false); editor.finishStroke();
@@ -291,21 +338,24 @@ class BoardEditorAuthoredBuildingTest {
         assertEquals(original, members(editor.board(), placed.id()));
     }
 
-    @Test void assembledHeightChangesAllMembersAndDeletingThePlacementClearsOnlyItsBuildingState() {
+    @Test void stretchingHeightChangesAllMembersAndDeletingThePlacementClearsOnlyItsBuildingState() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(14, 14), null);
         Coords anchor = new Coords(6, 6);
-        editor.command(new Command(Action.ASSET, "buildings/authored/xenobiology-station"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
         editor.pointer(anchor, 0, 0, false); editor.finishStroke();
         var object = editor.board().getHex(anchor).getDecorations().getFirst();
-        assertFalse(members(editor.board(), object.id()).isEmpty());
+        var original = members(editor.board(), object.id());
+        assertEquals(2, original.size(), "The church covers two neighbouring hexes at its authored scale");
+        var stretched = new LinkedHashMap<Coords, Integer>();
+        original.forEach((cell, height) -> stretched.put(cell, height * 2));
         editor.command(new Command(Action.SELECT_AT, "6,6", ""), null);
         editor.command(new Command(Action.SELECT_OBJECT, object.id()), null);
-        editor.command(new Command(Action.OBJECT_VALUE, "levels", "5"), null);
-        assertTrue(members(editor.board(), object.id()).values().stream().allMatch(h -> h == 5));
+        editor.command(new Command(Action.OBJECT_VALUE, "stretchZ", "2"), null);
+        assertEquals(stretched, members(editor.board(), object.id()));
         editor.command(new Command(Action.REMOVE_OBJECT), null);
         assertTrue(members(editor.board(), object.id()).isEmpty());
         editor.command(new Command(Action.UNDO), null);
-        assertTrue(members(editor.board(), object.id()).values().stream().allMatch(h -> h == 5));
+        assertEquals(stretched, members(editor.board(), object.id()));
     }
 
     @Test void cosmeticEditsKeepCollapsedSectionsAndMissingArtworkCanStillBeDeleted(@TempDir Path dir) throws Exception {

@@ -26,6 +26,11 @@ public enum BuildingInteriors {
         return value > 0 && value < values().length ? values()[value] : DEFAULT;
     }
 
+    /** Tilted authored structures retain roof access, but cannot acquire interior storeys. Closed ones stay closed. */
+    public static BuildingInteriors forAuthored(BoardDecoration object, BuildingInteriors choice) {
+        return BuildingVolumes.tilted(object) && choice != NO ? NO_FLOORS : choice;
+    }
+
     public static BuildingInteriors resolve(Hex hex) {
         if (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()) { return NO; }
         BuildingInteriors choice = choice(hex);

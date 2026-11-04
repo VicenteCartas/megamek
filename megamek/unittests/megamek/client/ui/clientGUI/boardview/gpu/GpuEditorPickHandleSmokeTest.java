@@ -68,6 +68,7 @@ class GpuEditorPickHandleSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(1600, 1000);
+        configuration.setInitialVisible(false);
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override public void create() {
@@ -207,8 +208,14 @@ class GpuEditorPickHandleSmokeTest {
         clickAt(point); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "pillar")), source.editorState().selection(),
               "On its selected hex, a click through the water selects the pillar beneath it");
-        click(view, new Coords(4, 7)); settle(view, source);
-        assertEquals(List.of(new BoardEditorSession.Selection(new Coords(4, 7), "")), source.editorState().selection());
+        // Keep the next board click above the section panel, which now occupies the lower-right board area.
+        Coords elsewhere = new Coords(3, 3);
+        Vector2 next = screen(view, BoardGeometry.center(elsewhere, 0));
+        var stage = GpuBoardTestUi.stage();
+        var intercepted = stage.hit(next.x, Gdx.graphics.getHeight() - next.y, true);
+        assertTrue(intercepted == null || intercepted == stage.getRoot(), () -> "The test's empty hex click must reach the board: " + intercepted);
+        clickAt(next); settle(view, source);
+        assertEquals(List.of(new BoardEditorSession.Selection(elsewhere, "")), source.editorState().selection());
         clickAt(point); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "pillar")), source.editorState().selection(),
               "From another selection too");
@@ -235,12 +242,13 @@ class GpuEditorPickHandleSmokeTest {
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle.png"));
         drag(view, source, 90);
         assertEquals(Math.IEEEremainder(start + 90, 360), rotation(source), 1, "The car turned with the pointer's quarter sweep");
+        assertHandleAttached(view, terrain, CAR, "car");
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle-turned.png"));
         undo(view, source, session);
         assertEquals(start, rotation(source), .001, "One undo restores the rotation");
         assertFalse(source.editorState().canUndo(), "The whole drag was one undo step");
 
-        // The handle follows the camera: in the angled view it is grabbable too. Undo emptied the selection.
+        // The handle stays attached to the object and remains grabbable in the angled view. Undo emptied the selection.
         view.boardCamera.setIsometric(true); settle(view, source);
         car = installed(view, terrain, CAR, "car");
         top = car.bounds().getCenter(new Vector3());
@@ -249,6 +257,7 @@ class GpuEditorPickHandleSmokeTest {
         assertEquals(List.of(new BoardEditorSession.Selection(CAR, "car")), source.editorState().selection());
         drag(view, source, -45);
         assertEquals(Math.IEEEremainder(start - 45, 360), rotation(source), 1, "Clockwise in the angled view");
+        assertHandleAttached(view, terrain, CAR, "car");
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle-angled.png"));
         undo(view, source, session);
         assertEquals(start, rotation(source), .001);
@@ -308,6 +317,13 @@ class GpuEditorPickHandleSmokeTest {
 
     private static double rotation(GpuMapSource source) {
         return source.editorState().objects().stream().filter(object -> object.id().equals("car")).findFirst().orElseThrow().rotation();
+    }
+
+    private static void assertHandleAttached(GpuBattleView view, GpuTerrain terrain, Coords coords, String id) throws Exception {
+        var box = terrain.editorObjects(coords).stream().filter(o -> o.id().equals(id)).findFirst().orElseThrow().outline();
+        Vector3 expected = box.getBounds().getCenter(new Vector3()); expected.x = box.getBounds().max.x;
+        expected.mul(box.getTransform());
+        assertTrue(expected.epsilonEquals(component(handle(view), "base"), .001f), "The displayed handle uses the current prop pose, including after release");
     }
 
     /** The view's rotation handle for the current selection, or null. */

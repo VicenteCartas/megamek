@@ -666,6 +666,8 @@ class BoardMultiHexBuildingTest {
                 if (inward) {
                     assertTrue(plates.contains(-3, 2.8) && plates.contains(40, 3),
                           "Inward miter overhangs keep their fitted plates beyond the outer rail's endpoints");
+                    assertTrue(plates.contains(-3.5, 3.15),
+                          "A periodic joint must not cut a small triangle out of the mitered end");
                 }
             }
         }
@@ -695,6 +697,17 @@ class BoardMultiHexBuildingTest {
         assertTrue(washers.get(1).stream().allMatch(v -> v[0] < 8.5f || v[0] > 9.5f), "Keep whole washers clear of the cap edge");
         assertEquals(washers.getFirst().stream().filter(v -> v[0] > 12).count(),
               washers.get(1).stream().filter(v -> v[0] > 12).count(), "Retain the accepted pattern away from columns");
+    }
+
+    @Test
+    void unchangedBuildingLayoutReusesItsGeometryCacheKey() {
+        var heights = flower(3, 2);
+        Coords annex = CENTRE.translated(0).translated(0);
+        heights.put(annex, 2);
+        var scene = scene(heights, DOME, Map.of(), Set.of());
+        var first = layout(scene, annex);
+        assertEquals("existing model", Map.of(first, "existing model").get(layout(scene, annex)),
+              "Derived cap footprints must retain value equality when the same layout is regenerated");
     }
 
     @Test

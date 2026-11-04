@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.geom.Area;
 import java.awt.geom.Rectangle2D;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,7 +30,7 @@ class BuildingVolumesTest {
     }
 
     @Test void areaLimitUsesTheWholeStructuralProjectionForTiltedSourceData() {
-        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/xenobiology-station", null,
+        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/frontier-church", null,
               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);
         assertEquals(1, BuildingVolumes.onBoardFraction(new Coords(8, 8), tilted, 16, 16), 1e-8);
     }
@@ -97,15 +98,45 @@ class BuildingVolumesTest {
         }
     }
 
-    @Test void researchStationRepeatsItsAuthoredVolumesAndKeepsItsOpenCourtyard() {
-        var definition = BuildingVolumes.of("buildings/authored/xenobiology-station");
+    @Test void repeatedFloorAssemblyKeepsAnOpenCourtyard() {
+        // Isolated module fixture using the arena's closed ring footprint.
+        var solids = new ArrayList<BuildingVolumes.Solid>();
+        for (String role : new String[] {"base0", "floor0"}) {
+            for (var solid : BuildingVolumes.of("buildings/authored/civic-arena").solids()) {
+                solids.add(new BuildingVolumes.Solid(role, solid.triangles()));
+            }
+        }
+        var definition = new BuildingVolumes.Definition(Map.of("base0", 0.0, "floor0", 0.0, "roof0", 0.0), solids);
         assertTrue(definition.present()); assertTrue(definition.modular());
         var shortBuilding = definition.assemble(2, 12);
         var tallBuilding = definition.assemble(5, 12);
         assertEquals(36.0, BuildingVolumes.roofs(shortBuilding).keySet().stream().mapToDouble(Double::doubleValue).max().orElseThrow(), .001);
         assertEquals(90.0, BuildingVolumes.roofs(tallBuilding).keySet().stream().mapToDouble(Double::doubleValue).max().orElseThrow(), .001);
         Area floor = BuildingVolumes.section(tallBuilding, 63);
-        assertFalse(floor.contains(0, -20), "The courtyard is not filled by a bounding rectangle");
-        assertTrue(floor.contains(-46, 0)); assertTrue(floor.contains(46, 0)); assertTrue(floor.contains(0, 30));
+        assertFalse(floor.contains(0, 0), "The courtyard is not filled by a bounding rectangle");
+        assertTrue(floor.contains(-60, 0)); assertTrue(floor.contains(60, 0)); assertTrue(floor.contains(0, 90));
+    }
+
+    @Test void civicBuildingsRespectTheirSmallFootprintsAndSeparatePropsFromFloors() {
+        var church = BuildingVolumes.of("buildings/authored/frontier-church");
+        assertTrue(church.present()); assertFalse(church.modular());
+        var solids = church.assemble(8, 0);
+        assertEquals(Set.of(18.0, 36.0, 54.0), BuildingVolumes.roofs(solids).keySet());
+        assertTrue(BuildingVolumes.section(solids, 45).contains(0, -15));
+        assertFalse(BuildingVolumes.section(solids, 45).contains(0, 50));
+        assertEquals(0, BuildingVolumes.area(BuildingVolumes.section(solids, 55)), .001);
+        var churchBounds = BoardModelBounds.bounds("buildings/authored/frontier-church");
+        assertTrue(churchBounds[3] - churchBounds[0] <= HexTile.MODEL_WIDTH);
+        assertTrue(churchBounds[4] - churchBounds[1] <= 2 * HexTile.HEIGHT);
+        var arena = BuildingVolumes.of("buildings/authored/civic-arena");
+        assertTrue(arena.present()); assertFalse(arena.modular());
+        var ring = arena.assemble(8, 0);
+        assertEquals(Set.of(18.0), BuildingVolumes.roofs(ring).keySet());
+        assertFalse(BuildingVolumes.section(ring, 9).contains(0, 0), "The field has no building floors");
+        assertTrue(BuildingVolumes.section(ring, 9).contains(60, 0));
+        assertEquals(0, BuildingVolumes.area(BuildingVolumes.section(ring, 19)), .001);
+        var arenaBounds = BoardModelBounds.bounds("buildings/authored/civic-arena");
+        assertTrue(arenaBounds[3] - arenaBounds[0] <= 2 * HexTile.MODEL_WIDTH);
+        assertTrue(arenaBounds[4] - arenaBounds[1] < 3.2 * HexTile.HEIGHT);
     }
 }

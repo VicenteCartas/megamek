@@ -85,6 +85,61 @@ class LunarDomeTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void railsClearColumnCapsOwnedByAdjacentHexes() throws Exception {
+        var type = Class.forName(BoardMultiHexBuilding.class.getName() + "$Cap");
+        var outline = type.getDeclaredMethod("outline"); outline.setAccessible(true);
+        var bottom = type.getDeclaredMethod("bottom"); bottom.setAccessible(true);
+        var top = type.getDeclaredMethod("top"); top.setAccessible(true);
+        int checked = 0;
+        for (Coords at : List.of(new Coords(21, 11), new Coords(22, 12), new Coords(23, 12))) {
+            for (var tunnel : LAYOUTS.get(at).tunnels()) {
+                float z = tunnel.top() + .295f;
+                Area exclusions = new Area();
+                // Collect from the other shares too: testing only the receiver's list would miss ownership bugs.
+                for (var entry : LAYOUTS.entrySet()) {
+                    if (at.distance(entry.getKey()) > 1) { continue; }
+                    for (var neighbour : entry.getValue().tunnels()) {
+                        for (Object cap : neighbour.caps()) {
+                            if (z < (float) bottom.invoke(cap) || z > (float) top.invoke(cap)) { continue; }
+                            Path2D.Float path = new Path2D.Float();
+                            for (var p : (List<BoardMultiHexBuilding.Point>) outline.invoke(cap)) {
+                                float x = p.x() + neighbour.origin().x() - tunnel.origin().x();
+                                float y = p.y() + neighbour.origin().y() - tunnel.origin().y();
+                                if (path.getCurrentPoint() == null) { path.moveTo(x, y); } else { path.lineTo(x, y); }
+                            }
+                            path.closePath();
+                            exclusions.add(new Area(path));
+                            exclusions.add(new Area(new BasicStroke(.38f).createStrokedShape(path)));
+                        }
+                    }
+                }
+                assertFalse(exclusions.isEmpty(), "The affected terrace has nearby column caps");
+                for (var mesh : cap(tunnel).meshes) {
+                    for (var part : mesh.parts) {
+                        if (!part.id.equals(BoardMultiHexBuilding.HARDWARE)) { continue; }
+                        for (int triangle = 0; triangle < part.indices.length; triangle += 3) {
+                            List<Vector3> washer = new ArrayList<>();
+                            for (int k = 0; k < 3; k++) {
+                                int index = Short.toUnsignedInt(part.indices[triangle + k]) * RigidGlb.STRIDE;
+                                var v = mesh.vertices;
+                                if (Math.abs(v[index + 2] - z) < .001f && v[index + 5] > .999f && v[index + 6] < .2f) {
+                                    washer.add(new Vector3(v[index], v[index + 1], 0));
+                                }
+                            }
+                            if (washer.size() != 3) { continue; }
+                            Area overlap = GpuBuildingInterior.area(washer); overlap.intersect(exclusions);
+                            assertTrue(areaSize(overlap) < .0001, at.getBoardNum() + " rail washer crowds a column cap: " + washer);
+                            checked++;
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(checked > 60, "Inspect the surviving rail fasteners across the actual stepped, shared-hex junction");
+    }
+
+    @Test
     void tallStepPillarAt2413KeepsBothWallFacesAndReachesGround() {
         var corner = LAYOUTS.get(new Coords(23, 12)).tunnels().stream().flatMap(tunnel -> tunnel.corners().stream())
               .filter(pillar -> Math.hypot(pillar.at().x() + 38.670956, pillar.at().y() - 5.0091085) < 2)
@@ -455,6 +510,15 @@ class LunarDomeTest {
                     double x = (a.x() + b.x()) / 2 + (b.y() - a.y()) / length * .02;
                     double y = (a.y() + b.y()) / 2 - (b.x() - a.x()) / length * .02;
                     double neighbouringRoof = 0;
+                    for (var dome : entry.getValue().domes()) {
+                        List<BoardMultiHexBuilding.Point> ring = new ArrayList<>();
+                        for (int side = 0; side < 12; side++) {
+                            double angle = side * Math.PI / 6;
+                            ring.add(new BoardMultiHexBuilding.Point(dome.x() + dome.podium() * (float) Math.cos(angle),
+                                  dome.y() + dome.podium() * (float) Math.sin(angle)));
+                        }
+                        if (area(ring).contains(x, y)) { neighbouringRoof = Math.max(neighbouringRoof, dome.ring()); }
+                    }
                     for (int direction = 0; direction < 6; direction++) {
                         Coords next = at.translated(direction);
                         var neighbour = LAYOUTS.get(next);

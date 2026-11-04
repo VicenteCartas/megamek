@@ -53,6 +53,7 @@ import megamek.common.Configuration;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BuildingInteriors;
 import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexIssue;
@@ -1316,7 +1317,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
                 brushRow(brushNumber(UiKit.text("BoardEditor.assembledLevels"), Math.max(1, object.levels()), 1, 20, 1, action, prefix + "levels"));
             } else { brushRow(hint(UiKit.text("BoardEditor.authoredHeight"))); }
             var policy = brush.property("bldg_interiors");
-            brushRow(interiors(policy == null ? 0 : policy.value(), chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_interiors", chosen)));
+            brushRow(interiors(policy == null ? 0 : policy.value(), object, chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_interiors", chosen)));
             brushRow(hint(UiKit.text("BoardEditor.hint.place")));
             return;
         }
@@ -2037,7 +2038,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             if (BuildingVolumes.of(object.asset()).modular()) {
                 number(UiKit.text("BoardEditor.assembledLevels"), Math.max(1, object.levels()), 1, 20, 1, Action.OBJECT_VALUE, "levels");
             } else { text(UiKit.text("BoardEditor.authoredHeight")); }
-            detail.add(interiors(snapshot.buildingInteriors(), chosen -> send(Action.BUILDING_INTERIORS, chosen))).growX().row();
+            detail.add(interiors(snapshot.buildingInteriors(), object, chosen -> send(Action.BUILDING_INTERIORS, chosen))).growX().row();
         } else if (object.kind().equals("prop")) {
             // Scrubbing stops at the surface; a typed value may still sink the object into it.
             number(UiKit.text("BoardEditor.heightAboveSurface"), heightOffset(object), 0, 30, .1, Action.OBJECT_VALUE, "offset");
@@ -2113,12 +2114,21 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         designLayer.setVisible(true); designLayer.toFront();
     }
     private Table interiors(int current, java.util.function.Consumer<String> changed) {
+        return interiors(current, null, changed);
+    }
+    private Table interiors(int current, BoardDecoration object, java.util.function.Consumer<String> changed) {
         var labels = List.of("default", "yes", "noFloors", "no");
         List<Option> options = new ArrayList<>();
+        boolean tilted = object != null && BuildingVolumes.tilted(object);
         for (int i = 0; i < labels.size(); i++) {
+            if (tilted && i < 2) { continue; }
             options.add(new Option(UiKit.text("BoardEditor.interiors." + labels.get(i)), Integer.toString(i)));
         }
-        return choice(UiKit.text("BoardEditor.interiors"), options.get(Math.max(0, Math.min(3, current))).label(), options, changed);
+        var policy = BuildingInteriors.values()[Math.max(0, Math.min(3, current))];
+        if (object != null) { policy = BuildingInteriors.forAuthored(object, policy); }
+        Table result = choice(UiKit.text("BoardEditor.interiors"), UiKit.text("BoardEditor.interiors." + labels.get(policy.ordinal())), options, changed);
+        if (tilted) { ui.tip(result).getActor().setText(UiKit.text("BoardEditor.buildingTilt")); }
+        return result;
     }
 
     private record Option(String label, String id) { }
@@ -2265,14 +2275,14 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         detail.add(numeric(label, value, min, max, step, action, target)).row();
     }
     private Table rotations(BoardDecoration object, boolean compact, Action action) {
+        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
         Table row = new Table();
         row.add(ui.label(UiKit.text("BoardEditor.rotation"), "hud-small", 12, UiTheme.TEXT)).colspan(3).left().padBottom(3).row();
         String[] axes = {"X", "Y", "Z"}, keys = {"rotationX", "rotationY", "rotation"};
         String[] descriptions = {UiKit.text("BoardEditor.rotation.pitch"), UiKit.text("BoardEditor.rotation.roll"),
               UiKit.text("BoardEditor.rotation.yaw")};
         double[] values = {object.rotationX(), object.rotationY(), object.rotation()};
-        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
-        for (int i = BuildingVolumes.of(object.asset()).present() ? 2 : 0; i < 3; i++) {
+        for (int i = 0; i < 3; i++) {
             UiNumber number = angle(axes[i], values[i], compact, action, prefix + keys[i]).compactCaption().fieldSize(48, 27);
             ui.tip(number).getActor().setText(descriptions[i]);
             row.add(number).growX().minWidth(0).padRight(i == 2 ? 0 : 7);

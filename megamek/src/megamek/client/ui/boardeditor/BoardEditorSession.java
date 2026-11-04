@@ -728,7 +728,9 @@ public final class BoardEditorSession {
                 case TERRAIN -> edit(hex -> setTerrain(hex, command.target(), Integer.parseInt(command.value())));
                 case REMOVE_TERRAIN -> edit(hex -> {
                     int type = Terrains.getType(command.value());
-                    if (type == Terrains.BRIDGE) { removeDeck(hex); } else { removeWay(hex, type); }
+                    if (type == Terrains.BRIDGE) { removeDeck(hex); }
+                    else if (type == Terrains.BUILDING) { removeComponent(hex, blueprint.component("building")); }
+                    else { removeWay(hex, type); }
                     if (!hex.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) { hex.removeTerrain(Terrains.FOLIAGE_ELEV); }
                 });
                 case EDGE -> editEdge(command.target(), Integer.parseInt(command.value()));
@@ -2842,7 +2844,6 @@ public final class BoardEditorSession {
     /** Saved member heights cannot be rebaked without the placement's structural geometry. */
     private void checkBuildingGeometry(Coords owner, BoardDecoration original, BoardDecoration object) {
         if ((original == null || !BuildingVolumes.sameGeometry(original, object)) && BuildingVolumes.of(object.asset()).present()) {
-            checkBuildingTilt(object.asset(), object.rotationX(), object.rotationY());
             require(BuildingVolumes.onBoardFraction(owner, object, board().getWidth(), board().getHeight()) >= .1 - 1e-6,
                   Messages.getString("BoardEditor.buildingOutside"));
         }
@@ -2853,15 +2854,6 @@ public final class BoardEditorSession {
                     require(ref == null || !ref.id().equals(object.id()), Messages.getString("BoardEditor.buildingAssetMissing"));
                 }
             }
-        }
-    }
-
-    /** Gameplay roofs and floors are horizontal; structural buildings may pivot only around their vertical axis. */
-    private static void checkBuildingTilt(String asset, double rotationX, double rotationY) {
-        if (BuildingVolumes.of(asset).present()) {
-            require(Math.abs(Math.IEEEremainder(rotationX, 360)) < 1e-7
-                        && Math.abs(Math.IEEEremainder(rotationY, 360)) < 1e-7,
-                  Messages.getString("BoardEditor.buildingTilt"));
         }
     }
 
@@ -3108,6 +3100,10 @@ public final class BoardEditorSession {
         } else if (target.equals("wayPillars")) { wayPillars = Boolean.parseBoolean(value); }
         else if (target.equals("zone")) { setZones(next, zoneMask(value)); }
         else { throw new IllegalArgumentException("Unknown brush setting " + target); }
+        var object = next.getDecorations().stream().findFirst().orElse(null);
+        if (object != null && BuildingVolumes.of(object.asset()).present()) {
+            BuildingInteriors.set(next, BuildingInteriors.forAuthored(object, BuildingInteriors.choice(next)));
+        }
         paintTemplate = next;
     }
 
@@ -3117,6 +3113,11 @@ public final class BoardEditorSession {
         if (!selectedObject.isEmpty()) {
             BoardDecoration object = object(hex);
             paintTemplate = new Hex(0); paintTemplate.setDecorations(List.of(object));
+            if (BuildingVolumes.of(object.asset()).present()) {
+                Hex building = buildingSample();
+                BuildingInteriors.set(paintTemplate, BuildingInteriors.forAuthored(object,
+                      building == null ? BuildingInteriors.DEFAULT : BuildingInteriors.choice(building)));
+            }
             sampledHex = null;
             brushComponent = ""; brushKey = object.asset();
             var asset = blueprint.asset(object.asset()); brushLabel = asset == null ? object.asset() : asset.label();
@@ -3305,13 +3306,16 @@ public final class BoardEditorSession {
         return String.join(", ", Board.exitsAsIntList(mask).stream().map(String::valueOf).toList());
     }
 
-    /** Removes {@code definition}'s terrain fields and its appearance from {@code hex}; its objects stay. */
+    /** Removes a component and its appearance; detaching an authored building removes its placement on commit. */
     private static void removeComponent(Hex hex, BoardEditorBlueprint.Component definition) {
         if (definition.id().equals("bridge")) { removeDeck(hex); return; }
         definition.fields().forEach(field -> removeWay(hex, Terrains.getType(field.terrain())));
         var appearance = new LinkedHashMap<>(hex.getAppearance());
         appearance.remove(definition.id());
-        if (definition.id().equals("building")) { appearance.remove("buildingProfile"); }
+        if (definition.id().equals("building")) {
+            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile"));
+            hex.setBuildingReference(null);
+        }
         hex.setAppearance(appearance);
     }
 
@@ -3406,12 +3410,33 @@ public final class BoardEditorSession {
         convertTokens();
         wayDecks();
         authoredBuildings();
+        // Also constrain direct member edits and pasted terrain, not only object-transform commands.
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            Hex hex = board().getHex(at);
+            var reference = hex.getBuildingReference();
+            if (reference == null || !board().contains(reference.anchor()) || !hex.containsTerrain(Terrains.BUILDING)) { continue; }
+            var object = board().getHex(reference.anchor()).getDecorations().stream()
+                  .filter(o -> o.id().equals(reference.id())).findFirst().orElse(null);
+            if (object == null) { continue; }
+            var choice = BuildingInteriors.forAuthored(object, BuildingInteriors.choice(hex));
+            if (choice != BuildingInteriors.choice(hex)) { change(at, current -> BuildingInteriors.set(current, choice)); }
+        }
         joinBuildingLooks();
         connectedBuildingLooks();
     }
 
     /** Placement or ground edits rebake coverage; appearance edits and collapse keep the saved gameplay state. */
     private void authoredBuildings() {
+        // Erasing any authored member removes the owning placement too. A collapsed member retains its reference,
+        // so gameplay damage and cosmetic edits never become deletion requests.
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            var reference = stroke.get(at).getBuildingReference();
+            if (reference != null && !reference.equals(board().getHex(at).getBuildingReference())
+                  && board().contains(reference.anchor())) {
+                change(reference.anchor(), hex -> hex.setDecorations(hex.getDecorations().stream()
+                      .filter(object -> !object.id().equals(reference.id())).toList()));
+            }
+        }
         Map<String, Map.Entry<Coords, BoardDecoration>> before = new LinkedHashMap<>(), after = new LinkedHashMap<>();
         Set<String> groundChanges = new LinkedHashSet<>();
         for (Coords at : List.copyOf(stroke.keySet())) {
@@ -3466,10 +3491,8 @@ public final class BoardEditorSession {
                         : new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null));
             for (Coords at : members.keySet()) {
                 change(at, hex -> {
-                    for (var field : definition.fields()) { hex.removeTerrain(Terrains.getType(field.terrain())); }
+                    removeComponent(hex, definition);
                     hex.removeTerrain(Terrains.BLDG_INTERIORS);
-                    hex.setBuildingReference(null);
-                    appearance(hex, "building", null);
                 });
             }
             if (next == null) { continue; }
@@ -3880,9 +3903,6 @@ public final class BoardEditorSession {
                 }
             }
             default -> throw new IllegalArgumentException("Unknown object property " + property);
-        }
-        if (property.equals("rotationX") || property.equals("rotationY")) {
-            checkBuildingTilt(d.asset(), rotationX, rotationY);
         }
         return new BoardDecoration(d.id(), d.kind(), d.asset(), name, x, y, rotation, mirror, scale, placement, order, clipToHex,
               rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels());

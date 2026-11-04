@@ -44,6 +44,7 @@ import com.badlogic.gdx.math.Polygon;
 import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.OrientedBoundingBox;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Os;
@@ -228,9 +229,8 @@ class GpuBattleView extends ApplicationAdapter {
     private boolean hoverHeld;
     /** Height of the walkable surface under the latest pointer in the hovered hex, owned by the render thread like hovered. */
     private float hoverZ = Float.NaN;
-    /** {@link #frameObjects}' hexes, read during frame {@link #frameObjectsFrame}. */
+    /** Installed object snapshots shared by the outline passes and input until the next board render. */
     private final Map<Coords, List<GpuTerrain.EditorObject>> frameObjects = new HashMap<>();
-    private long frameObjectsFrame = -1;
     private SystemCursor cursor = SystemCursor.Arrow;
     private boolean fitted;
     private long frames;
@@ -557,6 +557,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderBoard() {
+        frameObjects.clear();
         if (!waitingForAssetCapture && shaderEdits.update() && terrain != null) { terrain.shadersChanged(); }
         if (tuning != null && tuning.takeAssetReloadRequest()) { reloadAssets(); }
         showAssetSyncProgress();
@@ -778,15 +779,16 @@ class GpuBattleView extends ApplicationAdapter {
         // The temporary close-up only discovers programs. Baking pages for it would evict the user's view.
         terrain.setMaterialCache(tuning.terrainCache() && warmUp != WarmUp.CLOSE);
         terrain.setMaterialCacheDebug(tuning.terrainCacheDebug());
-        // Lighting, not an option: the sky light the board's relief hides from canyons and the feet of its walls.
-        skyVisibility.update(terrain.environment(), scene, 1);
         terrain.setGravity(atmosphereSettings.gravity());
         terrain.setVacuum(atmosphereSettings.pressure().isVacuum());
         // The 3D Graphics choose what the terrain builds; the first frame already has the saved choice, and a switch
         // rebuilds behind the loading stage below. The Tactical View is the camera and the presentation.
         terrain.setColumns(source.uiPreferences().graphics() == BoardGraphics.CLASSIC);
         terrain.present(playback.transition(), playback.transitionProgress());
-        terrain.update(scene, boardCamera.camera);
+        // Authored transforms move the installed shell below. Slice, replant and rebuild sky occlusion after release.
+        boolean authoredGesture = source.editorAuthoredGesture() && terrain.ready(scene);
+        skyVisibility.update(terrain.environment(), authoredGesture ? terrain.presentation(scene) : scene, 1);
+        if (!authoredGesture) { terrain.update(scene, boardCamera.camera); }
         // Keep draining preparation, but do not build another terrain level for the shader probe's temporary camera.
         boolean detailChanged = terrain.refine(warmUp == WarmUp.CLOSE ? null : boardCamera.camera, source.isEditor());
         settings.set(terrain.settings());
@@ -1278,9 +1280,8 @@ class GpuBattleView extends ApplicationAdapter {
                     var object = frameObjects(item.coords()).stream()
                           .filter(o -> o.id().equals(item.object())).findFirst();
                     if (object.isPresent()) {
-                        var bounds = object.get().bounds();
                         // The outline is the object's own box; only a held drag adds the ground projection of its drop.
-                        lines.box(bounds.min.x, bounds.min.y, bounds.max.z, bounds.getWidth(), bounds.getHeight(), bounds.getDepth());
+                        drawObjectBox(object.get().outline());
                         if (boardInput.dragged && boardInput.editorGrab != null) {
                             editorProjection(destination, object.get().anchorLevel() * BoardGeometry.level());
                         }
@@ -1294,10 +1295,7 @@ class GpuBattleView extends ApplicationAdapter {
             List<String> hoveredObjects = ui instanceof GpuMapHud map ? map.editorHoverObjects() : List.of();
             if (!hoveredObjects.isEmpty() && state.selected() != null) {
                 lines.setColor(1, 1, 1, alpha);
-                frameObjects(state.selected()).stream().filter(o -> hoveredObjects.contains(o.id())).forEach(object -> {
-                    var bounds = object.bounds();
-                    lines.box(bounds.min.x, bounds.min.y, bounds.max.z, bounds.getWidth(), bounds.getHeight(), bounds.getDepth());
-                });
+                frameObjects(state.selected()).stream().filter(o -> hoveredObjects.contains(o.id())).forEach(object -> drawObjectBox(object.outline()));
             }
             for (Coords coords : state.movePreview()) {
                 boolean valid = scene.tile(coords) != null;
@@ -2285,17 +2283,13 @@ class GpuBattleView extends ApplicationAdapter {
      * listed once per frame for both outline passes and the tethers.
      */
     private List<GpuTerrain.EditorObject> frameObjects(Coords coords) {
-        if (frameObjectsFrame != Gdx.graphics.getFrameId()) {
-            frameObjects.clear();
-            frameObjectsFrame = Gdx.graphics.getFrameId();
-        }
         return frameObjects.computeIfAbsent(coords, terrain::editorObjects);
     }
 
     /**
      * The handle that turns the Select tool's selection about the vertical axis through its {@code pivot}: one object or
-     * decal, or one whole group about its members' centre. A short line from the middle of the selection box's right
-     * side, as the camera sees it, at the box's top, to a small circle at {@code tip}; a fixed size on screen.
+     * decal, or one whole group about its members' centre. One object's handle attaches to its local +X side and turns
+     * with its box. A group's handle uses the collective world envelope. The circle stays a readable size on screen.
      * {@code from} is what a drag's turn adds to: the object's rotation, or 0 for a group, whose value is its turn.
      */
     private record RotationHandle(Vector3 pivot, Vector3 base, Vector3 tip, float radius, boolean group, double from) { }
@@ -2306,6 +2300,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (state == null || state.tool() != megamek.client.ui.boardeditor.BoardEditorSession.Tool.SELECT
               || state.selection().isEmpty() || state.selection().size() > 1 && state.group().isEmpty()) { return null; }
         var box = new com.badlogic.gdx.math.collision.BoundingBox().inf();
+        OrientedBoundingBox outline = null;
         Vector3 pivot = new Vector3();
         double from = 0;
         for (var item : state.selection()) {
@@ -2317,28 +2312,46 @@ class GpuBattleView extends ApplicationAdapter {
             // A route is laid by painting its hexes; it does not turn.
             if (drawn == null || megamek.common.board.RailRoute.isRoute(object)) { return null; }
             box.ext(drawn.bounds());
+            outline = drawn.outline();
             pivot.add(drawn.anchor().x, drawn.anchor().y, 0);
             from = object.rotation();
         }
         var camera = boardCamera.camera;
-        Vector3 right = new Vector3(camera.direction).crs(camera.up);
-        right.z = 0;
-        if (right.isZero(.000001f)) { return null; }
-        right.nor();
-        Vector3 centre = box.getCenter(new Vector3());
-        float reach = Math.abs(right.x) * box.getWidth() / 2 + Math.abs(right.y) * box.getHeight() / 2;
-        Vector3 base = new Vector3(centre.x, centre.y, box.max.z).mulAdd(right, reach);
-        // The pixels one world unit along the handle spans where it starts.
-        Vector3 start = camera.project(new Vector3(base), 0, 0, camera.viewportWidth, camera.viewportHeight);
-        Vector3 step = camera.project(new Vector3(base).add(right), 0, 0, camera.viewportWidth, camera.viewportHeight);
-        float pixels = Vector2.dst(start.x, start.y, step.x, step.y);
-        if (!(pixels > 0) || start.z < 0 || start.z > 1) { return null; }
-        float unit = layoutScale / pixels;
         boolean group = state.selection().size() > 1;
+        Vector3 base, outward;
+        if (group) {
+            outward = new Vector3(camera.direction).crs(camera.up); outward.z = 0; outward.nor();
+            Vector3 centre = box.getCenter(new Vector3());
+            float reach = Math.abs(outward.x) * box.getWidth() / 2 + Math.abs(outward.y) * box.getHeight() / 2;
+            base = new Vector3(centre.x, centre.y, box.max.z).mulAdd(outward, reach);
+        } else {
+            var local = outline.getBounds();
+            base = local.getCenter(new Vector3()); base.x = local.max.x;
+            base.mul(outline.getTransform());
+            outward = new Vector3(Vector3.X).rot(outline.getTransform()).nor();
+        }
         pivot.scl(1f / state.selection().size());
         pivot.z = base.z;
-        return new RotationHandle(pivot, base, new Vector3(base).mulAdd(right, HANDLE_LENGTH * unit), HANDLE_RADIUS * unit,
+        // The pivot's depth stays fixed through a Z turn; sizing at the moving side made a perspective grip drift
+        // off the pointer's arc. Use the shared camera scale instead of subtracting nearly identical projections.
+        float unit = layoutScale * BoardCamera.worldUnitsPerPixel(camera, pivot);
+        Vector3 tip = new Vector3(base).mulAdd(outward, HANDLE_LENGTH * unit);
+        Vector3 screen = camera.project(new Vector3(tip), 0, 0, camera.viewportWidth, camera.viewportHeight);
+        if (!(unit > 0) || !Float.isFinite(unit) || screen.z < 0 || screen.z > 1) { return null; }
+        float radius = HANDLE_RADIUS * layoutScale * BoardCamera.worldUnitsPerPixel(camera, tip);
+        pivot.z = tip.z;
+        return new RotationHandle(pivot, base, tip, radius,
               group, group ? 0 : from);
+    }
+
+    /** The eight local corners follow the same full transform as the drawn mesh, including pitch, roll and stretch. */
+    private void drawObjectBox(OrientedBoundingBox box) {
+        Vector3[] corners = box.getVertices();
+        for (int i = 0; i < 8; i++) {
+            for (int bit = 1; bit <= 4; bit <<= 1) {
+                if ((i & bit) == 0) { lines.line(corners[i], corners[i | bit]); }
+            }
+        }
     }
 
     /**
@@ -2346,9 +2359,9 @@ class GpuBattleView extends ApplicationAdapter {
      * about its pivot with the selection, so it stays under the pointer.
      */
     private void drawRotationHandle(float alpha) {
-        RotationHandle held = boardInput.rotationGrab, handle = held == null ? rotationHandle() : held;
+        RotationHandle held = boardInput.rotationGrab, handle = rotationHandle();
         if (handle == null) { return; }
-        if (held != null) {
+        if (held != null && held.group()) {
             float turn = (float) (boardInput.rotationSent - held.from());
             Vector3 base = new Vector3(held.base()).sub(held.pivot()).rotate(Vector3.Z, turn).add(held.pivot());
             Vector3 tip = new Vector3(held.tip()).sub(held.pivot()).rotate(Vector3.Z, turn).add(held.pivot());
@@ -2830,9 +2843,13 @@ class GpuBattleView extends ApplicationAdapter {
             for (var item : selection) {
                 if (item.object().isEmpty()) { continue; }
                 for (var object : terrain.editorObjects(item.coords())) {
-                    if (object.id().equals(item.object()) && !object.decal()
-                          && com.badlogic.gdx.math.Intersector.intersectRayBoundsFast(ray, object.bounds())) {
-                        return new GpuTerrain.DecorationHit(item.coords(), object.id(), 0, object.anchorLevel() * BoardGeometry.level());
+                    if (object.id().equals(item.object()) && !object.decal()) {
+                        var box = object.outline();
+                        // Test in object space: the oriented-box shortcut assumes unit axes and mis-picks scaled props.
+                        var local = new com.badlogic.gdx.math.collision.Ray(ray.origin, ray.direction).mul(new Matrix4(box.getTransform()).inv());
+                        if (com.badlogic.gdx.math.Intersector.intersectRayBoundsFast(local, box.getBounds())) {
+                            return new GpuTerrain.DecorationHit(item.coords(), object.id(), 0, object.anchorLevel() * BoardGeometry.level());
+                        }
                     }
                 }
             }
@@ -2849,7 +2866,7 @@ class GpuBattleView extends ApplicationAdapter {
         /** The pointer's angle (radians) about the handle's pivot, on the horizontal plane of the handle; NaN off it. */
         private double handleAngle(RotationHandle handle, int x, int y) {
             var ray = boardCamera.camera.getPickRay(x, y, 0, 0, boardCamera.camera.viewportWidth, boardCamera.camera.viewportHeight);
-            float distance = Math.abs(ray.direction.z) < .00001f ? -1 : (handle.base().z - ray.origin.z) / ray.direction.z;
+            float distance = Math.abs(ray.direction.z) < .00001f ? -1 : (handle.tip().z - ray.origin.z) / ray.direction.z;
             if (distance <= 0) { return Double.NaN; }
             Vector3 point = ray.getEndPoint(new Vector3(), distance);
             return Math.atan2(point.y - handle.pivot().y, point.x - handle.pivot().x);

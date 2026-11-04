@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
  */
 @Tag("on-demand")
 class GpuMultiHexBuildingSmokeTest {
-    private record View(String name, Coords at, float zoom, boolean isometric, float orbit, float tilt) {
+    record View(String name, Coords at, float zoom, boolean isometric, float orbit, float tilt) {
         View(String name, Coords at, float zoom, boolean isometric, float orbit) { this(name, at, zoom, isometric, orbit, 0); }
     }
 
@@ -72,15 +72,19 @@ class GpuMultiHexBuildingSmokeTest {
           new View("review-ring-east", new Coords(25, 11), .18f, true, 70),
           new View("review-ring-north", new Coords(23, 6), .18f, true, 160),
           new View("review-ring-top", new Coords(23, 10), .27f, false, 0),
+          new View("review-rail-junction", new Coords(23, 12), .085f, false, 0),
           new View("review-roof-detail", new Coords(22, 12), .045f, false, 0),
           new View("review-roof-oblique", new Coords(22, 12), .055f, true, -20, -10));
 
     @Test
     void capturesLunarBase() throws Exception {
+        capture(BoardFile.loadSheet(new File("data/boards", "Alien Worlds/32x17 Lunar Base.board2"), false, true), VIEWS, "multihex-buildings");
+    }
+
+    static void capture(Board board, List<View> views, String name) throws Exception {
         float hour = Float.parseFloat(System.getProperty("megamek.gpu.boards.hour", "10"));
-        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "multihex-buildings");
+        File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), name);
         Files.createDirectories(output.toPath());
-        Board board = BoardFile.loadSheet(new File("data/boards", "Alien Worlds/32x17 Lunar Base.board2"), false, true);
         var capture = new FutureTask<BoardScene>(() -> {
             var editor = new BoardEditorSession(); editor.open(board, null);
             try (var source = new GpuMapSource(editor.game(), null, editor)) { return source.takeFrame().scene(); }
@@ -103,7 +107,7 @@ class GpuMultiHexBuildingSmokeTest {
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
-                    for (View view : VIEWS) {
+                    for (View view : views) {
                         if (view.name().startsWith("review-")) { continue; }
                         camera.setIsometric(view.isometric());
                         camera.orbit(view.orbit(), view.tilt());
@@ -117,7 +121,7 @@ class GpuMultiHexBuildingSmokeTest {
                     // headless test installations otherwise covers the roof with a placeholder and hides its UVs.
                     BoardScene materials = materials(scene);
                     terrain.update(materials);
-                    for (View view : VIEWS) {
+                    for (View view : views) {
                         if (!view.name().startsWith("junction") && !view.name().equals("ring-roof")
                               && !view.name().startsWith("corner-") && !view.name().startsWith("review-")) { continue; }
                         camera.setIsometric(view.isometric()); camera.orbit(view.orbit(), view.tilt());
@@ -129,7 +133,7 @@ class GpuMultiHexBuildingSmokeTest {
                     }
                     frame.configure(new BoardAtmosphere.Settings(22, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                    for (View lamps : VIEWS) {
+                    for (View lamps : views) {
                         if (!List.of("corner-pillars", "review-low-front", "review-east", "review-back").contains(lamps.name())) { continue; }
                         camera.setIsometric(true); camera.orbit(lamps.orbit(), lamps.tilt()); camera.camera.zoom = lamps.zoom();
                         camera.center(BoardGeometry.center(lamps.at(), materials.tile(lamps.at()).elevation()));

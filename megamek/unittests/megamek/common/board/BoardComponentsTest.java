@@ -28,6 +28,29 @@ import org.junit.jupiter.api.io.TempDir;
 class BoardComponentsTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    @Test void orphanBuildingControlsAreOmittedWithoutLosingPropsAssetsOrCollapsedMembers() throws Exception {
+        Board board = Board.createEmptyBoard(3, 1);
+        var controls = Map.of("footprint", HexAppearance.SQUARE, "kitVariant", HexAppearance.ofKitVariant("default"),
+              "buildingProfile", HexAppearance.STEPPED_BUILDING);
+        board.getHex(0, 0).setAppearance(controls);
+        var asset = new HexAppearance(null, "buildings/missing-pack/hall", null, null).withUid("missing-hall");
+        var appearance = new java.util.LinkedHashMap<>(controls); appearance.put("building", asset);
+        board.getHex(1, 0).setAppearance(appearance);
+        var prop = new BoardDecoration("tiny-authored", "prop", "buildings/debug/debug-authored", null, 0, 0, 0, false, .05,
+              BoardDecoration.Placement.ground(), 0);
+        board.getHex(1, 0).setDecorations(List.of(prop));
+        board.getHex(2, 0).setAppearance(controls);
+        var reference = new BuildingVolumes.Reference(prop.id(), new Coords(1, 0));
+        board.getHex(2, 0).setBuildingReference(reference);
+        Board loaded = BoardFile.readNative(encode(board));
+        assertTrue(loaded.getHex(0, 0).getAppearance().isEmpty());
+        assertEquals(Map.of("building", asset), loaded.getHex(1, 0).getAppearance());
+        var savedProp = loaded.getHex(1, 0).getDecorations().getFirst();
+        assertEquals(prop.id(), savedProp.id()); assertEquals(prop.asset(), savedProp.asset()); assertEquals(.05, savedProp.scale());
+        assertEquals(controls, loaded.getHex(2, 0).getAppearance());
+        assertEquals(reference, loaded.getHex(2, 0).getBuildingReference());
+    }
+
     @Test void missingBasementsAreUnknownAndUnknownIsOmittedWhenSaving() throws Exception {
         Board source = Board.createEmptyBoard(1, 1);
         var hex = new Hex(0, "building:2:0;bldg_cf:60;bldg_elev:3", "");

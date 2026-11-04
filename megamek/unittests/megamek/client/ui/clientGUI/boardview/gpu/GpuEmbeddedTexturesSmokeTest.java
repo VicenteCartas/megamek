@@ -95,10 +95,10 @@ class GpuEmbeddedTexturesSmokeTest {
                         assertTrue(Gdx.gl.glIsTexture(texture.getTextureObjectHandle()), "Only the cache disposes images");
                     }
                     var first = board.model("buildings/authored/hpg-headquarters");
-                    var second = board.model("buildings/authored/xenobiology-station");
-                    assertSame(first.getMaterial("structures/common/weathered-paint")
+                    var second = board.model("buildings/authored/civic-arena");
+                    assertSame(first.getMaterial("structures/common/satin-steel")
                                 .get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture,
-                          second.getMaterial("structures/common/weathered-paint")
+                          second.getMaterial("structures/common/satin-steel")
                                 .get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription.texture);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) {

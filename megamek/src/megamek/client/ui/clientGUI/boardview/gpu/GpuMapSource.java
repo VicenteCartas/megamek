@@ -130,7 +130,7 @@ final class GpuMapSource implements BoardSource {
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private long boardGeneration;
     private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview,
-          Map<Coords, List<BoardEditorTerrain.Badge>> badges) { }
+          Map<Coords, List<BoardEditorTerrain.Badge>> badges, boolean authoredGesture) { }
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
@@ -248,8 +248,12 @@ final class GpuMapSource implements BoardSource {
         if (editor != null && state.activeBrush().way() && editorHover != null) {
             editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
         }
+        boolean authoredGesture = editorStrokeBoard == board && state != null && state.tool() == BoardEditorSession.Tool.SELECT
+              && state.selection().stream().anyMatch(item -> board.getHex(item.coords()).getDecorations().stream()
+                    .anyMatch(object -> object.id().equals(item.object())
+                          && megamek.common.board.BuildingVolumes.of(object.asset()).present()));
         publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
-              badgeSnapshot);
+              badgeSnapshot, authoredGesture);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
@@ -589,6 +593,8 @@ final class GpuMapSource implements BoardSource {
     private void closeMeasuring() { ruler = null; }
 
     public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
+
+    @Override public boolean editorAuthoredGesture() { return (rendering == null ? publication : rendering).authoredGesture(); }
 
     @Override public Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() {
         return (rendering == null ? publication : rendering).badges();

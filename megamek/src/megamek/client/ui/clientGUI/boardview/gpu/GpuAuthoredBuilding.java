@@ -28,6 +28,7 @@ import com.badlogic.gdx.graphics.g3d.utils.shapebuilders.BoxShapeBuilder;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Quaternion;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BuildingInteriors;
@@ -45,7 +46,7 @@ final class GpuAuthoredBuilding {
     }
     /** CPU geometry prepared with the terrain snapshot; only upload and small interior meshes touch GL. */
     record Prepared(Layout layout, List<ModelData> levels, List<List<Vector3>> floors, List<Vector3> columns,
-          List<Vector3> roof) { }
+          List<Vector3> roof, BoundingBox localBounds) { }
     private record Assembly(String asset, List<BuildingVolumes.Module> modules) { }
     private record Placement(Coords anchor, BoardDecoration object, double base, int width, int height) { }
     private record Geometry(ModelData source, GeneratedMesh mesh) { }
@@ -153,7 +154,7 @@ final class GpuAuthoredBuilding {
         Model interior = null;
         try {
             for (ModelData lod : prepared.levels()) { levels.add(upload.apply(lod)); }
-            if (prepared.layout().interiors() != BuildingInteriors.NO) { interior = interior(prepared); }
+            if (!prepared.floors().isEmpty() || !prepared.columns().isEmpty()) { interior = interior(prepared); }
             return new Slice(List.copyOf(levels), interior, prepared.roof());
         } catch (RuntimeException | Error failure) {
             levels.forEach(Model::dispose);
@@ -202,6 +203,9 @@ final class GpuAuthoredBuilding {
 
     private static Prepared slice(Layout layout, Whole placed) {
         var object = layout.object();
+        Matrix4 unplace = frame(layout.anchor(), object, layout.base()).inv();
+        BoundingBox localBounds = new BoundingBox().inf();
+        Vector3 localPoint = new Vector3();
         float cx = HexTile.centerX(layout.cell(), HexTile.MODEL_WIDTH), cy = HexTile.centerY(layout.cell(), HexTile.HEIGHT);
         List<GeneratedMesh.Keep> boundaries = new ArrayList<>();
         // The Voronoi cell of the original occupied hex centres equals their shared hex edges. At outside edges it
@@ -229,20 +233,25 @@ final class GpuAuthoredBuilding {
                   new float[] {maxX + 1, maxY + 1}, new float[] {minX - 1, maxY + 1});
             for (var boundary : boundaries) { polygon = GeneratedMesh.clip(polygon, boundary); }
             minX = Float.MAX_VALUE; minY = Float.MAX_VALUE; maxX = -Float.MAX_VALUE; maxY = -Float.MAX_VALUE;
-            for (var point : polygon) {
-                minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
-                minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
+            for (var corner : polygon) {
+                minX = Math.min(minX, corner[0]); maxX = Math.max(maxX, corner[0]);
+                minY = Math.min(minY, corner[1]); maxY = Math.max(maxY, corner[1]);
             }
             // Only planes touching the final convex region can cut it; distant members are redundant.
             List<float[]> region = polygon;
             var active = boundaries.stream().filter(plane -> region.stream().anyMatch(p -> Math.abs(plane.at(p[0], p[1])) < .02)).toList();
             var share = polygon.isEmpty() ? new GeneratedMesh() : lod.mesh().clipped(active, minX - .01f, minY - .01f, maxX + .01f, maxY + .01f);
             for (var part : share.parts.values()) {
-                for (int i = 0; i < part.size; i += RigidGlb.STRIDE) { part.items[i] -= cx; part.items[i + 1] -= cy; }
+                for (int i = 0; i < part.size; i += RigidGlb.STRIDE) {
+                    // Retain the near mesh's object-space envelope before the per-hex translation. Editor outlines
+                    // then follow a preview transform without reading every mesh vertex again on the render thread.
+                    if (levels.isEmpty()) { localBounds.ext(localPoint.set(part.items[i], part.items[i + 1], part.items[i + 2]).mul(unplace)); }
+                    part.items[i] -= cx; part.items[i + 1] -= cy;
+                }
             }
             levels.add(share.data("authored-" + object.id() + "-" + layout.cell(), lod.source()));
         }
-        if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of()); }
+        if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of(), localBounds); }
         Area cell = BuildingVolumes.hex(layout.cell());
         Area interiorCell = new Area(cell);
         // Floor slab edges must sit behind the neutral map cap, not flicker through its coincident plane.
@@ -256,7 +265,7 @@ final class GpuAuthoredBuilding {
         }
         List<List<Vector3>> floors = new ArrayList<>();
         List<Vector3> columns = new ArrayList<>();
-        if (layout.interiors() != BuildingInteriors.NO) {
+        if (layout.interiors() != BuildingInteriors.NO && !BuildingVolumes.tilted(object)) {
             for (int level = 0; level < layout.height(); level++) {
                 float z = (layout.ground() + level) * HexTile.LEVEL_HEIGHT;
                 if (level == 0 || layout.interiors() == BuildingInteriors.YES) {
@@ -274,8 +283,12 @@ final class GpuAuthoredBuilding {
             }
         }
         Area roof = new Area();
+        boolean tilted = BuildingVolumes.tilted(object);
         placed.roofs().forEach((z, area) -> {
-            if (Math.ceil(z / HexTile.LEVEL_HEIGHT - 1e-5) == layout.ground() + layout.height()) { roof.add(area); }
+            // A slope still has one gameplay roof per hex. Support the whole covered footprint at that height,
+            // rather than a narrow strip where the sloping mesh happens to cross the selected level band.
+            if (tilted ? z > layout.ground() * HexTile.LEVEL_HEIGHT + .00001
+                  : Math.ceil(z / HexTile.LEVEL_HEIGHT - 1e-5) == layout.ground() + layout.height()) { roof.add(area); }
         });
         roof.intersect(cell);
         roof.transform(AffineTransform.getTranslateInstance(-cx, -cy));
@@ -286,7 +299,7 @@ final class GpuAuthoredBuilding {
             standing.add(new Vector3(triangle.b()).set(triangle.b().x, triangle.b().y, roofZ));
             standing.add(new Vector3(triangle.c()).set(triangle.c().x, triangle.c().y, roofZ));
         }
-        return new Prepared(layout, List.copyOf(levels), List.copyOf(floors), List.copyOf(columns), List.copyOf(standing));
+        return new Prepared(layout, List.copyOf(levels), List.copyOf(floors), List.copyOf(columns), List.copyOf(standing), localBounds);
     }
 
     private static Model interior(Prepared prepared) {

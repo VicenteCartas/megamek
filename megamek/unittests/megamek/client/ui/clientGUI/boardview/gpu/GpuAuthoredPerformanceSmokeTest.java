@@ -30,6 +30,10 @@ import org.junit.jupiter.api.Test;
 @Tag("on-demand")
 @Tag("gpu-benchmark")
 class GpuAuthoredPerformanceSmokeTest {
+    @jdk.jfr.Name("megamek.AuthoredPlacement")
+    @jdk.jfr.StackTrace(false)
+    static final class PlacementTiming extends jdk.jfr.Event { public String asset; }
+
     @Test void timesNativePlacementFrames() throws Exception {
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(32, 28), null);
@@ -41,7 +45,7 @@ class GpuAuthoredPerformanceSmokeTest {
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900);
         config.setInitialVisible(false); config.useVsync(false); config.setForegroundFPS(60);
         var assets = List.of("buildings/debug/debug-authored", "buildings/authored/hpg-headquarters",
-              "buildings/authored/xenobiology-station");
+              "buildings/authored/civic-arena");
         var positions = List.of(new Coords(8, 6), new Coords(14, 18), new Coords(26, 6));
         Path output = Path.of("build/gpu-board-review/authored-buildings/placement-"
               + System.getProperty("megamek.gpu.authoredRun", "review") + ".jfr");
@@ -53,6 +57,8 @@ class GpuAuthoredPerformanceSmokeTest {
                 long warm, started, first, revision, previousFrame;
                 double maximum, interval, ready;
                 int index, phase;
+                PlacementTiming timing;
+                String stage = "";
                 @Override public void render() {
                     try {
                         long before = System.nanoTime();
@@ -67,6 +73,14 @@ class GpuAuthoredPerformanceSmokeTest {
                             Gdx.input.getInputProcessor().mouseMoved(Math.round(pointer.x), Gdx.graphics.getHeight() - Math.round(pointer.y));
                         }
                         assertTrue(System.nanoTime() < deadline, "Authored placement stalled at " + index + "/" + phase);
+                        if (phase == 2 && ready == 0) {
+                            var tasks = ((GpuTerrain) field(this, "terrain")).buildDetails().stream()
+                                  .map(status -> status.step().task()).distinct().sorted().collect(Collectors.joining(","));
+                            if (!tasks.equals(stage)) {
+                                stage = tasks;
+                                System.out.printf("AUTHORED work asset=%s time=%.1fms stages=%s%n", assets.get(index), millis(started), stage);
+                            }
+                        }
                         if (GpuBoardTestUi.loading(this) || GpuBoardTestUi.busy(this)) { return; }
                         if (warm == 0) {
                             // Palette category thumbnails are startup work, independent of the measured placement.
@@ -89,13 +103,14 @@ class GpuAuthoredPerformanceSmokeTest {
                             System.out.printf("AUTHORED preview asset=%s elapsed=%.1fms max-frame=%.1fms%n", assets.get(index), millis(started), maximum);
                             revision = source.editorState().revision(); first = frames(); maximum = interval = ready = 0;
                             started = System.nanoTime(); previousFrame = 0; phase = 2;
+                            timing = new PlacementTiming(); timing.asset = assets.get(index); timing.begin(); stage = "";
                             source.editorPointer(at, 0, 0, false, source.takeFrame().boardGeneration()); source.endEditorStroke();
                         } else {
                             if (source.editorState().revision() == revision) { return; }
                             var installed = (BoardScene) field(field(this, "terrain"), "coverScene");
                             if (installed == null || installed.tiles().stream().flatMap(t -> t.features().stream())
                                   .noneMatch(f -> assets.get(index).equals(f.asset()) && GpuAuthoredBuilding.supports(f))) { return; }
-                            if (ready == 0) { ready = millis(started); }
+                            if (ready == 0) { ready = millis(started); timing.end(); timing.commit(); }
                             if (frames() < first + 45 || millis(started) < 3000) { return; }
                             assertTrue(source.takeFrame().scene().tiles().stream().flatMap(t -> t.features().stream())
                                   .anyMatch(f -> assets.get(index).equals(f.asset()) && GpuAuthoredBuilding.supports(f)));
