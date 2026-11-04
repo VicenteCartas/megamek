@@ -96,6 +96,28 @@ vec3 modelNormal(vec3 view, out vec3 geometric) {
 }
 
 #ifdef modelSurfaceFlag
+// The environment deliberately omits the sun. Its refracted image is the finite solar disk convolved with a
+// normalized angular lobe: roughness broadens and dims the highlight without changing its integrated energy.
+vec3 rubySun(vec3 position, vec3 direction, float roughness) {
+    float optical = max(.12, roughness);
+    float variance = 2.0 * optical * optical * optical * optical + SUN_DIAMETER * SUN_DIAMETER / 16.0;
+    float concentration = 1.0 / variance;
+    // The spherical Gaussian's normalization is k/(2*pi*(1-exp(-2*k))); exp(-2*k) is negligible here.
+    // sunColor is irradiance/pi, giving .5*k after the radiance conversion.
+    float lobe = .5 * concentration * exp(concentration * (dot(direction, sunDirection()) - 1.0));
+    vec3 light = sunColor() * lobe;
+#ifdef shadowMapFlag
+    vec4 projected = u_shadowMapProjViewTrans * vec4(position, 1.0);
+    vec3 uv = projected.xyz / projected.w * .5 + .5;
+    uv.z = min(uv.z, .998);
+    light *= shadowVisibility(shadowTent(uv, vec2(0.0), 1.5, false));
+#endif
+#ifdef cloudShadowFlag
+    light *= cloudTransmission(position);
+#endif
+    return light;
+}
+
 // Internal refraction through a closed convex crystal. The escaped ray sees the filtered sky/ground environment:
 // inclusions make it translucent, not a clear alpha window onto the scene. Two internal reflections are retained.
 vec3 rubyTransport(vec3 pigment, vec3 normal, vec3 view, float roughness) {
@@ -130,6 +152,7 @@ vec3 rubyTransport(vec3 pigment, vec3 normal, vec3 view, float roughness) {
             vec3 ground = environmentGround(GROUND_ALBEDO);
             vec3 light = environmentRadiance(escaped, max(.12, roughness), ground, surfaceAmbient(vec3(0.0, 0.0, 1.0)));
             light = mix(hiddenSky(escaped, ground, GROUND_ALBEDO, light), light, skyVisibility(worldExit, escaped));
+            light += rubySun(worldExit, escaped, roughness);
             vec3 absorption = pow(clamp(pigment, vec3(.001), vec3(.95)), vec3(max(.12, path * u_modelRuby)));
             radiance += light * absorption * energy * (1.0 - fresnel);
         }

@@ -1,8 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.BasicStroke;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
+import java.awt.geom.Line2D;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -181,17 +183,27 @@ final class GpuAuthoredBuilding {
         if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of()); }
         var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
         Area cell = BuildingVolumes.hex(layout.cell());
+        Area interiorCell = new Area(cell);
+        // Floor slab edges must sit behind the neutral map cap, not flicker through its coincident plane.
+        for (int edge = 0; edge < 6; edge++) {
+            Coords neighbour = layout.cell().translated(HexTile.edgeDirection(edge));
+            if (neighbour.getX() >= 0 && neighbour.getY() >= 0 && neighbour.getX() < layout.boardWidth() && neighbour.getY() < layout.boardHeight()) { continue; }
+            int next = (edge + 1) % 6;
+            var boundary = new Line2D.Double(HexTile.cornerX(layout.cell(), edge, HexTile.MODEL_WIDTH), HexTile.cornerY(layout.cell(), edge, HexTile.HEIGHT),
+                  HexTile.cornerX(layout.cell(), next, HexTile.MODEL_WIDTH), HexTile.cornerY(layout.cell(), next, HexTile.HEIGHT));
+            interiorCell.subtract(new Area(new BasicStroke(.08f, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_MITER).createStrokedShape(boundary)));
+        }
         List<List<Vector3>> floors = new ArrayList<>();
         List<Vector3> columns = new ArrayList<>();
         if (layout.interiors() != BuildingInteriors.NO) {
             for (int level = 0; level < layout.height(); level++) {
                 float z = (layout.ground() + level) * HexTile.LEVEL_HEIGHT;
                 if (level == 0 || layout.interiors() == BuildingInteriors.YES) {
-                    Area floor = BuildingVolumes.section(solids, z + .02); floor.intersect(cell);
+                    Area floor = BuildingVolumes.section(solids, z + .02); floor.intersect(interiorCell);
                     floor.transform(AffineTransform.getTranslateInstance(-cx, -cy));
                     floors.add(GpuBuildingInterior.triangles(floor));
                 }
-                Area middle = BuildingVolumes.section(solids, z + HexTile.LEVEL_HEIGHT * .5); middle.intersect(cell);
+                Area middle = BuildingVolumes.section(solids, z + HexTile.LEVEL_HEIGHT * .5); middle.intersect(interiorCell);
                 var bounds = middle.getBounds2D();
                 for (double px = Math.ceil(bounds.getMinX() / 22) * 22; px < bounds.getMaxX(); px += 22) {
                     for (double py = Math.ceil(bounds.getMinY() / 22) * 22; py < bounds.getMaxY(); py += 22) {

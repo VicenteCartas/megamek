@@ -501,6 +501,36 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
+    void pillarCapPlatesAndSlopingShouldersKeepSquareTexels() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("postCap", GeneratedMesh.class, List.class,
+              List.class, float.class, float.class, float.class);
+        method.setAccessible(true);
+        List<float[]> hex = new ArrayList<>();
+        for (int corner = 0; corner < 6; corner++) {
+            hex.add(new float[] { HexTile.cornerOffsetX(corner, 100), HexTile.cornerOffsetY(corner, 86.6f) });
+        }
+        var mesh = new GeneratedMesh();
+        method.invoke(null, mesh, hex, List.of(new float[] { -4, -3 }, new float[] { 4, -3 },
+              new float[] { 5, 2 }, new float[] { -3, 4 }), 0f, 2f, .5f);
+        var plates = vertices(mesh.data("pillar-cap", false), BoardMultiHexBuilding.HARDWARE);
+        int tops = 0, shoulders = 0;
+        for (int i = 0; i < plates.size(); i += 3) {
+            float[] a = plates.get(i), b = plates.get(i + 1), c = plates.get(i + 2);
+            var ab = new Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+            var ac = new Vector3(c[0] - a[0], c[1] - a[1], c[2] - a[2]);
+            if (ab.crs(ac).len() < .2f) { continue; } // Ignore the small round fastener heads.
+            var axes = textureAxes(a, b, c);
+            assertNotNull(axes);
+            assertEquals(12, axes[0].len(), .01, "The top and shoulders use the same physical texture scale");
+            assertEquals(12, axes[1].len(), .01);
+            assertEquals(0, axes[0].cpy().nor().dot(axes[1].cpy().nor()), .002,
+                  "Angled plate edges must not shear the metal grain or its normal map");
+            if (a[5] > .99f) { tops++; } else { shoulders++; }
+        }
+        assertTrue(tops > 0 && shoulders > 0);
+    }
+
+    @Test
     void tallPillarsHaveOnlyAHeadLightAndASmallerFootLight() throws Exception {
         var method = BoardMultiHexBuilding.class.getDeclaredMethod("facadePost", GeneratedMesh.class, List.class,
               float[].class, float.class, float.class, float.class, float.class, float.class, boolean.class);

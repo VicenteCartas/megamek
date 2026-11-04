@@ -41,7 +41,7 @@ class GpuAuthoredBuildingSmokeTest {
         editor.command(new Command(Action.OBJECT_VALUE, "levels", "5"), null);
         editor.command(new Command(Action.OBJECT_VALUE, "colour0", "#dc9b72"), null);
         var scene = capture(editor.board());
-        var grown = capture(megamek.common.util.BoardUtilities.resize(editor.board(), 0, 0, 4, 0));
+        var grown = capture(megamek.common.util.BoardUtilities.resize(editor.board(), 0, 4, 0, 0));
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -138,6 +138,9 @@ class GpuAuthoredBuildingSmokeTest {
         assertEquals(1, board.getHex(hpg).getDecorations().size());
 
         var smallEditor = new BoardEditorSession(); smallEditor.open(Board.createEmptyBoard(6, 4), null);
+        for (int x = 0; x < 6; x++) {
+            for (int y = 0; y < 4; y++) { smallEditor.board().getHex(x, y).setLevel(3); }
+        }
         for (String asset : List.of("hpg-headquarters", "xenobiology-station")) {
             smallEditor.command(new Command(Action.ASSET, "buildings/authored/" + asset), null);
             smallEditor.command(new Command(Action.BRUSH_VALUE, "object:scale", ".05"), null);
@@ -232,9 +235,12 @@ class GpuAuthoredBuildingSmokeTest {
                     terrain.update(smallScene);
                     terrain.animate(1, List.of());
                     camera.camera.zoom = .18f;
-                    camera.center(BoardGeometry.center(new Coords(3, 2), 0));
+                    camera.center(BoardGeometry.center(new Coords(3, 2), 3));
                     frame.render(terrain, camera, smallScene);
                     GpuReviewFrame.save(new File(output, "small-props.png"));
+                    // The displayed frame may enable material flags; settle them as the interactive loading loop does.
+                    GpuTerrainLodSmokeTest.settle(terrain, null, smallScene, camera);
+                    assertTrue(terrain.ready(smallScene), "Picking requires the scene's material configuration to be ready");
                     int selectable = 0;
                     for (Object chunk : (List<?>) field(terrain, "chunks")) {
                         for (Object prop : (List<?>) field(chunk, "props")) {
@@ -257,9 +263,10 @@ class GpuAuthoredBuildingSmokeTest {
                                       new com.badlogic.gdx.math.Vector3(0, 0, -1));
                                 var hit = terrain.decorationHit(smallScene, ray);
                                 picked = hit != null && hit.id().equals(shown.id()) && hit.coords().equals(owner);
+                                if (picked) { assertEquals(shown.anchor().z, hit.anchorZ(), .0001f, "Authored drag plane follows the baked base height"); }
                             }
                         }
-                        assertTrue(picked, "Small authored prop remains selectable");
+                        assertTrue(picked, "Small authored prop remains selectable at " + owner + " in " + shown.bounds());
                     }
                     terrain.setFluffHidden(true);
                     for (Coords owner : List.of(new Coords(2, 2), new Coords(4, 2))) {

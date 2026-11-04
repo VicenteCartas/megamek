@@ -2833,7 +2833,7 @@ final class BoardMultiHexBuilding {
         prism(mesh, hex, PIER, outline, bottom, top, outline.size());
         var collar = grown(outline, .18f);
         postCap(mesh, hex, outline, bottom, bottom + .7f, .65f);
-        postCap(mesh, hex, outline, top - .6f, top + BEVEL_RISE + .65f, .65f);
+        postCap(mesh, hex, outline, top, top + BEVEL_RISE + .4f, .5f);
         for (float z = (float) Math.ceil((bottom + 1) / LEVEL) * LEVEL; z < top - 1; z += LEVEL) {
             prism(mesh, hex, PIER, collar, z - .3f, z + .3f, collar.size());
         }
@@ -2875,12 +2875,15 @@ final class BoardMultiHexBuilding {
                   ((c[1] - a[1]) * nx - (c[0] - a[0]) * ny) / 12);
             outward(mesh, HARDWARE, hex, v0, v1, v2); outward(mesh, HARDWARE, hex, v0, v2, v3);
         }
-        clippedPolygon(mesh, hex, HARDWARE, inner.stream()
+        clippedPolygon(mesh, hex, PIER, inner.stream()
               .map(p -> vertex(p[0], p[1], top, 0, 0, 1, 1, p[0] / 12, -p[1] / 12)).toList());
-        var bolts = parapets(inner, .35f);
+        var plate = parapets(inner, .28f);
+        clippedPolygon(mesh, hex, HARDWARE, plate.stream()
+              .map(p -> vertex(p[0], p[1], top + .035f, 0, 0, 1, 1, p[0] / 12, -p[1] / 12)).toList());
+        var bolts = parapets(plate, .28f);
         for (int corner = 0; corner < bolts.size(); corner += 2) {
             float[] at = bolts.get(corner);
-            fastener(mesh, hex, new Vector3(at[0], at[1], top + .025f), Vector3.Z, .14f);
+            fastener(mesh, hex, new Vector3(at[0], at[1], top + .075f), Vector3.Z, .16f);
         }
     }
 
@@ -2895,7 +2898,7 @@ final class BoardMultiHexBuilding {
         prism(mesh, hex, PIER, outline, bottom, top, outline.size());
         float collar = (front - .35f) / 2, depth = front + .65f;
         postCap(mesh, hex, outline, bottom, bottom + .7f, .5f);
-        postCap(mesh, hex, outline, top - .6f, top + BEVEL_RISE + .65f, .5f);
+        postCap(mesh, hex, outline, top, top + BEVEL_RISE + .4f, .5f);
         for (float z = (float) Math.ceil((bottom + 1) / LEVEL) * LEVEL; z < top - 1; z += LEVEL) {
             facadeStrip(mesh, hex, PIER, a, tx, ty, -2.95f, 2.95f, collar, depth, z - .3f, z + .3f);
         }
@@ -2925,8 +2928,8 @@ final class BoardMultiHexBuilding {
         // Each exposed face has one head lamp and one small foot lamp, never another lamp at every storey.
         // External corners use larger amber head lenses. Foot markers are always small and white.
         for (boolean head : new boolean[] { true, false }) {
-            float width = head ? half * (marker ? .55f : .18f) : half * .07f;
-            float low = head ? top - (marker ? 2.5f : 2.8f) : bottom + .9f;
+            float width = head ? half * (marker ? .55f : .45f) : half * .12f;
+            float low = head ? top - (marker ? 2.5f : 1.95f) : bottom + .9f;
             float high = head ? top - 1.2f : bottom + 1.4f;
             facadeStrip(mesh, hex, HARDWARE, a, tx, ty, at - width - .2f, at + width + .2f,
                   front + .05f, .08f, low - .2f, high + .2f);

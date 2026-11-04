@@ -7839,7 +7839,10 @@ final class GpuTerrain implements Disposable {
                     if (prop.decorationId != null && drawn(prop, false) && hitProp(prop, ray, point)
                           && ray.origin.dst2(point) <= nearest) {
                         nearest = ray.origin.dst2(point);
-                        result = new DecorationHit(prop.decorationOwner == null ? prop.coords() : prop.decorationOwner, prop.decorationId, nearest, prop.instance().transform.val[Matrix4.M23]);
+                        // Authored meshes already contain their base height; their instance translates only in XY.
+                        float anchorZ = prop.decorationOwner == null ? prop.instance().transform.val[Matrix4.M23]
+                              : prop.decorationFeature.elevation() * BoardGeometry.level();
+                        result = new DecorationHit(prop.decorationOwner == null ? prop.coords() : prop.decorationOwner, prop.decorationId, nearest, anchorZ);
                     }
                 }
                 for (TileMesh tile : chunk.tileMeshes.values()) {
