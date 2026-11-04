@@ -354,6 +354,45 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /** What the save question before leaving was answered; closing it any other way stays in the game. */
+    interface SaveFirstAnswer {
+        /**
+         * @param save whether to save the game before leaving
+         */
+        void answered(boolean save);
+    }
+
+    /**
+     * Asks whether to save the game before leaving it: Save…, Don't save, or Cancel to stay. Settings → Advanced
+     * turns the question off.
+     *
+     * @param stayed runs when it closes unanswered, as with Cancel or Esc
+     */
+    UiDialog saveFirst(SaveFirstAnswer answer, Runnable stayed) {
+        boolean[] answered = new boolean[1];
+        UiDialog dialog = begin(Messages.getString("Lobby.saveFirst.title"), "dialog.md", true, () -> {
+            if (!answered[0]) {
+                stayed.run();
+            }
+        });
+        var label = kit.typeLabel(Messages.getString("Lobby.saveFirst.message"), "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(Messages.getString("Lobby.saveFirst.save"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(true);
+        }).setName("save-first-save");
+        dialog.secondary(Messages.getString("Lobby.saveFirst.leave"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(false);
+        }).setName("save-first-leave");
+        dialog.cancelButton(Messages.getString("Cancel.text")).setName("save-first-cancel");
+        show(dialog);
+        return dialog;
+    }
+
     /**
      * Opens the random map settings.
      *

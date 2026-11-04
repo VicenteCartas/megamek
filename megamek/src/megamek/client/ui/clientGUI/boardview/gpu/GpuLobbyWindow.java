@@ -737,18 +737,43 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: leaves the game the way the client's exit does, after its save question. */
+    /**
+     * Any thread: leaves the game the way the client's exit does. Unless the player stopped it, the lobby first asks
+     * whether to save, in its own dialog; saving leaves once the game is written, and a cancelled save stays.
+     */
     void leave() {
         SwingUtilities.invokeLater(() -> {
             if (closing || exitRequested) {
                 return;
             }
-            exitRequested = true;
-            try {
-                gui.handleExit();
-            } finally {
-                exitRequested = false;
+            if (GUIPreferences.getInstance().getNoSaveNag() || (screen == null)) {
+                exitRequested = true;
+                try {
+                    gui.handleExit();
+                } finally {
+                    exitRequested = false;
+                }
+                return;
             }
+            exitRequested = true;
+            onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.saveFirst(
+                  save -> SwingUtilities.invokeLater(() -> {
+                    exitRequested = false;
+                    if (closing) {
+                        return;
+                    }
+                    if (!save) {
+                        gui.exitWithoutAsking();
+                    } else if (!swingDialogs.blocked()) {
+                        files.saveGame(file -> gui.lobbyCommands().saveGame(file,
+                              written -> SwingUtilities.invokeLater(() -> {
+                                  saved(written);
+                                  if ((written != null) && !closing) {
+                                      gui.exitWithoutAsking();
+                                  }
+                              })));
+                    }
+                }), () -> SwingUtilities.invokeLater(() -> exitRequested = false))));
         });
     }
 

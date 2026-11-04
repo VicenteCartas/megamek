@@ -1279,6 +1279,14 @@ work for Swing, and item 11 is under investigation.
        Checks: `RequisitionCatalogTest.theTypeRowOffersOnlyTypesWithAnAllowedUnit`, `LobbyFilesTest`,
        `LobbyTogglesSmokeTest` (the game menu saves and loads; a MekHQ lobby only saves) and
        `LobbyNativeDialogsSmokeTest.theFooterButtonsStayCentredOnTheCardWithAToolBesideThem`.
+     - Menu polish on `ui-work`, so the lobby has fewer nested menus and fewer Swing dialogs:
+       - Leaving the lobby asks "Save before leaving?" in a native dialog (`LobbyNativeDialogs.saveFirst`)
+         instead of the Swing "Save First?" question (`AbstractClientGUI.handleExit`). Save… opens the system
+         file dialog and leaves once the game is written; Don't save leaves (`AbstractClientGUI.exitWithoutAsking`);
+         Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
+         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window still asks in Swing, since
+         its exit path belongs to hud-v3.
+       Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
@@ -1297,8 +1305,8 @@ work for Swing, and item 11 is under investigation.
          - the unit damage editor (`UnitEditorDialog`);
          - the SBF and Alpha Strike stats dialogs, with their export;
          - the auto-resolve dialogs: the chance of winning, the progress and the log.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), and the map editor's Client
-         Settings and About.
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), the map editor's Client
+         Settings and About, and the "Save First?" question when leaving a battle (`AbstractClientGUI.handleExit`).
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

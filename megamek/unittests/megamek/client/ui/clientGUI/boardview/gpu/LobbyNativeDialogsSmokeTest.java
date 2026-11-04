@@ -29,6 +29,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import megamek.client.Client;
 import megamek.client.bot.AIType;
@@ -542,6 +543,45 @@ class LobbyNativeDialogsSmokeTest {
             ui.draw();
             assertFalse(dialogs.isOpen(), "Escape closes it");
             assertEquals(2, answers.size(), "Escape answers nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theSaveQuestionBeforeLeavingSavesLeavesOrStays() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            UiDialog dialog = dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            Table card = dialog.card();
+            Vector2 cardRight = card.localToStageCoordinates(new Vector2(card.getWidth(), 0));
+            for (String name : List.of("save-first-save", "save-first-leave", "save-first-cancel")) {
+                Actor button = find(ui, name);
+                Vector2 right = button.localToStageCoordinates(new Vector2(button.getWidth(), 0));
+                assertTrue(right.x <= cardRight.x + 0.5f, name + " stays inside the card");
+            }
+            click(ui, find(ui, "save-first-save"));
+            assertEquals(List.of("save true"), answers, "Save… saves");
+            assertFalse(dialogs.isOpen());
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-leave"));
+            assertEquals("save false", answers.getLast(), "Don't save leaves");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-cancel"));
+            ui.draw();
+            assertEquals("stayed", answers.getLast(), "Cancel stays");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen());
+            assertEquals(List.of("save true", "save false", "stayed", "stayed"), answers, "Escape stays too");
             dialogs.dispose();
         });
     }
