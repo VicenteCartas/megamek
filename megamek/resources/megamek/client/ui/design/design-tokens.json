@@ -74,7 +74,7 @@
     "icon.sm": 16, "icon.md": 20, "icon.lg": 24,
     "border": 1, "focus.width": 2, "focus.gap": 1, "selection.width": 2,
     "tick.control": 8, "tick.panel": 13, "tick.width": 2,
-    "dialog.sm": 420, "dialog.md": 620, "dialog.lg": 800
+    "dialog.sm": 420, "dialog.md": 620, "dialog.lg": 800, "dialog.xl": 960
   },
   "opacity": { "tint.hover": 0.16, "tint.pressed": 0.28 },
   "motion": { "fast": 120, "medium": 200, "slow": 320, "easing": [0.2, 0.0, 0.0, 1.0] },

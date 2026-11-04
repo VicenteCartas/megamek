@@ -103,6 +103,35 @@ class LobbyFilesTest {
     }
 
     @Test
+    void aGameSaveAsksForASaveFileInTheSaveGameFolderAndPassesItOn() {
+        LobbyFiles.Ask ask = files.ask(LobbyFiles.Route.SAVE_GAME, null);
+        assertTrue(ask.save());
+        assertEquals(new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(), ask.directory());
+        assertEquals(Messages.getString("Lobby.files.saveGame"), ask.title());
+        assertEquals(List.of("sav.gz", "sav"), ask.extensions());
+
+        File chosen = answer("my game.sav.gz");
+        List<File> saved = new ArrayList<>();
+        files.saveGame(saved::add);
+        assertEquals(List.of(chosen), saved);
+
+        answer(null);
+        files.saveGame(saved::add);
+        assertEquals(1, saved.size(), "a cancel saves nothing");
+
+        LobbyFiles.Ask load = files.ask(LobbyFiles.Route.LOAD_GAME, null);
+        assertFalse(load.save());
+        assertEquals(ask.directory(), load.directory());
+        assertEquals(List.of("sav.gz", "sav"), load.extensions());
+        File loaded = answer("quicksave.sav.gz");
+        List<File> loads = new ArrayList<>();
+        files.loadGame(loads::add);
+        answer(null);
+        files.loadGame(loads::add);
+        assertEquals(List.of(loaded), loads, "the chosen save is passed on; a cancel loads nothing");
+    }
+
+    @Test
     void gameOptionsSaveAndLoadBack() {
         Vector<IBasicOption> saved = new Vector<>();
         saved.add(new BasicOption(OptionsConstants.BASE_FRIENDLY_FIRE, true));

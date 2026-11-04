@@ -172,7 +172,8 @@ final class LobbyCrewToolsView {
         if (!key.contains(".")) {
             tip(select, key + ".toolTipText");
         }
-        body.add(kit.formField(strip(label), select)).padTop(body.getChildren().isEmpty() ? 0 : space("md")).row();
+        float gap = body.getChildren().isEmpty() ? 0 : space("md");
+        body.add(kit.formField(strip(label), select)).padTop(gap).row();
     }
 
     private void buttons(UiDialog dialog, @Nullable String saveTip, @Nullable String randomizeTip) {

@@ -78,9 +78,16 @@ public final class UiDialog {
         scroll.setScrollingDisabled(true, false);
         card.add(scroll).grow().minHeight(0).row();
         Table foot = kit.footer(card, true);
+        // The buttons sit centred on the card while the leading side leaves them xxl clear; else they go right
         foot.add(leading).expandX().left();
         foot.add(actions);
-        foot.add(new Actor()).expandX();
+        foot.add(new Actor()).width(new Value() {
+            @Override
+            public float get(Actor context) {
+                float half = (foot.getWidth() - foot.getPadX() - actions.getPrefWidth()) / 2;
+                return (leading.getPrefWidth() + space("xxl") <= half) ? Math.max(0, half) : 0;
+            }
+        });
         layer.add(card).width(new Value() {
             @Override
             public float get(Actor context) {
@@ -212,7 +219,8 @@ public final class UiDialog {
         }
         actions.clearChildren();
         for (UiButton each : footerButtons) {
-            actions.add(each).width(widest).padLeft(actions.getCells().isEmpty() ? 0 : space("md"));
+            float gap = actions.getCells().isEmpty() ? 0 : space("md");
+            actions.add(each).width(widest).padLeft(gap);
         }
         return button;
     }

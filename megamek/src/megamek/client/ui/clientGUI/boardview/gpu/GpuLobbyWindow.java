@@ -1151,6 +1151,70 @@ public final class GpuLobbyWindow {
         });
     }
 
+    /** Any thread: asks for a file through the system's dialog and saves the game to it, as the menu bar's Save did. */
+    void saveGame() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && !swingDialogs.blocked()) {
+                files.saveGame(file -> gui.lobbyCommands().saveGame(file, this::saved));
+            }
+        });
+    }
+
+    /** Any thread: saves the game to the quick save file without asking, as the menu bar's Quick Save did. */
+    void quickSave() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                gui.lobbyCommands().quickSave(this::saved);
+            }
+        });
+    }
+
+    /**
+     * Whether this lobby can leave for a saved game: only MegaMek's own, whose start screen loads it. A game MekHQ
+     * started belongs to its campaign, so its lobby offers no loading.
+     */
+    static boolean loadsGames() {
+        return GpuHost.keepsOpen();
+    }
+
+    /** Any thread: asks for a saved game through the system's dialog, then, once confirmed, leaves to load it. */
+    void loadGame() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && loadsGames() && !swingDialogs.blocked()) {
+                files.loadGame(this::confirmLoad);
+            }
+        });
+    }
+
+    /** Any thread: once confirmed, leaves the lobby to load the quick save, as the menu bar's Quick Load did. */
+    void quickLoad() {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing && loadsGames()) {
+                confirmLoad(null);
+            }
+        });
+    }
+
+    /** Swing thread: asks, as the Swing lobby did, whether to close the lobby for {@code file} (null: quick save). */
+    private void confirmLoad(@Nullable File file) {
+        onScreen(shown -> shown.confirmDialog(Messages.getString("ClientGUI.LoadFromLobby.title"),
+              Messages.getString("ClientGUI.LoadFromLobby.message"), () -> SwingUtilities.invokeLater(() -> {
+                  if (!closing) {
+                      gui.leaveLobbyAndLoad(file);
+                  }
+              })));
+    }
+
+    /** Swing thread: tells the player in the chat where the game was saved, or that it was not. */
+    private void saved(@Nullable File file) {
+        ChatterBox chat = gui.getChatterBox();
+        if (chat != null) {
+            chat.systemMessage((file == null) ? Messages.getString("Lobby.save.failed")
+                  : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+            queueRefresh();
+        }
+    }
+
     /** Any thread: opens the configuration of the editable unit {@code id}. */
     void configureUnit(int id) {
         forces(controller -> controller.configure(id));

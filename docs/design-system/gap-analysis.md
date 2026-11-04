@@ -1228,6 +1228,57 @@ work for Swing, and item 11 is under investigation.
        Checks: `UiGallerySmokeTest.aListInsideAScrollingPaneTakesTheWheelOverItsRows` and
        `LobbyTogglesSmokeTest.aRightClickAnywhereOnACardOpensItsMenu`. Live: `briefing+camo`, the wheel over the
        tree.
+     - Drake's map setup round, after #36 (pushed straight to `UI`):
+       - The board browser has thumbnail and list views, and each slot has its own rotate, theme and level
+         controls. A generated slot shows a preview. Inspect in 3D, and Inspect's "Point to inspect hexes"
+         (`GpuHexHover`, `GpuMapHexCard`) shows each hex's terrain on a card. Thumbnails read only the terrain
+         (`BoardFile.readTerrain`).
+       - The preview shows the planetary conditions, in the lobby and in the Swing `MapSetupDialog`
+         (`GpuBoardWindow.openPreview(frame, board, conditions)`).
+       - Board stacks: a slot can hold several boards (Add to stack). The game rolls one of them, or keeps it a
+         surprise until the game starts, and another can be rolled or revealed. `MapSettings` keeps the stacks
+         (`getBoardStack`, `setBoardStack`) and `MapSetup` saves them as `<STACK>` elements; older setup files
+         still load. When only a stack changes (`equalBoardConfiguration` and `!equalBoardStacks`), the server
+         keeps the lobby's generated board. `removeUnavailable` now builds a surprise from the boards that are
+         still available, not the full list, and prunes the stacks.
+       - `MapSetupForm` holds pending local edits, so a late server echo doesn't undo a newer change.
+       - `LobbyCommands.applyMapSetup` takes `(MapSettings, MapSetup)`. MekHQ doesn't call it; MekHQ and
+         MegaMekLab still compile.
+       Checks: `MapSettingsTest`, `MapSettingsDataTest`, `MapSetupFormTest`, `LobbyMapSetupControllerTest`,
+       `MinimapTerrainTest` and `LobbyMapSetupSmokeTest`.
+     - Tester feedback round on `lobby-followups`:
+       - Camo chooser (Illiani): the tiles shrink from 104 to 72 px, so a `dialog.lg` dialog shows six columns.
+         The grid's height now follows the window (`LobbyNativeDialogs.camoGridHeight`, 240–560 px) instead of a
+         fixed 300 px.
+       - Saving in the lobby: the top bar gains a ⋮ game menu next to the settings gear, with "Save game…" (the
+         system file dialog, in `savegames`, `LobbyFiles.Route.SAVE_GAME`) and "Quick save". Ctrl+S
+         (`LOCAL_SAVE`) and Ctrl+Shift+S (`QUICK_SAVE`) do the same. Both send the `/localsave` command that the
+         Swing menu bar sends (`LobbyCommands.saveGame`, `quickSave`). The chat then says where the game was
+         saved, or that it was not (`AbstractClient.setSaveCompletionCallback`).
+       - Add unit (Lanceman): a new "Other" tab and type filter hold the four unit types no tab had: handheld
+         weapons, mobile structures, advanced buildings and battlefield support assets
+         (`RequisitionCatalog.Category.OTHER`). A test checks that every `UnitType` has a tab.
+       Checks: `RequisitionCatalogTest`, `LobbyFilesTest`, `LobbyCommandsTest`,
+       `LobbyTogglesSmokeTest.theGameMenuInTheTopBarSavesTheGame` and `LobbyNativeDialogsSmokeTest`.
+     - Second tester feedback round on `lobby-followups`:
+       - Dialog footers: the buttons are centred on the card, as tokens.md says, while the leading side (a tool
+         or check box) stays `xxl` clear of them. A wider leading side, such as the Welcome dialog's "Do not
+         bother me again", sends them to the right edge rather than crowding it. The first button no longer
+         takes the button gap as a left margin. The same "gap before the first" slip is fixed
+         in the C3 view's buttons and the crew tools' first field.
+       - Camo chooser: a new `dialog.xl` width (960) for picture browsers fits eight columns of 72 px tiles.
+         Like every dialog, it shrinks to the window less `xxxl` on each side.
+       - Loading from the lobby: the ⋮ game menu adds "Load game…" (the system file dialog, in `savegames`,
+         `LobbyFiles.Route.LOAD_GAME`) and "Quick load". Ctrl+L (`LOCAL_LOAD`) and Ctrl+Shift+L (`QUICK_LOAD`)
+         do the same. Each asks first, as the Swing menu did (`ClientGUI.LoadFromLobby`), then leaves the lobby
+         quietly and loads the save (`ClientGUI.leaveLobbyAndLoad`). A MekHQ game offers no loading
+         (`GpuHost.keepsOpen()`), since MekHQ loads its own campaigns.
+       - Add unit: the Type filter row offers only the types that hold a unit the game's rules allow
+         (`RequisitionCatalog.types`, carried in `RequisitionSearch.Result`). A chosen type stays so it can be
+         cleared.
+       Checks: `RequisitionCatalogTest.theTypeRowOffersOnlyTypesWithAnAllowedUnit`, `LobbyFilesTest`,
+       `LobbyTogglesSmokeTest` (the game menu saves and loads; a MekHQ lobby only saves) and
+       `LobbyNativeDialogsSmokeTest.theFooterButtonsStayCentredOnTheCardWithAToolBesideThem`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

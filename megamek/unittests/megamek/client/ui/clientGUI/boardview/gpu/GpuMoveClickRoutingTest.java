@@ -580,7 +580,7 @@ class GpuMoveClickRoutingTest {
     }
 
     /**
-     * Every unit menu ends with MegaMek's full map menu of the unit's hex, in every phase: 
+     * Every unit menu ends with MegaMek's full map menu of the unit's hex, in every phase:
      * a gamemaster's lists the Gamemaster commands, for an enemy and an own unit alike, and they act on
      * that hex's units; another player's lists none.
      */

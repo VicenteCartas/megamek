@@ -125,6 +125,40 @@ class LobbyNativeDialogsSmokeTest {
     }
 
     @Test
+    void theFooterButtonsStayCentredOnTheCardWithAToolBesideThem() {
+        UiTestStage.run(ui -> {
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.lg");
+            dialog.body().add(new Actor()).size(400, 40);
+            dialog.tool("Refresh directory", () -> { });
+            Button ok = dialog.primary("OK", () -> { });
+            Button cancel = dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.stage.act(1f);
+            ui.draw();
+            float left = ok.localToStageCoordinates(new Vector2(0, 0)).x;
+            float right = cancel.localToStageCoordinates(new Vector2(cancel.getWidth(), 0)).x;
+            Vector2 card = dialog.card().localToStageCoordinates(new Vector2(0, 0));
+            float centre = card.x + dialog.card().getWidth() / 2;
+            assertEquals(centre, (left + right) / 2, 1.5f, "the buttons are centred on the card, the tool aside");
+            dialog.close();
+
+            UiDialog wide = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.lg");
+            wide.body().add(new Actor()).size(400, 40);
+            wide.leading().add(new Actor()).size(320, 20);
+            wide.primary("OK", () -> { });
+            Button quit = wide.cancelButton("Cancel");
+            wide.show(ui.stage, false);
+            ui.stage.act(1f);
+            ui.draw();
+            Actor foot = quit.getParent().getParent();
+            float footRight = foot.localToStageCoordinates(new Vector2(foot.getWidth(), 0)).x;
+            float quitRight = quit.localToStageCoordinates(new Vector2(quit.getWidth(), 0)).x;
+            assertEquals(footRight, quitRight, 1.5f, "a wide leading side sends the buttons right, not against it");
+            wide.close();
+        });
+    }
+
+    @Test
     void theCamoChooserHandsBackTheClickedCamo() {
         UiTestStage.run(ui -> {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);

@@ -2,10 +2,12 @@
 package megamek.client.lobby;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -45,12 +47,21 @@ public final class RequisitionSearch {
      * @param sources  the source books of the units the rules allow, for the Source filter
      * @param millis   how long the query took, the catalogue's loading aside
      * @param loadMillis how long reading and indexing the catalogue took, when this query did it, else 0
+     * @param types    the exact types holding a unit the rules allow, for the Type filter
      */
     public record Result(Query query, List<RequisitionRow> rows, int total, List<String> sources, long millis,
-          long loadMillis) {
+          long loadMillis, Set<RequisitionCatalog.ExactType> types) {
         public Result {
             rows = List.copyOf(rows);
             sources = List.copyOf(sources);
+            types = Set.copyOf(types);
+        }
+
+        /** A result that offers every type. */
+        public Result(Query query, List<RequisitionRow> rows, int total, List<String> sources, long millis,
+              long loadMillis) {
+            this(query, rows, total, sources, millis, loadMillis,
+                  EnumSet.allOf(RequisitionCatalog.ExactType.class));
         }
     }
 
@@ -62,6 +73,7 @@ public final class RequisitionSearch {
     private final Map<MekSummary, RequisitionRow> rows = new IdentityHashMap<>();
     private RequisitionCatalog.Rules sourcesFor;
     private List<String> sources = List.of();
+    private Set<RequisitionCatalog.ExactType> types = Set.of();
     /** How long reading the catalogue took, until a result that says so is handed on; a stale query's is kept. */
     private long unreportedLoad;
 
@@ -127,9 +139,10 @@ public final class RequisitionSearch {
         if (!query.rules().equals(sourcesFor)) {
             sourcesFor = query.rules();
             sources = RequisitionCatalog.sources(index, query.rules());
+            types = RequisitionCatalog.types(index, query.rules());
         }
         long millis = (System.nanoTime() - start) / 1_000_000;
-        return new Result(query, shown, index.size(), sources, millis, loadMillis);
+        return new Result(query, shown, index.size(), sources, millis, loadMillis, types);
     }
 
     /**
