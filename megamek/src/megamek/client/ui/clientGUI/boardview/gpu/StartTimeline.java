@@ -46,11 +46,6 @@ final class StartTimeline {
         return ease((t - MENU_START - ITEM_STAGGER * index) / ITEM_SLIDE);
     }
 
-    /** Whether the player has played before, so the greeting welcomes them back; it always calls them Commander. */
-    static boolean returning(String lastPlayerName) {
-        return lastPlayerName != null && !lastPlayerName.isBlank();
-    }
-
     /** Eases out: fast at first, settling at 1. */
     static double ease(double x) {
         return 1 - Math.pow(1 - clamp(x), 3);
