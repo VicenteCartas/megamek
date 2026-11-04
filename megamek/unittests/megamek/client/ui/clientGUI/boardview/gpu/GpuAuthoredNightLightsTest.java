@@ -23,8 +23,9 @@ class GpuAuthoredNightLightsTest {
         RigidGlb.boardMaterial(data, "windows", "structures/buildings/fortress-glass");
         RigidGlb.boardMaterial(data, "wall", "structures/common/cast-concrete");
         assertEquals(java.util.Set.of("windows"), data.nightEmission);
-        assertTrue(java.util.stream.StreamSupport.stream(data.materials.first().textures.spliterator(), false)
-              .anyMatch(t -> t.usage == com.badlogic.gdx.graphics.g3d.model.data.ModelTexture.USAGE_EMISSIVE));
+        float[] glow = data.surfaces.get("windows").glow();
+        assertTrue(glow[0] > 0 && glow[0] > glow[2], "Shared glass keeps its warm emission");
+        assertArrayEquals(new float[3], data.surfaces.get("wall").glow(), "Walls remain unlit");
         var inherited = new RigidGlb.Data(); inherited.inheritMaterials(data);
         assertEquals(data.nightEmission, inherited.nightEmission);
     }
