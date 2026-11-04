@@ -63,21 +63,19 @@ final class LobbyTopBar extends WidgetGroup {
     private final UiPopover sidesPopover;
     private final UiPopover warningsPopover;
     private final UiPopover gameMenu;
-    private final Runnable saveAction;
-    private final Runnable quickSaveAction;
+    private final GameActions gameActions;
     private final float gap = space("lg");
     private final List<Button> blockerChips = new ArrayList<>();
     private LobbySnapshot shown = LobbySnapshot.EMPTY;
     private String shortcut = "";
     private boolean narrow;
 
-    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable settingsAction, Runnable saveAction,
-          Runnable quickSaveAction, Runnable leaveAction, Runnable readyAction, Consumer<Warning> warningAction) {
+    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable settingsAction, GameActions gameActions,
+          Runnable leaveAction, Runnable readyAction, Consumer<Warning> warningAction) {
         this.kit = kit;
         this.seat = seat;
         this.warningAction = warningAction;
-        this.saveAction = saveAction;
-        this.quickSaveAction = quickSaveAction;
+        this.gameActions = gameActions;
         gameMenu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
         gameMenu.setName("lobby-game-menu-popover");
         sidesPopover = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
@@ -141,7 +139,7 @@ final class LobbyTopBar extends WidgetGroup {
         return sidesPopover.back() || warningsPopover.back() || gameMenu.back() || seat.back();
     }
 
-    /** The ⋮ menu of the game itself: saving it, with or without asking where, as the old menu bar's File menu. */
+    /** The ⋮ menu of the game itself: saving it and loading another, as the old menu bar's File menu. */
     private void openGameMenu(Actor trigger) {
         if (gameMenu.isVisible()) {
             gameMenu.cancel();
@@ -151,8 +149,13 @@ final class LobbyTopBar extends WidgetGroup {
             return;
         }
         UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-        gameItem(items, "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, saveAction);
-        gameItem(items, "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, quickSaveAction);
+        gameItem(items, "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, gameActions::save);
+        gameItem(items, "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, gameActions::quickSave);
+        if (gameActions.loads()) {
+            items.separator();
+            gameItem(items, "Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, gameActions::load);
+            gameItem(items, "Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, gameActions::quickLoad);
+        }
         gameMenu.header(null, null).content(items);
         gameMenu.openedFrom(trigger);
         Vector2 corner = trigger.localToStageCoordinates(new Vector2(0, 0));
@@ -165,6 +168,22 @@ final class LobbyTopBar extends WidgetGroup {
             action.run();
         });
         item.setName(key);
+    }
+
+    /** What the ⋮ game menu does. */
+    interface GameActions {
+        void save();
+
+        void quickSave();
+
+        /** Asks for a saved game and leaves the lobby to load it. */
+        void load();
+
+        /** Leaves the lobby to load the quick save. */
+        void quickLoad();
+
+        /** Whether this lobby offers loading at all. */
+        boolean loads();
     }
 
     /** The Ready key's name for the tooltips, such as "Ctrl+Enter", or empty for none. */

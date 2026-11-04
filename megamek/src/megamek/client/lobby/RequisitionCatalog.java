@@ -532,6 +532,21 @@ public final class RequisitionCatalog {
         return List.copyOf(sources);
     }
 
+    /** The exact types that hold a unit {@code rules} allow, for the Type row, so it offers no empty choice. */
+    public static Set<ExactType> types(Index index, Rules rules) {
+        Set<ExactType> types = EnumSet.noneOf(ExactType.class);
+        for (Entry entry : index.entries) {
+            if (rules.allows(entry.unit())) {
+                for (ExactType type : ExactType.values()) {
+                    if (!types.contains(type) && type.matches(entry.unit())) {
+                        types.add(type);
+                    }
+                }
+            }
+        }
+        return types;
+    }
+
     /** The search split into lower-case words without accents; none for a blank search. */
     public static String[] words(@Nullable String search) {
         if ((search == null) || search.isBlank()) {

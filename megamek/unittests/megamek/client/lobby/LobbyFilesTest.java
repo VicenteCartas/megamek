@@ -118,6 +118,17 @@ class LobbyFilesTest {
         answer(null);
         files.saveGame(saved::add);
         assertEquals(1, saved.size(), "a cancel saves nothing");
+
+        LobbyFiles.Ask load = files.ask(LobbyFiles.Route.LOAD_GAME, null);
+        assertFalse(load.save());
+        assertEquals(ask.directory(), load.directory());
+        assertEquals(List.of("sav.gz", "sav"), load.extensions());
+        File loaded = answer("quicksave.sav.gz");
+        List<File> loads = new ArrayList<>();
+        files.loadGame(loads::add);
+        answer(null);
+        files.loadGame(loads::add);
+        assertEquals(List.of(loaded), loads, "the chosen save is passed on; a cancel loads nothing");
     }
 
     @Test

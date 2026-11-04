@@ -1200,8 +1200,19 @@ public class ClientGUI extends AbstractClientGUI
         }
 
         // Close lobby and load the selected file directly (skip HostDialog)
-        controller.setPostUnlaunchAction(() ->
-              controller.megaMekGUI.loadGameFile(selectedFile));
+        leaveLobbyAndLoad(selectedFile);
+    }
+
+    /**
+     * Leaves the lobby without asking and loads {@code file} from the start screen, skipping the host dialog; or the
+     * quick save when {@code file} is null. The caller has already confirmed that the lobby is to be left.
+     */
+    public void leaveLobbyAndLoad(@Nullable File file) {
+        if (file == null) {
+            controller.setPostUnlaunchAction(() -> controller.megaMekGUI.quickLoadGame());
+        } else {
+            controller.setPostUnlaunchAction(() -> controller.megaMekGUI.loadGameFile(file));
+        }
         setDisconnectQuietly(true);
         die();
     }
@@ -1449,9 +1460,7 @@ public class ClientGUI extends AbstractClientGUI
                 break;
             case FILE_GAME_QUICK_LOAD:
                 if (confirmLoadFromLobby()) {
-                    controller.setPostUnlaunchAction(() -> controller.megaMekGUI.quickLoadGame());
-                    setDisconnectQuietly(true);
-                    die();
+                    leaveLobbyAndLoad(null);
                 }
                 break;
             case HELP_ABOUT:

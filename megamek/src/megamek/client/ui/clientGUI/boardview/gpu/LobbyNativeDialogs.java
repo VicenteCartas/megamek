@@ -108,7 +108,7 @@ final class LobbyNativeDialogs {
      */
     LobbyCamoView camo(LobbyCamoView.Source source, CamoCatalog catalog, CamoChoice choice, boolean assets,
           Consumer<Camouflage> chosen) {
-        UiDialog dialog = begin(Messages.getString("CamoChoiceDialog.select_camo_pattern"), "dialog.lg", false,
+        UiDialog dialog = begin(Messages.getString("CamoChoiceDialog.select_camo_pattern"), "dialog.xl", false,
               () -> {
                   camoView.dispose();
                   camoView = null;
@@ -121,7 +121,7 @@ final class LobbyNativeDialogs {
             });
         }
         camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog,
-              "dialog.lg"), camoGridHeight(), chosen, this::close);
+              "dialog.xl"), camoGridHeight(), chosen, this::close);
         show(dialog);
         return camoView;
     }

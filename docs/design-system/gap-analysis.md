@@ -1260,6 +1260,24 @@ work for Swing, and item 11 is under investigation.
          (`RequisitionCatalog.Category.OTHER`). A test checks that every `UnitType` has a tab.
        Checks: `RequisitionCatalogTest`, `LobbyFilesTest`, `LobbyCommandsTest`,
        `LobbyTogglesSmokeTest.theGameMenuInTheTopBarSavesTheGame` and `LobbyNativeDialogsSmokeTest`.
+     - Second tester feedback round on `lobby-followups`:
+       - Dialog footers: the buttons are centred on the card, as tokens.md says, whatever the leading side
+         holds. The leading cell and an empty trailing cell share the spare width (`uniformX`), and the first
+         button no longer takes the button gap as a left margin. The same "gap before the first" slip is fixed
+         in the C3 view's buttons and the crew tools' first field.
+       - Camo chooser: a new `dialog.xl` width (960) for picture browsers fits eight columns of 72 px tiles.
+         Like every dialog, it shrinks to the window less `xxxl` on each side.
+       - Loading from the lobby: the ⋮ game menu adds "Load game…" (the system file dialog, in `savegames`,
+         `LobbyFiles.Route.LOAD_GAME`) and "Quick load". Ctrl+L (`LOCAL_LOAD`) and Ctrl+Shift+L (`QUICK_LOAD`)
+         do the same. Each asks first, as the Swing menu did (`ClientGUI.LoadFromLobby`), then leaves the lobby
+         quietly and loads the save (`ClientGUI.leaveLobbyAndLoad`). A MekHQ game offers no loading
+         (`GpuHost.keepsOpen()`), since MekHQ loads its own campaigns.
+       - Add unit: the Type filter row offers only the types that hold a unit the game's rules allow
+         (`RequisitionCatalog.types`, carried in `RequisitionSearch.Result`). A chosen type stays so it can be
+         cleared.
+       Checks: `RequisitionCatalogTest.theTypeRowOffersOnlyTypesWithAnAllowedUnit`, `LobbyFilesTest`,
+       `LobbyTogglesSmokeTest` (the game menu saves and loads; a MekHQ lobby only saves) and
+       `LobbyNativeDialogsSmokeTest.theFooterButtonsStayCentredOnTheCardWithAToolBesideThem`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human

@@ -49,7 +49,8 @@ public final class LobbyFiles {
         SAVE_UNIT_LIST(true),
         LOAD_UNIT_LIST(false),
         EXPORT_SPRITE(true),
-        SAVE_GAME(true);
+        SAVE_GAME(true),
+        LOAD_GAME(false);
 
         private final boolean save;
 
@@ -148,9 +149,9 @@ public final class LobbyFiles {
                   null);
             case EXPORT_SPRITE -> new Ask(route, null, Messages.getString("ExportUnitSpriteDialog.title"),
                   Messages.getString("Lobby.files.pngFiles"), List.of("png"), (name == null) ? null : name + ".png");
-            case SAVE_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
-                  Messages.getString("Lobby.files.saveGame"), Messages.getString("Lobby.files.saveGames"),
-                  List.of(SAVE_GZ, SAVE), null);
+            case SAVE_GAME, LOAD_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
+                  Messages.getString(route.save() ? "Lobby.files.saveGame" : "Lobby.files.loadGame"),
+                  Messages.getString("Lobby.files.saveGames"), List.of(SAVE_GZ, SAVE), null);
         };
     }
 
@@ -164,6 +165,15 @@ public final class LobbyFiles {
         chooser.choose(ask(Route.SAVE_GAME, null), file -> {
             if (file != null) {
                 save.accept(file);
+            }
+        });
+    }
+
+    /** Asks for a saved game to load, in the save game folder, and hands it to {@code load}; nothing when cancelled. */
+    public void loadGame(Consumer<File> load) {
+        chooser.choose(ask(Route.LOAD_GAME, null), file -> {
+            if (file != null) {
+                load.accept(file);
             }
         });
     }

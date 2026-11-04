@@ -125,6 +125,26 @@ class LobbyNativeDialogsSmokeTest {
     }
 
     @Test
+    void theFooterButtonsStayCentredOnTheCardWithAToolBesideThem() {
+        UiTestStage.run(ui -> {
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.lg");
+            dialog.body().add(new Actor()).size(400, 40);
+            dialog.tool("Refresh directory", () -> { });
+            Button ok = dialog.primary("OK", () -> { });
+            Button cancel = dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.stage.act(1f);
+            ui.draw();
+            float left = ok.localToStageCoordinates(new Vector2(0, 0)).x;
+            float right = cancel.localToStageCoordinates(new Vector2(cancel.getWidth(), 0)).x;
+            Vector2 card = dialog.card().localToStageCoordinates(new Vector2(0, 0));
+            float centre = card.x + dialog.card().getWidth() / 2;
+            assertEquals(centre, (left + right) / 2, 1.5f, "the buttons are centred on the card, the tool aside");
+            dialog.close();
+        });
+    }
+
+    @Test
     void theCamoChooserHandsBackTheClickedCamo() {
         UiTestStage.run(ui -> {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);

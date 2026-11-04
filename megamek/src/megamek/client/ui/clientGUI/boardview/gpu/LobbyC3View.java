@@ -292,7 +292,8 @@ final class LobbyC3View {
         }
         Table buttons = new Table();
         for (UiButton button : shown) {
-            buttons.add(button).width(widest).padLeft(buttons.getCells().isEmpty() ? 0 : space("md"));
+            float gap = buttons.getCells().isEmpty() ? 0 : space("md");
+            buttons.add(button).width(widest).padLeft(gap);
         }
         actions.add(buttons).right().padLeft(shown.isEmpty() ? 0 : space("md"));
 

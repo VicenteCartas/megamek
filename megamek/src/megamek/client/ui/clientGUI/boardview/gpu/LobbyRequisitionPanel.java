@@ -232,6 +232,8 @@ final class LobbyRequisitionPanel {
     private RequisitionSearch.Query asked;
     private RequisitionSearch.Result result;
     private List<String> sources = List.of();
+    /** The types holding a unit the rules allow; every type until the first result says otherwise. */
+    private Set<ExactType> populated = EnumSet.allOf(ExactType.class);
     private boolean drawerOpen;
     /** The drawer's slide: the height it set out from, its seconds so far (negative: none) and whether it shuts. */
     private float slideFrom;
@@ -627,8 +629,9 @@ final class LobbyRequisitionPanel {
         }
         LOGGER.info("Requisition: {} of {} units found in {} ms for \"{}\"", found.rows().size(), found.total(),
               found.millis(), found.query().search());
-        if (!found.sources().equals(sources)) {
+        if (!found.sources().equals(sources) || !found.types().equals(populated)) {
             sources = found.sources();
+            populated = found.types();
             if (drawerOpen) {
                 fillDrawer();
             }
@@ -834,7 +837,9 @@ final class LobbyRequisitionPanel {
         drawer.defaults().left();
         List<UiFilterChip> chips = new ArrayList<>();
 
-        List<ExactType> types = ExactType.of(category);
+        // An empty type is no choice; the chosen one stays so it can be cleared.
+        List<ExactType> types = ExactType.of(category).stream()
+              .filter(type -> populated.contains(type) || (filters.type() == type)).toList();
         if (types.size() > 1) {
             HorizontalGroup group = chipGroup();
             for (ExactType type : types) {

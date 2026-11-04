@@ -330,8 +330,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, window::saveGame, window::quickSave,
-              window::leave, window::ready, this::goTo);
+        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, gameActions(), window::leave,
+              window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);
@@ -407,8 +407,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
 
     /**
      * The Ready key (KeyCommandBind.DONE, Ctrl+Enter by default) presses Ready, the Client Settings key
-     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, and the save keys (LOCAL_SAVE, Ctrl+S, and
-     * QUICK_SAVE, Ctrl+Shift+S) save the game, unless a text field has the keys.
+     * (KeyCommandBind.CLIENT_SETTINGS, Alt+C) opens the settings, the save keys (LOCAL_SAVE, Ctrl+S, and
+     * QUICK_SAVE, Ctrl+Shift+S) save the game and the load keys (LOCAL_LOAD, Ctrl+L, and QUICK_LOAD, Ctrl+Shift+L)
+     * load one where the lobby offers that, unless a text field has the keys.
      */
     private boolean readyKey(int keycode) {
         if (stage.getKeyboardFocus() instanceof TextField) {
@@ -429,6 +430,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         KeyCommandBind quickSave = KeyCommandBind.QUICK_SAVE;
         if (key == quickSave.key && modifiers == quickSave.modifiers) {
             window.quickSave();
+            return true;
+        }
+        KeyCommandBind load = KeyCommandBind.LOCAL_LOAD;
+        if (GpuLobbyWindow.loadsGames() && key == load.key && modifiers == load.modifiers) {
+            window.loadGame();
+            return true;
+        }
+        KeyCommandBind quickLoad = KeyCommandBind.QUICK_LOAD;
+        if (GpuLobbyWindow.loadsGames() && key == quickLoad.key && modifiers == quickLoad.modifiers) {
+            window.quickLoad();
             return true;
         }
         KeyCommandBind bind = KeyCommandBind.DONE;
@@ -467,6 +478,36 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (topBar != null) {
             topBar.pulse();
         }
+    }
+
+    /** The top bar's ⋮ game menu, which the window runs on the Swing thread. */
+    private LobbyTopBar.GameActions gameActions() {
+        return new LobbyTopBar.GameActions() {
+            @Override
+            public void save() {
+                window.saveGame();
+            }
+
+            @Override
+            public void quickSave() {
+                window.quickSave();
+            }
+
+            @Override
+            public void load() {
+                window.loadGame();
+            }
+
+            @Override
+            public void quickLoad() {
+                window.quickLoad();
+            }
+
+            @Override
+            public boolean loads() {
+                return GpuLobbyWindow.loadsGames();
+            }
+        };
     }
 
     /** The player column's actions, which the window runs on the Swing thread. */

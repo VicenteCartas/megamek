@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
@@ -400,5 +401,16 @@ class RequisitionCatalogTest {
         late.setSource("TRO:3145");
         assertEquals(List.of("tro:3025", "TRO:3039"), RequisitionCatalog.sources(index(a, b, late, mek("D", "")),
               STANDARD_3067));
+    }
+
+    @Test
+    void theTypeRowOffersOnlyTypesWithAnAllowedUnit() {
+        MekSummary tank = unit("Demolisher", "", UnitType.TANK, 3000, TechConstants.T_INTRO_BOX_SET);
+        MekSummary asset = unit("Artillery", "", UnitType.BATTLEFIELD_SUPPORT_ASSET, 3000,
+              TechConstants.T_INTRO_BOX_SET);
+        MekSummary lateVtol = unit("Hawk", "", UnitType.VTOL, 3100, TechConstants.T_INTRO_BOX_SET);
+        assertEquals(EnumSet.of(ExactType.TANK, ExactType.BATTLEFIELD_SUPPORT_ASSET),
+              RequisitionCatalog.types(index(mek("Atlas", "AS7-D"), tank, asset, lateVtol), STANDARD_3067),
+              "a unit the rules leave out offers no type");
     }
 }
