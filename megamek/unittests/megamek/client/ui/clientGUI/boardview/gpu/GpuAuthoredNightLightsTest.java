@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 /** Fixture positions must follow the same transformed, clipped ownership as the visible stadium. */
 class GpuAuthoredNightLightsTest {
     @Test void sharedWindowMaterialsControlGeneratedKitsWithoutLightingTheirWalls() {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
         var data = new RigidGlb.Data();
         RigidGlb.boardMaterial(data, "windows", "structures/buildings/fortress-glass");
         RigidGlb.boardMaterial(data, "wall", "structures/common/cast-concrete");
