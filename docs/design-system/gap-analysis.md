@@ -1261,9 +1261,10 @@ work for Swing, and item 11 is under investigation.
        Checks: `RequisitionCatalogTest`, `LobbyFilesTest`, `LobbyCommandsTest`,
        `LobbyTogglesSmokeTest.theGameMenuInTheTopBarSavesTheGame` and `LobbyNativeDialogsSmokeTest`.
      - Second tester feedback round on `lobby-followups`:
-       - Dialog footers: the buttons are centred on the card, as tokens.md says, whatever the leading side
-         holds. The leading cell and an empty trailing cell share the spare width (`uniformX`), and the first
-         button no longer takes the button gap as a left margin. The same "gap before the first" slip is fixed
+       - Dialog footers: the buttons are centred on the card, as tokens.md says, while the leading side (a tool
+         or check box) stays `xxl` clear of them. A wider leading side, such as the Welcome dialog's "Do not
+         bother me again", sends them to the right edge rather than crowding it. The first button no longer
+         takes the button gap as a left margin. The same "gap before the first" slip is fixed
          in the C3 view's buttons and the crew tools' first field.
        - Camo chooser: a new `dialog.xl` width (960) for picture browsers fits eight columns of 72 px tiles.
          Like every dialog, it shrinks to the window less `xxxl` on each side.

@@ -957,7 +957,7 @@ that the user moves around or keeps open beside the game open as a **window** wi
 | Header | An optional status icon at `icon.lg` (24), the title in `headline`, then help and close icon buttons in the compact size |
 | Status | Info `status.info`, success `status.success`, warning `status.warning`, error `status.danger`, question `accent.primary`; always with the icon, never the color alone |
 | Body | `body` text in `text.primary` wrapping at the card's width, or any content such as form fields; an optional extra row (for example "Don't ask again") `xl` (16) below it |
-| Footer | `xxl` (24) below the content: the buttons centred on the card (a leading tool or check box does not push them aside), `md` (8) apart, all as wide as the widest and at least 88; the main action first, as in Windows (last in right-to-left) |
+| Footer | `xxl` (24) below the content: the buttons centred on the card while a leading tool or check box stays `xxl` (24) clear of them, else at the right edge, `md` (8) apart, all as wide as the widest and at least 88; the main action first, as in Windows (last in right-to-left) |
 | Motion | The card and its scrim fade in over `fast` (120 ms); they close at once. Reduce motion skips the fade. A card that greets (the start screen's welcome) may unfold instead: `UiDialog.unfold(true)` opens it from a thin line at its centre over `medium`, the scrim darkening over the same time, and its bands reveal after it |
 
 - **One main action.** A dialog has at most one primary or danger button, and it goes first; Cancel and other choices

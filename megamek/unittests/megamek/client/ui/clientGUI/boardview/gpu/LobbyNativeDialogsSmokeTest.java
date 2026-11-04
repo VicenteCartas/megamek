@@ -141,6 +141,20 @@ class LobbyNativeDialogsSmokeTest {
             float centre = card.x + dialog.card().getWidth() / 2;
             assertEquals(centre, (left + right) / 2, 1.5f, "the buttons are centred on the card, the tool aside");
             dialog.close();
+
+            UiDialog wide = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.lg");
+            wide.body().add(new Actor()).size(400, 40);
+            wide.leading().add(new Actor()).size(320, 20);
+            wide.primary("OK", () -> { });
+            Button quit = wide.cancelButton("Cancel");
+            wide.show(ui.stage, false);
+            ui.stage.act(1f);
+            ui.draw();
+            Actor foot = quit.getParent().getParent();
+            float footRight = foot.localToStageCoordinates(new Vector2(foot.getWidth(), 0)).x;
+            float quitRight = quit.localToStageCoordinates(new Vector2(quit.getWidth(), 0)).x;
+            assertEquals(footRight, quitRight, 1.5f, "a wide leading side sends the buttons right, not against it");
+            wide.close();
         });
     }
 
