@@ -46,44 +46,54 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.Align;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.Cell;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.View;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
+import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiKit;
-import megamek.client.ui.gdx.UiSelect;
-import megamek.client.ui.gdx.UiStepper;
+import megamek.client.ui.gdx.UiTheme;
+import megamek.common.compute.damage.PreExistingDamageLevel;
 
 /**
  * The lobby's damage editor (L-polish, item 6): the unit's paperdoll on the left, coloured live by the edits with the
- * change from the unit as read, and the picked location's values on the right, or the unit's general values. A click
- * on the doll or the location list above the values picks what shows. Repair all brings the shown values back to a
- * whole unit; More… keeps the edits and opens the Swing editor for ammunition, modes and the damage roller.
+ * change from the unit as read, the Whole unit button under it; on the right the picked location's name, stepped through with the chevrons beside it, over its values: armor and
+ * structure as health bars, hits as boxes and states as switches; under both, the pre-existing damage roller. A click
+ * on the doll picks a location. Restore Unit
+ * brings every value back to a whole unit; More… keeps the edits and opens the Swing editor for what this one lacks.
  */
 final class LobbyDamageView {
     /** The doll's width, and the most height it may take; a tall doll is fitted by its height instead. */
     private static final float DOLL_WIDTH = 260;
-    private static final float DOLL_MAX_HEIGHT = 400;
+    private static final float DOLL_MAX_HEIGHT = 330;
     /**
      * The values' pane: one height for every location, so picking another never resizes the dialog, and low enough
      * that the dialog fits a 900 pixel high window at the shipped interface scale.
      */
-    private static final float PANE_HEIGHT = 380;
+    private static final float PANE_HEIGHT = 340;
+    private static final PreExistingDamageLevel[] LEVELS = PreExistingDamageLevel.values();
 
     private final UiKit kit;
     private final UnitDamageForm form;
     private final List<UnitDamageForm.Place> places;
     private final GpuPaperdoll doll;
     private final GpuPaperdolls.Doll geometry;
-    private final UiSelect where;
+    private final Label heading;
+    private final UiButton wholeUnit;
+    private final UiKit.Segmented roller;
+    private final UiButton reroll;
     private final Table values = new Table();
     private final ScrollPane valuesScroll;
     /** The picked location, or null for the general values. */
     private UnitDamageForm.Place chosen;
     private String hovered = "";
+    /** The level last rolled, or null when nothing was rolled since the dialog opened or the unit was restored. */
+    private PreExistingDamageLevel rolled;
 
     LobbyDamageView(UiKit kit, UiDialog dialog, UnitDamageForm form, GpuPaperdolls paperdolls,
           LobbyPromptViews.Edt edt, Runnable applied, Runnable more, Runnable close) {
@@ -123,16 +133,6 @@ final class LobbyDamageView {
             }
         });
 
-        List<String> names = new ArrayList<>();
-        places.forEach(place -> names.add(place.name()));
-        names.add(Messages.getString("UnitEditorDialog.general"));
-        where = kit.tokenSelect(true, names.toArray(String[]::new));
-        where.setName("damage-where");
-        UiKit.onChange(where, () -> {
-            int index = where.getSelectedIndex();
-            choose(index >= 0 && index < places.size() ? places.get(index) : null);
-        });
-
         Table body = dialog.body();
         body.top().left();
         Table left = new Table();
@@ -145,21 +145,70 @@ final class LobbyDamageView {
                 height = DOLL_MAX_HEIGHT;
                 width = height * bounds[2] / bounds[3];
             }
-            left.add(doll).size(width, height).top();
+            left.add(doll).size(width, height).top().row();
         }
+        wholeUnit = kit.button("button-secondary" + UiTheme.COMPACT, "unit",
+              Messages.getString("Lobby.damage.wholeUnit"), null);
+        wholeUnit.setName("damage-whole");
+        UiKit.onChange(wholeUnit, () -> choose(null));
+        left.add(wholeUnit).growX().padTop(space("md")).row();
+
+        String[] names = new String[LEVELS.length];
+        for (int index = 0; index < LEVELS.length; index++) {
+            names[index] = Messages.getString("Lobby.damage." + LEVELS[index].name());
+        }
+        roller = kit.segmented(UiTheme.TOKEN_SEGMENT + UiTheme.COMPACT, true, names);
+        for (int index = 0; index < LEVELS.length; index++) {
+            UiButton segment = roller.buttons.get(index);
+            PreExistingDamageLevel level = LEVELS[index];
+            segment.setName("damage-roll-" + level.name().toLowerCase());
+            kit.tip(segment, true).getActor().setText(
+                  Messages.getString("UnitEditorDialog.preExistingDamage." + level.name()));
+            UiKit.onChange(segment, () -> roll(level));
+        }
+        reroll = kit.button("button-icon" + UiTheme.COMPACT, "die", null, null);
+        reroll.setName("damage-reroll");
+        kit.tip(reroll, true).getActor().setText(Messages.getString("Lobby.damage.reroll"));
+        UiKit.onChange(reroll, () -> roll(rolled));
         body.add(left).top().width(DOLL_WIDTH).padRight(space("xl"));
 
         Table right = new Table();
         right.top().left();
-        right.add(where).left().row();
+        Table head = new Table();
+        UiButton previous = kit.button("button-icon" + UiTheme.COMPACT, "chevron-left", null, null);
+        previous.setName("damage-previous");
+        UiKit.onChange(previous, () -> step(-1));
+        UiButton next = kit.button("button-icon" + UiTheme.COMPACT, "chevron-right", null, null);
+        next.setName("damage-next");
+        UiKit.onChange(next, () -> step(1));
+        heading = kit.typeLabel("", "title", "text.primary");
+        heading.setName("damage-heading");
+        heading.setAlignment(Align.center);
+        heading.setEllipsis(true);
+        head.add(previous).size(size("control.sm"));
+        head.add(heading).growX().minWidth(0).padLeft(space("sm")).padRight(space("sm"));
+        head.add(next).size(size("control.sm"));
+        right.add(head).growX().row();
         values.top().left().pad(0, space("md"), space("md"), space("md"));
         valuesScroll = kit.scrollList(values, true);
         valuesScroll.setName("damage-values");
         right.add(valuesScroll).growX().height(PANE_HEIGHT).padTop(space("md"));
-        body.add(right).top().growX();
+        body.add(right).top().growX().row();
+        if (form.rollable()) {
+            // the roller is the whole unit's, so it spans both columns under them
+            Table rolling = new Table();
+            rolling.add(kit.typeLabel(Messages.getString("UnitEditorDialog.preExistingDamage"), "body",
+                  "text.secondary")).left().padRight(space("lg"));
+            rolling.add(roller).growX();
+            rolling.add(reroll).size(size("control.sm")).padLeft(space("xs"));
+            body.add(rolling).colspan(2).growX().padTop(space("lg"));
+        }
 
         dialog.tool(Messages.getString("UnitEditorDialog.preExistingDamage.reset"), () -> {
             form.repairAll();
+            rolled = null;
+            roller.select(-1);
+            reroll.setDisabled(true);
             refresh();
         }).setName("damage-repair");
         dialog.tool(Messages.getString("Lobby.damage.more"), () -> {
@@ -175,6 +224,7 @@ final class LobbyDamageView {
         }, close)).setName("damage-ok");
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("damage-cancel");
 
+        reroll.setDisabled(true);
         choose(places.stream().filter(place -> place.abbr().equals("CT")).findFirst()
               .orElse(places.isEmpty() ? null : places.get(0)));
     }
@@ -197,20 +247,40 @@ final class LobbyDamageView {
         }
     }
 
+    /** Steps to the next location, or back with a negative {@code by}; the whole unit follows the last one. */
+    private void step(int by) {
+        int count = places.size() + 1;
+        int at = chosen == null ? places.size() : places.indexOf(chosen);
+        int next = Math.floorMod(at + by, count);
+        choose(next < places.size() ? places.get(next) : null);
+    }
+
+    private void roll(PreExistingDamageLevel level) {
+        if (level == null) {
+            return;
+        }
+        form.roll(level);
+        rolled = level;
+        roller.select(List.of(LEVELS).indexOf(level));
+        reroll.setDisabled(level == PreExistingDamageLevel.NONE);
+        refresh();
+    }
+
     private void choose(UnitDamageForm.Place place) {
         chosen = place;
-        int index = place == null ? places.size() : places.indexOf(place);
-        if (where.getSelectedIndex() != index) {
-            where.select(index);
-        }
+        heading.setText(place == null ? Messages.getString("Lobby.damage.wholeUnit") : place.name());
+        wholeUnit.pressed(place == null);
         fillValues();
         refreshDoll();
         valuesScroll.setScrollY(0);
     }
 
     private void refresh() {
+        float scroll = valuesScroll.getScrollY();
         fillValues();
         refreshDoll();
+        valuesScroll.layout();
+        valuesScroll.setScrollY(scroll);
     }
 
     private void fillValues() {
@@ -224,59 +294,61 @@ final class LobbyDamageView {
             }
             Label label = kit.typeLabel(value.label(), "body", "text.secondary");
             label.setEllipsis(true);
+            String name = "damage-value-" + index;
+            if (value.kind() == UnitDamageForm.Kind.STEPPER) {
+                // a bar takes the row's width under its label, as a stat block in a game shows it
+                values.add(label).left().growX().minWidth(0).colspan(2).padTop(index == 0 ? 0 : space("md")).row();
+                values.add(bar(value, name)).growX().colspan(2).padTop(space("xxs")).row();
+                continue;
+            }
             values.add(label).left().growX().minWidth(0).padTop(gap);
-            values.add(control(value, "damage-value-" + index)).right().padLeft(space("lg")).padTop(gap).row();
+            values.add(control(value, name)).right().padLeft(space("lg")).padTop(gap).row();
         }
     }
 
+    private UiHealthBar bar(UnitDamageForm.Value value, String name) {
+        UiHealthBar bar = kit.healthBar(value.value(), value.max(), value.original());
+        bar.setName(name);
+        bar.bar().setName(name + "-bar");
+        bar.up().setName(name + "-up");
+        bar.down().setName(name + "-down");
+        bar.field().setName(name + "-field");
+        UiKit.onChange(bar, () -> {
+            value.value(bar.value());
+            refreshDoll();
+        });
+        return bar;
+    }
+
     private Actor control(UnitDamageForm.Value value, String name) {
-        switch (value.kind()) {
-            case STEPPER -> {
-                UiStepper stepper = kit.stepper(value.value(), 0, value.max());
-                stepper.setName(name);
-                stepper.up().setName(name + "-up");
-                stepper.down().setName(name + "-down");
-                UiKit.onChange(stepper, () -> {
-                    value.value(stepper.value());
-                    refreshDoll();
-                });
-                Table line = new Table();
-                line.add(stepper);
-                line.add(kit.typeLabel("/ " + value.max(), "small", "text.secondary")).minWidth(space("xxxl") + space("md"))
-                      .padLeft(space("xs"));
-                return line;
-            }
-            case TOGGLE -> {
-                UiChoice toggle = kit.toggleSwitch("", value.on());
-                toggle.setName(name);
-                UiKit.onChange(toggle, () -> {
-                    value.value(toggle.isChecked() ? 1 : 0);
-                    // a limb brought back fills its armor and structure, which the rebuilt rows show
-                    refresh();
-                });
-                return toggle;
-            }
-            default -> {
-                Table boxes = new Table();
-                List<UiChoice> checks = new ArrayList<>();
-                for (int box = 0; box < value.max(); box++) {
-                    UiChoice check = kit.check("", box < value.value());
-                    check.setName(name + "-" + box);
-                    int at = box;
-                    UiKit.onChange(check, () -> {
-                        // a click on a hit box past the hits hits up to it; on the last hit, clears that one
-                        value.value(check.isChecked() ? at + 1 : at);
-                        for (int each = 0; each < checks.size(); each++) {
-                            checks.get(each).setChecked(each < value.value());
-                        }
-                        refreshDoll();
-                    });
-                    checks.add(check);
-                    boxes.add(check).padLeft(box == 0 ? 0 : space("xxs"));
-                }
-                return boxes;
-            }
+        if (value.kind() == UnitDamageForm.Kind.TOGGLE) {
+            UiChoice toggle = kit.toggleSwitch("", value.on());
+            toggle.setName(name);
+            UiKit.onChange(toggle, () -> {
+                value.value(toggle.isChecked() ? 1 : 0);
+                // a limb brought back fills its armor and structure, which the rebuilt rows show
+                refresh();
+            });
+            return toggle;
         }
+        Table boxes = new Table();
+        List<UiChoice> checks = new ArrayList<>();
+        for (int box = 0; box < value.max(); box++) {
+            UiChoice check = kit.check("", box < value.value());
+            check.setName(name + "-" + box);
+            int at = box;
+            UiKit.onChange(check, () -> {
+                // a click on a hit box past the hits hits up to it; on the last hit, clears that one
+                value.value(check.isChecked() ? at + 1 : at);
+                for (int each = 0; each < checks.size(); each++) {
+                    checks.get(each).setChecked(each < value.value());
+                }
+                refreshDoll();
+            });
+            checks.add(check);
+            boxes.add(check).padLeft(box == 0 ? 0 : space("xxs"));
+        }
+        return boxes;
     }
 
     private void refreshDoll() {
@@ -321,5 +393,9 @@ final class LobbyDamageView {
 
     private static float space(String token) {
         return DesignTokens.shipped().space().get(token);
+    }
+
+    private static float size(String token) {
+        return DesignTokens.shipped().size().get(token);
     }
 }

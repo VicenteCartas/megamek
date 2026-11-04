@@ -974,6 +974,15 @@ public final class UiKit {
     }
 
     /**
+     * A health bar ({@link UiHealthBar}) for {@code value} of {@code max}, such as a location's armor: click or drag
+     * the bar, wheel over it, step with − and + or the arrow keys, or type the value; the change from {@code original}
+     * shows at its end.
+     */
+    public UiHealthBar healthBar(int value, int max, int original) {
+        return new UiHealthBar(this, value, max, original);
+    }
+
+    /**
      * A stepper as {@link #stepper(int, int, int)} led by {@code caption} in small text.secondary, the caption, the
      * buttons and the value all {@link UiStepper#gap()} apart: one group, which stands a larger space from the next.
      */

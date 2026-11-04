@@ -34,6 +34,7 @@ package megamek.client.lobby;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -41,6 +42,10 @@ import java.util.function.Consumer;
 
 import megamek.client.ui.Messages;
 import megamek.common.CriticalSlot;
+import megamek.common.compute.damage.CritAssignment;
+import megamek.common.compute.damage.PreExistingDamageApplier;
+import megamek.common.compute.damage.PreExistingDamageLevel;
+import megamek.common.compute.damage.PreExistingDamageResult;
 import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.MiscMounted;
@@ -71,7 +76,7 @@ import megamek.common.weapons.attacks.InfantryAttack;
  * equipment and system hits, and the unit's general state (crew hits, heat, fuel, conditions and the systems that sit
  * in no location), as the Swing {@code UnitEditorDialog} shows them. Read from the unit on the Swing thread, edited by
  * the view on its own, and written back by {@link #apply} as a {@link DamageEditSpec} that carries only what this form
- * edits; ammunition, equipment modes and the pre-existing damage roller stay in the Swing editor.
+ * edits, and rolled with pre-existing damage by {@link #roll}; ammunition and equipment modes stay in the Swing editor.
  */
 public final class UnitDamageForm {
     /** The most hits a crew member can be given here, as in the Swing editor. */
@@ -153,6 +158,11 @@ public final class UnitDamageForm {
             return value > 0;
         }
 
+        /** Back to the value it was read with, without the change hook: a roll starts from the unit as read. */
+        private void restore() {
+            value = original;
+        }
+
         private void repair() {
             switch (repair) {
                 case FULL -> value(max);
@@ -216,6 +226,8 @@ public final class UnitDamageForm {
     private final Entity entity;
     private final Map<Integer, Place> places = new TreeMap<>();
     private final List<Value> general = new ArrayList<>();
+    /** The hit values a pre-existing damage roll can mark, by what the roll names. */
+    private final Map<String, Value> keyed = new HashMap<>();
     private Value structuralIntegrity;
 
     private UnitDamageForm(Entity entity) {
@@ -311,6 +323,86 @@ public final class UnitDamageForm {
             value.writer.write(spec, value.value);
         }
         return spec;
+    }
+
+    /** Whether the pre-existing damage rules (First Succession War, p.144) cover the unit, so it can be rolled. */
+    public boolean rollable() {
+        return PreExistingDamageApplier.isSupported(entity);
+    }
+
+    /**
+     * Rolls pre-existing damage at {@code level} into the form, as the Swing editor's roller does: each roll starts
+     * again from the unit as read, and None, or no level, just goes back to it. The unit itself is only read.
+     */
+    public void roll(PreExistingDamageLevel level) {
+        values().forEach(Value::restore);
+        if (level == null || level == PreExistingDamageLevel.NONE || !rollable()) {
+            return;
+        }
+        PreExistingDamageResult result = PreExistingDamageApplier.simulate(entity, level);
+        for (Place place : places.values()) {
+            int location = place.location;
+            if (place.armor != null) {
+                place.armor.value(result.armor()[location]);
+            }
+            if (place.rear != null) {
+                place.rear.value(result.rearArmor()[location]);
+            }
+            if (place.internal != null) {
+                place.internal.value(result.internal()[location]);
+            }
+        }
+        if (structuralIntegrity != null) {
+            structuralIntegrity.value(result.structuralIntegrity());
+        }
+        for (CritAssignment assignment : result.critAssignments()) {
+            Value hit = keyed.get(key(assignment));
+            if (hit != null) {
+                hit.value(hit.value + 1);
+            }
+        }
+    }
+
+    /** What the hit value a rolled critical hit marks is keyed by, as the Swing roller maps it. */
+    private String key(CritAssignment assignment) {
+        return switch (assignment) {
+            case CritAssignment.EquipmentCrit(int number) -> "eq:" + number;
+            case CritAssignment.MekSystemCrit(int system, int location) -> mekKey(system, location);
+            case CritAssignment.VehicleCrit(CritAssignment.VehicleCritKind kind, int location) -> switch (kind) {
+                case TURRET_LOCK -> "turretLock";
+                case SENSORS -> "sensor";
+                case MOTIVE -> "motive";
+                case STABILIZER -> entity instanceof VTOL && location == VTOL.LOC_ROTOR ? "flightStabilizer"
+                      : "stabilizer:" + location;
+            };
+            case CritAssignment.AeroFighterCrit(CritAssignment.AeroFighterCritKind kind) -> switch (kind) {
+                case AVIONICS -> "avionics";
+                case FIRE_CONTROL_SYSTEM -> "fcs";
+                case SENSORS -> "sensor";
+                case ENGINE -> "engine";
+                case LANDING_GEAR -> "gear";
+            };
+        };
+    }
+
+    private String mekKey(int system, int location) {
+        if (entity instanceof LandAirMek && system == LandAirMek.LAM_AVIONICS) {
+            return "lamAvionics:" + location;
+        }
+        if (entity instanceof LandAirMek && system == LandAirMek.LAM_LANDING_GEAR) {
+            return "lamGear:" + location;
+        }
+        if (entity instanceof QuadVee && system == QuadVee.SYSTEM_CONVERSION_GEAR) {
+            return "conversion:" + location;
+        }
+        return switch (system) {
+            case Mek.SYSTEM_ENGINE -> "engine:" + (location == Mek.LOC_LEFT_TORSO || location == Mek.LOC_RIGHT_TORSO
+                  ? location : Mek.LOC_CENTER_TORSO);
+            case Mek.SYSTEM_GYRO -> "gyro";
+            case Mek.SYSTEM_SENSORS -> "sensor";
+            case Mek.SYSTEM_LIFE_SUPPORT -> "lifeSupport";
+            default -> "actuator:" + location + ":" + system;
+        };
     }
 
     /** Writes the edits to the unit; call on the thread that owns the unit. */
@@ -473,8 +565,8 @@ public final class UnitDamageForm {
                 label += " (" + entity.getLocationAbbr(mounted.getLocation()) + "/"
                       + entity.getLocationAbbr(mounted.getSecondLocation()) + ")";
             }
-            target(mounted.getLocation()).add(new Value(label, Kind.BOXES, hits, Math.max(slots, 1), Repair.CLEAR,
-                  (spec, value) -> spec.equipmentHits.put(number, value)));
+            target(mounted.getLocation()).add(mark("eq:" + number, new Value(label, Kind.BOXES, hits,
+                  Math.max(slots, 1), Repair.CLEAR, (spec, value) -> spec.equipmentHits.put(number, value))));
         }
     }
 
@@ -488,15 +580,16 @@ public final class UnitDamageForm {
         } else if (entity instanceof ProtoMek) {
             readProtoSystems();
         } else if (entity instanceof Aero aero) {
-            general.add(boxes("UnitEditorDialog.avionics", aero.getAvionicsHits(), 3,
-                  (spec, value) -> spec.avionicsHits = value));
-            general.add(boxes("UnitEditorDialog.fcs", aero.getFCSHits(), 3, (spec, value) -> spec.fcsHits = value));
-            general.add(boxes("UnitEditorDialog.sensor", aero.getSensorHits(), 3,
-                  (spec, value) -> spec.sensorHits = value));
-            general.add(boxes("UnitEditorDialog.engine", aero.getEngineHits(), 3,
-                  (spec, value) -> spec.engineHits = value));
-            general.add(boxes("UnitEditorDialog.landingGear", aero.isGearHit() ? 1 : 0, 1,
-                  (spec, value) -> spec.gearHits = value));
+            general.add(mark("avionics", boxes("UnitEditorDialog.avionics", aero.getAvionicsHits(), 3,
+                  (spec, value) -> spec.avionicsHits = value)));
+            general.add(mark("fcs", boxes("UnitEditorDialog.fcs", aero.getFCSHits(), 3,
+                  (spec, value) -> spec.fcsHits = value)));
+            general.add(mark("sensor", boxes("UnitEditorDialog.sensor", aero.getSensorHits(), 3,
+                  (spec, value) -> spec.sensorHits = value)));
+            general.add(mark("engine", boxes("UnitEditorDialog.engine", aero.getEngineHits(), 3,
+                  (spec, value) -> spec.engineHits = value)));
+            general.add(mark("gear", boxes("UnitEditorDialog.landingGear", aero.isGearHit() ? 1 : 0, 1,
+                  (spec, value) -> spec.gearHits = value)));
             general.add(boxes("UnitEditorDialog.lifeSupport", aero.hasLifeSupport() ? 0 : 1, 1,
                   (spec, value) -> spec.lifeSupportHits = value));
         }
@@ -518,20 +611,20 @@ public final class UnitDamageForm {
             }
         }
         String engine = "UnitEditorDialog.engine";
-        target(Mek.LOC_CENTER_TORSO).add(boxes(engine, hits[0], slots[0],
-              (spec, value) -> spec.centerEngineHits = value));
+        target(Mek.LOC_CENTER_TORSO).add(mark("engine:" + Mek.LOC_CENTER_TORSO, boxes(engine, hits[0], slots[0],
+              (spec, value) -> spec.centerEngineHits = value)));
         if (entity.getNumberOfCriticalSlots(CriticalSlot.TYPE_SYSTEM, Mek.SYSTEM_ENGINE, Mek.LOC_RIGHT_TORSO) > 0) {
-            target(Mek.LOC_LEFT_TORSO).add(boxes(engine, hits[1], slots[1],
-                  (spec, value) -> spec.leftEngineHits = value));
-            target(Mek.LOC_RIGHT_TORSO).add(boxes(engine, hits[2], slots[2],
-                  (spec, value) -> spec.rightEngineHits = value));
+            target(Mek.LOC_LEFT_TORSO).add(mark("engine:" + Mek.LOC_LEFT_TORSO, boxes(engine, hits[1], slots[1],
+                  (spec, value) -> spec.leftEngineHits = value)));
+            target(Mek.LOC_RIGHT_TORSO).add(mark("engine:" + Mek.LOC_RIGHT_TORSO, boxes(engine, hits[2], slots[2],
+                  (spec, value) -> spec.rightEngineHits = value)));
         }
-        target(Mek.LOC_CENTER_TORSO).add(boxes("UnitEditorDialog.gyro", hits[3], slots[3],
-              (spec, value) -> spec.gyroHits = value));
-        target(Mek.LOC_HEAD).add(boxes("UnitEditorDialog.sensor", hits[4], slots[4],
-              (spec, value) -> spec.sensorHits = value));
-        target(Mek.LOC_HEAD).add(boxes("UnitEditorDialog.lifeSupport", hits[5], slots[5],
-              (spec, value) -> spec.lifeSupportHits = value));
+        target(Mek.LOC_CENTER_TORSO).add(mark("gyro", boxes("UnitEditorDialog.gyro", hits[3], slots[3],
+              (spec, value) -> spec.gyroHits = value)));
+        target(Mek.LOC_HEAD).add(mark("sensor", boxes("UnitEditorDialog.sensor", hits[4], slots[4],
+              (spec, value) -> spec.sensorHits = value)));
+        target(Mek.LOC_HEAD).add(mark("lifeSupport", boxes("UnitEditorDialog.lifeSupport", hits[5], slots[5],
+              (spec, value) -> spec.lifeSupportHits = value)));
         target(Mek.LOC_HEAD).add(boxes("UnitEditorDialog.cockpit", hits[6], slots[6],
               (spec, value) -> spec.cockpitHits = value));
         if (entity instanceof LandAirMek) {
@@ -540,16 +633,16 @@ public final class UnitDamageForm {
                 int avionics = entity.getNumberOfCriticalSlots(CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_AVIONICS,
                       location);
                 if (avionics > 0) {
-                    target(location).add(boxes("UnitEditorDialog.avionics", entity.getBadCriticalSlots(
-                                CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_AVIONICS, location), avionics,
-                          (spec, value) -> spec.lamAvionicsHits.put(at, value)));
+                    target(location).add(mark("lamAvionics:" + location, boxes("UnitEditorDialog.avionics",
+                          entity.getBadCriticalSlots(CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_AVIONICS, location),
+                          avionics, (spec, value) -> spec.lamAvionicsHits.put(at, value))));
                 }
                 int gear = entity.getNumberOfCriticalSlots(CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_LANDING_GEAR,
                       location);
                 if (gear > 0) {
-                    target(location).add(boxes("UnitEditorDialog.landingGear", entity.getBadCriticalSlots(
-                                CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_LANDING_GEAR, location), gear,
-                          (spec, value) -> spec.lamLandingGearHits.put(at, value)));
+                    target(location).add(mark("lamGear:" + location, boxes("UnitEditorDialog.landingGear",
+                          entity.getBadCriticalSlots(CriticalSlot.TYPE_SYSTEM, LandAirMek.LAM_LANDING_GEAR, location),
+                          gear, (spec, value) -> spec.lamLandingGearHits.put(at, value))));
                 }
             }
         }
@@ -566,39 +659,43 @@ public final class UnitDamageForm {
                     continue;
                 }
                 int column = actuator - start;
-                target(location).add(new Value(mek.getSystemName(actuator), Kind.BOXES,
+                target(location).add(mark("actuator:" + location + ":" + actuator, new Value(
+                      mek.getSystemName(actuator), Kind.BOXES,
                       entity.getDamagedCriticalSlots(CriticalSlot.TYPE_SYSTEM, actuator, location), 1, Repair.CLEAR,
-                      (spec, value) -> spec.actuatorHits[row][column] = value));
+                      (spec, value) -> spec.actuatorHits[row][column] = value)));
             }
             if (entity instanceof QuadVee) {
-                target(location).add(new Value(mek.getSystemName(QuadVee.SYSTEM_CONVERSION_GEAR), Kind.BOXES,
+                target(location).add(mark("conversion:" + location, new Value(
+                      mek.getSystemName(QuadVee.SYSTEM_CONVERSION_GEAR), Kind.BOXES,
                       entity.getDamagedCriticalSlots(CriticalSlot.TYPE_SYSTEM, QuadVee.SYSTEM_CONVERSION_GEAR,
                             location), 1, Repair.CLEAR,
-                      (spec, value) -> spec.actuatorHits[row][DamageEditSpec.CONVERSION_GEAR_INDEX] = value));
+                      (spec, value) -> spec.actuatorHits[row][DamageEditSpec.CONVERSION_GEAR_INDEX] = value)));
             }
         }
     }
 
     private void readTankSystems(Tank tank) {
-        target(tank.hasNoTurret() ? Entity.LOC_NONE : tank.getLocTurret()).add(boxes("UnitEditorDialog.turretLock",
-              tank.isTurretLocked(0) ? 1 : 0, 1, (spec, value) -> spec.turretLockHits = value));
+        target(tank.hasNoTurret() ? Entity.LOC_NONE : tank.getLocTurret()).add(mark("turretLock",
+              boxes("UnitEditorDialog.turretLock", tank.isTurretLocked(0) ? 1 : 0, 1,
+                    (spec, value) -> spec.turretLockHits = value)));
         general.add(boxes("UnitEditorDialog.engine", tank.getEngineHits(), 1,
               (spec, value) -> spec.engineHits = value));
-        general.add(boxes("UnitEditorDialog.sensor", tank.getSensorHits(), Tank.CRIT_SENSOR_MAX,
-              (spec, value) -> spec.sensorHits = value));
+        general.add(mark("sensor", boxes("UnitEditorDialog.sensor", tank.getSensorHits(), Tank.CRIT_SENSOR_MAX,
+              (spec, value) -> spec.sensorHits = value)));
         int motive = tank.isImmobile(false) ? 4 : tank.hasHeavyMovementDamage() ? 3
               : tank.hasModerateMovementDamage() ? 2 : tank.hasMinorMovementDamage() ? 1 : 0;
-        general.add(boxes("UnitEditorDialog.motiveDamage", motive, 4, (spec, value) -> spec.motiveHits = value));
+        general.add(mark("motive", boxes("UnitEditorDialog.motiveDamage", motive, 4,
+              (spec, value) -> spec.motiveHits = value)));
         stabilizers(tank, tank.getLocTurret(), tank.getLocTurret2());
     }
 
     private void readVtolSystems(VTOL vtol) {
-        target(VTOL.LOC_ROTOR).add(boxes("UnitEditorDialog.flightStabilizer",
-              vtol.isStabiliserHit(VTOL.LOC_ROTOR) ? 1 : 0, 1, (spec, value) -> spec.flightStabilizerHits = value));
+        target(VTOL.LOC_ROTOR).add(mark("flightStabilizer", boxes("UnitEditorDialog.flightStabilizer",
+              vtol.isStabiliserHit(VTOL.LOC_ROTOR) ? 1 : 0, 1, (spec, value) -> spec.flightStabilizerHits = value)));
         general.add(boxes("UnitEditorDialog.engine", vtol.getEngineHits(), 1,
               (spec, value) -> spec.engineHits = value));
-        general.add(boxes("UnitEditorDialog.sensor", vtol.getSensorHits(), Tank.CRIT_SENSOR_MAX,
-              (spec, value) -> spec.sensorHits = value));
+        general.add(mark("sensor", boxes("UnitEditorDialog.sensor", vtol.getSensorHits(), Tank.CRIT_SENSOR_MAX,
+              (spec, value) -> spec.sensorHits = value)));
         stabilizers(vtol, VTOL.LOC_ROTOR, VTOL.LOC_ROTOR);
     }
 
@@ -608,8 +705,8 @@ public final class UnitDamageForm {
                 continue;
             }
             int at = location;
-            target(location).add(boxes("UnitEditorDialog.stabilizer", tank.isStabiliserHit(location) ? 1 : 0, 1,
-                  (spec, value) -> spec.stabilizerHits[at] = value));
+            target(location).add(mark("stabilizer:" + location, boxes("UnitEditorDialog.stabilizer",
+                  tank.isStabiliserHit(location) ? 1 : 0, 1, (spec, value) -> spec.stabilizerHits[at] = value)));
         }
     }
 
@@ -643,6 +740,12 @@ public final class UnitDamageForm {
     private List<Value> target(int location) {
         Place place = location >= 0 ? places.get(location) : null;
         return place != null ? place.values : general;
+    }
+
+    /** Keys {@code value} for the hits a pre-existing damage roll names {@code key}. */
+    private Value mark(String key, Value value) {
+        keyed.put(key, value);
+        return value;
     }
 
     private static Value add(Place place, String label, Kind kind, int value, int max, Repair repair,

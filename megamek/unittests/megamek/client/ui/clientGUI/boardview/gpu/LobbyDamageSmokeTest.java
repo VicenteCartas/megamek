@@ -14,10 +14,13 @@ import java.util.List;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import megamek.client.lobby.UnitDamageForm;
+import megamek.client.ui.Messages;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
-import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
@@ -65,8 +68,8 @@ class LobbyDamageSmokeTest {
             assertNotNull(arm, "the doll has a left arm to click");
             clickAt(ui, doll, arm);
             assertEquals("LA", view.chosen().abbr(), "a click on the doll picks its location");
-            UiSelect where = find(ui, "damage-where");
-            assertEquals(form.places().indexOf(view.chosen()), where.getSelectedIndex(), "the list follows");
+            Label heading = find(ui, "damage-heading");
+            assertEquals(view.chosen().name(), heading.getText().toString(), "the heading follows");
 
             List<UnitDamageForm.Value> values = view.chosen().values();
             int armorRow = values.indexOf(view.chosen().armor());
@@ -76,6 +79,44 @@ class LobbyDamageSmokeTest {
             click(ui, down);
             assertEquals(armor - 2, form.place("LA").armor().value(), "the stepper takes armour off");
 
+            UiHealthBar armorBar = find(ui, "damage-value-" + armorRow);
+            Actor bar = armorBar.bar();
+            int quarter = armor / 4;
+            clickAt(ui, bar, new Vector2(bar.getWidth() * quarter / armor, bar.getHeight() / 2));
+            assertEquals(quarter, form.place("LA").armor().value(), "a click on the bar sets it there");
+            dragAcross(ui, bar, bar.getWidth() / 4, bar.getWidth() - 1);
+            assertEquals(armor, form.place("LA").armor().value(), "a drag to the end scrubs it full");
+            Vector2 middle = bar.localToStageCoordinates(new Vector2(bar.getWidth() / 2, bar.getHeight() / 2));
+            Vector2 screen = ui.stage.stageToScreenCoordinates(middle);
+            ui.stage.mouseMoved(Math.round(screen.x), Math.round(screen.y));
+            ui.stage.scrolled(0, 1);
+            ui.stage.scrolled(0, 1);
+            assertEquals(armor - 2, form.place("LA").armor().value(), "the wheel steps it down");
+            assertEquals("\u22122", armorBar.delta().getText().toString(), "the change from the unit shows");
+            ui.stage.setKeyboardFocus(armorBar.field());
+            armorBar.field().selectAll();
+            ui.stage.keyTyped('7');
+            ui.draw();
+            assertEquals(7, form.place("LA").armor().value(), "a typed number sets it");
+
+            click(ui, find(ui, "damage-next"));
+            assertEquals(form.places().get(form.places().indexOf(form.place("LA")) + 1), view.chosen(),
+                  "the chevron steps to the next location");
+            click(ui, find(ui, "damage-whole"));
+            assertNull(view.chosen(), "Whole unit shows the general values");
+            assertEquals(Messages.getString("Lobby.damage.wholeUnit"), heading.getText().toString());
+            click(ui, find(ui, "damage-previous"));
+            assertEquals(form.places().get(form.places().size() - 1), view.chosen(), "back from the whole unit");
+
+            UiButton reroll = find(ui, "damage-reroll");
+            assertTrue(reroll.isDisabled(), "nothing to roll again yet");
+            click(ui, find(ui, "damage-roll-heavy"));
+            assertFalse(reroll.isDisabled(), "a heavy roll can be rolled again");
+            assertTrue(form.places().stream().anyMatch(place -> place.armor() != null
+                  && place.armor().value() < place.armor().max()), "a heavy roll takes armour off");
+            click(ui, find(ui, "damage-roll-none"));
+            assertFalse(form.changed(), "None goes back to the unit as read");
+            clickAt(ui, doll, arm);
             int boxesRow = -1;
             for (int index = 0; index < values.size(); index++) {
                 if (values.get(index).kind() == UnitDamageForm.Kind.BOXES && values.get(index).max() > 0) {
@@ -145,6 +186,16 @@ class LobbyDamageSmokeTest {
         ui.draw();
     }
 
+    private static void dragAcross(UiTestStage ui, Actor actor, float from, float to) {
+        float y = actor.getHeight() / 2;
+        Vector2 start = ui.stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(from, y)));
+        Vector2 end = ui.stage.stageToScreenCoordinates(actor.localToStageCoordinates(new Vector2(to, y)));
+        ui.stage.touchDown(Math.round(start.x), Math.round(start.y), 0, Input.Buttons.LEFT);
+        ui.stage.touchDragged(Math.round((start.x + end.x) / 2), Math.round(start.y), 0);
+        ui.stage.touchDragged(Math.round(end.x), Math.round(end.y), 0);
+        ui.stage.touchUp(Math.round(end.x), Math.round(end.y), 0, Input.Buttons.LEFT);
+        ui.draw();
+    }
     private static void click(UiTestStage ui, Actor actor) {
         clickAt(ui, actor, new Vector2(actor.getWidth() / 2, actor.getHeight() / 2));
     }

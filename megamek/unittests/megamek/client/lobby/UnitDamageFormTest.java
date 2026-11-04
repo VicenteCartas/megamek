@@ -41,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.util.List;
 
+import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
@@ -197,6 +198,51 @@ class UnitDamageFormTest {
         assertTrue(spec.ammoShots.isEmpty());
         form.apply();
         assertEquals(2, ((megamek.common.units.Aero) cheetah).getSI());
+    }
+
+    @Test
+    void aRollDamagesTheFormNotTheUnitAndNoneGoesBack() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        int armor = atlas.getTotalArmor();
+        UnitDamageForm form = UnitDamageForm.of(atlas);
+        assertTrue(form.rollable());
+        boolean hit = false;
+        for (int roll = 0; roll < 20 && !hit; roll++) {
+            form.roll(PreExistingDamageLevel.HEAVY);
+            assertTrue(form.changed(), "a heavy roll damages the form");
+            hit = form.places().stream().flatMap(place -> place.values().stream())
+                  .anyMatch(value -> value.kind() == UnitDamageForm.Kind.BOXES && value.value() > 0);
+        }
+        assertTrue(hit, "a heavy roll's critical hits mark the hit boxes");
+        assertEquals(armor, atlas.getTotalArmor(), "the unit is only read");
+
+        form.roll(PreExistingDamageLevel.NONE);
+        assertFalse(form.changed(), "None goes back to the unit as read");
+        form.roll(PreExistingDamageLevel.LIGHT);
+        form.apply();
+        assertTrue(atlas.getTotalArmor() < armor, "an applied roll reaches the unit");
+    }
+
+    @Test
+    void aRollStartsFromTheUnitAsReadWithoutRefillingALostLimb() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        UnitDamageForm form = UnitDamageForm.of(atlas);
+        value(form.place("LA"), "Blown Off").value(1);
+        form.apply();
+        UnitDamageForm again = UnitDamageForm.of(atlas);
+        again.roll(PreExistingDamageLevel.MODERATE);
+        again.roll(PreExistingDamageLevel.NONE);
+        assertFalse(again.changed(), "restoring a blown-off limb's switch does not fill its armour");
+    }
+
+    @Test
+    void vehiclesAndFightersRollToo() throws Exception {
+        for (String file : List.of("Bulldog Medium Tank.blk", "Cheetah F-11.blk")) {
+            UnitDamageForm form = UnitDamageForm.of(load(file));
+            assertTrue(form.rollable(), file);
+            form.roll(PreExistingDamageLevel.HEAVY);
+            assertTrue(form.changed(), file);
+        }
     }
 
     private static List<String> labels(UnitDamageForm.Place place) {
