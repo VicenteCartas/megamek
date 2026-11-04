@@ -6,7 +6,9 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
 import java.awt.geom.Line2D;
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -46,22 +48,48 @@ final class GpuAuthoredBuilding {
           List<Vector3> roof) { }
     private record Assembly(String asset, List<BuildingVolumes.Module> modules) { }
     private record Placement(Coords anchor, BoardDecoration object, double base, int width, int height) { }
+    private record Geometry(ModelData source, GeneratedMesh mesh) { }
+    private record Whole(List<Geometry> levels, List<BuildingVolumes.Solid> solids, Map<Double, Area> roofs,
+          Map<Double, Area> sections) { }
+    /** Derived CPU geometry shared by workers of one immutable tile snapshot; never owns GPU resources. */
+    private record Cached(WeakReference<List<BoardScene.Tile>> tiles, int width, int height,
+          Map<String, List<Coords>> members, Map<Placement, Whole> placements, Map<Layout, Prepared> slices) { }
+    // Keep the current and previous snapshots: route previews compare both. Do not retain every intermediate drag.
+    private static final List<Cached> SCENES = new ArrayList<>();
     private static final Map<String, List<ModelData>> FILES = new ConcurrentHashMap<>();
     private static final Map<Assembly, List<ModelData>> ASSEMBLIES = new ConcurrentHashMap<>();
 
-    static void reload() { FILES.clear(); ASSEMBLIES.clear(); }
+    static synchronized void reload() { FILES.clear(); ASSEMBLIES.clear(); SCENES.clear(); }
+
+    private static synchronized Cached cached(BoardScene scene) {
+        SCENES.removeIf(cache -> cache.tiles().get() == null);
+        for (var cache : SCENES) {
+            if (cache.tiles().get() == scene.tiles() && cache.width() == scene.width() && cache.height() == scene.height()) { return cache; }
+        }
+        Map<String, List<Coords>> members = new java.util.HashMap<>();
+        for (var tile : scene.tiles()) {
+            var reference = tile.cover().reference();
+            if (reference != null) { members.computeIfAbsent(reference.id(), ignored -> new ArrayList<>()).add(tile.coords()); }
+        }
+        members.replaceAll((id, coords) -> List.copyOf(coords));
+        var cache = new Cached(new WeakReference<>(scene.tiles()), scene.width(), scene.height(), Map.copyOf(members),
+              new ConcurrentHashMap<>(), new ConcurrentHashMap<>());
+        if (SCENES.size() == 2) { SCENES.removeFirst(); }
+        SCENES.add(cache);
+        return cache;
+    }
 
     static Map<Layout, Prepared> prepare(BoardScene scene, List<BoardScene.Tile> tiles) {
         Map<Layout, Prepared> result = new java.util.LinkedHashMap<>();
-        Map<Placement, List<ModelData>> placements = new java.util.HashMap<>();
+        Cached cache = cached(scene);
         for (var tile : tiles) {
             for (var feature : tile.features()) {
                 if (!supports(feature)) { continue; }
                 Layout layout = layout(scene, tile, feature);
                 var key = new Placement(layout.anchor(), layout.object(), layout.base(), scene.width(), scene.height());
-                var whole = placements.computeIfAbsent(key, ignored -> placement(layout,
+                var whole = cache.placements().computeIfAbsent(key, ignored -> placement(layout,
                       FILES.computeIfAbsent(feature.asset(), GpuAuthoredBuilding::load)));
-                result.put(layout, slice(layout, whole));
+                result.put(layout, cache.slices().computeIfAbsent(layout, ignored -> slice(layout, whole)));
             }
         }
         return Map.copyOf(result);
@@ -80,8 +108,7 @@ final class GpuAuthoredBuilding {
                   0, BuildingInteriors.NO, List.of(tile.coords()), scene.width(), scene.height());
         }
         var reference = tile.cover().reference();
-        var members = scene.tiles().stream().filter(t -> t.cover().reference() != null
-              && t.cover().reference().id().equals(reference.id())).map(BoardScene.Tile::coords).toList();
+        var members = cached(scene).members().get(reference.id());
         return new Layout(tile.coords(), reference.anchor(), feature.decoration(), feature.elevation(), tile.elevation(),
               tile.cover().height(), tile.cover().interiors(), members, scene.width(), scene.height());
     }
@@ -140,48 +167,80 @@ final class GpuAuthoredBuilding {
     }
 
     /** Cut and seal the whole placement first. Internal member cuts remain open for floors and destruction. */
-    private static List<ModelData> placement(Layout layout, List<ModelData> source) {
+    private static Whole placement(Layout layout, List<ModelData> source) {
         var definition = BuildingVolumes.of(layout.object().asset());
         var object = layout.object();
-        float x = HexTile.centerX(layout.anchor(), HexTile.MODEL_WIDTH) + (float) object.x() * HexTile.MODEL_WIDTH;
-        float y = HexTile.centerY(layout.anchor(), HexTile.HEIGHT) + (float) object.y() * HexTile.HEIGHT;
-        var frame = new Matrix4().translate(x, y, (float) layout.base() * HexTile.LEVEL_HEIGHT)
-              .rotate(Vector3.Z, (float) object.rotation()).rotate(Vector3.Y, (float) object.rotationY()).rotate(Vector3.X, (float) object.rotationX())
-              .scale((float) (object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1)),
-                    (float) (object.scale() * object.stretch().y()), (float) (object.scale() * object.stretch().z()));
+        var frame = frame(layout.anchor(), object, layout.base());
         var assembly = new Assembly(object.asset(), definition.modules(object.levels(), BuildingVolumes.seed(object)));
         var assembled = ASSEMBLIES.computeIfAbsent(assembly, ignored -> GpuBuilding.lods(source).stream()
               .<ModelData>map(lod -> assemble(lod, definition, object.levels(), BuildingVolumes.seed(object), new Matrix4())
                     .data(object.asset(), lod)).toList());
         var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
-        List<ModelData> levels = new ArrayList<>();
+        List<Geometry> levels = new ArrayList<>();
         for (ModelData lod : assembled) {
             GeneratedMesh whole = new GeneratedMesh();
             for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), frame); }
-            levels.add(AuthoredBoardClip.clip(whole, lod, layout.boardWidth(), layout.boardHeight(), solids));
+            var clipped = AuthoredBoardClip.clip(whole, lod, layout.boardWidth(), layout.boardHeight(), solids);
+            var mesh = new GeneratedMesh();
+            for (var node : clipped.nodes) { mesh.placed(clipped, node, new Matrix4()); }
+            levels.add(new Geometry(clipped, mesh));
         }
-        return List.copyOf(levels);
+        return new Whole(List.copyOf(levels), solids, BuildingVolumes.roofs(solids), new ConcurrentHashMap<>());
     }
 
-    private static Prepared slice(Layout layout, List<ModelData> placed) {
+    /** The authored frame in model units, shared with the immediate editor transform preview. */
+    static Matrix4 frame(Coords anchor, BoardDecoration object, double base) {
+        float x = HexTile.centerX(anchor, HexTile.MODEL_WIDTH) + (float) object.x() * HexTile.MODEL_WIDTH;
+        float y = HexTile.centerY(anchor, HexTile.HEIGHT) + (float) object.y() * HexTile.HEIGHT;
+        return new Matrix4().translate(x, y, (float) base * HexTile.LEVEL_HEIGHT)
+              .rotate(Vector3.Z, (float) object.rotation()).rotate(Vector3.Y, (float) object.rotationY()).rotate(Vector3.X, (float) object.rotationX())
+              .scale((float) (object.scale() * object.stretch().x() * (object.mirror() ? -1 : 1)),
+                    (float) (object.scale() * object.stretch().y()), (float) (object.scale() * object.stretch().z()));
+    }
+
+    private static Prepared slice(Layout layout, Whole placed) {
         var object = layout.object();
         float cx = HexTile.centerX(layout.cell(), HexTile.MODEL_WIDTH), cy = HexTile.centerY(layout.cell(), HexTile.HEIGHT);
         List<GeneratedMesh.Keep> boundaries = new ArrayList<>();
         // The Voronoi cell of the original occupied hex centres equals their shared hex edges. At outside edges it
         // also owns the visual fringe, so decorative overhangs disappear with a member rather than becoming scraps.
-        for (Coords other : layout.members()) {
+        for (Coords other : layout.members().stream().sorted(Comparator.comparingDouble(at -> {
+            double x = HexTile.centerX(at, HexTile.MODEL_WIDTH) - cx, y = HexTile.centerY(at, HexTile.HEIGHT) - cy;
+            return x * x + y * y;
+        })).toList()) {
             if (other.equals(layout.cell())) { continue; }
             double dx = HexTile.centerX(other, HexTile.MODEL_WIDTH) - cx, dy = HexTile.centerY(other, HexTile.HEIGHT) - cy;
-            boundaries.add((px, py) -> (dx * dx + dy * dy) * .5 - px * dx - py * dy);
+            double length = Math.hypot(dx, dy);
+            boundaries.add((px, py) -> length * .5 - (px - cx) * (dx / length) - (py - cy) * (dy / length));
         }
         List<ModelData> levels = new ArrayList<>();
-        for (ModelData lod : placed) {
-            GeneratedMesh whole = new GeneratedMesh();
-            for (int i = 0; i < lod.nodes.size; i++) { whole.placed(lod, lod.nodes.get(i), new Matrix4().translate(-cx, -cy, 0)); }
-            levels.add(whole.clipped(boundaries).data("authored-" + object.id() + "-" + layout.cell(), lod));
+        for (Geometry lod : placed.levels()) {
+            // Bound the otherwise unbounded Voronoi region by this placement's visual envelope, once per share.
+            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            for (var part : lod.mesh().parts.values()) {
+                for (int i = 0; i < part.size; i += RigidGlb.STRIDE) {
+                    minX = Math.min(minX, part.items[i]); maxX = Math.max(maxX, part.items[i]);
+                    minY = Math.min(minY, part.items[i + 1]); maxY = Math.max(maxY, part.items[i + 1]);
+                }
+            }
+            List<float[]> polygon = List.of(new float[] {minX - 1, minY - 1}, new float[] {maxX + 1, minY - 1},
+                  new float[] {maxX + 1, maxY + 1}, new float[] {minX - 1, maxY + 1});
+            for (var boundary : boundaries) { polygon = GeneratedMesh.clip(polygon, boundary); }
+            minX = Float.MAX_VALUE; minY = Float.MAX_VALUE; maxX = -Float.MAX_VALUE; maxY = -Float.MAX_VALUE;
+            for (var point : polygon) {
+                minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
+                minY = Math.min(minY, point[1]); maxY = Math.max(maxY, point[1]);
+            }
+            // Only planes touching the final convex region can cut it; distant members are redundant.
+            List<float[]> region = polygon;
+            var active = boundaries.stream().filter(plane -> region.stream().anyMatch(p -> Math.abs(plane.at(p[0], p[1])) < .02)).toList();
+            var share = polygon.isEmpty() ? new GeneratedMesh() : lod.mesh().clipped(active, minX - .01f, minY - .01f, maxX + .01f, maxY + .01f);
+            for (var part : share.parts.values()) {
+                for (int i = 0; i < part.size; i += RigidGlb.STRIDE) { part.items[i] -= cx; part.items[i + 1] -= cy; }
+            }
+            levels.add(share.data("authored-" + object.id() + "-" + layout.cell(), lod.source()));
         }
         if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of()); }
-        var solids = BuildingVolumes.placed(layout.anchor(), object, layout.base());
         Area cell = BuildingVolumes.hex(layout.cell());
         Area interiorCell = new Area(cell);
         // Floor slab edges must sit behind the neutral map cap, not flicker through its coincident plane.
@@ -199,11 +258,11 @@ final class GpuAuthoredBuilding {
             for (int level = 0; level < layout.height(); level++) {
                 float z = (layout.ground() + level) * HexTile.LEVEL_HEIGHT;
                 if (level == 0 || layout.interiors() == BuildingInteriors.YES) {
-                    Area floor = BuildingVolumes.section(solids, z + .02); floor.intersect(interiorCell);
+                    Area floor = new Area(placed.sections().computeIfAbsent(z + .02, height -> BuildingVolumes.section(placed.solids(), height))); floor.intersect(interiorCell);
                     floor.transform(AffineTransform.getTranslateInstance(-cx, -cy));
                     floors.add(GpuBuildingInterior.triangles(floor));
                 }
-                Area middle = BuildingVolumes.section(solids, z + HexTile.LEVEL_HEIGHT * .5); middle.intersect(interiorCell);
+                Area middle = new Area(placed.sections().computeIfAbsent(z + HexTile.LEVEL_HEIGHT * .5, height -> BuildingVolumes.section(placed.solids(), height))); middle.intersect(interiorCell);
                 var bounds = middle.getBounds2D();
                 for (double px = Math.ceil(bounds.getMinX() / 22) * 22; px < bounds.getMaxX(); px += 22) {
                     for (double py = Math.ceil(bounds.getMinY() / 22) * 22; py < bounds.getMaxY(); py += 22) {
@@ -213,7 +272,7 @@ final class GpuAuthoredBuilding {
             }
         }
         Area roof = new Area();
-        BuildingVolumes.roofs(solids).forEach((z, area) -> {
+        placed.roofs().forEach((z, area) -> {
             if (Math.ceil(z / HexTile.LEVEL_HEIGHT - 1e-5) == layout.ground() + layout.height()) { roof.add(area); }
         });
         roof.intersect(cell);

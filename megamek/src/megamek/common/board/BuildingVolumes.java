@@ -199,15 +199,17 @@ public final class BuildingVolumes {
 
     /** Exposed horizontal tops only: upper volumes subtract their area from lower roofs. Antennas never take part. */
     public static Map<Double, Area> roofs(List<Solid> solids) {
-        Map<Double, Area> caps = new java.util.TreeMap<>(Comparator.reverseOrder());
+        Map<Double, Path2D.Double> paths = new java.util.TreeMap<>(Comparator.reverseOrder());
         for (Solid solid : solids) {
             for (Triangle t : solid.triangles()) {
                 if (Math.abs(t.a().z() - t.b().z()) > .001 || Math.abs(t.a().z() - t.c().z()) > .001) { continue; }
                 double cross = (t.b().x() - t.a().x()) * (t.c().y() - t.a().y()) - (t.b().y() - t.a().y()) * (t.c().x() - t.a().x());
                 if (cross <= .00001) { continue; }
-                caps.computeIfAbsent(Math.rint(t.a().z() * 1000) / 1000, ignored -> new Area()).add(polygon(List.of(t.a(), t.b(), t.c())));
+                triangle(paths.computeIfAbsent(Math.rint(t.a().z() * 1000) / 1000, ignored -> new Path2D.Double()), t);
             }
         }
+        Map<Double, Area> caps = new java.util.TreeMap<>(Comparator.reverseOrder());
+        paths.forEach((z, path) -> caps.put(z, new Area(path)));
         Area covered = new Area();
         for (Area cap : caps.values()) {
             Area original = new Area(cap);
@@ -266,14 +268,26 @@ public final class BuildingVolumes {
 
     /** Geometric structural area retained by the board; independent of half-hex gameplay coverage and decorative props. */
     public static double onBoardFraction(Coords anchor, BoardDecoration object, int width, int height) {
-        Area footprint = new Area();
+        Path2D.Double path = new Path2D.Double();
         for (var solid : placed(anchor, object, 0)) {
-            for (var triangle : solid.triangles()) { footprint.add(polygon(List.of(triangle.a(), triangle.b(), triangle.c()))); }
+            for (var triangle : solid.triangles()) { triangle(path, triangle); }
         }
+        Area board = polygon(boardOutline(width, height));
+        if (board.contains(path.getBounds2D())) { return 1; }
+        Area footprint = new Area(path);
         double total = area(footprint);
         if (total == 0) { return 0; }
-        footprint.intersect(polygon(boardOutline(width, height)));
+        footprint.intersect(board);
         return area(footprint) / total;
+    }
+
+    /** Nonzero winding unions the projected triangles in one sweep; normalize winding so back faces cannot cancel. */
+    private static void triangle(Path2D.Double path, Triangle t) {
+        Point a = t.a(), b = t.b(), c = t.c();
+        double cross = (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+        if (cross == 0) { return; }
+        if (cross < 0) { Point swap = b; b = c; c = swap; }
+        path.moveTo(a.x(), a.y()); path.lineTo(b.x(), b.y()); path.lineTo(c.x(), c.y()); path.closePath();
     }
 
     /** Largest projected top area within one hex; floating point seam tolerances still make exact ties choose taller. */

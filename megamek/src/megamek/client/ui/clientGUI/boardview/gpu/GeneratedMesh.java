@@ -182,9 +182,31 @@ final class GeneratedMesh {
 
     /** The geometry where every half plane in {@code keeps} holds, each triangle clipped, attributes interpolated. */
     GeneratedMesh clipped(List<Keep> keeps) {
+        return clipped(keeps, -Float.MAX_VALUE, -Float.MAX_VALUE, Float.MAX_VALUE, Float.MAX_VALUE);
+    }
+
+    /** Reject triangles outside the convex region's bounds before allocating vertices or visiting its planes. */
+    GeneratedMesh clipped(List<Keep> keeps, float minX, float minY, float maxX, float maxY) {
         var result = new GeneratedMesh();
         parts.forEach((material, part) -> {
+            int stride = RigidGlb.STRIDE;
+            triangles:
             for (int start = 0; start < part.size; start += 3 * RigidGlb.STRIDE) {
+                float ax = part.items[start], ay = part.items[start + 1];
+                float bx = part.items[start + stride], by = part.items[start + stride + 1];
+                float cx = part.items[start + 2 * stride], cy = part.items[start + 2 * stride + 1];
+                if (Math.max(ax, Math.max(bx, cx)) < minX || Math.min(ax, Math.min(bx, cx)) > maxX
+                      || Math.max(ay, Math.max(by, cy)) < minY || Math.min(ay, Math.min(by, cy)) > maxY) { continue; }
+                boolean inside = true;
+                for (Keep keep : keeps) {
+                    double a = keep.at(ax, ay), b = keep.at(bx, by), c = keep.at(cx, cy);
+                    if (a < 0 && b < 0 && c < 0) { continue triangles; }
+                    inside &= a >= 0 && b >= 0 && c >= 0;
+                }
+                if (inside) {
+                    result.parts.computeIfAbsent(material, ignored -> new FloatArray()).addAll(part.items, start, 3 * stride);
+                    continue;
+                }
                 List<float[]> polygon = new ArrayList<>(3);
                 for (int k = 0; k < 3; k++) {
                     float[] vertex = new float[RigidGlb.STRIDE];
@@ -216,6 +238,12 @@ final class GeneratedMesh {
 
     /** Sutherland-Hodgman: {@code polygon}'s part where {@code keep} holds, attributes interpolated; empty below three. */
     static List<float[]> clip(List<float[]> polygon, Keep keep) {
+        boolean inside = false, outside = false;
+        for (float[] p : polygon) {
+            if (keep.at(p[0], p[1]) >= 0) { inside = true; } else { outside = true; }
+        }
+        if (!outside) { return polygon; }
+        if (!inside) { return List.of(); }
         List<float[]> result = new ArrayList<>(polygon.size() + 1);
         for (int i = 0; i < polygon.size(); i++) {
             float[] a = polygon.get(i), b = polygon.get((i + 1) % polygon.size());

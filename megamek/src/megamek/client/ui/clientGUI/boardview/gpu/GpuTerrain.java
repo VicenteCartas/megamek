@@ -1513,6 +1513,7 @@ final class GpuTerrain implements Disposable {
         private BoundingBox previewBounds;
         private float previewAnchorZ;
         private Coords previewCoords;
+        private Coords previewOwner;
         private String receiver;
         /** World support height for an interior floor; NaN for shells and other props. */
         private final float floorZ;
@@ -1618,6 +1619,7 @@ final class GpuTerrain implements Disposable {
         }
 
         Coords coords() { return previewCoords == null ? coords : previewCoords; }
+        Coords owner() { return previewOwner == null ? decorationOwner : previewOwner; }
         ModelInstance instance() { return previewInstance == null ? instance : previewInstance; }
         BoundingBox bounds() { return previewInstance == null ? bounds : previewBounds; }
         float anchorZ() { return previewInstance == null ? decorationAnchorZ : previewAnchorZ; }
@@ -6924,8 +6926,12 @@ final class GpuTerrain implements Disposable {
                 }
                 for (Prop prop : candidates) {
                     // Route shape and placement commit together after the adjacent tiles rebuild.
-                    if (BoardRail.route(prop.decorationFeature) || GpuAuthoredBuilding.supports(prop.decorationFeature)) { continue; }
+                    if (BoardRail.route(prop.decorationFeature)) { continue; }
                     var placement = placements.get(prop.decorationId);
+                    if (GpuAuthoredBuilding.supports(prop.decorationFeature)) {
+                        changed |= previewAuthored(chunk, prop, placement);
+                        continue;
+                    }
                     BoardScene.Feature next = placement == null ? prop.decorationFeature : placement.feature();
                     Coords coords = placement == null ? prop.coords : placement.coords();
                     // Another model or other colours need the chunk's rebuild, which installs that model.
@@ -6983,6 +6989,38 @@ final class GpuTerrain implements Disposable {
                 editorMovedProps = moved;
             }
         });
+    }
+
+    /** Borrow the installed shares immediately; the worker replaces their board cuts and gameplay floors together. */
+    private boolean previewAuthored(Chunk chunk, Prop prop, EditorPlacement placement) {
+        if (placement == null) { return false; }
+        var next = placement.feature();
+        var original = prop.decorationFeature;
+        if (!original.asset().equals(next.asset()) || !original.colours().equals(next.colours())
+              || original.decoration().levels() != next.decoration().levels()) { return false; }
+        if (next.equals(prop.previewFeature == null ? original : prop.previewFeature) && placement.coords().equals(prop.owner())) { return false; }
+        float unit = BoardGeometry.hexScale();
+        Matrix4 before = new Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(prop.decorationOwner, original.decoration(), original.elevation()));
+        Matrix4 after = new Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(placement.coords(), next.decoration(), next.elevation()));
+        Matrix4 delta = after.mul(before.inv());
+        prop.previewFeature = next;
+        prop.previewOwner = placement.coords();
+        prop.previewAnchorZ = next.elevation() * BoardGeometry.level();
+        prop.previewInstance = copy(prop.instance);
+        prop.previewInstance.transform.set(delta).mul(prop.instance.transform);
+        prop.previewBounds = new BoundingBox(prop.bounds).mul(delta);
+        TileMesh tile = chunk.tileMeshes.get(prop.coords);
+        if (tile != null) {
+            for (Prop floor : tile.props) {
+                if (Float.isNaN(floor.floorZ)) { continue; }
+                floor.previewInstance = copy(floor.instance);
+                floor.previewInstance.transform.set(delta).mul(floor.instance.transform);
+                floor.previewBounds = new BoundingBox(floor.bounds).mul(delta);
+            }
+            for (InteriorStruts strut : tile.struts) { strut.instance.transform.set(prop.previewInstance.transform); }
+        }
+        chunk.bounds.ext(prop.bounds()); shadowBounds.ext(prop.bounds());
+        return true;
     }
 
     /**
@@ -7644,7 +7682,9 @@ final class GpuTerrain implements Disposable {
                 }
                 for (var feature : tile.features()) {
                     if (feature.decoration() != null) {
-                        result.put(feature.decoration().id(), new EditorPlacement(tile.coords(), feature));
+                        Coords owner = feature.kind() == BoardScene.FeatureKind.BUILDING && GpuAuthoredBuilding.supports(feature)
+                              ? tile.cover().reference().anchor() : tile.coords();
+                        result.put(feature.decoration().id(), new EditorPlacement(owner, feature));
                     }
                 }
             }
@@ -7666,15 +7706,16 @@ final class GpuTerrain implements Disposable {
             Map<String, List<Prop>> structures = new LinkedHashMap<>();
             for (Chunk chunk : chunks) {
                 for (Prop prop : chunk.props) {
-                    if (coords.equals(prop.decorationOwner)) { structures.computeIfAbsent(prop.decorationId, ignored -> new ArrayList<>()).add(prop); }
+                    if (coords.equals(prop.owner())) { structures.computeIfAbsent(prop.decorationId, ignored -> new ArrayList<>()).add(prop); }
                 }
             }
             structures.forEach((id, shares) -> {
                 Prop first = shares.getFirst();
-                var object = first.decorationFeature.decoration();
+                var shown = first.previewFeature == null ? first.decorationFeature : first.previewFeature;
+                var object = shown.decoration();
                 BoundingBox box = new BoundingBox().inf();
                 shares.forEach(share -> box.ext(share.bounds()));
-                float z = first.decorationFeature.elevation();
+                float z = shown.elevation();
                 Vector3 anchor = new Vector3(BoardGeometry.centerX(coords) + (float) object.x() * BoardGeometry.width(),
                       BoardGeometry.centerY(coords) + (float) object.y() * BoardGeometry.height(), z * BoardGeometry.level());
                 result.add(new EditorObject(id, box, z, anchor, object.placement(), shares.stream().anyMatch(share -> drawn(share, false)), false));
@@ -7841,8 +7882,8 @@ final class GpuTerrain implements Disposable {
                         nearest = ray.origin.dst2(point);
                         // Authored meshes already contain their base height; their instance translates only in XY.
                         float anchorZ = prop.decorationOwner == null ? prop.instance().transform.val[Matrix4.M23]
-                              : prop.decorationFeature.elevation() * BoardGeometry.level();
-                        result = new DecorationHit(prop.decorationOwner == null ? prop.coords() : prop.decorationOwner, prop.decorationId, nearest, anchorZ);
+                              : (prop.previewFeature == null ? prop.decorationFeature : prop.previewFeature).elevation() * BoardGeometry.level();
+                        result = new DecorationHit(prop.decorationOwner == null ? prop.coords() : prop.owner(), prop.decorationId, nearest, anchorZ);
                     }
                 }
                 for (TileMesh tile : chunk.tileMeshes.values()) {

@@ -28,6 +28,65 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
+    @Test void previewsAuthoredTransformsBeforeRebuildingAnyChunks() throws Exception {
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(24, 20), null);
+        for (int x = 0; x < 24; x++) { for (int y = 0; y < 20; y++) { editor.board().getHex(x, y).setLevel(3); } }
+        Coords at = new Coords(11, 9);
+        place(editor, at, "hpg-headquarters", 0);
+        BoardScene original = capture(editor.board());
+        List<BoardScene> poses = new java.util.ArrayList<>();
+        for (var edit : List.of(new Command(Action.OBJECT_VALUE, "x", ".25"), new Command(Action.OBJECT_VALUE, "rotation", "37"),
+              new Command(Action.OBJECT_VALUE, "scale", ".8"), new Command(Action.OBJECT_VALUE, "stretchY", "1.2"))) {
+            editor.command(edit, null, true);
+            poses.add(original.withTiles(BoardTiles.captureAll(editor.board())));
+        }
+        poses.add(original);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900); config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                try {
+                    BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.center(BoardGeometry.center(at, 3));
+                    terrain.update(original); GpuTerrainLodSmokeTest.settle(terrain, null, original, camera);
+                    var models = new java.util.HashSet<com.badlogic.gdx.graphics.g3d.Model>();
+                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) field(chunk, "props")) {
+                            if (field(prop, "decorationId") != null) { models.add(((com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance")).model); }
+                        }
+                    }
+                    var start = original.tile(at).features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
+                    for (BoardScene pose : poses) {
+                        var next = pose.tile(at).features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
+                        long clock = System.nanoTime(); terrain.previewEditorObjects(pose);
+                        System.out.printf("PERF authored immediate-transform=%.2fms%n", (System.nanoTime() - clock) / 1_000_000.0);
+                        float unit = BoardGeometry.hexScale();
+                        var delta = new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, next.decoration(), 3))
+                              .mul(new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, start.decoration(), 3)).inv());
+                        int shares = 0;
+                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) field(chunk, "props")) {
+                                if (field(prop, "decorationId") == null) { continue; }
+                                var installed = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+                                var preview = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "previewInstance");
+                                assertNotNull(preview); assertSame(installed.model, preview.model); assertTrue(models.contains(preview.model));
+                                assertArrayEquals(new com.badlogic.gdx.math.Matrix4(delta).mul(installed.transform).val, preview.transform.val, .001f);
+                                shares++;
+                            }
+                        }
+                        assertTrue(shares > 40);
+                        var shown = terrain.editorObjects(at).getFirst();
+                        assertEquals(3, shown.anchorLevel(), .0001);
+                        assertEquals(BoardGeometry.centerX(at) + next.decoration().x() * BoardGeometry.width(), shown.anchor().x, .001);
+                    }
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Authored immediate preview", failure.get()); }
+    }
+
     @Test void rendersClippedHpgAndStationWithNeutralCapsAndRestoresTheirGeometryWhenTheBoardGrows() throws Exception {
         File output = new File("build/gpu-board-review/authored-buildings");
         Files.createDirectories(output.toPath());

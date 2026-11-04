@@ -27,7 +27,7 @@ final class AuthoredBoardClip {
         static Point at(double u, double z) { return new Point(Math.round(u * 1000), Math.round(z * 1000)); }
     }
     private record Edge(double x, double y, double tx, double ty, double length) {
-        double side(float[] p) { return ty * (p[0] - x) - tx * (p[1] - y); }
+        double side(float px, float py) { return ty * (px - x) - tx * (py - y); }
         Point project(float[] p) { return Point.at(tx * (p[0] - x) + ty * (p[1] - y), p[2]); }
         float[] vertex(double u, double z) {
             return new float[] { (float) (x + tx * u), (float) (y + ty * u), (float) z,
@@ -42,12 +42,15 @@ final class AuthoredBoardClip {
         Area board = BuildingVolumes.polygon(outline);
         Rectangle2D bounds = bounds(whole);
         if (bounds == null || board.contains(bounds)) { return whole.data(source.id, source); }
+        Rectangle2D boardBounds = board.getBounds2D();
         GeneratedMesh result = new GeneratedMesh();
         whole.parts.forEach((material, part) -> {
             for (int offset = 0; offset < part.size; offset += 3 * RigidGlb.STRIDE) {
                 var triangle = triangle(part.items, offset);
                 Rectangle2D box = bounds(triangle);
                 if (board.contains(box)) { result.polygon(material, triangle); continue; }
+                if (box.getMaxX() < boardBounds.getMinX() || box.getMinX() > boardBounds.getMaxX()
+                      || box.getMaxY() < boardBounds.getMinY() || box.getMinY() > boardBounds.getMaxY()) { continue; }
                 // The union is concave. Partition only boundary-crossing triangles over the candidate hex prisms.
                 int minX = Math.max(0, (int) Math.floor(box.getMinX() / (HexTile.MODEL_WIDTH * .75)) - 1);
                 int maxX = Math.min(width - 1, (int) Math.ceil(box.getMaxX() / (HexTile.MODEL_WIDTH * .75)) + 1);
@@ -140,9 +143,14 @@ final class AuthoredBoardClip {
         Map<Point, List<Point>> next = new LinkedHashMap<>();
         mesh.parts.values().forEach(part -> {
             for (int offset = 0; offset < part.size; offset += 3 * RigidGlb.STRIDE) {
+                int stride = RigidGlb.STRIDE;
+                double sa = edge.side(part.items[offset], part.items[offset + 1]);
+                double sb = edge.side(part.items[offset + stride], part.items[offset + stride + 1]);
+                double sc = edge.side(part.items[offset + 2 * stride], part.items[offset + 2 * stride + 1]);
+                if (sa > EPSILON && sb > EPSILON && sc > EPSILON || sa < -EPSILON && sb < -EPSILON && sc < -EPSILON) { continue; }
                 var t = triangle(part.items, offset);
-                double[] side = t.stream().mapToDouble(edge::side).toArray();
-                if (Arrays.stream(side).allMatch(s -> Math.abs(s) <= EPSILON)) {
+                double[] side = {sa, sb, sc};
+                if (Math.abs(sa) <= EPSILON && Math.abs(sb) <= EPSILON && Math.abs(sc) <= EPSILON) {
                     Path2D path = new Path2D.Double();
                     for (int k = 0; k < 3; k++) {
                         Point p = edge.project(t.get(k));
@@ -151,7 +159,7 @@ final class AuthoredBoardClip {
                     }
                     path.closePath(); coplanar.add(new Area(path)); continue;
                 }
-                if (Arrays.stream(side).noneMatch(s -> s < -EPSILON)) { continue; }
+                if (sa >= -EPSILON && sb >= -EPSILON && sc >= -EPSILON) { continue; }
                 List<float[]> cuts = new ArrayList<>();
                 for (int k = 0; k < 3; k++) {
                     int j = (k + 1) % 3;
