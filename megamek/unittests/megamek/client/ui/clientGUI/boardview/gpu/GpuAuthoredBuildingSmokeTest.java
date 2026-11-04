@@ -49,15 +49,23 @@ class GpuAuthoredBuildingSmokeTest {
     }
 
     @Test void civicCitadelKeepsSteppedFloorsAndNightGlazingAcrossLods() throws Exception {
+        reviewCivicTower("civic-citadel", 14, List.of(2, 2, 3, 3, 14), 125, .33f);
+    }
+
+    @Test void civicHabitatKeepsSixHexesAndNightGlazingAcrossLods() throws Exception {
+        reviewCivicTower("civic-habitat", 12, List.of(1, 1, 12, 12, 12, 12), 125, .34f);
+    }
+
+    private static void reviewCivicTower(String asset, int height, List<Integer> roofs, float targetZ, float zoom) throws Exception {
         com.badlogic.gdx.utils.GdxNativesLoader.load();
-        File output = new File("build/gpu-board-review/civic-citadel");
+        File output = new File("build/gpu-board-review/" + asset);
         Files.createDirectories(output.toPath());
         Coords at = new Coords(4, 4);
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
-        place(editor, at, "civic-citadel", 0);
+        place(editor, at, asset, 0);
         var scene = capture(editor.board());
-        assertEquals(14, scene.tile(at).cover().height());
-        assertEquals(List.of(2, 2, 3, 3, 14), scene.tiles().stream()
+        assertEquals(height, scene.tile(at).cover().height());
+        assertEquals(roofs, scene.tiles().stream()
               .filter(t -> t.cover().reference() != null).map(t -> t.cover().height()).sorted().toList());
         var slices = GpuAuthoredBuilding.prepare(scene, scene.tiles());
         for (var prepared : slices.values()) {
@@ -114,8 +122,8 @@ class GpuAuthoredBuildingSmokeTest {
                             for (View view : views) {
                                 camera.setIsometric(!view.top());
                                 if (!view.top()) { camera.orbit(view.yaw() - 45, view.pitch() - BoardCamera.ISOMETRIC_TILT); }
-                                camera.camera.zoom = view.top() ? .30f : .33f;
-                                camera.center(BoardGeometry.center(at, 0).add(0, 0, view.top() ? 0 : 125));
+                                camera.camera.zoom = view.top() ? .30f : zoom;
+                                camera.center(BoardGeometry.center(at, 0).add(0, 0, view.top() ? 0 : targetZ));
                                 terrain.animate(1, List.of()); frame.render(terrain, camera, scene);
                                 int inspected = 0;
                                 for (Object chunk : (List<?>) field(terrain, "chunks")) {
@@ -128,8 +136,8 @@ class GpuAuthoredBuildingSmokeTest {
                                 GpuReviewFrame.save(new File(output, "lod" + lod + "-" + view.name() + ".png"));
                             }
                         }
-                        camera.setIsometric(true); camera.camera.zoom = .33f;
-                        camera.center(BoardGeometry.center(at, 0).add(0, 0, 125));
+                        camera.setIsometric(true); camera.camera.zoom = zoom;
+                        camera.center(BoardGeometry.center(at, 0).add(0, 0, targetZ));
                         frame.configure(new BoardAtmosphere.Settings(23, 0, 0,
                               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                         for (int lod = 0; lod < 2; lod++) {
@@ -152,7 +160,7 @@ class GpuAuthoredBuildingSmokeTest {
                         assertTrue(painted > 0);
                         terrain.update(scene); selectedLod[0] = 0;
                         camera.orbit(0, -15); camera.camera.zoom = .22f;
-                        camera.center(BoardGeometry.center(at, 0).add(0, 0, 140));
+                        camera.center(BoardGeometry.center(at, 0).add(0, 0, targetZ + 15));
                         terrain.animate(1, List.of(), .25f, at, 6 * BoardGeometry.level());
                         assertFalse(faded(terrain).isEmpty(), "The shaft opens to its generated interior");
                         frame.render(terrain, camera, scene);
@@ -163,7 +171,7 @@ class GpuAuthoredBuildingSmokeTest {
                 finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }
             }
         }, config);
-        if (failure.get() != null) { throw new AssertionError("Civic citadel review", failure.get()); }
+        if (failure.get() != null) { throw new AssertionError(asset + " review", failure.get()); }
     }
 
     @Test void civicAssetsKeepMaterialsAndLightsAcrossSlicedLods() throws Exception {
