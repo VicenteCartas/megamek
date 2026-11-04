@@ -30,7 +30,7 @@ class GpuAuthoredPartitionTest {
             float notchX = cell.equals(at) ? -20 : 59 - HexTile.MODEL_WIDTH * .75f;
             float notchY = cell.equals(at) ? 5 : 55 - HexTile.HEIGHT * .5f;
             for (var floor : prepared.floors()) {
-                assertTrue(covers(floor, 0, 0), "Each storey has a usable interior");
+                assertTrue(covers(floor, 2, 3), "Each storey has a usable interior at " + cell);
                 assertFalse(covers(floor, notchX, notchY), "Generated floors must not fill the authored notch");
             }
             assertFalse(prepared.roof().isEmpty(), "The helper's top supplies roof supports");

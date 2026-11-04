@@ -639,6 +639,65 @@ class BoardMultiHexBuildingTest {
     }
 
     @Test
+    void railJointsCrossMitersSquarelyWithoutLosingTheOverhangingEnds() throws Exception {
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("coping", GeneratedMesh.class, List.class,
+              float[].class, float[].class, float[].class, float[].class, float.class, float.class);
+        method.setAccessible(true);
+        for (boolean inward : new boolean[] { false, true }) {
+            for (int degrees : new int[] { 0, 30, 90, 210 }) {
+                float cos = (float) Math.cos(Math.toRadians(degrees)), sin = (float) Math.sin(Math.toRadians(degrees));
+                var outline = List.of(new float[] { 0, 0 }, new float[] { 36, 0 },
+                            new float[] { inward ? -5 : 3.8f, 3.8f }, new float[] { inward ? 42 : 32.2f, 3.8f })
+                      .stream().map(p -> new float[] { 64 + cos * p[0] - sin * p[1], -37 + sin * p[0] + cos * p[1] }).toList();
+                var mesh = new GeneratedMesh();
+                method.invoke(null, mesh, wideHex(), outline.get(0), outline.get(1), outline.get(2), outline.get(3), 20f, 3.5f);
+                var top = vertices(mesh.data("rail-joints", false), BoardMultiHexBuilding.HARDWARE).stream()
+                      .filter(v -> Math.abs(v[2] - 20.285f) < .001f && v[5] > .999f)
+                      .map(v -> new Vector3((v[0] - 64) * cos + (v[1] + 37) * sin,
+                            -(v[0] - 64) * sin + (v[1] + 37) * cos, 0)).toList();
+                var plates = GpuBuildingInterior.area(top);
+                for (float joint : new float[] { 5.5f, 14.5f, 23.5f }) {
+                    for (float across : new float[] { .65f, 1.9f, 3.15f }) {
+                        assertFalse(plates.contains(joint, across), "A joint crosses the full rail width at one along-rail distance");
+                        assertTrue(plates.contains(joint - .4f, across) && plates.contains(joint + .4f, across),
+                              "The fitted plates meet both sides of the narrow square joint");
+                    }
+                }
+                if (inward) {
+                    assertTrue(plates.contains(-3, 2.8) && plates.contains(40, 3),
+                          "Inward miter overhangs keep their fitted plates beyond the outer rail's endpoints");
+                }
+            }
+        }
+    }
+
+    @Test
+    void railFastenersClearCapOverhangsWithoutErasingOtherHeights() throws Exception {
+        var capType = Class.forName(BoardMultiHexBuilding.class.getName() + "$Cap");
+        var constructor = capType.getDeclaredConstructor(List.class, float.class, float.class);
+        constructor.setAccessible(true);
+        var method = BoardMultiHexBuilding.class.getDeclaredMethod("coping", GeneratedMesh.class, List.class,
+              float[].class, float[].class, float[].class, float[].class, float.class, float.class, List.class);
+        method.setAccessible(true);
+        // The nearest bolt centres fall outside this narrow overhang, but their washers leave no useful gap.
+        var outline = List.of(new float[] { 8.7f, 0 }, new float[] { 9.3f, 0 }, new float[] { 9.3f, 3.8f }, new float[] { 8.7f, 3.8f });
+        List<List<float[]>> washers = new ArrayList<>();
+        for (var caps : List.of(List.of(), List.of(constructor.newInstance(outline, 19f, 22f)),
+              List.of(constructor.newInstance(outline, 30f, 32f)))) {
+            var mesh = new GeneratedMesh();
+            method.invoke(null, mesh, wideHex(), new float[] { 0, 0 }, new float[] { 36, 0 },
+                  new float[] { 0, 3.8f }, new float[] { 36, 3.8f }, 20f, 0f, caps);
+            washers.add(vertices(mesh.data("rail-clearance", false), BoardMultiHexBuilding.HARDWARE).stream()
+                  .filter(v -> Math.abs(v[2] - 20.295f) < .001f && v[5] > .999f && v[6] < .2f).toList());
+        }
+        assertTrue(washers.get(1).size() < washers.getFirst().size(), "Remove the bolt pair crowded against the cap overhang");
+        assertEquals(washers.getFirst().size(), washers.get(2).size(), "A cap on another roof level must not suppress these fasteners");
+        assertTrue(washers.get(1).stream().allMatch(v -> v[0] < 8.5f || v[0] > 9.5f), "Keep whole washers clear of the cap edge");
+        assertEquals(washers.getFirst().stream().filter(v -> v[0] > 12).count(),
+              washers.get(1).stream().filter(v -> v[0] > 12).count(), "Retain the accepted pattern away from columns");
+    }
+
+    @Test
     void tallPillarsHaveOnlyAHeadLightAndASmallerFootLight() throws Exception {
         var method = BoardMultiHexBuilding.class.getDeclaredMethod("facadePost", GeneratedMesh.class, List.class,
               float[].class, float.class, float.class, float.class, float.class, float.class, boolean.class);

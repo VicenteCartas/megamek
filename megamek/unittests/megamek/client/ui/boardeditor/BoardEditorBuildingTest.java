@@ -91,28 +91,6 @@ class BoardEditorBuildingTest {
     }
 
     @Test
-    void legacyDebugAppearanceUsesTheWeightBasedKitAfterSaving(@TempDir Path directory) throws Exception {
-        var board = Board.createEmptyBoard(6, 3);
-        var colour = megamek.common.board.BoardDecoration.Colours.of("#72949b");
-        for (int weight = 1; weight <= 4; weight++) {
-            Hex hex = new Hex(0, "building:" + weight + ":0;bldg_elev:2;bldg_cf:60;bldg_basement_type:1", "");
-            hex.setAppearance(Map.of("building", new HexAppearance("building/debug-authored", null, null, null, colour, 45)));
-            board.setHex(new Coords(weight, 1), hex);
-        }
-        var editor = new BoardEditorSession(); editor.open(board, null);
-        Path file = directory.resolve("legacy-debug.board2"); editor.save(file); editor.open(file);
-        for (int weight = 1; weight <= 4; weight++) {
-            Hex hex = editor.board().getHex(weight, 1);
-            String model = TilesetScenery.structureModels(hex).get(Terrains.BUILDING);
-            assertEquals(TilesetScenery.genericBuilding(hex), model);
-            assertTrue(TilesetScenery.generatedKit(model));
-            assertTrue(hex.getDecorations().isEmpty(), "A legacy single-hex look must not place the two-hex demo");
-            assertEquals(colour, hex.getAppearance().get("building").colours());
-            assertEquals(45, hex.getAppearance().get("building").rotation());
-        }
-    }
-
-    @Test
     void genericRotationAndConnectedTintSurviveSavingAndUndo(@TempDir Path directory) throws Exception {
         Coords first = new Coords(2, 2), second = first.translated(0);
         var editor = new BoardEditorSession();

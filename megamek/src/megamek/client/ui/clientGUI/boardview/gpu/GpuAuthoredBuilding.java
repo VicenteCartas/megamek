@@ -307,9 +307,12 @@ final class GpuAuthoredBuilding {
             var triangles = prepared.floors().get(level);
             if (triangles.isEmpty()) { continue; }
             var floor = builder.part("floor-" + level, GL20.GL_TRIANGLES, attributes, material);
-            float z = (layout.ground() + level) * HexTile.LEVEL_HEIGHT + (level == 0 ? .04f : 0);
-            GpuBuildingInterior.floor(floor, triangles, z);
+            GpuBuildingInterior.floor(floor, triangles, floorHeight(layout, level));
         }
         return builder.end();
+    }
+
+    static float floorHeight(Layout layout, int level) {
+        return (layout.ground() + level) * HexTile.LEVEL_HEIGHT + (level == 0 ? .04f : 0);
     }
 }

@@ -31,6 +31,53 @@ import org.junit.jupiter.api.Test;
 /** The shipped examples exercise real slicing, material upload, interiors and anchor-hex collapse. */
 @Tag("on-demand")
 class GpuAuthoredBuildingSmokeTest {
+    @Test void debugDemoShowsTwoHeightsGeneratedFloorsAndIndependentHexCollapse() throws Exception {
+        File output = new File("build/gpu-board-review/authored-buildings");
+        Files.createDirectories(output.toPath());
+        var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(7, 7), null);
+        Coords low = new Coords(2, 3), high = low.translated(1);
+        editor.command(new Command(Action.ASSET, "buildings/debug/debug-authored"), null);
+        editor.pointer(low, 0, 0, false); editor.finishStroke();
+        var file = output.toPath().resolve("Debug Authored Slicing.board2"); editor.save(file);
+        Board board = BoardFile.read(file);
+        BoardScene original = capture(board);
+        assertEquals(2, original.tiles().stream().filter(t -> t.cover().reference() != null).count());
+        assertEquals(2, original.tile(low).cover().height()); assertEquals(4, original.tile(high).cover().height());
+        var slices = GpuAuthoredBuilding.prepare(original, original.tiles());
+        assertEquals(2, slices.size());
+        for (var prepared : slices.values()) { assertEquals(prepared.layout().height(), prepared.floors().size()); }
+        board.collapseBuilding(low);
+        BoardScene collapsed = capture(board);
+        assertTrue(collapsed.tile(low).features().stream().noneMatch(GpuAuthoredBuilding::supports));
+        assertEquals(4, collapsed.tile(high).cover().height());
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900); config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                GpuTerrain terrain = new GpuTerrain();
+                GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(10, 0, 0,
+                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.setIsometric(true);
+                    camera.camera.zoom = .22f; camera.center(BoardGeometry.center(low, 1).add(30, 18, 8));
+                    terrain.update(original); terrain.animate(1, List.of());
+                    frame.render(terrain, camera, original); GpuReviewFrame.save(new File(output, "debug-authored.png"));
+                    for (Coords at : List.of(low, high)) {
+                        terrain.animate(1, List.of(), 0, at, BoardGeometry.level());
+                        assertFalse(faded(terrain).isEmpty(), "Hovering inside reveals runtime floors");
+                        frame.render(terrain, camera, original);
+                        GpuReviewFrame.save(new File(output, at.equals(low) ? "debug-low-interior.png" : "debug-high-interior.png"));
+                    }
+                    terrain.update(collapsed); terrain.animate(1, List.of());
+                    frame.render(terrain, camera, collapsed); GpuReviewFrame.save(new File(output, "debug-hex-collapsed.png"));
+                    assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+                } catch (Throwable error) { failure.set(error); }
+                finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Debug authored slicing demo", failure.get()); }
+    }
+
     @Test void previewsAuthoredTransformsAndPaintBeforeRebuildingAnyChunks() throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(24, 20), null);
         for (int x = 0; x < 24; x++) { for (int y = 0; y < 20; y++) { editor.board().getHex(x, y).setLevel(3); } }

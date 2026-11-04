@@ -33,7 +33,7 @@ class GpuEditorBuildingSmokeTest {
             editor.command(new Command(Action.CHOOSE_BRUSH, "building", "building/lunar-habitat"), null);
             editor.pointer(at, 0, 0, false);
             editor.finishStroke();
-            editor.command(new Command(Action.CHOOSE_BRUSH, "building", "building/debug-authored"), null);
+            editor.command(new Command(Action.CHOOSE_BRUSH, "building", ""), null);
             editor.pointer(new Coords(1, 4), 0, 0, false); editor.finishStroke();
             editor.command(new Command(Action.DESIGN_ROTATION, "building", "45"), null);
             editor.command(new Command(Action.BUILDING_COLOUR, "#d6ccab"), null);

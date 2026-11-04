@@ -200,7 +200,8 @@ final class GpuGroundCover implements Disposable {
         }
         float iceReach = BoardRelief.metres(ICE_BORDER_REACH);
         float shoreReach = BoardRelief.metres(SHORE_FADE_METRES);
-        var obstacles = new BoardObstacles(scene, tile, true);
+        var obstacles = new BoardObstacles(scene, tile, ground, MAX_HEIGHT_FRACTION * BoardGeometry.width(),
+              2 * BoardGeometry.hexScale());
         List<BoardScene.Feature> minerals = vegetation == null ? List.of() : vegetation.minerals();
         var cover = new BoardSurfaceBlend.Sampler(scene, tile);
         var root = new Vector3();
@@ -324,7 +325,8 @@ final class GpuGroundCover implements Disposable {
         faces.addAll(surface.walls());
         faces.removeIf(face -> BoardSurface.bridgeSupport(scene, tile, face));
         var support = new GpuBiomeVegetation.Support(faces);
-        var obstacles = new BoardObstacles(scene, tile, true);
+        var obstacles = new BoardObstacles(scene, tile, faces, MAX_HEIGHT_FRACTION * BoardGeometry.width(),
+              2 * BoardRelief.metres(1));
         // Rim blades grow up to a ground rail's ballast (BoardObstacles); only a road keeps its verge bare.
         var road = BoardRoad.rendered(tile) ? BoardRoad.way(scene, tile) : null;
         boolean boundary = BoardSurfaceBlend.boundary(scene, tile);

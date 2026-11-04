@@ -52,6 +52,7 @@ class GpuMultiHexBuildingSmokeTest {
           new View("road-gates", new Coords(23, 12), .3f, true, -20),
           new View("annex-cap", new Coords(21, 11), .12f, true, -20),
           new View("junction-top", new Coords(22, 12), .22f, false, 0),
+          new View("review-terrace-roof-panels", new Coords(23, 11), .20f, false, 0),
           new View("junction-oblique", new Coords(21, 11), .16f, true, -20),
           new View("corner-gate", new Coords(23, 12), .08f, true, -20),
           new View("corner-pillars", new Coords(21, 11), .09f, true, -20),
