@@ -202,9 +202,9 @@ class BoardFoliageTest {
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
-            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/).
+            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/, crystal/).
             String name = atlas.getName().replace(".png", "");
-            String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/").map(folder -> folder + name)
+            String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/", "crystal/").map(folder -> folder + name)
                   .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
             var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();

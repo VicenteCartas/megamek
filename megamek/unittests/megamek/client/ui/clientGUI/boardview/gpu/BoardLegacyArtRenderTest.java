@@ -92,7 +92,7 @@ class BoardLegacyArtRenderTest {
                 Hex token = board.getHex(AT).duplicate();
                 token.setAppearance(Map.of());
                 Hex design = BoardSceneryLayouts.withoutTakenTokens(board.getHex(AT));
-                assertFalse(design.getAppearance().isEmpty());
+                assertFalse(design.getAppearance().isEmpty(), terrain);
                 Object[] expected = tileset.assignMatch(token), actual = tileset.assignMatch(design);
                 assertEquals(expected[0], actual[0], terrain + ": base");
                 assertEquals(expected[1], actual[1], terrain + ": supers");
