@@ -21,24 +21,64 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
-    /** A side separated between two slabs runs straight as a concrete edge does, where the hexes alone would zigzag. */
+    /** Separated sides run straight as a concrete edge does, where the hexes alone would zigzag. */
     @Test void aSeparatedPavementSideFitsStraight() {
+        assertStraightCut(11, 3, 8);
+    }
+
+    /** A cut that stops inside the pavement, whose two hands still join beyond it, runs straight to its end. */
+    @Test void aCutStoppingInsideThePavementFitsStraight() {
+        assertStraightCut(7, 1, 7);
+    }
+
+    /** A branch leaves a cut straight through the corner it joins, and runs straight itself to the cut's line. */
+    @Test void aCutStaysStraightThroughABranch() {
+        var board = cutBoard(11);
+        int southEast = 1 << 2, south = 1 << 3;
+        board.getHex(4, 5).setAppearance(java.util.Map.of("pavement", megamek.common.board.HexAppearance.withSeparated(null, southEast | south)));
+        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(board), 1, true, java.util.Set.of());
+        assertStraight(fit, 3, 8);
+        int first = 0, second = 0;
+        while (megamek.common.board.HexTile.edgeDirection(first) != 2) { first++; }
+        while (megamek.common.board.HexTile.edgeDirection(second) != 3) { second++; }
+        var points = new java.util.ArrayList<megamek.common.board.ConcreteFit.Point>();
+        for (int k : new int[] { first, (first + 1) % 6, second, (second + 1) % 6 }) {
+            var point = fit.corner(new Coords(4, 5), k);
+            if (!points.contains(point)) { points.add(point); }
+        }
+        assertEquals(3, points.size());
+        var a = points.get(0);
+        var b = points.get(1);
+        var c = points.get(2);
+        float area = (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+        assertTrue(Math.abs(area) < .5f, "One straight branch: twice its triangle's area is " + area);
+    }
+
+    private static void assertStraightCut(int lastColumn, int from, int to) {
+        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(cutBoard(lastColumn)), 1, true, java.util.Set.of());
+        assertStraight(fit, from, to);
+    }
+
+    private static megamek.common.board.Board cutBoard(int lastColumn) {
         var board = megamek.common.board.Board.createEmptyBoard(12, 10);
         for (int x = 0; x < 12; x++) {
             for (int y = 0; y < 10; y++) {
                 var hex = new megamek.common.Hex(0, "pavement:1", "");
-                if (y == 4) {
+                if (y == 4 && x <= lastColumn) {
                     int sides = 1 << 3 | ((x & 1) == 1 ? 1 << 2 | 1 << 4 : 0);
                     hex.setAppearance(java.util.Map.of("pavement", megamek.common.board.HexAppearance.withSeparated(null, sides)));
                 }
                 board.setHex(x, y, hex);
             }
         }
-        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(board), 1, true, java.util.Set.of());
+        return board;
+    }
+
+    private static void assertStraight(megamek.common.board.ConcreteFit fit, int from, int to) {
         int south = 0;
         while (megamek.common.board.HexTile.edgeDirection(south) != 3) { south++; }
         float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
-        for (int x = 3; x <= 8; x++) {
+        for (int x = from; x <= to; x++) {
             for (int k : new int[] { south, (south + 1) % 6 }) {
                 float y = fit.corner(new Coords(x, 4), k).y();
                 low = Math.min(low, y);

@@ -25,6 +25,9 @@ import megamek.common.units.Terrains;
  * built.
  */
 public final class ConcreteFit {
+    /** How far a separated side stays from a hex's centre, at scale 1: past the gap each side of it draws, and a little more. */
+    private static final float SEPARATED_MARGIN = 10;
+
     /**
      * What the fit reads of one hex. {@code fixed}: the hex keeps its outline (a structure, ground drawn without the
      * fitted relief, or a pin); {@code wayExits}: its road and ground-rail sides; {@code ramps}: the sides whose road
@@ -79,9 +82,8 @@ public final class ConcreteFit {
     private final Integer plateau;
     /** Prior accepted plateaus, read only while this temporary level fit is constructed. */
     private final ConcreteFit previous;
-    /** While a separated slab's sides are fitted: every cell's slab by board index, and that slab; else null and 0. */
-    private final int[] slabs;
-    private final int slab;
+    /** While a run of separated sides is fitted, each cell's hand of it by board index: 1 owns the run, -1 lies outside, 0 neither. */
+    private final int[] hands;
     /** Hexes that keep their outline because a placed object pins them. */
     private final Set<Coords> pinned;
     /** Moved lattice corners by {@link #slot}; null where a corner keeps its place. */
@@ -100,13 +102,12 @@ public final class ConcreteFit {
 
     private ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere,
           Set<Coords> pinned, Integer plateau, ConcreteFit previous) {
-        this(width, height, cells, scale, everywhere, pinned, plateau, previous, null, 0);
+        this(width, height, cells, scale, everywhere, pinned, plateau, previous, null);
     }
 
     private ConcreteFit(int width, int height, List<Cell> cells, float scale, boolean everywhere,
-          Set<Coords> pinned, Integer plateau, ConcreteFit previous, int[] slabs, int slab) {
-        this.slabs = slabs;
-        this.slab = slab;
+          Set<Coords> pinned, Integer plateau, ConcreteFit previous, int[] hands) {
+        this.hands = hands;
         this.width = width;
         this.height = height;
         this.cells = cells;
@@ -150,70 +151,130 @@ public final class ConcreteFit {
     /** Takes the corners of a later pass that no earlier one moved, and those a separated side's end slid on. */
     private void adopt(ConcreteFit next, Set<Coords> fitted) {
         for (int i = 0; i < shifts.length; i++) {
-            if ((shifts[i] == null || next.slab != 0) && next.shifts[i] != null) { shifts[i] = next.shifts[i]; }
+            if ((shifts[i] == null || next.hands != null) && next.shifts[i] != null) { shifts[i] = next.shifts[i]; }
         }
         for (Cell tile : cells) { if (next.footprint(tile.coords()) != null) { fitted.add(tile.coords()); } }
     }
 
     /**
-     * A side separated between two slabs of pavement at one level is fitted as any concrete edge is, by the same contour
-     * fitter, with one owner for each side: the later slab. Its ends start where the outline's fit put them. A side that
-     * parts no two slabs keeps its hex edge, and a board with no separated side never comes here.
+     * Each run of separated sides between pavement at one level is fitted as any concrete edge is, by the same contour
+     * fitter, whether it parts the pavement in two or stops inside it: one hand of the run owns it and the other lies
+     * outside. Where three separated sides meet, the two running on nearly straight are one run and the third branches off
+     * it ({@link #branch}). A hex on both hands of its run keeps its edges, and a board with no separated side never comes
+     * here.
      */
     private void fitSeparated() {
         if (cells.stream().noneMatch(tile -> tile.separated() != 0)) { return; }
-        int[] found = new int[cells.size()];
-        int count = 0;
-        for (int i = 0; i < cells.size(); i++) {
-            if (found[i] != 0 || !paved(cells.get(i))) { continue; }
-            found[i] = ++count;
-            List<Cell> open = new ArrayList<>(List.of(cells.get(i)));
-            while (!open.isEmpty()) {
-                Cell tile = open.removeLast();
-                for (int d = 0; d < 6; d++) {
-                    Cell next = cell(tile.coords().translated(d));
-                    if (next == null || !paved(next) || next.level() != tile.level()
-                          || ((tile.separated() >> d | next.separated() >> (d + 3) % 6) & 1) != 0) { continue; }
-                    int at = index(next.coords().getX(), next.coords().getY());
-                    if (found[at] == 0) {
-                        found[at] = count;
-                        open.add(next);
-                    }
-                }
-            }
-        }
-        Map<Integer, Integer> owners = new TreeMap<>();
-        for (int i = 0; i < cells.size(); i++) {
-            Cell tile = cells.get(i);
-            for (int d = 0; d < 6 && found[i] != 0; d++) {
+        List<Cut> cuts = new ArrayList<>();
+        Map<Long, List<Cut>> ends = new HashMap<>();
+        for (Cell tile : cells) {
+            for (int e = 0; e < 6 && paved(tile); e++) {
+                int d = HexTile.edgeDirection(e);
                 Cell next = cell(tile.coords().translated(d));
-                if (next != null && paved(next) && next.level() == tile.level()
-                      && found[index(next.coords().getX(), next.coords().getY())] < found[i]) {
-                    owners.put(found[i], tile.level());
-                }
+                // Every side once, from the hex to its north, north-east or south-east.
+                if (d > 2 || next == null || !paved(next) || next.level() != tile.level() || !apart(tile, next, d)) { continue; }
+                Cut cut = new Cut(tile, next, key(original(tile.coords(), e)), key(original(tile.coords(), (e + 1) % 6)));
+                cuts.add(cut);
+                ends.computeIfAbsent(cut.from, ignored -> new ArrayList<>()).add(cut);
+                ends.computeIfAbsent(cut.to, ignored -> new ArrayList<>()).add(cut);
             }
         }
+        Map<Long, Cut> branches = new HashMap<>();
+        ends.forEach((corner, there) -> {
+            Cut branch = there.size() == 3 ? branch(corner, there, ends) : null;
+            if (branch != null) { branches.put(corner, branch); }
+        });
+        Set<Cut> seen = new HashSet<>();
         Set<Coords> fitted = new HashSet<>();
-        owners.forEach((owner, level) -> adopt(new ConcreteFit(width, height, cells, scale, everywhere, pinned, level, this, found, owner), fitted));
+        for (Cut cut : cuts) { fitRun(cut, ends, branches, seen, fitted); }
         // An end sliding along the outline also moves the ground hex beside it.
         for (Cell tile : cells) { if (footprint(tile.coords()) != null) { fitted.add(tile.coords()); } }
         footprints(fitted);
     }
 
+    /** Fits the run holding {@code first}, after the runs it branches off: its end meets their fitted lines. */
+    private void fitRun(Cut first, Map<Long, List<Cut>> ends, Map<Long, Cut> branches, Set<Cut> seen, Set<Coords> fitted) {
+        if (!seen.add(first)) { return; }
+        int[] hands = new int[cells.size()];
+        hands[index(first.a)] = 1;
+        hands[index(first.b)] = -1;
+        boolean twoHanded = true;
+        List<Cut> open = new ArrayList<>(List.of(first)), met = new ArrayList<>();
+        while (!open.isEmpty()) {
+            Cut cut = open.removeLast();
+            for (long end : new long[] { cut.from, cut.to }) {
+                if (branches.get(end) == cut) { met.add(ends.get(end).get(ends.get(end).get(0) == cut ? 1 : 0)); }
+                Cut next = onward(cut, end, ends, branches);
+                if (next == null || !seen.add(next)) { continue; }
+                // Two sides meeting at a corner share one hex; the other hex lies across the run from it.
+                boolean shareA = next.a == cut.a || next.a == cut.b;
+                Cell shared = shareA ? next.a : next.b, across = shareA ? next.b : next.a;
+                twoHanded &= hands[index(across)] != hands[index(shared)];
+                hands[index(across)] = -hands[index(shared)];
+                open.add(next);
+            }
+        }
+        for (Cut cut : met) { fitRun(cut, ends, branches, seen, fitted); }
+        if (twoHanded) { adopt(new ConcreteFit(width, height, cells, scale, everywhere, pinned, first.a.level(), this, hands), fitted); }
+    }
+
+    /** The side that carries a run on from {@code cut} past its corner {@code end}; null where the run ends there. */
+    private static Cut onward(Cut cut, long end, Map<Long, List<Cut>> ends, Map<Long, Cut> branches) {
+        Cut branch = branches.get(end);
+        if (branch == cut) { return null; }
+        List<Cut> there = new ArrayList<>(ends.get(end));
+        there.remove(cut);
+        there.remove(branch);
+        return there.size() == 1 ? there.getFirst() : null;
+    }
+
+    /** Where the sides from {@code start} along {@code cut} reach their far end, or three sides meeting. */
+    private Point reach(Cut cut, long start, Map<Long, List<Cut>> ends) {
+        long at = cut.from == start ? cut.to : cut.from;
+        Set<Cut> walked = new HashSet<>(Set.of(cut));
+        for (Cut next = onward(cut, at, ends, Map.of()); next != null && walked.add(next); next = onward(next, at, ends, Map.of())) {
+            at = next.from == at ? next.to : next.from;
+        }
+        return lattice(at);
+    }
+
+    /**
+     * Which of the three separated sides meeting at {@code corner} branches off: the one leaving the other two nearest a
+     * straight line, judged by where they lead, when they lie over about 140 degrees apart. Null when no two do: a Y.
+     */
+    private Cut branch(long corner, List<Cut> there, Map<Long, List<Cut>> ends) {
+        Cut branch = null;
+        float straightest = -.75f;
+        Point at = lattice(corner);
+        for (int i = 0; i < 3; i++) {
+            float cosine = reach(there.get((i + 1) % 3), corner, ends).sub(at).nor().dot(reach(there.get((i + 2) % 3), corner, ends).sub(at).nor());
+            if (cosine < straightest) {
+                straightest = cosine;
+                branch = there.get(i);
+            }
+        }
+        return branch;
+    }
+
+    /** Which of a hex's corners (0..5) the {@code corner} is. */
+    private int cornerOf(Cell tile, Corner corner) {
+        int k = 0;
+        while (original(tile.coords(), k).dst2(corner.original) > .001f) { k++; }
+        return k;
+    }
+
     /**
      * The straight stretch of the outline a separated side ends on, as its two ends beside {@code corner}; null where the
-     * side ends anywhere else. The ground beyond it is one hex, and the side's two slabs each have an edge along it.
+     * side ends anywhere else. The ground beyond it is one hex, and the run's two hands each have an edge along it.
      */
     private Point[] outlineAt(Corner corner) {
         List<Point> ends = new ArrayList<>(2);
         for (Cell tile : corner.tiles) {
-            for (int k = 0; k < 6; k++) {
-                if (original(tile.coords(), k).dst2(corner.original) > .001f) { continue; }
-                for (int e : new int[] { k, (k + 5) % 6 }) {
-                    Cell across = cell(tile.coords().translated(HexTile.edgeDirection(e)));
-                    if (across != null && !across.concrete() && !across.liquid()) {
-                        ends.add(previous.corner(tile.coords(), e == k ? (k + 1) % 6 : (k + 5) % 6));
-                    }
+            int k = cornerOf(tile, corner);
+            for (int e : new int[] { k, (k + 5) % 6 }) {
+                Cell across = cell(tile.coords().translated(HexTile.edgeDirection(e)));
+                if (across != null && !across.concrete() && !across.liquid()) {
+                    ends.add(previous.corner(tile.coords(), e == k ? (k + 1) % 6 : (k + 5) % 6));
                 }
             }
         }
@@ -222,8 +283,23 @@ public final class ConcreteFit {
         return Math.abs(along.x * to.y - along.y * to.x) < .01f * scale ? new Point[] { a, ends.get(1) } : null;
     }
 
-    /** Where a separated side's fitted {@code line} meets the outline its end lies on, within it; else where it was. */
+    /** The third hex at {@code corner}, beside the two of a run's open end there; null off the board. */
+    private Cell third(Corner corner) {
+        Cell tile = corner.tiles.iterator().next();
+        int k = cornerOf(tile, corner);
+        for (int e : new int[] { k, (k + 5) % 6 }) {
+            Cell across = cell(tile.coords().translated(HexTile.edgeDirection(e)));
+            if (across == null || !corner.tiles.contains(across)) { return across; }
+        }
+        return null;
+    }
+
+    /**
+     * Where a run's end goes for its fitted {@code line}: onto the line if it stops inside the pavement, where the line meets
+     * the outline the end lies on, within it; else where it was.
+     */
     private static Point slid(Corner corner, Line line, Point point) {
+        if (corner.free) { return line.project(point); }
         if (corner.outline == null) { return point; }
         Point a = corner.outline[0], along = corner.outline[1].sub(a), unit = along.nor();
         Point joint = new Line(-unit.y, unit.x, -unit.y * a.x + unit.x * a.y).intersection(line);
@@ -234,7 +310,12 @@ public final class ConcreteFit {
 
     private static boolean paved(Cell tile) { return tile.concrete() && !tile.liquid(); }
 
-    private int slab(Cell tile) { return slabs[index(tile.coords().getX(), tile.coords().getY())]; }
+    /** Whether the author parted {@code tile} from the hex across its side in direction {@code d}, from either hex. */
+    private static boolean apart(Cell tile, Cell across, int d) {
+        return ((tile.separated() >> d | across.separated() >> (d + 3) % 6) & 1) != 0;
+    }
+
+    private int hand(Cell tile) { return hands[index(tile)]; }
 
     /**
      * The cells of a board as the 3D board captures its hexes, from the hexes alone (what the legacy conversion can read
@@ -318,6 +399,13 @@ public final class ConcreteFit {
         return index < 0 ? null : footprints[index];
     }
 
+    private int index(Cell tile) { return index(tile.coords().getX(), tile.coords().getY()); }
+
+    /** The unmoved place of a lattice corner by its {@link #key}. */
+    private Point lattice(long corner) {
+        return new Point((int) (corner >> 32) * hexWidth / 4, (int) corner * hexHeight / 2);
+    }
+
     private int index(int x, int y) {
         return x < 0 || y < 0 || x >= width || y >= height ? -1 : x * height + y;
     }
@@ -353,6 +441,10 @@ public final class ConcreteFit {
         Line rail;
         /** The straight stretch of the outline a separated side's end may slide along; null elsewhere. */
         Point[] outline;
+        /** A run of separated sides stops here inside the pavement: this end follows the fitted line. */
+        boolean free;
+        /** A run of separated sides meets others here: it is a branch, the straight line from here to its far end. */
+        boolean meets;
         boolean pinned, dock, border;
 
         Corner(Point point) {
@@ -361,17 +453,21 @@ public final class ConcreteFit {
         }
     }
 
+    /** A separated side between two hexes, and its two lattice corners. */
+    private record Cut(Cell a, Cell b, long from, long to) { }
+
     private void fit() {
         Map<Long, Corner> corners = new TreeMap<>();
         for (Cell land : cells) {
             if (land.liquid() || !land.concrete() || plateau != null && land.level() != plateau
-                  || slab != 0 && slab(land) != slab) { continue; }
+                  || hands != null && hand(land) != 1) { continue; }
             for (int e = 0; e < 6; e++) {
                 Cell water = cell(land.coords().translated(HexTile.edgeDirection(e)));
                 // A graded opening owns its road plane, not a vertical plateau wall to straighten.
                 if (plateau != null && (land.ramps() & 1 << HexTile.edgeDirection(e)) != 0) { continue; }
                 if (plateau != null && (water == null || !water.concrete() || water.liquid()
-                      || (slab != 0 ? water.level() != land.level() : water.level() >= land.level()))) { continue; }
+                      || (hands != null ? water.level() != land.level() || !apart(land, water, HexTile.edgeDirection(e))
+                            : water.level() >= land.level()))) { continue; }
                 if (!outside(water) || water.liquid() && water.level() > land.level()) { continue; }
                 Corner a = coastCorner(corners, land.coords(), e);
                 Corner b = coastCorner(corners, land.coords(), (e + 1) % 6);
@@ -401,15 +497,27 @@ public final class ConcreteFit {
                     dryLevel = tile.level();
                 }
             }
-            if (slab != 0) {
-                // Three slabs meeting stay put, and a side's end stays where the outline's fit put it.
-                corner.pinned |= corner.tiles.stream().filter(this::outside).map(this::slab).distinct().count() > 1;
+            if (hands != null) {
+                // A run's end stays where an earlier fit put it.
                 Shift moved = previous.shift(key(corner.original));
                 if (!moved.equals(Shift.ZERO)) {
                     corner.point = corner.original.add(new Point(moved.x(), moved.y()));
                     corner.pinned = true;
                 }
-                if (corner.previous == null || corner.next == null) { corner.outline = outlineAt(corner); }
+                // A fixed hex keeps its corners, so an end beside one moves nowhere.
+                if ((corner.previous == null || corner.next == null)
+                      && corner.tiles.stream().noneMatch(tile -> fixedBoundary(corner, tile))) {
+                    corner.outline = outlineAt(corner);
+                    Cell third = third(corner);
+                    if (third != null && paved(third) && third.level() == plateau) {
+                        corner.meets = corner.tiles.stream().anyMatch(tile -> apart(tile, third, tile.coords().direction(third.coords())));
+                        // The third hex's corner moves with a free end, so it counts among the hexes the end moves.
+                        if (!corner.meets && moved.equals(Shift.ZERO) && !fixedBoundary(corner, third)) {
+                            corner.free = true;
+                            corner.tiles.add(third);
+                        }
+                    }
+                }
             }
             if (!corner.pinned) {
                 Line before = corner.previous == null ? null : corner.previous.rail, after = corner.rail;
@@ -869,7 +977,8 @@ public final class ConcreteFit {
             fitQuay(chain, middle, last, runs);
             return;
         }
-        float[] along = construction(dx, dy);
+        boolean branch = chain.get(first).meets || chain.get(last).meets;
+        float[] along = branch ? new float[] { dx / length, dy / length } : construction(dx, dy);
         float nx = -along[1], ny = along[0];
         float offset = 0;
         int begin = last - first > 1 ? first + 1 : first, end = last - first > 1 ? last - 1 : last;
@@ -885,8 +994,8 @@ public final class ConcreteFit {
         }
         if (low <= high) { offset = Math.clamp(offset, low, high); }
         Line line = new Line(nx, ny, offset);
-        if (last - first == 1) {
-            // An unsimplifiable single edge retains its endpoints.
+        if (last - first == 1 || branch) {
+            // An unsimplifiable single edge, or a branch, retains its endpoints.
             line = new Line(-dy / length, dx / length, (-dy * a.x + dx * a.y) / length);
         }
         int split = (first + last) / 2;
@@ -896,7 +1005,8 @@ public final class ConcreteFit {
             // Corners mirrored across a regular hex lie equally far: the first is split at, never what rounding picks.
             if (distance > error + .01f * scale) { error = distance; split = i; }
         }
-        if (last - first > 1 && (error > 24 * scale || low > high)) {
+        // The run a branch leaves has moved its corner, which a branch of two sides may take up to 40 from a straight line.
+        if (last - first > 1 && (error > (branch ? 40 : 24) * scale || low > high)) {
             fitQuay(chain, first, split, runs);
             fitQuay(chain, split, last, runs);
         } else { runs.add(new Run(first, last, line, false)); }
@@ -938,7 +1048,9 @@ public final class ConcreteFit {
         // Unlike a quay, an inland cut can carry the full road/rail corridor. Leave room for its
         // axis-aligned ballast bounds and shoulder; placed-object checks still reject an actual collision.
         float route = RailRoute.BESIDE_RAIL + (float) Math.sqrt(2) * RailRoute.BALLAST_HALF_WIDTH + 1.5f;
-        return (plateau != null && tile.wayExits() != 0 ? Math.max(minimum, route) : minimum) * scale;
+        if (plateau != null && tile.wayExits() != 0) { return Math.max(minimum, route) * scale; }
+        // A separated side is a narrow gap on one flat ground: the hex's centre only has to stay on its own pavement.
+        return (hands != null ? SEPARATED_MARGIN : minimum) * scale;
     }
 
     private boolean protectedLand(Cell tile) {
@@ -1121,7 +1233,7 @@ public final class ConcreteFit {
 
     private boolean outside(Cell tile) {
         return tile != null && !tile.molten() && (tile.liquid() || everywhere && (!tile.concrete()
-              || plateau != null && (slab != 0 ? tile.level() == plateau && slab(tile) < slab : tile.level() < plateau)));
+              || plateau != null && (hands != null ? tile.level() == plateau && hand(tile) < 0 : tile.level() < plateau)));
     }
 
     private float dockHalf(Cell land, float[] axis) {

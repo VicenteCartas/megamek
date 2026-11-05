@@ -2814,7 +2814,6 @@ final class BoardSurface {
         return Float.isFinite(height) ? height : Float.isFinite(nearby) ? nearby : fallback;
     }
 
-    /** Digs the hex's scenery into its top, which gives way where the scenery's models draw dug ground instead. */
     /**
      * Pavement parted from the pavement beside it ({@link BoardScene.Tile#pavementApart}): the slab stops short of the side,
      * as the concrete fit moved it, and the ground it lies on shows there. Both hexes of a side do this, so the ground runs
@@ -2833,7 +2832,7 @@ final class BoardSurface {
             int end = (edge + 1) % 6;
             Vector3 a = moved(edge), b = moved(end), inward = inward(edge);
             List<Boundary> strip = List.of(p -> (p.x - a.x) * inward.x + (p.y - a.y) * inward.y - gap,
-                  through(a, slabCorner(edge, inset), b), through(b, slabCorner(end, inset), a));
+                  gapEnd(edge, edge, inset, b), gapEnd(edge, end, inset, a));
             List<Face> tops = new ArrayList<>(), others = new ArrayList<>(), ground = new ArrayList<>();
             for (Face face : faces) { (face.finish() == Finish.TOP && !gaps.contains(face) ? tops : others).add(face); }
             subtract(tops, strip, relief, ground::add);
@@ -2843,6 +2842,20 @@ final class BoardSurface {
             faces.addAll(tops);
             faces.addAll(ground);
         }
+    }
+
+    /**
+     * The end of an edge's gap at its corner {@code k}, as the {@link Boundary} that holds {@code keep}: square where the
+     * cut stops inside the pavement, the third hex there joining both the others; else along the {@link #slabCorner}.
+     */
+    private Boundary gapEnd(int edge, int k, float[] inset, Vector3 keep) {
+        int other = k == edge ? (edge + 5) % 6 : k;
+        BoardScene.Tile third = neighbor(scene, other), across = neighbor(scene, edge);
+        boolean stops = inset[other] == 0 && third != null && third.surface() == BoardScene.Surface.CONCRETE
+              && !third.liquid().present() && third.elevation() == tile.elevation()
+              && moved(other).dst(moved((other + 1) % 6)) >= .01f * BoardGeometry.hexScale()
+              && !across.pavementApart(third, across.coords().direction(third.coords()));
+        return through(moved(k), stops ? moved(k).add(inward(edge)) : slabCorner(k, inset), keep);
     }
 
     /** The inward unit normal of an edge as the concrete fit moved it. */
@@ -2893,6 +2906,7 @@ final class BoardSurface {
         return BoardScene.Surface.GRASS;
     }
 
+    /** Digs the hex's scenery into its top, which gives way where the scenery's models draw dug ground instead. */
     private void dig() {
         stands = BoardGroundCut.dig(scene, tile, faces, relief, this::diggable);
         dug = faces.stream().anyMatch(face -> face.finish() == Finish.DUG);
