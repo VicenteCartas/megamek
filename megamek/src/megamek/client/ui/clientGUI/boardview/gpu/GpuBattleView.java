@@ -1110,10 +1110,8 @@ class GpuBattleView extends ApplicationAdapter {
                 GpuGlsl.offscreen(() -> {
                     attackEffects.prepare();
                     designators.prepare();
-                    if (source.isEditor() || scene.tiles().stream().anyMatch(tile -> tile.fireSmoke().present())) {
-                        terrainEffects.prepare();
-                    }
-                    if (source.isEditor() || terrain.hasWater()) { waterImpacts.prepare(); }
+                    if (scene.tiles().stream().anyMatch(tile -> tile.fireSmoke().present())) { terrainEffects.prepare(); }
+                    if (terrain.hasWater()) { waterImpacts.prepare(); }
                     jumpJets.prepare();
                     atmosphere.prepare();
                     terrain.prepareEffects();
@@ -1122,9 +1120,9 @@ class GpuBattleView extends ApplicationAdapter {
                 tactical.prepare();
                 fireControl.prepare();
                 overlay.prepare();
-                if (ui instanceof GpuMapHud map && !map.prepare()) { break; }
-                // Probing moves the camera: not while the board makes its entrance.
-                if (probed || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
+                // Probing moves the camera: not while the board makes its entrance. An editor loads what its starting view
+                // draws and the rest when it is asked for: a closer view's programs link while the board shows.
+                if (probed || source.isEditor() || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
                     warmUp = WarmUp.DONE;
                 } else {
                     boardCamera.look(BoardGeometry.center(new Coords(scene.width() / 2, scene.height() / 2), 0),

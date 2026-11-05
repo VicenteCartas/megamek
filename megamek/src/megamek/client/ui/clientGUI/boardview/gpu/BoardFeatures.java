@@ -214,6 +214,13 @@ final class BoardFeatures {
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural, Set<String> buildingReferences) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, natural, buildingReferences, null);
+    }
+
+    /** {@code searched}: the hex's woods if its capture ran their search ahead (BoardTiles), else null to search here. */
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          boolean natural, Set<String> buildingReferences, List<BoardScene.Feature> searched) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
             List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board, buildingReferences));
@@ -293,7 +300,7 @@ final class BoardFeatures {
             result.addAll(roadControls(hex, coords, board, true));
             return List.copyOf(result);
         }
-        result.addAll(woods(hex, coords, board, natural));
+        result.addAll(searched != null ? searched : woods(hex, coords, board, natural));
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
         result.addAll(decorations(hex, coords, board, buildingReferences));
@@ -301,8 +308,11 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
-    /** Woods and jungle fill a crown-coverage target; orchards retain their authored rows. */
-    private static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural) {
+    /**
+     * Woods and jungle fill a crown-coverage target; orchards retain their authored rows. Reads the board and builds
+     * nothing shared, so any thread may search while the board holds still (BoardTiles).
+     */
+    static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural) {
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
         if (BoardTreeDistribution.noTrees(hex)

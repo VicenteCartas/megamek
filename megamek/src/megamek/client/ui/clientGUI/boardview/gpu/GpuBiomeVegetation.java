@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
@@ -535,15 +534,6 @@ final class GpuBiomeVegetation implements Disposable {
         return new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
     }
 
-    /** These batches are created at draw time, outside terrain chunks; prepare their real layout before editor cards draw. */
-    void prepareMaterials(BiConsumer<Material, Mesh> consumer) {
-        Mesh layout = template(0);
-        try {
-            layout.enableInstancedRendering(true, 1, instanceAttribute());
-            consumer.accept(material(0, sedge()), layout);
-        } finally { layout.dispose(); }
-    }
-
     /**
      * One terrain chunk's two nearer reed tiers. Its buffers persist, so panning selects chunks instead of rebuilding
      * instance data. The coarsest reed tier shares a board-wide batch instead.
@@ -756,8 +746,7 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     /**
-     * Drops one board's reeds. The sedge cutout is the same on every board and stays, so the one the editor's warm-up
-     * loads (prepareMaterials) is still there when a stroke paints the first marsh.
+     * Drops one board's reeds. The sedge cutout is the same on every board and stays.
      */
     private void forgetBoard() {
         for (Chunk chunk : chunks.values()) { chunk.dispose(); }

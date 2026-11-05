@@ -114,6 +114,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /** The issues triangle's plain red: the delete icon's hover red. */
     private static final com.badlogic.gdx.graphics.Color ISSUE_RED = com.badlogic.gdx.graphics.Color.valueOf("FF554C");
     private static final float ISSUE_ICON = 24;
+    /** How long something must load before the spinner shows, and stay done before it goes: quick work never flashes it. */
+    private static final float PREPARING_SHOW = .3f, PREPARING_HIDE = .25f;
     /** Issue rows the dropdown lists; a longer list ends with a count of the rest. */
     private static final int ISSUE_ROWS = 200;
     /** Camera binds as Help lists them: those the board view's camera handles in the editor too. */
@@ -177,6 +179,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private boolean sideOpen;
     /** Shown only while the document has issues; a click lists them, and an issue frames and selects its hex. */
     private final UiKit.Icon issues;
+    /** Turns beside the issues triangle while something asked for still loads, which its tip names. */
+    private final UiKit.Icon preparing;
+    private final com.badlogic.gdx.scenes.scene2d.ui.TextTooltip preparingTip;
+    private int skippedDraws;
+    private float preparingFor, preparedFor;
     private final com.badlogic.gdx.scenes.scene2d.ui.TextTooltip issuesTip;
     /** The open issue list, kept current while it is shown. */
     private UiMenuList issueMenu;
@@ -421,6 +428,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         });
         issuesTip = ui.tip(issues);
         stage.addActor(issues);
+        preparing = ui.icon("progress", ISSUE_ICON, UiTheme.MUTED); preparing.setName("editor-preparing"); preparing.setVisible(false);
+        preparing.addAction(com.badlogic.gdx.scenes.scene2d.actions.Actions.forever(
+              com.badlogic.gdx.scenes.scene2d.actions.Actions.rotateBy(-360, 1)));
+        preparingTip = ui.tip(preparing);
+        stage.addActor(preparing);
         section = new GpuHexSection(source, terrain, ui, azimuth, this::objectLabel);
         sectionPanel = new Table(); sectionPanel.setName("editor-section-panel");
         sectionPanel.add(section).growX().minWidth(0).height(section.getPrefHeight());
@@ -555,6 +567,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         float statusLeft = toolbar.getRight() + GAP;
         float statusRight = twoRows ? width - GAP : width - utilityWidth - 2 * GAP;
         issues.setBounds(statusRight - ISSUE_ICON, toolbar.getY() + (TOOLBAR_HEIGHT - ISSUE_ICON) / 2, ISSUE_ICON, ISSUE_ICON);
+        statusRight -= ISSUE_ICON + GAP;
+        preparing.setBounds(statusRight - ISSUE_ICON, issues.getY(), ISSUE_ICON, ISSUE_ICON);
+        preparing.setOrigin(ISSUE_ICON / 2, ISSUE_ICON / 2);
         statusRight -= ISSUE_ICON + GAP;
         documentStatus.setBounds(statusLeft, toolbar.getY(), Math.max(0, statusRight - statusLeft), TOOLBAR_HEIGHT);
         library.setBounds(GAP, GAP, LIBRARY_WIDTH, Math.max(120, height - top - GAP));
@@ -742,6 +757,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             junctions.update();
             samples.update(terrain.get());
         }
+        showPreparing();
         stage.getViewport().apply();
         for (Preview preview : previews) {
             if (!"Ready".equals(preview.image().getUserObject()) && thumbnails.isLoaded(preview.file(), Texture.class)) {
@@ -757,11 +773,26 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         });
     }
 
-    /** Palette programs join the editor's loading boundary, including cards that have not been opened yet. */
-    boolean prepare(BoardScene scene) {
-        GpuTerrain board = terrain.get();
-        if (board == null) { return false; }
-        return samples.prepare(board, scene) & models.prepare(board) & junctions.prepare(board);
+    /** What the editor asked for and still waits for, as the draws, previews and edit themselves report it. */
+    private void showPreparing() {
+        int skipped = GpuShaderProvider.unlinkedDraws();
+        boolean shaders = skipped != skippedDraws;
+        skippedDraws = skipped;
+        boolean edit = terrain.get() != null && terrain.get().editPending();
+        int cards = samples.pending() + models.pending() + junctions.pending();
+        float delta = com.badlogic.gdx.Gdx.graphics.getDeltaTime();
+        if (shaders || edit || cards > 0) {
+            preparingFor += delta;
+            preparedFor = 0;
+            var names = new java.util.ArrayList<String>();
+            if (edit) { names.add(UiKit.text("BoardEditor.preparing.edit")); }
+            if (shaders) { names.add(UiKit.text("BoardEditor.preparing.shaders")); }
+            if (cards > 0) { names.add(UiKit.text("BoardEditor.preparing.previews", cards)); }
+            preparingTip.getActor().setText(UiKit.text("BoardEditor.preparing", String.join(", ", names)));
+        } else if ((preparedFor += delta) > PREPARING_HIDE) {
+            preparingFor = 0;
+        }
+        preparing.setVisible(preparingFor > PREPARING_SHOW);
     }
 
     /** The hovered item as a level key of the inspected hex: the side view's, else a Layers row's, else the board's. */

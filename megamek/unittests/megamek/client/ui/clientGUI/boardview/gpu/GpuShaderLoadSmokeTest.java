@@ -300,9 +300,9 @@ class GpuShaderLoadSmokeTest {
     }
 
     @Test
-    void editorCompilesNothingAfterItsLoadingStage() throws Exception {
+    void editorLoadsOnDemandBehindItsSpinner() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Watch watch = new Watch("editor");
+        Watch watch = new Watch("editor").onDemand();
         AtomicReference<Watch> relight = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         String savedQuality = preferences.getBoardQuality();
@@ -329,7 +329,7 @@ class GpuShaderLoadSmokeTest {
         for (String text : List.of("tree", "lava")) {
             steps.add(() -> ((TextField) GpuBoardTestUi.stage().getRoot().findActor("editor-search")).setText(text));
         }
-        // The building is the board's first: its shell's program and depth twin come from the palette's warm-up.
+        // Nothing here was prepared at load: each links when asked for, with the board and its frames going on meanwhile.
         List<Coords> strokes = List.of(new Coords(3, 3), new Coords(7, 3), new Coords(11, 3), new Coords(5, 9),
               new Coords(9, 9), new Coords(13, 12));
         List<BoardEditorSession.Command> brushes = List.of(
@@ -358,7 +358,7 @@ class GpuShaderLoadSmokeTest {
                 int step = -1;
                 double stepAt;
                 long relightStarted;
-                boolean changedLighting, sawRelighting;
+                boolean changedLighting, sawRelighting, sawSpinner;
                 Image modelCard, railCard;
 
                 @Override
@@ -378,7 +378,7 @@ class GpuShaderLoadSmokeTest {
                                 if (loading) { return; }
                                 // Exclude only the intentional reload. Counters from before this frame still catch
                                 // programs first requested by the frame that dismisses its loading stage.
-                                active = new Watch("editor-quality", compilesBefore, deferredBefore);
+                                active = new Watch("editor-quality", compilesBefore, deferredBefore).onDemand();
                                 active.before(wasLoading);
                                 relight.set(active);
                             }
@@ -407,6 +407,7 @@ class GpuShaderLoadSmokeTest {
                         }
                         var root = GpuBoardTestUi.stage().getRoot();
                         double seconds = watch.seconds();
+                        sawSpinner |= root.findActor("editor-preparing").isVisible();
                         if (step == -1) {
                             noScarPrograms(GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain"));
                             // An editor opened before in this JVM left its page: the start page first.
@@ -425,6 +426,8 @@ class GpuShaderLoadSmokeTest {
                             steps.get(step++).run();
                             stepAt = seconds;
                         } else if (step == steps.size() && settled && seconds - stepAt > 4) {
+                            assertTrue(sawSpinner, "The spinner shows while something loads");
+                            assertFalse(root.findActor("editor-preparing").isVisible(), "The spinner goes once nothing does");
                             var scene = source.takeFrame().scene();
                             assertTrue(scene.tile(strokes.get(0)).liquid().molten(), "The lava stroke shows");
                             assertTrue(scene.tile(strokes.get(1)).liquid().present(), "The water stroke shows");
@@ -540,6 +543,10 @@ class GpuShaderLoadSmokeTest {
         private int frames, loadingAgain;
         // Links while an optional view shows (the Tactical View, the thermal view), which may link on first use.
         private int optionalCompiles, optionalDeferred, optionalStart = -1, optionalDeferredStart;
+        /** The editor links what it is asked for in the background: no link may hold a frame or bring a loading stage back. */
+        private boolean onDemand;
+
+        Watch onDemand() { onDemand = true; return this; }
 
         Watch(String name) { this(name, GpuGlsl.compilesAfterLoading(), GpuGlsl.deferredAfterLoading()); }
 
@@ -602,8 +609,10 @@ class GpuShaderLoadSmokeTest {
             LOGGER.info(report);
             System.out.println(report);
             assertEquals(0, after, name + ": shaders compiled on the render thread after the loading stage (see the timing log)");
-            assertEquals(0, deferredAfter,
-                  name + ": shader links were deferred until after the loading stage (see the timing log)");
+            if (!onDemand) {
+                assertEquals(0, deferredAfter,
+                      name + ": shader links were deferred until after the loading stage (see the timing log)");
+            }
             assertEquals(0, loadingAgain, name + ": a loading stage came back");
         }
     }

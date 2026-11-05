@@ -1189,15 +1189,6 @@ final class GpuTerrain implements Disposable {
     private boolean combatScars = GpuGroundDamage.COMBAT_SCARS;
     /** A board the editor changes, and its samples: any surface may appear, so programs keep the biome stage. */
     private boolean editable;
-    /**
-     * An editor board waits behind its loading stage for the palette's kinds (GpuEditorTerrainPreviews.kinds), which
-     * {@link #kinds}, a private renderer, builds; their materials then join this terrain's warm-up (takeKinds).
-     */
-    private boolean kindsPending;
-    private GpuTerrain kinds;
-    private final ArrayDeque<BoardScene> kindScenes = new ArrayDeque<>();
-    /** False for {@link #kinds}: it builds materials, and links none of their programs. */
-    private boolean linking = true;
     private final GpuPropBatch propBatch = new GpuPropBatch();
     private final GpuFungus fungus = new GpuFungus();
     private final GpuGeysers geysers = new GpuGeysers();
@@ -2301,12 +2292,6 @@ final class GpuTerrain implements Disposable {
         }
         scene = scene.withTiles(scatterTiles);
         TerrainSettings settings = TerrainSettings.capture();
-        if (kindsPending && kinds == null) {
-            kinds = new GpuTerrain(this);
-            kinds.linking = false;
-            kindScenes.addAll(GpuEditorTerrainPreviews.kinds());
-            kinds.update(kindScenes.removeFirst(), null);
-        }
         BoardScene target = requested == null ? coverScene : requested.scene();
         TerrainSettings targetSettings = requested == null ? installedSettings : requested.settings();
         boolean targetColumns = requested == null ? installedColumns : requested.columns();
@@ -2370,11 +2355,11 @@ final class GpuTerrain implements Disposable {
     private boolean materialsReady() { return terrainMaterialsReady && sameMaterialConfiguration(); }
 
     /**
-     * Whether the warm-up last prepared for this lighting configuration, with the palette's kinds of an editor board
-     * (takeKinds): then at most an edit's new materials still link, and the board stays shown (ready).
+     * Whether the warm-up last prepared for this lighting configuration: then at most an edit's new materials still link,
+     * and the board stays shown (ready).
      */
     private boolean sameMaterialConfiguration() {
-        return !kindsPending && terrainMaterialEnvironment == environment.getMask()
+        return terrainMaterialEnvironment == environment.getMask()
               && terrainMaterialFlags == environmentLighting.flags()
               && terrainMaterialShadows == (environment.shadowMap != null);
     }
@@ -2383,6 +2368,9 @@ final class GpuTerrain implements Disposable {
     private boolean awaitingLinks() {
         return rebuild != null && rebuild.plan != null && rebuild.remaining.isEmpty() && !familySession && !materialsReady();
     }
+
+    /** An edit still builds or waits for its programs: the board shows the terrain from before it. */
+    boolean editPending() { return requested != null || rebuild != null; }
 
     boolean busy() {
         return requested != null || rebuild != null || detailJob != null || !pending.isEmpty()
@@ -2531,11 +2519,8 @@ final class GpuTerrain implements Disposable {
      */
     void setCombatScars(boolean scars) { combatScars = scars; }
 
-    /** Before the board builds: whether the editor changes it (editable), when it also prepares the palette's kinds. */
-    void setEditable(boolean editing) {
-        editable = editing;
-        kindsPending = editing;
-    }
+    /** Before the board builds: whether the editor changes it (editable). */
+    void setEditable(boolean editing) { editable = editing; }
 
     private static boolean sameBoard(BoardScene a, BoardScene b) {
         return a.boardId() == b.boardId() && a.width() == b.width() && a.height() == b.height();
@@ -2900,14 +2885,13 @@ final class GpuTerrain implements Disposable {
     }
 
     boolean refine(Camera camera, boolean editing) {
-        if (kinds != null) { takeKinds(); }
         // A requested board's update plan starts before links, which can hold a first frame for seconds; links wait
         // until its first sections start, so these prepare on the workers while they link.
         if (requested != null && rebuild == null && detailJob == null && pending.isEmpty()) { startRebuild(); }
         boolean starting = rebuild != null && rebuild.started.isEmpty()
               && (rebuild.plan == null || !rebuild.remaining.isEmpty());
         // Launch links while CPU terrain jobs are being prepared, and poll without blocking the loading screen.
-        if (!materialsReady() && linking && !starting) {
+        if (!materialsReady() && !starting) {
             if (terrainMaterialPreparation == null && requested != null) { updateLight(requested.scene().light()); }
             prepareTerrainMaterials();
         }
@@ -2952,28 +2936,6 @@ final class GpuTerrain implements Disposable {
                   || rebuild != null && !rebuild.preparation.isDone() || !busy() || awaitingLinks()) { break; }
         } while (System.nanoTime() < deadline);
         return false;
-    }
-
-    /**
-     * Drives the private renderer of an editor board's palette kinds; once it installed them, their materials join this
-     * terrain's warm-up and it goes. It links nothing itself (linking): this terrain links their programs.
-     */
-    private void takeKinds() {
-        kinds.refine(null);
-        if (kinds.coverScene == null || kinds.requested != null || kinds.rebuild != null) { return; }
-        if (!kindScenes.isEmpty()) {
-            kinds.update(kindScenes.removeFirst(), null);
-            return;
-        }
-        for (Renderable sample : kinds.terrainMaterialSamples) {
-            prepareTerrainMaterial(sample.material, sample.meshPart.mesh);
-            Material swapped = GpuIceShader.landOrBorder(sample.material);
-            if (swapped != null) { prepareTerrainMaterial(swapped, sample.meshPart.mesh); }
-        }
-        biomeVegetation.prepareMaterials(this::prepareTerrainMaterial);
-        kinds.dispose();
-        kinds = null;
-        kindsPending = false;
     }
 
     private boolean advanceBuild(Camera camera, long deadline) {
@@ -3430,8 +3392,8 @@ final class GpuTerrain implements Disposable {
         installedColumns = rebuild.request.columns();
         installedTessellation = rebuild.request.tessellated();
         // The startup camera no longer builds hidden full-detail chunks just to discover the grass program.
-        if (!installedColumns && (editable || scene.tiles().stream().anyMatch(tile ->
-              BoardBiome.kind(tile) == BoardScene.Biome.FIELD || GpuGroundCover.grows(scene, tile)))) {
+        if (!installedColumns && scene.tiles().stream().anyMatch(tile ->
+              BoardBiome.kind(tile) == BoardScene.Biome.FIELD || GpuGroundCover.grows(scene, tile))) {
             GpuGroundCover.prepareMaterials(this::prepareTerrainMaterial);
         }
         floor = plan.floor();
@@ -3567,37 +3529,6 @@ final class GpuTerrain implements Disposable {
         terrainMaterialsReady = false;
     }
 
-    /** Palette previews own their programs, but borrow the board's already discovered material/layout set. */
-    boolean preparePreviewPrograms(GpuTerrain board) {
-        for (Renderable sample : board.terrainMaterialSamples) {
-            prepareTerrainMaterial(sample.material, sample.meshPart.mesh);
-            // A theme's isolated section draws its trees and props without the board's instance batches.
-            if (sample.material.has(GpuTreeInstances.Instanced.TYPE)) {
-                Material plain = new Material(sample.material);
-                plain.remove(GpuTreeInstances.Instanced.TYPE);
-                prepareTerrainMaterial(plain, sample.meshPart.mesh.getVertexAttributes());
-            }
-        }
-        GpuBiomeSurface.mark(environment, editable);
-        prepareTerrainMaterials();
-        return materialsReady();
-    }
-
-    /** The plain imported-model layouts used by asset cards; placement/instancing state belongs only to the board. */
-    void previewModelMaterials(java.util.function.BiConsumer<Material, VertexAttributes> consumer) {
-        for (Renderable sample : terrainMaterialSamples) {
-            if (!instancedShader(sample.material)) { continue; }
-            Material plain = new Material(sample.material);
-            plain.remove(GpuTreeInstances.Instanced.TYPE | GpuBuildingCutaway.TYPE | Foliage.TYPE);
-            // Cards bake a selected colour into the raw GLB vertices; only board placements add a slot attribute.
-            List<VertexAttribute> attributes = new ArrayList<>();
-            for (VertexAttribute attribute : sample.meshPart.mesh.getVertexAttributes()) {
-                if (!attribute.alias.equals(RigidGlb.COLOUR_SLOT)) { attributes.add(attribute); }
-            }
-            consumer.accept(plain, new VertexAttributes(attributes.toArray(VertexAttribute[]::new)));
-        }
-    }
-
     /** Driver links continue across loading frames. Retained samples are checked again when lighting flags change. */
     private void prepareTerrainMaterials() {
         if (terrainMaterialSamples.isEmpty() && !columns) {
@@ -3627,7 +3558,7 @@ final class GpuTerrain implements Disposable {
             boolean twinned = prepasses(prepass(sample.material));
             // A variant whose tops the ground material cache draws also links its generic cached-lit and fill programs.
             boolean cacheable = cacheTops && GpuMaterialCache.cacheable(sample.material);
-            programs += (twinned ? 2 : 1) + (editable ? 1 : 0) + (cacheable ? 2 : 0);
+            programs += (twinned ? 2 : 1) + (cacheable ? 2 : 0);
             // Beside interactive frames (an edit, the editor's samples) the rest wait once a frame spent its budget.
             if (GpuGlsl.overBudget()) {
                 everySample = false;
@@ -3639,18 +3570,12 @@ final class GpuTerrain implements Disposable {
             // Its depth twin links here too, after it, behind the loading stage, never at a first draw.
             boolean twin = colour && twinned && terrainMaterialPreparation.run(() ->
                   prepassTwins.put(shaderGroup(sample.shader), GpuShaderProvider.unwrap(twinOf(sample))));
-            boolean cast = editable && terrainMaterialPreparation.run(() -> {
-                Shader colourShader = sample.shader;
-                sample.shader = null;
-                try { depthBatch.getShaderProvider().getShader(sample); }
-                finally { sample.shader = colourShader; }
-            });
             boolean cachedLit = colour && cacheable && terrainMaterialPreparation.run(() -> cacheProgram(sample,
                   GpuMaterialCache.cachedTwin(sample.material), sample.environment, batch.getShaderProvider()));
             boolean fills = colour && cacheable && terrainMaterialPreparation.run(() -> cacheProgram(sample,
                   materialCache.fillMaterial(sample.material), null, fillShaders()));
             GpuGlsl.spent(System.nanoTime() - start);
-            linked += (colour ? 1 : 0) + (twin ? 1 : 0) + (cast ? 1 : 0) + (cachedLit ? 1 : 0) + (fills ? 1 : 0);
+            linked += (colour ? 1 : 0) + (twin ? 1 : 0) + (cachedLit ? 1 : 0) + (fills ? 1 : 0);
         }
         if (linked < programs) { terrainMaterialsReady = false; }
         if (everySample) { terrainMaterialsAsked = asked; }
@@ -4078,8 +4003,6 @@ final class GpuTerrain implements Disposable {
         boolean sculpted = surface.relief.sculpted();
         Material magma = tile.liquid().volcanic() ? GpuMagmaShader.material(assets,
               tile.liquid().molten() ? GpuMagmaShader.BANK : GpuMagmaShader.CRUST, chunk.lavaField) : null;
-        // A one-hex palette card exposes this unblended volcanic edge even when the board's banks all blend.
-        if (editable && magma != null) { prepareTerrainMaterial(magma, MeshBatch.STANDARD); }
         if (sculpted) {
             sculpt(solid, overlay, chunk, scene, tile, surface, surfaces, prepared.sculpts().get(tile.coords()), magma);
         }
@@ -5457,12 +5380,6 @@ final class GpuTerrain implements Disposable {
                 for (Renderable part : chunk.waterRenderables) {
                     Material depth = GpuWaterPages.depthMaterial(part.material);
                     if (depth != null) { prepareTerrainMaterial(depth, part.meshPart.mesh.getVertexAttributes()); }
-                    // A palette sample is a one-hex board, so its water exposes a cut even when this board does not.
-                    if (waterMode(part.material) == GpuWaterShader.Mode.SURFACE) {
-                        Material cut = GpuWaterPages.cutMaterial(part.material);
-                        prepareTerrainMaterial(cut, part.meshPart.mesh.getVertexAttributes());
-                        prepareTerrainMaterial(GpuWaterPages.beyondMaterial(cut), part.meshPart.mesh.getVertexAttributes());
-                    }
                 }
                 List<Array<Renderable>> layers = new ArrayList<>(List.of(chunk.shadowPropRenderables, chunk.looseDecorations,
                       chunk.routeRenderables));
@@ -9185,10 +9102,11 @@ final class GpuTerrain implements Disposable {
 
     /**
      * Links the spore and geyser programs now (GpuBattleView's warm-up) on a board that has them, not when the first
-     * comes into view; in the editor, which a stroke may give them, always, with the wave simulations of water and lava.
+     * comes into view; in the editor, which a stroke may give them, the geysers' and the wave simulations' always: they
+     * link in milliseconds, and a stroke's first water must not hold a frame.
      */
     void prepareEffects() {
-        if (editable || chunks.stream().anyMatch(chunk -> !chunk.spores.isEmpty())) { fungus.prepare(); }
+        if (chunks.stream().anyMatch(chunk -> !chunk.spores.isEmpty())) { fungus.prepare(); }
         if (editable || chunks.stream().anyMatch(chunk -> !chunk.geysers.isEmpty())) { geysers.prepare(); }
         if (editable) {
             ocean.prepare();
@@ -9198,10 +9116,7 @@ final class GpuTerrain implements Disposable {
 
     @Override
     public void dispose() {
-        // The kinds' renderer borrows this terrain's assets.
-        if (kinds != null) { kinds.dispose(); kinds = null; }
         if (lifts != null) { lifts.dispose(); lifts = null; }
-        kindScenes.clear();
         meshGeneration++;
         detailWorker.shutdownNow();
         // Workers borrow chunk/asset data. ForkJoinPool.close may return once termination has started after
