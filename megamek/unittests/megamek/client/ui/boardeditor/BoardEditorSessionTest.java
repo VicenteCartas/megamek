@@ -92,14 +92,12 @@ class BoardEditorSessionTest {
         session.save(file);
         send(session, Action.ELEVATION, "", "2");
         session.board().addTag("Arena");
-        session.board().setRoadsAutoExit(!session.board().getRoadsAutoExit());
         send(session, Action.UNDO, "", "");
         assertTrue(session.dirty(), "Undoing a hex cannot hide unsaved board settings");
         session.save(file);
         assertFalse(session.dirty());
         var loaded = BoardFile.read(file);
         assertEquals(session.board().getTags(), loaded.getTags());
-        assertEquals(session.board().getRoadsAutoExit(), loaded.getRoadsAutoExit());
     }
 
     /**
@@ -1057,7 +1055,6 @@ class BoardEditorSessionTest {
     /** A road or bridge that does not join up is an issue with its recommended fix; games do not refuse it. */
     @Test void aRoadIntoNothingIsAnIssueWithItsFixButNoRulesError() throws Exception {
         var board = megamek.common.board.Board.createEmptyBoard(3, 3);
-        board.setRoadsAutoExit(false);
         Coords road = new Coords(1, 1);
         board.setHex(road, new Hex(0, "road:1:1", ""));
         Path file = directory.resolve("road.board2"); BoardFile.save(board, file);
@@ -1519,21 +1516,20 @@ class BoardEditorSessionTest {
         assertEquals(before, nodes(session, new Coords(5, 5), new Coords(9, 9)));
     }
 
-    /** Exit Roads to Pavement: a road beside pavement loses its automatic exit, and the option is saved. */
-    @Test void exitRoadsToPavementChangesAutomaticRoadExitsAndIsSaved() throws Exception {
-        var session = session();
+    /** A legacy road keeps its exit into pavement when opened, as a game of that file has it, and the saved file holds it. */
+    @Test void anOpenedLegacyRoadKeepsItsExitsAsStoredOnes() throws Exception {
         Coords road = new Coords(3, 3), pavement = road.translated(0);
-        session.board().setHex(road, new Hex(0, "road:1", ""));
-        session.board().setHex(pavement, new Hex(0, "pavement:1", ""));
-        assertTrue(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0), "The road exits to the pavement");
-        send(session, Action.BOARD, "roads", "false");
-        assertFalse(session.snapshot().roadsAutoExit());
-        assertFalse(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0));
-        assertTrue(session.dirty());
+        var legacy = megamek.common.board.Board.createEmptyBoard(8, 8);
+        legacy.setHex(pavement, new Hex(0, "pavement:1", ""));
+        legacy.setHex(road, new Hex(0, "road:1", ""));
+        var session = new BoardEditorSession();
+        session.open(legacy, null);
+        var opened = session.board().getHex(road).getTerrain(Terrains.ROAD);
+        assertTrue(opened.hasExitsSpecified());
+        assertEquals(1, opened.getExits());
         Path file = directory.resolve("roads.board2");
         session.save(file);
-        assertTrue(Files.readString(file).contains("\"exitRoadsToPavement\":false"));
-        assertFalse(BoardFile.read(file).getRoadsAutoExit());
+        assertEquals(1, BoardFile.read(file).getHex(road).getTerrain(Terrains.ROAD).getExits());
     }
 
     /** The user's own Open (a Recent Boards entry) and Save add the file to the launcher's Recent Boards list. */
@@ -1658,7 +1654,6 @@ class BoardEditorSessionTest {
         session.board().setDescription("Ridge");
         session.board().setAnnotations(other, List.of("Note"));
         send(session, Action.BOARD, "arena", "true");
-        send(session, Action.BOARD, "roads", "false");
         session.validateAll();
         Path file = directory.resolve("resize.board2");
         session.save(file);
@@ -1673,7 +1668,6 @@ class BoardEditorSessionTest {
         assertEquals(hex, BoardFile.hexNode(session.board().getHex(new Coords(4, 4))));
         assertEquals(van, BoardFile.hexNode(session.board().getHex(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
         assertTrue(session.snapshot().arena());
-        assertFalse(session.board().getRoadsAutoExit());
         assertEquals("Ridge", session.board().getDescription());
         assertEquals(List.of("Note"), List.copyOf(session.board().getAnnotations(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
         Coords movedIssue = megamek.common.util.BoardUtilities.resized(broken, 2, 3);

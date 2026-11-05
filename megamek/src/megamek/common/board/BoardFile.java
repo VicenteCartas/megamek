@@ -230,11 +230,6 @@ public final class BoardFile {
                 hexes[index] = hex;
             }
             Board board = new Board();
-            if (root.has("options")) {
-                JsonNode options = root.get("options");
-                requireObject(options);
-                board.setRoadsAutoExit(bool(options, "exitRoadsToPavement", true));
-            }
             board.setBoardType(BoardType.valueOf(string(root, "boardType", "GROUND")));
             board.setDocumentName(string(root, "name", null));
             board.setDescription(string(root, "description", null));
@@ -403,7 +398,6 @@ public final class BoardFile {
         put(root, "description", board.getDescription());
         put(root, "sourceHeader", board.getSourceHeader());
         if (board.getBoardType() != BoardType.GROUND) { root.put("boardType", board.getBoardType().name()); }
-        if (!board.getRoadsAutoExit()) { root.putObject("options").put("exitRoadsToPavement", false); }
         if (!board.getTags().isEmpty()) {
             ArrayNode tags = root.putArray("tags"); board.getTags().stream().sorted().forEach(tags::add);
         }

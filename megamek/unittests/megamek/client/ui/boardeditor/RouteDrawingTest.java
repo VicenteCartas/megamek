@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.fasterxml.jackson.databind.JsonNode;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
+import megamek.common.Hex;
+import megamek.common.board.Board;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
@@ -257,6 +259,51 @@ class RouteDrawingTest {
         session.pointer(new Coords(10, 10), 0, 0, false);
         session.finishStroke();
         assertEquals(1, session.brush(new Coords(10, 10)).stream().filter(at -> session.board().getHex(at).containsTerrain(Terrains.ROAD)).count());
+    }
+
+    /** Roads connect as buildings do: along the stroke only, so a road or pavement beside it stays apart. */
+    @Test void aRoadConnectsOnlyAlongItsStroke() {
+        Coords imported = new Coords(5, 8), first = new Coords(5, 5), second = first.translated(0), beside = first.translated(1);
+        Coords far = beside.translated(1);
+        Board board = Board.createEmptyBoard(16, 17);
+        board.setHex(imported, new Hex(0, "road:1", ""));
+        board.setHex(far.translated(0), new Hex(0, "pavement:1", ""));
+        var session = new BoardEditorSession();
+        session.open(board, null);
+        session.command(new Command(Action.CHOOSE_BRUSH, "road", "1"), null);
+        drag(session, List.of(first, second));
+        session.finishStroke();
+        drag(session, List.of(beside, far));
+        session.finishStroke();
+        assertEquals(1, roadExits(session, first));
+        assertEquals(8, roadExits(session, second));
+        assertEquals(2, roadExits(session, beside), "No side toward the road beside it");
+        assertEquals(16, roadExits(session, far), "No side toward the pavement beside it");
+
+        // A click beside an imported road leaves both apart, as they would be after saving and reopening.
+        session.pointer(imported.translated(3), 0, 0, false);
+        session.finishStroke();
+        assertEquals(0, roadExits(session, imported));
+        assertEquals(0, roadExits(session, imported.translated(3)));
+
+        // A stroke into an existing road joins it and keeps its branches.
+        int side = beside.direction(second);
+        drag(session, List.of(beside, second));
+        session.finishStroke();
+        assertEquals(2 | 1 << side, roadExits(session, beside));
+        assertEquals(8 | 1 << (side + 3) % 6, roadExits(session, second));
+
+        // Erasing a hex disconnects its neighbours in the same step.
+        session.command(new Command(Action.TOOL, "", "ERASE"), null);
+        session.pointer(far, 0, 0, false);
+        session.finishStroke();
+        assertEquals(1 << side, roadExits(session, beside));
+        session.command(new Command(Action.UNDO), null);
+        assertEquals(2 | 1 << side, roadExits(session, beside));
+    }
+
+    private static int roadExits(BoardEditorSession session, Coords at) {
+        return session.board().getHex(at).getTerrain(Terrains.ROAD).getExits();
     }
 
     private static BoardEditorSession rail() {

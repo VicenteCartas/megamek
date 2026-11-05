@@ -93,6 +93,15 @@ class WayLayerEditorTest {
         assertFalse(session.board().getHex(CENTRE).containsTerrain(Terrains.BRIDGE_ROAD));
     }
 
+    @Test void aBridgeDrawnFromARoadJoinsIt() {
+        var session = new BoardEditorSession();
+        session.board().setHex(CENTRE, new Hex(0, "water:2", ""));
+        road(session); stroke(session, CENTRE.translated(0));
+        send(session, Action.CHOOSE_BRUSH, "bridge", "bridge/built");
+        stroke(session, CENTRE.translated(0), CENTRE, CENTRE.translated(3));
+        assertTrue(session.board().getHex(CENTRE.translated(0)).containsTerrainExit(Terrains.ROAD, 3));
+    }
+
     @Test void aWayPaintedHalfwayAcrossAnExplicitBridgeDoesNotFillItsSpan() {
         var session = new BoardEditorSession();
         for (int y = 2; y <= 6; y++) { session.board().setHex(new Coords(4, y), bridge(0, 1, 9)); }

@@ -64,7 +64,7 @@ public final class BoardEditorSession {
     /** In toolbar, menu and key order: shape the ground, paint it, then clean up. */
     public enum Tool { SELECT, SCULPT, PAINT, ERASE }
     public enum Action {
-        TOOL, COMPONENT, BRUSH, ADD_COMPONENT, REMOVE_COMPONENT, TERRAIN, REMOVE_TERRAIN, EDGE, AUTO_EDGES,
+        TOOL, COMPONENT, BRUSH, ADD_COMPONENT, REMOVE_COMPONENT, TERRAIN, REMOVE_TERRAIN, EDGE,
         ELEVATION, ELEVATOR, THEME, VARIANT, BLEND, ASSET, SELECT_OBJECT, OBJECT_VALUE, DUPLICATE_OBJECT, REMOVE_OBJECT, REORDER_OBJECT,
         COPY, PASTE, UNDO, REDO, NEW, OPEN, SAVE, SAVE_AS, SELECT_AT, MAP_THEME,
         CHOOSE_BRUSH, BRUSH_VALUE, SAMPLE, CLEAR_SELECTION, DELETE_SELECTION, GROUP, UNGROUP, GROUP_VALUE,
@@ -114,7 +114,7 @@ public final class BoardEditorSession {
          */
         KIT_VARIANT,
         /**
-         * Changes the board, not a hex (target: "arena" or "roads" with value true/false, "tag" or "untag" with a manual
+         * Changes the board, not a hex (target: "arena" with value true/false, "tag" or "untag" with a manual
          * tag, "autotags"); see {@link #boardSetting(String, String)}. Not an undo step: the control is its own undo.
          */
         BOARD,
@@ -206,9 +206,9 @@ public final class BoardEditorSession {
      * the distinct groups of the selected objects, with "" for an ungrouped selected object. {@code groupSizes} gives
      * the board-wide member count of each group with a member in the selected hex. {@code issues} lists the
      * document's rules and placement problems in hex order, as of the last committed edit. {@code levels} are the
-     * selected hex's heights, bottom to top. {@code tags} are the board's tags, sorted, and {@code roadsAutoExit} its
-     * "exit roads to pavement" option; {@code boardComponents} are the blueprint components that the whole-board Remove
-     * offers, those some hex holds ({@link #boardComponents()}). {@code drawsRoutes}: a Paint drag with the active brush
+     * selected hex's heights, bottom to top. {@code tags} are the board's tags, sorted; {@code boardComponents} are the
+     * blueprint components that the whole-board Remove offers, those some hex holds ({@link #boardComponents()}).
+     * {@code drawsRoutes}: a Paint drag with the active brush
      * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
      * list reports, which {@link Action#REMOVE_COPIES} removes. {@code kitVariants}: the variants of the selected
      * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none.
@@ -218,7 +218,7 @@ public final class BoardEditorSession {
           List<Property> properties, Map<String, HexAppearance> appearance, List<BoardDecoration> objects,
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
-          List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
+          List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
           boolean buildingProfileAvailable) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
@@ -389,7 +389,6 @@ public final class BoardEditorSession {
     private String copiedText;
     private long revision, currentId, savedId, nextId;
     private Set<String> savedTags = Set.of();
-    private boolean savedRoadsAutoExit;
     private boolean placed;
     private boolean continuousEdit;
     private LevelSculpt.Mode sculpt = LevelSculpt.Mode.RAISE;
@@ -448,8 +447,7 @@ public final class BoardEditorSession {
     /** Copy and Paste also use {@code clipboard} for hexes as text (the editor window passes the system clipboard). */
     public void textClipboard(java.awt.datatransfer.Clipboard clipboard) { textClipboard = clipboard; }
     public boolean dirty() {
-        return currentId != savedId || !stroke.isEmpty() || !savedTags.equals(board().getTags())
-              || savedRoadsAutoExit != board().getRoadsAutoExit();
+        return currentId != savedId || !stroke.isEmpty() || !savedTags.equals(board().getTags());
     }
     public String title() {
         return (dirty() ? "* " : "") + (path != null ? path.getFileName().toString()
@@ -472,7 +470,7 @@ public final class BoardEditorSession {
               properties(hex), hex == null ? Map.of() : hex.getAppearance(), hex == null ? List.of() : contentsOrder(hex),
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
-              board().getRoadsAutoExit(), boardComponents(), drawsRoutes(),
+              boardComponents(), drawsRoutes(),
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
@@ -592,14 +590,21 @@ public final class BoardEditorSession {
      * Makes {@code board} the document, converted first ({@link BoardSceneryLayouts#convert}): by its content, not a
      * file name, so a legacy board gets its scenery as objects, every untyped bridge gets its type, and a converted board
      * is never decoded again. The board is then native: every editor document is a .board2 document, where road level 2
-     * is the Alley finish. It holds no token the conversion took ({@link BoardSceneryLayouts#withoutTakenTokens}), so the
-     * document is exactly what its saved .board2 holds, and its 2D Preview shows what a 2D player of that file sees.
+     * is the Alley finish. It holds no token the conversion took ({@link BoardSceneryLayouts#withoutTakenTokens}) and its
+     * roads hold their connections as stored ones, so the document is exactly what its saved .board2 holds, and its 2D
+     * Preview shows what a 2D player of that file sees.
      */
     private void replace(Board board, Path path) {
         List<HexIssue> converted = BoardSceneryLayouts.convert(board);
         List<Coords> every = new ArrayList<>();
         for (int y = 0; y < board.getHeight(); y++) {
-            for (int x = 0; x < board.getWidth(); x++) { every.add(new Coords(x, y)); }
+            for (int x = 0; x < board.getWidth(); x++) {
+                every.add(new Coords(x, y));
+                Terrain road = board.getHex(x, y).getTerrain(Terrains.ROAD);
+                if (road != null && !road.hasExitsSpecified()) {
+                    board.getHex(x, y).addTerrain(new Terrain(Terrains.ROAD, road.getLevel(), true, road.getExits()));
+                }
+            }
         }
         dropTakenTokens(board, every);
         this.path = path; suggested = null; importIssues = converted;
@@ -608,7 +613,6 @@ public final class BoardEditorSession {
         currentId = savedId = ++nextId;
         install(board);
         savedTags = Set.copyOf(board.getTags());
-        savedRoadsAutoExit = board.getRoadsAutoExit();
     }
 
     /**
@@ -690,7 +694,6 @@ public final class BoardEditorSession {
         path = file;
         savedId = currentId;
         savedTags = Set.copyOf(board().getTags());
-        savedRoadsAutoExit = board().getRoadsAutoExit();
         message = Messages.getString("BoardEditor.saved", file.getFileName().toString());
         revision++;
     }
@@ -736,14 +739,6 @@ public final class BoardEditorSession {
                     if (!hex.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) { hex.removeTerrain(Terrains.FOLIAGE_ELEV); }
                 });
                 case EDGE -> editEdge(command.target(), Integer.parseInt(command.value()));
-                case AUTO_EDGES -> edit(hex -> {
-                    Terrain old = hex.getTerrain(Terrains.getType(command.value()));
-                    require(old != null && old.getExits() <= 63, Messages.getString("BoardEditor.legacyExits"));
-                    require(old.getType() != Terrains.BRIDGE && old.getType() != Terrains.BRIDGE_ROAD
-                          && old.getType() != Terrains.BRIDGE_RAIL && old.getType() != Terrains.RAIL,
-                          Messages.getString("BoardEditor.way.explicitExits"));
-                    hex.addTerrain(new Terrain(old.getType(), old.getLevel()));
-                });
                 case ELEVATION -> edit(hex -> hex.setLevel(Integer.parseInt(command.value())));
                 case ELEVATOR -> edit(hex -> {
                     Terrain old = hex.getTerrain(Terrains.INDUSTRIAL_ELEVATOR);
@@ -1249,24 +1244,13 @@ public final class BoardEditorSession {
     }
 
     /**
-     * The board settings that are no undo steps (Settings â†’ Map's tags and roads option, Save's license header) stay as
+     * The board settings that are no undo steps (Settings â†’ Map's tags, Save's license header) stay as
      * they are now when a resize's undo or redo swaps in the other board.
      */
     private static void keepSettings(Board from, Board to) {
         List.copyOf(to.getTags()).forEach(to::removeTag);
         from.getTags().forEach(to::addTag);
         to.setSourceHeader(from.getSourceHeader());
-        if (to.getRoadsAutoExit() != from.getRoadsAutoExit()) {
-            to.setRoadsAutoExit(from.getRoadsAutoExit());
-            deriveExits(to);
-        }
-    }
-
-    /** Every hex derives its exits again ({@link Board#initializeHex}) and announces it, as the old editor's correctExits did. */
-    private static void deriveExits(Board board) {
-        for (int y = 0; y < board.getHeight(); y++) {
-            for (int x = 0; x < board.getWidth(); x++) { board.initializeHex(x, y); }
-        }
     }
 
     /**
@@ -1531,7 +1515,7 @@ public final class BoardEditorSession {
                   + ";bridge_cf:" + continued.terrainLevel(Terrains.BRIDGE_CF)
                   : blueprint.component(brushComponent.equals("road") || bridge ? "bridge" : "ways").defaults();
             boolean pillars = wayPillars || continued != null && HexAppearance.pillars(continued.getAppearance());
-            int exits = sides;
+            int exits = brushComponent.equals("road") && !layer.deck() ? sides | landings(at) : sides;
             change(at, h -> {
                 if (bridge) { paintBridge(h, layer.level(), exits, pillars); }
                 else {
@@ -1548,11 +1532,30 @@ public final class BoardEditorSession {
             if (layer.surface() == WaySurface.NEW) { made++; }
             else if (layer.deck()) { carried++; }
         }
+        if (bridge) { path.forEach(this::joinLanding); }
         selected = path.getLast(); selectedObject = "";
         component = board().getHex(selected).hasBridge() && wayLayers.get(selected).deck() ? "bridge"
               : brushComponent.equals("road") ? "road" : "ground";
         selection.clear(); selection.add(new Selection(selected, ""));
         message = strokeNotice.isEmpty() ? Messages.getString("BoardEditor.way.painted", brushLabel, count, made, carried) : strokeNotice;
+    }
+
+    /** The sides where a bridge deck already exits back to a ground road at {@code at}. */
+    private int landings(Coords at) {
+        Hex hex = board().getHex(at);
+        int sides = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            if (hex.bridgeLandsFrom(board().getHex(at.translated(direction)), direction)) { sides |= 1 << direction; }
+        }
+        return sides;
+    }
+
+    /** A road already on a bridge card's landing joins the deck just drawn from it. */
+    private void joinLanding(Coords at) {
+        Terrain road = board().getHex(at).getTerrain(Terrains.ROAD);
+        if (road == null) { return; }
+        int exits = road.getExits() | landings(at);
+        if (exits != road.getExits()) { change(at, hex -> hex.addTerrain(new Terrain(Terrains.ROAD, road.getLevel(), true, exits))); }
     }
 
     private void paintBridge(Hex hex, int level, int sides, boolean pillars) {
@@ -1566,13 +1569,14 @@ public final class BoardEditorSession {
               pillars || HexAppearance.pillars(hex.getAppearance()), type.colours()) : HexAppearance.NATURAL_BRIDGE);
     }
 
+    /** The drawn path supplies explicit connections, retaining branches already drawn, as {@link #paintBuildings} does. */
     private void paintWay(Hex hex, boolean deck, int sides) {
         boolean road = brushComponent.equals("road");
         int type = road ? deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD : deck ? Terrains.BRIDGE_RAIL : Terrains.RAIL;
         Terrain old = hex.getTerrain(type);
         int exits = sides | (old == null ? 0 : old.getExits());
         if (road) {
-            hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), deck || old != null && old.hasExitsSpecified(), exits));
+            hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), true, exits));
             HexAppearance look = colonyFinish(hex, paintTemplate.getAppearance().get("road"));
             // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
             appearance(hex, deck ? "bridgeRoad" : "road", deck ? roadSurface(look) : look);
@@ -1718,7 +1722,7 @@ public final class BoardEditorSession {
             change(next, h -> {
                 for (int cut : types) {
                     Terrain value = h.getTerrain(cut);
-                    if (value != null && (value.getExits() & back) != 0 && (cut != Terrains.ROAD || value.hasExitsSpecified())) {
+                    if (value != null && (value.getExits() & back) != 0) {
                         h.addTerrain(new Terrain(cut, value.getLevel(), true, value.getExits() & ~back));
                         if (cut == Terrains.RAIL || cut == Terrains.BRIDGE_RAIL) {
                             RailRoute.lay(h, cut == Terrains.BRIDGE_RAIL, value.getExits() & ~back,
@@ -1736,7 +1740,7 @@ public final class BoardEditorSession {
         for (Coords at : List.copyOf(stroke.keySet())) {
             Hex current = board().getHex(at), before = stroke.get(at);
             if (before.hasBridge() && !current.hasBridge()) { cutWayNeighbours(at, before, Terrains.BRIDGE); }
-            for (int way : new int[] { Terrains.RAIL, Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
+            for (int way : new int[] { Terrains.ROAD, Terrains.RAIL, Terrains.BRIDGE_ROAD, Terrains.BRIDGE_RAIL }) {
                 if (before.containsTerrain(way) && !current.containsTerrain(way)) { cutWayNeighbours(at, before, way); }
             }
             change(at, hex -> {
@@ -3348,20 +3352,15 @@ public final class BoardEditorSession {
 
     /**
      * Changes the board itself, as the old editor's board settings did: the Arena flag ("arena", value true or false: the
-     * tag {@link BoardClassifier#ARENA_TAG}), the "exit roads to pavement" option ("roads", true or false; the automatic
-     * road exits follow at once), a manual tag ("tag" adds the value, "untag" removes it) or the automatic tags
+     * tag {@link BoardClassifier#ARENA_TAG}), a manual tag ("tag" adds the value, "untag" removes it) or the automatic tags
      * ("autotags": {@link BoardsTagger#updateAutoTags}, the board tagger's own rule). These are not undo steps; the
-     * control is its own undo, and {@link #dirty} compares the tags and the option with the saved ones.
+     * control is its own undo, and {@link #dirty} compares the tags with the saved ones.
      */
     private void boardSetting(String target, String value) {
         switch (target) {
             case "arena" -> {
                 if (Boolean.parseBoolean(value)) { board().addTag(BoardClassifier.ARENA_TAG); }
                 else { board().removeTag(BoardClassifier.ARENA_TAG); }
-            }
-            case "roads" -> {
-                board().setRoadsAutoExit(Boolean.parseBoolean(value));
-                deriveExits(board());
             }
             case "tag", "untag" -> {
                 String tag = value.strip();
@@ -3795,6 +3794,10 @@ public final class BoardEditorSession {
             Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
             hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, 0));
             appearance(hex, "bridge", HexAppearance.BUILT_BRIDGE);
+        }
+        if (definition.id().equals("road")) {
+            Terrain road = hex.getTerrain(Terrains.ROAD);
+            hex.addTerrain(new Terrain(Terrains.ROAD, road.getLevel(), true, road.getExits()));
         }
         applyChoiceMaterials(hex, definition, true);
     }

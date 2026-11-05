@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -234,7 +233,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private String settingsMessage;
     /** The Settings dialog's Map section, and the board settings it shows (tags and road option), to rebuild it on change. */
     private final Table mapSettings = new Table();
-    private List<Object> mapState = List.of();
+    private List<String> mapState = List.of();
     /** Asks before Clear Board empties every hex. */
     private final megamek.client.ui.gdx.UiConfirmation clearConfirm;
     /** The Settings dialog's scroll, which the Menu's New scrolls to the Size section. */
@@ -820,7 +819,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             settingsMessage = next.message(); settingsResult.setText(next.message());
         }
         // The Map section follows the board's settings while they show, so a chip or checkbox is its own undo.
-        if (settingsLayer.isVisible() && !mapState.equals(List.of(next.tags(), next.roadsAutoExit()))
+        if (settingsLayer.isVisible() && !mapState.equals(next.tags())
               && !(stage.getKeyboardFocus() instanceof TextField field && field.isDescendantOf(mapSettings))) {
             showMapSettings(next);
         }
@@ -2032,10 +2031,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
               side -> send(Action.EDGE, terrain, Integer.toString(side)));
         edges.setName("editor-edges-" + terrain);
         detail.add(edges).row();
-        if (!Set.of("cliff_top", "bridge", "bridge_road", "bridge_rail", "rail").contains(terrain) && value != null) {
-            detail.add(button(UiKit.text(value.explicit() ? "BoardEditor.useAutoEdges" : "BoardEditor.autoEdges"),
-                  () -> send(Action.AUTO_EDGES, terrain))).row();
-        }
     }
 
     private static String height(BoardDecoration object) {
@@ -2640,22 +2635,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * The Map section from {@code next}: the Arena and road checkboxes, the manual tags as removable chips beside an
-     * Add tag field, and the automatic tags, read-only, with Update automatic tags. Rebuilt whenever the board's tags or
-     * option change while the settings show ({@link #refresh}).
+     * The Map section from {@code next}: the Arena checkbox, the manual tags as removable chips beside an
+     * Add tag field, and the automatic tags, read-only, with Update automatic tags. Rebuilt whenever the board's tags
+     * change while the settings show ({@link #refresh}).
      */
     private void showMapSettings(BoardEditorSession.Snapshot next) {
-        mapState = List.of(next.tags(), next.roadsAutoExit());
+        mapState = next.tags();
         mapSettings.clearChildren(); mapSettings.defaults().growX().minWidth(0).padBottom(5);
         var arena = ui.checkbox(UiKit.text("BoardEditor.cheArena"), next.arena()); arena.setName("editor-settings-arena"); arena.left();
         ui.tip(arena).getActor().setText(UiKit.text("BoardEditor.cheArena.tooltip"));
         onChange(arena, () -> send(Action.BOARD, "arena", Boolean.toString(arena.isTicked())));
         mapSettings.add(arena).left().row();
-        var roads = ui.checkbox(UiKit.text("BoardEditor.cheRoadsAutoExit"), next.roadsAutoExit()); roads.setName("editor-settings-roads");
-        roads.left();
-        ui.tip(roads).getActor().setText(UiKit.text("BoardEditor.cheRoadsAutoExit.tooltip"));
-        onChange(roads, () -> send(Action.BOARD, "roads", Boolean.toString(roads.isTicked())));
-        mapSettings.add(roads).left().row();
         mapSettings.add(ui.label(UiKit.text("BoardEditor.tags"), "hud-small", 12, UiTheme.TEXT)).padTop(6).row();
         // Arena has its own checkbox; automatic tags are listed apart, read-only.
         var manual = next.tags().stream().filter(tag -> !tag.equals(megamek.utilities.BoardClassifier.ARENA_TAG)

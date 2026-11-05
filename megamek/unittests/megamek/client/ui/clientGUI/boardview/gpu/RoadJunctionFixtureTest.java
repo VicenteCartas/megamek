@@ -30,7 +30,6 @@ class RoadJunctionFixtureTest {
         Board loaded = BoardFile.read(file);
         assertEquals(original.getDocumentName(), loaded.getDocumentName());
         assertEquals(original.getAnnotations(), loaded.getAnnotations());
-        assertFalse(loaded.getRoadsAutoExit());
         for (var panel : RoadJunctionFixture.Panel.values()) {
             for (int mask = 0; mask < 64; mask++) {
                 Coords at = RoadJunctionFixture.center(panel, mask);

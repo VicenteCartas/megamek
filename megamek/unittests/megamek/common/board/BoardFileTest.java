@@ -331,7 +331,6 @@ class BoardFileTest {
         board.setDescription("First paragraph.\n\nSecond paragraph.");
         board.setSourceHeader("# Original author\r\n# License\r\n");
         board.addTag("example");
-        board.setRoadsAutoExit(false);
         board.setAnnotations(new Coords(0, 0), List.of("Note one", "Note two"));
         board.setAnnotations(new Coords(5, 5), List.of("Keep an old out-of-bounds annotation"));
         Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:4;fluff:2001", "CustomTheme");
