@@ -5,6 +5,7 @@ import java.awt.BasicStroke;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
+import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
@@ -33,6 +34,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -845,7 +847,10 @@ final class GpuRoads {
         return result;
     }
 
-    /** Whole terrain triangles carry the splat. Road borders, paint and tyre wear do not split them. */
+    /**
+     * Whole terrain triangles carry the splat. Road borders, paint and tyre wear do not split them. A neighbour's patch gets
+     * none unless one reaches its shape: a whole-hex fan can span the patch's bounds without touching it, and paint nothing.
+     */
     static List<BoardTacticalGeometry.Triangle> drape(BoardScene.Tile tile, BoardSurface surface, Patch patch) {
         List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
         float scale = BoardGeometry.hexScale();
@@ -856,6 +861,8 @@ final class GpuRoads {
         boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
         // A road through water lies on its bed (BoardRoad#bed); a bridge's apron keeps to the dry bank.
         boolean bed = surface.tile.liquid().present() && BoardBridge.feature(tile) == null;
+        boolean reached = tile.coords().equals(surface.tile.coords());
+        float[] outline = null;
         for (var face : surface.coatingFaces()) {
             boolean ground = bed || face.finish() != BoardSurface.Finish.BED && face.finish() != BoardSurface.Finish.SHORE;
             if (!ground || apart && !surface.carries(face, tile)) { continue; }
@@ -869,8 +876,53 @@ final class GpuRoads {
             float maxY = (Math.max(face.a().y, Math.max(face.b().y, face.c().y)) - cy) / scale;
             if (!bounds.intersects(minX, minY, maxX - minX, maxY - minY)) { continue; }
             result.add(lifted(face, patch.lift() * scale));
+            if (!reached) {
+                if (outline == null) { outline = outline(patch.shape()); }
+                reached = reaches(outline, (face.a().x - cx) / scale, (face.a().y - cy) / scale, (face.b().x - cx) / scale,
+                      (face.b().y - cy) / scale, (face.c().x - cx) / scale, (face.c().y - cy) / scale, minX, minY, maxX, maxY);
+            }
         }
-        return result;
+        return reached ? result : List.of();
+    }
+
+    /** A shape's outline as line segments, x1, y1, x2, y2 each, flattened as finely as {@link #sides} walks it. */
+    private static float[] outline(Area shape) {
+        var result = new FloatArray();
+        float[] point = new float[6];
+        float startX = 0, startY = 0, lastX = 0, lastY = 0;
+        for (var path = shape.getPathIterator(null, .25); !path.isDone(); path.next()) {
+            int type = path.currentSegment(point);
+            if (type == java.awt.geom.PathIterator.SEG_MOVETO) {
+                startX = lastX = point[0];
+                startY = lastY = point[1];
+                continue;
+            }
+            float x = type == java.awt.geom.PathIterator.SEG_CLOSE ? startX : point[0];
+            float y = type == java.awt.geom.PathIterator.SEG_CLOSE ? startY : point[1];
+            result.add(lastX, lastY, x, y);
+            lastX = x;
+            lastY = y;
+        }
+        return result.toArray();
+    }
+
+    /**
+     * Whether a counter-clockwise triangle with these bounds touches the region inside {@code outline}: an outline segment
+     * meets it, or none does and its corner a lies inside the region. One pass with no allocation: drape asks per ground face.
+     */
+    private static boolean reaches(float[] outline, float ax, float ay, float bx, float by, float cx, float cy,
+          float minX, float minY, float maxX, float maxY) {
+        boolean inside = false;
+        for (int i = 0; i < outline.length; i += 4) {
+            float x1 = outline[i], y1 = outline[i + 1], x2 = outline[i + 2], y2 = outline[i + 3];
+            if (y1 > ay != y2 > ay && ax < x1 + (ay - y1) / (y2 - y1) * (x2 - x1)) { inside = !inside; }
+            if (x1 < minX && x2 < minX || x1 > maxX && x2 > maxX || y1 < minY && y2 < minY || y1 > maxY && y2 > maxY) { continue; }
+            if ((bx - ax) * (y1 - ay) >= (by - ay) * (x1 - ax) && (cx - bx) * (y1 - by) >= (cy - by) * (x1 - bx)
+                  && (ax - cx) * (y1 - cy) >= (ay - cy) * (x1 - cx)
+                  || Line2D.linesIntersect(x1, y1, x2, y2, ax, ay, bx, by) || Line2D.linesIntersect(x1, y1, x2, y2, bx, by, cx, cy)
+                  || Line2D.linesIntersect(x1, y1, x2, y2, cx, cy, ax, ay)) { return true; }
+        }
+        return inside;
     }
 
     private static BoardTacticalGeometry.Triangle lifted(BoardSurface.Face face, float lift) {

@@ -44,7 +44,6 @@ class GpuRoadModeTest {
             assertEquals(enhanced.roads().keySet(), classic.roads().keySet(), "Spill receivers belong to both views");
             boolean graded = false;
             for (var entry : enhanced.roads().entrySet()) {
-                // Classic's whole-hex fan triangles can also take a patch whose bounds they only overlap: match by paint.
                 var painted = new ArrayList<>(classic.roads().get(entry.getKey()));
                 for (var expected : entry.getValue()) {
                     var patch = painted.stream().filter(p -> samePaint(expected, p)).findFirst().orElse(null);
@@ -56,6 +55,7 @@ class GpuRoadModeTest {
                     assertEquals(maxZ(expected), maxZ(patch), .001f, "The carriageway's top differs at " + entry.getKey());
                     graded |= maxZ(patch) - minZ(patch) > .001f;
                 }
+                assertTrue(painted.isEmpty(), "Classic installs a patch Enhanced does not at " + entry.getKey());
             }
             assertTrue(graded, "The fixture includes an actual road grade, not just flat paint");
         });
