@@ -349,6 +349,15 @@ final class GpuAssets implements Disposable {
 
     /** The work the first sculpt or finish arrays take, or null. */
     private Preparing preparing;
+    /** The anisotropy the sculpt arrays filter with, now and when built ({@link #setTerrainAnisotropy}). */
+    private float terrainAnisotropy = MATERIAL_ANISOTROPY;
+
+    /** The sculpted terrain's material filtering; GL thread. Normal quality lowers it (GpuTerrain.setNormalQuality). */
+    void setTerrainAnisotropy(float level) {
+        if (terrainAnisotropy == level) { return; }
+        terrainAnisotropy = level;
+        if (terrainArrays != null) { terrainArrays.arrays().anisotropy(level); }
+    }
 
     private TerrainArrays terrainArrays(List<String> names, List<String> materials) {
         var started = preparing;
@@ -359,6 +368,7 @@ final class GpuAssets implements Disposable {
         }
         var work = joined(started != null ? started.work() : terrainWork(names, materials));
         MaterialArrays arrays = arrays(work.arrays());
+        arrays.anisotropy(terrainAnisotropy);
         return new TerrainArrays(List.copyOf(materials), arrays,
               new FinishArrays(arrays.data(), work.surface(), work.tint(), work.glow(), work.relief()));
     }
@@ -571,6 +581,23 @@ final class GpuAssets implements Disposable {
     /** One owned pair: sRGB colour/height and raw numerical maps, each compacted in material order. */
     record MaterialArrays(TextureArray color, TextureArray data) implements Disposable {
         @Override public void dispose() { color.dispose(); data.dispose(); }
+
+        void anisotropy(float level) {
+            setAnisotropy(color, level);
+            setAnisotropy(data, level);
+        }
+    }
+
+    /** The anisotropy of repeating material arrays, as far as the driver offers. */
+    static final float MATERIAL_ANISOTROPY = 8;
+
+    private static void setAnisotropy(TextureArray array, float level) {
+        float anisotropy = Math.min(level, GLTexture.getMaxAnisotropicFilterLevel());
+        if (anisotropy > 1) {
+            // GLTexture.setAnisotropicFilter targets 2D, so set the array's own target explicitly.
+            array.bind();
+            Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
+        }
     }
 
     /** One array layer: a board material's packed layout and its dimensions. */
@@ -652,12 +679,7 @@ final class GpuAssets implements Disposable {
             data.upload();
             array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
             array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            // GLTexture.setAnisotropicFilter targets 2D, so set the array's own target explicitly.
-            float anisotropy = Math.min(8, GLTexture.getMaxAnisotropicFilterLevel());
-            if (anisotropy > 1) {
-                array.bind();
-                Gdx.gl.glTexParameterf(GL30.GL_TEXTURE_2D_ARRAY, GL20.GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy);
-            }
+            setAnisotropy(array, MATERIAL_ANISOTROPY);
             return array;
         } catch (RuntimeException | Error failure) { array.dispose(); throw failure; }
     }

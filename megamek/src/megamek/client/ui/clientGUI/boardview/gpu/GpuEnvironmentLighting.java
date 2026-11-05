@@ -34,9 +34,11 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
      * compiled in: a lighting takes it as {@link #antialiasing} when its environment applies it (applyAntialiasing).
      */
     static boolean specularAntialiasing = true;
+    /** Normal quality's cheaper light and materials, compiled in and taken up as {@link #antialiasing} is. */
+    static boolean normalQuality;
     /** The {@link #flags} bits: the features below. */
     static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16,
-          CRYSTAL_TRANSMISSION = 32;
+          CRYSTAL_TRANSMISSION = 32, NORMAL_QUALITY = 64;
     private final Color sky = new Color(), horizon = new Color();
     private Texture texture;
     private GpuLightingEnvironment image;
@@ -63,6 +65,8 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     boolean biomes;
     /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
     boolean antialiasing;
+    /** Normal quality as last applied (applyAntialiasing): normalQualityFlag. */
+    boolean cheaperShading;
 
     GpuEnvironmentLighting() { super(TYPE); }
 
@@ -70,7 +74,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     int flags() {
         return (cloudShadow != null ? CLOUD_SHADOW : 0) | (ambientOcclusion != null ? AMBIENT_OCCLUSION : 0)
               | (lavaLighting != null ? LAVA_LIGHTING : 0) | (biomes ? BIOMES : 0) | (antialiasing ? ANTIALIASING : 0)
-              | (crystals != null ? CRYSTAL_TRANSMISSION : 0);
+              | (crystals != null ? CRYSTAL_TRANSMISSION : 0) | (cheaperShading ? NORMAL_QUALITY : 0);
     }
 
     /** An environment's (or a draw's combined attributes') lighting, or null. */
@@ -127,14 +131,17 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     }
 
     /**
-     * Brings the lit programs of an environment with this lighting in line with the setting
-     * (specularAntialiasingFlag, GpuCloudShadow.prefix). It is a program key's feature (flags), so a switch is a
-     * lighting change: shader selection, the terrain's material readiness and its family programs follow it, and the
-     * terrain rebuilds behind its loading stage.
+     * Brings the lit programs of an environment with this lighting in line with the settings
+     * (specularAntialiasingFlag and normalQualityFlag, GpuCloudShadow.prefix). They are a program key's features
+     * (flags), so a switch is a lighting change: shader selection, the terrain's material readiness and its family
+     * programs follow it, and the terrain rebuilds behind its loading stage.
      */
     static void applyAntialiasing(Environment environment) {
         var lighting = of(environment);
-        if (lighting != null) { lighting.antialiasing = specularAntialiasing; }
+        if (lighting != null) {
+            lighting.antialiasing = specularAntialiasing;
+            lighting.cheaperShading = normalQuality;
+        }
     }
 
     void set(BoardAtmosphere.Lighting lighting) {
@@ -276,7 +283,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         copy.original = original != null ? original : this;
         copy.cloudShadow = cloudShadow; copy.ambientOcclusion = ambientOcclusion; copy.lavaLighting = lavaLighting;
         copy.crystals = crystals;
-        copy.biomes = biomes; copy.antialiasing = antialiasing;
+        copy.biomes = biomes; copy.antialiasing = antialiasing; copy.cheaperShading = cheaperShading;
         return copy;
     }
     @Override public int hashCode() { return 31 * super.hashCode() + flags(); }

@@ -120,7 +120,7 @@ final class GpuBiomeVegetation implements Disposable {
     static String cropSource() {
         return "#define CROP_HEIGHT " + CROP_HEIGHT + "\n#define CROP_HEX_METRES "
               + BoardGeometry.width() / BoardRelief.metres(1) + "\n#define CROP_KEEP " + pair(CROP_KEEP)
-              + "\n#define CROP_FADE " + pair(CROP_FADE)
+              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n#define CROP_NORMAL_SCALE " + TerrainLod.NORMAL_SCALE
               + "\n" + GpuShaderSource.read("terrain-crops.glsl");
     }
 
@@ -128,7 +128,9 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** The share of a crop's plants by rank that stands at this projected size, as terrain-crops.glsl draws them. */
     static float cropDensity(BoardFields.Crop crop, float pixels) {
-        float fade = Math.clamp((pixels - CROP_FADE[0]) / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
+        // Plants stand on the detail levels Normal quality takes at larger hexes (TerrainLod.select): they fade there.
+        float detail = GpuEnvironmentLighting.normalQuality ? pixels / TerrainLod.NORMAL_SCALE : pixels;
+        float fade = Math.clamp((detail - CROP_FADE[0]) / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
         return Math.clamp(pixels / CROP_KEEP[crop.ordinal()], .001f, 1) * fade * fade * (3 - 2 * fade);
     }
 

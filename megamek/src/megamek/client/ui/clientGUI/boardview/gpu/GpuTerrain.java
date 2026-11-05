@@ -952,6 +952,7 @@ final class GpuTerrain implements Disposable {
     private int flagFrame;
     /** The view last drawn: cloth outside it holds its pose. Null until one draws, or for a view-less render. */
     private Camera flagView;
+    private boolean waveFrame;
     /** The sun's shadow map and its caches; the terrain's depth pass and the units cast into it. */
     private final GpuTerrainShadows shadowMap = new GpuTerrainShadows(new GpuTerrainShadows.Casters() {
         @Override
@@ -1011,18 +1012,19 @@ final class GpuTerrain implements Disposable {
     private Shader twin(Shader colour, Attributes material) {
         Prepass category = prepass(material);
         return prepasses(category) && (category != Prepass.OBJECTS || !objectsFar)
+              && (category != Prepass.RELIEF || environmentLighting.ambientOcclusion != null || reliefFar)
               ? prepassTwins.get(shaderGroup(colour)) : null;
     }
 
     /**
      * Whether the depth pre-pass draws a category: those of depthPrepass, and all relief while ambient occlusion reads
      * the pre-pass depth (GpuAmbientOcclusion in the environment's lighting, so its switch prepares the twins as a
-     * lighting change).
+     * lighting change) or Normal quality saves shading the relief's hidden faces.
      */
     private boolean prepasses(Prepass category) {
         return category != null && (depthPrepass.contains(category)
               || (category == Prepass.RELIEF || category == Prepass.CLIFFS)
-                    && environmentLighting.ambientOcclusion != null);
+                    && (environmentLighting.ambientOcclusion != null || environmentLighting.cheaperShading));
     }
 
     /**
@@ -1311,6 +1313,11 @@ final class GpuTerrain implements Disposable {
      * twins (twin), which stay built, so a zoom links nothing. Perspective views keep them.
      */
     private boolean objectsFar;
+    /**
+     * Whether a hex is under TreeLod.PREPASS_RELIEF pixels on screen (updateDetail): Normal quality's relief then draws
+     * its twin, whose depth spares the shading of what lies hidden; closer, little does.
+     */
+    private boolean reliefFar;
     /** The last pre-pass's twin draws, and the lists it reuses. */
     private int prepassDraws;
     private final Array<Renderable> prepassParts = new Array<>();
@@ -6783,6 +6790,18 @@ final class GpuTerrain implements Disposable {
         flagRevisions.put(cloth, flag.revision);
     }
 
+    /** Normal quality advances the waves every other frame, and not at all while no water shows; they follow the clock. */
+    private boolean wavesDue() {
+        if (!environmentLighting.cheaperShading || ocean.texture() == null) { return true; }
+        waveFrame = !waveFrame;
+        if (waveFrame) { return false; }
+        if (flagView == null) { return true; }
+        for (Chunk chunk : chunks) {
+            if (chunk.waterField != null && flagView.frustum.boundsInFrustum(chunk.bounds)) { return true; }
+        }
+        return false;
+    }
+
     void animate(float delta, List<ModelInstance> units, float buildingAlpha, Coords hovered, float hoverFloorZ) {
         float nextBuilding = MathUtils.clamp(buildingAlpha, 0, 1);
         boolean changedOpacity = nextBuilding != buildingOpacity;
@@ -6797,7 +6816,7 @@ final class GpuTerrain implements Disposable {
         else if (!lava && lavaOcean.texture() != null) { lavaOcean.reset(); }
         boolean water = proceduralWater && chunks.stream().anyMatch(chunk -> chunk.waterField != null);
         if (water && waterEffects && !fluffHidden) {
-            ocean.update(clock, wind, gravity);
+            if (wavesDue()) { ocean.update(clock, wind, gravity); }
             waders.update(coverScene, units, units.stream().map(this::unitBounds).toList(), delta);
         } else if (!water && ocean.texture() != null) { ocean.reset(); }
         List<BoundingBox> occupied = hasCutaways && buildingOpacity < 1
@@ -8546,7 +8565,10 @@ final class GpuTerrain implements Disposable {
      */
     private boolean renderPrepass(Camera camera) {
         prepassDraws = 0;
-        if (depthPrepass.isEmpty() && environmentLighting.ambientOcclusion == null) { return false; }
+        if (depthPrepass.isEmpty() && environmentLighting.ambientOcclusion == null
+              && !environmentLighting.cheaperShading) {
+            return false;
+        }
         for (Renderable part : batch.gathered()) {
             Shader twin = twin(part.shader, part.material);
             if (twin != null) {
@@ -8811,6 +8833,17 @@ final class GpuTerrain implements Disposable {
             part.environment = environment;
             batch.render(part);
         }
+    }
+
+    /**
+     * Normal quality's shading (normalQualityFlag; the cache's fills take no lighting and stay as they are) and its lower
+     * anisotropy: the board's isometric view asks for about 2x.
+     */
+    void setNormalQuality(boolean enabled) {
+        // Its detail levels follow other hex sizes (TerrainLod.select): a still camera selects again.
+        if (environmentLighting.cheaperShading != enabled) { detailPixelsPerUnit = Float.NaN; }
+        GpuEnvironmentLighting.normalQuality = enabled;
+        assets.setTerrainAnisotropy(enabled ? 2 : GpuAssets.MATERIAL_ANISOTROPY);
     }
 
     /**
@@ -9109,6 +9142,8 @@ final class GpuTerrain implements Disposable {
         // Further out, building shells' twins cost more than the shading they save; the twins stay built.
         objectsFar = !perspective && TreeLod.level(TreeLod.PREPASS_OBJECTS, BoardGeometry.width() * pixelsPerUnit,
               objectsFar ? 1 : 0) == 1;
+        reliefFar = perspective || TreeLod.level(TreeLod.PREPASS_RELIEF, BoardGeometry.width() * pixelsPerUnit,
+              reliefFar ? 1 : 0) == 1;
         Vector3 nearest = new Vector3();
         for (Chunk chunk : chunks) {
             if (perspective) {

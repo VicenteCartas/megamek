@@ -47,6 +47,8 @@ final class GpuGroundCover implements Disposable {
     private static final int STRIDE = 4;
     /** Projected pixels per hex over which grass blades grow in. */
     static final float START_PIXELS = 120, FULL_PIXELS = 500;
+    /** The share of a meadow's blades Normal quality draws (terrain-grass.glsl), each survivor by its root wider. */
+    private static final float NORMAL_SHARE = .6f;
     /**
      * Projected pixels per hex over which a bank rim's blades stand up, a little before the meadow's first blades, and
      * below which fewer of them stand, each widening by as much, so that the rim keeps its fringe (terrain-grass.glsl).
@@ -623,7 +625,7 @@ final class GpuGroundCover implements Disposable {
     private long frame, uploads;
     private int revision = -1, boardId = -1;
     /** Render-owned submission snapshot; installed roots still invalidate a stationary view. */
-    private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
+    private record View(float[] projectionView, float viewportPixels, float share, List<BoardScene.Tile> candidates,
           Map<Coords, BoardPlants> sources, List<ModelInstance> instances) { }
     private View view;
     /** How long blades take to grow on a hex whose roots arrived while it was already on screen without any. */
@@ -639,7 +641,7 @@ final class GpuGroundCover implements Disposable {
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
               + "\n#define GRASS_RIM_START " + RIM_START_PIXELS + "\n#define GRASS_RIM_STAND " + RIM_STAND_PIXELS
               + "\n#define GRASS_RIM_KEEP " + RIM_KEEP_PIXELS
-              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX
+              + "\n#define GRASS_ROOTS_PER_HEX " + ROOTS_PER_HEX + "\n#define GRASS_NORMAL_SHARE " + NORMAL_SHARE
               + "\n#define GRASS_MAX_HEIGHT " + MAX_HEIGHT_FRACTION + "\n" + GpuBiomeVegetation.cropSource()
               + GpuGroundDamage.shaderSource() + GpuShaderSource.read("terrain-grass.glsl");
         // A root beyond its density leaves every vertex of its blade outside the clip volume.
@@ -690,7 +692,8 @@ final class GpuGroundCover implements Disposable {
         long now = System.nanoTime();
         // A hex that has just grown in needs its full target once more; the last submission had it growing.
         boolean grown = arrivals.values().removeIf(arrived -> now - arrived >= GROWTH_NANOS);
-        if (view != null && !grown && arrivals.isEmpty() && view.viewportPixels() == viewportPixels
+        float share = GpuEnvironmentLighting.normalQuality ? NORMAL_SHARE : 1;
+        if (view != null && !grown && arrivals.isEmpty() && view.viewportPixels() == viewportPixels && view.share() == share
               && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
             boolean current = true;
             for (var entry : view.sources().entrySet()) {
@@ -729,7 +732,7 @@ final class GpuGroundCover implements Disposable {
             Long arrived = arrivals.get(tile.coords());
             float growth = arrived == null ? 1 : BoardRelief.smooth((now - arrived) / (float) GROWTH_NANOS);
             if (meadow) {
-                chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth));
+                chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * share * density(pixels) * growth));
                 chunk.rim.add(planted.rim(), (int) Math.ceil(ROOTS_PER_HEX * rimDensity(pixels) * growth));
             } else {
                 chunk.wheat.add(planted.wheat(), (int) Math.ceil(ROOTS_PER_HEX
@@ -765,7 +768,7 @@ final class GpuGroundCover implements Disposable {
                 }
             }
         }
-        view = new View(camera.combined.val.clone(), viewportPixels, List.copyOf(candidates), sources, result);
+        view = new View(camera.combined.val.clone(), viewportPixels, share, List.copyOf(candidates), sources, result);
         return result;
     }
 

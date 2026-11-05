@@ -41,6 +41,7 @@ final class GpuCloudShadow {
               + (lighting != null && lighting.crystals != null ? "#define crystalTransmissionFlag\n" : "")
               + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
               + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
+              + (lighting != null && lighting.cheaperShading ? "#define normalQualityFlag\n" : "")
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);
     }
 

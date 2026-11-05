@@ -40,11 +40,13 @@ void main() {
     // A meadow's blades are its grass: they take its material's finish where they root, filtered over the blade's own
     // screen footprint, so every fragment of a blade reads the same texel at the level its size needs. A field's
     // plants (v_coverData.x, one per draw instance, so whole quads branch alike) keep a dry leaf's.
+#ifndef normalQualityFlag
     if (v_coverData.x < .5) {
         vec2 meadowFootprint = v_cloudPosition.xy * vec2(1.0, -1.0) / u_meadowFinish.z;
         finish = finishTexel(int(u_meadowFinish.x + .5), v_coverRoot * vec2(1.0, -1.0) / u_meadowFinish.y,
               mat2(dFdx(meadowFootprint), dFdy(meadowFootprint)));
     }
+#endif
 #endif
 #ifdef biomeVegetationFlag
     // Their material's finish, as the means of its maps: their artwork is composited at run time.

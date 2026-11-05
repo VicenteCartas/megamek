@@ -129,7 +129,12 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
     vec3 sky = skyLight(normal, s.bounce) * s.front;
     bool tissue = s.back != vec3(0.0);
+#ifdef normalQualityFlag
+    // Thin tissue's far side faces the ground.
+    if (tissue) sky += environmentGround(s.bounce) * s.back;
+#else
     if (tissue) sky += skyLight(-normal, s.bounce) * s.back;
+#endif
     vec3 ambient = (sky * occlusion * s.cavity + localLight * s.cavity) * diffuseBudget;
     vec3 light = sunDirection();
     // Contact shadows (ambient-occlusion.glsl) add the small occluders the shadow map is too coarse for.
@@ -172,8 +177,15 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     albedo += sheen;
     // The hot share is matte, matching the dedicated crust and lava programs.
     albedo += localSpecular * multiscatter * s.cavity * (1.0 - s.heat);
+#ifdef normalQualityFlag
+    vec3 reflectedSky = s.film > .01 || s.metallic > .01 ? skyReflection(normal, view, roughness, f0, s.bounce,
+          environmentGround(s.bounce), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
+          : faceSky * specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);
+    albedo += reflectedSky * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat);
+#else
     albedo += skyReflection(normal, view, roughness, f0, s.bounce, environmentGround(s.bounce),
           surfaceAmbient(vec3(0.0, 0.0, 1.0))) * multiscatter * s.specularOcclusion * s.cavity * (1.0 - s.heat);
+#endif
     if (submerged > 0.0) {
         vec3 scattered = surfaceAmbient(vec3(0.0, 0.0, 1.0)) * occlusion + sunOnGround() * (1.0 + caustic);
         albedo = submergedLight(albedo, s.albedo, scattered, submerged);

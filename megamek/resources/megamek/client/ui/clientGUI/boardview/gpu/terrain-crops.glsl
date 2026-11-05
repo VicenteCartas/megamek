@@ -42,4 +42,9 @@ vec3 cropCanopy(bool maize, float tone, float tilt) {
 float cropShare(bool maize, float pixels) { return clamp(pixels / (maize ? CROP_KEEP.y : CROP_KEEP.x), .001, 1.0); }
 
 // How many of a field's plants stand as they fade into the ground's crop colour (terrain-biome.glsl).
-float cropPlants(float pixels) { return smoothstep(CROP_FADE.x, CROP_FADE.y, pixels); }
+float cropPlants(float pixels) {
+#ifdef normalQualityFlag
+    pixels /= CROP_NORMAL_SCALE; // They stand on the detail levels it takes at larger hexes (TerrainLod.select).
+#endif
+    return smoothstep(CROP_FADE.x, CROP_FADE.y, pixels);
+}

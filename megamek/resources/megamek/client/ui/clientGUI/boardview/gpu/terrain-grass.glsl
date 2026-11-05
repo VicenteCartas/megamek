@@ -36,9 +36,14 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // A field's plants thin out as they shrink, each survivor widening by as much, until they fade into the ground's
     // crop colour (terrain-crops.glsl); so does a rim's fringe once it has stood up. Grass only thins out, over the
     // ground's own grass.
-    float share = crop ? cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : 1.0;
+#ifdef normalQualityFlag
+    float meadowShare = GRASS_NORMAL_SHARE; // Fewer blades, each survivor wider, so the sward keeps most of its cover.
+#else
+    float meadowShare = 1.0;
+#endif
+    float share = crop ? cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : meadowShare;
     float density = (crop ? share * cropPlants(pixels) : rim ? share * smoothstep(GRASS_RIM_START, GRASS_RIM_STAND, pixels)
-          : smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
+          : share * smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(a_coverRoot.w);
     // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.
@@ -102,7 +107,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
                 * mix(.85, 1.15, grassRandom(seed + 37u))
           : u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow) * (1.0 - t);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
-    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / share;
+    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / (crop || rim ? share : sqrt(share));
     float gust = vegetationGust(root.xy);
     vec3 tip, control;
     if (rim) {

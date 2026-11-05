@@ -11,6 +11,8 @@ enum TerrainLod {
     DISTANT(1, 6, false);
 
     static final int CHUNK_SIZE = 8;
+    /** Normal quality takes each level at this many times the hex's size: small triangles shade the most for the least. */
+    static final float NORMAL_SCALE = 3;
     private static final TerrainLod[] LEVELS = values();
     record Tuning(int fullPixels, int mediumPixels) {
         Tuning {
@@ -42,6 +44,7 @@ enum TerrainLod {
 
     /** Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation. */
     static TerrainLod select(float pixels, TerrainLod current) {
+        if (GpuEnvironmentLighting.normalQuality) { pixels /= NORMAL_SCALE; }
         int level = current == null ? 3 : current.ordinal();
         while (level > 0 && pixels >= tuning.threshold(level - 1) * (current == null ? 1 : 1.1f)) { level--; }
         while (level < 3 && pixels < tuning.threshold(level) * .9f) { level++; }

@@ -37,6 +37,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.profiling.GLProfiler;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
+import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import jdk.jfr.Event;
@@ -275,6 +276,8 @@ class GpuBoardPerformanceSmokeTest {
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
         boolean compareCache = Boolean.getBoolean("megamek.gpu.performanceCompareMaterialCache");
+        // High, Normal, Normal, High in one GL context, so other work on the machine weighs on both alike.
+        boolean compareQuality = Boolean.getBoolean("megamek.gpu.performanceCompareQuality");
         Map<String, String> shaderBaseline = shaderSources(System.getProperty("megamek.gpu.performanceCompareShaders"));
         boolean compareShaders = !shaderBaseline.isEmpty();
         boolean waitForCache = compareCache || compareShaders || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");
@@ -286,11 +289,11 @@ class GpuBoardPerformanceSmokeTest {
         // The Tactical View's overview, close and moving scenarios after the 3D view's, in the same JVM.
         int views = Boolean.getBoolean("megamek.gpu.performanceOverviewOnly") ? 1
               : Boolean.getBoolean("megamek.gpu.performanceTactical") ? 6 : 3;
-        int comparisons = (comparePages ? 1 : 0) + (compareCache ? 1 : 0) + (compareShaders ? 1 : 0);
+        int comparisons = (comparePages ? 1 : 0) + (compareCache ? 1 : 0) + (compareShaders ? 1 : 0) + (compareQuality ? 1 : 0);
         if (comparisons > 1 || comparisons > 0 && graphics.size() > 1) {
-            throw new IllegalArgumentException("One comparison per run: terrain pages, material cache, shaders or graphics");
+            throw new IllegalArgumentException("One comparison per run: terrain pages, material cache, shaders, quality or graphics");
         }
-        int variants = compareShaders ? 4 : comparePages || compareCache ? 2 : Math.max(1, graphics.size());
+        int variants = compareShaders || compareQuality ? 4 : comparePages || compareCache ? 2 : Math.max(1, graphics.size());
         var preferences = GUIPreferences.getInstance();
         BoardGraphics savedGraphics = preferences.getBoardGraphics();
         String savedAa = preferences.getBoardAntiAliasing();
@@ -299,6 +302,7 @@ class GpuBoardPerformanceSmokeTest {
         boolean savedNormals = preferences.getBoardNormalMaps();
         boolean savedTessellation = preferences.getBoardTessellation();
         boolean savedParallax = preferences.getBoardTerrainParallax();
+        String savedQuality = preferences.getBoardQuality();
         TerrainLod.Tuning savedLod = TerrainLod.tuning();
         float savedUiScale = preferences.getBoardUiScale();
         float savedRenderScale = BoardCamera.renderScale;
@@ -312,10 +316,14 @@ class GpuBoardPerformanceSmokeTest {
                 preferences.setBoardNormalMaps(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceNormalMaps", "true")));
                 preferences.setBoardTessellation(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTessellation", "true")));
                 preferences.setBoardTerrainParallax(Boolean.getBoolean("megamek.gpu.performanceTerrainParallax"));
+                preferences.setBoardQuality(System.getProperty("megamek.gpu.performanceQuality", "HIGH"));
                 preferences.setBoardUiScale(1);
             });
-            GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                  GpuTerrain.Prepass.IMPOSTORS);
+            // A quality comparison measures the game's own pre-pass; older comparisons keep their pinned set.
+            if (System.getProperty("megamek.gpu.performanceQuality") == null) {
+                GpuTerrain.depthPrepass = EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                      GpuTerrain.Prepass.IMPOSTORS);
+            }
             TerrainLod.tune(new TerrainLod.Tuning(Integer.getInteger("megamek.gpu.performanceFullPixels", savedLod.fullPixels()),
                   Integer.getInteger("megamek.gpu.performanceMediumPixels", savedLod.mediumPixels())));
         }
@@ -408,8 +416,12 @@ class GpuBoardPerformanceSmokeTest {
                         assertEquals(false, tuning.antiAliasing());
                         assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
                         assertEquals(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"), tuning.ambientOcclusion());
-                        assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                              GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
+                        assertEquals("NORMAL".equalsIgnoreCase(System.getProperty("megamek.gpu.performanceQuality")),
+                              tuning.normalQuality());
+                        if (System.getProperty("megamek.gpu.performanceQuality") == null) {
+                            assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
+                                  GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
+                        }
                     }
                     System.out.printf("PERF settings renderScale=%.2f specularAA=%s SMAA=%s AO=%s prepass=%s uiScale=%.2f%n",
                           BoardCamera.renderScale, GpuEnvironmentLighting.specularAntialiasing, tuning.antiAliasing(),
@@ -491,6 +503,15 @@ class GpuBoardPerformanceSmokeTest {
                         }
                         // The switch takes effect in this warmup frame, which builds what the variant first draws.
                         if (configureFrame && graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
+                        if (configureFrame && compareQuality && view == 0 && phase == 0) {
+                            SelectBox<String> quality = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-quality");
+                            quality.setSelectedIndex(variant == 0 || variant == 3 ? 1 : 0);
+                            String resolution = System.getProperty("megamek.gpu.performanceNormalResolution");
+                            if (resolution != null) {
+                                Slider scale = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-render-resolution");
+                                scale.setValue(variant == 0 || variant == 3 ? 100 : Float.parseFloat(resolution));
+                            }
+                        }
                         if (configureFrame && frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
                             boardCamera.fit(fixture.source.takeFrame().scene());
@@ -519,6 +540,7 @@ class GpuBoardPerformanceSmokeTest {
                         if (compareShaders) {
                             scenario += (variant == 0 || variant == 3 ? "-baseline-" : "-candidate-") + variant;
                         }
+                        if (compareQuality) { scenario += (variant == 0 || variant == 3 ? "-high-" : "-normal-") + variant; }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
@@ -774,6 +796,7 @@ class GpuBoardPerformanceSmokeTest {
                     preferences.setBoardNormalMaps(savedNormals);
                     preferences.setBoardTessellation(savedTessellation);
                     preferences.setBoardTerrainParallax(savedParallax);
+                    preferences.setBoardQuality(savedQuality);
                     preferences.setBoardUiScale(savedUiScale);
                 });
                 BoardCamera.renderScale = savedRenderScale;

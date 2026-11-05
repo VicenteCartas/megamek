@@ -164,10 +164,12 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     float broad = 0.0, grain = .5;
     if (max(fringe.x, max(fringe.y, fringe.z)) > 0.0) {
         broad = biomeNoise(world.xy / 4.7 + 13.0);
+#ifndef normalQualityFlag
         if (pixelMetres < .15) {
             float fine = biomeNoise(world.xy * 12.0);
             grain = mix(fine, .5, smoothstep(.03, .15, pixelMetres));
         }
+#endif
     }
     if (fringe.x > 0.0) {
         // Each parcel has its crop, wheat or maize, and its row direction (BoardFields). Parcels meet at grass
@@ -224,7 +226,11 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         // A draining lip breaks into peat shelves before the drop. Leave uphill/shore waterlines level.
         if (!shore) {
             // Low-step rim distances refer to the original seam through the bank, not its receded plateau lip.
+#ifdef normalQualityFlag
+            float retreat = mix(2.5, 7.0, broad);
+#else
             float retreat = mix(2.5, 7.0, biomeNoise(world.xy / 2.0 + 19.0));
+#endif
             water *= smoothstep(retreat * .2, retreat, rim);
         }
         // Reuse actual soil relief rather than replacing it with smooth coloured noise.

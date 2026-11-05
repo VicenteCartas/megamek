@@ -20,6 +20,8 @@ final class TreeLod {
      * pre-pass and saved nothing; this lies near their geometric mean, untuned.
      */
     static final float[] PREPASS_OBJECTS = { 16 };
+    /** Normal quality's relief joins the depth pre-pass while a hex is narrower than this on screen (GpuTerrain.twin). */
+    static final float[] PREPASS_RELIEF = { 96 };
     static final int LEVELS = PIXELS.length + 1;
     private static final float HYSTERESIS = 0.1f;
 
