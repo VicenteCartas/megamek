@@ -1759,7 +1759,8 @@ final class GpuAssets implements Disposable {
         if (ice == null) {
             String name = "terrain/ice/ice-sheet";
             Texture color = texture(name, GpuMaterialMaps.Layout.COLOR, true);
-            var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE));
+            var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE),
+                  layer(name, GpuMaterialMaps.Layout.FLOES));
             int width = Math.max(maps.get(0).width(), maps.get(1).width());
             int height = Math.max(maps.get(0).height(), maps.get(1).height());
             ice = new Ice(color, repeatingArray(new MaterialArrayData(maps.stream().map(Layer::pixels).toList(), width, height,

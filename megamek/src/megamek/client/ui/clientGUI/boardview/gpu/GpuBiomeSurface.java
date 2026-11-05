@@ -17,6 +17,8 @@ final class GpuBiomeSurface implements Disposable {
     private static final int BIOME = 0x0f000000;
     /** G bit 4: a dry, same-biome/elevation two-ring neighbourhood; low G bits remain the aqueous palette. */
     private static final int UNIFORM_BIOME = 0x00100000;
+    /** B bit 7: frozen land at one level within two rings, so no ice border reaches this cell (terrain-ice.glsl). */
+    private static final int ICE_INTERIOR = 0x00008000;
     /**
      * In metres, as terrain-biome-mask.glsl: biome weights reach 14 m beyond a hex outline, a palette 5 m beyond it from
      * a position the noise moves up to 3 m along each axis. The margin covers float rounding at quarter edges.
@@ -120,6 +122,12 @@ final class GpuBiomeSurface implements Disposable {
             for (int index = 0; index < next.length; index++) {
                 if (uniformBiome(next, w, h, new Coords(index % w, index / w))) { next[index] |= UNIFORM_BIOME; }
             }
+            if (anyIce) {
+                int[] kinds = next.clone();
+                for (int index = 0; index < next.length; index++) {
+                    if (iceInterior(kinds, w, h, new Coords(index % w, index / w))) { next[index] |= ICE_INTERIOR; }
+                }
+            }
         }
         previous = scene == null ? null : scene.tiles();
         active = scene != null && active(scene);
@@ -191,6 +199,17 @@ final class GpuBiomeSurface implements Disposable {
     private static float distance(float left, float right, float bottom, float top, float x, float y, float grow) {
         return BoardBiome.hexDistance(Math.max(0, Math.max(left - grow - x, x - right - grow)),
               Math.max(0, Math.max(bottom - grow - y, y - top - grow)));
+    }
+
+    private static boolean iceInterior(int[] tiles, int w, int h, Coords coords) {
+        int own = tiles[coords.getY() * w + coords.getX()];
+        if (((own >>> 8) & 3) != 1) { return false; }
+        for (Coords near : coords.allAtDistanceOrLess(2)) {
+            if (!inside(near, w, h)) { continue; }
+            int tile = tiles[near.getY() * w + near.getX()];
+            if (((tile >>> 8) & 3) != 1 || (tile & 0xff) != (own & 0xff)) { return false; }
+        }
+        return true;
     }
 
     private static boolean inside(Coords coords, int w, int h) {

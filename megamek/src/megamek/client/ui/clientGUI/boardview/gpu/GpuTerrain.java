@@ -324,7 +324,7 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuSurfaceBlend.TYPE) ? " blend" : "")
                   + (ordinaryFamily != -1 ? " ordinary-" + ordinaryFamily : "")
                   + (renderable.material.has(GpuMagmaShader.TYPE) ? " volcanic" : "")
-                  + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.mode(renderable.material) : "")
+                  + (GpuIceShader.mode(renderable.material) != 0 ? " ice-" + GpuIceShader.variant(renderable.material) : "")
                   + (GpuEnvironmentLighting.cloudShadow(renderable.environment) != null ? " cloud" : "")
                   + (renderable.environment != null && renderable.environment.shadowMap != null ? " shadow" : "")
                   + (GpuTreeInstances.instanced(renderable) ? " instanced" : "")
@@ -455,7 +455,7 @@ final class GpuTerrain implements Disposable {
                 private int waterNearestUnit = -1;
                 private long globalsPass = -1;
                 private final long instances = instanceMask(renderable);
-                private final int iceMode = GpuIceShader.mode(renderable.material);
+                private final int iceMode = GpuIceShader.variant(renderable.material);
                 private final boolean ruby = GpuCrystalTransmission.ruby(renderable.material);
                 private final int environmentFlags = GpuEnvironmentLighting.flags(renderable.environment);
                 private final VertexAttributes createdLayout = renderable.meshPart.mesh.getVertexAttributes();
@@ -978,7 +978,7 @@ final class GpuTerrain implements Disposable {
 
     /** What selects a sculpt material's generic program besides its families; the family marker is left out. */
     private static Object familyVariant(Material material) {
-        return List.of(material.getMask() & ~GpuFamilyPrograms.Constants.TYPE, GpuIceShader.mode(material),
+        return List.of(material.getMask() & ~GpuFamilyPrograms.Constants.TYPE, GpuIceShader.variant(material),
               linearDiffuse(material), GpuSurfaceBlend.ordinaryFamily(material), GpuTessellation.curved(material));
     }
 
@@ -1389,7 +1389,7 @@ final class GpuTerrain implements Disposable {
      */
     private static boolean sameMaterialVariant(Material material, int iceMode, boolean linearTexture,
           int ordinaryFamily, GpuWaterShader.Mode waterMode, boolean flowingMagma, boolean ruby) {
-        return GpuIceShader.mode(material) == iceMode && linearDiffuse(material) == linearTexture
+        return GpuIceShader.variant(material) == iceMode && linearDiffuse(material) == linearTexture
               && GpuCrystalTransmission.ruby(material) == ruby
               && GpuSurfaceBlend.ordinaryFamily(material) == ordinaryFamily && waterMode(material) == waterMode
               && flowingMagma(material) == flowingMagma;
@@ -3501,7 +3501,7 @@ final class GpuTerrain implements Disposable {
             // A cliff chunk's relief takes its own sample, which links the program's depth twin too.
             if (sample.material.getMask() == material.getMask() && prepass(sample.material) == prepass(material)
                   && GpuTessellation.curved(sample.material) == GpuTessellation.curved(material)
-                  && sameMaterialVariant(material, GpuIceShader.mode(sample.material), linearDiffuse(sample.material),
+                  && sameMaterialVariant(material, GpuIceShader.variant(sample.material), linearDiffuse(sample.material),
                         GpuSurfaceBlend.ordinaryFamily(sample.material), waterMode(sample.material),
                         flowingMagma(sample.material), GpuCrystalTransmission.ruby(sample.material))
                   && sample.meshPart.mesh.getVertexAttributes().equals(attributes)

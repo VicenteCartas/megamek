@@ -399,6 +399,12 @@ final class GodotMaterial {
         return kind == Kind.SHADER ? parameterNumber("subsurface_scattering_strength", 0) : number("subsurf_scatter_strength", 0);
     }
 
+    /** A map baked for the game beside this material's own, which neither its .tres nor its shader names: {@code <name>_<map>.png}. */
+    File beside(String map) {
+        String name = file.getName();
+        return new File(file.getParentFile(), name.substring(0, name.lastIndexOf('.')) + "_" + map + ".png");
+    }
+
     /**
      * A map StandardMaterial3D has no slot for: a ShaderMaterial's {@code texture_<map>} parameter, which its shader
      * declares (docs/gpu-board-materials.md lists them).

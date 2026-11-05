@@ -58,9 +58,21 @@ final class GpuIceShader extends FloatAttribute {
         return ice == null ? 0 : (int) ice.value;
     }
 
+    /**
+     * What selects a material's program. Land ice shares one with the dry ground beside it, and black ice with paved ground
+     * beside it, told apart by u_iceMode: a program of its own for each would link the whole ground shader again, 5-10 s on
+     * Iris Xe. Floating slabs and waterfalls draw blended in their own pass, and keep theirs.
+     */
+    static int variant(Material material) {
+        int mode = mode(material);
+        return mode == 4 ? 1 : mode == 5 ? 2 : mode;
+    }
+
     static String prefix(Material material) {
         int mode = mode(material);
-        return mode == 0 ? "" : "#define iceFlag\n#define ICE_MODE " + mode + ".0\n";
+        if (mode == 0) { return ""; }
+        return "#define iceFlag\n" + (floating(material) ? "#define ICE_MODE " + mode + ".0\n"
+              : variant(material) == 1 ? "#define ICE_LAND\n" : "");
     }
 
     private static Material apply(Material material, int mode) {
