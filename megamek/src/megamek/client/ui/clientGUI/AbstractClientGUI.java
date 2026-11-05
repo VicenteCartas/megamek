@@ -156,13 +156,7 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
                 return false;
             }
         } // We should wait here until the save game packet arrives.
-        try {
-            getFrame().setVisible(false);
-            saveSettings();
-        } finally {
-            // The start screen waits for this game's window to close; it must close whatever failed before
-            die();
-        }
+        exitWithoutAsking();
         return true;
     }
 
@@ -175,6 +169,17 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         return JOptionPane.showConfirmDialog(getFrame(), Messages.getString("ClientGUI.gameSaveDialogMessage"),
               Messages.getString("ClientGUI.gameSaveFirst"), JOptionPane.YES_NO_CANCEL_OPTION,
               JOptionPane.WARNING_MESSAGE);
+    }
+
+    /** Leaves the game as {@link #handleExit()} does once its save question is answered, without asking it. */
+    public void exitWithoutAsking() {
+        try {
+            getFrame().setVisible(false);
+            saveSettings();
+        } finally {
+            // The start screen waits for this game's window to close; it must close whatever failed before
+            die();
+        }
     }
 
     @Override

@@ -148,6 +148,13 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private boolean railPending;
     private boolean menuPending;
     private boolean unitMenuPending;
+    private boolean unitDamagePending;
+    /** How many locations the probe steps the damage editor on once it is open: {@code +next}. */
+    private int damageStepsPending;
+    /** Whether the probe rolls heavy damage on the damage editor once it is open: {@code +heavy}. */
+    private boolean damageHeavyPending;
+    /** Whether the probe picks the whole unit, with its deployment, once the damage editor is open: {@code +whole}. */
+    private boolean damageWholePending;
     /** The developer switch's clicks and pointer, run through the stage once their time comes. */
     private boolean clickCompactPending;
     private boolean clickFoldPending;
@@ -266,6 +273,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         railPending = probe.options().contains("rail");
         menuPending = probe.options().contains("menu");
         unitMenuPending = probe.options().contains("unitmenu");
+        unitDamagePending = probe.options().contains("unitdamage");
+        damageStepsPending = unitDamagePending && probe.options().contains("next") ? 1 : 0;
+        damageHeavyPending = unitDamagePending && probe.options().contains("heavy");
+        damageWholePending = unitDamagePending && probe.options().contains("whole");
         clickCompactPending = probe.options().contains("clickcompact");
         clickFoldPending = probe.options().contains("fold");
         foldReportPending = clickFoldPending;
@@ -336,7 +347,8 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, window::openSettings, gameActions(), window::leave,
+        topBar = new LobbyTopBar(kit, gameMasterSeat,
+              () -> window.battlefieldCommand(LobbyBattlefieldController.Command.GAME_OPTIONS), this::openSystemMenu,
               window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
@@ -378,7 +390,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         root.add(columns).grow().pad(0, space("lg"), space("lg"), space("lg"));
         players.attach(stage.getRoot());
         forces.attach(stage.getRoot());
-        battlefield.attach(stage.getRoot());
         topBar.attach(stage.getRoot());
         nativeDialogs = new LobbyNativeDialogs(kit, stage, motion);
         stage.addListener(new InputListener() {
@@ -392,7 +403,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     return readyKey(keycode);
                 }
                 // Escape closes a menu first, then leaves a text field, so typing never reaches the lobby's keys
-                if (topBar.back() || players.back() || forces.back() || battlefield.back()) {
+                if (topBar.back() || players.back() || forces.back()) {
                     return true;
                 }
                 if (stage.getKeyboardFocus() instanceof TextField) {
@@ -406,9 +417,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                     centre.back();
                     return true;
                 }
-                return false;
+                openSystemMenu();
+                return true;
             }
         });
+    }
+
+    /** GPU thread: opens the system menu, which Esc opens once nothing else is left to close. */
+    void openSystemMenu() {
+        nativeDialog(dialogs -> dialogs.systemMenu(systemActions()));
     }
 
     /**
@@ -486,9 +503,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         }
     }
 
-    /** The top bar's ⋮ game menu, which the window runs on the Swing thread. */
-    private LobbyTopBar.GameActions gameActions() {
-        return new LobbyTopBar.GameActions() {
+    /** The system menu's actions, which the window runs on the Swing thread. */
+    private LobbyNativeDialogs.SystemActions systemActions() {
+        return new LobbyNativeDialogs.SystemActions() {
             @Override
             public void save() {
                 window.saveGame();
@@ -512,6 +529,16 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public boolean loads() {
                 return GpuLobbyWindow.loadsGames();
+            }
+
+            @Override
+            public void settings() {
+                window.openSettings();
+            }
+
+            @Override
+            public void leave() {
+                window.leave();
             }
         };
     }
@@ -547,11 +574,6 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             @Override
             public void changeDeployment(int id, int position) {
                 window.changeDeployment(id, position);
-            }
-
-            @Override
-            public void toggleGameMaster() {
-                window.toggleGameMaster();
             }
 
             @Override
@@ -621,6 +643,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public void c3(int unitId) {
+                window.c3Unit(unitId);
+            }
+
+            @Override
             public void drop(List<Integer> unitIds, List<Integer> formationIds, LobbyForcesController.Target target) {
                 window.dropForces(unitIds, formationIds, target);
             }
@@ -631,8 +658,14 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
-            public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
-                window.unitMenu(unitIds, formationIds, formationsView);
+            public void unitCommand(int unitId, String name) {
+                window.unitCommand(unitId, name);
+            }
+
+            @Override
+            public void menu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView,
+                  Set<String> omit) {
+                window.unitMenu(unitIds, formationIds, formationsView, omit);
             }
 
             @Override
@@ -856,6 +889,10 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     void unitMenu(List<LobbyMenuEntry> entries) {
         if (forces != null) {
             forces.showMenu(entries);
+            GpuLobbyProbe probe = window.probe();
+            if (probe != null && probe.options().contains("unitsub")) {
+                forces.openFirstSubmenu();
+            }
         }
     }
 
@@ -995,7 +1032,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
     private void closeMenus() {
         boolean closed = true;
         while (closed) {
-            closed = topBar.back() || players.back() || forces.back() || battlefield.back();
+            closed = topBar.back() || players.back() || forces.back();
         }
     }
 
@@ -1490,6 +1527,22 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         return clicks;
     }
 
+    /** The first actor under {@code root} whose name starts with {@code prefix}, depth first. */
+    private static @Nullable Actor probeFind(Actor root, String prefix) {
+        if (root.getName() != null && root.getName().startsWith(prefix)) {
+            return root;
+        }
+        if (root instanceof Group group) {
+            for (Actor child : group.getChildren()) {
+                Actor found = probeFind(child, prefix);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     /** Scrolls the dialog's body so that {@code target} shows in the middle. */
     private static void probeReveal(UiDialog dialog, @Nullable Actor target) {
         if (target == null) {
@@ -1513,6 +1566,39 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         double elapsed = (System.nanoTime() - start) / 1e9;
+        if (unitDamagePending && elapsed > PROBE_CLICK_AT) {
+            // the units arrive from the server a moment after the lobby shows; looks until a second before the shot
+            Actor damage = probeFind(stage.getRoot(), "lobby-unit-damage-");
+            if (damage != null) {
+                unitDamagePending = false;
+                GpuLobbyProbeInput.click(stage, damage);
+            } else if (elapsed > probe.shotAt() - 1) {
+                unitDamagePending = false;
+                LOGGER.warn("The lobby probe found no unit with a damage icon");
+            }
+        }
+        if (!unitDamagePending && damageStepsPending > 0) {
+            Actor next = probeFind(stage.getRoot(), "damage-next");
+            if (next != null) {
+                damageStepsPending--;
+                GpuLobbyProbeInput.click(stage, next);
+            }
+        }
+        if (!unitDamagePending && damageHeavyPending) {
+            Actor heavy = probeFind(stage.getRoot(), "damage-roll-heavy");
+            // the dialog lays out on the frame after it opens; a click before that lands nowhere
+            if (heavy != null && heavy.getWidth() > 0) {
+                damageHeavyPending = false;
+                GpuLobbyProbeInput.click(stage, heavy);
+            }
+        }
+        if (!unitDamagePending && damageWholePending) {
+            Actor whole = probeFind(stage.getRoot(), "damage-whole");
+            if (whole != null && whole.getWidth() > 0) {
+                damageWholePending = false;
+                GpuLobbyProbeInput.click(stage, whole);
+            }
+        }
         if (clickCompactPending && elapsed > PROBE_CLICK_AT) {
             clickCompactPending = false;
             GpuLobbyProbeInput.click(stage, forces.compactToggle());

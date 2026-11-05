@@ -63,6 +63,10 @@ class LobbyBattlefieldTest {
         assertTrue(LobbyBattlefield.rolled(map(MapSettings.BOARD_GENERATED)));
         assertTrue(LobbyBattlefield.rolled(map(MapSettings.BOARD_RANDOM)));
         assertTrue(LobbyBattlefield.rolled(map(MapSettings.BOARD_SURPRISE + "a\nb")));
+        assertTrue(LobbyBattlefield.of(null, null, map(MapSettings.BOARD_GENERATED),
+              LobbyBattlefield.AutoResolve.DEFAULT).rolled(), "the column learns the map is rolled");
+        assertFalse(LobbyBattlefield.of(null, null, map("16x17/Grassland 1.board"),
+              LobbyBattlefield.AutoResolve.DEFAULT).rolled());
     }
 
     @Test

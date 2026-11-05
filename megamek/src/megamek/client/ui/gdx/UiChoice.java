@@ -61,7 +61,8 @@ public class UiChoice extends Button {
         float ring = UiTheme.CHOICE_RING;
         float width = kind == Kind.SWITCH ? Math.round(UiTheme.CHOICE_SIZE * UiTheme.SWITCH_LENGTH)
               : UiTheme.CHOICE_SIZE;
-        add(new Indicator()).size(width, UiTheme.CHOICE_SIZE).pad(ring).padRight(ring + 4);
+        // a choice with no words of its own needs no gap before them, so it lines up with the controls beside it
+        add(new Indicator()).size(width, UiTheme.CHOICE_SIZE).pad(ring).padRight(text == null || text.isEmpty() ? ring : ring + 4);
         add(label);
         setProgrammaticChangeEvents(false);
         super.setChecked(checked);

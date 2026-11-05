@@ -4,6 +4,7 @@ package megamek.client.lobby;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -59,8 +60,17 @@ class LobbyAsksTest {
         Entity trailer = mock(Entity.class);
         when(prompts.orderTrain(head, List.of(trailer))).thenReturn(Optional.of(List.of(trailer)));
         asks.orderTrain(head, List.of(trailer), answers::add);
-        asks.editDamage(head, () -> answers.add("done"));
+        asks.editDamage(head, UnitDamageForm.Options.ALL, () -> answers.add("done"));
         verify(prompts).editDamage(head);
         assertEquals(List.of(List.of(trailer), "done"), answers);
+    }
+
+    @Test
+    void readOnlyDamageIsRefusedBySwing() {
+        Entity unit = mock(Entity.class);
+        asks.editDamage(unit, new UnitDamageForm.Options(false, false, false), () -> answers.add("done"));
+        verify(prompts).error(LobbyError.CANNOT_EDIT_DAMAGE);
+        verify(prompts, never()).editDamage(unit);
+        assertEquals(List.of(), answers);
     }
 }

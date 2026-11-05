@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.gdx;
 
+import java.util.List;
+
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -17,7 +19,9 @@ import megamek.client.ui.design.DesignTokens;
  * and the value stand {@link #GAP} ({@code xs}) apart, every gap the same, so a row of steppers reads as groups when
  * they stand a larger space apart; the value's cell is as wide as the widest value, so the buttons never move. Its
  * buttons disable at the bounds; the arrow keys step it while it has the keyboard focus. It fires a ChangeEvent on each
- * step. Made by {@link UiKit#stepper(int, int, int)} and {@link UiKit#stepper(String, int, int, int)}.
+ * step. Made by {@link UiKit#stepper(int, int, int)} and {@link UiKit#stepper(String, int, int, int)}; as a selector
+ * ({@link UiKit#selector(List, int)}) it shows one of a list of choices between chevrons, as a game's settings menu
+ * does, its cell as wide as the widest choice.
  */
 public final class UiStepper extends Table {
     private final int min;
@@ -26,15 +30,27 @@ public final class UiStepper extends Table {
     private final UiButton up;
     private final Label shown;
     private final Label caption;
+    /** The choices a selector shows for its values, or null for a number. */
+    private final List<String> choices;
     private int value;
 
     UiStepper(UiKit kit, String caption, int value, int min, int max) {
+        this(kit, caption, value, min, max, null);
+    }
+
+    /** A selector: one of {@code choices}, the {@code index}th first, between chevrons. */
+    UiStepper(UiKit kit, List<String> choices, int index) {
+        this(kit, null, index, 0, choices.size() - 1, List.copyOf(choices));
+    }
+
+    private UiStepper(UiKit kit, String caption, int value, int min, int max, List<String> choices) {
         this.min = min;
         this.max = Math.max(min, max);
+        this.choices = choices;
         float control = DesignTokens.shipped().size().get("control.sm");
         float gap = gap();
-        down = kit.button("button-icon" + UiTheme.COMPACT, "remove", null, null);
-        up = kit.button("button-icon" + UiTheme.COMPACT, "add", null, null);
+        down = kit.button("button-icon" + UiTheme.COMPACT, choices == null ? "remove" : "chevron-left", null, null);
+        up = kit.button("button-icon" + UiTheme.COMPACT, choices == null ? "add" : "chevron-right", null, null);
         shown = kit.typeLabel("", "body.strong", "text.primary");
         shown.setAlignment(Align.center);
         if (caption != null) {
@@ -70,8 +86,9 @@ public final class UiStepper extends Table {
     private float valueWidth(int min, int max) {
         String saved = shown.getText().toString();
         float widest = 0;
-        for (String text : new String[] { String.valueOf(min), String.valueOf(max),
-              "0".repeat(String.valueOf(max).length()) }) {
+        List<String> texts = choices != null ? choices : List.of(String.valueOf(min), String.valueOf(max),
+              "0".repeat(String.valueOf(max).length()));
+        for (String text : texts) {
             shown.setText(text);
             widest = Math.max(widest, shown.getPrefWidth());
         }
@@ -107,7 +124,7 @@ public final class UiStepper extends Table {
     /** Sets the value, brought within the bounds, without a ChangeEvent. */
     public void value(int next) {
         value = clamp(next, min, max);
-        shown.setText(String.valueOf(value));
+        shown.setText(choices == null ? String.valueOf(value) : choices.get(value));
         down.setDisabled(value <= min);
         up.setDisabled(value >= max);
     }

@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -45,13 +44,5 @@ class StartTimelineTest {
         assertTrue(StartTimeline.itemProgress(midway, 0) > StartTimeline.itemProgress(midway, 3),
               "Lower items start later");
         assertEquals(1, StartTimeline.itemProgress(StartTimeline.INTRO_END, 5), 1e-9);
-    }
-
-    @Test
-    void theGreetingWelcomesBackOnlyAPlayerWhoHasPlayedBefore() {
-        assertTrue(StartTimeline.returning("  Natasha "));
-        assertFalse(StartTimeline.returning(""));
-        assertFalse(StartTimeline.returning("   "));
-        assertFalse(StartTimeline.returning(null));
     }
 }

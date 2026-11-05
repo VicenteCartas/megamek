@@ -82,13 +82,13 @@ class LobbyRecipientSmokeTest {
             assertEquals(ME, requisition[0].recipient(), "the units go to you first");
             assertEquals(ME, players.recipient(), "the roster marks you");
 
-            click(ui, roster.findActor("lobby-player-" + MY_BOT));
+            clickName(ui, roster.findActor("lobby-player-" + MY_BOT));
             frame.run();
             assertEquals(MY_BOT, requisition[0].recipient(), "a click on your bot's card sends the units to it");
             assertEquals(1, owner.getSelectedIndex(), "the picker follows the roster");
             assertEquals(MY_BOT, players.recipient(), "the roster marks the bot");
 
-            click(ui, roster.findActor("lobby-player-" + ENEMY));
+            clickName(ui, roster.findActor("lobby-player-" + ENEMY));
             frame.run();
             assertEquals(MY_BOT, requisition[0].recipient(), "an enemy's card cannot take your units");
 
@@ -237,8 +237,16 @@ class LobbyRecipientSmokeTest {
         return table;
     }
 
+    /** Clicks a player card on its name line, clear of the team and deployment buttons below it. */
+    private static void clickName(UiTestStage ui, Actor card) {
+        press(ui, card.localToStageCoordinates(new Vector2(card.getWidth() / 2, card.getHeight() - 10)));
+    }
+
     private static void click(UiTestStage ui, Actor actor) {
-        Vector2 point = actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2));
+        press(ui, actor.localToStageCoordinates(new Vector2(actor.getWidth() / 2, actor.getHeight() / 2)));
+    }
+
+    private static void press(UiTestStage ui, Vector2 point) {
         point = ui.stage.stageToScreenCoordinates(point);
         int x = Math.round(point.x);
         int y = Math.round(point.y);
@@ -276,10 +284,6 @@ class LobbyRecipientSmokeTest {
 
         @Override
         public void changeDeployment(int id, int position) {
-        }
-
-        @Override
-        public void toggleGameMaster() {
         }
 
         @Override
