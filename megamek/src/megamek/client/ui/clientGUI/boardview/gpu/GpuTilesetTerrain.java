@@ -227,7 +227,7 @@ final class GpuTilesetTerrain {
     }
     /** Whether a liquid runs on across an edge: into the open liquid it joins, or off the board. */
     private static boolean open(BoardScene.Tile tile, BoardScene.Tile neighbor) {
-        return neighbor == null || !neighbor.frozen() && tile.liquid().connects(neighbor.liquid());
+        return neighbor == null || !neighbor.frozen() && tile.joins(neighbor);
     }
 
     /**

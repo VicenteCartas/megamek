@@ -2039,6 +2039,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (field.optional()) { row.add(removeButton("", () -> send(Action.REMOVE_TERRAIN, field.terrain()))).width(26).padLeft(4); }
         detail.add(row).minHeight(28).row();
         if (field.edges()) { edges(field.terrain()); }
+        if (snapshot.joinedSides().containsKey(field.terrain())) { connectedSides(field.terrain()); }
         if (field.terrain().equals("solaris_elevator")) {
             heading(UiKit.text("BoardEditor.dieRolls"));
             Table rolls = new Table();
@@ -2058,6 +2059,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             ui.tip(capacity).getActor().setText(UiKit.text(dialog + "capacity.tooltip")); detail.add(capacity).row();
             text(UiKit.text(dialog + "help"));
         }
+    }
+
+    /** Which sides of this water or pavement join the same terrain beside it; a side turned off shows ground in 3D. */
+    private void connectedSides(String terrain) {
+        heading(UiKit.text("BoardEditor.connectedSides"));
+        UiHexSides sides = new UiHexSides(ui, snapshot.joinedSides().get(terrain),
+              side -> send(Action.EDGE, terrain, Integer.toString(side)));
+        sides.setName("editor-sides-" + terrain);
+        ui.tip(sides).getActor().setText(UiKit.text("BoardEditor.connectedSides.tooltip"));
+        detail.add(sides).row();
     }
 
     /** The kit's north-up edge diagram shares the document's clockwise N..NW mask. */

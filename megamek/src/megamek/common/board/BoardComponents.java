@@ -66,7 +66,7 @@ final class BoardComponents {
             int type = Terrains.getType(parts[1]);
             String connections = switch (type) {
                 case Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.ROAD, Terrains.BRIDGE_ROAD,
-                      Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.PAVEMENT, Terrains.WATER, Terrains.CLIFF_TOP -> "connections";
+                      Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.CLIFF_TOP -> "connections";
                 default -> null;
             };
             fields.add(new Field(parts[0], type, connections));
@@ -121,16 +121,16 @@ final class BoardComponents {
                 else if (level >= 0 && level < names.size() && !names.get(level).isEmpty()) { component.put(field.name(), names.get(level)); }
                 else { component.put(field.name(), level); }
                 if (field.connections() != null && (terrain.getExits() & ~63) == 0) {
-                    var exits = component.putArray(field.connections());
-                    for (int direction = 0; direction < 6; direction++) {
-                        if ((terrain.getExits() & (1 << direction)) != 0) { exits.add(DIRECTIONS.get(direction)); }
-                    }
+                    putDirections(component.putArray(field.connections()), terrain.getExits());
                 } else if (terrain.hasExitsSpecified()) {
                     // Some legacy selectors (and Solaris elevator die rolls) reuse the exits integer as data.
                     component.withObject("/legacyExits").put(field.name(), terrain.getExits());
                 }
             }
-            if (appearances != null && appearances.has(owner)) { component.set("appearance", appearances.get(owner).deepCopy()); }
+            // Water's own appearance, its separated sides, says nothing once the water is gone.
+            if (appearances != null && appearances.has(owner) && (!owner.equals("water") || !component.isEmpty())) {
+                component.set("appearance", appearances.get(owner).deepCopy());
+            }
             if (owner.equals("building") && appearances != null) { buildingAppearance(component, appearances); }
             if (!component.isEmpty()) { components.set(owner, component); }
         });
@@ -291,7 +291,13 @@ final class BoardComponents {
         return index;
     }
 
-    private static int directions(JsonNode list, String path) {
+    static void putDirections(com.fasterxml.jackson.databind.node.ArrayNode list, int mask) {
+        for (int direction = 0; direction < 6; direction++) {
+            if ((mask & (1 << direction)) != 0) { list.add(DIRECTIONS.get(direction)); }
+        }
+    }
+
+    static int directions(JsonNode list, String path) {
         require(list.isArray(), path + " must be an array of directions");
         int mask = 0;
         for (JsonNode item : list) {

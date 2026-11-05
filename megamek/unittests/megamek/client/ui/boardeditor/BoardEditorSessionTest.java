@@ -305,7 +305,10 @@ class BoardEditorSessionTest {
         var blueprint = BoardEditorBlueprint.get();
         var covered = blueprint.components().stream().flatMap(c -> c.fields().stream()).map(BoardEditorBlueprint.Field::terrain).toList();
         assertEquals(covered.size(), covered.stream().distinct().count());
-        for (int type = 1; type < Terrains.SIZE; type++) { assertTrue(covered.contains(Terrains.getName(type)), Terrains.getName(type)); }
+        // The import takes bldg_fluff, so no editor document holds one and the blueprint has no field for it.
+        for (int type = 1; type < Terrains.SIZE; type++) {
+            if (type != Terrains.BLDG_FLUFF) { assertTrue(covered.contains(Terrains.getName(type)), Terrains.getName(type)); }
+        }
         var hex = new megamek.common.Hex(0, "road:1:9;fluff:12;woods:1;foliage_elev:2", "");
         hex.setAppearance(Map.of("road", new megamek.common.board.HexAppearance("road/rounded", null, null, null)));
         var query = blueprint.artwork(hex, "road");
@@ -1530,6 +1533,69 @@ class BoardEditorSessionTest {
         Path file = directory.resolve("roads.board2");
         session.save(file);
         assertEquals(1, BoardFile.read(file).getHex(road).getTerrain(Terrains.ROAD).getExits());
+    }
+
+    /**
+     * A water or pavement side turned off in Edit parts both hexes, saves as named directions under one property and no
+     * derived sides, and survives reopening; only the same terrain at the same level can be parted, and terrain gone from
+     * a hex rejoins its neighbours' sides, so what is painted there again connects.
+     */
+    @Test void separatedSidesPartBothHexesAndSaveAsNamedDirections() throws Exception {
+        for (String terrain : List.of("water", "pavement")) {
+            Coords here = new Coords(3, 3), north = here.translated(0), south = here.translated(3);
+            var board = megamek.common.board.Board.createEmptyBoard(8, 8);
+            for (Coords hex : List.of(here, north, south)) { board.setHex(hex, new Hex(0, terrain + ":1", "")); }
+            var session = new BoardEditorSession();
+            session.open(board, null);
+            send(session, Action.SELECT_AT, "3,3", "");
+            assertEquals(9, session.snapshot().joinedSides().get(terrain), terrain + " joins by default");
+
+            send(session, Action.EDGE, terrain, "0");
+            assertEquals(8, session.snapshot().joinedSides().get(terrain));
+            assertEquals(1, separated(session, here, terrain));
+            assertEquals(8, separated(session, north, terrain), "Both hexes of the side");
+
+            Path file = directory.resolve(terrain + "-sides.board2");
+            session.save(file);
+            String text = Files.readString(file);
+            assertTrue(text.contains("\"separated\":[\"n\"]"), text);
+            assertFalse(text.contains("connections"), "No derived sides: " + text);
+            session.open(file);
+            send(session, Action.SELECT_AT, "3,3", "");
+            assertEquals(8, session.snapshot().joinedSides().get(terrain), "Reopened");
+
+            send(session, Action.EDGE, terrain, "1");
+            assertEquals(Messages.getString("BoardEditor.connectedSidesRefused"), session.snapshot().message());
+            assertEquals(1, separated(session, here, terrain));
+
+            send(session, Action.EDGE, terrain, "0");
+            assertEquals(9, session.snapshot().joinedSides().get(terrain), "Turned on again");
+            assertEquals(0, separated(session, north, terrain));
+            send(session, Action.UNDO, "", "");
+            assertEquals(1, separated(session, here, terrain), "One undo step, both hexes");
+            assertEquals(8, separated(session, north, terrain));
+
+            send(session, Action.SELECT_AT, north.getX() + "," + north.getY(), "");
+            send(session, Action.REMOVE_COMPONENT, "", terrain);
+            assertEquals(0, separated(session, here, terrain), "Nothing left to part it from");
+        }
+    }
+
+    /** A legacy file's exits on water choose 2D tiles: they part nothing, and Edit shows the water joined. */
+    @Test void legacyWaterExitsAreNotSeparatedSides() {
+        Coords here = new Coords(3, 3);
+        var board = megamek.common.board.Board.createEmptyBoard(8, 8);
+        board.setHex(here, new Hex(0, "water:1:0", ""));
+        board.setHex(here.translated(0), new Hex(0, "water:1:0", ""));
+        var session = new BoardEditorSession();
+        session.open(board, null);
+        send(session, Action.SELECT_AT, "3,3", "");
+        assertEquals(1, session.snapshot().joinedSides().get("water"));
+        assertEquals(0, separated(session, here, "water"));
+    }
+
+    private static int separated(BoardEditorSession session, Coords at, String terrain) {
+        return megamek.common.board.HexAppearance.separated(session.board().getHex(at).getAppearance(), terrain);
     }
 
     /** The user's own Open (a Recent Boards entry) and Save add the file to the launcher's Recent Boards list. */

@@ -2792,7 +2792,7 @@ final class GpuTerrain implements Disposable {
         return tile.features().stream().filter(f -> f.decoration() == null || !f.decoration().kind().equals("decal")).toList();
     }
 
-    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads, structures or Edges. */
+    /** Whether any hex changed what the concrete fit reads: its ground, water, level, roads, structures, Edges or sides. */
     private static boolean concreteInputsChanged(BoardScene before, BoardScene after) {
         for (int index = 0; index < after.tiles().size(); index++) {
             BoardScene.Tile was = before.tiles().get(index), is = after.tiles().get(index);
@@ -2804,7 +2804,8 @@ final class GpuTerrain implements Disposable {
                   || was.wayExits() != is.wayExits() || was.road() != is.road() || !was.corridor().equals(is.corridor())
                   || was.cliffTopExits() != is.cliffTopExits() || was.detailedGround() != is.detailedGround()
                   || !structures(was).equals(structures(is))
-                  || BoardConcrete.edges(was) != BoardConcrete.edges(is)) { return true; }
+                  || BoardConcrete.edges(was) != BoardConcrete.edges(is)
+                  || was.pavementSides() != is.pavementSides()) { return true; }
         }
         return false;
     }

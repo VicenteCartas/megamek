@@ -23,6 +23,112 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardLiquidTest {
+    private static final Coords SIDE = new Coords(2, 2);
+
+    /** Two hexes of {@code token} north and south of one side, on grass, which {@code sides} parts on the south hex. */
+    private static BoardScene sides(String token, String owner, int sides) throws Exception {
+        Board board = Board.createEmptyBoard(5, 5);
+        Hex south = new Hex(0, token, "");
+        if (sides != 0) { south.setAppearance(java.util.Map.of(owner, megamek.common.board.HexAppearance.withSeparated(null, sides))); }
+        board.setHex(SIDE, south);
+        board.setHex(SIDE.translated(0), new Hex(0, token, ""));
+        return GpuLegacyImportSmokeTest.scene(board);
+    }
+
+    private static int edgeToward(int direction) {
+        for (int edge = 0; edge < 6; edge++) {
+            if (BoardGeometry.edgeDirection(edge) == direction) { return edge; }
+        }
+        throw new AssertionError(direction);
+    }
+
+    private static Vector3 sideMiddle() {
+        int edge = edgeToward(0);
+        return BoardGeometry.corner(SIDE, 0, edge).lerp(BoardGeometry.corner(SIDE, 0, (edge + 1) % 6), .5f);
+    }
+
+    private static float nearest(List<BoardSurface.Face> faces, Vector3 point) {
+        float nearest = Float.POSITIVE_INFINITY;
+        for (var face : faces) {
+            for (Vector3 corner : List.of(face.a(), face.b(), face.c())) {
+                nearest = Math.min(nearest, (float) Math.hypot(corner.x - point.x, corner.y - point.y));
+            }
+        }
+        return nearest;
+    }
+
+    private static float topArea(BoardSurface surface) {
+        float area = 0;
+        for (var face : surface.faces) {
+            if (face.finish() == BoardSurface.Finish.TOP) {
+                area += new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).len() / 2;
+            }
+        }
+        return area;
+    }
+
+    /** A separated side is no mouth: the water of both hexes stays off it, with land between them, and no legacy exit does this. */
+    @Test void aSeparatedWaterSideIsABankWithLandAlongIt() throws Exception {
+        float scale = BoardGeometry.hexScale();
+        BoardScene joined = sides("water:1", "water", 0), apart = sides("water:1", "water", 1);
+        assertTrue(new BoardSurface(joined, joined.tile(SIDE)).mouth(edgeToward(0)));
+        assertTrue(nearest(new BoardSurface(joined, joined.tile(SIDE)).waterFaces, sideMiddle()) < 2 * scale, "Open water crosses the side");
+        for (Coords hex : List.of(SIDE, SIDE.translated(0))) {
+            var surface = new BoardSurface(apart, apart.tile(hex));
+            assertFalse(surface.mouth(edgeToward(hex.equals(SIDE) ? 0 : 3)), hex.toString());
+            assertTrue(nearest(surface.waterFaces, sideMiddle()) > 3 * scale, hex + " keeps its water off the side");
+        }
+        assertEquals(0, BoardLiquid.capture(new Hex(0, "water:1:0", "")).separated());
+    }
+
+    /** Where open water passes round a separated side's end, no land or wall reaches the corner: the land stops at a nose. */
+    @Test void aSeparatedSidesFreeEndLeavesOpenWaterAtTheCorner() throws Exception {
+        Board board = Board.createEmptyBoard(5, 5);
+        Coords east = SIDE.translated(1), north = SIDE.translated(0);
+        Hex south = new Hex(0, "water:1", "");
+        south.setAppearance(java.util.Map.of("water", megamek.common.board.HexAppearance.withSeparated(null, 1 << 1)));
+        board.setHex(SIDE, south);
+        board.setHex(east, new Hex(0, "water:1", ""));
+        board.setHex(north, new Hex(0, "water:1", ""));
+        BoardScene scene = GpuLegacyImportSmokeTest.scene(board);
+        var surface = new BoardSurface(scene, scene.tile(SIDE));
+        int edge = edgeToward(1);
+        Vector3 a = BoardGeometry.corner(SIDE, 0, edge), b = BoardGeometry.corner(SIDE, 0, (edge + 1) % 6);
+        // The free corner is the one the north hex shares.
+        Vector3 shared = java.util.stream.IntStream.range(0, 6).mapToObj(k -> BoardGeometry.corner(north, 0, k))
+              .anyMatch(corner -> corner.dst(a) < .01f) ? a : b;
+        Vector3 other = shared == a ? b : a;
+        float water = BoardGeometry.waterZ(scene.tile(SIDE)), scale = BoardGeometry.hexScale();
+        for (var face : surface.faces) {
+            if (face.finish() == BoardSurface.Finish.BED) { continue; }
+            for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                if (p.dst(shared.x, shared.y, p.z) < .1f * shared.dst(other)) {
+                    assertTrue(p.z <= water + .01f * scale, "Nothing stands out of the water near the corner: " + p);
+                }
+            }
+        }
+        var relief = new BoardRelief(scene, scene.tile(SIDE), BoardSurface.ramps(scene, scene.tile(SIDE)), TerrainLod.FULL);
+        Vector3 open = new Vector3(shared).lerp(other, .1f), land = new Vector3(shared).lerp(other, .5f);
+        assertTrue(relief.shore(open.x, open.y, false) > 0, "Open water on the side near the corner");
+        assertTrue(relief.shore(land.x, land.y, false) < 0, "Land along the rest of the side");
+    }
+
+    /** Pavement stops short of a separated side and the ground it lies on fills the rest of its hex, with no gap in the mesh. */
+    @Test void separatedPavementShowsTheGroundAlongItsSide() throws Exception {
+        BoardScene joined = sides("pavement:1", "pavement", 0), apart = sides("pavement:1", "pavement", 1);
+        var open = new BoardSurface(joined, joined.tile(SIDE));
+        var parted = new BoardSurface(apart, apart.tile(SIDE));
+        assertTrue(open.faces.stream().allMatch(face -> open.family(face) == BoardScene.Surface.CONCRETE));
+        var ground = parted.faces.stream().filter(face -> parted.family(face) != BoardScene.Surface.CONCRETE).toList();
+        assertFalse(ground.isEmpty());
+        assertTrue(ground.stream().allMatch(face -> parted.family(face) == BoardScene.Surface.GRASS));
+        Vector3 middle = sideMiddle();
+        assertTrue(ground.stream().anyMatch(face -> face.height(middle.x, middle.y) != Float.NEGATIVE_INFINITY), "Ground on the side itself");
+        assertEquals(topArea(open), topArea(parted), .01f * topArea(open), "The strip and the slab fill the hex");
+        assertFalse(BoardSurface.geometryKey(joined, joined.tile(SIDE)).equals(BoardSurface.geometryKey(apart, apart.tile(SIDE))),
+              "An edit of the side rebuilds the hex");
+    }
+
     @Test
     void terrainControlsTheLiquidAndHazardLevelsNeverBecomeWaterDepths() {
         Hex hex = new Hex(5);

@@ -684,6 +684,37 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         int groundLevel() { return elevation - (ultraSublevel ? 1 : 0); }
 
         /**
+         * Whether a side the author separated parts this hex's water from {@code other}'s, the neighbour in
+         * {@code direction}. It holds between water at one level; across a step the water still falls.
+         */
+        boolean separated(Tile other, int direction) {
+            return elevation == other.elevation
+                  && ((liquid.separated() >> direction | other.liquid.separated() >> (direction + 3) % 6) & 1) != 0;
+        }
+
+        /** Whether this hex's liquid runs on into {@code other}, the neighbour in {@code direction}. */
+        boolean joins(Tile other, int direction) {
+            return liquid.connects(other.liquid) && !separated(other, direction);
+        }
+
+        /** {@link #joins(Tile, int)} for a neighbour known by its coordinates. */
+        boolean joins(Tile other) {
+            return liquid.connects(other.liquid) && ((liquid.separated() | other.liquid.separated()) == 0
+                  || !separated(other, coords.direction(other.coords)));
+        }
+
+        /** The sides the author parted from the pavement beside this hex's pavement. */
+        int pavementSides() {
+            return surface == Surface.CONCRETE ? megamek.common.board.HexAppearance.separated(appearance, "pavement") : 0;
+        }
+
+        /** Whether a side the author separated parts this hex's pavement from {@code other}'s, at one level. */
+        boolean pavementApart(Tile other, int direction) {
+            return surface == Surface.CONCRETE && other.surface == Surface.CONCRETE && elevation == other.elevation
+                  && ((pavementSides() >> direction | other.pavementSides() >> (direction + 3) % 6) & 1) != 0;
+        }
+
+        /**
          * The sides of the tile's rails that lie on its ground: its captured {@link #railBed} (a destroyed rail's too,
          * which draws no track) and its ground route features (a hand-made tile's, the editor preview's stroke).
          */

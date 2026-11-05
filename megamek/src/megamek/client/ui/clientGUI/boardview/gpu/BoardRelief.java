@@ -552,8 +552,9 @@ final class BoardRelief {
         float value = shoreBase(x, y, molten);
         if (molten) { return value; }
         float channel = river.field(x, y, value);
-        if (channel == Float.NEGATIVE_INFINITY) { return value; }
-        return Math.min(value, channel);
+        if (channel != Float.NEGATIVE_INFINITY) { value = Math.min(value, channel); }
+        float strip = river.strips(x, y);
+        return strip == Float.POSITIVE_INFINITY ? value : smoothMin(value, strip, SHORE_BLEND * BoardGeometry.hexScale());
     }
 
     /**
@@ -3026,12 +3027,30 @@ final class BoardRelief {
             for (int i = 0; i < count; i++) {
                 Vector3 p = edgePoint(edge, canonical(e, i, count), base);
                 if (i == 0 ? corner(self, e).seamless() : seamless) { p.z = groundHeight(p.x, p.y); }
+                // No wall stands in the open water past a separated side's strip of land.
+                if (separatedWater(e) || i == 0 && separatedWater((e + 5) % 6)) {
+                    float water = BoardGeometry.waterZ(tile);
+                    p.z = water + (p.z - water) * stripLand(p.x, p.y);
+                }
                 outline.add(p);
             }
         }
         outlineStarts[6] = outline.size();
         return outline;
     }
+
+    /** Whether edge e is a side the author separated between two water hexes. */
+    private boolean separatedWater(int e) {
+        int direction = BoardGeometry.edgeDirection(e);
+        BoardScene.Tile next = scene.tile(tile.coords().translated(direction));
+        return next != null && tile.liquid().present() && tile.liquid().connects(next.liquid()) && tile.separated(next, direction);
+    }
+
+    /** See {@link BoardRiver#stripLand}. */
+    float stripLand(float x, float y) { return river.stripLand(x, y); }
+
+    /** See {@link BoardRiver#stripDepth}. */
+    float stripDepth(float x, float y) { return river.stripDepth(x, y); }
 
     /** Distance from the pool centre to its actual dry boundary along this shoreline ray. */
     float bankRadius(Vector3 center, Vector3 target) {
@@ -3270,12 +3289,12 @@ final class BoardRelief {
                 float t = length2 == 0 ? 0 : Math.clamp(((w.x - p.x) * dx + (w.y - p.y) * dy) / length2, 0, 1);
                 room = Math.min(room, .4f * (float) Math.hypot(w.x - p.x - t * dx, w.y - p.y - t * dy));
             }
-            float f = Math.min(.5f, room / Math.max(gap, 1e-4f));
+            float f = Math.min(.5f, room / Math.max(gap, 1e-4f)), top = separatedWater(e) ? b.z : base;
             // Grade the existing rows across the available bank instead of leaving a flat shelf and a tiny drop
             // at the water. This also gives the material room to lose dry cover before reaching the waterline.
             lip.add(lip(boundary, waterline[(index + waterline.length - 1) % waterline.length], w,
                   waterline[(index + 1) % waterline.length], (b.x - w.x) * f, (b.y - w.y) * f,
-                  tile.liquid().molten() ? base : base - (base - w.z) * (1 - f)));
+                  tile.liquid().molten() ? base : top - (top - w.z) * (1 - f)));
             lipParameters.add(first + k / (float) perEdge);
             inner.add(w);
             innerParameters.add(first + k / (float) perEdge);

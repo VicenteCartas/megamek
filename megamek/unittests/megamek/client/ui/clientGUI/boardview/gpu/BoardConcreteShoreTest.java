@@ -21,6 +21,33 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
+    /** A side separated between two slabs runs straight as a concrete edge does, where the hexes alone would zigzag. */
+    @Test void aSeparatedPavementSideFitsStraight() {
+        var board = megamek.common.board.Board.createEmptyBoard(12, 10);
+        for (int x = 0; x < 12; x++) {
+            for (int y = 0; y < 10; y++) {
+                var hex = new megamek.common.Hex(0, "pavement:1", "");
+                if (y == 4) {
+                    int sides = 1 << 3 | ((x & 1) == 1 ? 1 << 2 | 1 << 4 : 0);
+                    hex.setAppearance(java.util.Map.of("pavement", megamek.common.board.HexAppearance.withSeparated(null, sides)));
+                }
+                board.setHex(x, y, hex);
+            }
+        }
+        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(board), 1, true, java.util.Set.of());
+        int south = 0;
+        while (megamek.common.board.HexTile.edgeDirection(south) != 3) { south++; }
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (int x = 3; x <= 8; x++) {
+            for (int k : new int[] { south, (south + 1) % 6 }) {
+                float y = fit.corner(new Coords(x, 4), k).y();
+                low = Math.min(low, y);
+                high = Math.max(high, y);
+            }
+        }
+        assertTrue(high - low < .01f, "One straight side: " + low + " to " + high);
+    }
+
     private static final Coords CENTER = new Coords(3, 3);
 
     @ParameterizedTest

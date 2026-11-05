@@ -5,11 +5,18 @@ import java.util.Locale;
 
 import com.badlogic.gdx.graphics.Color;
 import megamek.common.Hex;
+import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.units.Terrains;
 
-/** Immutable liquid/crust appearance captured from terrain; depth and elevation stay on the tile. */
-record BoardLiquid(Kind kind, String theme, int rapids) {
+/**
+ * Immutable liquid/crust appearance captured from terrain; depth and elevation stay on the tile. {@code separated}: the
+ * sides the author parted from the water beside them ({@link HexAppearance#separated}), which {@link BoardScene.Tile#joins}
+ * reads.
+ */
+record BoardLiquid(Kind kind, String theme, int rapids, int separated) {
+    BoardLiquid(Kind kind, String theme, int rapids) { this(kind, theme, rapids, 0); }
+
     enum Kind { NONE, WATER, HAZARDOUS, MAGMA, MAGMA_CRUST }
 
     static final BoardLiquid NONE = new BoardLiquid(Kind.NONE, "", 0);
@@ -41,7 +48,7 @@ record BoardLiquid(Kind kind, String theme, int rapids) {
         // Hazardous pools use the ordinary water animation with a green material tint.
         if (hazardous || !(theme.equals("mars") || theme.equals("volcano"))) { theme = ""; }
         return new BoardLiquid(hazardous ? Kind.HAZARDOUS : Kind.WATER, theme,
-              Math.clamp(hex.terrainLevel(Terrains.RAPIDS), 0, 2));
+              Math.clamp(hex.terrainLevel(Terrains.RAPIDS), 0, 2), HexAppearance.separated(hex.getAppearance(), "water"));
     }
 
     boolean present() { return kind != Kind.NONE && kind != Kind.MAGMA_CRUST; }

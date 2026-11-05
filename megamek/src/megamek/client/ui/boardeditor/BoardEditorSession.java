@@ -211,7 +211,8 @@ public final class BoardEditorSession {
      * {@code drawsRoutes}: a Paint drag with the active brush
      * draws a route by hand, built on its release ({@link #pointer}). {@code copies}: the identical copies the issues
      * list reports, which {@link Action#REMOVE_COPIES} removes. {@code kitVariants}: the variants of the selected
-     * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none.
+     * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none. {@code joinedSides}: for
+     * the selected hex's water and pavement, the sides that join the same terrain beside it, by terrain name.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -220,7 +221,7 @@ public final class BoardEditorSession {
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
-          boolean buildingProfileAvailable) {
+          boolean buildingProfileAvailable, Map<String, Integer> joinedSides) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -325,6 +326,8 @@ public final class BoardEditorSession {
     private final Map<Coords, Hex> stroke = new LinkedHashMap<>();
     private final java.util.Set<Coords> painted = new java.util.HashSet<>();
     private final Map<Coords, WayLayer> wayLayers = new LinkedHashMap<>();
+    /** The terrains whose sides the author can part from the same terrain beside them ({@link HexAppearance#separated}). */
+    private static final int[] SEPARABLE = { Terrains.WATER, Terrains.PAVEMENT };
     /** Receivers observed by the pointer, retained when the hand-drawn path is replayed. */
     private final Map<Coords, String> wayReceivers = new LinkedHashMap<>();
     private boolean levelHeight, wayPillars;
@@ -474,7 +477,7 @@ public final class BoardEditorSession {
               copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
-              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex));
+              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex), joinedSides());
     }
 
     /**
@@ -3058,7 +3061,8 @@ public final class BoardEditorSession {
         require(hex.containsTerrain(Terrains.PAVEMENT), Messages.getString("BoardEditor.pavementFirst"));
         var edges = HexAppearance.Edges.valueOf(value.toUpperCase(java.util.Locale.ROOT));
         Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
-        if (edges == HexAppearance.Edges.AUTO) { styles.remove("pavement"); } else { styles.put("pavement", HexAppearance.of(edges)); }
+        HexAppearance look = HexAppearance.withSeparated(HexAppearance.of(edges), HexAppearance.separated(styles, "pavement"));
+        if (look == null) { styles.remove("pavement"); } else { styles.put("pavement", look); }
         hex.setAppearance(styles);
     }
 
@@ -3435,6 +3439,7 @@ public final class BoardEditorSession {
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
+        openSeparatedSides();
         authoredBuildings();
         // Also constrain direct member edits and pasted terrain, not only object-transform commands.
         for (Coords at : List.copyOf(stroke.keySet())) {
@@ -3872,9 +3877,75 @@ public final class BoardEditorSession {
         }
     }
 
+    /** The selected hex's sides that join the same water or pavement beside it, by terrain name. */
+    private Map<String, Integer> joinedSides() {
+        Hex hex = selected == null ? null : board().getHex(selected);
+        if (hex == null) { return Map.of(); }
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (int type : SEPARABLE) {
+            if (!hex.containsTerrain(type)) { continue; }
+            int sides = 0;
+            for (int direction = 0; direction < 6; direction++) {
+                Hex next = board().getHex(selected.translated(direction));
+                if (next != null && next.containsTerrain(type) && !apart(type, hex, next, direction)) { sides |= 1 << direction; }
+            }
+            result.put(Terrains.getName(type), sides);
+        }
+        return Map.copyOf(result);
+    }
+
+    /** Whether a separated side parts {@code hex}'s terrain from {@code next}'s, the neighbour in {@code direction}. */
+    private static boolean apart(int type, Hex hex, Hex next, int direction) {
+        String owner = Terrains.getName(type);
+        return hex.getLevel() == next.getLevel() && ((HexAppearance.separated(hex.getAppearance(), owner) >> direction
+              | HexAppearance.separated(next.getAppearance(), owner) >> (direction + 3) % 6) & 1) != 0;
+    }
+
+    /** Separates or rejoins the selected hex's water or pavement and the same terrain across {@code direction}. */
+    private void toggleSeparated(int type, int direction) {
+        Coords at = selected.translated(direction);
+        Hex hex = board().getHex(selected), next = board().getHex(at);
+        require(hex.containsTerrain(type), Messages.getString("BoardEditor.addTerrainFirst"));
+        require(next != null && next.containsTerrain(type) && next.getLevel() == hex.getLevel(),
+              Messages.getString("BoardEditor.connectedSidesRefused"));
+        boolean apart = !apart(type, hex, next, direction);
+        change(selected, current -> separated(current, type, direction, apart));
+        change(at, current -> separated(current, type, (direction + 3) % 6, apart));
+    }
+
+    private static void separated(Hex hex, int type, int direction, boolean apart) {
+        String owner = Terrains.getName(type);
+        int sides = HexAppearance.separated(hex.getAppearance(), owner);
+        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
+        HexAppearance look = HexAppearance.withSeparated(styles.get(owner), apart ? sides | 1 << direction : sides & ~(1 << direction));
+        if (look == null) { styles.remove(owner); } else { styles.put(owner, look); }
+        hex.setAppearance(styles);
+    }
+
+    /** Terrain gone from a hex takes its separated sides with it, so what is painted there again joins its neighbours. */
+    private void openSeparatedSides() {
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            for (int type : SEPARABLE) {
+                if (!stroke.get(at).containsTerrain(type) || board().getHex(at).containsTerrain(type)) { continue; }
+                for (int direction = 0; direction < 6; direction++) {
+                    Coords next = at.translated(direction);
+                    int back = (direction + 3) % 6;
+                    if (board().contains(next) && (HexAppearance.separated(board().getHex(next).getAppearance(), Terrains.getName(type)) >> back & 1) != 0) {
+                        change(next, current -> separated(current, type, back, false));
+                    }
+                }
+            }
+        }
+    }
+
     private void editEdge(String name, int direction) {
         require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
         int type = Terrains.getType(name);
+        if (type == Terrains.WATER || type == Terrains.PAVEMENT) {
+            toggleSeparated(type, direction);
+            if (!continuousEdit) { finishStroke(); }
+            return;
+        }
         Hex before = board().getHex(selected);
         BoardDecoration route = RailRoute.derived(before, "").stream()
               .filter(value -> RailRoute.onDeck(value) == (type == Terrains.BRIDGE_RAIL)).findFirst().orElse(null);

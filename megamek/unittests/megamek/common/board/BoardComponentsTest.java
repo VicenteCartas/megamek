@@ -232,6 +232,8 @@ class BoardComponentsTest {
 
     @Test void everyConnectionMaskRoundTripsAndCalculatedSidesAreFrozenWithoutMutatingTheSource() {
         for (int type : Terrains.exitableTerrains) {
+            // Water and pavement derive their sides on reading; their appearance's separated sides part them.
+            if (type == Terrains.WATER || type == Terrains.PAVEMENT) { continue; }
             for (int mask = 0; mask < 64; mask++) {
                 Hex source = new Hex();
                 Terrain terrain = new Terrain(type, 1); terrain.setExits(mask); source.addTerrain(terrain);

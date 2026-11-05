@@ -326,14 +326,15 @@ public final class BoardFile {
                 var colours = colours(style);
                 Integer rotation = style.has("rotation") ? integer(style, "rotation", 0) : null;
                 double padding = style.path("padding").asDouble();
+                int separated = style.has("separated") ? BoardComponents.directions(style.get("separated"), "separated") : 0;
                 // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
-                if (variant == null && asset == null && material == null && control == null
+                if (variant == null && asset == null && material == null && control == null && separated == 0
                       && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) { return; }
                 HexAppearance value = new HexAppearance(variant, asset,
                       material, style.has("strength") ? number(style, "strength", 0) : null,
                       colours, rotation,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
-                      style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style), padding);
+                      style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style), padding, separated);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -478,6 +479,7 @@ public final class BoardFile {
                 if (value.padding() != null) { style.put("padding", value.padding()); }
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
                 if (value.beside() != null) { style.put("beside", value.beside()); }
+                if (value.separated() != null) { BoardComponents.putDirections(style.putArray("separated"), value.separated()); }
                 if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
                 putColours(style, value.colours());
             });

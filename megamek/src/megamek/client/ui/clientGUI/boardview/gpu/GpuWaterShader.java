@@ -85,7 +85,7 @@ final class GpuWaterShader extends Attribute {
         for (int direction = 0; direction < 6; direction++) {
             BoardScene.Tile beside = scene.tile(tile.coords().translated(direction));
             if (beside != null && beside.elevation() == tile.elevation()
-                  && tile.liquid().connects(beside.liquid())) {
+                  && tile.joins(beside, direction)) {
                 BoardSurface frozen = beside.frozen() ? surfaces.apply(beside.coords()) : null;
                 if (!beside.frozen() || frozen != null && !frozen.waterFaces.isEmpty()) { pools.add(beside.coords()); }
             }
@@ -464,7 +464,7 @@ final class GpuWaterShader extends Attribute {
                     if (result.containsKey(at)) { continue; }
                     var to = scene.tile(at);
                     if (to == null || to.frozen() || to.elevation() != from.elevation()
-                          || !from.liquid().connects(to.liquid())) { continue; }
+                          || !from.joins(to, direction)) { continue; }
                     var current = entry.getValue();
                     incoming.computeIfAbsent(at, unused -> new Vector3()).add(current.u(), current.v(), 1);
                 }
@@ -855,7 +855,7 @@ final class GpuWaterShader extends Attribute {
                     Vector3 a = boundary.get(i), b = boundary.get(i + 1);
                     points.add(a);
                     // Open mouths continue into the next pool and falling lips into their sheet; neither is a bank.
-                    if (!surface.mouth(edge)) { segments.addAll(List.of(a.x, a.y, b.x, b.y)); }
+                    if (surface.bankAlong(edge, a, b)) { segments.addAll(List.of(a.x, a.y, b.x, b.y)); }
                 }
             }
             outline = new float[points.size() * 2];
