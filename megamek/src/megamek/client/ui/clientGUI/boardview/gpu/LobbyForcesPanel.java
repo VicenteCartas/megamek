@@ -621,7 +621,9 @@ final class LobbyForcesPanel {
                 if (unit.damage()) {
                     secondary.add(commandTool(unit, "build", "Lobby.card.damage", "damage",
                           LobbyUnitMenu.LMP_DAMAGE, offered));
-                    offered.add(LobbyUnitMenu.LMP_DEPLOY);
+                    if (unit.statusDeploys()) {
+                        offered.add(LobbyUnitMenu.LMP_DEPLOY);
+                    }
                 }
                 secondary.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
                       offered));

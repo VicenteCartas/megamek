@@ -1381,14 +1381,17 @@ work for Swing, and item 11 is under investigation.
            Change button beside the overline. In space the conditions card is disabled, muted and without a chevron.
        - The damage editor became the Unit Status dialog and took in the unit menu's Deploy submenu. The Whole unit
          values end with a Deployment section (`UnitDamageForm.deployment()`): heat at start (moved off a Mek's
-         centre torso), prone, hull down, hidden, wanted for scanning (a Game Master's, in a game with objectives)
+         centre torso), prone, hull down (TacOps hull-down rule; tanks only if hull-down capable), hidden (hidden
+         units rule), wanted for scanning (a Game Master's, in a game with objectives)
          and the deployment round, a select from pre-game (walk-on rules only) and game start to round 40. These are
-         written straight to the unit, and neither Restore Unit nor a roll touches them.
+         written straight to the unit, and neither Restore Unit nor a roll touches them. A unit already hull-down or
+         hidden keeps its toggle with the rule off, so it can be cleared.
          - The card's wrench opens it for every unit the player configures. Under a Game Master, a player who isn't
            one sees the damage read-only (`UnitDamageForm.Options.damage`), with a note in place of the roller and
            Restore Unit disabled, and the dialog opens on the Deployment section. An asset's damage is still the
            Game Master's alone.
          - A single wide card's ⋮ leaves Deploy out, because a submenu can now be omitted by key (`LMP_DEPLOY`).
+           An asset's card keeps it, since its status dialog has no deployment (`LobbyUnit.statusDeploys`).
            Compact rows and multi-select menus keep it, and the item is renamed Unit Status... in every menu.
          - Checks: `UnitDamageFormTest.theDeploymentReachesTheUnitAndRepairAndRollsLeaveIt` and
            `readOnlyDamageWritesOnlyTheDeployment`, `LobbyAsksTest.readOnlyDamageIsRefusedBySwing`,

@@ -190,9 +190,32 @@ class UnitDamageFormTest {
         assertTrue(labels(arm).contains("Blown Off"));
         assertTrue(labels(arm).contains("Shoulder"));
         List<String> deployment = form.deployment().stream().map(UnitDamageForm.Value::label).toList();
-        assertTrue(deployment.containsAll(List.of("Heat", "Prone", "Hull Down", "Deploys")), deployment.toString());
+        assertTrue(deployment.containsAll(List.of("Heat", "Prone", "Deploys")), deployment.toString());
+        assertFalse(deployment.contains("Hull Down"), "hull-down is an optional rule");
+        assertFalse(deployment.contains("Hidden"), "hidden units are an optional rule");
         assertFalse(deployment.contains("Wanted for scanning"), "only a game master with objectives marks targets");
         assertFalse(form.changed());
+    }
+
+    @Test
+    void hullDownAndHiddenFollowTheirRules() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        List<String> ruled = UnitDamageForm.of(atlas, new UnitDamageForm.Options(false, false, false, true, true))
+              .deployment().stream().map(UnitDamageForm.Value::label).toList();
+        assertTrue(ruled.containsAll(List.of("Hull Down", "Hidden")), ruled.toString());
+
+        atlas.setHullDown(true);
+        atlas.setHidden(true);
+        UnitDamageForm stale = UnitDamageForm.of(atlas, new UnitDamageForm.Options(false, false, false));
+        deployment(stale, "Hull Down").value(0);
+        deployment(stale, "Hidden").value(0);
+        stale.apply();
+        assertFalse(atlas.isHullDown(), "a unit left hull-down with the rule off can still be stood up");
+        assertFalse(atlas.isHidden(), "a unit left hidden with the rule off can still be revealed");
+        List<String> cleared = UnitDamageForm.of(atlas, new UnitDamageForm.Options(false, false, false))
+              .deployment().stream().map(UnitDamageForm.Value::label).toList();
+        assertFalse(cleared.contains("Hull Down"), cleared.toString());
+        assertFalse(cleared.contains("Hidden"), cleared.toString());
     }
 
     @Test

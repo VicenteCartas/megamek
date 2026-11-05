@@ -62,10 +62,21 @@ import megamek.common.util.CrewSkillSummaryUtil;
  * @param sheet       movement, protection, heat sinks and weapons, for a wide card's second block; null when hidden
  * @param damage      whether the local player may open the unit's status: every unit they configure, whose damage a
  *                    Game Master shows them read-only, but an asset only where they may edit its damage
+ * @param statusDeploys whether the unit's status also sets its deployment, so its card's menu can leave Deploy out;
+ *                    an asset's status is only its damage
  */
 public record LobbyUnit(int id, int ownerId, String name, String details, String weightClass, double tons, int bv,
       String bvText, String pilot, String skills, List<Tag> tags, int depth, Link link, boolean hidden,
-      @Nullable Tone nameTone, int forceId, boolean editable, boolean c3, @Nullable Sheet sheet, boolean damage) {
+      @Nullable Tone nameTone, int forceId, boolean editable, boolean c3, @Nullable Sheet sheet, boolean damage,
+      boolean statusDeploys) {
+
+    /** A card whose status, where the local player may open it, also sets its deployment. */
+    public LobbyUnit(int id, int ownerId, String name, String details, String weightClass, double tons, int bv,
+          String bvText, String pilot, String skills, List<Tag> tags, int depth, Link link, boolean hidden,
+          @Nullable Tone nameTone, int forceId, boolean editable, boolean c3, @Nullable Sheet sheet, boolean damage) {
+        this(id, ownerId, name, details, weightClass, tons, bv, bvText, pilot, skills, tags, depth, link, hidden,
+              nameTone, forceId, editable, c3, sheet, damage, damage);
+    }
 
     /** A card whose damage the local player may edit exactly when they may configure the unit. */
     public LobbyUnit(int id, int ownerId, String name, String details, String weightClass, double tons, int bv,
@@ -283,7 +294,7 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
         return new LobbyUnit(entity.getId(), entity.getOwnerId(), entity.getShortNameRaw(), details(entity),
               entity.getWeightClassName(), entity.getWeight(), bv, number(bv), pilot(entity), skills(entity, game),
               tags, carried > 0 ? carried : networked, link, false, nameTone, entity.getForceId(), editable,
-              entity.hasAnyC3System(), Sheet.of(entity), damage);
+              entity.hasAnyC3System(), Sheet.of(entity), damage, damage && !(entity instanceof BattlefieldSupportAsset));
     }
 
     /** What a blind drop lets an enemy see of {@code entity}: its kind and weight class, as the Swing lobby words it. */

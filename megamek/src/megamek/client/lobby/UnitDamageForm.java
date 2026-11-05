@@ -116,10 +116,17 @@ public final class UnitDamageForm {
      * @param preGame    whether a unit may deploy before the game, walking on (the rules' walk-on deployment)
      * @param scanTarget whether the unit can be marked as wanted for scanning: a game master's, in a game with
      *                   objectives
+     * @param hullDown   whether the game's rules let units start hull-down (TacOps hull-down)
+     * @param hidden     whether the game's rules let units start hidden (hidden units)
      */
-    public record Options(boolean damage, boolean preGame, boolean scanTarget) {
+    public record Options(boolean damage, boolean preGame, boolean scanTarget, boolean hullDown, boolean hidden) {
         /** Everything editable that every game offers, as for a unit's owner with no game master present. */
         public static final Options ALL = new Options(true, false, false);
+
+        /** Options for a game without the optional hull-down and hidden-unit rules. */
+        public Options(boolean damage, boolean preGame, boolean scanTarget) {
+            this(damage, preGame, scanTarget, false, false);
+        }
     }
 
     /** What Repair all does to a value. */
@@ -623,11 +630,13 @@ public final class UnitDamageForm {
             deployment.add(deploy(toggle("UnitEditorDialog.status.prone", entity.isProne(), null),
                   (unit, value) -> unit.setProne(value > 0)));
         }
-        if (canLieDown && (entity.isMek() || entity.isVehicle())) {
+        // Optional rules gate these; a unit already in the state still shows it, so it can be cleared
+        boolean hullDownCapable = entity.isMek() || (entity instanceof Tank tank && tank.isHullDownCapable());
+        if (canLieDown && hullDownCapable && (options.hullDown() || entity.isHullDown())) {
             deployment.add(deploy(toggle("UnitEditorDialog.status.hullDown", entity.isHullDown(), null),
                   (unit, value) -> unit.setHullDown(value > 0)));
         }
-        if (entity.canHide()) {
+        if (entity.canHide() && (options.hidden() || entity.isHidden())) {
             deployment.add(deploy(toggle("UnitEditorDialog.status.hidden", entity.isHidden(), null),
                   (unit, value) -> unit.setHidden(value > 0)));
         }

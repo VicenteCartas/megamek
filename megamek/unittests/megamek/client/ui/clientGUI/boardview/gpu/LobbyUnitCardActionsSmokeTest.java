@@ -94,6 +94,25 @@ class LobbyUnitCardActionsSmokeTest {
     }
 
     @Test
+    void anAssetsMenuKeepsDeployItsStatusLacks() {
+        UiTestStage.run(ui -> {
+            Recorder actions = new Recorder();
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, actions, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            forces.show(forces(new LobbyUnit(1, 1, "Asset", "", "", 0, 100, "100", "", "", List.of(), 0,
+                  LobbyUnit.Link.NONE, false, null, Force.NO_FORCE, true, false, null, true, false)));
+            ui.draw();
+
+            assertNotNull(panel.findActor("lobby-unit-damage-1"));
+            click(ui, unitMore(panel));
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, INDI_CAMO, RANDOMIZE, VIEW]"), actions.log,
+                  "an asset's status has no deployment, so its ⋮ keeps Deploy");
+            panel.remove();
+        });
+    }
+
+    @Test
     void theRandomizeIconOffersNameCallsignAndSkills() {
         UiTestStage.run(ui -> {
             Recorder actions = new Recorder();
