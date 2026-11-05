@@ -515,6 +515,27 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /**
+     * Shows an error over whatever shows: OK closes it, and the report button, when {@code reportLabel} is given, closes
+     * it and runs {@code report}.
+     */
+    UiDialog error(String title, String text, String dismissLabel, @Nullable String reportLabel,
+          @Nullable Runnable report) {
+        UiDialog dialog = begin(title, "dialog.md", true, () -> { });
+        var label = kit.typeLabel(text, "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(dismissLabel, this::close).setName("error-ok");
+        if (reportLabel != null && report != null) {
+            dialog.secondary(reportLabel, () -> {
+                close();
+                report.run();
+            }).setName("error-report");
+        }
+        show(dialog);
+        return dialog;
+    }
+
     /** Shows {@code text} with an OK button over whatever shows, as an alert. */    UiDialog message(String title, String text) {
         UiDialog dialog = begin(title, "dialog.sm", true, () -> { });
         var label = kit.typeLabel(text, "body", "text.primary");

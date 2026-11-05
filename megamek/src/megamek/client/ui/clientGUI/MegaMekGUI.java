@@ -68,6 +68,7 @@ import megamek.client.bot.ui.swing.BotGUI;
 import megamek.client.ui.BugReportMessages;
 import megamek.client.ui.CopySystemDataAction;
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuErrorPresenter;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow;
 import megamek.client.ui.clientGUI.tooltip.PilotToolTip;
 import megamek.client.ui.design.DesignTokens;
@@ -205,6 +206,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
               new BugReportMessages().get("package.reportBug"),
               Messages.getString("Okay"),
               () -> BugReportDialog.showWithGameTools(frame, this::currentTotalWarfareClient)));
+        GpuErrorPresenter.install();
     }
 
     /**
@@ -695,7 +697,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
             randomArmyDialog = null;
         }
         // listen to new frame
-        GpuStartWindow.suspendWhile(launched);
+        GpuStartWindow.suspendWhile(launched, this::unlaunch);
         if (!launched.isDisplayable()) {
             // A frame closes with windowClosed only once it has a native peer; the native lobby and board keep the
             // client's frame hidden, so it may never have been shown
@@ -704,7 +706,7 @@ public class MegaMekGUI implements IPreferenceChangeListener {
         launched.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosed(WindowEvent e) {
-                unlaunch();
+                GpuStartWindow.launchClosed(launched);
             }
         });
     }

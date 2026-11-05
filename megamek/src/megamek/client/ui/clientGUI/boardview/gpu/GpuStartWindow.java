@@ -35,6 +35,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import com.badlogic.gdx.ApplicationListener;
 import com.badlogic.gdx.utils.Os;
 import com.badlogic.gdx.utils.SharedLibraryLoader;
+import jakarta.annotation.Nullable;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
 import megamek.client.ui.Messages;
@@ -149,6 +150,8 @@ public final class GpuStartWindow {
     private static Consumer<ScenarioRequest> scenarios;
     /** The window a start action launched, until it closes; the start screen takes no input meanwhile. */
     private static volatile Window launched;
+    /** EDT: what runs once the launched window closes. */
+    private static Runnable launchEnded;
     private static final AtomicReference<String[]> NOTICE = new AtomicReference<>();
 
     private final boolean greet;
@@ -199,20 +202,17 @@ public final class GpuStartWindow {
 
         @Override
         public void closeRequested() {
-            if (modalOpen) {
-                SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
-            } else if (launched != null) {
-                SwingUtilities.invokeLater(GpuStartWindow::frontLaunched);
-            } else {
-                dispatch(Action.QUIT);
-            }
+            SwingUtilities.invokeLater(GpuStartWindow.this::closeAsked);
         }
 
         @Override
         public void focusGained() {
-            if (modalOpen) {
-                SwingUtilities.invokeLater(GpuStartWindow.this::frontModal);
-            }
+            SwingUtilities.invokeLater(() -> {
+                dropStaleModals();
+                if (modalOpen) {
+                    frontModal();
+                }
+            });
         }
 
         @Override
@@ -283,16 +283,40 @@ public final class GpuStartWindow {
 
     /**
      * EDT: suspends the start screen while {@code window}, which a start action launched, is open, so another game
-     * can't start under it; {@link #resume} ends that. The screen may come and go meanwhile and stays suspended.
+     * can't start under it; {@link #launchClosed} ends that and runs {@code ended}. The screen may come and go
+     * meanwhile and stays suspended.
      */
-    public static void suspendWhile(Window window) {
+    public static void suspendWhile(Window window, Runnable ended) {
         launched = window;
+        launchEnded = ended;
         inputChanged();
+    }
+
+    /**
+     * EDT: {@code window}, which a start action launched, has closed: runs what was to run then, once, and the start
+     * screen takes input again even when that fails.
+     */
+    public static void launchClosed(Window window) {
+        if (window == null || window != launched) {
+            return;
+        }
+        Runnable ended = launchEnded;
+        launchEnded = null;
+        try {
+            if (ended != null) {
+                ended.run();
+            }
+        } finally {
+            if (launched == window) {
+                resume();
+            }
+        }
     }
 
     /** EDT: the launched window has closed; the start screen takes input again. */
     public static void resume() {
         launched = null;
+        launchEnded = null;
         inputChanged();
         startEnded();
     }
@@ -313,11 +337,56 @@ public final class GpuStartWindow {
         return modalOpen || launched != null;
     }
 
+    /** EDT: the window's close button: brings what holds the screen to the front, or quits when nothing does. */
+    private void closeAsked() {
+        dropStaleModals();
+        if (modalOpen) {
+            frontModal();
+        } else if (launched != null) {
+            frontLaunched();
+        } else {
+            dispatch(Action.QUIT);
+        }
+    }
+
+    /**
+     * EDT: brings the launched window, or the newest form it shows, to the front. A game's window stays hidden while
+     * its scenes show in this one; when it shows nothing, its close is asked for as its own close button would, so the
+     * player can always leave it from here.
+     */
     private static void frontLaunched() {
         Window window = launched;
-        if (window != null && window.isShowing()) {
-            window.toFront();
+        if (window == null) {
+            return;
         }
+        if (!window.isDisplayable()) {
+            LOGGER.warn("The start screen's launched window closed without telling it; the start screen resumes");
+            launchClosed(window);
+        } else if (window.isShowing()) {
+            window.toFront();
+        } else {
+            Window shown = newestShowing(window);
+            if (shown != null) {
+                shown.toFront();
+            } else {
+                LOGGER.warn("The start screen is held by a hidden game that shows nothing; asking to leave it");
+                window.dispatchEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSING));
+            }
+        }
+    }
+
+    /** The innermost showing window that {@code owner} owns, newest first; null when none shows. */
+    private static Window newestShowing(Window owner) {
+        Window newest = null;
+        for (Window owned : owner.getOwnedWindows()) {
+            Window inner = newestShowing(owned);
+            if (inner != null) {
+                newest = inner;
+            } else if (owned.isShowing()) {
+                newest = owned;
+            }
+        }
+        return newest;
     }
 
     /** EDT: true while the start window is open or opening. */
@@ -637,6 +706,21 @@ public final class GpuStartWindow {
     static String[] takeNotice() {
         return NOTICE.getAndSet(null);
     }
+
+    /**
+     * EDT: shows an error over the open start screen, as {@link LobbyNativeDialogs#error} does; {@code report} runs on
+     * the EDT. Returns false, showing nothing, when the screen does not show, so the caller shows it otherwise.
+     */
+    static boolean showError(String title, String text, String dismissLabel, @Nullable String reportLabel,
+          @Nullable Runnable report) {
+        GpuStartWindow window = open;
+        if (window == null || window.closeRequested || !window.live || window.screen == null) {
+            return false;
+        }
+        Runnable onEdt = report == null ? null : () -> SwingUtilities.invokeLater(report);
+        window.post(() -> window.screen.dialogs.error(title, text, dismissLabel, reportLabel, onEdt));
+        return true;
+    }
     /** GPU thread: the intro has finished, or was skipped. */
     void settled() {
         SwingUtilities.invokeLater(() -> {
@@ -682,13 +766,34 @@ public final class GpuStartWindow {
         } else if (id == ComponentEvent.COMPONENT_SHOWN && dialog instanceof FileDialog) {
             // The system's file dialog has no window of AWT's to own, place or float; as a modal form it only blocks
             // the start window's input
-            if (dialog.isModal() && belongsToStart(dialog) && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
+            if (dialog.isModal() && belongsHere(dialog) && modalDialogs.add(dialog) && modalDialogs.size() == 1) {
                 setStartEnabled(false);
             }
-        } else if (id == ComponentEvent.COMPONENT_SHOWN && belongsToStart(dialog)) {
+        } else if (id == ComponentEvent.COMPONENT_SHOWN && belongsHere(dialog)) {
             centre(dialog);
             raise(dialog);
         }
+    }
+
+    /**
+     * A form of the start screen, or one the launched game shows while its own window stays hidden and no scene of its
+     * shows, such as its save question or why its battle view failed: either would otherwise hide behind the start
+     * window, which would take no input meanwhile.
+     */
+    private boolean belongsHere(Dialog dialog) {
+        if (belongsToStart(dialog)) {
+            return true;
+        }
+        Window game = launched;
+        if (closeRequested || game == null || game.isShowing()) {
+            return false;
+        }
+        for (Window current = dialog.getOwner(); current != null; current = current.getOwner()) {
+            if (current == game) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -744,12 +849,41 @@ public final class GpuStartWindow {
         dialog.toFront();
     }
 
-    /** EDT, once the scene has started: the forms that floated meanwhile are owned. */
+    /** EDT, once the scene has started: the forms that floated meanwhile, or showed before it, are owned. */
     private void shown() {
         if (open != this || closeRequested) {
             return;
         }
         adoptFloating();
+        adoptShowing();
+    }
+
+    /**
+     * EDT: raises the forms that showed before the screen did; their shown event came before its listener. A game's
+     * battle view that fails asks what to do while the start screen comes back, for one.
+     */
+    private void adoptShowing() {
+        for (Window window : Window.getWindows()) {
+            if (window instanceof Dialog dialog && !(dialog instanceof FileDialog) && dialog.isShowing()
+                  && !dialogOnTop.containsKey(dialog) && belongsHere(dialog)) {
+                centre(dialog);
+                raise(dialog);
+            }
+        }
+    }
+
+    /**
+     * EDT: forgets the modal forms counted as open that no longer show, should their hiding have gone unseen, so the
+     * screen never stays blocked by a form nobody can see.
+     */
+    private void dropStaleModals() {
+        for (Dialog dialog : new ArrayList<>(modalDialogs)) {
+            if (!dialog.isShowing()) {
+                LOGGER.warn("The start screen still counted the form \"{}\" as open; it no longer shows",
+                      dialog.getTitle());
+                endModal(dialog);
+            }
+        }
     }
 
     /** EDT: owns the forms that floated while the scene started. */

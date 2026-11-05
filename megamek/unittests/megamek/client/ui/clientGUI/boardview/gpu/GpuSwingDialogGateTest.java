@@ -32,6 +32,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -44,6 +45,7 @@ import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 import megamek.client.ui.Base64Image;
 import megamek.client.ui.Messages;
@@ -490,6 +492,35 @@ class GpuSwingDialogGateTest {
     }
 
     @Test
+    void theExitsSaveFileIsAskedInTheSystemDialogOverTheBattleWindow() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "Shows the battle window");
+        File folder = new File(System.getProperty("java.io.tmpdir"));
+        FileNameExtensionFilter saves = new FileNameExtensionFilter("Saved games", "sav.gz", "sav");
+        try (Declaring declaring = Declaring.create()) {
+            declaring.present();
+            List<Boolean> asked = new ArrayList<>();
+            try {
+                SystemFileDialog.fake((request, answer) -> {
+                    asked.add(request.save());
+                    answer.accept(new File(folder, "gpu-gate-battle"));
+                });
+                assertEquals(Optional.of(new File(folder, "gpu-gate-battle.sav.gz")),
+                      onSwing(() -> GpuBoardWindow.chooseFile(declaring.gui, folder, "Save", saves, true)),
+                      "The saved game gets the filter's extension");
+                assertEquals(List.of(true), asked, "Asked once, as a save");
+                SystemFileDialog.fake((request, answer) -> answer.accept(null));
+                assertEquals(Optional.empty(),
+                      onSwing(() -> GpuBoardWindow.chooseFile(declaring.gui, folder, "Save", saves, true)),
+                      "Cancelled");
+            } finally {
+                SystemFileDialog.fake(null);
+            }
+            assertNull(onSwing(() -> GpuBoardWindow.chooseFile(mock(ClientGUI.class), folder, "Save", saves, true)),
+                  "Another client's window asks nothing; it shows Swing's chooser");
+        }
+    }
+
+    @Test
     void theSwingSurfacesTheUserKeptAreRaisedOverTheBattleWindow() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
         GUIPreferences preferences = GUIPreferences.getInstance();
@@ -517,13 +548,14 @@ class GpuSwingDialogGateTest {
             // A file chooser (user item 21)
             assertTrue(gate.raised(() -> new JFileChooser().showOpenDialog(frame),
                   window -> shows(window, JFileChooser.class)), "Item 21: a file chooser");
-            // The exit's save question (D11), from the client's own exit
+            // The exit's save question (D11), from the client's own exit: asked natively now, Swing's without the window
             doCallRealMethod().when(declaring.gui).handleExit();
             preferences.setValue(GUIPreferences.ADVANCED_NO_SAVE_NAG, false);
-            assertTrue(gate.raised(() -> {
+            gate.drive("D11: the exit's save question", DialogKind.MESSAGE, MESSAGE_BOX, () -> {
                 declaring.gui.handleExit();
                 return null;
-            }, MESSAGE_BOX), "D11: the exit's save question");
+            });
+            gate.present();
             // About and the bug report (R6)
             assertTrue(gate.raised(() -> {
                 new MMAboutDialog(frame).show();
