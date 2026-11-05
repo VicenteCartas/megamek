@@ -44,8 +44,8 @@ class GpuRoofHoverSmokeTest {
     }
 
     private static void check(String asset) throws Exception {
-        var scene = BoardSurfaceBlendTest.scene(coords -> {
-            var ground = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+        var scene = BoardScenes.scene(coords -> {
+            var ground = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             var features = coords.distance(CENTER) <= 1
                   ? List.of(new BoardScene.Feature(asset, 0, 0, 0, 1, coords.equals(CENTER) ? 5 : 4, 0,
                         BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();

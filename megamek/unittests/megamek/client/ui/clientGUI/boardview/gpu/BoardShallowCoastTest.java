@@ -38,7 +38,7 @@ class BoardShallowCoastTest {
             BoardRelief.tune(BoardRelief.DEFAULTS);
             var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
                   "unofficial/Lanceman/16x17 Waterfall.board"), false, true);
-            var scene = GpuLegacyImportSmokeTest.scene(board);
+            var scene = BoardScenes.scene(board);
             var owners = List.of(new Coords(3, 7), new Coords(4, 7), new Coords(3, 8), new Coords(4, 8),
                   new Coords(3, 9), new Coords(4, 9), new Coords(3, 10), new Coords(4, 10));
             var tiles = owners.stream().map(scene::tile).toList();
@@ -96,7 +96,7 @@ class BoardShallowCoastTest {
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void descendingShallowStreamKeepsRootsAboveItsDrawnWater(TerrainLod lod) {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS,
               c.getY() < 4 ? 1 : 0, c.getX() == 4 ? 0 : -1, 0));
         var tiles = scene.tiles().stream().filter(tile -> tile.coords().getX() >= 3 && tile.coords().getX() <= 5
               && tile.coords().getY() >= 2 && tile.coords().getY() <= 5).toList();
@@ -142,17 +142,17 @@ class BoardShallowCoastTest {
     @Test
     void shallowWaterUsesNeighbouringLandInsteadOfItsNominalGrassFamily() {
         var grass = coast(BoardScene.Surface.GRASS, 0, false, BoardLiquid.WATER);
-        assertTrue(GpuGroundCover.grows(grass, grass.tile(BoardSurfaceBlendTest.CENTER)));
+        assertTrue(GpuGroundCover.grows(grass, grass.tile(BoardScenes.CENTER)));
         for (var family : List.of(BoardScene.Surface.DESERT, BoardScene.Surface.SAND, BoardScene.Surface.CONCRETE)) {
             var scene = coast(family, 0, false, BoardLiquid.WATER);
-            assertFalse(GpuGroundCover.grows(scene, scene.tile(BoardSurfaceBlendTest.CENTER)),
+            assertFalse(GpuGroundCover.grows(scene, scene.tile(BoardScenes.CENTER)),
                   "A water tile's nominal grass family cannot plant a " + family + " coast");
         }
     }
 
     @Test
     void deepFrozenAndMoltenWaterDoNotBecomeGrassSupport() {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         for (var scene : List.of(coast(BoardScene.Surface.GRASS, 1, false, BoardLiquid.WATER),
               coast(BoardScene.Surface.GRASS, 0, true, BoardLiquid.WATER),
               coast(BoardScene.Surface.GRASS, 0, false, new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0)))) {
@@ -162,12 +162,12 @@ class BoardShallowCoastTest {
 
     @Test
     void shallowWetlandBanksRemainOwnedByReeds() {
-        var scene = BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
-              ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, 0, 0)
+        var scene = BoardScenes.scene(c -> c.equals(BoardScenes.CENTER)
+              ? BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, 0, 0)
               : new BoardScene.Tile(c, 0, -1, false, 0, BoardScene.Surface.GRASS, null, null,
                     List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE,
                     BoardScene.Biome.MARSH, false));
-        var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         assertEquals(BoardScene.Biome.MARSH, BoardBiome.plantKind(scene, tile));
         assertFalse(GpuGroundCover.grows(scene, tile), "New shallow grass cannot duplicate the existing wetland plants");
     }
@@ -176,7 +176,7 @@ class BoardShallowCoastTest {
     void changingShallowDepthInvalidatesItsOwnAndNeighbouringGrassInputs() {
         var shallow = coast(BoardScene.Surface.GRASS, 0, false, BoardLiquid.WATER);
         var deep = coast(BoardScene.Surface.GRASS, 1, false, BoardLiquid.WATER);
-        for (var at : List.of(BoardSurfaceBlendTest.CENTER, BoardSurfaceBlendTest.CENTER.translated(5))) {
+        for (var at : List.of(BoardScenes.CENTER, BoardScenes.CENTER.translated(5))) {
             assertNotEquals(BoardVegetation.key(shallow, shallow.tile(at)), BoardVegetation.key(deep, deep.tile(at)),
                   "Depth changes grass eligibility and the adjacent bank fade");
         }
@@ -189,9 +189,9 @@ class BoardShallowCoastTest {
     }
 
     private static BoardScene coast(BoardScene.Surface land, int depth, boolean frozen, BoardLiquid liquid) {
-        return BoardSurfaceBlendTest.scene(c -> c.equals(BoardSurfaceBlendTest.CENTER)
+        return BoardScenes.scene(c -> c.equals(BoardScenes.CENTER)
               ? new BoardScene.Tile(c, 0, depth, frozen, 0, BoardScene.Surface.GRASS, null, null,
                     List.of(), List.of(), liquid, null, true)
-              : BoardSurfaceBlendTest.tile(c, land, 0, -1, 0));
+              : BoardScenes.tile(c, land, 0, -1, 0));
     }
 }

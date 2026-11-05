@@ -13,7 +13,7 @@ class BoardRoadFootprintTest {
     @Test
     void constantWidthCurvesJunctionsAndFlatEndCapsMatchTheirSharedClearance() {
         for (int exits : new int[] { 0, 1, 3, 5, 9, 18, 21, 27 }) {
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             for (float margin : new float[] { -3, 0, BoardRoad.SHOULDER }) {
                 var footprint = road.footprint(margin);
                 for (float x = -48.37f; x <= 48; x += 1) {
@@ -32,7 +32,7 @@ class BoardRoadFootprintTest {
 
     @Test
     void callersCanTrimACachedFootprintWithoutChangingAnotherPatchOrMargin() {
-        var road = BoardRoad.clearance(BoardRoadTest.CENTER, 21);
+        var road = BoardRoad.clearance(BoardScenes.CENTER, 21);
         Area original = road.footprint(0), shoulder = road.footprint(BoardRoad.SHOULDER);
         var trimmed = road.footprint(0);
         trimmed.reset();

@@ -74,7 +74,7 @@ class GpuSceneryPlacementSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (int i = 0; i < SAMPLES.size(); i++) {
@@ -152,7 +152,7 @@ class GpuSceneryPlacementSmokeTest {
               + (sample.structure().isEmpty() ? "" : ";" + sample.structure())
               + (scenery ? ";" + sample.fluff() : ""), ""));
         BoardSceneryLayouts.convert(board);
-        return GpuLegacyImportSmokeTest.scene(board);
+        return BoardScenes.scene(board);
     }
 
     private static ModelInstance instance(GpuTerrain terrain, String asset) throws Exception {

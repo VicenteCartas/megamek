@@ -219,7 +219,7 @@ class BoardFungusTest {
     @Test
     void cliffColoniesMountOnTheFinishedWallAndFaceOutwards() {
         Coords center = new Coords(4, 4);
-        BoardScene scene = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at,
+        BoardScene scene = BoardScenes.scene(at -> BoardScenes.tile(at,
               BoardScene.Surface.FUNGUS, at.equals(center) ? 4 : 0, -1, 0));
         var tile = scene.tile(center);
         var surface = new BoardSurface(scene, tile);
@@ -256,9 +256,9 @@ class BoardFungusTest {
             }
         }
         assertTrue(contacts > 100, "Check the broad attachment area, not just a few origins");
-        var flat = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at, BoardScene.Surface.FUNGUS, 0, -1, 0));
+        var flat = BoardScenes.scene(at -> BoardScenes.tile(at, BoardScene.Surface.FUNGUS, 0, -1, 0));
         assertTrue(BoardFungus.cliffs(flat, flat.tile(center), walls).isEmpty());
-        var grass = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at,
+        var grass = BoardScenes.scene(at -> BoardScenes.tile(at,
               BoardScene.Surface.GRASS, at.equals(center) ? 4 : 0, -1, 0));
         assertTrue(BoardFungus.cliffs(grass, grass.tile(center), walls).isEmpty());
     }

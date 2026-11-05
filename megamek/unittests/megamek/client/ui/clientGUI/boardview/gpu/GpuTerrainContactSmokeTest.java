@@ -41,7 +41,7 @@ class GpuTerrainContactSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 int arrayHandle = 0;
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (var lod : TerrainLod.values()) {
@@ -158,7 +158,7 @@ class GpuTerrainContactSmokeTest {
     }
 
     private static BoardScene scene(int height) {
-        return BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() < 4 ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS,
               c.getY() < 4 ? height : 0, height == 0 && c.getY() >= 4 ? 2 : -1, 0));
     }

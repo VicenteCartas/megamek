@@ -27,7 +27,7 @@ class BoardRubbleFitTest {
     @ParameterizedTest
     @ValueSource(strings = { "light", "medium", "heavy", "hardened", "wall" })
     void rubbleAndClearedPathsKeepTheirAuthoredSizeOnLevelGround(String variant) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             for (String suffix : List.of("", "-path")) {
                 BoardScene scene = scene(0, 0, variant + suffix);
                 var tile = scene.tile(CENTER);
@@ -41,7 +41,7 @@ class BoardRubbleFitTest {
     @ParameterizedTest
     @ValueSource(strings = { "light", "medium", "heavy", "hardened", "wall" })
     void allRubbleDetailsHaveGroundBeneathThemOnAnIsolatedCliff(String variant) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             for (String suffix : List.of("", "-path")) {
                 BoardScene scene = scene(3, 63, variant + suffix);
                 assertSupported(scene, 0);
@@ -52,7 +52,7 @@ class BoardRubbleFitTest {
 
     @Test
     void aSingleExposedEdgeFitsWhileLevelNeighboursContinueToSupportRubble() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             for (int direction = 0; direction < 6; direction++) {
                 assertSupported(scene(3, 1 << direction, "hardened"), 0);
             }
@@ -61,7 +61,7 @@ class BoardRubbleFitTest {
 
     @Test
     void iceAndBridgeDecksKeepRubbleIndependentOfTheGroundBelow() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene scene = scene(3, 63, "hardened");
             var tile = scene.tile(CENTER);
             var rubble = tile.features().getFirst();

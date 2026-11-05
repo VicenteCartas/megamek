@@ -132,7 +132,7 @@ class GpuLegacyImportSmokeTest {
         // A car on the span's paved middle deck, which only its GLB draws: it stands on the deck, not on the lake bed.
         converted.getHex(DECK).setDecorations(List.of(new BoardDecoration("deck-car", "prop", "scenery/vehicles/car", null,
               0, 0, 0, false, 1, BoardDecoration.Placement.on("bridge", 0), 0)));
-        BoardScene scene = scene(converted);
+        BoardScene scene = BoardScenes.scene(converted);
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
@@ -193,7 +193,7 @@ class GpuLegacyImportSmokeTest {
               new BoardDecoration("tilted", "prop", table, "", 0, .25, 0, false, 1, BoardDecoration.Placement.ground(), 0, false, 20, 0),
               new BoardDecoration("stretched", "prop", table, "", .25, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0, false)
                     .withStretch(new BoardDecoration.Stretch(1.5, 1, 1))));
-        BoardScene after = scene(imported);
+        BoardScene after = BoardScenes.scene(imported);
         // The converted board keeps the picnic token for 2D players; the 3D board never draws its art again.
         assertTrue(imported.getHex(TABLES).containsTerrain(Terrains.FLUFF));
         assertNull(after.tile(TABLES).tilesetScenery(), "No sprite for imported objects: the Tactical View draws them once, in 3D");
@@ -802,17 +802,6 @@ class GpuLegacyImportSmokeTest {
     private static Installed installed(Object prop) throws Exception {
         return new Installed((Coords) field(prop, "coords"), new BoundingBox((BoundingBox) field(prop, "bounds")),
               field(prop, "treeAsset") != null, (String) field(prop, "decorationId"), (Boolean) field(prop, "structure"));
-    }
-
-    /** The board's scene as every 3D view captures it ({@link BoardTiles}). */
-    static BoardScene scene(Board board) throws Exception {
-        var captured = new AtomicReference<BoardScene>();
-        SwingUtilities.invokeAndWait(() -> {
-            BoardSceneryLayouts.convert(board);
-            captured.set(new BoardScene(0, board.getWidth(), board.getHeight(),
-                  BoardTiles.captureAll(board), List.of(), List.of(), -1, "", List.of()));
-        });
-        return captured.get();
     }
 
     private static BoardDecoration object(BoardEditorSession session, String id) throws Exception {

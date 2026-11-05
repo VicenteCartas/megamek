@@ -61,7 +61,7 @@ class GpuMirroredObjectSmokeTest {
             place(board, MORE_CARS.get(1), "scenery/vehicles/car", variant, BoardDecoration.Colours.of("#b8b014"));
             place(board, CORAL, "mars/brain-lobes", variant, BoardDecoration.Colours.NONE);
         }
-        var captured = GpuLegacyImportSmokeTest.scene(board);
+        var captured = BoardScenes.scene(board);
         return new BoardScene(0, captured.width(), captured.height(), captured.tiles(), List.of(), List.of(), -1, "",
               List.of(), new BoardScene.Light(-24, -30));
     }

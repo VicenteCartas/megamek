@@ -80,7 +80,7 @@ class GpuEditorMaglevSmokeTest {
         BoardSceneryLayouts.convert(imported);
         Map<String, String> assets = new HashMap<>();
         for (Coords at : FIXTURE.keySet()) { imported.getHex(at).getDecorations().forEach(o -> assets.put(o.id(), o.asset())); }
-        BoardScene after = GpuLegacyImportSmokeTest.scene(imported);
+        BoardScene after = BoardScenes.scene(imported);
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         render((frame, camera) -> {
             for (int levelHeight : new int[] { BoardGeometry.DEFAULTS.levelHeight(), 30 }) {
@@ -118,7 +118,7 @@ class GpuEditorMaglevSmokeTest {
         var file = Configuration.boardsDir().toPath().resolve("unofficial/Derv_Maps/90x41 Whats Done Behind.board");
         Board imported = BoardFile.read(file);
         BoardSceneryLayouts.convert(imported);
-        BoardScene after = GpuLegacyImportSmokeTest.scene(imported);
+        BoardScene after = BoardScenes.scene(imported);
         // The NE/SW train runs from 7317 to 7715, the N/S one from 8015 to 8018.
         var shown = after.tiles().stream().filter(tile -> tile.coords().getX() >= 71 && tile.coords().getX() <= 80
               && tile.coords().getY() >= 12 && tile.coords().getY() <= 18).toList();

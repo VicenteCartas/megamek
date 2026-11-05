@@ -52,30 +52,6 @@ class BoardSculptTest {
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
-    /** Runs a check with hex transitions off or on, restoring the tuning afterwards. */
-    static void withTransitions(boolean transitions, Runnable check) {
-        BoardGeometry.Tuning previous = BoardGeometry.tuning();
-        BoardGeometry.tune(new BoardGeometry.Tuning(previous.hexScale(), previous.unitScale(), previous.unitHeightScale(),
-              previous.levelHeight(), previous.gridShade(), previous.multiHexUnitScale(), transitions));
-        try {
-            check.run();
-        } finally {
-            BoardGeometry.tune(previous);
-        }
-    }
-
-    /** Runs a check with the tiles padded this many metres apart, restoring the tuning afterwards. */
-    static void withPadding(float padding, Runnable check) {
-        BoardGeometry.Tuning previous = BoardGeometry.tuning();
-        BoardGeometry.tune(new BoardGeometry.Tuning(previous.hexScale(), previous.unitScale(), previous.unitHeightScale(),
-              previous.levelHeight(), previous.gridShade(), previous.multiHexUnitScale(), false, padding));
-        try {
-            check.run();
-        } finally {
-            BoardGeometry.tune(previous);
-        }
-    }
-
     private record Key(long x, long y, long z) {
         static Key of(Vector3 p) {
             return new Key(Math.round(p.x * 1000), Math.round(p.y * 1000), Math.round(p.z * 1000));
@@ -85,7 +61,7 @@ class BoardSculptTest {
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
     void sculptedTerrainIsWatertightAcrossHexesCornersAndJunctions(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::sculptedTerrainIsWatertightAcrossHexesCornersAndJunctionsChecks);
+        BoardScenes.withTransitions(transitions, BoardSculptTest::sculptedTerrainIsWatertightAcrossHexesCornersAndJunctionsChecks);
     }
 
     private static void sculptedTerrainIsWatertightAcrossHexesCornersAndJunctionsChecks() {
@@ -124,7 +100,7 @@ class BoardSculptTest {
                 // A two-triangle cast panel can meet several collinear rock segments, and padded tops leave
                 // zero-area triangles along a straight edge. Check their entire coverage rather than requiring
                 // the other side to inherit every subdivision.
-                BoardCliffSeamTest.assertClosed(complete, floor, family.toString());
+                BoardScenes.assertClosed(complete, floor, family.toString());
             } else {
                 assertEquals(0, open, family + ": every sculpted edge must be shared by two triangles");
             }
@@ -137,7 +113,7 @@ class BoardSculptTest {
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
     void reducedAndMixedDetailStaysWatertight(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::reducedAndMixedDetailStaysWatertightChecks);
+        BoardScenes.withTransitions(transitions, BoardSculptTest::reducedAndMixedDetailStaysWatertightChecks);
     }
 
     private static void reducedAndMixedDetailStaysWatertightChecks() {
@@ -228,7 +204,7 @@ class BoardSculptTest {
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
     void topsKeepGameLevelsAtAnchorsAndStayWithinBounds(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::topsKeepGameLevelsAtAnchorsAndStayWithinBoundsChecks);
+        BoardScenes.withTransitions(transitions, BoardSculptTest::topsKeepGameLevelsAtAnchorsAndStayWithinBoundsChecks);
     }
 
     private static void topsKeepGameLevelsAtAnchorsAndStayWithinBoundsChecks() {
@@ -256,7 +232,7 @@ class BoardSculptTest {
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
     void wallsStayBetweenTheirLevelsAndFaceOutward(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::wallsStayBetweenTheirLevelsAndFaceOutwardChecks);
+        BoardScenes.withTransitions(transitions, BoardSculptTest::wallsStayBetweenTheirLevelsAndFaceOutwardChecks);
     }
 
     private static void wallsStayBetweenTheirLevelsAndFaceOutwardChecks() {
@@ -282,7 +258,7 @@ class BoardSculptTest {
     @ParameterizedTest(name = "transitions {0}")
     @ValueSource(booleans = { false, true })
     void rayPickingResolvesLogicalHexesOnTopsAndCliffs(boolean transitions) {
-        withTransitions(transitions, BoardSculptTest::rayPickingResolvesLogicalHexesOnTopsAndCliffsChecks);
+        BoardScenes.withTransitions(transitions, BoardSculptTest::rayPickingResolvesLogicalHexesOnTopsAndCliffsChecks);
     }
 
     private static void rayPickingResolvesLogicalHexesOnTopsAndCliffsChecks() {
@@ -317,11 +293,72 @@ class BoardSculptTest {
 
     @Test
     void paddedTilesStayWatertightLevelBoundedAndPickable() {
-        withPadding(BoardGeometry.MAX_PADDING, () -> {
+        BoardScenes.withPadding(BoardGeometry.MAX_PADDING, () -> {
             sculptedTerrainIsWatertightAcrossHexesCornersAndJunctionsChecks();
             topsKeepGameLevelsAtAnchorsAndStayWithinBoundsChecks();
             wallsStayBetweenTheirLevelsAndFaceOutwardChecks();
             rayPickingResolvesLogicalHexesOnTopsAndCliffsChecks();
         });
+    }
+
+    @Test
+    void topsKeepTheirFootprintAndExactLevel() {
+        for (var family : BoardScene.Surface.values()) {
+            for (int level : new int[] { 0, 2, 6 }) {
+                var scene = BoardScenes.meshScene(family, level);
+                var surface = new BoardSurface(scene, scene.tile(BoardScenes.MESH_AT));
+                var top = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
+                Vector3 center = BoardGeometry.center(BoardScenes.MESH_AT, level);
+                assertEquals(center.z, surface.height(center.x, center.y), .001f);
+                float error = 0;
+                double area = 0;
+                for (var face : top) {
+                    float cross = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
+                    assertTrue(cross > 0, "Tops must not fold or overlap");
+                    area += cross * .5;
+                    for (int a = 0; a <= 5; a++) {
+                        for (int b = 0; b <= 5 - a; b++) {
+                            Vector3 p = new Vector3(face.a()).scl(a / 5f).mulAdd(face.b(), b / 5f)
+                                  .mulAdd(face.c(), (5 - a - b) / 5f);
+                            error = Math.max(error, Math.abs(p.z - surface.relief.groundHeight(p.x, p.y)));
+                        }
+                    }
+                }
+                if (level == 0) {
+                    assertEquals(BoardGeometry.width() * BoardGeometry.height() * .75, area, .05);
+                }
+                assertEquals(0, error, .001f, "Every top stays flat at its level: " + family);
+                if (level == 0) { assertEquals(6, top.size(), "An open flat top needs six triangles"); }
+                // Rounded cliff rims adaptively refine their interior normals/material shading while staying flat.
+                // BoardPlateauShadingTest checks that rim shading stays local and introduces no holes at every LOD.
+                int walls = surface.walls(scene, BoardGeometry.floor(scene)).size();
+                assertTrue(walls <= (level <= 2 ? 900 : 5400), "Avoid dense slope/cliff grids: " + walls);
+                System.out.printf("MESH %s level=%d top=%d walls=%d errorMetres=%.4f%n", family, level, top.size(),
+                      walls, error / BoardRelief.metres(1));
+            }
+        }
+    }
+
+    @Test
+    void flatTopsUseSixTrianglesAtEveryDetailIncludingBoardEdges() {
+        for (var family : BoardScene.Surface.values()) {
+            var scene = BoardScenes.meshScene(family, 0);
+            for (var detail : TerrainLod.values()) {
+                for (var at : List.of(BoardScenes.MESH_AT, new Coords(0, 0), new Coords(6, 3))) {
+                    var surface = new BoardSurface(scene, scene.tile(at), detail);
+                    var top = surface.groundFaces().stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
+                    assertEquals(6, top.size(), family + " " + detail + " " + at);
+                    double area = 0;
+                    for (var face : top) {
+                        for (var p : List.of(face.a(), face.b(), face.c())) { assertEquals(0, p.z, .0001f); }
+                        float cross = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z;
+                        assertTrue(cross > 0, "No inverted triangles");
+                        area += cross * .5;
+                    }
+                    assertEquals(BoardGeometry.width() * BoardGeometry.height() * .75, area, .05,
+                          "The entire hex remains covered");
+                }
+            }
+        }
     }
 }

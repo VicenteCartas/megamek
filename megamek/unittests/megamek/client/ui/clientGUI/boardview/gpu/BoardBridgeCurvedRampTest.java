@@ -161,13 +161,13 @@ class BoardBridgeCurvedRampTest {
         int straight = 1 << direction | 1 << (direction + 3) % 6;
         var bank = at.translated(direction);
         var span = at.translated(other);
-        return BoardSurfaceBlendTest.scene(c -> {
+        return BoardScenes.scene(c -> {
             if (c.equals(at) || c.equals(span)) {
                 int sides = c.equals(at) ? exits : 1 << other | 1 << (other + 3) % 6;
                 return BoardBridgeMaterialsTest.withDeckRoad(BoardBridgeSlopeTest.bridge(c, -1, 2, sides),
                       BoardRoad.Kind.PAVED, sides);
             }
-            return BoardRoadTest.tile(c, c.equals(bank) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+            return BoardScenes.tile(c, c.equals(bank) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   c.equals(bank) ? straight : 0, c.equals(bank) ? 0 : -1, BoardScene.Surface.GRASS);
         });
     }

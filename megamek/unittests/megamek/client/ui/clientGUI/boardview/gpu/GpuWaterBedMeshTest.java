@@ -26,7 +26,7 @@ class GpuWaterBedMeshTest {
     })
     void convertedShallowBarsKeepTheirGeometryAndContinuousWaterMaterial(String path, int x, int y) throws Exception {
         var board = BoardFile.loadSheet(new File(Configuration.boardsDir(), path), false, true);
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         var tile = scene.tile(new Coords(x, y));
         assertEquals(0, tile.waterDepth(), "The converted fixture includes the reported shallow bar");
         for (TerrainLod lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
@@ -83,8 +83,8 @@ class GpuWaterBedMeshTest {
     @ValueSource(ints = { 1, 4 })
     void levelPoolBedsStayInsideTheWaterAlongCurvedBanksAndMouths(int depth) {
         for (boolean mouths : new boolean[] { false, true }) {
-            var center = BoardSurfaceBlendTest.CENTER;
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.SAND,
+            var center = BoardScenes.CENTER;
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.SAND,
                   0, c.equals(center) || mouths && (c.equals(center.translated(1)) || c.equals(center.translated(4)))
                         ? depth : -1, 0));
             var original = new BoardSurface(scene, scene.tile(center));
@@ -110,9 +110,9 @@ class GpuWaterBedMeshTest {
     @EnumSource(TerrainLod.class)
     void levelWaterKeepsTheSparseBedThroughMaterialPreparation(TerrainLod lod) {
         for (boolean varyingDepth : new boolean[] { false, true }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.SAND,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.SAND,
                   0, varyingDepth ? 1 + Math.floorMod(c.getX() + c.getY(), 4) : 2, 0));
-            var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+            var tile = scene.tile(BoardScenes.CENTER);
             var surface = new BoardSurface(scene, tile, lod);
             var bed = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.BED).toList();
             var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());

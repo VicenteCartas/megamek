@@ -73,7 +73,7 @@ class BoardRoadSamplingTest {
     void combinedWearRetainsHeadingAndLanePositionAcrossEveryExitPattern() {
         Random random = new Random(0xCAFE);
         for (int exits = 1; exits < 64; exits++) {
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             for (int i = 0; i < 128; i++) {
                 float x = random.nextFloat(-100, 100), y = random.nextFloat(-100, 100);
                 var together = road.pavedWear(x, y);

@@ -79,14 +79,14 @@ class GpuMarshSlopeSmokeTest {
                   .append("CPU stage times measure submission, not synchronized whole-frame duration.\n");
         }
         try {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            BoardScenes.tune(.94f, true);
             // Shader recompilation must not reorder coplanar terrain by changing program identities.
             var sorter = ModelBatch.class.getDeclaredField("sorter");
             sorter.setAccessible(true);
             sorter.set(field(terrain, "batch"), new DefaultRenderableSorter());
             for (boolean sloped : new boolean[] { false, true }) {
                 var scene = sloped ? scene("connected")
-                      : BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.MARSH, 0));
+                      : BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
                 for (boolean rain : new boolean[] { false, true }) {
                     frame.configure(new BoardAtmosphere.Settings(16, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0,
@@ -203,7 +203,7 @@ class GpuMarshSlopeSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (String contact : new String[] { "connected", "downhill", "uphill" }) {
@@ -243,7 +243,7 @@ class GpuMarshSlopeSmokeTest {
     }
 
     private static BoardScene scene(String contact) {
-        return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               contact.equals("connected") || (c.getY() < 4) == contact.equals("downhill")
                     ? BoardScene.Biome.MARSH : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0));
     }

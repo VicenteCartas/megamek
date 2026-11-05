@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class BoardRoadJunctionTest {
     @Test
     void junctionApproachesHaveSolidChannelsThenDashesBeyondTheFinalRoadWidth() {
-        var at = BoardRoadTest.CENTER;
+        var at = BoardScenes.CENTER;
         var road = BoardRoad.clearance(at, 27).extended(java.util.Collections.nCopies(6, 50f));
         var paint = road.markings(at, 27);
         for (var stop : road.stopApproaches(27)) {
@@ -82,7 +82,7 @@ class BoardRoadJunctionTest {
             for (int branch = 0; branch < 6; branch++) {
                 if (branch == axis || branch == axis + 3) { continue; }
                 int exits = (1 << axis) | (1 << (axis + 3)) | (1 << branch);
-                var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+                var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
                 var stops = road.stopApproaches(exits);
                 assertEquals(1, stops.size());
                 assertEquals(branch, stops.getFirst().direction());
@@ -104,13 +104,13 @@ class BoardRoadJunctionTest {
     void signalControlledTsStopAllApproachesWithoutChangingTheirClearTurningArea() {
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) != 3) { continue; }
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
-            var priorityPaint = road.markings(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
+            var priorityPaint = road.markings(BoardScenes.CENTER, exits);
             for (var control : java.util.List.of(HexAppearance.TrafficControl.SIGNALS, HexAppearance.TrafficControl.GANTRY)) {
                 road.control(control);
                 var stops = road.stopApproaches(exits);
                 assertEquals(3, stops.size(), "Signals control each incoming approach");
-                var paint = road.markings(BoardRoadTest.CENTER, exits);
+                var paint = road.markings(BoardScenes.CENTER, exits);
                 paint.exclusiveOr(priorityPaint);
                 assertTrue(paint.isEmpty(), "Stop priority never changes the divider's clear crossing area");
                 for (var stop : stops) {
@@ -125,7 +125,7 @@ class BoardRoadJunctionTest {
     void fiveAndSixArmRailHubsStopIncomingRoadLanesWithoutPaintingTheMedian() {
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) < 5) { continue; }
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits)
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits)
                   .corridor(new RailRoute.Corridor(exits, 0, 0)).control(HexAppearance.TrafficControl.GANTRY);
             assertEquals(Integer.bitCount(exits), road.stopApproaches(exits).size(),
                   "A rail corridor replaces circulation with a controlled solid hub");
@@ -133,7 +133,7 @@ class BoardRoadJunctionTest {
             assertFalse(stops.isEmpty());
             stops.intersect(road.medianBand());
             assertTrue(stops.isEmpty(), "Stop bars keep the central railway clear");
-            assertFalse(road.markings(BoardRoadTest.CENTER, exits).intersects(-6, -6, 12, 12));
+            assertFalse(road.markings(BoardScenes.CENTER, exits).intersects(-6, -6, 12, 12));
         }
     }
 
@@ -142,7 +142,7 @@ class BoardRoadJunctionTest {
         for (int axis = 0; axis < 3; axis++) {
             int first = axis, second = (axis + 1) % 6;
             int exits = (1 << first) | (1 << second) | (1 << ((first + 3) % 6)) | (1 << ((second + 3) % 6));
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             float[] a = RailRoute.border(first), b = RailRoute.border(second);
             var corner = new Vector2(a[0], a[1]).nor().add(new Vector2(b[0], b[1]).nor()).nor().scl(17);
             assertTrue(road.footprint(0).contains(corner.x, corner.y), "The tight X corner has a rounded turning apron");
@@ -156,7 +156,7 @@ class BoardRoadJunctionTest {
 
     @Test
     void unmarkedMaterialJoinsDoNotAcquireStopPaintAndOnlyPavedRoadsRenderIt() {
-        Coords at = BoardRoadTest.CENTER;
+        Coords at = BoardScenes.CENTER;
         var road = BoardRoad.layout(at, 27, BoardRoad.Kind.PAVED,
               direction -> direction == 1 ? BoardRoad.Kind.ALLEY : direction == 4 ? BoardRoad.Kind.DIRT : BoardRoad.Kind.PAVED);
         assertEquals(java.util.List.of(0, 3), road.stopApproaches(27).stream().map(BoardRoad.StopApproach::direction).toList());
@@ -165,7 +165,7 @@ class BoardRoadJunctionTest {
         float x = sample.x() - sample.ny() * across, y = sample.y() + sample.nx() * across;
         for (var kind : BoardRoad.Kind.values()) {
             if (kind == BoardRoad.Kind.NONE) { continue; }
-            var tile = BoardRoadTest.tile(at, kind, 27, 0, BoardScene.Surface.GRASS);
+            var tile = BoardScenes.tile(at, kind, 27, 0, BoardScene.Surface.GRASS);
             var patches = GpuRoads.patches(tile, BoardRoad.layout(at, 27, kind, direction -> kind));
             assertEquals(kind == BoardRoad.Kind.PAVED,
                   patches.stream().anyMatch(patch -> patch.texture().equals("concrete-ground") && patch.shape().contains(x, y)),
@@ -176,7 +176,7 @@ class BoardRoadJunctionTest {
     @Test
     void stopBarsFollowWidenedOrOffsetRailCorridorsAndLeaveTheirBallastClear() {
         for (var corridor : java.util.List.of(new RailRoute.Corridor(9, 0, 0), new RailRoute.Corridor(9, 9, 9))) {
-            var road = BoardRoad.layout(BoardRoadTest.CENTER, 27, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED)
+            var road = BoardRoad.layout(BoardScenes.CENTER, 27, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED)
                   .corridor(corridor);
             Area paint = road.stopLines(27);
             assertEquals(4, road.stopApproaches(27).size());

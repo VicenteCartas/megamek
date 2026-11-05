@@ -40,7 +40,7 @@ class GpuDirtMaterialsSmokeTest {
                     terrain.setGrass(false);
                     for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT)) {
                         for (int levels : new int[] { 1, 2, 4 }) {
-                            BoardScene scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                            BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                                   family, c.getX() < 4 ? levels : 0, -1, 0));
                             Vector3 target = BoardGeometry.center(new Coords(3, 4), levels * .5f).add(40, 0, 0);
                             camera.camera.zoom = .14f;

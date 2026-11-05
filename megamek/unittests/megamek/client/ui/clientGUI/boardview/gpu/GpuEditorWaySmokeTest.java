@@ -156,7 +156,7 @@ class GpuEditorWaySmokeTest {
 
     private static void capture(Map<String, GpuRoadRailSmokeTest.View> views, String name, BoardEditorSession session,
           Coords focus) throws Exception {
-        views.put(name, new GpuRoadRailSmokeTest.View(GpuLegacyImportSmokeTest.scene(session.board()), focus, 2));
+        views.put(name, new GpuRoadRailSmokeTest.View(BoardScenes.scene(session.board()), focus, 2));
     }
 
     private static void stroke(BoardEditorSession session, Coords from, Coords to, String receiver) {

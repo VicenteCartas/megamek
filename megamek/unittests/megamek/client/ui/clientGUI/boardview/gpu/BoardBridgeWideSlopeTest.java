@@ -126,6 +126,6 @@ class BoardBridgeWideSlopeTest {
               t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(),
               Map.of("bridge", truss ? HexAppearance.TRUSS : HexAppearance.BUILT_BRIDGE), t.cover(), t.barren(),
               t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(), corridor);
-        return BoardBridgeMaterialsTest.replace(scene, tile);
+        return BoardScenes.replace(scene, tile);
     }
 }

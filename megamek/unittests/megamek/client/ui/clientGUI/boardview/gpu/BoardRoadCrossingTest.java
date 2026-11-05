@@ -13,10 +13,11 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardRoadCrossingTest {
-    private static final Coords AT = BoardRoadTest.CENTER;
+    private static final Coords AT = BoardScenes.CENTER;
 
     @Test
     void independentStraightCrossingsStopBothIncomingLanesBeforeTheActualTrackBand() {
@@ -95,5 +96,28 @@ class BoardRoadCrossingTest {
 
     private static BoardRoad road(int exits, RailRoute.Corridor corridor) {
         return BoardRoad.layout(AT, exits, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED).corridor(corridor);
+    }
+
+    @Test
+    void liveCrossingsReplaceOnlyOldPanelsOnTheSameRoadAndRailSurface() {
+        var hex = new Hex(0, "road:1:18;rail:1:9;bridge:1:9;bridge_elev:2;bridge_road:1:18", "");
+        var ground = megamek.common.board.BoardDecoration.Placement.ground();
+        var deck = megamek.common.board.BoardDecoration.Placement.on("bridge", 0);
+        String panel = "decal/rail/level-crossing";
+        var covered = new megamek.common.board.BoardDecoration("covered", "decal", panel, null, 0, 0, 0, false, 1, ground, 0);
+        var above = new megamek.common.board.BoardDecoration("above", "decal", panel, null, 0, 0, 0, false, 1, deck, 0);
+        var beside = new megamek.common.board.BoardDecoration("beside", "decal", panel, null, .4, .4, 0, false, 1, ground, 0);
+        hex.setDecorations(java.util.List.of(covered, above, beside));
+        var at = new Coords(2, 2);
+        var visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertFalse(visible.contains(covered), "The road crossing uses the embedded track");
+        assertTrue(visible.contains(above), "Ground rails do not replace artwork on the bridge above them");
+        assertTrue(visible.contains(beside), "An authored panel away from the crossing remains available");
+        megamek.common.board.RailRoute.lay(hex, true, 9, 0);
+        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertFalse(visible.contains(above), "A deck road and deck rail replace their own old crossing panel");
+        hex.removeTerrain(Terrains.ROAD);
+        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
+        assertTrue(visible.contains(covered), "Track without a road does not claim an authored panel");
     }
 }

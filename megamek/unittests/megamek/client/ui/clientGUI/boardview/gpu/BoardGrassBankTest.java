@@ -37,7 +37,7 @@ class BoardGrassBankTest {
             BoardRelief.tune(BoardRelief.DEFAULTS);
             var board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
                   "Map Set 2/16x17 Mountain Lake.board"), false, true);
-            var scene = GpuLegacyImportSmokeTest.scene(board);
+            var scene = BoardScenes.scene(board);
             var owners = List.of(new Coords(5, 14), new Coords(5, 15), new Coords(5, 16));
             var tiles = owners.stream().map(scene::tile).toList();
             float floor = BoardGeometry.floor(scene), sink = BoardGeometry.width() * .001f;
@@ -89,8 +89,8 @@ class BoardGrassBankTest {
 
     @Test
     void grassDensityFollowsInterpolatedSlopeInsteadOfTriangleBoundaries() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
-        var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var tile = scene.tile(BoardScenes.CENTER);
         var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
         var meadow = roots(GpuGroundCover.plant(scene, tile, surface, null));
         float left = BoardGeometry.centerX(tile.coords()) - BoardGeometry.width() / 2;
@@ -127,15 +127,15 @@ class BoardGrassBankTest {
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void grassThinsTowardsOpenWaterWithoutMovingSurvivingBlades(TerrainLod lod) {
-        var dry = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
-        var at = BoardSurfaceBlendTest.CENTER;
+        var dry = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var at = BoardScenes.CENTER;
         var tile = dry.tile(at);
         var support = BoardTacticalGeometry.Surface.of(new BoardSurface(dry, tile, lod), dry, BoardGeometry.floor(dry));
         var meadow = roots(GpuGroundCover.plant(dry, tile, support, null));
         float metre = BoardRelief.metres(1);
         for (int edge = 0; edge < 6; edge++) {
             var water = at.translated(BoardGeometry.edgeDirection(edge));
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS,
                   0, c.equals(water) ? 1 : -1, 0));
             // Keep the published support fixed to isolate density from changes in the shore's geometry.
             var planted = GpuGroundCover.plant(scene, scene.tile(at), support, null);
@@ -172,13 +172,13 @@ class BoardGrassBankTest {
 
     @Test
     void inlandRaisedAndFrozenWaterDoNotClearTheMeadow() {
-        var at = BoardSurfaceBlendTest.CENTER;
-        var dry = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var at = BoardScenes.CENTER;
+        var dry = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         var support = BoardTacticalGeometry.Surface.of(new BoardSurface(dry, dry.tile(at)), dry, BoardGeometry.floor(dry));
         var meadow = GpuGroundCover.plant(dry, dry.tile(at), support, null);
         for (int level : new int[] { -3, -1, 0, 1 }) {
             var water = at.translated(0);
-            var scene = BoardSurfaceBlendTest.scene(c -> c.equals(water)
+            var scene = BoardScenes.scene(c -> c.equals(water)
                   ? new BoardScene.Tile(c, level, 1, level == 0, 0, BoardScene.Surface.GRASS,
                         null, null, List.of(), List.of(), BoardLiquid.WATER, null, true)
                   : dry.tile(c));
@@ -192,7 +192,7 @@ class BoardGrassBankTest {
             }
         }
         var distant = at.translated(0, 2);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS,
               0, c.equals(distant) ? 1 : -1, 0));
         assertEquals(meadow, GpuGroundCover.plant(scene, scene.tile(at), support, null),
               "Water beyond the adjoining shore cannot remove inland grass");
@@ -215,7 +215,7 @@ class BoardGrassBankTest {
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void twoLevelBanksSupportGrassBetweenTheirEarthFaces(TerrainLod lod) {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS,
               c.getX() < 4 ? 2 : 0, -1, 0));
         var tile = scene.tile(new Coords(3, 4));
         var surface = new BoardSurface(scene, tile, lod);
@@ -266,14 +266,14 @@ class BoardGrassBankTest {
     void rimBladesAreLimitedToDryTwoLevelGrassBanks() {
         for (var family : new BoardScene.Surface[] { BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND }) {
             for (int levels : new int[] { 1, 2, 4 }) {
-                var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, c.getX() < 4 ? levels : 0, -1, 0));
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family, c.getX() < 4 ? levels : 0, -1, 0));
                 var tile = scene.tile(new Coords(3, 4));
                 var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, BoardGeometry.floor(scene));
                 var rim = GpuGroundCover.plantRim(scene, tile, surface, null);
                 assertEquals(family == BoardScene.Surface.GRASS && levels == 2, rim != null, family + " " + levels);
             }
         }
-        var wet = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS,
+        var wet = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS,
               c.getX() < 4 ? 2 : 0, c.getX() < 4 ? -1 : 1, 0));
         var tile = wet.tile(new Coords(3, 4));
         assertNull(GpuGroundCover.plantRim(wet, tile,

@@ -555,7 +555,7 @@ class GpuLegacyArtReportSmokeTest {
     // ------------------------------------------------------------------------------------------------ drawing
 
     private static BoardScene scene(Board board) {
-        try { return GpuLegacyImportSmokeTest.scene(board); }
+        try { return BoardScenes.scene(board); }
         catch (Exception failure) { throw new AssertionError(failure); }
     }
 

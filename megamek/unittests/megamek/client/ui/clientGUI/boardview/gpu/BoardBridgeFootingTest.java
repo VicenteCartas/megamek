@@ -207,7 +207,7 @@ class BoardBridgeFootingTest {
         Coords at = new Coords(7, 14);
         assertEquals(1, board.getHex(at).terrainLevel(Terrains.BRIDGE_ROAD),
               "The production legacy conversion must infer the connected paved deck road");
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         var tile = scene.tile(at);
         assertEquals(BoardRoad.Kind.PAVED, tile.deckRoad());
         var deck = BoardBridge.deck(scene, tile);
@@ -279,7 +279,7 @@ class BoardBridgeFootingTest {
     @Test
     void reloadingAnEditedGlbChangesTheBankExtension(@TempDir Path directory) throws Exception {
         var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
-        var tile = scene.tile(BoardNaturalBridgeTest.CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         var surfaces = new HashMap<Coords, BoardSurface>();
         var before = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, surfaces);
         float length = BoardBridgeFooting.terminalLength();
@@ -337,8 +337,8 @@ class BoardBridgeFootingTest {
             for (int d = 0; d < 6; d++) {
                 var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true, at, d);
                 int exits = (1 << d) | (1 << ((d + 3) % 6));
-                scene = BoardNaturalBridgeTest.replace(scene,
-                      BoardRoadTest.tile(at.translated(d), BoardRoad.Kind.PAVED, exits, 3, BoardScene.Surface.GRASS));
+                scene = BoardScenes.replace(scene,
+                      BoardScenes.tile(at.translated(d), BoardRoad.Kind.PAVED, exits, 3, BoardScene.Surface.GRASS));
                 var tile = scene.tile(at);
                 for (var lod : TerrainLod.values()) {
                     var surfaces = new HashMap<Coords, BoardSurface>();
@@ -411,9 +411,9 @@ class BoardBridgeFootingTest {
             var bridgeTile = new BoardScene.Tile(bridge, 0, 1, false, 0, BoardScene.Surface.GRASS, null, null,
                   BoardFeatures.capture(hex, bridge, Map.of()), List.of(),
                   BoardLiquid.WATER, null, true);
-            var bare = BoardNaturalBridgeTest.replace(plain, bridgeTile);
-            var scene = BoardNaturalBridgeTest.replace(bare, withRoad(bare.tile(road), 36));
-            var roadOnly = BoardNaturalBridgeTest.replace(scene, plain.tile(bridge));
+            var bare = BoardScenes.replace(plain, bridgeTile);
+            var scene = BoardScenes.replace(bare, withRoad(bare.tile(road), 36));
+            var roadOnly = BoardScenes.replace(scene, plain.tile(bridge));
             var natural = BoardBridgeTypeTest.typed(scene, HexAppearance.NATURAL_BRIDGE);
             var bank = new BoardSurface(scene, scene.tile(road));
             var bareBank = new BoardSurface(bare, bare.tile(road));
@@ -476,13 +476,13 @@ class BoardBridgeFootingTest {
 
     @Test
     void oneLevelBankDifferencesSeatTheSlabAndItsTaperedRails() {
-        var at = BoardNaturalBridgeTest.CENTER;
+        var at = BoardScenes.CENTER;
         for (int level : new int[] { 2, 4 }) {
             var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
-            scene = BoardNaturalBridgeTest.replace(scene,
-                  BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS));
-            scene = BoardNaturalBridgeTest.replace(scene,
-                  BoardRoadTest.tile(at.translated(3), BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS));
+            scene = BoardScenes.replace(scene,
+                  BoardScenes.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS));
+            scene = BoardScenes.replace(scene,
+                  BoardScenes.tile(at.translated(3), BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS));
             var surfaces = new HashMap<Coords, BoardSurface>();
             var footing = BoardBridgeFooting.build(scene, scene.tile(at), TerrainLod.FULL, surfaces);
             var bank = surfaces.get(at.translated(3));
@@ -504,7 +504,7 @@ class BoardBridgeFootingTest {
     /** The scene with the deck at {@code at} carrying a road of {@code kind} over all its exits. */
     private static BoardScene paved(BoardScene scene, Coords at, BoardRoad.Kind kind) {
         var tile = scene.tile(at);
-        return BoardNaturalBridgeTest.replace(scene, BoardBridgeMaterialsTest.withDeckRoad(tile, kind,
+        return BoardScenes.replace(scene, BoardBridgeMaterialsTest.withDeckRoad(tile, kind,
               BoardBridge.feature(tile).bridgeExits()));
     }
 
@@ -587,9 +587,9 @@ class BoardBridgeFootingTest {
         assertTrue(piers(span(3, false, 0, Set.of(0, 1, 2)), START.translated(3)).isEmpty(), "No room under a ground-level deck");
         var raised = span(3, false, 2, Set.of(0, 1, 2));
         assertEquals(2, joints(piers(raised, START.translated(3)), START.translated(3)), "Two levels above dry ground");
-        var road = BoardNaturalBridgeTest.replace(raised, withRoad(raised.tile(START.translated(3)), 9));
+        var road = BoardScenes.replace(raised, withRoad(raised.tile(START.translated(3)), 9));
         assertTrue(piers(road, START.translated(3)).isEmpty() && piers(road, START).isEmpty(), "The road beneath keeps its lane");
-        var across = BoardNaturalBridgeTest.replace(raised, withRoad(raised.tile(START.translated(3)), 18));
+        var across = BoardScenes.replace(raised, withRoad(raised.tile(START.translated(3)), 18));
         assertEquals(2, joints(piers(across, START.translated(3)), START.translated(3)), "A road crossing beneath, not along");
     }
 
@@ -602,8 +602,8 @@ class BoardBridgeFootingTest {
             Coords at = centre.translated(d);
             tiles.put(at, pillared(deckTile(at, 1 << (d + 3) % 6, true, 0)));
         }
-        var scene = BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
-              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+        var scene = BoardScenes.scene(at -> tiles.getOrDefault(at,
+              BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
         assertEquals(3, joints(piers(scene, centre), centre));
         for (int d : new int[] { 0, 2, 4 }) { assertEquals(1, joints(piers(scene, centre.translated(d)), centre.translated(d))); }
     }
@@ -686,8 +686,8 @@ class BoardBridgeFootingTest {
         tiles.put(middle, routeTile(middle, false, RailRoute.Kind.MAGLEV, 4, 18, true, 9));
         for (int d : new int[] { 1, 4 }) { tiles.put(middle.translated(d), routeTile(middle.translated(d), false,
               RailRoute.Kind.MAGLEV, 4, RailRoute.side((d + 3) % 6), false, 0)); }
-        var crossing = BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
-              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+        var crossing = BoardScenes.scene(at -> tiles.getOrDefault(at,
+              BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
         assertEquals(2, joints(maglevPiers(crossing, middle), middle));
         for (int d = 0; d < 6; d++) {
             var edge = BoardGeometry.center(middle, 0).lerp(BoardGeometry.center(middle.translated(d), 0), .5f);
@@ -710,11 +710,11 @@ class BoardBridgeFootingTest {
               second), second), "A ground maglev has no bridge piers");
         var rails = line(RailRoute.Kind.RAIL, new double[] { 0, 0, 0 }, Set.of(), Set.of());
         assertEquals(0, joints(maglevPiers(rails, second), second), "A rail lies on the ground");
-        var along = BoardNaturalBridgeTest.replace(dry, withRoad(dry.tile(second), 9));
+        var along = BoardScenes.replace(dry, withRoad(dry.tile(second), 9));
         assertEquals(0, joints(maglevPiers(along, second), second), "A road beneath along the route keeps its lane");
-        var across = BoardNaturalBridgeTest.replace(dry, withRoad(dry.tile(second), 18));
+        var across = BoardScenes.replace(dry, withRoad(dry.tile(second), 18));
         assertEquals(2, joints(maglevPiers(across, second), second), "A road crossing beneath, not along");
-        var railBeneath = BoardNaturalBridgeTest.replace(dry,
+        var railBeneath = BoardScenes.replace(dry,
               routeTile(second, false, RailRoute.Kind.MAGLEV, 2, 9, true, 9));
         assertEquals(0, joints(maglevPiers(railBeneath, second), second), "A ground rail beneath along the route keeps its track");
     }
@@ -731,7 +731,7 @@ class BoardBridgeFootingTest {
               joints(maglevPiers(dry, third), third), joints(maglevPiers(dry, fourth), fourth)));
         for (var kind : List.of(BoardScene.FeatureKind.BUILDING, BoardScene.FeatureKind.INDUSTRIAL)) {
             var structure = new BoardScene.Feature("buildings/saxarba/building_light/building_light_00", 0, 0, 0, 1, 2, 0, kind);
-            var built = BoardNaturalBridgeTest.replace(dry, withFeatures(dry.tile(second), List.of(structure)));
+            var built = BoardScenes.replace(dry, withFeatures(dry.tile(second), List.of(structure)));
             assertEquals(0, joints(maglevPiers(built, second), second), kind + ": none in the structure's hex");
             assertEquals(0, joints(maglevPiers(built, first), first), kind + ": nor its neighbour's half of that joint");
             assertEquals(1, joints(maglevPiers(built, third), third), kind + ": the joint away from it keeps its pier");
@@ -777,8 +777,8 @@ class BoardBridgeFootingTest {
             int sides = (i > 0 ? RailRoute.side(0) : 0) | (i < levels.length - 1 ? RailRoute.side(3) : 0);
             tiles.put(at, routeTile(at, wet.contains(i), kind, (int) levels[i], sides, toggled.contains(i), 0));
         }
-        return BoardSurfaceBlendTest.scene(at -> tiles.getOrDefault(at,
-              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+        return BoardScenes.scene(at -> tiles.getOrDefault(at,
+              BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
     }
 
     private static float lowest(List<BoardBridge.Facet> facets) {
@@ -804,10 +804,10 @@ class BoardBridgeFootingTest {
             route.put(at, toggled.contains(i) ? pillared(tile) : tile);
         }
         Coords entrance = START.translated(0), exit = START.translated(3, length);
-        route.put(entrance, BoardRoadTest.tile(entrance, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
-        route.put(exit, BoardRoadTest.tile(exit, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
-        return BoardSurfaceBlendTest.scene(at -> route.getOrDefault(at,
-              BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+        route.put(entrance, BoardScenes.tile(entrance, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        route.put(exit, BoardScenes.tile(exit, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS));
+        return BoardScenes.scene(at -> route.getOrDefault(at,
+              BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
     }
 
     private static BoardScene.Tile deckTile(Coords at, int exits, boolean water, int deck) {
@@ -827,7 +827,7 @@ class BoardBridgeFootingTest {
         assertTrue(BoardBridgeFooting.pier(scene, scene.tile(START), 3), "A toggled span two levels up has piers");
         Map<Coords, BoardScene.Tile> tiles = new HashMap<>();
         for (var tile : scene.tiles()) { tiles.put(tile.coords(), tile.coords().equals(middle) ? chasm(tile) : tile); }
-        var pit = BoardSurfaceBlendTest.scene(tiles::get);
+        var pit = BoardScenes.scene(tiles::get);
         assertFalse(BoardBridgeFooting.pier(pit, pit.tile(START), 3), "Its deck crosses the chasm on no pier");
         assertFalse(BoardBridgeFooting.pier(pit, pit.tile(middle), 3));
     }
@@ -901,10 +901,10 @@ class BoardBridgeFootingTest {
 
     @Test
     void asphaltPaintEndsBeforeTheGroundedApronAndTheDeckRemainsSolid() {
-        var at = BoardNaturalBridgeTest.CENTER;
+        var at = BoardScenes.CENTER;
         var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
-        scene = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene,
-              BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
+        scene = BoardBridgeTypeTest.typed(BoardScenes.replace(scene,
+              BoardScenes.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
         scene = paved(scene, at, BoardRoad.Kind.PAVED);
         var tile = scene.tile(at);
         var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new HashMap<>());
@@ -934,12 +934,12 @@ class BoardBridgeFootingTest {
 
     @Test
     void bareBankMasksBlendThroughGravelToLocalGroundWithoutFadingConnectedRoads() {
-        var at = BoardNaturalBridgeTest.CENTER;
+        var at = BoardScenes.CENTER;
         float scale = BoardGeometry.hexScale();
         for (var kind : List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.ALLEY, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.DIRT)) {
             var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
-            scene = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene,
-                  BoardRoadTest.tile(at.translated(0), kind, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
+            scene = BoardBridgeTypeTest.typed(BoardScenes.replace(scene,
+                  BoardScenes.tile(at.translated(0), kind, 9, 3, BoardScene.Surface.GRASS)), HexAppearance.BUILT_BRIDGE);
             scene = paved(scene, at, kind);
             var tile = scene.tile(at);
             var surfaces = new HashMap<Coords, BoardSurface>();

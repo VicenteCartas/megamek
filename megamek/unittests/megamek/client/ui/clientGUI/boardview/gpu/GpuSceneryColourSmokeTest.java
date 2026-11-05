@@ -322,7 +322,7 @@ class GpuSceneryColourSmokeTest {
         }
         board.getHex(at).setDecorations(List.of(new BoardDecoration("car", "prop", "scenery/vehicles/car", null, 0, 0, 30, false,
               1, BoardDecoration.Placement.ground(), 0, false).withColours(BoardDecoration.Colours.of("#ff00ff"))));
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setInitialVisible(false);
@@ -406,7 +406,7 @@ class GpuSceneryColourSmokeTest {
      */
     @Test
     void theTacticalViewHidesEveryPlacedObjectAndPicksTheSameHexes() throws Exception {
-        var scene = GpuLegacyImportSmokeTest.scene(imported());
+        var scene = BoardScenes.scene(imported());
         Coords snowTree = new Coords(1, 8);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
@@ -507,19 +507,19 @@ class GpuSceneryColourSmokeTest {
               .mapToObj(i -> uniform.getHex(i % uniform.getWidth(), i / uniform.getWidth())).toList()) {
             hex.setDecorations(hex.getDecorations().stream().map(o -> o.withColours(BoardDecoration.Colours.NONE)).toList());
         }
-        BoardScene coloured = GpuLegacyImportSmokeTest.scene(board), plain = GpuLegacyImportSmokeTest.scene(uniform);
+        BoardScene coloured = BoardScenes.scene(board), plain = BoardScenes.scene(uniform);
         // Another hex of the cars' chunk changes; then one recoloured car moves, keeping its colours.
         var raised = board.getHex(edit).duplicate();
         raised.setLevel(1);
         board.setHex(edit, raised);
-        BoardScene edited = GpuLegacyImportSmokeTest.scene(board);
+        BoardScene edited = BoardScenes.scene(board);
         var lot = board.getHex(cars).duplicate();
         var car = lot.getDecorations().stream().filter(o -> o.asset().equals("scenery/vehicles/car") && !o.colours().slots().isEmpty())
               .findFirst().orElseThrow();
         lot.setDecorations(lot.getDecorations().stream().map(o -> o != car ? o
               : o.transform(o.x() + .08, o.y(), o.rotation(), o.mirror(), o.scale(), o.placement())).toList());
         board.setHex(cars, lot);
-        BoardScene moved = GpuLegacyImportSmokeTest.scene(board);
+        BoardScene moved = BoardScenes.scene(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setInitialVisible(false);
@@ -611,7 +611,7 @@ class GpuSceneryColourSmokeTest {
                 board.setHex(coords, hex);
             }
         });
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         List<Integer> levels = new java.util.ArrayList<>();
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);

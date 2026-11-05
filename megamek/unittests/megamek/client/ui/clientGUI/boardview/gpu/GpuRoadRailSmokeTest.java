@@ -49,7 +49,7 @@ class GpuRoadRailSmokeTest {
         Files.createDirectories(output.toPath());
         Board board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
               "unofficial/Flynn/34x34 Starleague Depot42 FortifiedIsland.board"), false, true);
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         // The changed verge is hex 2616, whose old span vote and stored deck-road neighbor are both PAVED.
         var tile = scene.tile(new Coords(25, 15));
         var actual = BoardRoad.of(scene, tile);
@@ -216,7 +216,7 @@ class GpuRoadRailSmokeTest {
             var bits = RailRoute.besideBits(crop::getHex, run, new RailRoute.Member(at, marker));
             bits.forEach((member, value) -> RailRoute.beside(crop.getHex(member.at()), RailRoute.onDeck(member.marker()), value));
         }
-        return new View(GpuLegacyImportSmokeTest.scene(crop), at,
+        return new View(BoardScenes.scene(crop), at,
               hex.getLevel() + (hex.containsTerrain(Terrains.BRIDGE) ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0));
     }
 }

@@ -44,7 +44,7 @@ class GpuBiomeZoomSmokeTest {
                     recording.enable("jdk.ObjectAllocationSample");
                     recording.enable("jdk.GarbageCollection");
                     recording.start();
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var report = new StringBuilder("24x24; native 1280x960; terrain LOD enabled; paced outside measurements\n");
                     report.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     for (var kind : List.of(BoardScene.Biome.NONE, BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
@@ -56,7 +56,7 @@ class GpuBiomeZoomSmokeTest {
                             var tiles = new ArrayList<BoardScene.Tile>();
                             for (int x = 0; x < 24; x++) {
                                 for (int y = 0; y < 24; y++) {
-                                    tiles.add(BoardBiomeTest.tile(new Coords(x, y), kind, x < 12 ? 0 : 1));
+                                    tiles.add(BoardScenes.tile(new Coords(x, y), kind, x < 12 ? 0 : 1));
                                 }
                             }
                             var scene = new BoardScene(0, 24, 24, tiles, List.of(), List.of(), -1, "", List.of());

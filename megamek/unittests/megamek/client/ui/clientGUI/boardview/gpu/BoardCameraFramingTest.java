@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -534,5 +535,113 @@ class BoardCameraFramingTest {
                 }
             }
         }
+    }
+
+    @Test
+    void switchingPreservesFocusAndZoomAndFitIncludesEveryCorner() {
+        BoardScene scene = BoardScenes.raisedScene(4);
+        BoardCamera view = new BoardCamera();
+        view.resize(500, 740);
+        view.fit(scene);
+        view.pan(60, -20);
+        view.zoom(0.8f);
+        Vector3 focus = new Vector3(view.focus);
+        float zoom = view.camera.zoom;
+        view.setIsometric(true);
+        assertTrue(focus.epsilonEquals(view.focus, 0.001f));
+        assertEquals(zoom, view.camera.zoom);
+        view.fit(scene);
+        for (BoardScene.Tile tile : scene.tiles()) {
+            for (int corner = 0; corner < 6; corner++) {
+                Vector3 screen = view.camera.project(BoardGeometry.corner(tile.coords(), tile.elevation(), corner),
+                      0, 0, 500, 740);
+                assertTrue(screen.x >= 0 && screen.x <= 500 && screen.y >= 0 && screen.y <= 740);
+            }
+        }
+    }
+
+    @Test
+    void resizingRefitsTheBoardUntilThePlayerMovesTheCamera() {
+        BoardScene scene = BoardScenes.raisedScene(4);
+        BoardCamera view = new BoardCamera();
+        view.resize(1280, 800);
+        view.setIsometric(true);
+        view.fit(scene);
+        view.resize(900, 500, scene, 1);
+        for (BoardScene.Tile tile : scene.tiles()) {
+            for (int corner = 0; corner < 6; corner++) {
+                Vector3 screen = view.camera.project(BoardGeometry.corner(tile.coords(), tile.elevation(), corner),
+                      0, 0, 900, 500);
+                assertTrue(screen.x >= 0 && screen.x <= 900 && screen.y >= 0 && screen.y <= 500);
+            }
+        }
+        view.pan(40, 20);
+        Vector3 focus = new Vector3(view.focus);
+        float zoom = view.camera.zoom;
+        view.resize(1800, 1000, scene, 2);
+        assertTrue(focus.epsilonEquals(view.focus, 0.001f));
+        assertEquals(zoom / 2, view.camera.zoom, 0.0001f);
+        view.toggleOverview(scene);
+        view.resize(2700, 1500, scene, 3);
+        view.toggleOverview(scene);
+        assertTrue(focus.epsilonEquals(view.focus, 0.001f));
+        assertEquals(zoom / 3, view.camera.zoom, 0.0001f);
+    }
+
+    @Test
+    void orbitKeepsPickingAndTheCameraBasisValidAroundTheFullBoard() {
+        BoardScene scene = BoardScenes.raisedScene(0);
+        BoardCamera view = new BoardCamera();
+        view.resize(1100, 750);
+        for (float tilt : new float[] { 0, 35, BoardCamera.MAX_TILT }) {
+            for (float rotation : new float[] { -450, 0, 45, 90, 180, 270, 359, 1080 }) {
+                view.setIsometric(false);
+                view.orbit(rotation, tilt);
+                view.fit(scene);
+                assertEquals(1, view.camera.direction.len(), 0.0001f);
+                assertEquals(1, view.camera.up.len(), 0.0001f);
+                assertEquals(0, view.camera.direction.dot(view.camera.up), 0.0001f);
+                assertTrue(view.camera.direction.z <= -Math.cos(Math.toRadians(BoardCamera.MAX_TILT)) + 0.0001,
+                      "Orbit must stay above the horizon within the maximum tilt");
+                for (BoardScene.Tile tile : scene.tiles()) {
+                    Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                    Ray ray = new Ray(new Vector3(center).mulAdd(view.camera.direction, -1000), view.camera.direction);
+                    assertEquals(tile.coords(), BoardGeometry.pick(scene, ray));
+                    assertTrue(view.visibleArea(scene).contains(tile.coords().getX(), tile.coords().getY()));
+                }
+            }
+        }
+        view.orbit(0, 10000);
+        assertEquals(BoardCamera.MAX_TILT, view.tilt());
+        view.orbit(0, -10000);
+        assertTrue(view.isTopDown());
+    }
+
+    @Test
+    void fittingAtLowAnglesIncludesCliffsAndResetRestoresTheIsometricPreset() {
+        BoardScene scene = BoardScenes.raisedScene(8);
+        BoardCamera view = new BoardCamera();
+        view.resize(700, 450);
+        view.orbit(217, BoardCamera.MAX_TILT);
+        view.fit(scene);
+        float floor = BoardGeometry.floor(scene) / BoardGeometry.LEVEL;
+        for (BoardScene.Tile tile : scene.tiles()) {
+            for (float elevation : new float[] { floor, tile.elevation() }) {
+                for (int corner = 0; corner < 6; corner++) {
+                    Vector3 point = view.camera.project(BoardGeometry.corner(tile.coords(), elevation, corner),
+                          0, 0, 700, 450);
+                    assertTrue(point.x >= 0 && point.x <= 700 && point.y >= 0 && point.y <= 450);
+                }
+            }
+        }
+        view.pan(200, 100);
+        view.zoom(0.5f);
+        view.reset(scene);
+        assertTrue(view.isIsometric());
+        Vector3 focus = new Vector3(view.focus);
+        float zoom = view.camera.zoom;
+        view.orbit(85, -20);
+        assertTrue(focus.epsilonEquals(view.focus, 0.001f));
+        assertEquals(zoom, view.camera.zoom);
     }
 }

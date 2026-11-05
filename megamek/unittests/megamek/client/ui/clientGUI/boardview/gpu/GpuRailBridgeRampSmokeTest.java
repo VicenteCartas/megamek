@@ -65,7 +65,7 @@ class GpuRailBridgeRampSmokeTest {
                     var scene = scene();
                     for (int elevation : new int[] { 0, 1 }) {
                         if (elevation == 1) {
-                            scene = BoardNaturalBridgeTest.replace(scene, tile(BRIDGE, elevation));
+                            scene = BoardScenes.replace(scene, tile(BRIDGE, elevation));
                         }
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
@@ -177,7 +177,7 @@ class GpuRailBridgeRampSmokeTest {
         boolean water = at.getY() < APPROACH.getY();
         boolean track = at.getX() == BRIDGE.getX() && at.getY() >= 5;
         boolean bridge = track && water;
-        var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0);
+        var ground = BoardScenes.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0);
         var hex = new Hex(0);
         if (bridge) {
             hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 9));

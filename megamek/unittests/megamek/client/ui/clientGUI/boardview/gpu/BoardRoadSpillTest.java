@@ -22,7 +22,7 @@ class BoardRoadSpillTest {
 
     @Test
     void paintKeepsToDryGroundAtItsLevelWhileClearanceAlsoReachesRampsAndRails() {
-        var scene = BoardSurfaceBlendTest.scene(c -> {
+        var scene = BoardScenes.scene(c -> {
             if (c.equals(AT.translated(4))) {
                 return BoardBridgeFootingTest.routeTile(c, false, RailRoute.Kind.RAIL, 0, 9, false, 0);
             }
@@ -59,7 +59,7 @@ class BoardRoadSpillTest {
     @Test
     void grassAndScatteredRocksStayClearOfTheRingInIntermediateHexes() {
         var scene = triangle(BoardScene.Surface.GRASS);
-        var dry = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
+        var dry = BoardScenes.scene(c -> BoardScenes.tile(c, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
         List<BoardRoad> allRoads = scene.tiles().stream().filter(BoardRoad::rendered).map(tile -> BoardRoad.of(scene, tile)).toList();
         int removed = 0, kept = 0, stones = 0;
         for (Coords at : intermediate(scene)) {
@@ -96,7 +96,7 @@ class BoardRoadSpillTest {
         roads.put(AT.translated(0), 8);
         roads.put(AT.translated(2).translated(1), 16);
         roads.put(AT.translated(3).translated(4), 2);
-        return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               roads.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, roads.getOrDefault(c, 0), 0, surface));
     }
 

@@ -112,7 +112,7 @@ class GpuScenerySmokeTest {
         var scenes = new ArrayList<BoardScene>();
         for (Board board : List.of(catalog, fccw, details, corrections, port, geothermal, demolition, fccwNoBasement, ledges)) {
             BoardSceneryLayouts.convert(board);
-            scenes.add(GpuLegacyImportSmokeTest.scene(board));
+            scenes.add(BoardScenes.scene(board));
         }
         var fccwScene = scenes.get(1);
         assertTrue(fccwScene.tiles().stream().filter(t -> t.features().stream()
@@ -156,7 +156,7 @@ class GpuScenerySmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     for (int i = 0; i < scenes.size(); i++) {
                         var scene = scenes.get(i);
                         frame.prepare(terrain, camera, scene);

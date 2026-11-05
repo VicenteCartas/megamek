@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class GpuRoadJunctionFixtureSmokeTest {
     @Test
     void everyRoadRailCombinationAndTheSharedRoundabout() throws Exception {
-        var scene = GpuLegacyImportSmokeTest.scene(RoadJunctionFixture.create());
+        var scene = BoardScenes.scene(RoadJunctionFixture.create());
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "junction-fixture");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();

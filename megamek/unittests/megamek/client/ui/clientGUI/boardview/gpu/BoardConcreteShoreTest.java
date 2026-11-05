@@ -413,7 +413,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void rectanglesKeepTheirWidthWhereTheyMeetTheQuay() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
+        BoardScene scene = BoardScenes.dockScene();
         BoardConcrete coast = BoardConcrete.of(scene);
         Coords tip = new Coords(10, 2);
         for (int y = 2; y <= 5; y++) {
@@ -503,7 +503,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void dockAndQuaySidesExtendToOneLandingCorner() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
+        BoardScene scene = BoardScenes.dockScene();
         Coords pier = new Coords(5, 5), quay = new Coords(8, 9);
         BoardSurface pierSurface = new BoardSurface(scene, scene.tile(pier));
         BoardSurface quaySurface = new BoardSurface(scene, scene.tile(quay));
@@ -577,7 +577,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void concreteAroundAnEnclosedTerrainPatchHasThreeStraightSides() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         Set<Coords> island = new HashSet<>();
         var queue = new ArrayDeque<Coords>();
         queue.add(new Coords(8, 9));
@@ -618,7 +618,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void broadJunctionExtendsItsDiagonalToTheVerticalSide() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         Coords diagonal = new Coords(1, 1), vertical = new Coords(4, 1);
         BoardSurface arm = new BoardSurface(scene, scene.tile(diagonal));
         BoardSurface trunk = new BoardSurface(scene, scene.tile(vertical));
@@ -636,7 +636,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void longDiagonalOnAeroBaseTwoHasNoHexSteps() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(2);
+        BoardScene scene = BoardScenes.pavedMapScene(2);
         Coords first = new Coords(4, 11), last = new Coords(10, 14);
         Vector3 a = moved(new BoardSurface(scene, scene.tile(first)), first, 2);
         Vector3 b = moved(new BoardSurface(scene, scene.tile(last)), last, 0);
@@ -655,7 +655,7 @@ class BoardConcreteShoreTest {
     @Test
     void fittedAeroBasesKeepTerrainCentresAndUnfoldedMeshes() {
         for (int number : new int[] { 1, 2 }) {
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(number);
+            BoardScene scene = BoardScenes.pavedMapScene(number);
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
                 assertUnfolded(surface, "AeroBase " + number + " " + tile.coords());
@@ -747,7 +747,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void concreteQuayWallsContinueVerticallyToTheBedBesideBuildingsAtEveryDetail() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.quayScene(BoardScene.Surface.CONCRETE);
+        BoardScene scene = BoardScenes.quayScene(BoardScene.Surface.CONCRETE);
         for (TerrainLod lod : TerrainLod.values()) {
             for (int y = 4; y <= 7; y++) {
                 BoardSurface water = new BoardSurface(scene, scene.tile(new Coords(3, y)), lod);
@@ -883,7 +883,7 @@ class BoardConcreteShoreTest {
     }
 
     private static BoardScene aeroBaseAtElevation(int elevation) {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         if (elevation == 0) { return scene; }
         return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
               tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
@@ -989,5 +989,80 @@ class BoardConcreteShoreTest {
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @ParameterizedTest(name = "quay {0}")
+    @ValueSource(strings = { "Templates/SeaPort.board", "Map Set 7/16x17 Seaport.board" })
+    void seaportQuayPanelsStayClosedAndFaceTheWater(String path) throws Exception {
+        BoardScene scene = BoardScenes.capturedScene(path);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<BoardScenes.Segment, Integer> joined = new HashMap<>();
+            Map<Coords, List<BoardSurface.Face>> quays = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                var surface = new BoardSurface(scene, tile, lod);
+                BoardScenes.countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                BoardScenes.countEdges(joined, walls);
+                if (!tile.liquid().present() && tile.surface() == BoardScene.Surface.CONCRETE) {
+                    for (var face : walls) {
+                        if (face.landEdge() < 0) { continue; }
+                        var water = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                        if (water == null || !water.liquid().present()) { continue; }
+                        for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(vertex.z >= water.elevation() * BoardGeometry.level() - .001f,
+                                  "Only the basin owns the submerged quay: " + tile.coords() + " beside " + water.coords()
+                                        + ", " + lod + ": " + vertex);
+                        }
+                    }
+                }
+                if (!tile.liquid().present()) { continue; }
+                List<BoardSurface.Face> panels = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.WALL
+                      && face.landEdge() >= 0 && BoardConcrete.concreteBank(scene, tile, face.landEdge())).toList();
+                if (!panels.isEmpty()) {
+                    quays.put(tile.coords(), panels);
+                    BoardScenes.checkSubmergedShading(surface);
+                }
+                Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                for (var face : panels) {
+                    for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(BoardRelief.Kind.SUBMERGED_CLIFF, surface.relief.shade(vertex).kind(),
+                              "The complete panel keeps underwater shading at " + tile.coords() + ", " + lod);
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    Vector3 towardWater = new Vector3(center).sub(face.a());
+                    towardWater.z = 0;
+                    assertTrue(normal.dot(towardWater) > 0,
+                          "Quay panel faces the water at " + tile.coords() + ", " + lod + ": " + face);
+                }
+            }
+            assertFalse(quays.isEmpty());
+            for (var quay : quays.entrySet()) {
+                Map<BoardScenes.Segment, Integer> boundary = new HashMap<>();
+                BoardScenes.countEdges(boundary, quay.getValue());
+                BoardScenes.assertJoined(boundary, joined, "SeaPort quay " + quay.getKey() + ", " + lod);
+            }
+        }
+    }
+
+    @Test
+    void seaportApronFitsBothSides() throws Exception {
+        BoardScene scene = BoardScenes.capturedScene("Map Set 7/16x17 Seaport.board");
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Vector3 a = shape.corner(new Coords(2, 1), 3), b = shape.corner(new Coords(5, 2), 5);
+        Vector3 along = new Vector3(b).sub(a).nor();
+        Vector3 back = shape.corner(new Coords(2, 1), 2);
+        for (int x = 2; x <= 5; x++) {
+            Coords coords = new Coords(x, x / 2);
+            for (int k = 3; k <= 5; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(a);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The northwest quay stays straight beside inland buildings: " + coords + " corner " + k);
+            }
+            for (int k = 0; k <= 2; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(back);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The inland side stays straight and parallel to the quay: " + coords + " corner " + k);
+            }
+        }
     }
 }

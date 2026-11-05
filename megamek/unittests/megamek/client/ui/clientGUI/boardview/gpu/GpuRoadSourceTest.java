@@ -82,7 +82,7 @@ class GpuRoadSourceTest {
 
     @Test
     void neighbouringSlabSidesKeepTheirSourcePositionAndStopAtTheReceivingHex() {
-        var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, 9, 0,
+        var scene = BoardScenes.scene(at -> BoardScenes.tile(at, BoardRoad.Kind.PAVED, 9, 0,
               BoardScene.Surface.GRASS));
         var source = scene.tile(new Coords(3, 3));
         var road = BoardRoad.of(scene, source);

@@ -106,7 +106,7 @@ class BoardObstaclesTest {
                           t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
                           t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(),
                           new RailRoute.Corridor(exits, exits, 0));
-                    scene = BoardBridgeMaterialsTest.replace(scene, tile);
+                    scene = BoardScenes.replace(scene, tile);
                 }
                 for (var owner : List.of(at, bankAt)) {
                     var obstacles = new BoardObstacles(scene, scene.tile(owner));
@@ -145,7 +145,7 @@ class BoardObstaclesTest {
         var bankAt = at.translated(3);
         var base = BoardBridgeSlopeTest.lowerBank(at, 3, false);
         var natural = BoardBridgeTypeTest.typed(base, HexAppearance.NATURAL_BRIDGE);
-        var high = BoardBridgeMaterialsTest.replace(base, BoardBridgeSlopeTest.bridge(at, -1, 3, 9));
+        var high = BoardScenes.replace(base, BoardBridgeSlopeTest.bridge(at, -1, 3, 9));
         var root = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(bankAt, 0), .8f);
         for (var scene : List.of(natural, high)) {
             assertFalse(new BoardObstacles(scene, scene.tile(bankAt)).obstructs(root, .1f, 1),

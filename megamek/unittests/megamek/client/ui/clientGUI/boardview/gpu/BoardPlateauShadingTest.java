@@ -19,7 +19,7 @@ class BoardPlateauShadingTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void boxCanyonNarrowNeckStaysSharedWithoutFolding(TerrainLod detail) {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+        var scene = BoardScenes.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
         var north = new BoardSurface(scene, scene.tile(new Coords(14, 13)), detail).relief;
         var south = new BoardSurface(scene, scene.tile(new Coords(14, 14)), detail).relief;
         Vector3 start = south.seam(1, 1, 0), end = south.seam(1, 1, 1);
@@ -40,7 +40,7 @@ class BoardPlateauShadingTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void boxCanyonKeepsCliffLightingNearTheRim(TerrainLod detail) {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+        var scene = BoardScenes.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
         for (Coords at : List.of(new Coords(13, 1), new Coords(12, 1), new Coords(11, 12), new Coords(14, 13),
               new Coords(14, 14))) {
             var tile = scene.tile(at);

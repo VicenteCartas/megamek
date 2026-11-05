@@ -35,7 +35,7 @@ class GpuGroundDamageSmokeTest {
     @Test
     void naturalWearAndCombatScarsHaveIndependentControls() throws Exception {
         Board board = BoardFile.loadSheet(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"), false, true);
-        BoardScene scene = BoardAridSurfaceTest.capture(board);
+        BoardScene scene = BoardScenes.capture(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1440, 1080);
@@ -274,7 +274,7 @@ class GpuGroundDamageSmokeTest {
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             board.setHex(new Coords(x, y), new Hex(0, "", "grass"));
         }
-        var scene = BoardAridSurfaceTest.capture(board);
+        var scene = BoardScenes.capture(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1200, 900);

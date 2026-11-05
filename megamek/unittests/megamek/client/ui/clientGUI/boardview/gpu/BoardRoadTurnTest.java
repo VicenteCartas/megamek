@@ -52,7 +52,7 @@ class BoardRoadTurnTest {
 
     @Test
     void solidDividersStartOnBothConnectedApproachesBeforeEveryBend() {
-        var at = BoardRoadTest.CENTER;
+        var at = BoardScenes.CENTER;
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) != 2 || (exits & (exits >> 3)) != 0) { continue; }
             Map<Coords, Integer> masks = new HashMap<>();
@@ -60,7 +60,7 @@ class BoardRoadTurnTest {
             for (int d = 0; d < 6; d++) {
                 if ((exits & 1 << d) != 0) { masks.put(at.translated(d), (1 << d) | (1 << ((d + 3) % 6))); }
             }
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   masks.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   masks.getOrDefault(c, 0), 0, BoardScene.Surface.GRASS));
             for (int d = 0; d < 6; d++) {
@@ -84,7 +84,7 @@ class BoardRoadTurnTest {
         }
         // A nearby turn which does not connect back cannot change the divider of this straight road.
         var next = at.translated(0);
-        var unjoined = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        var unjoined = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(at) || c.equals(next) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
               c.equals(at) ? 9 : c.equals(next) ? 5 : 0, 0, BoardScene.Surface.GRASS));
         var plain = BoardRoad.layout(at, 9, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED).markings(at, 9);
@@ -98,7 +98,7 @@ class BoardRoadTurnTest {
         var file = new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         var board = new Board();
         board.load(file);
-        var scene = BoardCliffSeamTest.scene(file);
+        var scene = BoardScenes.scene(file);
         for (var tile : scene.tiles()) {
             if (!BoardRoad.rendered(tile)) { continue; }
             var at = tile.coords();
@@ -178,7 +178,7 @@ class BoardRoadTurnTest {
         var file = new File("data/boards/unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board");
         var board = new Board();
         board.load(file);
-        var scene = BoardCliffSeamTest.scene(file);
+        var scene = BoardScenes.scene(file);
         var at = new Coords(26, 21);
         assertEquals(3, scene.tile(at).roadExits());
         var road = BoardRoad.of(scene, scene.tile(at));

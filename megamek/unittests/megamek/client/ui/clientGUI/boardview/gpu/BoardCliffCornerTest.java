@@ -18,7 +18,7 @@ class BoardCliffCornerTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void domeVentCliffsRoundAboveTheDescendingLavaWithoutMovingItsContacts(TerrainLod lod) {
-        BoardScene scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        BoardScene scene = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
         for (Coords at : List.of(new Coords(12, 11), new Coords(13, 11))) {
             var surface = new BoardSurface(scene, scene.tile(at), lod);
             var walls = surface.walls(scene, BoardGeometry.floor(scene));

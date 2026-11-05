@@ -67,7 +67,7 @@ class GpuInfantryPlateauSmokeTest {
                         view.render();
                         view.boardCamera.advance(BoardCamera.ENTRANCE_SECONDS);
                         for (boolean cliffs : new boolean[] { false, true }) {
-                            BoardWetCliffTest.tune(cliffs);
+                            BoardScenes.tune(cliffs);
                             view.boardCamera.setIsometric(true);
                             view.boardCamera.camera.zoom = .16f;
                             view.boardCamera.center(BoardGeometry.center(new Coords(8, 14), 0));

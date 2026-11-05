@@ -70,7 +70,7 @@ class BoardTransitionsTest {
                 BoardScene scene = scene(step, family, true);
                 for (float padding : new float[] { 4, BoardGeometry.MAX_PADDING }) {
                     String name = family + " " + step + " levels, padding " + padding;
-                    BoardSculptTest.withPadding(padding, () -> {
+                    BoardScenes.withPadding(padding, () -> {
                         float rim = reach(scene, HIGH, true), foot = reach(scene, LOW, false), room = padding / 2;
                         assertTrue(rim < -room + 1.5f && rim > -room - 1.5f,
                               name + ": the rim stands back by half the padding, " + rim);
@@ -89,9 +89,9 @@ class BoardTransitionsTest {
             for (int step : new int[] { 1, 2, 3, 5 }) {
                 BoardScene scene = scene(step, family, true);
                 String name = family + " " + step + " levels";
-                BoardSculptTest.withTransitions(false, () -> assertTrue(reach(scene, HIGH, true) > -1.5f,
+                BoardScenes.withTransitions(false, () -> assertTrue(reach(scene, HIGH, true) > -1.5f,
                       name + ": without transitions the rim follows the edge"));
-                BoardSculptTest.withTransitions(true, () -> {
+                BoardScenes.withTransitions(true, () -> {
                     float rim = reach(scene, HIGH, true), foot = reach(scene, LOW, false);
                     // Dry cliffs retain wider plateau tops than gentle one/two-level slopes.
                     float room = BoardRelief.TRANSITION * (step >= 3 ? .6f : 1);
@@ -104,7 +104,7 @@ class BoardTransitionsTest {
 
     @Test
     void pavedCliffsAndSpecialArtworkKeepTheirOutline() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             // One/two-level concrete drops form fitted slopes; taller poured cliffs keep a vertical rim.
             BoardScene paving = scene(3, BoardScene.Surface.CONCRETE, true);
             assertTrue(reach(paving, HIGH, true) > -1.5f, "A paved cliff rim stays on its edge");
@@ -116,7 +116,7 @@ class BoardTransitionsTest {
 
     @Test
     void featuresSettleOnTheirOwnTop() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene scene = scene(2, BoardScene.Surface.GRASS, true);
             BoardSurface surface = new BoardSurface(scene, scene.tile(HIGH));
             Vector3[] edge = edge();
@@ -134,7 +134,7 @@ class BoardTransitionsTest {
 
     @Test
     void aSlopeIsPickedAsTheHexWhoseFootprintHoldsIt() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene scene = scene(1, BoardScene.Surface.GRASS, true);
             Vector3[] edge = edge();
             Vector3 middle = new Vector3(edge[0]).lerp(edge[1], .5f);

@@ -21,7 +21,7 @@ class BoardMagmaBedTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3, 4 })
     void lavaSurfaceAndSupportShareASparseBasinWithoutExposedBedWedges(int map) {
-        BoardScene scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent " + map + ".board"));
+        BoardScene scene = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent " + map + ".board"));
         int totalBed = 0;
         for (var tile : scene.tiles()) {
             if (!tile.liquid().molten()) { continue; }
@@ -66,7 +66,7 @@ class BoardMagmaBedTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 2, 3, 4 })
     void omittedLavaBedIsHiddenWhileCanonicalGroundRemainsAvailable(int map) {
-        BoardScene scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent " + map + ".board"));
+        BoardScene scene = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent " + map + ".board"));
         int omitted = 0, retained = 0;
         for (var tile : scene.tiles()) {
             if (!tile.liquid().molten()) { continue; }
@@ -98,10 +98,10 @@ class BoardMagmaBedTest {
     @Test
     void openMoltenHexUsesSixTrianglesForItsSurfaceAndCanonicalSupport() {
         BoardLiquid lava = new BoardLiquid(BoardLiquid.Kind.MAGMA, "", 0);
-        BoardScene scene = BoardSurfaceBlendTest.scene(at -> new BoardScene.Tile(at, 0, 0, false, 0,
+        BoardScene scene = BoardScenes.scene(at -> new BoardScene.Tile(at, 0, 0, false, 0,
               BoardScene.Surface.ROCK, null, null, List.of(), List.of(), lava, null, true));
         for (TerrainLod lod : TerrainLod.values()) {
-            BoardSurface surface = new BoardSurface(scene, scene.tile(BoardSurfaceBlendTest.CENTER), lod);
+            BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.CENTER), lod);
             assertEquals(6, surface.waterFaces.size());
             assertEquals(6, bed(surface).size(), "The canonical mesh must also be sparse");
             assertTrue(surface.renderBed(bed(surface)).isEmpty(), "Opaque lava covers the entire matching bed");
@@ -111,7 +111,7 @@ class BoardMagmaBedTest {
     @Test
     void descendingDomeVentLavaDoesNotCreateAnInternalOccludingLip() {
         GdxNativesLoader.load();
-        BoardScene scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        BoardScene scene = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
         Coords at = new Coords(15, 13);
         BoardSurface surface = new BoardSurface(scene, scene.tile(at));
         var camera = new BoardCamera();
@@ -142,18 +142,6 @@ class BoardMagmaBedTest {
                       "The sparse flow must not hide a section of itself behind an artificial angular lip");
             }
             previous = point;
-        }
-    }
-
-    @Test
-    void transparentWaterKeepsItsVisibleBed() {
-        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
-        BoardScene scene = BoardWaterfallTest.withWater(lava);
-        for (var tile : scene.tiles()) {
-            if (!tile.liquid().present()) { continue; }
-            BoardSurface surface = new BoardSurface(scene, tile);
-            List<BoardSurface.Face> canonical = bed(surface);
-            assertEquals(canonical, surface.renderBed(canonical));
         }
     }
 

@@ -101,8 +101,8 @@ class GpuIndustrialSmokeTest {
     }
 
     private static BoardScene scene(int height, boolean neighbor) {
-        return BoardSurfaceBlendTest.scene(coords -> {
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+        return BoardScenes.scene(coords -> {
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             int index = SITES.indexOf(coords);
             if (!neighbor && index == 1) { index = -1; }
             Hex hex = new Hex(0);

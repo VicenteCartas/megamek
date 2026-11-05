@@ -241,7 +241,7 @@ class GpuContainerYardSmokeTest {
             String content = Files.readString(file.toPath(), StandardCharsets.ISO_8859_1);
             if (!content.contains("fluff:80:") && !content.contains("fluff:81:")) { continue; }
             Board sheet = BoardFile.loadSheet(file, false, true);
-            BoardScene scene = GpuLegacyImportSmokeTest.scene(sheet);
+            BoardScene scene = BoardScenes.scene(sheet);
             var pinned = BoardConcrete.of(scene).fit().pinned();
             long yards = pinned.stream().filter(at -> BoardSceneryLayouts.skin(sheet.getHex(at)) != null).count();
             if (yards > 0) {

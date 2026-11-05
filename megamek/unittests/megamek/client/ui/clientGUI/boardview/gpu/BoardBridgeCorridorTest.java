@@ -30,8 +30,8 @@ class BoardBridgeCorridorTest {
                   + (rail ? ";bridge_rail:1:32" : ""), "");
             var tile = BoardBridgeMaterialsTest.withDeckRoad(BoardBridgeSlopeTest.bridge(AT, 0, 2, 63),
                   BoardRoad.Kind.PAVED, 31).withFeatures(BoardFeatures.capture(hex, AT, Map.of()));
-            var scene = BoardSurfaceBlendTest.scene(at -> at.equals(AT) ? tile
-                  : BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
+            var scene = BoardScenes.scene(at -> at.equals(AT) ? tile
+                  : BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
             var deck = BoardBridge.deck(scene, tile);
             assertEquals(0, deck.corridor().sides(), "The independent rail has no shared road approach");
             assertEquals(rail, deck.road(AT).footprint(0).contains(0, 0),

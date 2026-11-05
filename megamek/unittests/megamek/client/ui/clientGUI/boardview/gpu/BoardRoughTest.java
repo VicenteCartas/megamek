@@ -256,4 +256,91 @@ class BoardRoughTest {
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
     }
+
+    @Test
+    void roughUsesEngineGroundAndStableBouldersOfTheLocalGeology() {
+        Coords coords = new Coords(2, 2);
+        for (var family : BoardScene.Surface.values()) {
+            Hex hex = BoardScenes.roughHex(family, 1);
+            assertEquals(family == BoardScene.Surface.SAND ? BoardScene.Surface.GRASS : family,
+                  BoardFeatures.surface(hex), "Gameplay sand is cover over its theme, not a replacement geology");
+            assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Rough artwork is replaced by the terrain engine");
+            var features = BoardFeatures.capture(hex, coords, Map.of());
+            assertEquals(9, features.size());
+            assertTrue(features.stream().allMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER));
+            assertEquals(features, BoardFeatures.capture(hex, coords, Map.of()));
+            hex.addTerrain(new Terrain(Terrains.ROUGH, 2));
+            assertTrue(BoardFeatures.capture(hex, coords, Map.of()).size() > features.size(), "Ultra rough has more cover");
+            hex.addTerrain(new Terrain(Terrains.WOODS, 1));
+            var wooded = BoardFeatures.capture(hex, coords, Map.of());
+            assertTrue(wooded.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.TREE),
+                  "Rough coexists with the theme's woods, whose species/count are captured independently");
+            assertEquals(18, wooded.stream().filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).count());
+            hex.removeTerrain(Terrains.ROUGH);
+            assertTrue(BoardFeatures.capture(hex, coords, Map.of()).stream()
+                  .noneMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER), "Terrain edits remove the rocks");
+        }
+    }
+
+    @Test
+    void roughBouldersCoverTheCentreAndMergeIntoTheFinishedSlopes() {
+        for (var family : BoardScene.Surface.values()) {
+            for (int elevation : new int[] { -3, -1, 0, 1, 3 }) {
+                BoardScene scene = BoardScenes.isolatedRough(family, elevation);
+                var tile = scene.tile(new Coords(2, 2));
+                BoardSurface surface = new BoardSurface(scene, tile);
+                List<BoardSurface.Face> ground = new ArrayList<>(surface.groundFaces());
+                for (var other : scene.tiles()) {
+                    var neighbor = new BoardSurface(scene, other);
+                    ground.addAll(neighbor.groundFaces());
+                    ground.addAll(neighbor.walls(scene, BoardGeometry.floor(scene)));
+                }
+                ground.removeIf(f -> f.finish() == BoardSurface.Finish.OUTCROP || f.finish() == BoardSurface.Finish.DRESSING);
+                var rocks = surface.rough;
+                assertFalse(rocks.isEmpty(), "Rough must generate real rock geometry for " + family);
+                Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                int buried = 0, exposed = 0;
+                for (var face : rocks) {
+                    assertEquals(family, surface.family(face));
+                    for (var p : List.of(face.a(), face.b(), face.c())) {
+                        assertNotNull(surface.relief.shade(p), "Rocks use the terrain shader's local geology");
+                        float z = BoardSurface.sampleHeight(ground, p.x, p.y, Float.NaN);
+                        assertTrue(Float.isFinite(z), "The whole rock footprint has ground below it");
+                        if (p.z < z) { buried++; } else { exposed++; }
+                    }
+                }
+                assertTrue(buried > 0 && exposed > 0, "Rocks emerge from the terrain instead of floating above it");
+                assertTrue(surface.height(center.x, center.y) > center.z + BoardGeometry.HEX_SCALE,
+                      "Rough covers the centre even on an isolated high or low tile: " + family + " " + elevation);
+                int visible = 0, outer = 0;
+                for (var feature : tile.features()) {
+                    float x = center.x + feature.x() * BoardGeometry.HEX_SCALE;
+                    float y = center.y + feature.y() * BoardGeometry.HEX_SCALE;
+                    float rock = BoardSurface.sampleHeight(rocks, x, y, Float.NEGATIVE_INFINITY);
+                    if (rock > BoardSurface.sampleHeight(ground, x, y, center.z) + .1f * BoardGeometry.HEX_SCALE) {
+                        visible++;
+                        if (Math.hypot(feature.x(), feature.y()) > 20) { outer++; }
+                    }
+                }
+                assertTrue(visible >= 7, family + " " + elevation + " lost Rough cover: " + visible);
+                assertTrue(outer >= 3, "Rough must remain on the slopes and their feet: " + family + " " + elevation);
+                assertEquals(center.z, UnitLandingSupports.terrain(scene, center.x, center.y, new BoardSurface.Cache()), .01f,
+                      "Vehicles use the ground beneath the Rough");
+                assertEquals(surface.faces, new BoardSurface(scene, tile).faces, "Rebuilding never reshuffles the rocks");
+            }
+        }
+    }
+
+    @Test
+    void roughKeepsRoadExitsAndBuildingFoundationsClear() {
+        Coords coords = new Coords(2, 2);
+        Hex hex = BoardScenes.roughHex(BoardScene.Surface.GRASS, 2);
+        hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, 9));
+        for (var rock : BoardFeatures.capture(hex, coords, Map.of())) {
+            assertTrue(Math.abs(rock.x()) >= 9 + 6 * rock.scale(), "North/south road clearance includes rock width");
+        }
+        hex.addTerrain(new Terrain(Terrains.BUILDING, 1));
+        assertTrue(BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building")).stream()
+              .noneMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER));
+    }
 }

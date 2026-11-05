@@ -107,7 +107,7 @@ class BoardBridgeMaterialsTest {
         var at = new Coords(4, 4);
         var scene = BoardBridgeTypeTest.typed(straight(at, 0, 1, BoardRoad.Kind.NONE,
               BoardRoad.Kind.NONE, BoardRoad.Kind.NONE), HexAppearance.NATURAL_BRIDGE);
-        scene = replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.DIRT, 1));
+        scene = BoardScenes.replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.DIRT, 1));
         var deck = BoardBridge.deck(scene, scene.tile(at));
         var patches = GpuRoads.deckPatches(scene.tile(at), deck, deck.road(at));
         // The ground's dirt track (-5, not a built deck's closed -6) frays into loose shoulders in the shader.
@@ -120,7 +120,7 @@ class BoardBridgeMaterialsTest {
     @Test
     void groundAndDeckRoadPaintUseTheirOwnAppearanceWithoutRepaintingOtherCoats() {
         var at = new Coords(4, 4);
-        var tile = BoardBridgeTypeTest.appearance(BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, 9,
+        var tile = BoardBridgeTypeTest.appearance(BoardScenes.tile(at, BoardRoad.Kind.PAVED, 9,
               0, BoardScene.Surface.GRASS), Map.of("road", new HexAppearance(null, null, "gravel", null),
                     "bridgeRoad", new HexAppearance(null, null, "dirt", null)));
         tile = withDeckRoad(tile, BoardRoad.Kind.PAVED, 9);
@@ -135,7 +135,7 @@ class BoardBridgeMaterialsTest {
     void aDeckRoadIsPaintedOnItsOwnSidesOverTheWholeSlab() {
         var at = new Coords(4, 4);
         var scene = straight(at, 0, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
-        scene = replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.PAVED, 1));
+        scene = BoardScenes.replace(scene, withDeckRoad(scene.tile(at), BoardRoad.Kind.PAVED, 1));
         var deck = BoardBridge.deck(scene, scene.tile(at));
         assertFalse(deck.paved(), "Half a deck painted is half road");
         float[] north = megamek.common.board.RailRoute.border(0), south = megamek.common.board.RailRoute.border(3);
@@ -164,15 +164,15 @@ class BoardBridgeMaterialsTest {
                   BoardLiquid.WATER, null, true, BoardRoad.Kind.NONE), deck, deck == BoardRoad.Kind.NONE ? 0 : exits));
         }
         Coords entrance = start.translated((direction + 3) % 6), exit = start.translated(direction, length);
-        route.put(entrance, BoardRoadTest.tile(entrance, before, before == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
-        route.put(exit, BoardRoadTest.tile(exit, after, after == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
+        route.put(entrance, BoardScenes.tile(entrance, before, before == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
+        route.put(exit, BoardScenes.tile(exit, after, after == BoardRoad.Kind.NONE ? 0 : exits, 0, BoardScene.Surface.GRASS));
         int width = Math.max(9, route.keySet().stream().mapToInt(Coords::getX).max().orElseThrow() + 2);
         int height = Math.max(9, route.keySet().stream().mapToInt(Coords::getY).max().orElseThrow() + 2);
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 var at = new Coords(x, y);
-                tiles.add(route.getOrDefault(at, BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
+                tiles.add(route.getOrDefault(at, BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS)));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
@@ -185,11 +185,5 @@ class BoardBridgeMaterialsTest {
               t.tileset(), t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(),
               t.cliffTopExits(), t.bare(), t.groundCover(), t.ultraSublevel(), t.tilesetDecals(),
               t.tilesetScenery(), t.appearance(), t.cover(), t.barren(), kind, exits, t.deckMud(), t.railBed());
-    }
-
-    static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {
-        var tiles = new ArrayList<>(scene.tiles());
-        tiles.set(tile.coords().getX() * scene.height() + tile.coords().getY(), tile);
-        return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 }

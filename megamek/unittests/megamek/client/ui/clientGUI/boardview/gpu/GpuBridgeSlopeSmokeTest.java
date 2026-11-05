@@ -93,10 +93,10 @@ class GpuBridgeSlopeSmokeTest {
                     for (int levelHeight : new int[] { 18, 30 }) {
                         BoardGeometry.tune(new BoardGeometry.Tuning(1, 1, 1, levelHeight, previous.gridShade()));
                         for (int roadLevel : new int[] { 0, 2 }) {
-                            var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> {
+                            var scene = BoardBridgeTypeTest.typed(BoardScenes.scene(c -> {
                                 if (c.equals(at)) { return BoardBridgeSlopeTest.bridge(c, -1, 2, 9); }
                                 boolean approach = c.equals(at.translated(0)) || c.equals(at.translated(3));
-                                return BoardRoadTest.tile(c, approach ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                                return BoardScenes.tile(c, approach ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                                       approach ? 9 : 0, approach ? roadLevel : -1, BoardScene.Surface.ROCK);
                             }), HexAppearance.TRUSS);
                             var terrain = new GpuTerrain();
@@ -165,7 +165,7 @@ class GpuBridgeSlopeSmokeTest {
                         var p = BoardGeometry.center(at, 2).lerp(BoardGeometry.center(at.translated(3), 2), .4f);
                         float height = 1.7f * BoardGeometry.level() + lift;
                         assertPick(terrain, scene, at, p, height);
-                        var edited = BoardNaturalBridgeTest.replace(scene,
+                        var edited = BoardScenes.replace(scene,
                               BoardBridgeSlopeTest.bridge(at.translated(3), -2, 6, 9));
                         terrain.update(edited);
                         GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);

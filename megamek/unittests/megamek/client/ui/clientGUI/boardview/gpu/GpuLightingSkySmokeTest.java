@@ -34,7 +34,7 @@ class GpuLightingSkySmokeTest {
         Files.createDirectories(OUTPUT.toPath());
         var panorama = GpuLightingEnvironment.load(GpuLightingControlsTest.constantPng(directory.resolve("red.png"),
               0xC02020));
-        BoardScene scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(960, 640);

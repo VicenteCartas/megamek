@@ -20,8 +20,8 @@ class BoardCliffWidthTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void boxCanyonKeepsContinuousRidgeConnections(TerrainLod lod) {
-        BoardSculptTest.withTransitions(true, () -> {
-            var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
+        BoardScenes.withTransitions(true, () -> {
+            var scene = BoardScenes.scene(new File("data/boards/Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
             Map<Coords, BoardSurface> surfaces = new HashMap<>();
             int checked = 0;
             for (var tile : scene.tiles()) {
@@ -43,7 +43,7 @@ class BoardCliffWidthTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void dryCliffsKeepRidgesAcrossMaterialsAndDirections(TerrainLod lod) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             Coords start = new Coords(3, 3);
             for (var family : BoardScene.Surface.values()) {
                 for (int direction = 0; direction < 6; direction++) {

@@ -55,7 +55,7 @@ class GpuTilesetTerrainTest {
 
     @Test
     void gradedClassicArtworkUsesSlopeNormalsWhileFlatTopsStayUpward() {
-        var tile = BoardRoadTest.tile(CENTER, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS);
+        var tile = BoardScenes.tile(CENTER, BoardRoad.Kind.PAVED, 9, 0, BoardScene.Surface.GRASS);
         for (float rise : new float[] { 0, 1, 4 }) {
             var a = new Vector3(0, 0, 0); var b = new Vector3(1, 0, rise);
             var c = new Vector3(1, 1, rise); var d = new Vector3(0, 1, 0);
@@ -87,7 +87,7 @@ class GpuTilesetTerrainTest {
 
     @Test
     void classicQuaysKeepTheirNominalHexFootprintAndPicking() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
+        BoardScene scene = BoardScenes.dockScene();
         float floor = BoardGeometry.floor(scene);
         for (int y = 2; y <= 5; y++) {
             Coords at = new Coords(10, y);
@@ -187,11 +187,11 @@ class GpuTilesetTerrainTest {
 
     @Test
     void threeLevelRoadClimbDoesNotReshapeItsMiddleLevelClassicBank() {
-        var lower = BoardRoadTest.CENTER;
+        var lower = BoardScenes.CENTER;
         var upper = lower.translated(0);
         var bank = lower.translated(1);
         for (int level : new int[] { 1, 2 }) {
-            var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at,
+            var scene = BoardScenes.scene(at -> BoardScenes.tile(at,
                   at.equals(lower) || at.equals(upper) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   at.equals(lower) ? 1 : at.equals(upper) ? 8 : 0,
                   at.equals(lower) ? 0 : at.equals(upper) ? 3 : level, BoardScene.Surface.GRASS));
@@ -357,8 +357,8 @@ class GpuTilesetTerrainTest {
 
     @Test
     void classicWaterRetainsFullHexCoverageBesideEveryQuayMaterial() {
-        for (var scene : List.of(GpuRiverTerrainSmokeTest.dockScene(),
-              GpuRiverTerrainSmokeTest.quayScene(BoardScene.Surface.GRASS))) {
+        for (var scene : List.of(BoardScenes.dockScene(),
+              BoardScenes.quayScene(BoardScene.Surface.GRASS))) {
             float floor = BoardGeometry.floor(scene);
             for (var tile : scene.tiles()) {
                 if (!tile.liquid().present() || tile.frozen()) { continue; }

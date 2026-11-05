@@ -162,7 +162,7 @@ class GpuWideBridgeSmokeTest {
                 board.setHex(x, y, hex);
             }
         }
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         if (variant.rail()) {
             var corridor = scene.tile(variant.ramp()).deckCorridor();
             assertEquals(variant.exits(), corridor.sides(), "The fixture contains a shared deck corridor");

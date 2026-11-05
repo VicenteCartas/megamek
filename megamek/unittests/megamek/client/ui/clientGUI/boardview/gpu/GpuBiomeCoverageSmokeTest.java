@@ -74,7 +74,7 @@ class GpuBiomeCoverageSmokeTest {
                   BoardScene.Biome.MUD, BoardScene.Biome.TUNDRA)) {
                 for (int mode = 0; mode < 6; mode++) {
                     int fixture = mode;
-                    var scene = BoardSurfaceBlendTest.scene(c -> tile(c, biome, fixture));
+                    var scene = BoardScenes.scene(c -> tile(c, biome, fixture));
                     mask.update(scene);
                     var member = GpuBiomeSurface.class.getDeclaredField("pixels");
                     member.setAccessible(true);

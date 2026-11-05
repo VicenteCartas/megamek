@@ -75,7 +75,7 @@ class BoardBedLodTest {
 
     @Test
     void seaportBedsKeepShoreContactsAndDepthWithSparseFloors() {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/unofficial/Unknown/seaportwithfueltanks.board"));
+        var scene = BoardScenes.scene(new File("data/boards/unofficial/Unknown/seaportwithfueltanks.board"));
         int triangles = 0;
         for (var tile : scene.tiles()) {
             if (!tile.liquid().present()) { continue; }
@@ -162,5 +162,35 @@ class BoardBedLodTest {
             }
         }
         return new BoardScene(0, 10, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
+    void shoreBasinsKeepSparseUpwardGeometry() {
+        for (boolean mouths : new boolean[] { false, true }) {
+            var scene = BoardScenes.shores(1, mouths);
+            var surface = new BoardSurface(scene, scene.tile(BoardScenes.WATER));
+            for (var finish : List.of(BoardSurface.Finish.TOP, BoardSurface.Finish.BED)) {
+                var faces = surface.faces.stream().filter(f -> f.finish() == finish).toList();
+                assertTrue(!faces.isEmpty() && faces.size() <= (finish == BoardSurface.Finish.TOP ? 250 : 360),
+                      "Keep the curved bank outline without unnecessary interior rings: " + finish + " " + faces.size());
+                for (var face : faces) {
+                    assertTrue(new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).z >= -.001f,
+                          "Shore and bed triangles must not fold (vertical shore ends are allowed): " + face);
+                }
+                System.out.printf("MESH shore mouths=%s %s=%d%n", mouths, finish, faces.size());
+            }
+        }
+    }
+
+    @Test
+    void transparentWaterKeepsItsVisibleBed() {
+        BoardScene lava = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        BoardScene scene = BoardWaterfallTest.withWater(lava);
+        for (var tile : scene.tiles()) {
+            if (!tile.liquid().present()) { continue; }
+            BoardSurface surface = new BoardSurface(scene, tile);
+            List<BoardSurface.Face> canonical = bed(surface);
+            assertEquals(canonical, surface.renderBed(canonical));
+        }
     }
 }

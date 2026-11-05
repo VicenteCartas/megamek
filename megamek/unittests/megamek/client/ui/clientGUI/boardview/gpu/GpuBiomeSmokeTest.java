@@ -52,7 +52,7 @@ class GpuBiomeSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 int maskHandle = 0, sedgeHandle = 0;
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
@@ -214,7 +214,7 @@ class GpuBiomeSmokeTest {
                         GpuReviewFrame.save(new File(output, "MARSH-terrain-" + lod + ".png"));
                         for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
                             for (boolean upper : new boolean[] { false, true }) {
-                                var slope = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                                var slope = BoardScenes.scene(c -> BoardScenes.tile(c,
                                       (c.getY() < 4) == upper ? kind : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0));
                                 camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                                 settle(terrain, plants, frame, camera, slope);
@@ -252,7 +252,7 @@ class GpuBiomeSmokeTest {
                             }
                         }
                     }
-                    var contacts = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                    var contacts = BoardScenes.scene(c -> BoardScenes.tile(c,
                           c.getX() < 4 ? BoardScene.Biome.MARSH
                                 : c.getY() < 4 ? BoardScene.Biome.FIELD : BoardScene.Biome.MUD, 0));
                     camera.camera.zoom = .12f;
@@ -330,7 +330,7 @@ class GpuBiomeSmokeTest {
     }
 
     private static BoardScene scene(BoardScene.Biome kind) {
-        return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5 ? kind : BoardScene.Biome.NONE, 0));
     }
 
@@ -473,8 +473,8 @@ class GpuBiomeSmokeTest {
     }
 
     private static BoardScene shoreline(BoardScene.Biome kind, int depth) {
-        return BoardSurfaceBlendTest.scene(c -> c.getX() < 4
-              ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, depth, 0) : BoardBiomeTest.tile(c, kind, 0));
+        return BoardScenes.scene(c -> c.getX() < 4
+              ? BoardScenes.tile(c, BoardScene.Surface.DIRT, 0, depth, 0) : BoardScenes.tile(c, kind, 0));
     }
 
     private static int changed(Pixmap before) {

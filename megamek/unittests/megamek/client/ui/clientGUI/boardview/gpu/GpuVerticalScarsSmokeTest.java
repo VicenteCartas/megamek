@@ -273,7 +273,7 @@ class GpuVerticalScarsSmokeTest {
         for (int x = 0; x < 7; x++) for (int y = 0; y < 7; y++) { board.setHex(new Coords(x, y), new Hex(0)); }
         var at = new Coords(3, 3);
         board.setHex(at, new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", ""));
-        var scene = BoardAridSurfaceTest.capture(board);
+        var scene = BoardScenes.capture(board);
         var terrain = new GpuTerrain();
         var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
               BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));

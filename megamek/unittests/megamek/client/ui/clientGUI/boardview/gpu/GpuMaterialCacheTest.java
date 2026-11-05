@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Test;
 class GpuMaterialCacheTest {
     @Test
     void dryAndUnderwaterBoardCutsFitAtEveryEdgeAndDetail() {
-        var dry = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 2, -1, 0));
-        var wet = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, -2, 2, 0));
+        var dry = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 2, -1, 0));
+        var wet = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, -2, 2, 0));
         for (var scene : List.of(dry, wet)) {
             float floor = BoardGeometry.floor(scene);
             int directions = 0;
@@ -52,7 +52,7 @@ class GpuMaterialCacheTest {
 
     @Test
     void materialBlendedCutsKeepTheirProjectionAndFitTheSameCharts() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getY() < 4 ? BoardScene.Surface.GRASS : BoardScene.Surface.DIRT, 0, -1, 0));
         var at = new Coords(0, 3);
         var tile = scene.tile(at);
@@ -77,8 +77,8 @@ class GpuMaterialCacheTest {
 
     @Test
     void pouredAndMuddyCutsRemainDirect() {
-        var concrete = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.CONCRETE, 0, -1, 0));
-        var mud = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.MUD, 0));
+        var concrete = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.CONCRETE, 0, -1, 0));
+        var mud = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MUD, 0));
         for (var scene : List.of(concrete, mud)) {
             var tile = scene.tile(new Coords(0, 4));
             var surface = new BoardSurface(scene, tile);
@@ -96,7 +96,7 @@ class GpuMaterialCacheTest {
 
     @Test
     void changingTheBoardFloorRequiresNewBoundaryCharts() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         float floor = BoardGeometry.floor(scene);
         var before = new GpuMaterialCache.Charts(scene, 0, 0, floor);
         assertTrue(before.sameLayout(new GpuMaterialCache.Charts(scene, 0, 0, floor)));
@@ -111,7 +111,7 @@ class GpuMaterialCacheTest {
 
     @Test
     void chartedCommCenterCutsRetainEveryFacesOwnShading() throws Exception {
-        var scene = BoardCliffSeamTest.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        var scene = BoardScenes.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
         float floor = BoardGeometry.floor(scene);
         var emit = GpuTerrain.class.getDeclaredMethod("chartedFaces", Supplier.class, BoardSurface.class,
               List.class, List.class, float.class);

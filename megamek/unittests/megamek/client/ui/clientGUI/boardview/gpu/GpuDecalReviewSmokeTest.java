@@ -261,38 +261,38 @@ class GpuDecalReviewSmokeTest {
             parkShots.add(new Shot(parks.get(i).substring(parks.get(i).lastIndexOf('/') + 1), new Coords(1 + 2 * i, 2), .26f, false));
         }
         var views = new java.util.LinkedHashMap<String, View>();
-        views.put("emblems-bare", new View(GpuLegacyImportSmokeTest.scene(emblems(emblems, false)),
+        views.put("emblems-bare", new View(BoardScenes.scene(emblems(emblems, false)),
               List.of(new Shot("overview", new Coords(19, 4), 1.65f, false))));
-        views.put("emblems", new View(GpuLegacyImportSmokeTest.scene(emblems(emblems, true)), emblemShots));
-        views.put("car-parks", new View(GpuLegacyImportSmokeTest.scene(carParks(parks)), parkShots));
-        views.put("level-crossing", new View(GpuLegacyImportSmokeTest.scene(
+        views.put("emblems", new View(BoardScenes.scene(emblems(emblems, true)), emblemShots));
+        views.put("car-parks", new View(BoardScenes.scene(carParks(parks)), parkShots));
+        views.put("level-crossing", new View(BoardScenes.scene(
               emblems(List.of("decal/rail/level-crossing"), true)), List.of(
               new Shot("top", new Coords(1, 4), .45f, false),
               new Shot("oblique", new Coords(1, 4), .45f, true),
               new Shot("close", new Coords(1, 1), .06f, false),
               new Shot("close-oblique", new Coords(1, 1), .06f, true))));
-        views.put("template-imported", new View(GpuLegacyImportSmokeTest.scene(templateImported), templateShots));
-        views.put("spaceport-imported", new View(GpuLegacyImportSmokeTest.scene(districtImported), districtShots));
+        views.put("template-imported", new View(BoardScenes.scene(templateImported), templateShots));
+        views.put("spaceport-imported", new View(BoardScenes.scene(districtImported), districtShots));
         List<Shot> roadShots = new ArrayList<>(List.of(new Shot("overview", new Coords(PARK_HEXES.length, 1), 1, false),
               new Shot("oblique", new Coords(5, 1), .35f, true)));
         for (int i = 0; i < PARK_HEXES.length; i++) {
             String code = PARK_HEXES[i].substring(PARK_HEXES[i].length() - 2);
             roadShots.add(new Shot(PARK_HEXES[i].startsWith("pavement") ? code : code + "-ground", new Coords(1 + 2 * i, 1), .26f, false));
         }
-        views.put("car-park-roads-imported", new View(GpuLegacyImportSmokeTest.scene(roadsImported), roadShots));
+        views.put("car-park-roads-imported", new View(BoardScenes.scene(roadsImported), roadShots));
         List<Shot> roofShots = List.of(new Shot("roofs", new Coords(2, 6), .3f, false), new Shot("roofs-oblique", new Coords(2, 6), .3f, true));
-        views.put("lunar-imported", new View(GpuLegacyImportSmokeTest.scene(roofsImported), roofShots));
+        views.put("lunar-imported", new View(BoardScenes.scene(roofsImported), roofShots));
         List<Shot> joinShots = List.of(new Shot("2402", new Coords(5, 1), .26f, false), new Shot("2402-oblique", new Coords(5, 2), .3f, true));
-        views.put("op2mescape-imported", new View(GpuLegacyImportSmokeTest.scene(joinsImported), joinShots));
+        views.put("op2mescape-imported", new View(BoardScenes.scene(joinsImported), joinShots));
         List<Shot> keptShots = List.of(new Shot("2443-2446", new Coords(5, 7), .35f, false),
               new Shot("2443-2446-oblique", new Coords(5, 8), .35f, true));
-        views.put("desert-airfield-imported", new View(GpuLegacyImportSmokeTest.scene(keptImported), keptShots));
+        views.put("desert-airfield-imported", new View(BoardScenes.scene(keptImported), keptShots));
         // Grass blades show from 120 projected px per hex: the close-ups show none growing through the paint.
         List<Shot> meadowShots = new ArrayList<>(List.of(new Shot("overview", new Coords(6, 2), .9f, false),
               new Shot("oblique", new Coords(5, 2), .3f, true)));
         String[] painted = { "cars-3b", "straight-8", "red-cross", "comstar", "rubble-path", "red-cross-token" };
         for (int i = 0; i < painted.length; i++) { meadowShots.add(new Shot(painted[i], new Coords(1 + 2 * i, 2), .26f, false)); }
-        views.put("grass-imported", new View(GpuLegacyImportSmokeTest.scene(meadowImported), meadowShots));
+        views.put("grass-imported", new View(BoardScenes.scene(meadowImported), meadowShots));
 
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);

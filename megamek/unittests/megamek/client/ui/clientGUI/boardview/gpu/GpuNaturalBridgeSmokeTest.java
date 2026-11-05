@@ -136,7 +136,7 @@ class GpuNaturalBridgeSmokeTest {
                 var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
                       0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
                 var frame = new GpuReviewFrame(weather);
-                var at = BoardNaturalBridgeTest.CENTER;
+                var at = BoardScenes.CENTER;
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -182,12 +182,12 @@ class GpuNaturalBridgeSmokeTest {
                     GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     int natural = sample(camera, at);
-                    var approach = BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
+                    var approach = BoardScenes.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
                     // The road-attached span is built and carries the road over its exits (as a converted board stores
                     // it); the bare one stays natural.
-                    var built = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene, approach),
+                    var built = BoardBridgeTypeTest.typed(BoardScenes.replace(scene, approach),
                           HexAppearance.BUILT_BRIDGE);
-                    var edited = BoardNaturalBridgeTest.replace(built,
+                    var edited = BoardScenes.replace(built,
                           BoardBridgeMaterialsTest.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
                     var footing = BoardBridgeFooting.build(edited, edited.tile(at), TerrainLod.FULL, new HashMap<>());
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)

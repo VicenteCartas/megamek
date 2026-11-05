@@ -30,7 +30,7 @@ class BoardCliffTopTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 2 })
     void onlyMarkedDirectionsUseCliffsAndKeepTheirActualHeights(int levels) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             for (Coords upper : List.of(CENTER, new Coords(2, 2))) {
                 for (int mask : new int[] { 21, 42 }) {
                     BoardScene scene = island(upper, levels, mask);
@@ -71,7 +71,7 @@ class BoardCliffTopTest {
         var tile = capture(hex, CENTER);
         assertEquals(56, tile.cliffTopExits());
         assertEquals(56, tile.withText(List.of()).cliffTopExits());
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene scene = island(CENTER, -1, 63);
             var surface = new BoardSurface(scene, scene.tile(CENTER));
             for (int edge = 0; edge < 6; edge++) {
@@ -82,7 +82,7 @@ class BoardCliffTopTest {
 
     @Test
     void editingOnlyExitsRebuildsTheCliffAndItsNeighborSupport() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene before = island(CENTER, 1, 0);
             BoardScene after = island(CENTER, 1, 1);
             assertFalse(before.tile(CENTER).sameGeometry(after.tile(CENTER)));
@@ -103,7 +103,7 @@ class BoardCliffTopTest {
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void mixedCliffsAndSlopesStayClosedAtEveryDetail(boolean transitions) {
-        BoardSculptTest.withTransitions(transitions, () -> {
+        BoardScenes.withTransitions(transitions, () -> {
             for (boolean concrete : new boolean[] { false, true }) {
                 BoardScene scene = island(CENTER, 1, 56, concrete);
                 float floor = BoardGeometry.floor(scene);
@@ -114,7 +114,7 @@ class BoardCliffTopTest {
                         faces.addAll(surface.faces);
                         faces.addAll(surface.walls(scene, floor));
                     }
-                    BoardCliffSeamTest.assertClosed(faces, floor, "Authored cliffs " + lod + " concrete=" + concrete);
+                    BoardScenes.assertClosed(faces, floor, "Authored cliffs " + lod + " concrete=" + concrete);
                 }
             }
         });
@@ -129,8 +129,8 @@ class BoardCliffTopTest {
         assertEquals(24, scene.tile(new Coords(9, 12)).cliffTopExits());
         var original = BoardRelief.tuning();
         try {
-            BoardWetCliffTest.tune(true);
-            BoardSculptTest.withTransitions(true, () -> {
+            BoardScenes.tune(true);
+            BoardScenes.withTransitions(true, () -> {
                 for (Coords at : List.of(new Coords(8, 12), new Coords(9, 12))) {
                     for (int direction = 0; direction < 6; direction++) {
                         if ((scene.tile(at).cliffTopExits() & (1 << direction)) == 0) { continue; }

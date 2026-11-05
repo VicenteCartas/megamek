@@ -79,8 +79,8 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 4 })
     void submergedBanksRetainTheAdjacentLandsGeology(int level) {
-        var center = BoardSurfaceBlendTest.CENTER;
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var center = BoardScenes.CENTER;
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(center) ? BoardScene.Surface.GRASS : BoardScene.Surface.LUNAR,
               c.equals(center) ? 0 : level, c.equals(center) ? 1 : -1, 0));
         var water = scene.tile(center);
@@ -101,9 +101,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @CsvSource({ "0, false", "0, true", "1, false", "1, true" })
     void authoredWaterMixturesKeepTheAdjacentLandsCoverOnTheirBanks(int depth, boolean adjacentWater) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         var tropical = center.translated(2);
-        var scene = BoardSurfaceBlendTest.scene(c -> {
+        var scene = BoardScenes.scene(c -> {
             boolean wet = c.equals(center) || adjacentWater && c.equals(center.translated(5));
             var hex = new Hex(0, wet ? "water:" + depth + ";ground_fluff:3:2"
                   : c.equals(tropical) ? "ground_fluff:1:3" : "",
@@ -138,8 +138,8 @@ class GpuSurfaceBlendTest {
     void homogeneousFlatTopsKeepSixTrianglesThroughMaterialPreparation(TerrainLod lod) {
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND,
               BoardScene.Surface.ROCK, BoardScene.Surface.SNOW)) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, 0, -1, 0));
-            var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family, 0, -1, 0));
+            var tile = scene.tile(BoardScenes.CENTER);
             var center = BoardGeometry.center(tile.coords(), 0);
             var faces = new ArrayList<BoardSurface.Face>();
             for (int edge = 0; edge < 6; edge++) {
@@ -161,9 +161,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void concreteSlabsKeepTheirTopAndPanelTriangleBudgetAfterMaterialSampling(TerrainLod lod) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         for (int level : new int[] { 0, 4 }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   c.equals(center) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
                   c.equals(center) ? level : 4 - level, -1, 0));
             var tile = scene.tile(center);
@@ -191,9 +191,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void steepContactsKeepTheirMaterialsAndSurfaceAreaAtEveryLod(TerrainLod lod) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         var neighbour = center.translated(BoardGeometry.edgeDirection(0));
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(neighbour) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS,
               c.equals(center) || c.equals(neighbour) ? 4 : 0, -1, 0));
         var tile = scene.tile(center);
@@ -218,9 +218,9 @@ class GpuSurfaceBlendTest {
 
     @Test
     void coincidentCliffAndGroundVerticesKeepTheirDistinctShadingRoles() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() < 4 ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
-        var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         var a = BoardGeometry.center(tile.coords(), 0);
         var b = BoardGeometry.corner(tile.coords(), 0, 0);
         var c = BoardGeometry.corner(tile.coords(), 0, 1);
@@ -243,7 +243,7 @@ class GpuSurfaceBlendTest {
     @Test
     void authoredTransitionsAtCrowdedCliffsKeepABoundedMesh() {
         var themes = List.of("grass", "snow", "dirt", "rock", "lunar");
-        var scene = BoardSurfaceBlendTest.scene(c -> {
+        var scene = BoardScenes.scene(c -> {
             var hex = new Hex(c.getY() < 4 ? 4 : 0, "ground_fluff:1:3",
                   themes.get(Math.floorMod(c.getX() + 2 * c.getY(), themes.size())), c);
             var artwork = new BoardArtwork.HexImage(c, null, null, List.of(), Map.of(), null);
@@ -270,7 +270,7 @@ class GpuSurfaceBlendTest {
     void crowdedCliffsKeepEveryContributingFamilyInTheirPalettes() {
         var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
               BoardScene.Surface.DIRT, BoardScene.Surface.ROCK);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), c.getY() < 4 ? 4 : 0, -1, 0));
         for (int x = 2; x <= 6; x++) {
             var tile = scene.tile(new Coords(x, 3));
@@ -303,14 +303,14 @@ class GpuSurfaceBlendTest {
     void crowdedBoundariesPreserveAreaHeightAndEveryContributingMaterial() {
         var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
               BoardScene.Surface.DIRT, BoardScene.Surface.ROCK);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), 0, -1, 0));
         int original = 0, refined = 0;
         float maximumError = 0;
         double totalError = 0;
         int samples = 0;
         for (int direction = -1; direction < 6; direction++) {
-            var coords = direction < 0 ? BoardSurfaceBlendTest.CENTER : BoardSurfaceBlendTest.CENTER.translated(direction);
+            var coords = direction < 0 ? BoardScenes.CENTER : BoardScenes.CENTER.translated(direction);
             var tile = scene.tile(coords);
             var surface = new BoardSurface(scene, tile);
             var faces = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
@@ -366,10 +366,10 @@ class GpuSurfaceBlendTest {
 
     @Test
     void materialBordersKeepTheirSampledWidthAndPureTileCentres() {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = center.translated(direction);
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   c.equals(neighbor) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
             var tile = scene.tile(center);
             var surface = new BoardSurface(scene, tile);

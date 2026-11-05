@@ -66,10 +66,10 @@ class BoardBridgeWideProfileTest {
         // Each three-arm mask has a legal rail stem; the shared corner belongs to all three different deck planes.
         var levels = Map.of(at, 2, north, 3, northeast, 2);
         var exits = Map.of(at, 11, north, 44, northeast, 50);
-        var scene = BoardSurfaceBlendTest.scene(c -> levels.containsKey(c)
+        var scene = BoardScenes.scene(c -> levels.containsKey(c)
               ? BoardBridgeMaterialsTest.withDeckRoad(BoardBridgeSlopeTest.bridge(c, 0, levels.get(c), exits.get(c)),
                     BoardRoad.Kind.PAVED, exits.get(c))
-              : BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, -2, BoardScene.Surface.ROCK));
+              : BoardScenes.tile(c, BoardRoad.Kind.NONE, 0, -2, BoardScene.Surface.ROCK));
         var corner = BoardGeometry.corner(at, 0, 1);
         var profiles = new java.util.HashMap<Coords, List<BoardSurface.Face>>();
         for (var c : levels.keySet()) {

@@ -41,9 +41,9 @@ class BoardSurfaceContactTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 2, 5 })
     void exposedPlateausMeetTheirCliffAtTheActualSculptedRim(int family) {
-        var at = BoardSurfaceBlendTest.CENTER;
+        var at = BoardScenes.CENTER;
         for (int rise : new int[] { 1, 2, 3, 5 }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family,
                   c.equals(at) ? rise : 0));
             for (var lod : TerrainLod.values()) {
                 var surface = new BoardSurface(scene, scene.tile(at), lod);
@@ -67,7 +67,7 @@ class BoardSurfaceContactTest {
 
     @Test
     void minesCliffDebrisContinuesOntoTheReceivingGround() {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
+        var scene = BoardScenes.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
         int compared = 0;
         for (Coords at : List.of(new Coords(12, 3), new Coords(12, 4))) {
             var high = new BoardSurface(scene, scene.tile(at));
@@ -95,8 +95,8 @@ class BoardSurfaceContactTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 5 })
     void soilAndRockUseTheSameMaterialInputsOnBothSidesOfACliffCorner(int family) {
-        var at = BoardSurfaceBlendTest.CENTER;
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family,
+        var at = BoardScenes.CENTER;
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family,
               c.equals(at) ? 3 : c.equals(at.translated(0)) ? 1 : 0));
         for (var lod : TerrainLod.values()) {
             var surface = new BoardSurface(scene, scene.tile(at), lod);
@@ -126,11 +126,11 @@ class BoardSurfaceContactTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5, 6, 7 })
     void receivingGroundSharesNaturalFootCoverageAndKeepsConstructedEdges(int upper) {
-        var at = BoardSurfaceBlendTest.CENTER;
+        var at = BoardScenes.CENTER;
         for (int lower = 0; lower < BoardSurfaceBlend.FAMILIES; lower++) {
             int receiving = lower;
             for (int rise : new int[] { 1, 2, 3, 4 }) {
-                var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                       c.equals(at) ? upper : receiving, c.equals(at) ? rise : 0));
                 var high = scene.tile(at);
                 // Lava melts snow and burns turf beside it: the upper cover may show as what it leaves.

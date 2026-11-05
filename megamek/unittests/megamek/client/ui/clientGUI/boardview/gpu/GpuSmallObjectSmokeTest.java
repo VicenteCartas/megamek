@@ -81,7 +81,7 @@ class GpuSmallObjectSmokeTest {
     }
 
     private static BoardScene scene(Board board) throws Exception {
-        var captured = GpuLegacyImportSmokeTest.scene(board);
+        var captured = BoardScenes.scene(board);
         return new BoardScene(0, captured.width(), captured.height(), captured.tiles(), List.of(), List.of(), -1, "",
               List.of(), new BoardScene.Light(-24, -30));
     }

@@ -347,8 +347,8 @@ class GpuBuildingHoverSmokeTest {
     }
 
     private static void checkModularStoreys(GpuBattleView view, GpuBoardHud ui) throws Exception {
-        BoardScene scene = BoardSurfaceBlendTest.scene(coords -> {
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+        BoardScene scene = BoardScenes.scene(coords -> {
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             var hex = new Hex(0, "building:2;bldg_elev:5;bldg_cf:40", "");
             return new BoardScene.Tile(coords, 0, -1, false, 0, tile.surface(), null, null,
                   coords.equals(BUILDING) ? BoardFeatures.capture(hex, coords,

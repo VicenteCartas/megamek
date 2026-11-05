@@ -166,10 +166,10 @@ class GpuModularBuildingSmokeTest {
     }
 
     private static BoardScene scene(int middleHeight, String asset) {
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             int levels = coords.equals(new Coords(2, 4)) ? 1 : coords.equals(new Coords(4, 4)) ? middleHeight
                   : coords.equals(new Coords(6, 4)) ? 10 : 0;
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             int type = coords.getX() == 2 ? Terrains.INDUSTRIAL
                   : coords.getX() == 4 ? Terrains.BUILDING : Terrains.FUEL_TANK;
             var hex = new Hex(0);

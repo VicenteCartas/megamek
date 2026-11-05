@@ -33,7 +33,7 @@ import org.junit.jupiter.api.Test;
 /** Generated bridge geometry meets the actual road triangles without using level height for its dimensions. */
 @Tag("on-demand")
 class GpuBridgeSmokeTest {
-    private static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
+    private static final Coords CENTER = BoardScenes.CENTER;
 
     /** The shipped Canals bridge turns on both banks before its concrete approaches meet the straight streets. */
     @Test
@@ -482,7 +482,7 @@ class GpuBridgeSmokeTest {
     void piersReachTheDrawnDeckOnEveryDeckKind() throws Exception {
         Board all = piers();
         Map<String, BoardScene> scenes = new java.util.LinkedHashMap<>();
-        for (Case shown : CASES) { scenes.put(shown.label(), GpuLegacyImportSmokeTest.scene(only(all, shown))); }
+        for (Case shown : CASES) { scenes.put(shown.label(), BoardScenes.scene(only(all, shown))); }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
         Files.createDirectories(output.toPath());
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -575,7 +575,7 @@ class GpuBridgeSmokeTest {
     void trussSpansDrawOneJointOrEndPerExitInTheirColour() throws Exception {
         Board all = truss(piers());
         Map<String, BoardScene> scenes = new java.util.LinkedHashMap<>();
-        for (Case shown : CASES) { scenes.put(shown.label(), GpuLegacyImportSmokeTest.scene(only(all, shown))); }
+        for (Case shown : CASES) { scenes.put(shown.label(), BoardScenes.scene(only(all, shown))); }
         Files.createDirectories(TRUSS.toPath());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -804,7 +804,7 @@ class GpuBridgeSmokeTest {
             javax.swing.SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.convert(imported));
             assertEquals(example.built(), megamek.common.board.HexAppearance.bridgeBuilt(
                   imported.getHex(example.coords()).getAppearance()), example.reason() + ": the type import stores");
-            scenes.put(example, List.of(GpuLegacyImportSmokeTest.scene(imported)));
+            scenes.put(example, List.of(BoardScenes.scene(imported)));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
         Files.createDirectories(output.toPath());
@@ -978,7 +978,7 @@ class GpuBridgeSmokeTest {
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             if (coords.equals(CENTER)) {
                 return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS, null, null,
                       BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
@@ -990,7 +990,7 @@ class GpuBridgeSmokeTest {
                     road = (1 << d) | (1 << ((d + 3) % 6));
                 }
             }
-            return BoardRoadTest.tile(coords, road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.ALLEY,
+            return BoardScenes.tile(coords, road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.ALLEY,
                   road, 0, BoardScene.Surface.GRASS);
         });
     }
@@ -1072,9 +1072,9 @@ class GpuBridgeSmokeTest {
      */
     @Test
     void aMuddyNaturalDeckShowsMudAndARoadLiesOnTheArch() throws Exception {
-        var dry = GpuLegacyImportSmokeTest.scene(naturalSpan(""));
-        var muddy = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_mud:1"));
-        var road = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_road:3:9"));
+        var dry = BoardScenes.scene(naturalSpan(""));
+        var muddy = BoardScenes.scene(naturalSpan(";bridge_mud:1"));
+        var road = BoardScenes.scene(naturalSpan(";bridge_road:3:9"));
         Coords deck = new Coords(3, 2), field = new Coords(5, 5);
         assertTrue(muddy.tile(deck).deckMud() && !dry.tile(deck).deckMud());
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");

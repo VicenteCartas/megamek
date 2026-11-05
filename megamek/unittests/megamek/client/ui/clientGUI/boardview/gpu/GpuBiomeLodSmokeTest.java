@@ -41,12 +41,12 @@ class GpuBiomeLodSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     camera.setIsometric(true);
-                    var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                    var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                           c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
                                 ? kind : BoardScene.Biome.MUD, 0));
                     var focus = BoardGeometry.center(new Coords(4, 4), 0);

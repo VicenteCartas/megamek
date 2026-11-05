@@ -98,9 +98,9 @@ class BoardWallHeightTest {
     }
 
     private static BoardScene scene(Map<Coords, Wall> walls) {
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             Wall wall = walls.get(coords);
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, wall == null ? 0 : wall.elevation(), -1, 0);
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.GRASS, wall == null ? 0 : wall.elevation(), -1, 0);
             return tile.withFeatures(wall == null ? List.of() : List.of(new BoardScene.Feature(
                   "buildings/wall-" + wall.exits(), 0, 0, 0, 1, wall.height(), 0, BoardScene.FeatureKind.BUILDING)));
         });

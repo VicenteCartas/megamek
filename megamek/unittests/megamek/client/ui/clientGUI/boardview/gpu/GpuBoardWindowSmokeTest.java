@@ -199,16 +199,6 @@ class GpuBoardWindowSmokeTest {
     private record ClientWindow(JFrame frame, CommonMenuBar menus, BoardView view, JMenuItem gpuChoice,
           UnitOverviewOverlay overview) { }
 
-    private static int sidebarBorderColor(UnitOverviewOverlay overview, int index) {
-        var graphics = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB).createGraphics();
-        try {
-            var portraits = overview.captureLayers(graphics, new Rectangle(0, 0, 800, 600));
-            return portraits.get(index).image().getRGB(10, 2);
-        } finally {
-            graphics.dispose();
-        }
-    }
-
     private static void clickBoard(Coords coords, int button) {
         clickBoard(coords, button, 0);
     }

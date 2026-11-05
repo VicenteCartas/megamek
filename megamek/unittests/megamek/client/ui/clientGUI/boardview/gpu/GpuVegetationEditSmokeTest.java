@@ -53,7 +53,7 @@ class GpuVegetationEditSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1536, 1024);
@@ -145,7 +145,7 @@ class GpuVegetationEditSmokeTest {
     }
 
     private static BoardScene scene(int level, boolean editField) {
-        return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() >= (editField ? 4 : 5) ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.equals(EDIT) ? level : 0));
     }
 

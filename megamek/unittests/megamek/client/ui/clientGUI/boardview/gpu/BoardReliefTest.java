@@ -7,38 +7,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
 import com.badlogic.gdx.math.Vector3;
-import megamek.common.Hex;
 import megamek.common.board.Coords;
-import megamek.common.units.Terrain;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 /** Rim prominence by drop, concrete slabs, tree pits, special artwork, joined landforms and compressed elevations. */
 class BoardReliefTest {
-    private static final Coords CENTER = new Coords(2, 2);
-
-    private static BoardScene scene(int centerLevel, boolean detailed, BoardScene.Surface family) {
-        List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int x = 0; x < 5; x++) {
-            for (int y = 0; y < 5; y++) {
-                boolean center = x == CENTER.getX() && y == CENTER.getY();
-                tiles.add(new BoardScene.Tile(new Coords(x, y), center ? centerLevel : 0, -1, false, 0, family, null,
-                      null, List.of(), List.of(), BoardLiquid.NONE, null, center ? detailed : true));
-            }
-        }
-        return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
-    }
 
     /** Largest distance the cliff's upper tenth stands out beyond the logical edge. */
     private static float rimReach(int level) {
-        BoardScene scene = scene(level, true, BoardScene.Surface.SAND);
-        BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-        Vector3 center = BoardGeometry.center(CENTER, level);
+        BoardScene scene = BoardScenes.reliefScene(level, true, BoardScene.Surface.SAND);
+        BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
+        Vector3 center = BoardGeometry.center(BoardScenes.RELIEF_CENTER, level);
         float apothem = BoardGeometry.HEIGHT / 2, reach = 0;
         for (BoardSurface.Face face : surface.walls(scene, BoardGeometry.floor(scene))) {
             for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
@@ -58,7 +41,7 @@ class BoardReliefTest {
     @Test
     void deepDropsCarryMoreProminentRimFormationsThanShallowOnes() {
         // Without hex transitions, whose room sets every rim back from its edge.
-        BoardSculptTest.withTransitions(false, () -> {
+        BoardScenes.withTransitions(false, () -> {
             float shallow = Math.max(rimReach(1), rimReach(2));
             float deep = Math.min(rimReach(3), rimReach(4));
             assertTrue(deep > shallow * 1.2f, "Caprock reach: shallow " + shallow + ", deep " + deep);
@@ -68,8 +51,8 @@ class BoardReliefTest {
 
     @Test
     void specialArtworkKeepsALevelTopInsideItsSculptedOutline() {
-        BoardScene scene = scene(2, false, BoardScene.Surface.GRASS);
-        BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
+        BoardScene scene = BoardScenes.reliefScene(2, false, BoardScene.Surface.GRASS);
+        BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
         for (BoardSurface.Face face : surface.faces) {
             for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
                 assertEquals(2 * BoardGeometry.LEVEL, p.z, .001f, "Special ground art stays on its game level");
@@ -116,95 +99,6 @@ class BoardReliefTest {
     }
 
     @Test
-    void tallConcreteCliffsRemainFlatDownToTheirFeet() {
-        float m = BoardRelief.metres(1);
-        for (int level : new int[] { 3, 6 }) {
-            BoardScene scene = scene(level, true, BoardScene.Surface.CONCRETE);
-            BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-            Vector3 center = BoardGeometry.center(CENTER, level);
-            int samples = 0;
-            for (BoardSurface.Face face : surface.walls(scene, BoardGeometry.floor(scene))) {
-                // A rectangular slab needs only corner vertices; also measure inside its triangles.
-                Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
-                for (Vector3 p : List.of(face.a(), face.b(), face.c(), middle)) {
-                    // Distance beyond the nearest logical edge; the rounded corners are skipped.
-                    float beyond = -Float.MAX_VALUE, along = 0;
-                    for (int edge = 0; edge < 6; edge++) {
-                        Vector3 a = BoardGeometry.corner(CENTER, level, edge);
-                        Vector3 b = BoardGeometry.corner(CENTER, level, edge + 1);
-                        float ex = b.x - a.x, ey = b.y - a.y, length = (float) Math.hypot(ex, ey);
-                        float nx = ey / length, ny = -ex / length;
-                        if (nx * (a.x - center.x) + ny * (a.y - center.y) < 0) {
-                            nx = -nx;
-                            ny = -ny;
-                        }
-                        float distance = (p.x - a.x) * nx + (p.y - a.y) * ny;
-                        if (distance > beyond) {
-                            beyond = distance;
-                            along = ((p.x - a.x) * ex + (p.y - a.y) * ey) / (length * length);
-                        }
-                    }
-                    if (along < .15f || along > .85f) { continue; }
-                    assertEquals(0, beyond, .01f * m, "Cast concrete faces are flat, at " + p);
-                    samples++;
-                }
-            }
-            assertTrue(samples > 0, "Every face was measured");
-        }
-    }
-
-    @Test
-    void treesOnPavingStandInPlantingPitsThatNeverTouchOrRaiseTheGround() {
-        for (int density = 1; density <= 3; density++) {
-            for (BoardScene.Surface family : List.of(BoardScene.Surface.CONCRETE, BoardScene.Surface.GRASS)) {
-                Hex hex = new Hex(0);
-                if (family == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
-                hex.addTerrain(new Terrain(Terrains.WOODS, density));
-                hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
-                List<BoardScene.Feature> trees = BoardFeatures.capture(hex, CENTER, Map.of());
-                List<BoardScene.Tile> tiles = new ArrayList<>();
-                for (int x = 0; x < 5; x++) {
-                    for (int y = 0; y < 5; y++) {
-                        Coords coords = new Coords(x, y);
-                        tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
-                              coords.equals(CENTER) ? trees : List.of(), List.of(), BoardLiquid.NONE, null, true));
-                    }
-                }
-                BoardScene scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
-                BoardSurface surface = new BoardSurface(scene, scene.tile(CENTER));
-                List<Vector3> pits = new ArrayList<>();
-                for (BoardSurface.Face face : surface.faces) {
-                    if (face.finish() == BoardSurface.Finish.DRESSING) { pits.addAll(List.of(face.a(), face.b(), face.c())); }
-                }
-                if (family == BoardScene.Surface.GRASS) {
-                    assertTrue(pits.isEmpty(), "Only paved ground has planting pits");
-                    continue;
-                }
-                float spacing = Float.POSITIVE_INFINITY;
-                List<Vector3> trunks = new ArrayList<>();
-                for (BoardScene.Feature tree : trees) {
-                    Vector3 trunk = new Vector3(BoardGeometry.centerX(CENTER) + tree.x() * BoardGeometry.HEX_SCALE,
-                          BoardGeometry.centerY(CENTER) + tree.y() * BoardGeometry.HEX_SCALE, 0);
-                    for (Vector3 other : trunks) {
-                        spacing = Math.min(spacing, Math.max(Math.abs(trunk.x - other.x), Math.abs(trunk.y - other.y)));
-                    }
-                    trunks.add(trunk);
-                    assertTrue(pits.stream().anyMatch(p -> Math.hypot(p.x - trunk.x, p.y - trunk.y) < .01f),
-                          "Every tree stands in its own pit");
-                }
-                for (Vector3 p : pits) {
-                    float own = Float.POSITIVE_INFINITY;
-                    for (Vector3 trunk : trunks) { own = Math.min(own, Math.max(Math.abs(p.x - trunk.x), Math.abs(p.y - trunk.y))); }
-                    assertTrue(own < spacing / 2, "Neighbouring pits never touch");
-                    assertTrue(p.z < BoardRelief.metres(.2f), "A pit is thin dressing on the slab");
-                }
-                Vector3 center = BoardGeometry.center(CENTER, 0);
-                assertEquals(center.z, surface.height(center.x, center.y), .001f, "Pits never raise what stands there");
-            }
-        }
-    }
-
-    @Test
     void stepsAndPavingReachingTheBoardEdgeKeepItsHexOutline() {
         // A hill on the board's top edge, whose steps down to the hexes beside it run into the board's cut.
         Coords hill = new Coords(2, 0), corner = new Coords(0, 0);
@@ -227,7 +121,7 @@ class BoardReliefTest {
 
     /** Nothing reaches past the board's outline, and its cut still meets every lattice corner of that outline. */
     private static void assertKeepsHexOutline(BoardScene scene) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             List<Vector3> points = new ArrayList<>();
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
@@ -272,7 +166,7 @@ class BoardReliefTest {
         try {
             BoardGeometry.tune(new BoardGeometry.Tuning(1, previous.unitScale(), previous.unitHeightScale(), 1,
                   previous.gridShade(), previous.multiHexUnitScale()));
-            BoardScene scene = scene(3, true, BoardScene.Surface.ROCK);
+            BoardScene scene = BoardScenes.reliefScene(3, true, BoardScene.Surface.ROCK);
             float floor = BoardGeometry.floor(scene);
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
@@ -284,7 +178,7 @@ class BoardReliefTest {
                 }
             }
             assertNotNull(BoardGeometry.pick(scene, new com.badlogic.gdx.math.collision.Ray(
-                  new Vector3(BoardGeometry.center(CENTER, 3)).add(0, 0, 100), new Vector3(0, 0, -1))));
+                  new Vector3(BoardGeometry.center(BoardScenes.RELIEF_CENTER, 3)).add(0, 0, 100), new Vector3(0, 0, -1))));
         } finally { BoardGeometry.tune(previous); }
     }
 }

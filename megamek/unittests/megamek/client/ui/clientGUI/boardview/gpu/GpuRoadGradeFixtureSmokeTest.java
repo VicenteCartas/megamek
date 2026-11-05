@@ -50,7 +50,7 @@ class GpuRoadGradeFixtureSmokeTest {
                         if (!surfaces.isEmpty() && !surfaces.contains(surface)) { continue; }
                         var board = BoardFile.read(Path.of("data/boards/fixtures",
                               RoadGradeFixture.filename(concrete)));
-                        var scene = GpuLegacyImportSmokeTest.scene(board);
+                        var scene = BoardScenes.scene(board);
                         for (boolean classic : new boolean[] { false, true }) {
                             String mode = classic ? "classic" : "enhanced";
                             var terrain = new GpuTerrain();

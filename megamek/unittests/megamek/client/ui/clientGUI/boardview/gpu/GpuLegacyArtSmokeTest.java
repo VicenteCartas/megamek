@@ -58,7 +58,7 @@ class GpuLegacyArtSmokeTest {
     @Test
     void convertedLegacyArtRendersInItsColoursAndPlaces() throws Exception {
         Board board = board();
-        BoardScene scene = GpuLegacyImportSmokeTest.scene(board);
+        BoardScene scene = BoardScenes.scene(board);
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);

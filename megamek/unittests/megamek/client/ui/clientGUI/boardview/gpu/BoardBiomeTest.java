@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.units.Terrain;
@@ -23,9 +22,9 @@ class BoardBiomeTest {
     void indexedRootsKeepThePublishedBankHeightIncludingTriangleEdges() {
         var original = BoardGeometry.tuning();
         try {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
-            var scene = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
-                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.MARSH, 0));
+            BoardScenes.tune(.94f, true);
+            var scene = BoardScenes.scene(c -> c.getX() < 4
+                  ? BoardScenes.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
             var random = new Random(417);
             for (var lod : TerrainLod.values()) {
                 var surface = new BoardSurface(scene, scene.tile(new Coords(3, 4)), lod);
@@ -46,7 +45,7 @@ class BoardBiomeTest {
 
     @Test
     void reedsExtendWithoutDuplicateRootsAtEveryDensity() {
-        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.MARSH, 0));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
         var tile = scene.tile(new Coords(4, 4));
         var surface = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);
         var progressive = new GpuBiomeVegetation.Patch(scene, tile, surface, null);
@@ -62,32 +61,8 @@ class BoardBiomeTest {
         full.prepare(scene, tile, 1);
         assertEquals(full.roots, planted, "LOD preparation order must keep one deterministic lattice");
     }
-
-    /**
-     * A hex of the 9 x 9 fixture wholly within one parcel (BoardFields), clear of its headland: the crop fixtures
-     * stand there.
-     */
-    static final Coords CROPS = new Coords(6, 6);
     /** A hex of the fixture wholly within a wheat parcel. */
     static final Coords WHEAT = new Coords(1, 5);
-
-    /** A field hex's plants of both crops, one after the other; empty where none grows. */
-    static FloatArray cropPlants(BoardScene scene, BoardScene.Tile tile, BoardTacticalGeometry.Surface surface,
-          BoardDecals.Opacity paint) {
-        var plants = new FloatArray();
-        for (var crop : BoardFields.Crop.values()) {
-            var roots = GpuBiomeVegetation.plantStalks(scene, tile, surface, paint, crop);
-            if (roots != null) { plants.addAll(roots); }
-        }
-        return plants;
-    }
-
-    static BoardScene.Tile tile(Coords coords, BoardScene.Biome kind, int elevation) {
-        var base = BoardSurfaceBlendTest.tile(coords, kind == BoardScene.Biome.MUD || kind == BoardScene.Biome.QUICKSAND
-              ? BoardScene.Surface.DIRT : BoardScene.Surface.GRASS, elevation, -1, 0);
-        return new BoardScene.Tile(coords, elevation, -1, false, 0, base.surface(), null, null,
-              List.of(), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE, BoardFireSmoke.NONE, kind);
-    }
 
     @Test
     void fieldsUseCropBiomeWithoutLegacyPropsAndWetGroundKeepsItsOwnBiome() {
@@ -124,13 +99,13 @@ class BoardBiomeTest {
     void connectedFieldsAndWetlandsHaveNoInternalHexSeamsAndStopBelowThePlateau() {
         Coords center = new Coords(4, 4);
         for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH, BoardScene.Biome.QUICKSAND, BoardScene.Biome.MUD)) {
-            var scene = BoardSurfaceBlendTest.scene(c -> tile(c, kind, 1));
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, kind, 1));
             for (int edge = 0; edge < 6; edge++) {
                 var corner = BoardGeometry.corner(center, 1, edge);
                 assertEquals(1, BoardBiome.coverage(scene, kind, corner.x, corner.y, corner.z), .00001);
                 assertEquals(0, BoardBiome.coverage(scene, kind, corner.x, corner.y, corner.z - BoardRelief.metres(1.3f)));
             }
-            var single = BoardSurfaceBlendTest.scene(c -> tile(c, c.equals(center) ? kind : BoardScene.Biome.NONE, 1));
+            var single = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(center) ? kind : BoardScene.Biome.NONE, 1));
             var p = BoardGeometry.center(center, 1);
             assertEquals(1, BoardBiome.coverage(single, kind, p.x, p.y, p.z), .00001);
             p.lerp(BoardGeometry.center(center.translated(2), 1), .5f);
@@ -158,9 +133,9 @@ class BoardBiomeTest {
 
     @Test
     void reedsLeavePoolsOpenAndNeverDuplicateRootsAcrossHexes() {
-        Coords center = CROPS;
+        Coords center = BoardScenes.CROPS;
         float metre = BoardRelief.metres(1);
-        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.MARSH, 0));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
         var all = new HashSet<String>();
         int count = 0;
         for (var coords : List.of(center, center.translated(2))) {
@@ -185,8 +160,8 @@ class BoardBiomeTest {
     @Test
     void changingSpecialTerrainInvalidatesItsGeometryCache() {
         Coords center = new Coords(4, 4);
-        var before = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.MARSH, 0));
-        var after = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.QUICKSAND, 0));
+        var before = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
+        var after = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.QUICKSAND, 0));
         assertFalse(before.tile(center).sameGeometry(after.tile(center)));
         assertNotEquals(BoardSurface.geometryKey(before, before.tile(center)), BoardSurface.geometryKey(after, after.tile(center)));
     }
@@ -194,10 +169,10 @@ class BoardBiomeTest {
     @Test
     void cropPlantsStandOnTheirGroundOffRoadsAndInsideTheirFieldsLevel() {
         float metre = BoardRelief.metres(1);
-        Coords center = CROPS;
+        Coords center = BoardScenes.CROPS;
         for (boolean road : new boolean[] { false, true }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> {
-                var base = tile(c, c.getX() <= center.getX() ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE,
+            var scene = BoardScenes.scene(c -> {
+                var base = BoardScenes.tile(c, c.getX() <= center.getX() ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE,
                       c.getY() < center.getY() ? 1 : 0);
                 return new BoardScene.Tile(c, base.elevation(), -1, false, road ? 9 : 0, base.surface(), null, null,
                       List.of(), List.of(), BoardLiquid.NONE, null, true,
@@ -226,7 +201,7 @@ class BoardBiomeTest {
     @Test
     void cropPlantsStandInRankOrderOnTheirOwnRowsClearOfTheHeadland() {
         float metre = BoardRelief.metres(1);
-        var scene = BoardSurfaceBlendTest.scene(c -> tile(c, BoardScene.Biome.FIELD, 0));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.FIELD, 0));
         var planted = new HashSet<BoardFields.Crop>();
         int mixed = 0;
         for (var tile : scene.tiles()) {
@@ -271,11 +246,11 @@ class BoardBiomeTest {
     void marshReedsContinueAcrossExposedBanksButNeverUseTheWaterPlaneForSupport() {
         var original = BoardGeometry.tuning();
         try {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
-            var scene = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
-                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.MARSH, 0));
-            var removed = BoardSurfaceBlendTest.scene(c -> c.getX() < 4
-                  ? BoardSurfaceBlendTest.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : tile(c, BoardScene.Biome.NONE, 0));
+            BoardScenes.tune(.94f, true);
+            var scene = BoardScenes.scene(c -> c.getX() < 4
+                  ? BoardScenes.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
+            var removed = BoardScenes.scene(c -> c.getX() < 4
+                  ? BoardScenes.tile(c, BoardScene.Surface.DIRT, 0, 0, 0) : BoardScenes.tile(c, BoardScene.Biome.NONE, 0));
             int bankRoots = 0, landRoots = 0;
             var positions = new HashSet<String>();
             float metre = BoardRelief.metres(1);

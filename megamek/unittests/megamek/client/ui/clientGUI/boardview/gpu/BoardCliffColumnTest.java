@@ -49,7 +49,7 @@ class BoardCliffColumnTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void minesCliffColumnsDoNotFoldAcrossTheNarrowedCorner(TerrainLod detail) {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
+        var scene = BoardScenes.scene(new File("data/boards/Deserts/16x17 Mines 1.board"));
         var at = new Coords(12, 3);
         var surface = new BoardSurface(scene, scene.tile(at), detail);
         var outward = BoardGeometry.center(new Coords(11, 3), 0).sub(BoardGeometry.center(at, 0)).nor();

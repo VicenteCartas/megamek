@@ -30,20 +30,19 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class BoardNaturalBridgeTest {
-    static final Coords CENTER = new Coords(4, 4);
 
     @Test
     void classicCapIsAFullFlatHexWithTheSameOpenUnderpassAtEveryDetail() {
         for (int d = 0; d < 6; d++) {
-            var scene = scene(BoardScene.Surface.GRASS, true, false, CENTER, d);
-            var tile = scene.tile(CENTER);
+            var scene = scene(BoardScene.Surface.GRASS, true, false, BoardScenes.CENTER, d);
+            var tile = scene.tile(BoardScenes.CENTER);
             var deck = BoardBridge.deck(scene, tile);
-            var center = BoardGeometry.center(CENTER, 3);
+            var center = BoardGeometry.center(BoardScenes.CENTER, 3);
             for (var lod : TerrainLod.values()) {
                 var shape = BoardNaturalBridge.build(scene, tile, deck, lod, new HashMap<>(), true);
                 for (int edge = 0; edge < 6; edge++) {
-                    var a = BoardGeometry.corner(CENTER, 3, edge);
-                    var b = BoardGeometry.corner(CENTER, 3, edge + 1);
+                    var a = BoardGeometry.corner(BoardScenes.CENTER, 3, edge);
+                    var b = BoardGeometry.corner(BoardScenes.CENTER, 3, edge + 1);
                     for (float along : new float[] { 0, .5f, 1 }) {
                         var point = new Vector3(a).lerp(b, along).lerp(center, .001f);
                         assertEquals(center.z, BoardBridge.top(shape, point.x, point.y), .001f,
@@ -54,7 +53,7 @@ class BoardNaturalBridgeTest {
                       .allMatch(f -> f.normal().epsilonEquals(Vector3.Z, .001f)));
                 assertTrue(shape.facets().stream().anyMatch(f -> f.part() == BoardBridge.Part.SOFFIT && f.normal().z < -.5f));
                 assertEquals(Float.POSITIVE_INFINITY, shape.hit(new Ray(
-                      BoardGeometry.center(CENTER, 2).add(-100, 0, 0), Vector3.X)),
+                      BoardGeometry.center(BoardScenes.CENTER, 2).add(-100, 0, 0), Vector3.X)),
                       "A full hex cap does not fill the river passage below it");
             }
         }
@@ -64,21 +63,21 @@ class BoardNaturalBridgeTest {
     void classicCapGradesOntoLowerBanksWithOrWithoutRoadTerrain() {
         for (int direction = 0; direction < 6; direction++) {
             for (boolean paved : new boolean[] { false, true }) {
-                var scene = scene(BoardScene.Surface.GRASS, true, false, CENTER, direction);
+                var scene = scene(BoardScene.Surface.GRASS, true, false, BoardScenes.CENTER, direction);
                 int exits = (1 << direction) | (1 << ((direction + 3) % 6));
                 for (int d : new int[] { direction, (direction + 3) % 6 }) {
-                    var at = CENTER.translated(d);
-                    scene = replace(scene, BoardRoadTest.tile(at, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                    var at = BoardScenes.CENTER.translated(d);
+                    scene = BoardScenes.replace(scene, BoardScenes.tile(at, paved ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                           paved ? exits : 0, 2, BoardScene.Surface.GRASS));
                 }
-                var tile = scene.tile(CENTER);
-                var center = BoardGeometry.center(CENTER, 3);
+                var tile = scene.tile(BoardScenes.CENTER);
+                var center = BoardGeometry.center(BoardScenes.CENTER, 3);
                 for (var lod : TerrainLod.values()) {
                     var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod,
                           new HashMap<>(), true);
                     assertEquals(center.z, BoardBridge.top(shape, center.x, center.y), .001f);
                     for (int d : new int[] { direction, (direction + 3) % 6 }) {
-                        var bank = scene.tile(CENTER.translated(d));
+                        var bank = scene.tile(BoardScenes.CENTER.translated(d));
                         var end = BoardGeometry.center(bank.coords(), 2);
                         var column = GpuTilesetTerrain.column(scene, bank, BoardGeometry.floor(scene));
                         for (float fraction : new float[] { .25f, .375f, .4999f, .5001f, .6f }) {
@@ -91,10 +90,10 @@ class BoardNaturalBridgeTest {
                                   "A continuous grade joins the cap to its actual bank: " + d + "/" + paved + "/" + lod);
                         }
                     }
-                    var across = BoardGeometry.center(CENTER.translated(direction), 0)
-                          .sub(BoardGeometry.center(CENTER, 0)).nor();
+                    var across = BoardGeometry.center(BoardScenes.CENTER.translated(direction), 0)
+                          .sub(BoardGeometry.center(BoardScenes.CENTER, 0)).nor();
                     across.set(-across.y, across.x, 0);
-                    var passage = BoardGeometry.center(CENTER, 1).mulAdd(across, -100);
+                    var passage = BoardGeometry.center(BoardScenes.CENTER, 1).mulAdd(across, -100);
                     assertEquals(Float.POSITIVE_INFINITY, shape.hit(new Ray(passage, across)),
                           "The graded entrances leave the central river passage open");
                 }
@@ -104,8 +103,8 @@ class BoardNaturalBridgeTest {
 
     @Test
     void muddyShellDepthStartsAtItsActualTopEdgeOnDescendingDecks() {
-        var scene = BoardBridgeSlopeTest.scene(CENTER, 63, false);
-        var tile = scene.tile(CENTER);
+        var scene = BoardBridgeSlopeTest.scene(BoardScenes.CENTER, 63, false);
+        var tile = scene.tile(BoardScenes.CENTER);
         int loweredContacts = 0;
         for (var lod : TerrainLod.values()) {
             var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, new HashMap<>());
@@ -131,13 +130,13 @@ class BoardNaturalBridgeTest {
     @EnumSource(value = BoardScene.Surface.class, names = { "GRASS", "DIRT", "SAND", "ROCK", "SNOW" })
     void bareSpansUseTheBanksSurfaceAndKeepTheirLowerPassageAtEveryLod(BoardScene.Surface family) {
         var scene = scene(family, false, true);
-        var tile = scene.tile(CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         var deck = BoardBridge.deck(scene, tile);
         assertTrue(deck.natural(), "A road underneath is not a road attached to the deck");
         assertEquals(family, deck.surface());
         int previous = Integer.MAX_VALUE;
-        var center = BoardGeometry.center(CENTER, 3);
-        var below = BoardGeometry.center(CENTER, 2);
+        var center = BoardGeometry.center(BoardScenes.CENTER, 3);
+        var below = BoardGeometry.center(BoardScenes.CENTER, 2);
         for (var lod : TerrainLod.values()) {
             var shape = BoardNaturalBridge.build(scene, tile, deck, lod, new HashMap<>());
             assertTrue(shape.facets().size() < previous, "Each LOD must reduce submitted geometry");
@@ -161,15 +160,15 @@ class BoardNaturalBridgeTest {
     @Test
     void grassSpansAreBareRockThatTheirBanksCoverFadesOnto() {
         var scene = scene(BoardScene.Surface.GRASS, false, true);
-        var tile = scene.tile(CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         var deck = BoardBridge.deck(scene, tile);
         assertEquals(BoardScene.Surface.ROCK, BoardNaturalBridge.build(scene, tile, deck, TerrainLod.FULL, new HashMap<>()).surface());
         assertEquals(BoardScene.Surface.GRASS,
               BoardNaturalBridge.build(scene, tile, deck, TerrainLod.FULL, new HashMap<>(), true).surface(),
               "Classic keeps the meadow cap");
-        var bank = scene.tile(CENTER.translated(0));
+        var bank = scene.tile(BoardScenes.CENTER.translated(0));
         assertTrue(BoardSurfaceBlend.boundary(scene, bank), "A uniform meadow bank still blends onto the span's rock");
-        var edge = BoardGeometry.center(CENTER, 3).lerp(BoardGeometry.center(bank.coords(), 3), .5f);
+        var edge = BoardGeometry.center(BoardScenes.CENTER, 3).lerp(BoardGeometry.center(bank.coords(), 3), .5f);
         var inward = BoardGeometry.center(bank.coords(), 3).sub(edge).nor();
         var sampler = new BoardSurfaceBlend.Sampler(scene, bank);
         var lip = new Vector3(edge).mulAdd(inward, BoardRelief.metres(.5f));
@@ -347,18 +346,18 @@ class BoardNaturalBridgeTest {
     void groundRoadAndWaterGeometryRemainIndependentOfTheArch() {
         for (boolean water : new boolean[] { false, true }) {
             var scene = scene(BoardScene.Surface.GRASS, water, true);
-            var tile = scene.tile(CENTER);
+            var tile = scene.tile(BoardScenes.CENTER);
             var without = new BoardScene.Tile(tile.coords(), tile.elevation(), tile.waterDepth(), tile.frozen(),
                   tile.roadExits(), tile.surface(), null, null, List.of(), List.of(),
                   tile.liquid(), null, true, tile.road());
-            var groundOnly = replace(scene, without);
+            var groundOnly = BoardScenes.replace(scene, without);
             var before = new BoardSurface(groundOnly, without);
             var after = new BoardSurface(scene, tile);
             sameGeometry(before.faces, after.faces, "The natural bridge must not fill or reshape the ground below");
             sameGeometry(before.waterFaces, after.waterFaces, "The river must remain below the separate bridge shell");
             assertEquals(BoardRoad.of(groundOnly, without).joins(), BoardRoad.of(scene, tile).joins());
             if (!water) {
-                var at = BoardGeometry.center(CENTER, 0);
+                var at = BoardGeometry.center(BoardScenes.CENTER, 0);
                 assertEquals(UnitLandingSupports.ground(groundOnly, at.x, at.y),
                       UnitLandingSupports.ground(scene, at.x, at.y), .001f, "A unit below must stay on the lower road");
             }
@@ -385,15 +384,15 @@ class BoardNaturalBridgeTest {
     @Test
     void anApproachNeverTurnsANaturalSpanBuiltAndAnUntypedSpanIsACleanBuiltDeck() {
         var scene = scene(BoardScene.Surface.SAND, false, true);
-        var tile = scene.tile(CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         assertTrue(BoardBridge.deck(scene, tile).natural());
-        var entrance = CENTER.translated(0);
-        var road = BoardRoadTest.tile(entrance, BoardRoad.Kind.GRAVEL, 9, 3, BoardScene.Surface.SAND);
-        var edited = replace(scene, road);
+        var entrance = BoardScenes.CENTER.translated(0);
+        var road = BoardScenes.tile(entrance, BoardRoad.Kind.GRAVEL, 9, 3, BoardScene.Surface.SAND);
+        var edited = BoardScenes.replace(scene, road);
         assertTrue(BoardBridge.deck(edited, tile).natural(), "A stored natural span stays a rock arch beside a road");
         // An untyped span is built (the editor's stroke default); its deck carries only the road it stores.
-        var untyped = replace(edited, BoardBridgeTypeTest.appearance(tile, Map.of()));
-        var deck = BoardBridge.deck(untyped, untyped.tile(CENTER));
+        var untyped = BoardScenes.replace(edited, BoardBridgeTypeTest.appearance(tile, Map.of()));
+        var deck = BoardBridge.deck(untyped, untyped.tile(BoardScenes.CENTER));
         assertFalse(deck.natural());
         assertEquals(BoardRoad.Kind.NONE, deck.kind(), "An approach paints no deck");
     }
@@ -401,13 +400,13 @@ class BoardNaturalBridgeTest {
     @Test
     void naturalMouthsMeetTheScallopedBankAcrossThePassageAtEveryLod() {
         var scene = scene(BoardScene.Surface.GRASS, false, true);
-        var tile = scene.tile(CENTER);
-        var center = BoardGeometry.center(CENTER, 3);
+        var tile = scene.tile(BoardScenes.CENTER);
+        var center = BoardGeometry.center(BoardScenes.CENTER, 3);
         for (var lod : TerrainLod.values()) {
             var surfaces = new HashMap<Coords, BoardSurface>();
             var bridge = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
             for (int d : new int[] { 0, 3 }) {
-                var bank = surfaces.get(CENTER.translated(d));
+                var bank = surfaces.get(BoardScenes.CENTER.translated(d));
                 var direction = BoardGeometry.center(bank.tile.coords(), 3).sub(center);
                 var across = new Vector3(-direction.y, direction.x, 0).nor();
                 var ground = bank.faces.stream().filter(f -> f.finish() != BoardSurface.Finish.OUTCROP).toList();
@@ -430,14 +429,14 @@ class BoardNaturalBridgeTest {
     void levelBankPassagesHaveNoHeightStepOrCliffNormalAcrossTheirWalkingSurface() {
         int rimSamples = 0;
         for (int direction : new int[] { 0, 1 }) {
-            var scene = scene(BoardScene.Surface.SAND, true, false, CENTER, direction);
-            var tile = scene.tile(CENTER);
-            var center = BoardGeometry.center(CENTER, 3);
+            var scene = scene(BoardScene.Surface.SAND, true, false, BoardScenes.CENTER, direction);
+            var tile = scene.tile(BoardScenes.CENTER);
+            var center = BoardGeometry.center(BoardScenes.CENTER, 3);
             for (var lod : TerrainLod.values()) {
                 var surfaces = new HashMap<Coords, BoardSurface>();
                 var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), lod, surfaces);
                 for (int d : new int[] { direction, (direction + 3) % 6 }) {
-                    var bank = surfaces.get(CENTER.translated(d));
+                    var bank = surfaces.get(BoardScenes.CENTER.translated(d));
                     var along = BoardGeometry.center(bank.tile.coords(), 3).sub(center);
                     var unit = new Vector3(along).nor();
                     var across = new Vector3(-unit.y, unit.x, 0);
@@ -522,11 +521,11 @@ class BoardNaturalBridgeTest {
         // One approach makes an ordinary bridge; inspect the unchanged opposite bank in both cases.
         int exits = (1 << direction) | (1 << ((direction + 3) % 6));
         if (kind != BoardRoad.Kind.NONE) {
-            scene = replace(scene, BoardRoadTest.tile(center.translated(direction), kind, exits, 3, family));
+            scene = BoardScenes.replace(scene, BoardScenes.tile(center.translated(direction), kind, exits, 3, family));
         }
         var tile = scene.tile(center.translated((direction + 3) % 6));
         int crossing = (1 << ((direction + 1) % 6)) | (1 << ((direction + 4) % 6));
-        var without = replace(scene, BoardRoadTest.tile(center, BoardRoad.Kind.GRAVEL, crossing, 0, family));
+        var without = BoardScenes.replace(scene, BoardScenes.tile(center, BoardRoad.Kind.GRAVEL, crossing, 0, family));
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
             var before = new BoardSurface(without, tile, lod);
             var after = new BoardSurface(scene, tile, lod);
@@ -561,12 +560,12 @@ class BoardNaturalBridgeTest {
     void everyAuthoredExitHasAnOpenTopAndUnsupportedEndsHaveClosedRockShells() {
         // Bank-anchored caps join the bank's own top; unsupported ends must retain a complete independent shell.
         var ground = scene(BoardScene.Surface.ROCK, false, false);
-        var tiles = ground.tiles().stream().map(tile -> BoardRoadTest.tile(tile.coords(), BoardRoad.Kind.NONE,
+        var tiles = ground.tiles().stream().map(tile -> BoardScenes.tile(tile.coords(), BoardRoad.Kind.NONE,
               0, 0, BoardScene.Surface.ROCK)).toList();
         var scene = new BoardScene(0, 9, 9, tiles, List.of(), List.of(), -1, "", List.of());
         for (int exits = 0; exits < 64; exits++) {
-            var tile = bridge(scene.tile(CENTER), exits);
-            var edited = replace(scene, tile);
+            var tile = bridge(scene.tile(BoardScenes.CENTER), exits);
+            var edited = BoardScenes.replace(scene, tile);
             var shape = BoardNaturalBridge.build(edited, tile, BoardBridge.deck(edited, tile), TerrainLod.FULL, new HashMap<>());
             assertTrue(shape.facets().size() < 1600, "Bounded geometry even for branching natural spans");
             Map<List<Vector3>, Integer> edges = new HashMap<>();
@@ -582,7 +581,7 @@ class BoardNaturalBridgeTest {
                 assertEquals(1, edges.getOrDefault(edge.reversed(), 0), "No cracks or reversed faces in the arch shell");
             });
             for (int d = 0; d < 6; d++) {
-                var p = BoardGeometry.center(CENTER, 3).lerp(BoardGeometry.center(CENTER.translated(d), 3), .49f);
+                var p = BoardGeometry.center(BoardScenes.CENTER, 3).lerp(BoardGeometry.center(BoardScenes.CENTER.translated(d), 3), .49f);
                 float hit = shape.hit(new Ray(p.add(0, 0, 20), new Vector3(0, 0, -1)));
                 assertEquals((exits & (1 << d)) != 0, Float.isFinite(hit), "Only authored exits may reach a hex edge");
             }
@@ -671,16 +670,16 @@ class BoardNaturalBridgeTest {
      */
     @Test
     void aJoinedCornerBesideAMarkedCliffTopStaysAtTheDeck() {
-        var south = CENTER;
+        var south = BoardScenes.CENTER;
         var north = south.translated(0);
         var cliff = south.translated(1);
         // The ground at level 2, the decks one level above it, level banks at both ends and the marked bank at 4.
-        var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> c.equals(south)
+        var scene = BoardBridgeTypeTest.typed(BoardScenes.scene(c -> c.equals(south)
               ? BoardBridgeSlopeTest.bridge(c, 2, 1, 1 | 2 | 8)
               : c.equals(north) ? BoardBridgeSlopeTest.bridge(c, 2, 1, 1 | 4 | 8)
-              : c.equals(cliff) ? cliffTop(BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0, 4, BoardScene.Surface.ROCK),
+              : c.equals(cliff) ? cliffTop(BoardScenes.tile(c, BoardRoad.Kind.NONE, 0, 4, BoardScene.Surface.ROCK),
                     (1 << 4) | (1 << 5))
-              : BoardRoadTest.tile(c, BoardRoad.Kind.NONE, 0,
+              : BoardScenes.tile(c, BoardRoad.Kind.NONE, 0,
                     c.equals(south.translated(3)) || c.equals(north.translated(0)) ? 3 : 2, BoardScene.Surface.ROCK)),
               HexAppearance.NATURAL_BRIDGE);
         float deck = 3 * BoardGeometry.level() + BoardRelief.metres(.05f);
@@ -721,12 +720,12 @@ class BoardNaturalBridgeTest {
               raisedLavaTubes(5, 4), raisedLavaTubes(4, 3), raisedLavaTubes(4, 4));
         // The tongue check below admits edges beyond one corner of a joint only, never the shared edge itself.
         for (int d = 0; d < 6; d++) {
-            var a = BoardGeometry.corner(CENTER, 0, Math.floorMod(1 - d, 6));
-            var b = BoardGeometry.corner(CENTER, 0, Math.floorMod(2 - d, 6));
-            assertEquals(1, BoardGeometry.share(CENTER, d, a.x, a.y), BoardBankClip.SEAM);
-            assertEquals(1, BoardGeometry.share(CENTER, d, b.x, b.y), BoardBankClip.SEAM);
-            assertFalse(beyond(CENTER, d, a, b), "The shared edge, corner to corner");
-            assertTrue(beyond(CENTER, d, new Vector3(a).lerp(b, -.2f), a) && beyond(CENTER, d, b, new Vector3(b).lerp(a, -.2f)),
+            var a = BoardGeometry.corner(BoardScenes.CENTER, 0, Math.floorMod(1 - d, 6));
+            var b = BoardGeometry.corner(BoardScenes.CENTER, 0, Math.floorMod(2 - d, 6));
+            assertEquals(1, BoardGeometry.share(BoardScenes.CENTER, d, a.x, a.y), BoardBankClip.SEAM);
+            assertEquals(1, BoardGeometry.share(BoardScenes.CENTER, d, b.x, b.y), BoardBankClip.SEAM);
+            assertFalse(beyond(BoardScenes.CENTER, d, a, b), "The shared edge, corner to corner");
+            assertTrue(beyond(BoardScenes.CENTER, d, new Vector3(a).lerp(b, -.2f), a) && beyond(BoardScenes.CENTER, d, b, new Vector3(b).lerp(a, -.2f)),
                   "Beyond either corner");
         }
         int joints = 0, banks = 0, tongues = 0;
@@ -784,7 +783,7 @@ class BoardNaturalBridgeTest {
     void clippedTopsKeepThePointsTheirEdgesShare() {
         var scene = scene(BoardScene.Surface.ROCK, false, false);
         float m = BoardRelief.metres(1), height = 3 * BoardGeometry.level();
-        var o = BoardGeometry.center(CENTER, 0);
+        var o = BoardGeometry.center(BoardScenes.CENTER, 0);
         o.z = height;
         var a = new Vector3(o).add(-10 * m, 0, 0);
         var b = new Vector3(o).add(10 * m, 0, 0);
@@ -798,7 +797,7 @@ class BoardNaturalBridgeTest {
         banks.lineTo(o.x + m, o.y - 5 * m);
         banks.closePath();
         banks.append(new java.awt.geom.Rectangle2D.Float(o.x - 2 * m, o.y + 6 * m, 4 * m, 4 * m), false);
-        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(CENTER), facets, new Area(banks), height);
+        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(BoardScenes.CENTER), facets, new Area(banks), height);
         var edges = new HashSet<List<Vector3>>();
         boolean[] sides = new boolean[2];
         for (var face : clipped) {
@@ -827,7 +826,7 @@ class BoardNaturalBridgeTest {
     void thinClippedTopsTakeEachSharedPointOnce() {
         var scene = scene(BoardScene.Surface.ROCK, false, false);
         float unit = BoardGeometry.hexScale(), height = 3 * BoardGeometry.level();
-        var o = BoardGeometry.center(CENTER, 0);
+        var o = BoardGeometry.center(BoardScenes.CENTER, 0);
         o.z = height;
         var a = new Vector3(o);
         var c = new Vector3(o).add(10 * unit, .1f * unit, 0);
@@ -847,7 +846,7 @@ class BoardNaturalBridgeTest {
         banks.closePath();
         banks.append(new java.awt.geom.Rectangle2D.Float(o.x + 9.5f * unit, o.y - unit, 2 * unit, 2 * unit), false);
         var area = new Area(banks);
-        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(CENTER), facets, area, height);
+        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(BoardScenes.CENTER), facets, area, height);
         assertFalse(clipped.isEmpty(), "The faces keep their near ends");
         var faces = new HashSet<java.util.Set<Vector3>>();
         float covered = 0;
@@ -873,9 +872,9 @@ class BoardNaturalBridgeTest {
     @Test
     void clippedLevelTopsHoldForRandomFacesAndBanks() {
         var scene = scene(BoardScene.Surface.ROCK, false, false);
-        var tile = scene.tile(CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         float unit = BoardGeometry.hexScale(), height = 3 * BoardGeometry.level(), same = .001f * unit;
-        var o = BoardGeometry.center(CENTER, 0);
+        var o = BoardGeometry.center(BoardScenes.CENTER, 0);
         o.z = height;
         var random = new java.util.Random(20261030);
         int cases = 0;
@@ -1168,7 +1167,7 @@ class BoardNaturalBridgeTest {
     void clippedTopsBridgeEveryBankIsland(float x, float y) {
         var scene = scene(BoardScene.Surface.ROCK, false, false);
         float unit = BoardGeometry.hexScale(), height = 3 * BoardGeometry.level();
-        var o = x == 0 ? BoardGeometry.center(CENTER, 0) : new Vector3(x * unit, y * unit, 0);
+        var o = x == 0 ? BoardGeometry.center(BoardScenes.CENTER, 0) : new Vector3(x * unit, y * unit, 0);
         o.z = height;
         var facets = new ArrayList<BoardBridge.Facet>();
         BoardBridge.triangle(facets, new Vector3(o).add(-10 * unit, -10 * unit, 0), new Vector3(o).add(10 * unit, -10 * unit, 0),
@@ -1181,7 +1180,7 @@ class BoardNaturalBridgeTest {
             banks.closePath();
         }
         var area = new Area(banks);
-        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(CENTER), facets, area, height);
+        var clipped = BoardBankClip.outsideBanks(scene, scene.tile(BoardScenes.CENTER), facets, area, height);
         float kept = 0, covered = 0;
         for (var face : clipped) {
             assertTrue(face.normal().z > 0, "Every piece faces up: " + face);
@@ -1275,7 +1274,7 @@ class BoardNaturalBridgeTest {
     }
 
     static BoardScene scene(BoardScene.Surface family, boolean water, boolean underRoad) {
-        return scene(family, water, underRoad, CENTER, 0);
+        return scene(family, water, underRoad, BoardScenes.CENTER, 0);
     }
 
     static BoardScene scene(BoardScene.Surface family, boolean water, boolean underRoad, Coords bridge, int direction) {
@@ -1290,7 +1289,7 @@ class BoardNaturalBridgeTest {
                 boolean canyon = Math.abs(relative.dot(across)) < BoardGeometry.height() * .55f;
                 boolean road = !water && underRoad && Math.abs(relative.dot(across)) < .01f;
                 int level = canyon ? 0 : 3;
-                var ground = BoardRoadTest.tile(at, road ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
+                var ground = BoardScenes.tile(at, road ? BoardRoad.Kind.GRAVEL : BoardRoad.Kind.NONE,
                       road ? (1 << ((direction + 1) % 6)) | (1 << ((direction + 4) % 6)) : 0, level, family);
                 if (water && canyon) {
                     ground = new BoardScene.Tile(at, 0, 1, false, 0, family, null, null,
@@ -1312,11 +1311,5 @@ class BoardNaturalBridgeTest {
               ground.frozen(), ground.roadExits(), ground.surface(), null, null,
               BoardFeatures.capture(hex, ground.coords(), Map.of()), List.of(), ground.liquid(), null, true, ground.road()),
               Map.of("bridge", HexAppearance.NATURAL_BRIDGE));
-    }
-
-    static BoardScene replace(BoardScene scene, BoardScene.Tile tile) {
-        var tiles = new ArrayList<>(scene.tiles());
-        tiles.set(tile.coords().getX() * scene.height() + tile.coords().getY(), tile);
-        return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
     }
 }

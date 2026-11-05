@@ -167,8 +167,8 @@ class BoardBridgeSlopeTest {
             var roadAt = at.translated(direction);
             int exits = (1 << direction) | (1 << ((direction + 3) % 6));
             for (int roadLevel : new int[] { 0, 2 }) {
-                var scene = BoardSurfaceBlendTest.scene(c -> c.equals(at) ? bridge(c, -1, 2, exits)
-                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                var scene = BoardScenes.scene(c -> c.equals(at) ? bridge(c, -1, 2, exits)
+                      : BoardScenes.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                             c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS));
                 var tile = scene.tile(at);
                 var center = BoardGeometry.center(at, 1);
@@ -315,12 +315,12 @@ class BoardBridgeSlopeTest {
         var bridge = bridge(at, -1, 2, 9);
         var bankAt = at.translated(direction);
         for (int level : new int[] { -2, -1, 1, 2, 3 }) {
-            var bank = BoardRoadTest.tile(bankAt, BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS);
+            var bank = BoardScenes.tile(bankAt, BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS);
             assertEquals(1, BoardBridge.edgeElevation(bridge, bank, direction),
                   "Only a one-level drop to an otherwise bare bank changes the deck grade");
         }
-        var lower = BoardRoadTest.tile(bankAt, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS);
-        var water = BoardSurfaceBlendTest.tile(bankAt, BoardScene.Surface.GRASS, 0, 1, 0);
+        var lower = BoardScenes.tile(bankAt, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS);
+        var water = BoardScenes.tile(bankAt, BoardScene.Surface.GRASS, 0, 1, 0);
         assertEquals(1, BoardBridge.edgeElevation(bridge, water, direction), "Water cannot support a new ramp");
         assertEquals(1, BoardBridge.edgeElevation(bridge, null, direction), "The board edge cannot support a new ramp");
         assertEquals(1, BoardBridge.edgeElevation(bridge(at, -1, 2, 1), lower, direction),
@@ -333,12 +333,12 @@ class BoardBridgeSlopeTest {
     static BoardScene lowerBank(Coords at, int direction, boolean paved) {
         var bankAt = at.translated(direction);
         int exits = (1 << direction) | (1 << ((direction + 3) % 6));
-        return BoardSurfaceBlendTest.scene(c -> {
+        return BoardScenes.scene(c -> {
             if (c.equals(at)) {
                 var tile = bridge(c, -1, 2, exits);
                 return paved ? BoardBridgeMaterialsTest.withDeckRoad(tile, BoardRoad.Kind.PAVED, exits) : tile;
             }
-            return BoardRoadTest.tile(c, paved && c.equals(bankAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+            return BoardScenes.tile(c, paved && c.equals(bankAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   paved && c.equals(bankAt) ? exits : 0, c.equals(bankAt) ? 0 : -1, BoardScene.Surface.GRASS);
         });
     }
@@ -352,9 +352,9 @@ class BoardBridgeSlopeTest {
             var roadAt = at.translated(direction);
             int exits = (1 << direction) | (1 << ((direction + 3) % 6));
             for (int roadLevel : new int[] { 0, 2 }) {
-                var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> c.equals(at)
+                var scene = BoardBridgeTypeTest.typed(BoardScenes.scene(c -> c.equals(at)
                       ? bridge(c, -1, 2, exits)
-                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                      : BoardScenes.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                             c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS)),
                       HexAppearance.TRUSS);
                 var tile = scene.tile(at);
@@ -435,7 +435,7 @@ class BoardBridgeSlopeTest {
             route.put(at, paved.apply(bridge(at, -2, 4 + step(d), straight)));
             if (roads) {
                 at = at.translated(d);
-                route.put(at, BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, straight, 2 + step(d), BoardScene.Surface.ROCK));
+                route.put(at, BoardScenes.tile(at, BoardRoad.Kind.PAVED, straight, 2 + step(d), BoardScene.Surface.ROCK));
             }
         }
         var tiles = new ArrayList<BoardScene.Tile>();
@@ -443,14 +443,14 @@ class BoardBridgeSlopeTest {
         for (int x = 0; x < width; x++) {
             for (int y = 0; y < height; y++) {
                 var at = new Coords(x, y);
-                tiles.add(route.getOrDefault(at, BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, -2, BoardScene.Surface.ROCK)));
+                tiles.add(route.getOrDefault(at, BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, -2, BoardScene.Surface.ROCK)));
             }
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     static BoardScene.Tile bridge(Coords at, int ground, int height, int exits) {
-        var tile = BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, ground, BoardScene.Surface.ROCK);
+        var tile = BoardScenes.tile(at, BoardRoad.Kind.NONE, 0, ground, BoardScene.Surface.ROCK);
         var hex = new Hex(ground);
         hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, height));

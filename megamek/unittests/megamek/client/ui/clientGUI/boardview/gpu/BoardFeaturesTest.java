@@ -5,24 +5,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
-import megamek.common.board.HexAppearance;
 import megamek.common.board.TilesetScenery;
-import megamek.common.units.BipedMek;
-import megamek.common.units.ConvInfantry;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardFeaturesTest {
     /**
@@ -34,43 +32,6 @@ class BoardFeaturesTest {
         assertTrue(shorter <= (density == 1 ? 1 : 2), "At most one shorter plant in light woods, two in heavier woods");
         assertTrue(plants.stream().allMatch(plant -> plant.height() >= height * .7f && plant.height() <= height * 1.1f),
               "Plants stand about their woods' height");
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = { 1, 2, 3, 4 })
-    void tankFarmDesignsUseFuelTankFeaturesWithoutBuildingInteriors(int weight) {
-        Hex hex = new Hex(0, "fuel_tank:" + weight + ":4;fuel_tank_cf:15;fuel_tank_elev:3;fuel_tank_magn:100", "");
-        hex.setAppearance(Map.of("fuelTank", new HexAppearance("building/tank-farm", null, null, null)));
-        var models = TilesetScenery.structureModels(hex);
-        assertEquals(java.util.Set.of(Terrains.FUEL_TANK), models.keySet());
-        var features = BoardFeatures.capture(hex, new Coords(1, 1), models);
-        assertEquals(1, features.size());
-        assertEquals(BoardScene.FeatureKind.FUEL_TANK, features.getFirst().kind(),
-              "Only BUILDING features generate interior floors and struts");
-        assertEquals(3, features.getFirst().height());
-    }
-
-    @Test
-    void liveCrossingsReplaceOnlyOldPanelsOnTheSameRoadAndRailSurface() {
-        var hex = new Hex(0, "road:1:18;rail:1:9;bridge:1:9;bridge_elev:2;bridge_road:1:18", "");
-        var ground = megamek.common.board.BoardDecoration.Placement.ground();
-        var deck = megamek.common.board.BoardDecoration.Placement.on("bridge", 0);
-        String panel = "decal/rail/level-crossing";
-        var covered = new megamek.common.board.BoardDecoration("covered", "decal", panel, null, 0, 0, 0, false, 1, ground, 0);
-        var above = new megamek.common.board.BoardDecoration("above", "decal", panel, null, 0, 0, 0, false, 1, deck, 0);
-        var beside = new megamek.common.board.BoardDecoration("beside", "decal", panel, null, .4, .4, 0, false, 1, ground, 0);
-        hex.setDecorations(java.util.List.of(covered, above, beside));
-        var at = new Coords(2, 2);
-        var visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
-        assertFalse(visible.contains(covered), "The road crossing uses the embedded track");
-        assertTrue(visible.contains(above), "Ground rails do not replace artwork on the bridge above them");
-        assertTrue(visible.contains(beside), "An authored panel away from the crossing remains available");
-        megamek.common.board.RailRoute.lay(hex, true, 9, 0);
-        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
-        assertFalse(visible.contains(above), "A deck road and deck rail replace their own old crossing panel");
-        hex.removeTerrain(Terrains.ROAD);
-        visible = BoardFeatures.capture(hex, at, Map.of()).stream().map(BoardScene.Feature::decoration).toList();
-        assertTrue(visible.contains(covered), "Track without a road does not claim an authored panel");
     }
 
     @Test
@@ -93,70 +54,6 @@ class BoardFeaturesTest {
         hex.addTerrain(new Terrain(Terrains.ULTRA_SUBLEVEL, 1));
         assertEquals(features, BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .filter(f -> f.decoration() != null).toList(), "Absolute objects remain available above a chasm");
-    }
-    @Test
-    void aBridgeSpansAChasmOnTheHexLevel() {
-        Hex hex = new Hex(2);
-        hex.addTerrain(new Terrain(Terrains.ULTRA_SUBLEVEL, 1));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
-        var bridges = BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
-              .filter(feature -> feature.asset().equals("bridge")).toList();
-        assertEquals(1, bridges.size(), "The deck spans the chasm");
-        assertEquals(1, bridges.getFirst().elevation(), .0001, "One level above the hex's level, not the pit's");
-    }
-
-    @ParameterizedTest
-    @ValueSource(ints = { 1, 3, 7, 10 })
-    void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {
-        Hex hex = new Hex(2);
-        hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
-        Coords coords = new Coords(2, 3);
-        for (String suffix : new String[] { "a", "b", "c", "d" }) {
-            String asset = "buildings/saxarba/misc/heavy_industrial_" + suffix;
-            var features = BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset));
-            assertEquals(1, features.size());
-            assertEquals(BoardScene.FeatureKind.INDUSTRIAL, features.getFirst().kind());
-            assertEquals(height, features.getFirst().height());
-            assertEquals(asset, features.getFirst().asset());
-        }
-        BipedMek unit = new BipedMek();
-        assertTrue(unit.isElevationValid(0, hex));
-        for (int elevation = 1; elevation <= height; elevation++) {
-            assertFalse(unit.isElevationValid(elevation, hex), "Industrial height is cover, not a building floor");
-        }
-        hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
-        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
-        assertTrue(unit.isElevationValid(3, hex), "A coexisting real building retains its roof");
-        assertTrue(new ConvInfantry().isElevationValid(1, hex),
-              "Infantry can occupy the coexisting building's interior floors");
-        var mixed = BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building",
-              Terrains.INDUSTRIAL, "industry"));
-        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
-              && feature.height() == 3));
-        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
-              && feature.height() == height));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
-    void modeledBridgesKeepTheUnderlyingTerrainMaterial(String theme) {
-        Hex hex = new Hex(-2);
-        hex.setTheme(theme);
-        var surface = BoardFeatures.surface(hex);
-        hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 100));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_REPAIRED, 1));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()), "Bridge geometry must not force the legacy ground artwork");
-        assertEquals(surface, BoardFeatures.surface(hex));
-        assertFalse(BoardLiquid.capture(hex).present(), "A suspended bridge does not imply liquid beneath it");
-        hex.addTerrain(new Terrain(Terrains.WATER, 2));
-        assertTrue(BoardFeatures.detailedGround(hex, Map.of()));
-        assertTrue(BoardLiquid.capture(hex).present(), "Authored water beneath a bridge must remain water");
-        hex.removeTerrain(Terrains.WATER);
-        hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
-        assertFalse(BoardFeatures.detailedGround(hex, Map.of()), "Unmodeled ground markings still keep their artwork");
     }
 
     @ParameterizedTest
@@ -216,21 +113,6 @@ class BoardFeaturesTest {
         hex.addTerrain(new Terrain(Terrains.RUBBLE, 1));
         assertFalse(BoardFeatures.detailedGround(hex, models),
               "Real unmodeled terrain must still retain its artwork");
-    }
-
-    @Test
-    void lunarThemeKeepsItsOwnGeologyWithoutReplacingExplicitSurfaceTerrain() {
-        Hex hex = new Hex(0);
-        hex.setTheme("lunar");
-        assertEquals(BoardScene.Surface.LUNAR, BoardFeatures.surface(hex));
-        hex.setTheme("rock");
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
-        hex.setTheme("lunar");
-        hex.addTerrain(new Terrain(Terrains.MAGMA, 1));
-        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
-        hex.removeTerrain(Terrains.MAGMA);
-        hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
-        assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
     }
 
     @Test
@@ -444,5 +326,56 @@ class BoardFeaturesTest {
         assertEquals(BoardScene.Biome.FIELD, BoardFeatures.biome(hex));
         assertTrue(BoardFeatures.capture(hex, new Coords(0, 0), Map.of()).stream()
               .noneMatch(feature -> feature.asset().equals("vegetation/field")), "Instanced crops replace the legacy field prop");
+    }
+
+    @Test
+    void treesOnPavingStandInPlantingPitsThatNeverTouchOrRaiseTheGround() {
+        for (int density = 1; density <= 3; density++) {
+            for (BoardScene.Surface family : List.of(BoardScene.Surface.CONCRETE, BoardScene.Surface.GRASS)) {
+                Hex hex = new Hex(0);
+                if (family == BoardScene.Surface.CONCRETE) { hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1)); }
+                hex.addTerrain(new Terrain(Terrains.WOODS, density));
+                hex.addTerrain(new Terrain(Terrains.FOLIAGE_ELEV, 2));
+                List<BoardScene.Feature> trees = BoardFeatures.capture(hex, BoardScenes.RELIEF_CENTER, Map.of());
+                List<BoardScene.Tile> tiles = new ArrayList<>();
+                for (int x = 0; x < 5; x++) {
+                    for (int y = 0; y < 5; y++) {
+                        Coords coords = new Coords(x, y);
+                        tiles.add(new BoardScene.Tile(coords, 0, -1, false, 0, family, null, null,
+                              coords.equals(BoardScenes.RELIEF_CENTER) ? trees : List.of(), List.of(), BoardLiquid.NONE, null, true));
+                    }
+                }
+                BoardScene scene = new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "", List.of());
+                BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
+                List<Vector3> pits = new ArrayList<>();
+                for (BoardSurface.Face face : surface.faces) {
+                    if (face.finish() == BoardSurface.Finish.DRESSING) { pits.addAll(List.of(face.a(), face.b(), face.c())); }
+                }
+                if (family == BoardScene.Surface.GRASS) {
+                    assertTrue(pits.isEmpty(), "Only paved ground has planting pits");
+                    continue;
+                }
+                float spacing = Float.POSITIVE_INFINITY;
+                List<Vector3> trunks = new ArrayList<>();
+                for (BoardScene.Feature tree : trees) {
+                    Vector3 trunk = new Vector3(BoardGeometry.centerX(BoardScenes.RELIEF_CENTER) + tree.x() * BoardGeometry.HEX_SCALE,
+                          BoardGeometry.centerY(BoardScenes.RELIEF_CENTER) + tree.y() * BoardGeometry.HEX_SCALE, 0);
+                    for (Vector3 other : trunks) {
+                        spacing = Math.min(spacing, Math.max(Math.abs(trunk.x - other.x), Math.abs(trunk.y - other.y)));
+                    }
+                    trunks.add(trunk);
+                    assertTrue(pits.stream().anyMatch(p -> Math.hypot(p.x - trunk.x, p.y - trunk.y) < .01f),
+                          "Every tree stands in its own pit");
+                }
+                for (Vector3 p : pits) {
+                    float own = Float.POSITIVE_INFINITY;
+                    for (Vector3 trunk : trunks) { own = Math.min(own, Math.max(Math.abs(p.x - trunk.x), Math.abs(p.y - trunk.y))); }
+                    assertTrue(own < spacing / 2, "Neighbouring pits never touch");
+                    assertTrue(p.z < BoardRelief.metres(.2f), "A pit is thin dressing on the slab");
+                }
+                Vector3 center = BoardGeometry.center(BoardScenes.RELIEF_CENTER, 0);
+                assertEquals(center.z, surface.height(center.x, center.y), .001f, "Pits never raise what stands there");
+            }
+        }
     }
 }

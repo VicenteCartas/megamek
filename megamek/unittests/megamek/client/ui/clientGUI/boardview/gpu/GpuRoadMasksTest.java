@@ -25,8 +25,8 @@ class GpuRoadMasksTest {
     void distantRoadMasksKeepTheirWorldBoundsAndCoverage() {
         int reduced = 0;
         for (int exits : new int[] { 1, 3, 5, 9, 21, 63 }) {
-            var tile = BoardRoadTest.tile(BoardRoadTest.CENTER, BoardRoad.Kind.PAVED, exits, 0, BoardScene.Surface.GRASS);
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var tile = BoardScenes.tile(BoardScenes.CENTER, BoardRoad.Kind.PAVED, exits, 0, BoardScene.Surface.GRASS);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             for (var patch : GpuRoads.patches(tile, road)) {
                 if (patch.shape().isEmpty()) { continue; }
                 var full = GpuRoads.mask(road, patch);

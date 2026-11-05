@@ -1528,7 +1528,7 @@ class GpuMagmaSmokeTest {
 
     /** Retain the established winding-river geometry and all metadata; change only its liquid kind. */
     private static BoardScene moltenBendScene() {
-        BoardScene river = GpuRiverTerrainSmokeTest.scene(BoardScene.Surface.VOLCANO);
+        BoardScene river = BoardScenes.scene(BoardScene.Surface.VOLCANO);
         return river.withTiles(river.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
               tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),

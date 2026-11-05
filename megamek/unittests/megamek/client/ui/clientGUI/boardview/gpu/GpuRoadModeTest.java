@@ -28,7 +28,7 @@ class GpuRoadModeTest {
                 for (int d : new int[] { 0, 1, 3, 4 }) {
                     if (at.equals(junction.translated(d))) { exits = 1 << ((d + 3) % 6); }
                 }
-                tiles.add(BoardRoadTest.tile(at, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED,
+                tiles.add(BoardScenes.tile(at, exits == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.PAVED,
                       exits, at.equals(upper) ? 1 : 0, BoardScene.Surface.GRASS));
             }
         }

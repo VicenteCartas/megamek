@@ -21,7 +21,7 @@ class BoardRoadRoutingTest {
     void mesaStraightRoadsKeepTheirAxisAndCaptureClearsTheRenderedRoute() {
         Board board = new Board();
         board.load(MESA);
-        var scene = BoardCliffSeamTest.scene(MESA);
+        var scene = BoardScenes.scene(MESA);
         for (Coords at : List.of(new Coords(33, 15), new Coords(28, 22))) {
             var tile = scene.tile(at);
             int direction = Integer.numberOfTrailingZeros(tile.roadExits());
@@ -46,7 +46,7 @@ class BoardRoadRoutingTest {
 
     @Test
     void mesaLowerRoadMakesOneBroadTurnWithoutReversingItsCurvature() {
-        var scene = BoardCliffSeamTest.scene(MESA);
+        var scene = BoardScenes.scene(MESA);
         float previousHeading = Float.NEGATIVE_INFINITY;
         for (Coords at : List.of(new Coords(27, 22), new Coords(28, 22), new Coords(29, 21))) {
             var road = BoardRoad.of(scene, scene.tile(at));

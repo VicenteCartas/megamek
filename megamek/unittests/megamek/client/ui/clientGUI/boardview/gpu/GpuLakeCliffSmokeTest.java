@@ -33,8 +33,8 @@ class GpuLakeCliffSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
-                    BoardWetCliffTest.tune(true);
-                    var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+                    BoardScenes.tune(true);
+                    var scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
