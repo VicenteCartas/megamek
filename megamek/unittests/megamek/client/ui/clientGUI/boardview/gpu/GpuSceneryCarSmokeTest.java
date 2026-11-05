@@ -51,7 +51,7 @@ class GpuSceneryCarSmokeTest {
                         var scene = scenes.get(index);
                         var cars = scene.tile(coords).features().stream()
                               .filter(f -> f.asset().startsWith("scenery/vehicles/car")).toList();
-                        assertEquals(BoardSceneryCarTest.COUNTS.get(index).intValue(), cars.size());
+                        assertEquals(BoardSceneryTest.COUNTS.get(index).intValue(), cars.size());
                         terrain.setColumns(false);
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
@@ -82,7 +82,7 @@ class GpuSceneryCarSmokeTest {
                             camera.update();
                             GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
-                            GpuReviewFrame.save(new File(output, "cars_" + BoardSceneryCarTest.VARIANTS.get(index)
+                            GpuReviewFrame.save(new File(output, "cars_" + BoardSceneryTest.VARIANTS.get(index)
                                   + (artwork ? "-art.png" : view == 2 ? "-oblique.png" : "-models.png")));
                         }
                     }

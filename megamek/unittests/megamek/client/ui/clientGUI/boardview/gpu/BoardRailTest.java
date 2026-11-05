@@ -38,7 +38,7 @@ class BoardRailTest {
     /** Native way terrain: a maglev on an implicit deck at the node's level, a rail on the ground. */
     static BoardScene scene(Map<Coords, Double> nodes, Map<Coords, Integer> sides, RailRoute.Kind kind) {
         return BoardScenes.scene(coords -> nodes.containsKey(coords)
-              ? BoardBridgeFootingTest.routeTile(coords, false, kind, nodes.get(coords).intValue(), sides.get(coords), false, 0)
+              ? BridgeScenes.routeTile(coords, false, kind, nodes.get(coords).intValue(), sides.get(coords), false, 0)
               : BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0));
     }
 

@@ -269,7 +269,7 @@ class GpuBridgeSmokeTest {
                           List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.DIRT),
                           List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL))) {
                         var deck = kinds.getLast();
-                        var scene = BoardBridgeMaterialsTest.straight(CENTER, 2, 1, kinds.get(0), kinds.get(1), deck);
+                        var scene = BridgeScenes.straight(CENTER, 2, 1, kinds.get(0), kinds.get(1), deck);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
                         GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);

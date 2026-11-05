@@ -119,7 +119,7 @@ class GpuRailBridgeRampSmokeTest {
         if (elevation == 0) { return; }
         for (float along : new float[] { .35f, .45f, .55f, .65f }) {
             var point = BoardGeometry.center(BRIDGE, 0).lerp(BoardGeometry.center(APPROACH, 0), along);
-            float expected = (1 - BoardBridgeSlopeTest.eased(along)) * elevation * BoardGeometry.level() + lift + railTop;
+            float expected = (1 - BridgeScenes.eased(along)) * elevation * BoardGeometry.level() + lift + railTop;
             for (int side : new int[] { -1, 1 }) {
                 var ray = new Ray(new Vector3(point.x + side * BoardRail.GAUGE_HALF * scale, point.y, 200),
                       new Vector3(0, 0, -1));
@@ -192,6 +192,6 @@ class GpuRailBridgeRampSmokeTest {
         var tile = new BoardScene.Tile(at, 0, ground.waterDepth(), false, 0, ground.surface(), null, null,
               BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null,
               true, BoardRoad.Kind.NONE);
-        return bridge ? BoardBridgeTypeTest.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
+        return bridge ? BridgeScenes.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
     }
 }

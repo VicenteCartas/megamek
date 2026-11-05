@@ -85,7 +85,7 @@ class GpuNaturalBridgeSmokeTest {
     void raisedLavaTubeJointsCloseOntoTheirBanks() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
         Files.createDirectories(output.toPath());
-        var scenes = List.of(BoardNaturalBridgeTest.raisedLavaTubes(4, 4), BoardNaturalBridgeTest.raisedLavaTubes(4, 3));
+        var scenes = List.of(BridgeScenes.raisedLavaTubes(4, 4), BridgeScenes.raisedLavaTubes(4, 3));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 1024);
@@ -141,7 +141,7 @@ class GpuNaturalBridgeSmokeTest {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW)) {
-                        var scene = BoardNaturalBridgeTest.scene(family, false, true);
+                        var scene = BridgeScenes.canyonScene(family, false, true);
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
@@ -164,7 +164,7 @@ class GpuNaturalBridgeSmokeTest {
                             assertTrue(crossing == null || !at.equals(crossing.coords()), "The lower passage stays hollow");
                         }
                     }
-                    var river = BoardNaturalBridgeTest.scene(BoardScene.Surface.ROCK, true, false);
+                    var river = BridgeScenes.canyonScene(BoardScene.Surface.ROCK, true, false);
                     frame.prepare(terrain, camera, river);
                     terrain.update(river);
                     camera.setIsometric(true);
@@ -174,7 +174,7 @@ class GpuNaturalBridgeSmokeTest {
                     frame.render(terrain, camera, river);
                     GpuReviewFrame.save(new File(output, "river-oblique.png"));
 
-                    var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
+                    var scene = BridgeScenes.canyonScene(BoardScene.Surface.GRASS, false, true);
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     camera.setIsometric(false);
@@ -185,10 +185,10 @@ class GpuNaturalBridgeSmokeTest {
                     var approach = BoardScenes.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
                     // The road-attached span is built and carries the road over its exits (as a converted board stores
                     // it); the bare one stays natural.
-                    var built = BoardBridgeTypeTest.typed(BoardScenes.replace(scene, approach),
+                    var built = BridgeScenes.typed(BoardScenes.replace(scene, approach),
                           HexAppearance.BUILT_BRIDGE);
                     var edited = BoardScenes.replace(built,
-                          BoardBridgeMaterialsTest.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
+                          BridgeScenes.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
                     var footing = BoardBridgeFooting.build(edited, edited.tile(at), TerrainLod.FULL, new HashMap<>());
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                           .add(0, -footing.lengths().get(3) * BoardGeometry.hexScale() - BoardRelief.metres(5), 0);

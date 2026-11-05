@@ -124,7 +124,7 @@ class GpuWallSmokeTest {
                     camera.update();
                     renderReady(frame, terrain, camera, scene);
                     assertTrue(wallLodCount(terrain, 2) > 0, "Distant wall slots reuse the actual simpler LOD1 mesh");
-                    scene = BoardWallHeightTest.mixedScene();
+                    scene = BoardWallTest.mixedScene();
                     terrain.update(scene);
                     camera.setIsometric(true);
                     camera.center(BoardGeometry.center(center, 2));

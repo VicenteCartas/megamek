@@ -148,7 +148,7 @@ class BoardTunnelTest {
     @EnumSource(value = BoardRoad.Kind.class, names = { "PAVED", "ALLEY", "GRAVEL", "DIRT" })
     void aDeckRoadOpensTheBridgePortalInItsMaterial(BoardRoad.Kind kind) {
         var at = BoardScenes.CENTER;
-        var scene = BoardBridgeMaterialsTest.straight(at, 0, 3, kind, BoardRoad.Kind.NONE, kind);
+        var scene = BridgeScenes.straight(at, 0, 3, kind, BoardRoad.Kind.NONE, kind);
         var end = at.translated(0, 2);
         var wall = BoardScenes.tile(end.translated(0), BoardRoad.Kind.NONE, 0, 3, BoardScene.Surface.ROCK);
         scene = BoardScenes.replace(scene, wall);
@@ -159,14 +159,14 @@ class BoardTunnelTest {
         assertTrue(BoardTunnel.entrances(scene, scene.tile(at.translated(0))).isEmpty(),
               "Connected bridge decks stay open");
 
-        scene = BoardBridgeTypeTest.typed(scene, HexAppearance.NATURAL_BRIDGE);
+        scene = BridgeScenes.typed(scene, HexAppearance.NATURAL_BRIDGE);
         assertTrue(BoardTunnel.entrances(scene, scene.tile(end)).isEmpty(),
               "A bare rock arch opens no portal, even with a road attached");
     }
 
     /** {@code t} with a bridge two levels up whose deck carries a gravel road over its exits. */
     private static BoardScene.Tile bridge(BoardScene.Tile t, int exits) {
-        return BoardBridgeMaterialsTest.withDeckRoad(new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(),
+        return BridgeScenes.withDeckRoad(new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(),
               t.frozen(), t.roadExits(), t.surface(), t.decals(), t.decalsWithoutLimbs(), List.of(new BoardScene.Feature("bridge", 0, 0, 0, 1, 1, 2, BoardScene.FeatureKind.PROP, exits)),
               t.text(), t.liquid(), t.tileset(), t.detailedGround(), t.road()), BoardRoad.Kind.GRAVEL, exits);
     }

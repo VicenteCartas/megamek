@@ -87,12 +87,12 @@ class BoardSurfaceCacheTest {
 
     @Test
     void changingAnAdjacentNaturalSpanToBuiltRestoresTheBanksCliffRim() {
-        var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.SAND, false, false);
+        var scene = BridgeScenes.canyonScene(BoardScene.Surface.SAND, false, false);
         var span = BoardScenes.CENTER;
         var bank = span.translated(0);
         var cache = new BoardSurface.Cache();
         var supported = cache.get(scene, scene.tile(bank));
-        var retyped = BoardScenes.replace(scene, BoardBridgeTypeTest.appearance(scene.tile(span),
+        var retyped = BoardScenes.replace(scene, BridgeScenes.appearance(scene.tile(span),
               Map.of("bridge", HexAppearance.BUILT_BRIDGE)));
         assertEquals(scene.tile(span).features(), retyped.tile(span).features(),
               "Changing construction family does not change the bridge terrain");

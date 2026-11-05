@@ -24,7 +24,7 @@ class BoardRoadSpillTest {
     void paintKeepsToDryGroundAtItsLevelWhileClearanceAlsoReachesRampsAndRails() {
         var scene = BoardScenes.scene(c -> {
             if (c.equals(AT.translated(4))) {
-                return BoardBridgeFootingTest.routeTile(c, false, RailRoute.Kind.RAIL, 0, 9, false, 0);
+                return BridgeScenes.routeTile(c, false, RailRoute.Kind.RAIL, 0, 9, false, 0);
             }
             boolean wet = c.equals(AT.translated(2));
             int level = c.equals(AT.translated(1)) ? 1 : 0;
