@@ -1371,12 +1371,22 @@ work for Swing, and item 11 is under investigation.
          - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
            game in play, and the lobby has none yet.
          - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
+       - Game options moved to the top bar, because testers did not find them in the battlefield column: a
+         `button-special` Game options button with a gavel stands before the Game Master's seat, its tooltip naming
+         the era, tech level and notable rules that the column's Rules section showed. It keeps its name while the
+         whole bar fits, and folds to its gavel when the bar has no room for it. The Rules section and its chips are
+         gone from the column.
+         - Planetary conditions and Victory are summary cards (`UiSummaryCard`, `UiKit.summaryCard`): the whole card
+           opens the setting, its edge strong under the pointer and a › chevron by the title, instead of a quiet
+           Change button beside the overline. In space the conditions card is disabled, muted and without a chevron.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
+       `gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded`,
        `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
        `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
        stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
-       the name line; `LobbyBattlefieldToolsSmokeTest`, `LobbyMapSetupSmokeTest` (Board Editor) and
+       the name line; `LobbyBattlefieldToolsSmokeTest` (with the conditions and victory cards, and space's disabled
+       conditions), `LobbyMapSetupSmokeTest` (Board Editor) and
        `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
        icons and the submenu's Back, Esc and Left, clicked through the stage);
        `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and

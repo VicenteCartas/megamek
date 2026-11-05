@@ -1117,8 +1117,11 @@ surface under an `accent.primary` edge. `token-card-drop` is the card or formati
 with a doubled `accent.primary` edge; between rows the drop target is a `token-row-slot` strip. `UiKit.pictureCard(text, aspect)` (`UiPictureCard`) is a card that shows a picture and opens something when
 clicked (the lobby's map): the `token-picture-card` button, `token-card` at rest and `token-card-over` (a
 `border.strong` edge) under the pointer, as high as its width times the picture's aspect up to `maxHeight`, with a
-muted line while there is no picture. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot` and
-`palette` glyphs to `UiTheme.ICONS`.
+muted line while there is no picture. `UiKit.summaryCard(title)` (`UiSummaryCard`) is a card that sums a setting up and
+opens it when clicked (the lobby's planetary conditions and victory): the same `token-picture-card` button, with the
+overline title and a › `chevron-right` on its first row and the wrapped `body` summary in `text.secondary` under them;
+disabled, the summary turns `text.muted` and the chevron goes. The lobby added the `more-vert`, `add`, `check-circle`, `radio-unchecked`, `hourglass`, `bot`,
+`palette` and `gavel` glyphs to `UiTheme.ICONS`.
 
 The battle HUD's own parts (the HUD parts tab) live in `GpuBoardSkin` and `GpuHudKit`. `GpuHudKit.unitRow(w, h, true)`
 is the unit row as a selectable plain panel: the `token-unit-row` style has a `border.subtle` edge at rest,

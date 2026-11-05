@@ -338,7 +338,9 @@ final class GpuLobbyScreen extends ApplicationAdapter {
                 window.withdrawGameMaster();
             }
         }, motion);
-        topBar = new LobbyTopBar(kit, gameMasterSeat, this::openSystemMenu, window::ready, this::goTo);
+        topBar = new LobbyTopBar(kit, gameMasterSeat,
+              () -> window.battlefieldCommand(LobbyBattlefieldController.Command.GAME_OPTIONS), this::openSystemMenu,
+              window::ready, this::goTo);
         topBar.shortcut(KeyCommandBind.getDesc(KeyCommandBind.DONE));
         players = new LobbyPlayersPanel(kit, playerActions(), !preferences.getLobbyChatFolded());
         forces = new LobbyForcesPanel(kit, forceActions(), spriteDrawables::get);

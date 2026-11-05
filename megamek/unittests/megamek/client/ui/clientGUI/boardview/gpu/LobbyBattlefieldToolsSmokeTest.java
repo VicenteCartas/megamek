@@ -20,6 +20,7 @@ import megamek.client.lobby.LobbyReadiness;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.ui.clientGUI.boardview.gpu.LobbyBattlefieldController.Command;
+import megamek.client.ui.gdx.UiSummaryCard;
 import megamek.client.ui.gdx.UiTestStage;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -70,11 +71,51 @@ class LobbyBattlefieldToolsSmokeTest {
             panel.remove();
         });
     }
+    @Test
+    void theConditionsAndVictoryCardsOpenWhenClickedAndSpaceHasNoConditions() {
+        UiTestStage.run(ui -> {
+            List<Command> commands = new ArrayList<>();
+            LobbyBattlefieldPanel battlefield = new LobbyBattlefieldPanel(ui.kit, new LobbyBattlefieldPanel.Actions() {
+                @Override
+                public void command(Command command) {
+                    commands.add(command);
+                }
+
+                @Override
+                public void autoResolve(boolean chances, int runs, int threads) {
+                }
+            });
+            Table panel = battlefield.panel();
+            ui.window.addActor(panel);
+            panel.setBounds(100, 50, 360, 900);
+
+            show(ui, battlefield, panel, false, true);
+            UiSummaryCard conditions = panel.findActor("lobby-battlefield-conditions");
+            UiSummaryCard victory = panel.findActor("lobby-battlefield-victory");
+            assertEquals("Daylight", conditions.summary());
+            assertEquals("Last side standing", victory.summary());
+            click(ui, conditions);
+            click(ui, victory);
+            assertEquals(List.of(Command.CONDITIONS, Command.VICTORY), commands);
+
+            commands.clear();
+            show(ui, battlefield, panel, new LobbyBattlefield("Space", "Vacuum", true, true, false, "3025",
+                  List.of(), "Last side standing", LobbyBattlefield.AutoResolve.DEFAULT));
+            assertTrue(conditions.isDisabled(), "space has no planetary conditions to change");
+            click(ui, conditions);
+            click(ui, victory);
+            assertEquals(List.of(Command.VICTORY), commands);
+            panel.remove();
+        });
+    }
 
     private static void show(UiTestStage ui, LobbyBattlefieldPanel battlefield, Table panel, boolean rolled,
           boolean generable) {
-        LobbyBattlefield field = new LobbyBattlefield("32 × 34 hexes", "Daylight", false, generable, rolled, "3025",
-              List.of(), "Last side standing", LobbyBattlefield.AutoResolve.DEFAULT);
+        show(ui, battlefield, panel, new LobbyBattlefield("32 × 34 hexes", "Daylight", false, generable, rolled,
+              "3025", List.of(), "Last side standing", LobbyBattlefield.AutoResolve.DEFAULT));
+    }
+
+    private static void show(UiTestStage ui, LobbyBattlefieldPanel battlefield, Table panel, LobbyBattlefield field) {
         battlefield.show(new LobbySnapshot(1, false, false, LobbyGameMaster.OFF, List.of(), List.of(), List.of(), "",
               "", LobbyForces.EMPTY, field, LobbyReadiness.EMPTY, LobbyRequisition.EMPTY));
         panel.validate();

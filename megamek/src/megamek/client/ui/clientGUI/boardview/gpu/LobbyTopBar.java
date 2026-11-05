@@ -33,9 +33,10 @@ import megamek.client.ui.gdx.UiTheme;
  * The lobby's top bar, over the art without a panel, as the reference's ready bar: the BRIEFING title with where the
  * game runs and its map under it at the start; the ready count, a Battle Value chip per side and the warnings to heed
  * before Ready in the middle, centred on the whole bar, more sides folding into one chip that lists them; at the end
- * only actions: the Game Master's seat, Ready, then the ☰ button that opens the system menu (saving, loading,
- * settings and leaving the lobby, which Esc opens too), last in the corner as a game's menu button. Ready turns green
- * with a check once the player is ready, and
+ * only actions: Game options (its rules summary in its tooltip), the Game Master's seat, Ready, then the ☰ button that
+ * opens the system menu (saving, loading, settings and leaving the lobby, which Esc opens too), last in the corner as
+ * a game's menu button. Game options folds to its gavel when the bar has no room for its name. Ready turns green with a check once the
+ * player is ready, and
  * a click on it while a red warning stands lights the red warnings instead.
  */
 final class LobbyTopBar extends WidgetGroup {
@@ -58,6 +59,10 @@ final class LobbyTopBar extends WidgetGroup {
     private final Label subtitle;
     private final UiButton ready;
     private final UiButton done;
+    private final Table gameOptionsSlot = new Table();
+    private final UiButton gameOptionsNamed;
+    private final UiButton gameOptionsGavel;
+    private final List<TextTooltip> gameOptionsTips = new ArrayList<>();
     private final TextTooltip readyTip;
     private final TextTooltip doneTip;
     private final UiPopover sidesPopover;
@@ -68,8 +73,8 @@ final class LobbyTopBar extends WidgetGroup {
     private String shortcut = "";
     private boolean narrow;
 
-    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable menuAction, Runnable readyAction,
-          Consumer<Warning> warningAction) {
+    LobbyTopBar(UiKit kit, LobbyGameMasterSeat seat, Runnable gameOptionsAction, Runnable menuAction,
+          Runnable readyAction, Consumer<Warning> warningAction) {
         this.kit = kit;
         this.seat = seat;
         this.warningAction = warningAction;
@@ -99,6 +104,11 @@ final class LobbyTopBar extends WidgetGroup {
         // Both of Ready's faces share the wider one's width, so nothing moves when Ready changes face
         float width = Math.max(ready.getPrefWidth(), done.getPrefWidth());
         Stack readyFaces = new Stack(ready, done);
+        gameOptionsNamed = gameOptionsButton("button-special", Messages.getString("Lobby.gameOptions"),
+              gameOptionsAction);
+        gameOptionsGavel = gameOptionsButton("button-icon", null, gameOptionsAction);
+        gameOptionsSlot.add(gameOptionsNamed);
+        trailing.add(gameOptionsSlot).padRight(space("sm"));
         trailing.add(seat).padRight(space("sm"));
         trailing.add(readyFaces).minWidth(width).padRight(space("sm"));
         trailing.add(menu);
@@ -136,6 +146,36 @@ final class LobbyTopBar extends WidgetGroup {
             narrow = on;
             fillWarnings();
         }
+    }
+
+    /** One face of Game options, named {@code lobby-game-options}; its tooltip names the rules in play. */
+    private UiButton gameOptionsButton(String style, String text, Runnable action) {
+        UiButton button = kit.button(style, "gavel", text, null);
+        button.setName("lobby-game-options");
+        TextTooltip tip = kit.tip(button, true);
+        tip.getActor().setText(gameOptionsTip());
+        gameOptionsTips.add(tip);
+        UiKit.onChange(button, action);
+        return button;
+    }
+
+    /** "Change the game options", over the era and tech level and the notable rules in play. */
+    private String gameOptionsTip() {
+        String tip = Messages.getString("Lobby.gameOptions.tooltip");
+        String rules = shown.battlefield().rulesLine();
+        if (!rules.isBlank()) {
+            tip += "\n" + rules;
+        }
+        List<String> notable = shown.battlefield().notableRules();
+        if (!notable.isEmpty()) {
+            tip += "\n" + String.join(", ", notable);
+        }
+        return tip;
+    }
+
+    /** For tests and the probe: the Game options button shown, with its name or only its gavel. */
+    UiButton gameOptions() {
+        return (UiButton) gameOptionsSlot.getChildren().first();
     }
 
     /** Shows the server and map, the ready count, each side's Battle Value, the warnings and Ready's face. */
@@ -308,6 +348,7 @@ final class LobbyTopBar extends WidgetGroup {
         }
         this.readyTip.getActor().setText(readyTip);
         doneTip.getActor().setText(withWaiting(Messages.getString("Lobby.ready.on.tooltip") + key));
+        gameOptionsTips.forEach(tip -> tip.getActor().setText(gameOptionsTip()));
     }
 
     /** {@code text} and, on a line of its own, whom the server still waits for, if anyone. */
@@ -331,6 +372,7 @@ final class LobbyTopBar extends WidgetGroup {
 
     @Override
     public void layout() {
+        fitGameOptions();
         float height = getHeight();
         float trailingWidth = trailing.getPrefWidth();
         // The heading gives way first, its subtitle cut short, so the chips and Ready keep their room
@@ -345,5 +387,18 @@ final class LobbyTopBar extends WidgetGroup {
         float x = LobbyLayout.chipsX(getWidth(), headingWidth, chips.getPrefWidth(), trailingWidth, gap);
         chips.setBounds(Math.round(x), Math.round((height - chips.getPrefHeight()) / 2), chipsWidth,
               chips.getPrefHeight());
+    }
+
+    /** Names Game options while the whole bar fits with its name, and folds it to its gavel when it does not. */
+    private void fitGameOptions() {
+        UiButton shownFace = gameOptions();
+        float named = trailing.getPrefWidth() - shownFace.getPrefWidth() + gameOptionsNamed.getPrefWidth();
+        boolean fits = heading.getPrefWidth() + gap + chips.getPrefWidth() + gap + named <= getWidth();
+        UiButton face = fits ? gameOptionsNamed : gameOptionsGavel;
+        if (face != shownFace) {
+            gameOptionsSlot.clearChildren();
+            gameOptionsSlot.add(face);
+            trailing.invalidate();
+        }
     }
 }

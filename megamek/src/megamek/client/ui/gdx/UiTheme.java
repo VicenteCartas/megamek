@@ -198,6 +198,8 @@ public final class UiTheme implements Disposable {
           Map.entry("palette", 0xE40A), Map.entry("build", 0xE869),
           // The lobby's unit cards: hub (a C3 network) and delete
           Map.entry("hub", 0xE9F4), Map.entry("delete", 0xE872),
+          // The lobby's top bar: gavel, Game options (the rules of the game)
+          Map.entry("gavel", 0xE90E),
           // The Tactical View's unit badges: power_settings_new, vertical_align_bottom, anchor, sensors_off, sensors,
           // security, visibility, terrain, visibility_off (a TAG link's crosshair is "locate").
           Map.entry("power", 0xE8AC), Map.entry("prone", 0xE258), Map.entry("anchor", 0xF1CD),

@@ -87,7 +87,7 @@ class LobbyTogglesSmokeTest {
         UiTestStage.run(ui -> {
             int[] opened = new int[1];
             LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
-                  () -> opened[0]++, () -> { }, warning -> { });
+                  () -> { }, () -> opened[0]++, () -> { }, warning -> { });
             bar.attach(ui.stage.getRoot());
             ui.window.addActor(bar);
             bar.setBounds(100, 600, 1200, 80);
@@ -95,6 +95,31 @@ class LobbyTogglesSmokeTest {
             ui.draw();
             click(ui, bar.findActor("lobby-menu"));
             assertEquals(1, opened[0], "a click on the menu button opens the system menu");
+            bar.remove();
+        });
+    }
+
+    @Test
+    void gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded() {
+        UiTestStage.run(ui -> {
+            int[] opened = new int[1];
+            LobbyTopBar bar = new LobbyTopBar(ui.kit, new LobbyGameMasterSeat(ui.kit, new NoSeatActions(), false),
+                  () -> opened[0]++, () -> { }, () -> { }, warning -> { });
+            bar.attach(ui.stage.getRoot());
+            ui.window.addActor(bar);
+            bar.setBounds(100, 600, 1200, 80);
+            bar.validate();
+            ui.draw();
+            Actor button = bar.findActor("lobby-game-options");
+            click(ui, button);
+            assertEquals(1, opened[0], "a click on Game options opens the game options");
+            bar.setBounds(100, 600, 380, 80);
+            bar.validate();
+            ui.draw();
+            Actor gavel = bar.findActor("lobby-game-options");
+            assertTrue(gavel.getWidth() < button.getWidth(), "a bar with no room for its name folds Game options to its gavel");
+            click(ui, gavel);
+            assertEquals(2, opened[0], "the gavel opens the game options too");
             bar.remove();
         });
     }

@@ -1191,6 +1191,14 @@ public final class UiKit {
         return new UiPictureCard(this, text, aspect);
     }
 
+    /**
+     * A card that sums something up under {@code title} and opens it when clicked ({@link UiSummaryCard}), such as the
+     * lobby's planetary conditions; its summary is set with {@link UiSummaryCard#summary(String)}.
+     */
+    public UiSummaryCard summaryCard(String title) {
+        return new UiSummaryCard(this, title);
+    }
+
     /** Makes radio buttons exclusive: exactly one stays selected, the first checked one or else the first. */
     public com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice> radioGroup(UiChoice... radios) {
         var group = new com.badlogic.gdx.scenes.scene2d.ui.ButtonGroup<UiChoice>();
