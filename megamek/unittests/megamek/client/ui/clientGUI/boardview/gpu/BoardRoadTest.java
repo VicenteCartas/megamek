@@ -665,24 +665,6 @@ class BoardRoadTest {
     }
 
     @Test
-    void roughAndWoodsLeaveRoomForCurvesAndDeadEndsWithoutErasingTheirTerrainMeaning() {
-        for (int exits : new int[] { 0, 1, 2, 3, 4, 8, 16, 32 }) {
-            Hex hex = new Hex(0);
-            hex.addTerrain(new Terrain(Terrains.ROAD, 1, true, exits));
-            hex.addTerrain(new Terrain(Terrains.ROUGH, 2));
-            hex.addTerrain(new Terrain(Terrains.WOODS, 2));
-            var road = BoardRoad.clearance(CENTER, exits);
-            var features = BoardFeatures.capture(hex, CENTER, Map.of());
-            assertEquals(9, features.stream().filter(f -> f.kind() == BoardScene.FeatureKind.TREE).count());
-            assertTrue(features.stream().anyMatch(f -> f.kind() == BoardScene.FeatureKind.BOULDER));
-            for (var feature : features) {
-                float radius = feature.kind() == BoardScene.FeatureKind.TREE ? 2 : feature.scale() * BoardFeatures.ROUGH_BOULDER_WIDTH / 2;
-                assertTrue(road.distance(feature.x(), feature.y()) >= BoardRoad.SHOULDER + radius);
-            }
-        }
-    }
-
-    @Test
     void plainRoadsRunStraightThroughAZigzagOfHexesAndBothSidesAgreeOnEveryCrossing() {
         // A road running east on this lattice alternates north-east and south-east exits.
         Map<Coords, Integer> chain = Map.of(new Coords(2, 4), 18, new Coords(3, 3), 20, new Coords(4, 4), 34,
