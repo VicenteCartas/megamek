@@ -197,11 +197,12 @@ class LobbyBoardPreviewSmokeTest {
           Inspection inspection) throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         float resolution = preferences.getBoardRenderResolution();
-        String aa = preferences.getBoardAntiAliasing();
+        String aa = preferences.getBoardAntiAliasing(), quality = preferences.getBoardQuality();
         boolean tessellation = preferences.getBoardTessellation(), normals = preferences.getBoardNormalMaps();
         boolean coords = preferences.getCoordsEnabled(), types = preferences.getHexTypesEnabled();
         try {
             SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardQuality("HIGH");
                 preferences.setBoardRenderResolution(.5f);
                 preferences.setBoardAntiAliasing("SMAA");
                 preferences.setBoardTessellation(true);
@@ -245,6 +246,7 @@ class LobbyBoardPreviewSmokeTest {
             UiTestStage.capture("map-embedded-inspection-top-grid", 960, 720).dispose();
         } finally {
             SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardQuality(quality);
                 preferences.setBoardRenderResolution(resolution);
                 preferences.setBoardAntiAliasing(aa);
                 preferences.setBoardTessellation(tessellation);

@@ -46,14 +46,16 @@ import megamek.common.units.UnitLocation;
 import megamek.logging.MMLogger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3 shows its overview, a close
+ * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3, in either quality, shows its overview, a close
  * view, a pan, a volley of a laser, an autocannon and missiles and the Tactical View; then a tank and an infantry
  * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
  * off. The Tactical View, the thermal (wireframe) view, SMAA and a render resolution below 100% are optional: they
  * link their own programs when they first show; their links are not counted, but no loading stage may come back. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
- * paints lava, water, ice, a car, scorch and the board's first building. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
+ * paints lava, water, ice, a car, scorch and the board's first building. It also switches Quality from Normal to High, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
  * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
@@ -67,11 +69,15 @@ class GpuShaderLoadSmokeTest {
     private static final File GRASSLAND = new File("data/boards/AGoAC Maps/16x17 Grassland 3.board");
     private static final File UNITS = new File("testresources/megamek/common/units");
 
-    @Test
-    void gameCompilesNothingAfterItsLoadingStage() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = { "NORMAL", "HIGH" })
+    void gameCompilesNothingAfterItsLoadingStage(String quality) throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<List<BoardScene.Animation>> pending = new AtomicReference<>(List.of());
-        Watch watch = new Watch("game");
+        Watch watch = new Watch("game " + quality);
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        String savedQuality = preferences.getBoardQuality();
+        float savedResolution = preferences.getBoardRenderResolution();
         var fixture = GpuBoardFixture.create(BoardFile.loadSheet(GRASSLAND, false, true));
         List<Entity> late = new ArrayList<>();
         try {
@@ -106,8 +112,11 @@ class GpuShaderLoadSmokeTest {
             }).when(source).takeFrame();
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
-            // The game loads at 100%: the switch to 75% below links FSR at its first use, an optional setting.
-            GUIPreferences.getInstance().setBoardRenderResolution(1);
+            // Each quality loads at its own resolution. From High's 100%, the switch to 75% below links FSR at its first
+            // use, an optional setting; Normal's 80% links it while loading.
+            float loadedResolution = "NORMAL".equals(quality) ? .8f : 1;
+            preferences.setBoardQuality(quality);
+            preferences.setBoardRenderResolution(loadedResolution);
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step, links, programs;
 
@@ -163,7 +172,7 @@ class GpuShaderLoadSmokeTest {
                             watch.optionalView(false);
                             tuning.setWireframe(false);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
-                            BoardCamera.renderScale = 1;
+                            BoardCamera.renderScale = loadedResolution;
                             step++;
                         } else if (step == 9 && seconds > 45) {
                             // Hits on walls: their scar patches draw with the walls' own programs.
@@ -188,6 +197,8 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
+            preferences.setBoardQuality(savedQuality);
+            preferences.setBoardRenderResolution(savedResolution);
             BoardCamera.renderScale = 1;
             // The view closed the spied source, which shares the fixture's state.
             SwingUtilities.invokeAndWait(fixture.view::close);
@@ -211,6 +222,8 @@ class GpuShaderLoadSmokeTest {
         boolean saved = GUIPreferences.getInstance().getBoardTessellation();
         String savedAntiAliasing = GUIPreferences.getInstance().getBoardAntiAliasing();
         float savedResolution = GUIPreferences.getInstance().getBoardRenderResolution();
+        String savedQuality = GUIPreferences.getInstance().getBoardQuality();
+        GUIPreferences.getInstance().setBoardQuality("HIGH");
         GUIPreferences.getInstance().setBoardTessellation(true);
         GUIPreferences.getInstance().setBoardAntiAliasing("SMAA");
         GUIPreferences.getInstance().setBoardRenderResolution(.75f);
@@ -270,6 +283,7 @@ class GpuShaderLoadSmokeTest {
             GUIPreferences.getInstance().setBoardTessellation(saved);
             GUIPreferences.getInstance().setBoardAntiAliasing(savedAntiAliasing);
             GUIPreferences.getInstance().setBoardRenderResolution(savedResolution);
+            GUIPreferences.getInstance().setBoardQuality(savedQuality);
             BoardCamera.renderScale = 1;
             SwingUtilities.invokeAndWait(fixture.view::close);
         }
@@ -292,7 +306,11 @@ class GpuShaderLoadSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Watch watch = new Watch("editor");
         AtomicReference<Watch> relight = new AtomicReference<>();
-        AtomicReference<Boolean> originalSpecular = new AtomicReference<>();
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        String savedQuality = preferences.getBoardQuality();
+        float savedResolution = preferences.getBoardRenderResolution();
+        preferences.setBoardQuality("NORMAL");
+        preferences.setBoardRenderResolution(.8f);
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             editor.game().setBoard(BoardFile.loadSheet(GRASSLAND, false, true));
@@ -364,7 +382,7 @@ class GpuShaderLoadSmokeTest {
                                 if (loading) { return; }
                                 // Exclude only the intentional reload. Counters from before this frame still catch
                                 // programs first requested by the frame that dismisses its loading stage.
-                                active = new Watch("editor-AA", compilesBefore, deferredBefore);
+                                active = new Watch("editor-quality", compilesBefore, deferredBefore);
                                 active.before(wasLoading);
                                 relight.set(active);
                             }
@@ -427,8 +445,8 @@ class GpuShaderLoadSmokeTest {
                             assertTrue(output.isDirectory() || output.mkdirs());
                             GpuBoardTestUi.capture(new File(output, "editor-scorch-gallery.png"));
                             watch.check();
-                            originalSpecular.set(GpuEnvironmentLighting.specularAntialiasing);
-                            GpuEnvironmentLighting.specularAntialiasing = !originalSpecular.get();
+                            SelectBox<String> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
+                            quality.setSelected("High");
                             changedLighting = true;
                             relightStarted = System.nanoTime();
                         } else if (seconds - stepAt > 60) {
@@ -441,8 +459,13 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
-            if (originalSpecular.get() != null) { GpuEnvironmentLighting.specularAntialiasing = originalSpecular.get(); }
-            SwingUtilities.invokeAndWait(source::close);
+            // On the Swing thread, after the panel's own queued saves.
+            SwingUtilities.invokeAndWait(() -> {
+                source.close();
+                preferences.setBoardQuality(savedQuality);
+                preferences.setBoardRenderResolution(savedResolution);
+            });
+            BoardCamera.renderScale = 1;
         }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
         assertTrue(relight.get() != null, "The changed lighting must reach its presented phase");

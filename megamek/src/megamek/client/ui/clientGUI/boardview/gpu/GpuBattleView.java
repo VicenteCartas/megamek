@@ -3670,6 +3670,8 @@ class GpuBattleView extends ApplicationAdapter {
 
     private void disposeView() {
         disposed = true;
+        // The open view's choice (BoardDisplaySettings.apply): nothing drawn without a view inherits it.
+        GpuEnvironmentLighting.normalQuality = false;
         GpuGlsl.presenting(false);
         if (loadingStage != null) {
             loadingStage.dispose();

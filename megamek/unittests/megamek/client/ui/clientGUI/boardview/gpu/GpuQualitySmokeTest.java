@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.atomic.AtomicReference;
+import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
@@ -14,6 +15,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
 import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -27,6 +29,12 @@ class GpuQualitySmokeTest {
     @Test
     void normalDrawsTheBoardAndHighBringsTheChoicesBack() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        String savedQuality = preferences.getBoardQuality();
+        float savedResolution = preferences.getBoardRenderResolution();
+        // What a new player starts with, whatever this machine has saved.
+        preferences.setBoardQuality(preferences.getDefaultString(GUIPreferences.BOARD_QUALITY));
+        preferences.setBoardRenderResolution(preferences.getDefaultFloat(GUIPreferences.BOARD_RENDER_RESOLUTION));
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             var config = GpuBoardWindow.configuration(false);
             config.setWindowedMode(1280, 800);
@@ -44,6 +52,13 @@ class GpuQualitySmokeTest {
                         Slider resolution = GpuBoardTestUi.tuning(view, "tuning-render-resolution");
                         CheckBox occlusion = GpuBoardTestUi.tuning(view, "tuning-ambient-occlusion");
                         var tuning = GpuBoardTestUi.tuning(view);
+                        assertEquals("Normal", quality.getSelected(), "A new player starts in Normal");
+                        assertEquals(80, resolution.getValue(), "at its render resolution");
+                        assertEquals(.8f, BoardCamera.renderScale);
+                        assertTrue(occlusion.isDisabled(), "with what it leaves out disabled");
+                        view.render();
+                        assertTrue(GpuEnvironmentLighting.normalQuality);
+
                         quality.setSelected("High");
                         occlusion.setChecked(true);
                         view.render();
@@ -81,6 +96,13 @@ class GpuQualitySmokeTest {
                     }
                 }
             }, config);
+        } finally {
+            // On the Swing thread, after the panel's own queued saves.
+            SwingUtilities.invokeAndWait(() -> {
+                preferences.setBoardQuality(savedQuality);
+                preferences.setBoardRenderResolution(savedResolution);
+            });
+            BoardCamera.renderScale = 1;
         }
         if (failure.get() != null) { throw new AssertionError("Quality on the real board", failure.get()); }
     }

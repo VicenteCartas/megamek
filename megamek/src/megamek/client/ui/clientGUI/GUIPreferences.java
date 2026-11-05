@@ -912,7 +912,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
-        store.setDefault(BOARD_QUALITY, "HIGH");
+        store.setDefault(BOARD_QUALITY, "NORMAL");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
         store.setDefault(BOARD_SHADOWS, "NORMAL");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
@@ -923,7 +923,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_VIGNETTE, false);
         store.setDefault(BOARD_TESSELLATION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
-        store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
+        store.setDefault(BOARD_RENDER_RESOLUTION, .8f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(REQUISITION_READOUT_TRO, false);

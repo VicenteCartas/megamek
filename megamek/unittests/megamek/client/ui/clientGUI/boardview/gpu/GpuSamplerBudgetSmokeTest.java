@@ -70,6 +70,9 @@ class GpuSamplerBudgetSmokeTest {
         BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
         boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
+        String savedQuality = GUIPreferences.getInstance().getBoardQuality();
+        // High uses the most samplers: Normal only leaves reads out, and has no ambient occlusion.
+        GUIPreferences.getInstance().setBoardQuality("HIGH");
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
@@ -94,6 +97,7 @@ class GpuSamplerBudgetSmokeTest {
                     failure.set(error);
                 } finally {
                     GUIPreferences.getInstance().setBoardAmbientOcclusion(savedOcclusion);
+                    GUIPreferences.getInstance().setBoardQuality(savedQuality);
                     Gdx.app.exit();
                 }
             }

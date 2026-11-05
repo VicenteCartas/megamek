@@ -303,6 +303,7 @@ class GpuBoardPerformanceSmokeTest {
         boolean savedTessellation = preferences.getBoardTessellation();
         boolean savedParallax = preferences.getBoardTerrainParallax();
         String savedQuality = preferences.getBoardQuality();
+        float savedResolution = preferences.getBoardRenderResolution();
         TerrainLod.Tuning savedLod = TerrainLod.tuning();
         float savedUiScale = preferences.getBoardUiScale();
         float savedRenderScale = BoardCamera.renderScale;
@@ -317,6 +318,7 @@ class GpuBoardPerformanceSmokeTest {
                 preferences.setBoardTessellation(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTessellation", "true")));
                 preferences.setBoardTerrainParallax(Boolean.getBoolean("megamek.gpu.performanceTerrainParallax"));
                 preferences.setBoardQuality(System.getProperty("megamek.gpu.performanceQuality", "HIGH"));
+                preferences.setBoardRenderResolution(1);
                 preferences.setBoardUiScale(1);
             });
             // A quality comparison measures the game's own pre-pass; older comparisons keep their pinned set.
@@ -797,6 +799,7 @@ class GpuBoardPerformanceSmokeTest {
                     preferences.setBoardTessellation(savedTessellation);
                     preferences.setBoardTerrainParallax(savedParallax);
                     preferences.setBoardQuality(savedQuality);
+                    preferences.setBoardRenderResolution(savedResolution);
                     preferences.setBoardUiScale(savedUiScale);
                 });
                 BoardCamera.renderScale = savedRenderScale;
