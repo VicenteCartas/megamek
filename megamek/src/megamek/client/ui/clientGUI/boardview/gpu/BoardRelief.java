@@ -2340,9 +2340,19 @@ final class BoardRelief {
         float qx = ma[0] * (1 - t) + mb[0] * t, qy = ma[1] * (1 - t) + mb[1] * t;
         // Local relief moves across the face, never along it: noisy radial/rounded normals can reverse adjacent
         // columns into a loop at a broken rim. Shared corners still supply their exact offsets and bounded slides.
-        return new Vector3(px + rx + bx + qx + edge.nx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
+        // Corners moved unevenly turn the face, and its normal with it; pushed along the edge's own, a deep recess
+        // would run along the face beside the corner and draw a facet almost edge-on.
+        float nx = edge.nx, ny = edge.ny;
+        float run = d != 0 && (ma[0] != mb[0] || ma[1] != mb[1]) ? movedLength(edge) : 0;
+        if (run > 0) {
+            float mx = (lx + mb[0] - ma[0]) / run, my = (ly + mb[1] - ma[1]) / run;
+            float side = Math.signum(edge.nx * my - edge.ny * mx);
+            nx = my * side;
+            ny = -mx * side;
+        }
+        return new Vector3(px + rx + bx + qx + nx * d * rest + scratchA[0] * wa + ta * ex * (sa - wa)
                     + scratchB[0] * wb + tb * ex * (sb - wb),
-              py + ry + by + qy + edge.ny * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
+              py + ry + by + qy + ny * d * rest + scratchA[1] * wa + ta * ey * (sa - wa)
                     + scratchB[1] * wb + tb * ey * (sb - wb), z);
     }
 
