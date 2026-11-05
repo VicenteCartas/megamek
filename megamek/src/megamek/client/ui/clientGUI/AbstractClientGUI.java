@@ -143,31 +143,50 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
         initializeFrame();
     }
 
-    public void handleExit() {
+    /**
+     * Asks whether to save, then leaves the game. Returns false, leaving the game running, when the player cancels or
+     * doesn't save after all.
+     */
+    public boolean handleExit() {
         if (!GUIP.getNoSaveNag()) {
-            int savePrompt = JOptionPane.showConfirmDialog(getFrame(),
-                  Messages.getString("ClientGUI.gameSaveDialogMessage"),
-                  Messages.getString("ClientGUI.gameSaveFirst"),
-                  JOptionPane.YES_NO_CANCEL_OPTION,
-                  JOptionPane.WARNING_MESSAGE);
+            int savePrompt = askSaveFirst();
             if ((savePrompt == JOptionPane.CANCEL_OPTION) || (savePrompt == JOptionPane.CLOSED_OPTION)
                   || ((savePrompt == JOptionPane.YES_OPTION) && !saveGame())) {
                 // When the user clicked YES but did not actually save the game, don't close the game
-                return;
+                return false;
             }
         } // We should wait here until the save game packet arrives.
-        getFrame().setVisible(false);
-        saveSettings();
-        die();
+        try {
+            getFrame().setVisible(false);
+            saveSettings();
+        } finally {
+            // The start screen waits for this game's window to close; it must close whatever failed before
+            die();
+        }
+        return true;
+    }
+
+    /**
+     * Asks whether to save before leaving the game.
+     *
+     * @return {@link JOptionPane#YES_OPTION}, {@code NO_OPTION}, {@code CANCEL_OPTION} or {@code CLOSED_OPTION}
+     */
+    protected int askSaveFirst() {
+        return JOptionPane.showConfirmDialog(getFrame(), Messages.getString("ClientGUI.gameSaveDialogMessage"),
+              Messages.getString("ClientGUI.gameSaveFirst"), JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.WARNING_MESSAGE);
     }
 
     @Override
     public void die() {
-        storyRetry.stop();
-        spriteHandlers.forEach(BoardViewSpriteHandler::dispose);
-        frame.removeAll();
-        frame.setVisible(false);
-        frame.dispose();
+        try {
+            storyRetry.stop();
+            spriteHandlers.forEach(BoardViewSpriteHandler::dispose);
+            frame.removeAll();
+            frame.setVisible(false);
+        } finally {
+            frame.dispose();
+        }
     }
 
     protected void initializeFrame() {

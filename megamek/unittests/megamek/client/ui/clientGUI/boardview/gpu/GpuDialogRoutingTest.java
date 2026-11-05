@@ -69,7 +69,7 @@ class GpuDialogRoutingTest {
     /** The client methods under test run their real code; every other client call answers the Mockito default. */
     private static final Set<String> ROUTED = Set.of("askNative", "askYesNo", "confirm", "option", "message",
           "doYesNoDialog", "doAlertDialog", "addToast", "askRows", "askText", "input", "doChoiceDialog", "askForm",
-          "askEntry");
+          "askEntry", "askSaveFirst");
     private static File originalDataDir;
 
     /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */

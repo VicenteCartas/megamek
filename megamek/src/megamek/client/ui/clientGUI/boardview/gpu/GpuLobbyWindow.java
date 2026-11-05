@@ -468,6 +468,22 @@ public final class GpuLobbyWindow {
     }
 
     /**
+     * EDT: shows an error over the lobby that shows, as {@link LobbyNativeDialogs#error} does; {@code report} runs on
+     * the EDT. Returns false, showing nothing, when no lobby's screen shows, so the caller shows it otherwise.
+     */
+    static boolean showError(String title, String text, String dismissLabel, @Nullable String reportLabel,
+          @Nullable Runnable report) {
+        GpuLobbyWindow window = active;
+        if (window == null || window.closing || window.screen == null) {
+            return false;
+        }
+        Runnable onEdt = report == null ? null : () -> SwingUtilities.invokeLater(report);
+        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.error(title, text, dismissLabel, reportLabel,
+              onEdt)));
+        return true;
+    }
+
+    /**
      * EDT: asks over the lobby that shows whether to read the bot documentation, as the Swing bot readme nag does: Yes
      * shows it as Princess help, and the box stops the question coming back. Returns false, asking nothing, when no
      * lobby shows, so the Swing nag should.

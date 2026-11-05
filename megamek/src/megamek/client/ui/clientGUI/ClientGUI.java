@@ -1800,6 +1800,16 @@ public class ClientGUI extends AbstractClientGUI
         if (unitDisplayPanel != null) { unitDisplayPanel.disposeDisplay(); }
 
         dead = true;
+        try {
+            releaseForDeath();
+        } finally {
+            // Closes the frame, which the start screen waits for, even when a display failed to let go
+            super.die();
+        }
+    }
+
+    /** Tells every display, dialog and the client to let go, before the frame closes. */
+    private void releaseForDeath() {
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
@@ -1849,7 +1859,6 @@ public class ClientGUI extends AbstractClientGUI
 
         GUIP.removePreferenceChangeListener(this);
         tilesetManager.close();
-        super.die();
     }
 
     public GameOptionsDialog getGameOptionsDialog() {
@@ -3423,22 +3432,38 @@ public class ClientGUI extends AbstractClientGUI
     }
 
     @Override
-    public boolean saveGame() {
-        ignoreHotKeys = true;
-        JFileChooser fc = new JFileChooser(MMConstants.SAVEGAME_DIR);
-        fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
-        fc.setDialogTitle(Messages.getString("ClientGUI.FileSaveDialog.title"));
+    protected int askSaveFirst() {
+        return confirm(Messages.getString("ClientGUI.gameSaveDialogMessage"),
+              Messages.getString("ClientGUI.gameSaveFirst"), JOptionPane.YES_NO_CANCEL_OPTION,
+              JOptionPane.WARNING_MESSAGE);
+    }
 
-        int returnVal = fc.showSaveDialog(frame);
-        ignoreHotKeys = false;
-        if ((returnVal != JFileChooser.APPROVE_OPTION) || (fc.getSelectedFile() == null)) {
+    @Override
+    public boolean saveGame() {
+        String title = Messages.getString("ClientGUI.FileSaveDialog.title");
+        Optional<File> chosen = GpuBoardWindow.chooseFile(this, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
+              title, new FileNameExtensionFilter(Messages.getString("Lobby.files.saveGames"),
+                    MMConstants.SAVE_FILE_GZ_EXT.substring(1), MMConstants.SAVE_FILE_EXT.substring(1)), true);
+        File selected;
+        if (chosen != null) {
+            selected = chosen.orElse(null);
+        } else {
+            ignoreHotKeys = true;
+            JFileChooser fc = new JFileChooser(MMConstants.SAVEGAME_DIR);
+            fc.setLocation(frame.getLocation().x + 150, frame.getLocation().y + 100);
+            fc.setDialogTitle(title);
+            int returnVal = fc.showSaveDialog(frame);
+            ignoreHotKeys = false;
+            selected = (returnVal == JFileChooser.APPROVE_OPTION) ? fc.getSelectedFile() : null;
+        }
+        if (selected == null) {
             // I want a file, know!
             return false;
         }
-        String file = fc.getSelectedFile().getName();
+        String file = selected.getName();
         // stupid hack to allow for savegames in folders with spaces in
         // the name
-        String path = fc.getSelectedFile().getParentFile().getPath();
+        String path = selected.getAbsoluteFile().getParentFile().getPath();
         path = path.replace(" ", "|");
         client.sendChat(CG_CHAT_COMMAND_LOCAL_SAVE + " " + file + " " + path);
         client.setAwaitingSave(true);
