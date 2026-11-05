@@ -38,8 +38,10 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // A field's plants thin out as they shrink, each survivor widening by as much, until they fade into the ground's
     // crop colour (terrain-crops.glsl); so does a rim's fringe once it has stood up. Grass only thins out, over the
     // ground's own grass.
-    float share = crop ? u_coverShare.y * cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0)
-          : u_coverShare.x;
+    float kept = crop ? cropShare(!wheat, pixels) : 1.0;
+    float share = crop ? u_coverShare.y * kept : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : u_coverShare.x;
+    // Survivors widen by a far plant's or a rim's whole thinning, and by the root of what a level (or a meadow) leaves out.
+    float widening = crop ? kept * sqrt(u_coverShare.y) : rim ? share : sqrt(share);
     float density = (crop ? share * cropPlants(pixels) : rim ? share * smoothstep(GRASS_RIM_START, GRASS_RIM_STAND, pixels)
           : share * smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }
@@ -66,7 +68,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
         // drooping at their tips, which flutter in the wind. A plant this size grows in over its last 512 ranks,
         // widening rather than appearing.
         float plant = u_levelHeight * CROP_HEIGHT * mix(.92, 1.06, variation) * (1.0 - scar * .5);
-        float growth = clamp((density - a_coverRoot.w) / 512.0, 0.0, 1.0) / share;
+        float growth = clamp((density - a_coverRoot.w) / 512.0, 0.0, 1.0) / widening;
         float gust = vegetationGust(root.xy);
         vec3 up = normalize(vec3(u_wind.xy * u_wind.z * (.04 + .04 * gust), 1.0));
         float t = samplePoint.y;
@@ -105,7 +107,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
                 * mix(.85, 1.15, grassRandom(seed + 37u))
           : u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow) * (1.0 - t);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
-    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / (crop || rim ? share : sqrt(share));
+    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / widening;
     float gust = vegetationGust(root.xy);
     vec3 tip, control;
     if (rim) {
