@@ -120,9 +120,10 @@ class BoardSculptTest {
                 if (!plinth) { open++; }
             }
             assertTrue(triangles > 10000, "Sculpted terrain must be tessellated");
-            if (family == BoardScene.Surface.CONCRETE) {
-                // A two-triangle cast panel can meet several collinear rock segments. Check their entire
-                // coverage rather than requiring the slab to inherit every rock subdivision.
+            if (family == BoardScene.Surface.CONCRETE || BoardGeometry.tuning().padding() > 0) {
+                // A two-triangle cast panel can meet several collinear rock segments, and padded tops leave
+                // zero-area triangles along a straight edge. Check their entire coverage rather than requiring
+                // the other side to inherit every subdivision.
                 BoardCliffSeamTest.assertClosed(complete, floor, family.toString());
             } else {
                 assertEquals(0, open, family + ": every sculpted edge must be shared by two triangles");

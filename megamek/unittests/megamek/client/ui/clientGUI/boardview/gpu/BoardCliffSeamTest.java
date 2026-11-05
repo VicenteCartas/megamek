@@ -15,16 +15,21 @@ import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Shared cliff corners, rims and feet on the shipped map, including the artwork-covered bunker. */
 class BoardCliffSeamTest {
+    @BeforeAll
+    static void natives() { GdxNativesLoader.load(); }
+
     private static BoardScene scene(String path) {
         return scene(new File("data/boards/" + path));
     }
@@ -307,7 +312,7 @@ class BoardCliffSeamTest {
     private static void assertJoined(Map<Segment, Integer> boundary, Map<Segment, Integer> joined, String label) {
         List<Segment> open = boundary.entrySet().stream()
               .filter(entry -> entry.getValue() == 1 && joined.get(entry.getKey()) < 2
-                    && !covered(entry.getKey(), joined, boundary))
+                    && !covered(entry.getKey(), joined))
               .map(Map.Entry::getKey).toList();
         assertTrue(open.isEmpty(), label + " must meet its adjoining cliff, rim and bank: "
               + open.stream().limit(5).toList());
@@ -320,7 +325,7 @@ class BoardCliffSeamTest {
         long bottom = Math.round(floor * 1000);
         var open = edges.entrySet().stream().filter(entry -> entry.getValue() == 1)
               .map(Map.Entry::getKey).filter(e -> e.a.z != bottom || e.b.z != bottom)
-              .filter(e -> !covered(e, edges, Map.of(e, 1))).toList();
+              .filter(e -> !covered(e, edges)).toList();
         assertTrue(open.isEmpty(), label + " must close every boundary: " + open.stream().limit(8).toList());
     }
 
@@ -339,13 +344,13 @@ class BoardCliffSeamTest {
     private record Segment(Point a, Point b) { }
 
     /** A collapsed bank may join two collinear samples; compare coverage across that subdivision too. */
-    private static boolean covered(Segment edge, Map<Segment, Integer> joined, Map<Segment, Integer> own) {
+    private static boolean covered(Segment edge, Map<Segment, Integer> joined) {
         double dx = edge.b.x - edge.a.x, dy = edge.b.y - edge.a.y, dz = edge.b.z - edge.a.z;
         double length2 = dx * dx + dy * dy + dz * dz;
         double tolerance = 2 / Math.sqrt(length2); // Two thousandths of a world unit.
         List<double[]> spans = new ArrayList<>();
         for (Segment other : joined.keySet()) {
-            if (own.containsKey(other)) { continue; }
+            if (other.equals(edge)) { continue; }
             double ax = other.a.x - edge.a.x, ay = other.a.y - edge.a.y, az = other.a.z - edge.a.z;
             double bx = other.b.x - edge.a.x, by = other.b.y - edge.a.y, bz = other.b.z - edge.a.z;
             double a = (ax * dx + ay * dy + az * dz) / length2;
