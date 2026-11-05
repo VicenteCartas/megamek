@@ -32,7 +32,9 @@ import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.IndustrialElevator;
 import megamek.common.board.Board;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardConnectivityCheck;
+import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
@@ -808,9 +810,12 @@ public final class BoardEditorSession {
                         paintTemplate.setDecorations(List.of(new BoardDecoration("brush", design.kind(), design.model(),
                               design.model().equals(design.id()) ? null : design.label(),
                               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top",
-                                    // A maglev is suspended a level up; a rail lies on the ground.
-                                    megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1 : 0), 0, false)
-                              .withColours(design.colours())));
+                                    // A maglev is suspended a level up, a billboard's panel on its legs; a rail lies on the ground.
+                                    megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1
+                                          : BoardBillboard.ASSET.equals(design.model()) ? BoardBillboard.DEFAULT_LEVELS : 0), 0, false)
+                              .withColours(design.colours())
+                              .withBillboard(BoardBillboard.ASSET.equals(design.model())
+                                    ? BoardBillboard.DEFAULT.with("decal0", BoardBillboard.RANDOM) : BoardBillboard.DEFAULT)));
                     }
                     if (BuildingVolumes.of(design.model()).present()) {
                         var building = paintTemplate.getDecorations().getFirst();
@@ -2234,7 +2239,28 @@ public final class BoardEditorSession {
 
     /** A new copy of the brush's object at {@code x, y} on {@code placement}. */
     private static BoardDecoration brushCopy(BoardDecoration prototype, double x, double y, BoardDecoration.Placement placement) {
-        return prototype.duplicate().transform(x, y, prototype.rotation(), prototype.mirror(), prototype.scale(), placement);
+        return pickArt(prototype.duplicate().transform(x, y, prototype.rotation(), prototype.mirror(), prototype.scale(), placement), BoardBillboard.DEFAULT);
+    }
+
+    /**
+     * {@code object} with each {@link BoardBillboard#RANDOM} panel of a billboard given a pick of the billboard art,
+     * preferring a picture its other panels and {@code shown} (the billboard as it was) do not show; a blank panel without
+     * any art. The board stores the picks, so they stay the same for every player until chosen again.
+     */
+    private static BoardDecoration pickArt(BoardDecoration object, BoardBillboard shown) {
+        var billboard = object.billboard();
+        if (!billboard.decals().contains(BoardBillboard.RANDOM)) { return object; }
+        var art = BoardDecalArt.billboards();
+        var decals = new ArrayList<>(billboard.decals());
+        for (int panel = 0; panel < decals.size(); panel++) {
+            if (!decals.get(panel).equals(BoardBillboard.RANDOM)) { continue; }
+            var fresh = new ArrayList<>(art);
+            fresh.removeAll(decals);
+            fresh.removeAll(shown.decals());
+            var from = fresh.isEmpty() ? art : fresh;
+            decals.set(panel, from.isEmpty() ? "" : from.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(from.size())));
+        }
+        return object.withBillboard(new BoardBillboard(decals, billboard.width(), billboard.height(), billboard.legs(), billboard.lights()));
     }
 
     /**
@@ -2900,7 +2926,8 @@ public final class BoardEditorSession {
     private void editObject(String property, String value) {
         require(selected != null, Messages.getString("BoardEditor.selectObjectFirst"));
         BoardDecoration current = object(board().getHex(selected));
-        BoardDecoration next = property.equals("asset") ? familyMember(current, value) : objectValue(current, property, value);
+        BoardDecoration next = property.equals("asset") ? familyMember(current, value)
+              : pickArt(objectValue(current, property, value), current.billboard());
         if (property.equals("offset") || property.equals("level")) {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
@@ -3949,6 +3976,7 @@ public final class BoardEditorSession {
     private BoardDecoration objectValue(BoardDecoration d, String property, String value) {
         require(!RailRoute.isRoute(d), Messages.getString("BoardEditor.routeExtend"));
         if (property.startsWith("flag.")) { return d.withFlag(d.flag().with(property.substring(5), value)); }
+        if (property.startsWith("billboard.")) { return d.withBillboard(d.billboard().with(property.substring(10), value)); }
         if (property.equals("levels")) { return d.withLevels(Math.max(1, Integer.parseInt(value))); }
         double x = d.x(), y = d.y(), rotation = d.rotation(), scale = d.scale();
         double rotationX = d.rotationX(), rotationY = d.rotationY();
@@ -3989,7 +4017,7 @@ public final class BoardEditorSession {
             default -> throw new IllegalArgumentException("Unknown object property " + property);
         }
         return new BoardDecoration(d.id(), d.kind(), d.asset(), name, x, y, rotation, mirror, scale, placement, order, clipToHex,
-              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels(), d.flag());
+              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels(), d.flag(), d.billboard());
     }
 
     private static void copyInto(Hex source, Hex target) {

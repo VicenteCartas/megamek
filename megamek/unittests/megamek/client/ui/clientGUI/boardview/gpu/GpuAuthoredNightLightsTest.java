@@ -32,6 +32,7 @@ class GpuAuthoredNightLightsTest {
             String surface = data.materials.first().id;
             data.nightEmission.add(surface);
             data.emissionOff.add(surface);
+            data.nightColours.put(surface, new float[] { .1f, .2f, .3f });
         }
         var generated = HabitatKit.lods(json.treeToValue(spec, HabitatKit.Spec.class), pieces, true, "review");
         for (int lod = 0; lod < generated.size(); lod++) {
@@ -43,6 +44,10 @@ class GpuAuthoredNightLightsTest {
             var used = new java.util.HashSet<String>();
             for (var material : generated.get(lod).materials) { used.add(material.id); }
             assertTrue(used.containsAll(source.emissionOff));
+            String surface = source.emissionOff.iterator().next();
+            var finish = generated.get(lod).surfaces.get(surface);
+            assertTrue(java.util.Arrays.equals(new float[] { .1f, .2f, .3f }, finish.glow())
+                  || java.util.Arrays.equals(new float[] { .1f, .2f, .3f }, finish.tint()), "A piece's night colour reaches the kit's own finish");
         }
     }
 

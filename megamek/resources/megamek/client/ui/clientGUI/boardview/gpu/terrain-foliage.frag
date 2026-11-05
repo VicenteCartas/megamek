@@ -39,6 +39,7 @@ uniform sampler2D u_ambientTexture;
 uniform vec4 u_modelSurface;
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow;
+uniform vec3 u_modelLight; // GpuModelLight: enabled, emission multiplier (night lights fade by day), unused here
 uniform float u_modelBoard; // 1 for a board material's .tres, 0 for the GLB's own material
 #endif
 #ifdef emissiveTextureFlag
@@ -205,6 +206,7 @@ void main() {
 #endif
 #ifdef modelSurfaceFlag
     emission = emission * u_modelEmission + u_modelGlow;
+    if (u_modelLight.x > 0.0) { emission *= u_modelLight.y; }
 #endif
     // Fungal tissue breathes: its glow swells and fades slowly across a colony.
     if (u_foliage > 2.5) emission *= .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));

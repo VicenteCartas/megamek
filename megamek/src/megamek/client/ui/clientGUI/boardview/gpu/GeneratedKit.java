@@ -113,6 +113,9 @@ final class GeneratedKit {
             generated.buildingPaint.addAll(source.buildingPaint);
             generated.paintMasks.addAll(source.paintMasks);
             generated.nightEmission.addAll(source.nightEmission);
+            source.nightColours.forEach((id, colour) -> {
+                if (generated.surfaces.containsKey(id)) { RigidGlb.nightEmission(generated, id, colour); }
+            });
             generated.emissionOff.addAll(source.emissionOff);
             result.add(generated);
         }

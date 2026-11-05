@@ -49,11 +49,32 @@ class RigidGlbTest {
         extras.remove("mmEmission");
         for (var level : RigidGlb.loadLods(file(document, false))) {
             assertTrue(((RigidGlb.Data) level).emissionOff.isEmpty());
-            assertEquals(.4f, level.materials.first().emissive.r, 1e-6);
+            assertEquals(.4f, ((RigidGlb.Data) level).surfaces.get("paint").glow()[0], 1e-6, "Inherit restores the factor as a night colour");
         }
         extras.put("mmEmission", "invalid");
         var invalid = file(document, false);
         assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(invalid));
+    }
+
+    @Test
+    void everyNightLightIsAColourOnItsMaterialsOwnProgram() throws Exception {
+        var document = levels();
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
+        var extras = material.putObject("extras").put("mmNightEmission", true);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertNull(data.materials.first().emissive, "A colour attribute would select another program");
+            assertArrayEquals(new float[] { .4f, .2f, .1f }, data.surfaces.get("paint").glow(), 1e-6f);
+        }
+        material.remove("emissiveFactor");
+        extras.remove("mmNightEmission");
+        extras.putArray("mmNightColour").add(0).add(.4).add(1);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertEquals(java.util.Set.of("paint"), data.nightEmission, "The colour alone makes it a night light");
+            assertArrayEquals(new float[] { 0, .4f, 1 }, data.surfaces.get("paint").glow(), 1e-6f);
+        }
     }
 
     @Test

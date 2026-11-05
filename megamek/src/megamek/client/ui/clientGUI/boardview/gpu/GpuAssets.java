@@ -39,6 +39,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
 import megamek.common.Configuration;
 import megamek.common.board.TilesetScenery;
@@ -1247,6 +1248,50 @@ final class GpuAssets implements Disposable {
         return models.computeIfAbsent(BoardFlag.ASSET, key -> new Model(GpuFlag.data()));
     }
 
+    private record BillboardShape(BoardBillboard billboard, float legs) { }
+    private final Map<BillboardShape, List<Model>> billboards = new HashMap<>();
+
+    /**
+     * A billboard's levels of detail, shared by the placements of one shape and retired with the last that draws them
+     * ({@link #retain}); the marked box, reported once per image, when its image cannot be read.
+     */
+    List<Model> billboardLevels(BoardBillboard billboard, float legs) {
+        String art = BoardBillboard.ASSET + "@" + billboard.decals();
+        if (unloadable.containsKey(art)) { return java.util.Collections.nCopies(RigidGlb.LEVELS, missing(art, unloadable.get(art))); }
+        var shape = new BillboardShape(billboard, legs);
+        var known = billboards.get(shape);
+        if (known != null) { return known; }
+        List<Model> levels = new ArrayList<>();
+        try {
+            for (int lod = 0; lod < BoardBillboardMesh.LODS; lod++) { levels.add(createModel(BoardBillboardMesh.data(billboard, legs, lod))); }
+        } catch (RuntimeException failure) {
+            levels.forEach(Model::dispose);
+            return java.util.Collections.nCopies(RigidGlb.LEVELS, missing(art, reason(failure)));
+        }
+        while (levels.size() < RigidGlb.LEVELS) { levels.add(levels.getLast()); }
+        billboards.put(shape, List.copyOf(levels));
+        return billboards.get(shape);
+    }
+
+    /** The latest shapes placement previews asked for: a preview holds the newest, and sizing a brush makes more. */
+    private final Map<String, Model> billboardGhosts = new java.util.LinkedHashMap<>(16, .75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Model> eldest) {
+            if (size() <= 8) { return false; }
+            eldest.getValue().dispose();
+            return true;
+        }
+    };
+
+    /** A blank billboard of this shape for a placement preview, kept apart from the chunks' cache as it outlives their commits. */
+    Model billboardGhost(BoardBillboard billboard, float legs) {
+        var blank = billboard.blank();
+        return billboardGhosts.computeIfAbsent(blank + "@" + legs, key -> createModel(BoardBillboardMesh.data(blank, legs, 0)));
+    }
+
+    private Model billboardPreview() {
+        return models.computeIfAbsent(BoardBillboard.ASSET, key -> createModel(BoardBillboardMesh.preview()));
+    }
+
     /**
      * A placed object's model, in every view: a model with colour slots is one shared mesh whose placements pass their
      * colours per draw ({@link RigidGlb#colourSlotMesh}, applied by model-colour-slots.glsl); another model is the model
@@ -1257,6 +1302,7 @@ final class GpuAssets implements Disposable {
     /** {@link #slotted(String)} at a mesh level ({@link #objectLevels}). */
     Model slotted(String name, int level) {
         if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
+        if (BoardBillboard.ASSET.equals(name)) { return billboardPreview(); }
         var source = RigidGlb.source(root, name);
         if (!source.file().isFile()) { return missing(name, "no model file " + source.file().getPath()); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
@@ -1278,6 +1324,7 @@ final class GpuAssets implements Disposable {
      */
     Model decoration(String name, megamek.common.board.BoardDecoration.Colours colours) {
         if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
+        if (BoardBillboard.ASSET.equals(name)) { return billboardPreview(); }
         var file = RigidGlb.source(root, name).file();
         return file.isFile() ? model(name, colours) : missing(name, "no model file " + file.getPath());
     }
@@ -1424,6 +1471,11 @@ final class GpuAssets implements Disposable {
             return true;
         });
         retain(this.routes, liveModels);
+        billboards.values().removeIf(levels -> {
+            if (levels.stream().anyMatch(liveModels::contains)) { return false; }
+            levels.stream().distinct().forEach(Model::dispose);
+            return true;
+        });
         flags.values().removeIf(flag -> {
             if (liveModels.contains(flag.model)) { return false; }
             flag.model.dispose(); return true;
@@ -1496,6 +1548,7 @@ final class GpuAssets implements Disposable {
 
     Model lodModel(String name, int level) {
         if (BoardFlag.ASSET.equals(name)) { return flagPreview(); }
+        if (BoardBillboard.ASSET.equals(name)) { return billboardPreview(); }
         if (BoardWall.supports(name)) { return wallLevels(name, 1).get(level); }
         if (BoardMultiHexBuilding.supports(name)) { return multiHexLevels(BoardMultiHexBuilding.layout(name, 1)).get(level); }
         if (unloadable.containsKey(name)) { return missing(name, unloadable.get(name)); }
@@ -1969,6 +2022,8 @@ final class GpuAssets implements Disposable {
         interiors.values().forEach(Model::dispose);
         interiors.clear();
         models.values().forEach(Model::dispose);
+        billboards.values().forEach(levels -> levels.stream().distinct().forEach(Model::dispose)); billboards.clear();
+        billboardGhosts.values().forEach(Model::dispose); billboardGhosts.clear();
         flags.values().forEach(flag -> flag.model.dispose()); flags.clear();
         flagPaints.values().forEach(Texture::dispose); flagPaints.clear();
         materials.values().forEach(Texture::dispose);

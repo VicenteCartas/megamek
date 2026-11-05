@@ -2,6 +2,7 @@
 // Imported glTF surfaces fill a Surface from their material maps and are lit by shadeSurface, as the terrain is.
 #ifdef modelSurfaceFlag
 uniform float u_modelPaintMask; // Albedo alpha selects paint rather than opacity, in lit and unlit views.
+uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
 uniform vec3 u_buildingPaint; // Placement colour on explicitly paintable building surfaces; white elsewhere.
 in vec2 v_modelUV;
 uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit material previews.
@@ -10,7 +11,6 @@ uniform float u_modelPremultiplied; // Premultiplied alpha is also used by unlit
 #ifdef modelSurfaceFlag
 uniform vec4 u_modelSurface; // roughness, metallic and scattering factors; finish map present
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
-uniform vec3 u_modelEmission, u_modelGlow; // the emission map's linear tint; constant emission
 #ifdef modelRubyFlag
 uniform float u_modelRuby; // inverse absorption reference distance in world units
 uniform mat4 u_rubyVolume; // world to the authored closed crystal

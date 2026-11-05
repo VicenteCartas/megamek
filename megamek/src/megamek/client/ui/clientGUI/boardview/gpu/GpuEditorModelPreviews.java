@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
 import megamek.common.Configuration;
 import megamek.common.board.RailRoute;
@@ -165,6 +166,7 @@ final class GpuEditorModelPreviews implements Disposable {
                 // A route is generated, not a file: the builder lays its pieces on a flat carrier.
                 var route = megamek.common.board.RailRoute.Kind.of(asset);
                 if (BoardFlag.ASSET.equals(asset)) { return GpuFlag.data(); }
+                if (BoardBillboard.ASSET.equals(asset)) { return BoardBillboardMesh.preview(); }
                 if (route != null) { return BoardRail.model(BoardRail.flat(route, sides, tracks)); }
                 if (asset.startsWith("buildings/")) {
                     if (megamek.common.board.BuildingVolumes.of(asset).present()) { return GpuAuthoredBuilding.preview(asset); }

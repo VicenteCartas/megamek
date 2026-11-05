@@ -86,7 +86,7 @@ class GpuAuthoredBuildingSmokeTest {
                         var model = assets.authoredBuilding(prepared);
                         for (int lod = 0; lod < 2; lod++) {
                             for (Material material : model.levels().get(lod).materials) {
-                                if (material.has(ColorAttribute.Emissive)) {
+                                if (material.has(ColorAttribute.Emissive) || material.has(GpuModelLight.TYPE)) {
                                     assertFalse(material.has(GpuBuildingPaint.TYPE), "Windows and lamps must not take wall tint");
                                     var light = material.get(GpuModelLight.class, GpuModelLight.TYPE);
                                     if (material.id.contains("fortress-glass")) {
@@ -206,9 +206,12 @@ class GpuAuthoredBuildingSmokeTest {
                         for (int lod = 0; lod < model.levels().size(); lod++) {
                             for (Material material : model.levels().get(lod).materials) {
                                 var light = material.get(ColorAttribute.class, ColorAttribute.Emissive);
-                                if (light == null || light.color.r + light.color.g + light.color.b == 0) { continue; }
+                                var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                                // A night light's colour is its finish's glow (RigidGlb.nightEmission).
+                                if ((light == null || light.color.r + light.color.g + light.color.b == 0)
+                                      && (surface == null || surface.glow[0] + surface.glow[1] + surface.glow[2] == 0)) { continue; }
                                 assertFalse(material.id.contains("#paint"), "Tintable walls must remain unlit: " + material.id);
-                                assertTrue(material.id.contains("#emission") || material.id.contains("dome-window"),
+                                assertTrue(material.id.contains("#emission") || material.id.contains("dome-window") || material.id.contains("glass"),
                                       "Only lamps, displays and window maps emit: " + material.id);
                                 if (material.id.contains("glass") || material.id.contains("dome-window")) {
                                     var control = material.get(GpuModelLight.class, GpuModelLight.TYPE);

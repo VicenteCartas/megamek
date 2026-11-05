@@ -85,6 +85,10 @@ void main() {
 #ifdef lightingFlag
     fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb, modelShading, modelFace, modelView);
 #else
+#ifdef modelSurfaceFlag
+    emissive.rgb *= u_modelEmission;
+    if (u_modelLight.x > 0.0) { emissive.rgb += u_modelGlow; }
+#endif
     if (u_modelLight.x > 0.0) { emissive.rgb *= u_modelLight.y; }
     fragColor.rgb = diffuse.rgb + emissive.rgb;
 #endif

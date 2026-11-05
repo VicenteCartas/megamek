@@ -74,8 +74,13 @@ final class RigidGlb {
     /** Encoded bytes are retained for managed GPU texture recreation; external files keep a shared path key. */
     record Image(String key, byte[] encoded, String file, int minFilter, int magFilter, int wrapS, int wrapT) { }
 
-    /** A finite night light: file positions are glTF Y-up; decoded positions use the board's Z-up model units. */
-    record NightLight(Vector3 position, Vector3 color, float power, float size) { }
+    /**
+     * A finite night light: file positions are glTF Y-up; decoded positions use the board's Z-up model units. With an
+     * {@code end} it is one emitter spread along that segment, as a whole row of lamps.
+     */
+    record NightLight(Vector3 position, Vector3 end, Vector3 color, float power, float size) {
+        NightLight(Vector3 position, Vector3 color, float power, float size) { this(position, null, color, power, size); }
+    }
 
     static List<NightLight> nightLights(File file) {
         try {
@@ -141,6 +146,8 @@ final class RigidGlb {
         final Set<String> buildingPaint = new HashSet<>();
         /** Authored emission that fades out in daylight (material extras {@code mmNightEmission}). */
         final Set<String> nightEmission = new HashSet<>();
+        /** Explicit night colours (extras {@code mmNightColour}), which a generated kit applies to its own finishes. */
+        final Map<String, float[]> nightColours = new HashMap<>();
         /** Per-surface opt-out of both model emission and the shared material's emission. */
         final Set<String> emissionOff = new HashSet<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
@@ -168,6 +175,7 @@ final class RigidGlb {
             paintMasks.addAll(source.paintMasks);
             buildingPaint.addAll(source.buildingPaint);
             nightEmission.addAll(source.nightEmission);
+            nightColours.putAll(source.nightColours);
             emissionOff.addAll(source.emissionOff);
             labels.addAll(source.labels);
             boardUVs.putAll(source.boardUVs);
@@ -691,6 +699,44 @@ final class RigidGlb {
     }
 
     /**
+     * Makes material {@code id} light up after dusk in {@code colour} (linear RGB: warm, cold or any other), whatever it
+     * is: the colour tints its emission map, or without one it glows evenly. A colour is only a uniform of the material's
+     * program, with no light to evaluate per pixel and no program of its own, so a board can hold any number of them.
+     */
+    static void nightEmission(Data result, String id, float... colour) {
+        boolean mapped = false;
+        for (var material : result.materials) {
+            if (material.id.equals(id) && material.textures != null) {
+                for (var texture : material.textures) { mapped |= texture.usage == ModelTexture.USAGE_EMISSIVE; }
+            }
+        }
+        var surface = result.surfaces.get(id);
+        result.surfaces.put(id, new Surface(surface.roughness(), surface.metallic(), surface.scatter(), surface.map(),
+              mapped ? colour : surface.tint(), mapped ? surface.glow() : colour, surface.relief(), surface.board()));
+        result.nightEmission.add(id);
+    }
+
+    /**
+     * Adds generated geometry's material {@code id} as an opaque, clamped picture of {@code file}, its image the colour and
+     * emission maps ({@link #nightEmission} sets how it lights up) over the normal and occlusion maps of the board material
+     * {@code finish}. It has the layout of a building's lit windows and draws with their existing programs. It is matte
+     * as printed vinyl, past the roughness where a local light leaves a highlight (lavaLighting's glossy test).
+     */
+    static void pictureMaterial(Data result, String id, File file, String finish) {
+        boardMaterial(result, id, finish);
+        String path = file.toPath().toAbsolutePath().normalize().toString();
+        var image = new Image(path, null, path, GL20.GL_LINEAR_MIPMAP_LINEAR, GL20.GL_LINEAR, GL20.GL_CLAMP_TO_EDGE, GL20.GL_CLAMP_TO_EDGE);
+        result.images.put(image.key(), image);
+        var target = result.materials.peek();
+        for (var texture : target.textures) {
+            if (texture.usage == ModelTexture.USAGE_DIFFUSE) { texture.fileName = image.key(); }
+        }
+        texture(target, ModelTexture.USAGE_EMISSIVE, image.key());
+        var surface = result.surfaces.get(id);
+        result.surfaces.put(id, new Surface(.85f, 0, 0, null, surface.tint(), surface.glow(), null, surface.board()));
+    }
+
+    /**
      * A board material's finish, adding to {@code target} the normal, occlusion and emission maps of its .tres the GLB
      * leaves out, each sampled as the base colour is. Its factors and maps replace the GLB's own metallic-roughness.
      */
@@ -842,6 +888,19 @@ final class RigidGlb {
                 if (board != null && board.blended()) { result.blends.put(target.id, board.blendMode()); }
                 result.materials.add(target);
                 materials.put(material, target.id);
+                // Every night light's colour is a uniform (nightEmission): its colour as data, or its glTF emissive factor
+                // as the material's finish draws it. One the file switches off keeps its factor for the editor's Inherit.
+                if (material.getExtras() instanceof Map<?, ?> extras && extras.get("mmNightColour") != null) {
+                    Vector3 colour = lightVector(extras.get("mmNightColour"));
+                    target.emissive = null;
+                    result.nightColours.put(target.id, new float[] { colour.x, colour.y, colour.z });
+                    nightEmission(result, target.id, colour.x, colour.y, colour.z);
+                } else if (target.emissive != null && result.nightEmission.contains(target.id) && !result.emissionOff.contains(target.id)) {
+                    float[] tint = result.surfaces.get(target.id).tint();
+                    Color factor = target.emissive;
+                    target.emissive = null;
+                    nightEmission(result, target.id, factor.r * tint[0], factor.g * tint[1], factor.b * tint[2]);
+                }
             }
             Map<MeshPrimitiveModel, String> partIds = new IdentityHashMap<>();
             Map<Map<String, AccessorModel>, Integer> offsets = new HashMap<>();

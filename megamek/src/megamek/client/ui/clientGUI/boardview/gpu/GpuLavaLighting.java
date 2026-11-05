@@ -100,7 +100,7 @@ final class GpuLavaLighting implements Disposable {
         if (nightShare != night) {
             nightShare = night;
             nightBuildings = night == 0 ? List.of() : buildings.stream().map(source -> new Source(source.tile(),
-                  source.position(), source.power() * nightShare, source.color(), source.size())).toList();
+                  source.position(), source.power() * nightShare, source.color(), source.size(), source.end(), source.radius())).toList();
         }
         if (tiles != scene.tiles() || width != BoardGeometry.width() || level != BoardGeometry.level()) {
             tiles = scene.tiles();

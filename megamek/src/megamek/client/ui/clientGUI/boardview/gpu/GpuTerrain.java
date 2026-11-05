@@ -76,6 +76,7 @@ import com.badlogic.gdx.math.collision.OrientedBoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.Disposable;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuTerrainLayer.MeshBatch;
 import megamek.common.board.BuildingInteriors;
@@ -1481,7 +1482,8 @@ final class GpuTerrain implements Disposable {
             float sizeScale = GpuAuthoredBuilding.lightScale(transform);
             int tile = coords().getX() * boardHeight + coords().getY();
             drawnLights = nightLights.stream().map(light -> new GpuLavaLighting.Source(tile,
-                  new Vector3(light.position()).mul(transform), light.power(), light.color(), light.size() * sizeScale)).toList();
+                  new Vector3(light.position()).mul(transform), light.power(), light.color(), light.size() * sizeScale,
+                  light.end() == null ? null : new Vector3(light.end()).mul(transform), 0)).toList();
         }
 
         private boolean infrastructure;
@@ -4486,7 +4488,10 @@ final class GpuTerrain implements Disposable {
             Model model = authored != null ? authored.levels().getFirst() : BoardRail.route(feature) ? routeModel(build, BoardRail.layout(scene, tile, feature, surface,
                         prepared.bridgeShapes()::get))
                   : placedObject ? (BoardFlag.ASSET.equals(feature.asset())
-                        ? assets.flag(feature.decoration()) : assets.slotted(feature.asset()))
+                        ? assets.flag(feature.decoration())
+                        : BoardBillboard.ASSET.equals(feature.asset()) ? assets.billboardLevels(feature.decoration().billboard(),
+                              BoardBillboardMesh.legs(feature.decoration(), tile.elevation())).getFirst()
+                        : assets.slotted(feature.asset()))
                   : generatedIndustrial ? assets.industrial(BoardIndustrial.layout(scene, tile, feature))
                   : wallLayout != null ? assets.wall(wallLayout)
                   : multiHexLayout != null ? assets.multiHexLevels(multiHexLayout).getFirst()
@@ -4536,6 +4541,11 @@ final class GpuTerrain implements Disposable {
             BoundingBox editorBounds = feature.decoration() == null ? null : new BoundingBox(bounds);
             if (BoardFlag.ASSET.equals(feature.asset())) {
                 editorBounds.set(Vector3.Zero, new Vector3(GpuFlag.WIDTH, 0, GpuFlag.HEIGHT));
+            }
+            if (BoardBillboard.ASSET.equals(feature.asset())) {
+                // The footings run on below the support; the outline stops at it.
+                editorBounds.min.z = Math.max(editorBounds.min.z, -BoardBillboardMesh.legs(feature.decoration(), tile.elevation()));
+                editorBounds.set(editorBounds.min, editorBounds.max);
             }
             boolean coral = feature.asset().startsWith("mars/");
             // Coral colonies have wide, uneven mineral roots. Embed that root layer while preserving cover height.
@@ -4727,6 +4737,10 @@ final class GpuTerrain implements Disposable {
                 prop.nightLights = GpuAuthoredBuilding.nightLights(authoredLayout);
                 prop.updateLights(scene.height());
             }
+            if (BoardBillboard.ASSET.equals(feature.asset())) {
+                prop.nightLights = BoardBillboardMesh.lights(object.billboard());
+                prop.updateLights(scene.height());
+            }
             if (placedObject || authored != null) { prop.decorationFeature = feature; }
             prop.decorationAnchorZ = instance.transform.val[Matrix4.M23] - feature.elevation() * BoardGeometry.level();
             // A click on a maglev's pier selects its route (batch-10 answer 8): the beam's triangles and its piers'.
@@ -4736,6 +4750,8 @@ final class GpuTerrain implements Disposable {
                 prop.levels = assets.wallLevels(wallLayout);
             } else if (multiHexLayout != null) {
                 prop.levels = assets.multiHexLevels(multiHexLayout);
+            } else if (BoardBillboard.ASSET.equals(feature.asset())) {
+                prop.levels = assets.billboardLevels(object.billboard(), BoardBillboardMesh.legs(object, tile.elevation()));
             } else if ((object != null && !standTree || prop.translucent) && !BoardRail.route(feature)) {
                 List<Model> levels = assets.objectLevels(feature.asset());
                 if (levels.stream().distinct().count() > 1) { prop.levels = levels.stream().map(drawn).toList(); }
@@ -7019,9 +7035,10 @@ final class GpuTerrain implements Disposable {
                     }
                     BoardScene.Feature next = placement == null ? prop.decorationFeature : placement.feature();
                     Coords coords = placement == null ? prop.coords : placement.coords();
-                    // Another model or other colours need the chunk's rebuild, which installs that model.
+                    // Another model, other colours or another billboard need the chunk's rebuild, which installs that model.
                     if (!prop.decorationFeature.asset().equals(next.asset())
-                          || !prop.decorationFeature.colours().equals(next.colours())) { continue; }
+                          || !prop.decorationFeature.colours().equals(next.colours())
+                          || !prop.decorationFeature.decoration().billboard().equals(next.decoration().billboard())) { continue; }
                     if (next.equals(prop.previewFeature == null ? prop.decorationFeature : prop.previewFeature)
                           && coords.equals(prop.coords())) { continue; }
                     ModelInstance preview = null;
@@ -7147,7 +7164,10 @@ final class GpuTerrain implements Disposable {
         return installedSettings.call(() -> {
             float z = editorHeight(coords, feature);
             if (!Float.isFinite(z)) { return null; }
-            ModelInstance ghost = new ModelInstance(assets.decoration(feature.asset(), feature.colours()));
+            ModelInstance ghost = new ModelInstance(BoardBillboard.ASSET.equals(feature.asset())
+                  ? assets.billboardGhost(feature.decoration().billboard(),
+                        BoardBillboardMesh.legs(feature.decoration(), coverScene.tile(coords).elevation()))
+                  : assets.decoration(feature.asset(), feature.colours()));
             placeDecoration(ghost, coords, feature, z + feature.elevation() * BoardGeometry.level());
             return ghost;
         });

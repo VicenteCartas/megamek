@@ -19,6 +19,7 @@ uniform sampler2D u_ambientTexture;
 uniform vec4 u_modelSurface;
 uniform sampler2D u_modelSurfaceMap; // R scattering, G roughness, B metallic
 uniform vec3 u_modelEmission, u_modelGlow;
+uniform vec3 u_modelLight; // GpuModelLight: enabled, emission multiplier (night lights fade by day), unused here
 uniform float u_modelBoard;
 #endif
 #ifdef emissiveTextureFlag
@@ -56,6 +57,7 @@ void main() {
         finish = Finish(u_modelSurface.x * map.g, u_modelSurface.y * map.b, u_modelSurface.z * map.r, finish.emission);
     }
     finish.emission = finish.emission * u_modelEmission + u_modelGlow;
+    if (u_modelLight.x > 0.0) { finish.emission *= u_modelLight.y; }
 #endif
     float occlusion = 1.0;
 #ifdef ambientTextureFlag

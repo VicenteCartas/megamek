@@ -44,6 +44,21 @@ public final class BoardFile {
               number(flag, "x", 0), number(flag, "y", 0), number(flag, "scale", 1), number(flag, "rotation", 0));
     }
 
+    private static BoardBillboard billboard(JsonNode object) {
+        if (!object.has("billboard")) { return BoardBillboard.DEFAULT; }
+        JsonNode billboard = object.get("billboard");
+        requireObject(billboard);
+        var fallback = BoardBillboard.DEFAULT;
+        List<String> decals = new ArrayList<>();
+        if (billboard.has("decals")) {
+            require(billboard.get("decals").isArray(), "decals must be an array");
+            billboard.get("decals").forEach(decal -> decals.add(decal.asText()));
+        } else { decals.addAll(fallback.decals()); }
+        return new BoardBillboard(decals, number(billboard, "width", fallback.width()),
+              number(billboard, "height", fallback.height()), bool(billboard, "legs", fallback.legs()),
+              bool(billboard, "lights", fallback.lights()));
+    }
+
     private static final ObjectMapper JSON = new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -364,7 +379,7 @@ public final class BoardFile {
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
                       bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
                       string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
-                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object)));
+                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object), billboard(object)));
             }
             hex.setDecorations(values);
         }
@@ -496,6 +511,13 @@ public final class BoardFile {
                     settings.put("emblem", flag.emblem());
                     settings.put("x", flag.x()); settings.put("y", flag.y());
                     settings.put("scale", flag.scale()); settings.put("rotation", flag.rotation());
+                }
+                if (BoardBillboard.ASSET.equals(value.asset())) {
+                    var billboard = value.billboard();
+                    var settings = object.putObject("billboard");
+                    billboard.decals().forEach(settings.putArray("decals")::add);
+                    settings.put("width", billboard.width()).put("height", billboard.height())
+                          .put("legs", billboard.legs()).put("lights", billboard.lights());
                 }
                 if (value.levels() > 0) { object.put("levels", value.levels()); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }

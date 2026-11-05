@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
@@ -257,6 +258,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private final UiKit.SearchField designSearch;
     private final Table designPages = new Table();
     private String designOwner = "", designQuery = "";
+    /** The gallery's cards while it shows the billboard art, else null. */
+    private List<GalleryCard> billboardCards;
     private int designPage;
     private float width, height, utilityWidth, utilityHeight;
     private String shownSelection = "";
@@ -1322,6 +1325,15 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             brushRow(hint(UiKit.text("BoardEditor.hint.place")));
             return;
         }
+        if (BoardBillboard.ASSET.equals(object.asset())) {
+            // With legs, their height is the placement's height.
+            if (object.billboard().legs()) { brushRow(rotations(object, true, action)); }
+            else { brushRow(rotations(object, true, action), brushNumber(UiKit.text("BoardEditor.heightOffset"), heightOffset(object), -10, 30, .1, action, prefix + "offset")); }
+            billboard(object, true);
+            brushRow(hint(UiKit.text("BoardEditor.billboard.hint")));
+            brushRow(hint(UiKit.text("BoardEditor.hint.place")));
+            return;
+        }
         brushRow(rotations(object, true, action), brushNumber(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, action, prefix + "scale"));
         // A brush sampled from a stretched object places stretched copies: it shows the stretch, which can be reset there.
         if (!object.stretch().equals(BoardDecoration.Stretch.NONE)) { brushRow(stretch(object, true, action)); }
@@ -1408,23 +1420,33 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return blueprint.variants(owner).stream().filter(v -> !linkedMaterial || v.material().isEmpty()).toList();
     }
 
+    /** One card of the gallery: its title, what the search looks in, how its preview fills and what choosing it does. */
+    private record GalleryCard(String label, String search, Consumer<Image> preview, Runnable select) { }
+
     private void showDesigns() {
+        if (billboardCards != null) { showCards(billboardCards); return; }
         if (designOwner.isEmpty()) { return; }
+        // The owner's default look first, then its designs.
+        String owner = designOwner, standard = UiKit.text("BoardEditor.defaultDesign");
+        List<GalleryCard> cards = new ArrayList<>();
+        cards.add(new GalleryCard(standard, standard, image -> samples.add(libraryTheme, owner, "", image), () -> send(Action.VARIANT, owner, "")));
+        for (var design : designVariants(owner)) {
+            cards.add(new GalleryCard(design.label(), design.label() + " " + design.id(), image -> preview(design, image),
+                  () -> send(Action.VARIANT, owner, design.id())));
+        }
+        showCards(cards);
+    }
+
+    private void showCards(List<GalleryCard> cards) {
         designCards.clearChildren(); designPages.clearChildren();
-        // The owner's default look (null) first, then its designs.
-        List<BoardEditorBlueprint.Variant> designs = new ArrayList<>();
-        designs.add(null); designs.addAll(designVariants(designOwner));
-        String standard = UiKit.text("BoardEditor.defaultDesign");
-        var matching = designs.stream().filter(v -> (v == null ? standard : v.label() + " " + v.id()).toLowerCase(Locale.ROOT)
-              .contains(designQuery)).toList();
+        var matching = cards.stream().filter(card -> card.search().toLowerCase(Locale.ROOT).contains(designQuery)).toList();
         int last = Math.max(0, (matching.size() - 1) / PAGE_SIZE); designPage = Math.min(designPage, last);
-        for (var design : matching.subList(Math.min(matching.size(), designPage * PAGE_SIZE), Math.min(matching.size(), (designPage + 1) * PAGE_SIZE))) {
+        for (var card : matching.subList(Math.min(matching.size(), designPage * PAGE_SIZE), Math.min(matching.size(), (designPage + 1) * PAGE_SIZE))) {
             Image image = new Image();
-            if (design == null) { samples.add(libraryTheme, designOwner, "", image); } else { preview(design, image); }
-            UiButton card = visualCard(design == null ? standard : design.label(), image, 80, () -> {
-                send(Action.VARIANT, designOwner, design == null ? "" : design.id()); closeDesigns();
-            });
-            designCards.addActor(card);
+            card.preview().accept(image);
+            UiButton face = visualCard(card.label(), image, 80, () -> { card.select().run(); closeDesigns(); });
+            face.setName("editor-gallery-" + card.search());
+            designCards.addActor(face);
         }
         if (last > 0) {
             UiButton previous = button(UiKit.text("Previous"), () -> { designPage--; showDesigns(); }); previous.setDisabled(designPage == 0);
@@ -1439,7 +1461,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         ui.fitChoices(designDialog, designScroll, designCards, width - UiKit.DIALOG_MARGIN, height - UiKit.DIALOG_MARGIN);
     }
 
-    private void closeDesigns() { stage.setKeyboardFocus(null); designLayer.setVisible(false); designCards.clearChildren(); }
+    private void closeDesigns() {
+        stage.setKeyboardFocus(null); designLayer.setVisible(false); designCards.clearChildren(); billboardCards = null;
+    }
 
     private UiButton visualCard(String title, Image preview, float imageHeight, Runnable select) {
         UiButton card = ui.button("hud-plain", null, title, null); card.clearChildren(); card.pad(4);
@@ -2043,7 +2067,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             detail.add(interiors(snapshot.buildingInteriors(), object, chosen -> send(Action.BUILDING_INTERIORS, chosen))).growX().row();
         } else if (object.kind().equals("prop")) {
             // Scrubbing stops at the surface; a typed value may still sink the object into it.
-            number(UiKit.text("BoardEditor.heightAboveSurface"), heightOffset(object), 0, 30, .1, Action.OBJECT_VALUE, "offset");
+            // A billboard on legs shows this height as its legs' (billboard).
+            if (!BoardBillboard.ASSET.equals(object.asset()) || !object.billboard().legs()) {
+                number(UiKit.text("BoardEditor.heightAboveSurface"), heightOffset(object), 0, 30, .1, Action.OBJECT_VALUE, "offset");
+            }
         } else { number(UiKit.text("BoardEditor.paintOrder"), object.drawOrder(), -20, 20, 1, Action.OBJECT_VALUE, "order"); }
         if (object.kind().equals("prop") && terrain.get() != null) {
             var placed = installedObjects.stream().filter(o -> o.id().equals(object.id())).findFirst();
@@ -2054,21 +2081,26 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         number(UiKit.text("BoardEditor.offsetEast"), object.x(), -4, 4, .01, Action.OBJECT_VALUE, "x");
         number(UiKit.text("BoardEditor.offsetNorth"), object.y(), -4, 4, .01, Action.OBJECT_VALUE, "y");
         detail.add(rotations(object, false, Action.OBJECT_VALUE)).row();
-        number(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, Action.OBJECT_VALUE, "scale");
-        detail.add(stretch(object, false, Action.OBJECT_VALUE)).row();
+        // A billboard's size is its panel's: a scale or stretch would size its supports and lamps with it.
+        boolean billboard = BoardBillboard.ASSET.equals(object.asset());
+        if (!billboard) {
+            number(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, Action.OBJECT_VALUE, "scale");
+            detail.add(stretch(object, false, Action.OBJECT_VALUE)).row();
+        }
         if (object.kind().equals("decal")) {
             UiButton overflow = button(UiKit.text("BoardEditor.spanNeighbours"),
                   () -> send(Action.OBJECT_VALUE, "clipToHex", Boolean.toString(!object.clipToHex())));
             overflow.setName("editor-object-span"); overflow.pressed(!object.clipToHex()); detail.add(overflow).row();
         }
         UiButton mirror = button(UiKit.text("BoardEditor.mirror"), () -> send(Action.OBJECT_VALUE, "mirror", Boolean.toString(!object.mirror())));
-        if (!authored) { mirror.setName("editor-object-mirror"); mirror.pressed(object.mirror()); detail.add(mirror).row(); }
+        if (!authored && !billboard) { mirror.setName("editor-object-mirror"); mirror.pressed(object.mirror()); detail.add(mirror).row(); }
         if (authored) {
             heading(UiKit.text("BoardEditor.colours"));
             colourRows(List.of(new RigidGlb.ColourSlot(UiKit.text("BoardEditor.buildingTint"), "#ffffff", BoardBridgeTruss.BODY.presets())),
                   object.colours(), (slot, value) -> send(Action.OBJECT_VALUE, "colour0", value));
         } else { colours(object); }
         if (BoardFlag.ASSET.equals(object.asset())) { flag(object, false); }
+        if (billboard) { billboard(object, false); }
         if (BoardFeatures.hasSnowForm(object.asset())) {
             // On by default: the tree takes its winter form on a snow surface; off keeps this tree bare there.
             UiButton snow = button(UiKit.text("BoardEditor.snow"), () -> send(Action.OBJECT_VALUE, "bare", Boolean.toString(!object.bare())));
@@ -2215,6 +2247,101 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             }
             brushRows.add(controls);
         }
+    }
+
+    /**
+     * A billboard's panel count, one picture card per panel (each opens the picker), the panels' size, its legs and their
+     * height, and its lamps, on the brush or a placed object.
+     */
+    private void billboard(BoardDecoration object, boolean brush) {
+        var billboard = object.billboard();
+        Action action = brush ? Action.BRUSH_VALUE : Action.OBJECT_VALUE;
+        String prefix = brush ? "object:billboard." : "billboard.";
+        int panels = billboard.panels();
+        List<Actor> cards = new ArrayList<>();
+        for (int i = 0; i < panels; i++) {
+            int panel = i;
+            String decal = billboard.decals().get(i);
+            Image preview = new Image();
+            billboardArt(decal, preview);
+            UiButton art = visualCard((panels > 1 ? (i + 1) + " · " : "") + billboardLabel(decal), preview, 64,
+                  () -> openBillboards(decal, panels > 1 ? panel + 1 : 0, action, prefix + "decal" + panel));
+            art.setName("editor-billboard-art-" + i);
+            cards.add(art);
+        }
+        String count = UiKit.text("BoardEditor.billboard.panels"), widthLabel = UiKit.text("BoardEditor.billboard.width"),
+              heightLabel = UiKit.text("BoardEditor.billboard.height");
+        UiNumber panelCount = brush ? brushNumber(count, panels, 1, BoardBillboard.MAX_PANELS, 1, action, prefix + "panels")
+              : numeric(count, panels, 1, BoardBillboard.MAX_PANELS, 1, action, prefix + "panels");
+        UiNumber width = brush ? brushNumber(widthLabel, billboard.width(), .5, 100, .1, action, prefix + "width")
+              : numeric(widthLabel, billboard.width(), .5, 100, .1, action, prefix + "width");
+        UiNumber height = brush ? brushNumber(heightLabel, billboard.height(), .5, 100, .1, action, prefix + "height")
+              : numeric(heightLabel, billboard.height(), .5, 100, .1, action, prefix + "height");
+        var legs = ui.checkbox(UiKit.text("BoardEditor.billboard.legs"), billboard.legs());
+        legs.setName("editor-billboard-legs");
+        onChange(legs, () -> send(action, prefix + "legs", Boolean.toString(legs.isTicked())));
+        var lamps = ui.checkbox(UiKit.text("BoardEditor.billboard.lights"), billboard.lights());
+        lamps.setName("editor-billboard-lights");
+        onChange(lamps, () -> send(action, prefix + "lights", Boolean.toString(lamps.isTicked())));
+        UiNumber legHeight = billboard.legs() ? legHeight(object, brush, action) : null;
+        if (brush) {
+            brushRow(panelCount, width, height);
+            if (legHeight != null) { brushRow(legs, legHeight, lamps); } else { brushRow(legs, lamps); }
+            brushRow(cards.stream().map(card -> {
+                Table holder = new Table();
+                holder.add(card).size(panels > 1 ? 112 : 150, 96);
+                return (Actor) holder;
+            }).toArray(Actor[]::new));
+            return;
+        }
+        heading(UiKit.text("BoardEditor.billboard"));
+        detail.add(panelCount).row();
+        cards.forEach(card -> detail.add(card).growX().row());
+        detail.add(width).row();
+        detail.add(height).row();
+        detail.add(legs).left().row();
+        if (legHeight != null) { detail.add(legHeight).row(); }
+        detail.add(lamps).left().row();
+        text(UiKit.text("BoardEditor.billboard.hint"));
+    }
+
+    /** The placement's height (in levels) shown and scrubbed in metres, as the height of the billboard's legs. */
+    private UiNumber legHeight(BoardDecoration object, boolean brush, Action action) {
+        long editGeneration = generation;
+        String target = (brush ? "object:" : "") + "offset";
+        UiNumber number = new UiNumber(ui, stage, UiKit.text("BoardEditor.billboard.legHeight"),
+              Math.round(heightOffset(object) * BoardBillboard.LEVEL_METRES * 10) / 10.0, 0, 60, .5, (next, finished) -> source.editorValue(new Command(action, target,
+                    Double.toString(Double.parseDouble(next) / BoardBillboard.LEVEL_METRES)), finished, editGeneration));
+        number.setName("editor-billboard-leg-height");
+        (brush ? brushNumbers : numbers).add(number);
+        return number;
+    }
+
+    /**
+     * Opens the gallery on the billboard art for one panel ({@code panel}: its number in a stack, else 0): Random and Blank
+     * first, then every picture of the folder.
+     */
+    private void openBillboards(String current, int panel, Action action, String target) {
+        stage.setKeyboardFocus(null); choices.cancel(); numbers.forEach(UiNumber::dismiss);
+        List<String> art = new ArrayList<>(List.of(BoardBillboard.RANDOM, ""));
+        art.addAll(BoardDecalArt.billboards());
+        billboardCards = art.stream().map(decal -> new GalleryCard(billboardLabel(decal) + (decal.equals(current) ? "  ✓" : ""),
+              billboardLabel(decal), image -> billboardArt(decal, image), () -> send(action, target, decal))).toList();
+        designOwner = ""; designPage = 0; designQuery = ""; designSearch.field.setText("");
+        designHeading.setText(UiTheme.upper(UiKit.text("BoardEditor.billboard.title") + (panel > 0 ? " " + panel : "")));
+        showDesigns(); designLayer.setVisible(true); designLayer.toFront();
+    }
+
+    private void billboardArt(String decal, Image image) {
+        if (decal.startsWith("decal/")) { thumbnail(BoardDecalArt.image(decal), image); }
+        else { image.setUserObject(UiKit.text(decal.isEmpty() ? "BoardEditor.billboard.blank.note" : "BoardEditor.billboard.random.note")); }
+    }
+
+    private static String billboardLabel(String decal) {
+        if (decal.isEmpty()) { return UiKit.text("BoardEditor.billboard.blank"); }
+        if (decal.equals(BoardBillboard.RANDOM)) { return UiKit.text("BoardEditor.billboard.random"); }
+        String name = decal.substring(decal.lastIndexOf('/') + 1).replace('-', ' ').replace('_', ' ');
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     private List<RigidGlb.ColourSlot> colourSlots(String model) {
