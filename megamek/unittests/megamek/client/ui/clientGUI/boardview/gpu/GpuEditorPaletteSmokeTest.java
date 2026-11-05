@@ -40,10 +40,11 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Assets palette in the real panel: the start page's nine category tiles fit without scrolling and show their
- * rendered icons; a tile opens its category, [<] goes back and the category's name jumps to another; the search covers
- * every category and the designs behind a gallery card, under a "Search results" header; Esc clears the search, then
- * leaves a gallery, then a category; a Theme card arms its theme's brush (Radius, an unticked Level and Only overwrite
+ * The Assets palette in the real panel: the start page's ten category tiles fit without scrolling and show their
+ * rendered icons; a tile opens its category, [<] goes back and the category's name jumps to another; a subcategory's card
+ * opens its page, where a lone picker family's section lists its members and the card then shows the armed member; the
+ * search covers every category and the designs behind a gallery card, under a "Search results" header; Esc clears the
+ * search, then leaves a gallery or subcategory, then a category; a Theme card arms its theme's brush (Radius, an unticked Level and Only overwrite
  * clear hexes; no Theme row) and stays highlighted; Ground & water's Liquids hold Water and Lava; the Water card's Brush
  * offers Depth and Current, and the cards then preview clear water, since Water does not paint the Volcano theme it
  * keeps; the Lava card previews lava and its Brush offers Depth only; "lava" and "magma" find it; a picker family's Type
@@ -67,7 +68,7 @@ class GpuEditorPaletteSmokeTest {
                   for (var category : BoardEditorBlueprint.get().categories()) {
                       assertTrue(GpuBoardTestUi.shown(root.findActor("editor-category-" + category.id())), category.id());
                   }
-                  assertEquals(0, ((ScrollPane) root.findActor("editor-category-scroll")).getMaxY(), .5f, "Nine tiles without scrolling");
+                  assertEquals(0, ((ScrollPane) root.findActor("editor-category-scroll")).getMaxY(), .5f, "Ten tiles without scrolling");
                   assertNull(root.findActor("editor-back"), "The start page has no back button");
                   GpuBoardTestUi.capture(new File(OUTPUT, "start-1366x768.png"));
                   GpuBoardTestUi.click("editor-category-ground-water");
@@ -101,7 +102,56 @@ class GpuEditorPaletteSmokeTest {
                   return true;
               },
               (view, source, root) -> {
+                  assertNotNull(root.findActor("editor-subcategory-trees"));
+                  assertNull(root.findActor("editor-section-vegetation/broadleaf"), "Behind the Trees card");
+                  assertNotNull(root.findActor("editor-library-woods/crystal"), "The crystal cover skin stays in Vegetation");
+                  assertNull(root.findActor("editor-subcategory-crystals"), "The crystal props do not");
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "vegetation.png"));
+                  GpuBoardTestUi.click("editor-subcategory-trees");
+                  return true;
+              },
+              (view, source, root) -> {
                   assertNotNull(root.findActor("editor-section-vegetation/broadleaf"));
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "trees.png"));
+                  GpuBoardTestUi.category("props");
+                  return true;
+              },
+              (view, source, root) -> {
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "props.png"));
+                  GpuBoardTestUi.click("editor-subcategory-crystals");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertNull(root.findActor("editor-category"), "A subcategory's header names it");
+                  assertEquals(UiTheme.upper(UiKit.text("BoardEditor.palette.props.crystals")),
+                        ((Label) root.findActor("editor-library-title")).getText().toString());
+                  for (String section : List.of("crystal-clusters", "giant-crystals", "single-crystals")) {
+                      assertNotNull(root.findActor("editor-section-props/" + section), section);
+                  }
+                  assertNotNull(root.findActor("editor-library-crystal/cover-spire"), "A family's member has its own card");
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "crystals.png"));
+                  GpuBoardTestUi.click("editor-library-crystal/cover-spire");
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertEquals("crystal/cover-spire", source.editorState().activeBrush().key());
+                  assertNotNull(((Group) root.findActor("editor-brush")).findActor("editor-choice-Type"), "The member keeps its family's Type row");
+                  assertTrue(root.findActor("editor-category-mark-props").isVisible());
+                  escape();
+                  return true;
+              },
+              (view, source, root) -> {
+                  assertNotNull(root.findActor("editor-category"), "Esc: from the subcategory back to its category");
+                  assertTrue(((UiButton) root.findActor("editor-subcategory-crystals")).isChecked(), "Its card shows the armed crystal");
+                  GpuBoardTestUi.click("editor-category");
+                  return true;
+              },
+              (view, source, root) -> { GpuBoardTestUi.click("editor-category-item-vegetation"); return true; },
+              (view, source, root) -> {
                   GpuBoardTestUi.click("editor-category");
                   return true;
               },

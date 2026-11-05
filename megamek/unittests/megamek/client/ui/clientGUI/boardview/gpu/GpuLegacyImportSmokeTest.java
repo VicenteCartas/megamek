@@ -581,8 +581,8 @@ class GpuLegacyImportSmokeTest {
             var root = GpuBoardTestUi.stage().getRoot();
             GpuBoardTestUi.category("industry"); settle(view, source);
             assertNotNull(root.findActor("editor-section-industry/seaport"));
-            GpuBoardTestUi.category("parks"); settle(view, source);
-            assertNotNull(root.findActor("editor-section-parks/animals"));
+            GpuBoardTestUi.category("props"); settle(view, source);
+            assertNotNull(root.findActor("editor-subcategory-animals"));
             assertNull(BoardEditorBlueprint.get().asset("scenery/saxarba/SMV_Fluff/FluffSystem-07-Garden-02-Table-1-03"),
                   "No baked picnic-table composite");
             var search = (com.badlogic.gdx.scenes.scene2d.ui.TextField) root.findActor("editor-search");

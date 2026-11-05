@@ -88,14 +88,16 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
           Map.entry("fuelTank", "fuel-tank"), Map.entry("industry", "factory"),
           Map.entry("transportation/maglev-stock", "train"), Map.entry("transportation/rail-stock", "train"),
           Map.entry("transportation/rail-maglev", "train"), Map.entry("transportation/airfields", "star"),
-          Map.entry("transportation", "car"), Map.entry("parks/animals", "animal"));
-    /** The Assets panel's page: the start page (no category), a category's sections, or a gallery card's designs. */
-    private record Page(String category, String gallery) { }
-    private static final Page START = new Page(null, null);
+          Map.entry("transportation", "car"), Map.entry("props/animals", "animal"));
+    /** The Assets panel's page: the start page (no category), a category's or subcategory's sections, or a gallery card's designs. */
+    private record Page(String category, String subcategory, String gallery) { }
+    private static final Page START = new Page(null, null, null);
     /** The page last shown, where the panel reopens when the editor is built again in this session. */
     private static Page lastPage = START;
-    /** A grid card: a blueprint card (an entry, a picker family or a gallery), or the Theme card of {@code theme}. */
-    private record Tile(BoardEditorBlueprint.Card card, String theme) { }
+    /** A grid card: a blueprint card (an entry, a picker family or a gallery), the Theme card of {@code theme}, or the one that opens {@code subcategory}. */
+    private record Tile(BoardEditorBlueprint.Card card, String theme, String subcategory) {
+        Tile(BoardEditorBlueprint.Card card, String theme) { this(card, theme, null); }
+    }
     /** A grid section: the end of its header's name, its caption (null: no header) and its cards. */
     private record Shelf(String id, String title, List<Tile> tiles) { }
     /** A grid section's header: an upper-case caption over a hairline. */
@@ -349,7 +351,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             if (category.themes() != null) { samples.add(category.icon().getTheme(), "", "", icon); }
             else { samples.add(BoardEditorSession.hexStamp("icon/" + category.id(), category.icon()), icon); }
             String id = category.id();
-            UiButton tile = visualCard(categoryName(id), icon, 66, () -> show(new Page(id, null)));
+            UiButton tile = visualCard(categoryName(id), icon, 66, () -> show(new Page(id, null, null)));
             tile.setName("editor-category-" + id);
             Image mark = new Image(ui.skin.newDrawable("white", UiTheme.MINT)); mark.setVisible(false);
             mark.setName("editor-category-mark-" + id); categoryMarks.put(id, mark);
@@ -850,16 +852,21 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         showPage();
     }
 
-    /** One step back: from a gallery to its category, from a category to the start page; false on the start page. */
+    /**
+     * One step back: from a gallery to the page that opened it, from a subcategory to its category, from a category to
+     * the start page; false on the start page.
+     */
     private boolean back() {
         if (page.category() == null) { return false; }
-        show(page.gallery() != null ? new Page(page.category(), null) : START);
+        show(page.gallery() != null ? new Page(page.category(), page.subcategory(), null)
+              : page.subcategory() != null ? new Page(page.category(), null, null) : START);
         return true;
     }
 
-    /** The shown page's header, then its grid. A page whose category or gallery the blueprint no longer has is the start page. */
+    /** The shown page's header, then its grid. A page whose category, subcategory or gallery the blueprint no longer has is the start page. */
     private void showPage() {
-        if (page.category() != null && (category(page.category()) == null || page.gallery() != null && gallery() == null)) {
+        if (page.category() != null && (category(page.category()) == null || page.gallery() != null && gallery() == null
+              || page.subcategory() != null && category(page.category()).sections(page.subcategory()).isEmpty())) {
             page = lastPage = START;
         }
         showHead();
@@ -868,7 +875,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /**
      * The Assets header: the title on the start page; while the search holds text, back (which clears it) and "Search
-     * results", since the results span every category; else back and the category's drop-down, or the gallery's name.
+     * results", since the results span every category; else back and the category's drop-down, or the subcategory's
+     * or gallery's name.
      */
     private void showHead() {
         libraryHead.clearChildren(); categoryFace = null;
@@ -883,10 +891,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             ui.tip(previous).getActor().setText(UiKit.text("BoardEditor.back"));
             head.add(previous).size(28);
             String name = searching ? UiKit.text("BoardEditor.searchResults")
-                  : page.gallery() != null ? page.gallery() : categoryName(page.category());
+                  : page.gallery() != null ? page.gallery()
+                  : page.subcategory() != null ? sectionName(page.category(), page.subcategory()) : categoryName(page.category());
             Label title = new Label(UiTheme.upper(name), ui.skin, "hud-title");
             title.setEllipsis(true); title.setName("editor-library-title");
-            if (searching || page.gallery() != null) { head.add(title).minWidth(0).padLeft(10); }
+            if (searching || page.gallery() != null || page.subcategory() != null) { head.add(title).minWidth(0).padLeft(10); }
             else {
                 // The category's name is a drop-down for a jump to another category.
                 categoryFace = new UiButton(ui, "hud-icon"); categoryFace.setName("editor-category");
@@ -917,7 +926,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         UiMenuList list = new UiMenuList(ui); list.setName("editor-category-list");
         for (var category : blueprint.categories()) {
             String id = category.id();
-            list.item(categoryName(id), null, id.equals(page.category()), false, true, () -> { choices.cancel(); show(new Page(id, null)); })
+            list.item(categoryName(id), null, id.equals(page.category()), false, true, () -> { choices.cancel(); show(new Page(id, null, null)); })
                   .setName("editor-category-item-" + id);
         }
         choices.header(null, null).content(list).openedFrom(categoryFace);
@@ -950,19 +959,30 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         libraryScroll.setScrollY(keep ? scroll : 0); libraryScroll.updateVisualScroll();
     }
 
-    /** The shown page's sections: a gallery's designs, or its category's sections. */
+    /** The shown page's sections: a gallery's designs, a subcategory's sections, or its category's subcategory cards and own sections. */
     private List<Shelf> shelves() {
         var category = category(page.category());
-        if (page.gallery() == null) { return shelves(category); }
-        return List.of(new Shelf(category.id(), null, gallery().members().stream().map(member -> new Tile(single(member), null)).toList()));
+        if (page.gallery() != null) {
+            return List.of(new Shelf(category.id(), null, gallery().members().stream().map(member -> new Tile(single(member), null)).toList()));
+        }
+        if (page.subcategory() != null) {
+            var sections = category.sections(page.subcategory());
+            // A lone section's caption would only repeat the page's name.
+            return sections.stream().map(section -> sections.size() > 1 ? shelf(section) : new Shelf(section.path(), null, shelf(section).tiles())).toList();
+        }
+        if (category.themes() != null) { return shelves(category); }
+        List<Shelf> shelves = new ArrayList<>();
+        var subcategories = category.subcategories();
+        if (!subcategories.isEmpty()) {
+            shelves.add(new Shelf(category.id(), null, subcategories.stream().map(id -> new Tile(null, null, id)).toList()));
+        }
+        category.sections(null).forEach(section -> shelves.add(shelf(section)));
+        return shelves;
     }
 
-    /** A category's sections: the blueprint's, or for the Theme category its themes and, apart, its special ones. */
+    /** All of a category's sections, the subcategories' too; for the Theme category its themes and, apart, its special ones. */
     private List<Shelf> shelves(BoardEditorBlueprint.Category category) {
-        if (category.themes() == null) {
-            return category.sections().stream().map(section -> new Shelf(section.path(), sectionName(section),
-                  section.cards().stream().map(card -> new Tile(card, null)).toList())).toList();
-        }
+        if (category.themes() == null) { return category.sections().stream().map(GpuBoardEditor::shelf).toList(); }
         var special = category.themes();
         String key = "BoardEditor.palette." + category.id();
         return List.of(new Shelf(category.id() + "/themes", UiKit.text(key + ".themes"), themeOptions().stream()
@@ -972,7 +992,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     /**
      * The search's results: per category, in start-page order, its cards that match by their label, a member's label or
-     * key, or their section's name. A gallery's designs are listed one by one; a picker family is one card.
+     * key, or their section's name. A gallery's designs are listed one by one, as a subcategory's lone family ({@link #shelf});
+     * any other picker family is one card.
      */
     private List<Shelf> results() {
         List<Shelf> results = new ArrayList<>();
@@ -1001,8 +1022,18 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return false;
     }
 
-    private static String sectionName(BoardEditorBlueprint.Section section) {
-        return UiKit.text("BoardEditor.palette." + section.category() + "." + section.id());
+    /** A section's cards; in a subcategory a section of one picker family has the room to list its members. */
+    private static Shelf shelf(BoardEditorBlueprint.Section section) {
+        var cards = section.cards();
+        boolean members = section.subcategory() != null && cards.size() == 1 && cards.getFirst().picker();
+        return new Shelf(section.path(), sectionName(section.category(), section.id()), members
+              ? cards.getFirst().members().stream().map(member -> new Tile(single(member), null)).toList()
+              : cards.stream().map(card -> new Tile(card, null)).toList());
+    }
+
+    /** The name of a section or a subcategory. */
+    private static String sectionName(String category, String id) {
+        return UiKit.text("BoardEditor.palette." + category + "." + id);
     }
 
     /** A gallery's design as a card of its own. */
@@ -1019,13 +1050,21 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A grid card: a Theme card arms its theme's brush; a gallery card opens its designs; any other card arms its entry, a
-     * picker family its first member. Its user object holds the brush keys that highlight it.
+     * A grid card: a Theme card arms its theme's brush; a subcategory's card opens it and a gallery card its designs; any
+     * other card arms its entry, a picker family its first member. Its user object holds the brush keys that highlight it.
      */
     private UiButton card(Tile tile) {
         Image preview = new Image();
         UiButton card;
-        if (tile.theme() != null) {
+        if (tile.subcategory() != null) {
+            String category = page.category(), id = tile.subcategory();
+            var members = category(category).sections(id).stream().flatMap(section -> section.cards().stream())
+                  .flatMap(shown -> shown.members().stream()).toList();
+            preview(members.getFirst(), preview);
+            card = visualCard(sectionName(category, id) + " ›", preview, 70, () -> show(new Page(category, id, null)));
+            card.setName("editor-subcategory-" + id);
+            card.setUserObject(members.stream().map(BoardEditorBlueprint.Entry::key).collect(java.util.stream.Collectors.toSet()));
+        } else if (tile.theme() != null) {
             String theme = tile.theme();
             samples.add(theme, "", "", preview);
             card = visualCard(themeLabel(theme), preview, 70, () -> send(Action.CHOOSE_BRUSH, "theme", theme));
@@ -1035,13 +1074,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             var first = shown.members().getFirst();
             preview(first, preview);
             if (shown.gallery()) {
-                card = visualCard(shown.label() + " ›", preview, 70, () -> show(new Page(page.category(), shown.label())));
+                card = visualCard(shown.label() + " ›", preview, 70, () -> show(new Page(page.category(), page.subcategory(), shown.label())));
                 card.setName("editor-gallery-" + shown.label());
             } else {
                 card = visualCard(shown.label(), preview, 70, () -> arm(first));
                 card.setName("editor-library-" + first.key());
-                // A gallery's designs share long names ("Legacy building art 52"): two lines show what tells them apart.
-                if (blueprint.card(first).gallery()) {
+                // A family's members, shown one by one, share long names ("Legacy building art 52"): two lines show what tells them apart.
+                if (blueprint.card(first).family() && !shown.family()) {
                     card.getLabel().setEllipsis(false); card.getLabel().setWrap(true); card.getCell(card.getLabel()).height(32);
                 }
             }
@@ -2852,8 +2891,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * Esc's last step, after the line-of-sight ruler's: the Assets panel's search clears, a gallery goes back to its
-     * category, a category to the start page.
+     * Esc's last step, after the line-of-sight ruler's: the Assets panel's search clears, a gallery goes back to the page
+     * that opened it, a subcategory to its category, a category to the start page.
      */
     boolean escapeAssets() {
         if (!query.isEmpty()) { query = ""; searchField.setText(""); showHead(); showGrid(false); return true; }

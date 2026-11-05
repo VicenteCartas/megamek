@@ -126,9 +126,9 @@ class BoardSceneryDecodeDataTest {
         }
         // One real object or one stamp per entry, counted by the category of its first palette section; colour, rotation
         // and decode-only variants stay out of the palette, and so do the -snow trees (a tree takes its winter form on
-        // snow). Crane tips and the narrow glass roof are rows. Industry holds the 10 seaport props, Parks the 12 animal
-        // poses, Transportation the routes, rolling stock and train stamps.
-        assertEquals(Map.of("buildings", 7, "industry", 17, "parks", 29, "transportation", 39, "vegetation", 73), visible);
+        // snow). Crane tips and the narrow glass roof are rows. Industry holds the 10 seaport props, Props the 12 animal
+        // poses and the 15 crystals, Transportation the routes, rolling stock and train stamps.
+        assertEquals(Map.of("buildings", 7, "industry", 17, "parks", 14, "props", 32, "transportation", 39, "vegetation", 73), visible);
         // Layers type icons name components by id and objects by palette section or category: a renamed one loses its icon.
         var icons = GpuBoardEditor.class.getDeclaredField("LAYER_ICONS");
         icons.setAccessible(true);

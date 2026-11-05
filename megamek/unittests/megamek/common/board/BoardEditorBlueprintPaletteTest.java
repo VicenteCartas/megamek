@@ -57,8 +57,8 @@ class BoardEditorBlueprintPaletteTest {
     };
 
     @Test
-    void theShippedPaletteHasNineCategoriesAndShowsEveryEntryInEachOfItsSections() {
-        assertEquals(List.of("theme", "ground-water", "vegetation", "transportation", "buildings", "industry", "parks",
+    void theShippedPaletteHasTenCategoriesAndShowsEveryEntryInEachOfItsSections() {
+        assertEquals(List.of("theme", "ground-water", "vegetation", "transportation", "buildings", "industry", "parks", "props",
               "hazards", "decals"), BLUEPRINT.categories().stream().map(BoardEditorBlueprint.Category::id).toList());
         assertEquals(List.of("dirt", "rock"), BLUEPRINT.specialThemes());
         for (var category : BLUEPRINT.categories()) {
@@ -84,6 +84,19 @@ class BoardEditorBlueprintPaletteTest {
         assertNull(BLUEPRINT.entry("hex/sample"));
         // An automatic building piece is no card: the 3D board picks it from weight and exits.
         assertNull(BLUEPRINT.entry("buildings/saxarba/building_light/building_light_12"));
+    }
+
+    /** The crystal props are behind Props' Crystals card, by their kind of crystal; the cover skin stays Vegetation's card. */
+    @Test
+    void theCrystalPropsAreASubcategoryApartFromTheCoverSkin() {
+        var props = BLUEPRINT.categories().stream().filter(c -> c.id().equals("props")).findFirst().orElseThrow();
+        assertEquals(List.of("crystals", "animals"), props.subcategories());
+        assertEquals(List.of("general"), props.sections(null).stream().map(BoardEditorBlueprint.Section::id).toList());
+        var crystals = props.sections("crystals").stream().flatMap(section -> section.cards().stream())
+              .flatMap(card -> card.members().stream()).toList();
+        assertEquals(15, crystals.size());
+        assertTrue(crystals.stream().allMatch(entry -> entry.asset() != null && entry.asset().kind().equals("prop")), "Props only");
+        assertEquals(List.of("vegetation/gameplay", "vegetation/looks"), BLUEPRINT.entry("woods/crystal").sections());
     }
 
     /** Ground & water's Liquids: the Water card and the Lava card, liquid magma on the water's depth. */
