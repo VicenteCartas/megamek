@@ -13,6 +13,7 @@ import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.actions.TemporalAction;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -57,6 +58,8 @@ public final class UiDialog {
     private UiButton primary;
     private float width = size("dialog.md");
     private Actor focusBefore;
+    /** The card's title row and its close button, which the focus starts on only when nothing else takes it. */
+    private final Actor titleBar;
     private boolean unfold;
 
     /**
@@ -71,6 +74,7 @@ public final class UiDialog {
         layer.setFillParent(true);
         card = kit.dialog(title, cancel, true);
         card.setName("dialog");
+        titleBar = card.getChildren().first();
         card.setTouchable(Touchable.enabled);
         body.top().left();
         scroll = kit.scrollList(body, true, false);
@@ -111,9 +115,22 @@ public final class UiDialog {
                 return event.getTarget() == layer && key(keycode);
             }
         });
+        // A slider or a closing list drops the keyboard focus; the card takes it back so Escape still reaches it
+        layer.addAction(Actions.forever(Actions.run(() -> {
+            Stage stage = layer.getStage();
+            if (stage != null && stage.getKeyboardFocus() == null && UiModal.active(stage) == layer) {
+                stage.setKeyboardFocus(card);
+            }
+        })));
         layer.addCaptureListener(new InputListener() {
             @Override
             public boolean keyDown(InputEvent event, int keycode) {
+                // A text field takes every key it is sent, so Escape cancels before it reaches one
+                if (keycode == Keys.ESCAPE && event.getTarget() instanceof TextField && inside(event.getTarget())) {
+                    event.cancel();
+                    cancel.run();
+                    return true;
+                }
                 if (keycode != Keys.TAB) {
                     return false;
                 }
@@ -317,7 +334,7 @@ public final class UiDialog {
         return actor != null && actor.isDescendantOf(card);
     }
 
-    /** The first field, or else the main button, or else the first control. */
+    /** The first field, or else the main button, or else the first control below the title, or else the close button. */
     private Actor firstFocus() {
         List<Actor> controls = focusables();
         for (Actor control : controls) {
@@ -327,6 +344,11 @@ public final class UiDialog {
         }
         if (primary != null && !primary.isDisabled()) {
             return primary;
+        }
+        for (Actor control : controls) {
+            if (!control.isDescendantOf(titleBar)) {
+                return control;
+            }
         }
         return controls.isEmpty() ? null : controls.getFirst();
     }

@@ -6,7 +6,6 @@ import static com.badlogic.gdx.scenes.scene2d.actions.Actions.run;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.function.Consumer;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Color;
@@ -37,6 +36,7 @@ import megamek.client.lobby.LobbySnapshot.PlayerRow;
 import megamek.client.lobby.LobbySnapshot.Relation;
 import megamek.client.lobby.LobbySnapshot.TeamGroup;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -54,9 +54,11 @@ import megamek.common.board.Board;
  * The lobby's left column, as the briefing room's roster and chat dock: the players by team, each team under a header
  * with its colour bar, name and totals, and ending with a button that adds a bot to it; then the chat, below a
  * hairline. A player's card shows their colour, name and role chips, deployment area, forces (unless a blind drop hides
- * them) and ready state; its menu, from its menu button or a right click, holds the Swing lobby's player actions,
- * enabled as there: the local player may configure only themselves and their bots. A double click on such a card opens
- * its player settings. The chat input sends on Enter, as the chat box does (commands such as /who included), and calls
+ * them) and ready state. The local player's own cards (themselves and their bots) act in place, with no menu: the
+ * swatch opens the camouflage, the Team and deployment buttons open a flat picker each (the deployment as the
+ * compass grid of start positions), and the icons at the forces line's end open the player settings, a bot's own
+ * settings, or remove the bot; a disconnected player's card offers a bot to take their place. A double click on such a
+ * card opens its player settings. The Game Master's seat is in the top bar. The chat input sends on Enter, as the chat box does (commands such as /who included), and calls
  * back earlier lines with Up and Down. The fold button at the input's end folds the chat to its header, which then shows
  * the latest line; lines from others tint the header and count on its badge until the chat opens again. The input row
  * stays at the column's foot either way, so the button never moves under the pointer.
@@ -84,8 +86,6 @@ final class LobbyPlayersPanel {
         void changeTeam(int id, int team);
 
         void changeDeployment(int id, int position);
-
-        void toggleGameMaster();
 
         void botSettings(int id);
 
@@ -130,9 +130,9 @@ final class LobbyPlayersPanel {
     private final float chatHeight;
     private final UiButton foldButton;
     private final Label foldTip;
+    /** The open picker: a player's team or deployment area. */
     private final UiPopover menu;
-    private final UiPopover submenu;
-    /** Each shown player's menu button, by player id. */
+    /** Each shown local player's deployment button, by player id. */
     private final Map<Integer, Actor> menuButtons = new HashMap<>();
     private LobbySnapshot shown = LobbySnapshot.EMPTY;
     /** The player whose card is marked as receiving the units being added; -1 for none. */
@@ -147,8 +147,6 @@ final class LobbyPlayersPanel {
         chat = new ChatFold(chatOpen);
         menu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
         menu.setName("lobby-player-menu");
-        submenu = new UiPopover(kit, () -> { }, UiTheme.TOKEN);
-        submenu.setName("lobby-player-submenu");
 
         panel = kit.panel(true);
         Table header = kit.header(Messages.getString("Lobby.players"), "", true);
@@ -226,13 +224,12 @@ final class LobbyPlayersPanel {
         return panel;
     }
 
-    /** Adds the player menus to {@code layer}, above the columns; once, before the panel shows a snapshot. */
+    /** Adds the player pickers to {@code layer}, above the columns; once, before the panel shows a snapshot. */
     void attach(Group layer) {
         layer.addActor(menu);
-        layer.addActor(submenu);
     }
 
-    /** One Escape step in the player menus: closes the deepest open one; true when one was open. */
+    /** One Escape step in the player pickers: closes the open one; true when one was open. */
     boolean back() {
         return menu.back();
     }
@@ -390,7 +387,7 @@ final class LobbyPlayersPanel {
         Image swatch = camo == null ? kit.solid(new Color(player.colour() << 8 | 0xFF)) : new Image(camo, Scaling.fill);
         swatch.setName("lobby-player-swatch-" + player.id());
         float swatchSize = size("icon.lg");
-        card.add(swatch).size(swatchSize).top().padRight(space("md"));
+        card.add(swatch).size(swatchSize).padRight(space("md"));
         if (player.local()) {
             kit.tip(swatch, true).getActor().setText(Messages.getString("Lobby.camo"));
             swatch.addListener(new ClickListener() {
@@ -401,26 +398,26 @@ final class LobbyPlayersPanel {
             });
         }
 
-        Table lines = new Table();
-        lines.top().left().defaults().left();
-        lines.add(nameRow(player)).growX().minWidth(0).row();
-        lines.add(startRow(player)).growX().minWidth(0).padTop(space("xxs")).row();
+        // The swatch, the name and the ready mark share the first line; the rows under it run the card's full width
+        card.add(nameRow(player)).growX().minWidth(0);
+        card.add(readyMark(player)).size(size("control.sm")).padLeft(space("xs")).row();
+        card.add(player.local() ? placeRow(player) : startRow(player)).colspan(3).growX().minWidth(0)
+              .padTop(space("xs")).row();
+        // The totals, with the card's tools at the end of their line
+        Table third = new Table();
+        third.left();
         String forces = player.hidden() ? Messages.getString("Lobby.hidden")
               : Messages.getString("Lobby.totals", player.bv(), player.tons(), player.units());
         Label forcesLabel = kit.typeLabel(forces, "small", "text.secondary");
         forcesLabel.setEllipsis(true);
-        lines.add(forcesLabel).growX().minWidth(0).padTop(space("xxs"));
-        card.add(lines).growX().minWidth(0).top();
-
-        Table side = new Table();
-        side.top();
-        side.add(readyMark(player)).size(size("control.sm")).row();
-        UiButton more = kit.button("button-icon" + UiTheme.COMPACT, "more-vert", null, null);
-        kit.tip(more, true).getActor().setText(Messages.getString("Lobby.playerMenu"));
-        UiKit.onChange(more, () -> openMenu(player.id(), more));
-        menuButtons.put(player.id(), more);
-        side.add(more).size(size("control.sm"));
-        card.add(side).top().padLeft(space("xs"));
+        third.add(forcesLabel).growX().minWidth(0);
+        Table tools = new Table();
+        tools.setName("lobby-player-tools-" + player.id());
+        cardActions(tools, player);
+        if (tools.hasChildren()) {
+            third.add(tools).right().padLeft(space("xs"));
+        }
+        card.add(third).colspan(3).growX().minWidth(0).padTop(space("xxs"));
 
         if (!player.hidden()) {
             HorizontalGroup icons = unitIcons(player.id());
@@ -432,12 +429,6 @@ final class LobbyPlayersPanel {
 
         // A table takes only its children's hits; the whole card takes clicks, not only its labels
         card.setTouchable(Touchable.enabled);
-        card.addListener(new ClickListener(Input.Buttons.RIGHT) {
-            @Override
-            public void clicked(InputEvent event, float x, float y) {
-                openMenuAt(player.id(), event.getStageX(), event.getStageY(), null);
-            }
-        });
         card.addListener(new ClickListener() {
             @Override
             public void clicked(InputEvent event, float x, float y) {
@@ -552,6 +543,70 @@ final class LobbyPlayersPanel {
         return row;
     }
 
+    /**
+     * The local player's or their bot's team and deployment area, each a quiet button that opens a flat picker under
+     * it; a deployment area the rules forbid shows the warning icon.
+     */
+    private Table placeRow(PlayerRow player) {
+        Table row = new Table();
+        row.left();
+        UiButton team = pickerButton("group", LobbySnapshot.teamName(player.team()),
+              Messages.getString("Lobby.assignTeam"));
+        team.setName("lobby-player-team-" + player.id());
+        UiKit.onChange(team, () -> openTeams(player.id(), team));
+        // The quiet button's inset would push its icon right of the swatch's edge, so the row starts that far left
+        row.add(team).left().minWidth(0).padLeft(-team.getPadLeft());
+        String start = player.start().isEmpty() ? Messages.getString("Lobby.deployment") : player.start();
+        String tip = Messages.getString("Lobby.deployment")
+              + (player.startValid() ? "" : "\n\n" + Messages.getString("Lobby.startInvalid"));
+        UiButton deploy = pickerButton(player.startValid() ? "locate" : "warn", start, tip);
+        deploy.setName("lobby-player-start-" + player.id());
+        UiKit.onChange(deploy, () -> openDeployment(player.id(), deploy));
+        menuButtons.put(player.id(), deploy);
+        row.add(deploy).left().minWidth(0).padLeft(space("xxs"));
+        row.add().growX();
+        return row;
+    }
+
+    private UiButton pickerButton(String icon, String text, String tip) {
+        UiButton button = kit.button("button-quiet" + UiTheme.COMPACT, icon, text, null);
+        // A narrow column cuts the caption short rather than the card running out of it
+        button.getLabel().setEllipsis(true);
+        button.getCell(button.getLabel()).minWidth(0);
+        kit.tip(button, true).getActor().setText(tip);
+        return button;
+    }
+
+    /**
+     * The icons at the end of the totals line: the player settings for the local player and their bots, a
+     * bot's own settings and its removal, and for a disconnected player, a bot to take their place.
+     */
+    private void cardActions(Table strip, PlayerRow player) {
+        int id = player.id();
+        if (player.localBot()) {
+            cardAction(strip, "bot", "Lobby.botSettings", "lobby-player-bot-" + id, () -> actions.botSettings(id));
+        }
+        if (player.local()) {
+            cardAction(strip, "settings", "Lobby.playerSettings", "lobby-player-settings-" + id,
+                  () -> actions.playerSettings(id));
+        }
+        if (player.localBot()) {
+            cardAction(strip, "close", "Lobby.removeBot", "lobby-player-remove-" + id, () -> actions.removeBot(id));
+        }
+        if (player.ghost()) {
+            cardAction(strip, "bot", "Lobby.replaceBot", "lobby-player-replace-" + id,
+                  () -> actions.replaceWithBot(id));
+        }
+    }
+
+    private void cardAction(Table strip, String icon, String tipKey, String name, Runnable action) {
+        UiButton button = kit.button("button-icon" + UiTheme.COMPACT, icon, null, null);
+        button.setName(name);
+        kit.tip(button, true).getActor().setText(Messages.getString(tipKey));
+        UiKit.onChange(button, () -> choose(action));
+        strip.add(button).size(size("control.sm")).padLeft(strip.hasChildren() ? space("xxs") : 0);
+    }
+
     /** The local player's ready toggle; another player's ready mark. */
     private Actor readyMark(PlayerRow player) {
         String icon = player.ready() ? "check-circle" : player.self() ? "radio-unchecked" : "hourglass";
@@ -574,100 +629,89 @@ final class LobbyPlayersPanel {
         return holder;
     }
 
-    // ---- The player menu ----
+    // ---- The team and deployment pickers ----
 
-    /** Opens player {@code id}'s menu under {@code button}, their card's menu button. */
-    private void openMenu(int id, Actor button) {
-        if (menu.isVisible()) {
-            menu.cancel();
-            return;
-        }
-        Vector2 corner = button.localToStageCoordinates(new Vector2(0, 0));
-        openMenuAt(id, corner.x, corner.y, button);
-    }
-
-    /** For the developer switch: opens the first bot's menu, or the first player's; false when none shows. */
+    /** For the developer switch: opens the first local player's deployment picker; false when none shows. */
     boolean openFirstMenu() {
-        PlayerRow chosen = shown.players().stream().filter(PlayerRow::bot).findFirst()
-              .orElse(shown.players().isEmpty() ? null : shown.players().get(0));
+        PlayerRow chosen = shown.players().stream().filter(PlayerRow::local).findFirst().orElse(null);
         Actor button = chosen == null ? null : menuButtons.get(chosen.id());
         if (button == null || button.getStage() == null) {
             return false;
         }
-        openMenu(chosen.id(), button);
+        openDeployment(chosen.id(), button);
         return true;
     }
 
-    private void openMenuAt(int id, float stageX, float stageY, Actor face) {
+    /** Opens player {@code id}'s teams under {@code button}, a flat list with their team checked. */
+    private void openTeams(int id, Actor button) {
         PlayerRow player = shown.player(id);
-        if (player == null || menu.getStage() == null) {
+        if (closedPicker() || player == null || menu.getStage() == null) {
             return;
         }
         UiMenuList list = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-        item(list, "Lobby.playerSettings", player.local(), () -> actions.playerSettings(id));
-        item(list, "Lobby.camo", player.local(), () -> actions.camouflage(id));
-        submenu(list, Messages.getString("Lobby.assignTeam"), player.local(), children -> {
-            for (int team = 0; team < LobbySnapshot.TEAM_COUNT; team++) {
-                int chosen = team;
-                children.item(LobbySnapshot.teamName(team), null, player.team() == team, false, true,
-                      () -> choose(() -> actions.changeTeam(id, chosen)));
-            }
-        });
-        submenu(list, Messages.getString("Lobby.deployment"), player.local(), children -> {
-            for (int position = 0; position < Board.NUM_ZONES; position++) {
-                int chosen = position;
-                children.item(LobbySnapshot.deploymentName(position), null, null, false, true,
-                      () -> choose(() -> actions.changeDeployment(id, chosen)));
-            }
-            if (!shown.customZones().isEmpty()) {
-                children.separator();
-            }
-            for (int zone : shown.customZones()) {
-                int chosen = Board.encodeCustomDeploymentZoneID(zone);
-                children.item(LobbySnapshot.zoneName(zone), null, null, false, true,
-                      () -> choose(() -> actions.changeDeployment(id, chosen)));
-            }
-        });
-        if (player.self()) {
-            list.separator();
-            list.item(Messages.getString("Lobby.gameMasterRole"), null, player.gameMaster(), false,
-                  shown.gameMasterAvailable(), () -> choose(actions::toggleGameMaster));
+        for (int team = 0; team < LobbySnapshot.TEAM_COUNT; team++) {
+            int chosen = team;
+            list.item(LobbySnapshot.teamName(team), null, player.team() == team, false, true,
+                  () -> choose(() -> actions.changeTeam(id, chosen))).setName("lobby-team-" + team);
         }
-        if (player.bot() || player.ghost()) {
-            list.separator();
-        }
-        if (player.bot()) {
-            item(list, "Lobby.botSettings", player.localBot(), () -> actions.botSettings(id));
-            item(list, "Lobby.removeBot", player.localBot(), () -> actions.removeBot(id));
-        }
-        if (player.ghost()) {
-            item(list, "Lobby.replaceBot", true, () -> actions.replaceWithBot(id));
-        }
-        menu.header(player.name(), LobbySnapshot.teamName(player.team())).content(list);
-        menu.openedFrom(face);
-        menu.showAt(stageX, stageY);
+        showPicker(Messages.getString("Lobby.assignTeam"), player.name(), list, button);
     }
 
-    private void item(UiMenuList list, String key, boolean enabled, Runnable action) {
-        list.item(Messages.getString(key), null, null, false, enabled, () -> choose(action));
+    /**
+     * Opens player {@code id}'s deployment areas under {@code button}: the start positions as a compass, as the player
+     * settings lay them out, their own area checked, then the map's custom zones.
+     */
+    private void openDeployment(int id, Actor button) {
+        PlayerRow player = shown.player(id);
+        if (closedPicker() || player == null || menu.getStage() == null) {
+            return;
+        }
+        Table grid = new Table();
+        grid.defaults().growX().uniformX().pad(space("xxs"));
+        for (int[] line : PlayerSettingsForm.GRID) {
+            for (int position : line) {
+                if (position < 0) {
+                    grid.add();
+                } else {
+                    grid.add(deployButton(id, position, LobbySnapshot.deploymentName(position), player.start()));
+                }
+            }
+            grid.row();
+        }
+        for (int zone : shown.customZones()) {
+            int position = Board.encodeCustomDeploymentZoneID(zone);
+            grid.add(deployButton(id, position, LobbySnapshot.zoneName(zone), player.start())).colspan(3).row();
+        }
+        showPicker(Messages.getString("Lobby.deployment"), player.name(), grid, button);
     }
 
-    /** Closes the menus, then runs {@code action}, so a dialog it opens does not find them open. */
+    private UiButton deployButton(int id, int position, String name, String start) {
+        UiButton button = kit.button("button-toggle-compact", null, name, null);
+        button.setName("lobby-deploy-" + position);
+        button.setProgrammaticChangeEvents(false);
+        // The card's line names the area, then any offset and width, or the "Any" area's box
+        button.setChecked(start.equals(name) || start.startsWith(name + ",")
+              || position == 0 && start.startsWith(name + " ("));
+        UiKit.onChange(button, () -> choose(() -> actions.changeDeployment(id, position)));
+        return button;
+    }
+
+    /** Closes an open picker, so a second press on its button only closes it; true when one was open. */
+    private boolean closedPicker() {
+        return menu.isVisible() && menu.cancel();
+    }
+
+    private void showPicker(String title, String detail, Actor content, Actor button) {
+        menu.header(title, detail).content(content);
+        menu.openedFrom(button);
+        Vector2 corner = button.localToStageCoordinates(new Vector2(0, 0));
+        menu.showAt(corner.x, corner.y);
+    }
+
+    /** Closes the picker, then runs {@code action}, so a dialog it opens does not find it open. */
     private void choose(Runnable action) {
         menu.cancel();
         action.run();
-    }
-
-    /** An item that opens a submenu beside it, which {@code fill} fills, as a desktop menu does. */
-    private void submenu(UiMenuList list, String text, boolean enabled,
-          Consumer<UiMenuList> fill) {
-        UiButton[] item = new UiButton[1];
-        item[0] = list.item(text, null, null, true, enabled, () -> {
-            UiMenuList children = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
-            fill.accept(children);
-            submenu.header(null, null).content(children);
-            menu.cascade(submenu, item[0]);
-        });
     }
 
     // ---- The chat ----

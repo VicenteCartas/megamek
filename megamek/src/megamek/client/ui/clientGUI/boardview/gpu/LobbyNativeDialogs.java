@@ -11,6 +11,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.AssetForm;
@@ -27,13 +28,16 @@ import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.TrainOrderForm;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.entityreadout.EntityReadout;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.icons.Camouflage;
 import megamek.common.units.Entity;
 
@@ -78,6 +82,8 @@ final class LobbyNativeDialogs {
     private LobbyRandomArmyView randomArmyView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
+    /** The paperdoll drawings, read once the damage editor first opens. */
+    private GpuPaperdolls paperdolls;
 
     private record Open(UiDialog dialog, Runnable closed) { }
 
@@ -288,6 +294,23 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /**
+     * Shows the unit's damage editor over whatever shows.
+     *
+     * @param applied runs on the Swing thread once OK wrote the edits to the unit
+     */
+    UiDialog damage(UnitDamageForm form, LobbyPromptViews.Edt edt, Runnable applied) {
+        if (paperdolls == null) {
+            paperdolls = new GpuPaperdolls();
+        }
+        // a Mek's front, rear and structure dolls stand side by side, as on the record sheet, so it takes more width
+        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
+              LobbyDamageView.sheet(paperdolls, form) ? "dialog.xl" : "dialog.lg", true, () -> { });
+        new LobbyDamageView(kit, dialog, form, paperdolls, edt, applied, this::close);
+        show(dialog);
+        return dialog;
+    }
+
     /** Asks for a train's order over whatever shows. */
     UiDialog trainOrder(TrainOrderForm form, LobbyPromptViews.Edt edt, Consumer<List<Entity>> ordered) {
         UiDialog dialog = begin(Messages.getString("TrainOrderDialog.title"), "dialog.sm", true, () -> { });
@@ -352,6 +375,108 @@ final class LobbyNativeDialogs {
         }).setName("yes-no-no");
         show(dialog);
         return dialog;
+    }
+
+    /** What the save question before leaving was answered; closing it any other way stays in the game. */
+    interface SaveFirstAnswer {
+        /**
+         * @param save whether to save the game before leaving
+         */
+        void answered(boolean save);
+    }
+
+    /**
+     * Asks whether to save the game before leaving it: Save…, Don't save, or Cancel to stay. Settings → Advanced
+     * turns the question off.
+     *
+     * @param stayed runs when it closes unanswered, as with Cancel or Esc
+     */
+    UiDialog saveFirst(SaveFirstAnswer answer, Runnable stayed) {
+        boolean[] answered = new boolean[1];
+        UiDialog dialog = begin(Messages.getString("Lobby.saveFirst.title"), "dialog.md", true, () -> {
+            if (!answered[0]) {
+                stayed.run();
+            }
+        });
+        var label = kit.typeLabel(Messages.getString("Lobby.saveFirst.message"), "body", "text.primary");
+        label.setWrap(true);
+        dialog.body().add(label).growX().left();
+        dialog.primary(Messages.getString("Lobby.saveFirst.save"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(true);
+        }).setName("save-first-save");
+        dialog.secondary(Messages.getString("Lobby.saveFirst.leave"), () -> {
+            answered[0] = true;
+            close();
+            answer.answered(false);
+        }).setName("save-first-leave");
+        dialog.cancelButton(Messages.getString("Cancel.text")).setName("save-first-cancel");
+        show(dialog);
+        return dialog;
+    }
+
+    /** What the lobby's system menu does; the screen runs each on the Swing thread. */
+    interface SystemActions {
+        void save();
+
+        void quickSave();
+
+        /** Asks for a saved game and leaves the lobby to load it. */
+        void load();
+
+        /** Leaves the lobby to load the quick save. */
+        void quickLoad();
+
+        /** Whether this lobby offers loading at all: a MekHQ lobby loads its own campaigns. */
+        boolean loads();
+
+        void settings();
+
+        void leave();
+    }
+
+    /**
+     * The lobby's system menu, as a game's pause menu: Resume, then saving and loading, Settings and Leave lobby, one
+     * column of buttons in groups. Esc or Resume closes it; every other button closes it before it acts.
+     */
+    UiDialog systemMenu(SystemActions actions) {
+        UiDialog dialog = begin(Messages.getString("Lobby.menu.title"), "dialog.sm", false, () -> { });
+        Table column = dialog.body();
+        float gap = DesignTokens.shipped().space().get("sm");
+        float group = DesignTokens.shipped().space().get("lg");
+        menuButton(column, "button-primary", "Lobby.menu.resume", null, 0, null);
+        menuButton(column, "button-secondary", "Lobby.gameMenu.save", KeyCommandBind.LOCAL_SAVE, group,
+              actions::save);
+        menuButton(column, "button-secondary", "Lobby.gameMenu.quickSave", KeyCommandBind.QUICK_SAVE, gap,
+              actions::quickSave);
+        if (actions.loads()) {
+            menuButton(column, "button-secondary", "Lobby.gameMenu.load", KeyCommandBind.LOCAL_LOAD, gap,
+                  actions::load);
+            menuButton(column, "button-secondary", "Lobby.gameMenu.quickLoad", KeyCommandBind.QUICK_LOAD, gap,
+                  actions::quickLoad);
+        }
+        menuButton(column, "button-secondary", "Lobby.menu.settings", KeyCommandBind.CLIENT_SETTINGS, group,
+              actions::settings);
+        menuButton(column, "button-secondary", "Lobby.menu.leave", null, group, actions::leave);
+        show(dialog);
+        return dialog;
+    }
+
+    private void menuButton(Table column, String style, String key, KeyCommandBind binding, float above,
+          Runnable action) {
+        UiButton button = kit.button(style, null, Messages.getString(key), null);
+        button.setName(key);
+        if (binding != null) {
+            kit.tip(button, true).getActor().setText(KeyCommandBind.getDesc(binding));
+        }
+        UiKit.onChange(button, () -> {
+            close();
+            if (action != null) {
+                action.run();
+            }
+        });
+        column.add(button).growX().padTop(above).row();
     }
 
     /**

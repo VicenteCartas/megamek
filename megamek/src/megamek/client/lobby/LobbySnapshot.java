@@ -77,7 +77,7 @@ public record LobbySnapshot(int localPlayerId, boolean localGameMaster, boolean 
     }
 
     /**
-     * @return whether the local player may take or give up the Game Master role from the player menu: the game allows
+     * @return whether the local player may take or give up the Game Master role from the top bar's seat: the game allows
      *       one, nobody else holds it and no vote runs; giving it up is always allowed
      */
     public boolean gameMasterAvailable() {

@@ -36,6 +36,7 @@ import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.TrainOrderForm;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -159,9 +160,9 @@ final class GpuLobbyTools {
         }
 
         @Override
-        public void editDamage(Entity unit, Runnable done) {
-            new SwingLobbyPrompts(gui()).editDamage(unit);
-            done.run();
+        public void editDamage(Entity unit, UnitDamageForm.Options options, Runnable done) {
+            UnitDamageForm form = UnitDamageForm.of(unit, options);
+            open(dialogs -> dialogs.damage(form, GpuLobbyTools.this::edt, done));
         }
 
         @Override

@@ -372,8 +372,8 @@ work for Swing, and item 11 is under investigation.
      footers (settings, game options, scenario chooser, unit and bot dialogs) move with their own steps.
   3. Main menu, in libGDX (a Swing version dropped frames on ordinary machines, and the 2D board that kept the
      startup path in Swing is going away): a full-window game screen over the battle art
-     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome back, Commander" greeting ("Welcome,
-     Commander" on the first launch; the player is always Commander, never named) and reveal on app launch (an
+     (`GpuStartWindow`, `GpuStartScreen`), opened by a skippable "Welcome, Commander" greeting
+     (the same for new and returning players; the player is always Commander, never named) and reveal on app launch (an
      instant cut with reduce motion), with Settings, Help and Tools on screen and Up, Down, Tab and Enter moving
      through the menu. The developers chose the hex reveal: hexes pop open across the art from left to right. The menu
      sits in a column on the right, because the art's main mech stands on the left, with the tip card at the bottom
@@ -1279,6 +1279,160 @@ work for Swing, and item 11 is under investigation.
        Checks: `RequisitionCatalogTest.theTypeRowOffersOnlyTypesWithAnAllowedUnit`, `LobbyFilesTest`,
        `LobbyTogglesSmokeTest` (the game menu saves and loads; a MekHQ lobby only saves) and
        `LobbyNativeDialogsSmokeTest.theFooterButtonsStayCentredOnTheCardWithAToolBesideThem`.
+     - Menu polish on `ui-work`, so the lobby has fewer nested menus and fewer Swing dialogs:
+       - Leaving the lobby asks "Save before leaving?" in a native dialog (`LobbyNativeDialogs.saveFirst`)
+         instead of the Swing "Save First?" question (`AbstractClientGUI.handleExit`). Save… opens the system
+         file dialog and leaves once the game is written; Don't save leaves (`AbstractClientGUI.exitWithoutAsking`);
+         Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
+         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window still asks in Swing, since
+         its exit path belongs to hud-v3.
+       - A system menu, as a game's pause menu (`LobbyNativeDialogs.systemMenu`): Resume, Save game…, Quick save,
+         Load game…, Quick load, Settings and Leave lobby, one column of buttons in groups, with each shortcut in its
+         tooltip. Esc opens it once nothing else is left to close, and closes it again. The top bar's gear, ⋮ game
+         menu and Leave button become one ☰ button that opens it, so the bar ends with the Game Master's seat, Ready
+         and ☰ in the corner, as a game's menu button. The shortcuts stay (Alt+C, Ctrl+S, Ctrl+Shift+S, Ctrl+L,
+         Ctrl+Shift+L). A MekHQ lobby offers no
+         loading here either.
+       - Player cards without a menu (`LobbyPlayersPanel`): the ⋮ button, the right click and the player menu's
+         submenus are gone. On the local player's own cards and their bots' cards, the team and the deployment area
+         are quiet buttons on the second line: Team opens a flat list of teams with the current one checked, and
+         the deployment button opens the start positions as the player settings' compass, with the map's custom
+         zones under it. A rail under the ready mark holds icons for the player settings, a bot's own settings and
+         Remove bot; a disconnected player's card offers Replace with a bot. The rail keeps the forces line's full
+         width; on the line itself the icons cut "3 units" short. The swatch still opens the camouflage and a
+         double click the player settings. The Game Master item left the card for the top bar's seat
+         (`LobbyPlayersPanel.Actions.toggleGameMaster` is gone). `lobby+menu` now opens the deployment picker.
+       - The battlefield column without its ⋮ menu (`LobbyBattlefieldPanel`): a cube icon beside Change map previews
+         the map in 3D, and a map rolled at launch shows a die (Generate battlefield, enabled when no surprise
+         board stops it) and the random map settings beside its line (`LobbyBattlefield.rolled`). Loading and
+         saving the map setup were already in the map setup's footer; the Board Editor joins them there
+         (`LobbyMapSetupView.Action.BOARD_EDITOR`).
+       - Unit cards act in place, and the unit menu no longer cascades (`LobbyForcesPanel`). A wide card of the local
+         player's unit shows Configure, C3 (for a unit with C3, opening the network manager on it) and Delete as icons
+         beside its ⋮; a compact row keeps only the ⋮. In the menu, a submenu replaces the list in the same popover,
+         under the submenu's name and a Back row (Left and Esc go back too), instead of opening up to four
+         popovers side by side. `lobby+unitmenu+unitsub` shows a submenu.
+       - Every kit dialog answers Esc, even with a text field focused (`UiDialog`): libGDX's `TextField` takes every
+         key, so Esc never reached the modal and the player settings, which open on their name, stayed open. The
+         dialog's first focus is now its first text field, else its primary button, else its first control outside
+         the title bar, so the system menu starts on Resume rather than the title bar's ×.
+       - A tidier player card (`LobbyPlayersPanel`): the swatch, name, chips and ready mark share the first line, so
+         YOU and the ready circle line up; the team and deployment pickers run the card's full width under it,
+         starting under the swatch; and the card's icons (settings, bot settings, Remove bot, Replace with a bot)
+         end the totals line, in the ready mark's column, rather than a rail that left space under the swatch. A
+         bot's card no longer cuts its team short.
+       - The random map settings keep one size (`LobbyRandomMapView`): the page takes the size of the largest tab,
+         measured once for the normal view and once for the advanced view, so the tabs no longer jump.
+       - More of a unit's actions on its wide card: View (eye) and Alpha Strike stats for any unit the local player
+         can see, and for their own Configure, Camouflage, C3 and Delete, at most four to a row with the ⋮ last in
+         the corner. An icon runs the unit menu's own command on the unit (`LobbyUnitMenu.unitCommand`, through
+         `GpuLobbyWindow.unitCommand`), and the card's ⋮ leaves those items out (`LobbyUnitMenu.of(…, omit)`). A
+         right click, a compact row's ⋮ or a menu for several units keeps them all. Edit Damage stays in the menu,
+         since only the menu knows when a Game Master takes it away.
+       - The card's icons settle into two rows (`LobbyForcesPanel`): the first always holds the main actions, View,
+         Configure, Delete and the ⋮; the second, under it, the secondary ones a unit may lack: Edit Damage (when the
+         local player may edit it, now carried on `LobbyUnit.damage` from `LobbyCommands.canEditDamage`; under a Game
+         Master everyone else finds it, greyed with the reason, in the ⋮ menu), Camouflage and C3. Alpha Strike
+         stats, a Swing dialog, go back into the menu.
+       - The team picker's icon lines up with the swatch and the totals: its row starts the quiet button's inset to
+         the left (`LobbyPlayersPanel`).
+       - A dialog that loses its keyboard focus takes it back (`UiDialog`): a slider or a closing popover drops the
+         stage's focus, and Esc then fell through to the lobby, which ignores it while a dialog is open, so the
+         random map settings never closed on Esc. The random map settings no longer pin the page's width to the
+         widest tab either, which pushed the advanced view's Theme out of the card; only the height is pinned.
+       - Edit Damage is a libGDX dialog (`LobbyDamageView`, through `LobbyNativeDialogs.damage`) for every unit the
+         Swing editor takes, which the lobby no longer opens: the unit's paperdoll on the left, coloured live by the
+         edits with the change from the unit as read, and the picked location's values on the right, or the unit's
+         general ones (`SI` on the doll, or Whole Unit, picks those).
+         - Armour, rear armour, structure, ammunition shots, a platoon's troopers and a bay's capacity are health
+           bars (`UiHealthBar`): a drag or a click sets the value in one go, the field types it, and − and + still
+           step it. Systems and equipment take hit boxes; breached, blown off, jammed and the like are switches.
+         - The location dropdown went: the doll picks, and ‹ › chevrons step through the locations. A unit with no
+           doll (battle armour, buildings, capital fighters, gun emplacements) picks from a list of its locations
+           instead; a conventional platoon has only its own values, so the list and chevrons hide.
+         - The damage roller is a row of level tiles (`UiLevelTiles`: None, Light, Moderate, Heavy) under both
+           columns, each with a pip meter in its colour (`status.success`, `accent.primary`, `status.warning`,
+           `status.danger`); the rolled one lights up, and the die rolls it again. Each roll starts again from the
+           unit as read.
+         - A Mek shows its record sheet's three dolls, as the board's unit sheet does: front armour, and rear armour
+           over structure beside it, each under its caption, and any of them picks a location; with the structure
+           on its own doll, the front doll shows the armour alone. The dialog is extra-large for those; other units
+           keep one doll. The values pane is taller (348), as high as the dialog can grow and still fit a 900 pixel
+           window at the shipped scale.
+         - The lobby's dolls are vivid (`GpuPaperdoll.vivid`): a critical location's red is stronger, with its
+           numbers in `text.primary`, so it stands apart from a damaged amber one, and an exposed location's change
+           takes the dark ink its number does. The board's dolls are unchanged.
+         - Large craft add their systems (CIC or FCS, K-F drive parts, grav decks, docking collars, sail, K-F boom)
+           and their transport bays, a place of their own with each bay's doors; a building edits its power and
+           gunners (stunned turns, killed per hex) instead of a crew.
+         - The values live in the toolkit-free `UnitDamageForm`, which writes a partial `DamageEditSpec` through
+           `DamageEditApplier`, so what it does not show stays as it was. More… (the way to the Swing editor) is
+           gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
+         - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
+           game in play, and the lobby has none yet.
+         - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
+       - Game options moved to the top bar, because testers did not find them in the battlefield column: a
+         `button-special` Game options button with a gavel stands before the Game Master's seat, its tooltip naming
+         the era, tech level and notable rules that the column's Rules section showed. It keeps its name while the
+         whole bar fits, and folds to its gavel when the bar has no room for it. The Rules section and its chips are
+         gone from the column.
+         - Planetary conditions and Victory are summary cards (`UiSummaryCard`, `UiKit.summaryCard`): the whole card
+           opens the setting, its edge strong under the pointer and a › chevron by the title, instead of a quiet
+           Change button beside the overline. In space the conditions card is disabled, muted and without a chevron.
+       - The damage editor became the Unit Status dialog and took in the unit menu's Deploy submenu. The Whole unit
+         values end with a Deployment section (`UnitDamageForm.deployment()`): heat at start (moved off a Mek's
+         centre torso), prone, hull down (TacOps hull-down rule; tanks only if hull-down capable), hidden (hidden
+         units rule), wanted for scanning (a Game Master's, in a game with objectives)
+         and the deployment round, a select from pre-game (walk-on rules only) and game start to round 40. These are
+         written straight to the unit, and neither Restore Unit nor a roll touches them. A unit already hull-down or
+         hidden keeps its toggle with the rule off, so it can be cleared.
+         - The card's wrench opens it for every unit the player configures. Under a Game Master, a player who isn't
+           one sees the damage read-only (`UnitDamageForm.Options.damage`), with a note in place of the roller and
+           Restore Unit disabled, and the dialog opens on the Deployment section. An asset's damage is still the
+           Game Master's alone.
+         - A single wide card's ⋮ leaves Deploy out, because a submenu can now be omitted by key (`LMP_DEPLOY`).
+           An asset's card keeps it, since its status dialog has no deployment (`LobbyUnit.statusDeploys`).
+           Compact rows and multi-select menus keep it, and the item is renamed Unit Status... in every menu.
+         - Checks: `UnitDamageFormTest.theDeploymentReachesTheUnitAndRepairAndRollsLeaveIt` and
+           `readOnlyDamageWritesOnlyTheDeployment`, `LobbyAsksTest.readOnlyDamageIsRefusedBySwing`,
+           `LobbyUnitMenuTest.theUnitStatusIconLeavesTheDeploySubmenuOut` and
+           `LobbyDamageSmokeTest.underAGameMasterTheDamageShowsAndTheDeploymentEdits`.
+       - Unit Status and card polish. Each value row is its own Table (`LobbyDamageView.line`), because one Table
+         mixing full-width bars with label/control rows squeezed the control column until toggles and hit boxes
+         were clipped. Controls now end on one right edge: a label-less `UiChoice` has no trailing gap and a
+         `UiHealthBar` ends on its "/ max". The deployment round is a ‹ › selector (`UiKit.selector`, a
+         `UiStepper` over named choices), not a 40-entry dropdown.
+         - The card's second icon row is Unit Status, Camo, Randomize (a die opening Name, Callsign or Skills) and
+           C3, up to eight icons. The ⋮ leaves out Randomize and C3, which are now omitted by key
+           (`LMP_RANDOMIZE`, `LMP_C3`); the C3 network manager has the rest of that submenu.
+         - Warning chips keep their size in a `UiChipRow` (`UiKit.chipRow`). Those that don't fit fold into "+n",
+           instead of squeezing until the icon and text spill out.
+         - Checks: `LobbyUnitMenuTest.theRandomizeAndC3IconsLeaveTheirSubmenusOut`,
+           `LobbyUnitCardActionsSmokeTest.theRandomizeIconOffersNameCallsignAndSkills` and
+           `chipsThatDoNotFitFoldIntoACountWhole`, and `LobbyDamageSmokeTest` stepping the round.
+       Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
+       `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
+       `gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded`,
+       `theSystemMenuSavesLoadsOpensTheSettingsAndLeaves` and `aLobbyThatCannotLoadOffersOnlySaving`;
+       `LobbyPlayerCardSmokeTest` (the rail's icons, the team list and the deployment compass, clicked through the
+       stage; another player's card has no controls) and `LobbyRecipientSmokeTest`, whose card click now lands on
+       the name line; `LobbyBattlefieldToolsSmokeTest` (with the conditions and victory cards, and space's disabled
+       conditions), `LobbyMapSetupSmokeTest` (Board Editor) and
+       `LobbyBattlefieldTest.generatedRandomAndSurpriseSheetsAreRolled`; `LobbyUnitCardActionsSmokeTest` (the card's
+       icons and the submenu's Back, Esc and Left, clicked through the stage);
+       `LobbyNativeDialogsSmokeTest.escapeClosesADialogWhoseTextFieldHasTheFocus` and
+       `theFirstFocusIsTheFirstButtonNotTheTitleBarClose`; `LobbyMapSetupSmokeTest.theRandomMapSettingsKeepTheirSizeAcrossTheTabs`;
+       `LobbyUnitMenuTest.aCardsIconsLeaveTheirItemsOutOfItsMenu` and `aCardIconRunsTheMenusCommandOnItsUnit`, and
+       `LobbyUnitCardActionsSmokeTest` (every icon clicked, the main and secondary rows, the ⋮'s menu without them,
+       no damage icon when a Game Master keeps it); `escapeClosesADialogWhoseTextFieldHasTheFocus` (Esc with no
+       focus) and `theRandomMapSettingsKeepTheirSizeAcrossTheTabs` (Esc closes it, Theme inside the card);
+       `UnitDamageFormTest` (a Mek's, vehicle's, VTOL's and fighter's places and values, repair, the partial spec
+       written to the unit, ammunition and weapon switches, the roller, and every kind of unit the Swing editor
+       takes read unchanged and applied: a platoon's troopers, each battle armour trooper, a DropShip's systems and
+       bays, an emplacement, a building's power and gunners) and `LobbyDamageSmokeTest` (the doll's left arm
+       clicked, a bar dragged and a hit box, the chevrons, a roll lighting its tile, the rear armour and structure
+       dolls clicked, Restore Unit, and OK writing the armour to the
+       unit; a squad's location list and a platoon's troopers clicked through the stage).
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
@@ -1294,11 +1448,11 @@ work for Swing, and item 11 is under investigation.
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:
-         - the unit damage editor (`UnitEditorDialog`);
+         - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
          - the auto-resolve dialogs: the chance of winning, the progress and the log.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), and the map editor's Client
-         Settings and About.
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), the map editor's Client
+         Settings and About, and the "Save First?" question when leaving a battle (`AbstractClientGUI.handleExit`).
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

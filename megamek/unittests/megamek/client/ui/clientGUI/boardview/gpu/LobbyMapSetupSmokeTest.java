@@ -157,7 +157,8 @@ class LobbyMapSetupSmokeTest {
 
             click(ui, body.findActor("map-load"));
             click(ui, body.findActor("map-random-settings"));
-            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP")), calls.toString());
+            click(ui, body.findActor("map-board-editor"));
+            assertTrue(calls.containsAll(List.of("run LOAD", "run RANDOM_MAP", "run BOARD_EDITOR")), calls.toString());
 
             click(ui, body.findActor("map-medium-space"));
             assertEquals(MapSettings.MEDIUM_SPACE, fixture.form.settings().getMedium(), "the segmented control sets the map type");
@@ -355,6 +356,42 @@ class LobbyMapSetupSmokeTest {
             assertEquals(1, sent.size(), "OK sends the settings");
             assertEquals(lakes + 1, sent.get(0).getMaxWaterSpots());
             assertFalse(dialogs.isOpen(), "OK closes the dialog");
+        });
+    }
+
+    @Test
+    void theRandomMapSettingsKeepTheirSizeAcrossTheTabs() {
+        UiTestStage.run(ui -> {
+            server();
+            RandomMapForm form = new RandomMapForm(server, settings -> { });
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyRandomMapView view = dialogs.randomMap(form, List.of("", "snow"), new RandomHost());
+            for (String mode : List.of("random-normal", "random-advanced")) {
+                click(ui, view.control(mode));
+                ui.draw();
+                Actor card = view.control("random-tabs");
+                while (!"dialog".equals(card.getName())) {
+                    card = card.getParent();
+                }
+                float width = card.getWidth();
+                float height = card.getHeight();
+                Actor theme = view.control("random-theme");
+                float right = theme.localToActorCoordinates(card, new Vector2(theme.getWidth(), 0)).x;
+                assertTrue(right <= width, mode + " keeps the theme inside the dialog");
+                for (String tab : List.of("civilization", "elevation", "natural", "water", "effects")) {
+                    Actor control = view.control("random-tab-" + tab);
+                    assertNotNull(control, tab);
+                    click(ui, control);
+                    ui.draw();
+                    assertEquals(width, card.getWidth(), .5f, mode + " " + tab + " keeps the dialog's width");
+                    assertEquals(height, card.getHeight(), .5f, mode + " " + tab + " keeps the dialog's height");
+                }
+            }
+            assertTrue(dialogs.isOpen());
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen(), "Escape closes the random map settings");
+            dialogs.dispose();
         });
     }
 

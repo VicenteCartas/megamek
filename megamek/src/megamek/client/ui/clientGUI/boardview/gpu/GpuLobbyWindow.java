@@ -737,18 +737,43 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: leaves the game the way the client's exit does, after its save question. */
+    /**
+     * Any thread: leaves the game the way the client's exit does. Unless the player stopped it, the lobby first asks
+     * whether to save, in its own dialog; saving leaves once the game is written, and a cancelled save stays.
+     */
     void leave() {
         SwingUtilities.invokeLater(() -> {
             if (closing || exitRequested) {
                 return;
             }
-            exitRequested = true;
-            try {
-                gui.handleExit();
-            } finally {
-                exitRequested = false;
+            if (GUIPreferences.getInstance().getNoSaveNag() || (screen == null)) {
+                exitRequested = true;
+                try {
+                    gui.handleExit();
+                } finally {
+                    exitRequested = false;
+                }
+                return;
             }
+            exitRequested = true;
+            onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.saveFirst(
+                  save -> SwingUtilities.invokeLater(() -> {
+                    exitRequested = false;
+                    if (closing) {
+                        return;
+                    }
+                    if (!save) {
+                        gui.exitWithoutAsking();
+                    } else if (!swingDialogs.blocked()) {
+                        files.saveGame(file -> gui.lobbyCommands().saveGame(file,
+                              written -> SwingUtilities.invokeLater(() -> {
+                                  saved(written);
+                                  if ((written != null) && !closing) {
+                                      gui.exitWithoutAsking();
+                                  }
+                              })));
+                    }
+                }), () -> SwingUtilities.invokeLater(() -> exitRequested = false))));
         });
     }
 
@@ -1234,7 +1259,7 @@ public final class GpuLobbyWindow {
      * Any thread: builds the unit menu for these units and formations and sends its items to the screen; the menu stays
      * here until one is chosen.
      */
-    void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView) {
+    void unitMenu(List<Integer> unitIds, List<Integer> formationIds, boolean formationsView, Set<String> omit) {
         SwingUtilities.invokeLater(() -> {
             if (closing) {
                 return;
@@ -1245,7 +1270,8 @@ public final class GpuLobbyWindow {
                   .toList();
             List<LobbyMenuEntry> entries;
             try {
-                unitMenu = LobbyUnitMenu.of(gui.getClient(), gui.lobbyCommands(), entities, formations, formationsView);
+                unitMenu = LobbyUnitMenu.of(gui.getClient(), gui.lobbyCommands(), entities, formations, formationsView,
+                      omit);
                 entries = unitMenu.entries();
             } catch (RuntimeException failure) {
                 LOGGER.error(failure, "The lobby could not read the unit menu");
@@ -1269,16 +1295,39 @@ public final class GpuLobbyWindow {
             unitMenu = null;
             String command = (menu == null) ? null : menu.command(path);
             if (!closing && command != null) {
-                List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
-                if (c3Units != null) {
-                    openC3(c3Units);
-                    return;
-                }
-                if (tools.unitCommand(command)) {
-                    return;
-                }
-                new SwingLobbyUnitActions(gui, files).run(command);
-                refreshSoon();
+                runUnitCommand(command);
+            }
+        });
+    }
+
+    /** Any thread: runs the unit menu's command {@code name} on one unit, as a unit card's icon does. */
+    void unitCommand(int unitId, String name) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                runUnitCommand(LobbyUnitMenu.unitCommand(name, unitId));
+            }
+        });
+    }
+
+    /** EDT: runs a unit menu command, natively where the lobby has its own dialog for it. */
+    private void runUnitCommand(String command) {
+        List<Integer> c3Units = LobbyC3Controller.managerUnits(gui.getClient().getGame(), command);
+        if (c3Units != null) {
+            openC3(c3Units);
+            return;
+        }
+        if (tools.unitCommand(command)) {
+            return;
+        }
+        new SwingLobbyUnitActions(gui, files).run(command);
+        refreshSoon();
+    }
+
+    /** Any thread: opens the C3 network manager on one unit, as the unit menu's C3 items do. */
+    void c3Unit(int unitId) {
+        SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                openC3(List.of(unitId));
             }
         });
     }
@@ -1441,6 +1490,7 @@ public final class GpuLobbyWindow {
         switch (action) {
             case LOAD -> loadMapSetup();
             case SAVE -> saveMapSetup();
+            case BOARD_EDITOR -> battlefieldCommand(LobbyBattlefieldController.Command.BOARD_EDITOR);
             case RANDOM_MAP -> openRandomMap();
             case CONDITIONS -> openConditions();
             case PREVIEW_3D -> {

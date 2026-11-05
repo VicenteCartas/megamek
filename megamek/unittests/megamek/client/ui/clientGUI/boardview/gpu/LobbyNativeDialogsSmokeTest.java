@@ -29,6 +29,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import megamek.client.Client;
 import megamek.client.bot.AIType;
@@ -48,6 +49,7 @@ import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
+import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -121,6 +123,52 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialog.isOpen());
             click(ui, lobby);
             assertEquals(1, behind[0], "the lobby takes clicks again once it closes");
+        });
+    }
+
+    @Test
+    void escapeClosesADialogWhoseTextFieldHasTheFocus() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> said.add("cancel")).width("dialog.sm");
+            UiTextField name = ui.kit.input("Vicente", false);
+            dialog.body().add(name).width(200);
+            dialog.primary("OK", () -> said.add("ok"));
+            dialog.cancelButton("Cancel");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(name, ui.stage.getKeyboardFocus(), "the text field takes the first focus");
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel"), said, "Escape cancels though the text field takes every key");
+
+            ui.stage.setKeyboardFocus(null);
+            ui.stage.act(1 / 60f);
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            assertEquals(List.of("cancel", "cancel"), said, "Escape cancels once a slider dropped the focus");
+        });
+    }
+
+    @Test
+    void theFirstFocusIsTheFirstButtonNotTheTitleBarClose() {
+        UiTestStage.run(ui -> {
+            UiDialog dialog = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            Button first = ui.kit.button("button-quiet", null, "First", null);
+            dialog.body().add(first).row();
+            dialog.body().add(ui.kit.button("button-quiet", null, "Second", null));
+            dialog.cancelButton("Close");
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertEquals(first, ui.stage.getKeyboardFocus(), "a dialog without OK starts on its first button");
+            dialog.close();
+
+            UiDialog withOk = new UiDialog(ui.kit, "Test", () -> { }).width("dialog.sm");
+            withOk.body().add(ui.kit.button("button-quiet", null, "Other", null));
+            Button ok = withOk.primary("OK", () -> { });
+            withOk.cancelButton("Cancel");
+            withOk.show(ui.stage, false);
+            ui.draw();
+            assertEquals(ok, ui.stage.getKeyboardFocus(), "OK takes the first focus when there is one");
+            withOk.close();
         });
     }
 
@@ -542,6 +590,45 @@ class LobbyNativeDialogsSmokeTest {
             ui.draw();
             assertFalse(dialogs.isOpen(), "Escape closes it");
             assertEquals(2, answers.size(), "Escape answers nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theSaveQuestionBeforeLeavingSavesLeavesOrStays() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            UiDialog dialog = dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            Table card = dialog.card();
+            Vector2 cardRight = card.localToStageCoordinates(new Vector2(card.getWidth(), 0));
+            for (String name : List.of("save-first-save", "save-first-leave", "save-first-cancel")) {
+                Actor button = find(ui, name);
+                Vector2 right = button.localToStageCoordinates(new Vector2(button.getWidth(), 0));
+                assertTrue(right.x <= cardRight.x + 0.5f, name + " stays inside the card");
+            }
+            click(ui, find(ui, "save-first-save"));
+            assertEquals(List.of("save true"), answers, "Save… saves");
+            assertFalse(dialogs.isOpen());
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-leave"));
+            assertEquals("save false", answers.getLast(), "Don't save leaves");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            click(ui, find(ui, "save-first-cancel"));
+            ui.draw();
+            assertEquals("stayed", answers.getLast(), "Cancel stays");
+
+            dialogs.saveFirst(save -> answers.add("save " + save), () -> answers.add("stayed"));
+            ui.draw();
+            ui.stage.keyDown(Input.Keys.ESCAPE);
+            ui.draw();
+            assertFalse(dialogs.isOpen());
+            assertEquals(List.of("save true", "save false", "stayed", "stayed"), answers, "Escape stays too");
             dialogs.dispose();
         });
     }

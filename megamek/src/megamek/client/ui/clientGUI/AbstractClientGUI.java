@@ -156,6 +156,11 @@ public abstract class AbstractClientGUI implements IClientGUI, IClientCommandHan
                 return;
             }
         } // We should wait here until the save game packet arrives.
+        exitWithoutAsking();
+    }
+
+    /** Leaves the game as {@link #handleExit()} does once its save question is answered, without asking it. */
+    public void exitWithoutAsking() {
         getFrame().setVisible(false);
         saveSettings();
         die();

@@ -73,7 +73,7 @@ final class LobbyMapSetupView {
     static final String KEY = "mapsetup";
 
     /** What the view asks of the window, besides the form's actions. */
-    enum Action { LOAD, SAVE, RANDOM_MAP, CONDITIONS, HELP, ADVANCED_SEARCH, PREVIEW_3D }
+    enum Action { LOAD, SAVE, BOARD_EDITOR, RANDOM_MAP, CONDITIONS, HELP, ADVANCED_SEARCH, PREVIEW_3D }
 
     /** The window's side of the view. */
     interface Host {
@@ -325,9 +325,12 @@ final class LobbyMapSetupView {
         load = footButton("button-quiet", null, "Lobby.battlefield.loadMapSetup", "map-load", Action.LOAD);
         save = footButton("button-quiet", null, "Lobby.battlefield.saveMapSetup", "map-save", Action.SAVE);
         tip(save, Messages.getString("ChatLounge.map.saveMapSetupTip"));
+        UiButton boardEditor = footButton("button-quiet", null, "Lobby.battlefield.boardEditor", "map-board-editor",
+              Action.BOARD_EDITOR);
         Table files = new Table();
         files.add(load).padRight(space("xs"));
-        files.add(save);
+        files.add(save).padRight(space("xs"));
+        files.add(boardEditor);
         preview3D = footButton("button-secondary", "cube", "Lobby.map.preview",
               "map-preview-3d", Action.PREVIEW_3D);
         generate = kit.button("button-primary" + UiTheme.COMPACT, "die",
