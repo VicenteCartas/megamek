@@ -94,6 +94,8 @@ public final class UnitDamageForm {
     private static final int MAX_STUNNED_TURNS = 20;
     /** The level of a building location that stands for its whole hex. */
     private static final int GROUND_FLOOR = 0;
+    /** The latest round a unit can be held back to, as the lobby's Deploy menu offered. */
+    private static final int LATEST_DEPLOY_ROUND = 40;
 
     /** How a value is edited. */
     public enum Kind {
@@ -102,7 +104,22 @@ public final class UnitDamageForm {
         /** Hit boxes: the value is how many of its most are hit. */
         BOXES,
         /** On (1) or off (0). */
-        TOGGLE
+        TOGGLE,
+        /** One of its {@link Value#choices()}: the value is the chosen one's index. */
+        CHOICE
+    }
+
+    /**
+     * What the lobby lets the local player do in the editor.
+     *
+     * @param damage     whether the damage may be edited; when not, it shows read-only and only the deployment edits
+     * @param preGame    whether a unit may deploy before the game, walking on (the rules' walk-on deployment)
+     * @param scanTarget whether the unit can be marked as wanted for scanning: a game master's, in a game with
+     *                   objectives
+     */
+    public record Options(boolean damage, boolean preGame, boolean scanTarget) {
+        /** Everything editable that every game offers, as for a unit's owner with no game master present. */
+        public static final Options ALL = new Options(true, false, false);
     }
 
     /** What Repair all does to a value. */
@@ -115,6 +132,12 @@ public final class UnitDamageForm {
         void write(DamageEditSpec spec, int value);
     }
 
+    /** Writes a deployment value straight to the unit, as the lobby's Deploy commands do. */
+    @FunctionalInterface
+    private interface Setter {
+        void set(Entity entity, int value);
+    }
+
     /** One edited value: its label, kind and bounds, the value it was read with and the value now. */
     public static final class Value {
         private final String label;
@@ -124,6 +147,8 @@ public final class UnitDamageForm {
         private final Repair repair;
         private final Writer writer;
         private final List<Value> flags = new ArrayList<>();
+        private Setter setter;
+        private List<String> choices = List.of();
         private Consumer<Value> changed;
         private Value hits;
         private String tip;
@@ -194,6 +219,11 @@ public final class UnitDamageForm {
             return tip;
         }
 
+        /** A choice's options, in the order of their indices; empty for another kind. */
+        public List<String> choices() {
+            return choices;
+        }
+
         /** Back to the value it was read with, without the change hook: a roll starts from the unit as read. */
         private void restore() {
             value = original;
@@ -260,26 +290,30 @@ public final class UnitDamageForm {
     }
 
     private final Entity entity;
+    private final Options options;
     private final Map<Integer, Place> places = new TreeMap<>();
     private final List<Value> general = new ArrayList<>();
+    /** How the unit starts the game: heat, stance, hidden, scan target and deployment round. */
+    private final List<Value> deployment = new ArrayList<>();
     /** The hit values a pre-existing damage roll can mark, by what the roll names. */
     private final Map<String, Value> keyed = new HashMap<>();
     private Value structuralIntegrity;
     /** How many transport bays the unit's bay values cover. */
     private int bays;
 
-    private UnitDamageForm(Entity entity) {
+    private UnitDamageForm(Entity entity, Options options) {
         this.entity = entity;
+        this.options = options;
         if (entity.isConventionalInfantry()) {
             readInfantry((Infantry) entity);
-            return;
+        } else {
+            readLocations();
+            readCrew();
+            readConditions();
+            readEquipment();
+            readSystems();
         }
-        readLocations();
-        readCrew();
-        readHeat();
-        readConditions();
-        readEquipment();
-        readSystems();
+        readDeployment();
     }
 
     /**
@@ -290,16 +324,26 @@ public final class UnitDamageForm {
         return entity != null;
     }
 
-    /** Reads the unit's damage; call on the thread that owns the unit. */
+    /** Reads the unit's damage, all of it editable; call on the thread that owns the unit. */
     public static UnitDamageForm of(Entity entity) {
+        return of(entity, Options.ALL);
+    }
+
+    /** Reads the unit's damage and deployment for what {@code options} allow; call on the thread that owns the unit. */
+    public static UnitDamageForm of(Entity entity, Options options) {
         if (!supported(entity)) {
             throw new IllegalArgumentException("Not edited by the lobby's damage editor: " + entity);
         }
-        return new UnitDamageForm(entity);
+        return new UnitDamageForm(entity, options);
     }
 
     public Entity entity() {
         return entity;
+    }
+
+    /** Whether the damage may be edited; when not, only the {@link #deployment()} values are. */
+    public boolean damageEditable() {
+        return options.damage();
     }
 
     /** The locations with something to edit, in the unit's order. */
@@ -312,9 +356,17 @@ public final class UnitDamageForm {
         return places.values().stream().filter(place -> place.abbr.equals(code)).findFirst().orElse(null);
     }
 
-    /** The values that sit in no location: structural integrity, fuel, crew, heat, systems and conditions. */
+    /** The values that sit in no location: structural integrity, fuel, crew, systems and conditions. */
     public List<Value> general() {
         return Collections.unmodifiableList(general);
+    }
+
+    /**
+     * How the unit starts the game: its heat, stance, hidden deployment, scan target and deployment round. These are
+     * its owner's to set even where the damage is the game master's, and neither Restore Unit nor a roll touches them.
+     */
+    public List<Value> deployment() {
+        return Collections.unmodifiableList(deployment);
     }
 
     /** An aerospace unit's structural integrity, or null. */
@@ -324,10 +376,11 @@ public final class UnitDamageForm {
 
     /** Whether anything differs from the unit as read. */
     public boolean changed() {
-        return values().stream().anyMatch(value -> value.value != value.original);
+        return values().stream().anyMatch(value -> value.value != value.original)
+              || deployment.stream().anyMatch(value -> value.value != value.original);
     }
 
-    /** Puts every armor and structure value to full and clears every hit, mark, heat and crew hit. */
+    /** Puts every armor and structure value to full and clears every hit, mark and crew hit. */
     public void repairAll() {
         values().forEach(Value::repair);
     }
@@ -446,9 +499,19 @@ public final class UnitDamageForm {
         };
     }
 
-    /** Writes the edits to the unit; call on the thread that owns the unit. */
+    /**
+     * Writes the edits to the unit; call on the thread that owns the unit. The damage is written only where it may be
+     * edited, and the deployment values only where they changed.
+     */
     public void apply() {
-        new DamageEditApplier(entity, spec()).applyToEntity();
+        if (options.damage()) {
+            new DamageEditApplier(entity, spec()).applyToEntity();
+        }
+        for (Value value : deployment) {
+            if (value.value != value.original) {
+                value.setter.set(entity, value.value);
+            }
+        }
     }
 
     private List<Value> values() {
@@ -547,15 +610,52 @@ public final class UnitDamageForm {
         }
     }
 
-    private void readHeat() {
-        if (!entity.tracksHeat()) {
-            return;
+    private void readDeployment() {
+        if (entity.tracksHeat()) {
+            int heat = Math.max(entity.heat, 0);
+            deployment.add(deploy(new Value(text("UnitEditorDialog.heat"), Kind.STEPPER, heat,
+                  SettableHeat.maximum(entity.getGame(), heat, entity.getHeatCapacityWithWater()), Repair.KEEP,
+                  null), (unit, value) -> unit.heat = value));
         }
-        int heat = Math.max(entity.heat, 0);
-        target(entity instanceof Mek ? Mek.LOC_CENTER_TORSO : Entity.LOC_NONE).add(new Value(
-              text("UnitEditorDialog.heat"), Kind.STEPPER, heat,
-              SettableHeat.maximum(entity.getGame(), heat, entity.getHeatCapacityWithWater()), Repair.CLEAR,
-              (spec, value) -> spec.heat = value));
+        boolean canLieDown = !entity.isAero() && !entity.isAirborne() && !entity.isAirborneVTOLorWIGE()
+              && !entity.isConventionalInfantry();
+        if (canLieDown && entity.isMek()) {
+            deployment.add(deploy(toggle("UnitEditorDialog.status.prone", entity.isProne(), null),
+                  (unit, value) -> unit.setProne(value > 0)));
+        }
+        if (canLieDown && (entity.isMek() || entity.isVehicle())) {
+            deployment.add(deploy(toggle("UnitEditorDialog.status.hullDown", entity.isHullDown(), null),
+                  (unit, value) -> unit.setHullDown(value > 0)));
+        }
+        if (entity.canHide()) {
+            deployment.add(deploy(toggle("UnitEditorDialog.status.hidden", entity.isHidden(), null),
+                  (unit, value) -> unit.setHidden(value > 0)));
+        }
+        if (options.scanTarget()) {
+            deployment.add(deploy(toggle("Lobby.status.scanTarget", entity.isDesignatedScanTarget(), null),
+                  (unit, value) -> unit.setDesignatedScanTarget(value > 0)));
+        }
+        List<Integer> rounds = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        if (options.preGame() || entity.getDeployRound() == Entity.DEPLOY_ROUND_PRE_GAME) {
+            rounds.add(Entity.DEPLOY_ROUND_PRE_GAME);
+            names.add(text("ChatLounge.deploysPreGame"));
+        }
+        for (int round = 0; round <= Math.max(LATEST_DEPLOY_ROUND, entity.getDeployRound()); round++) {
+            rounds.add(round);
+            names.add(round == 0 ? text("Lobby.status.atStart") : Messages.getString("Lobby.status.beforeRound",
+                  round));
+        }
+        int at = Math.max(0, rounds.indexOf(entity.getDeployRound()));
+        Value round = new Value(text("Lobby.status.deployRound"), Kind.CHOICE, at, rounds.size() - 1, Repair.KEEP,
+              null);
+        round.choices = List.copyOf(names);
+        deployment.add(deploy(round, (unit, value) -> unit.setDeployRound(rounds.get(value))));
+    }
+
+    private static Value deploy(Value value, Setter setter) {
+        value.setter = setter;
+        return value;
     }
 
     private void readConditions() {
@@ -563,19 +663,6 @@ public final class UnitDamageForm {
         if (!(entity instanceof AbstractBuildingEntity)) {
             general.add(toggle("UnitEditorDialog.status.shutdown", entity.isShutDown(),
                   (spec, value) -> spec.shutdown = value > 0));
-        }
-        boolean canLieDown = !entity.isAero() && !entity.isAirborne() && !entity.isAirborneVTOLorWIGE();
-        if (canLieDown && entity.isMek()) {
-            general.add(toggle("UnitEditorDialog.status.prone", entity.isProne(),
-                  (spec, value) -> spec.prone = value > 0));
-        }
-        if (canLieDown && (entity.isMek() || entity.isVehicle())) {
-            general.add(toggle("UnitEditorDialog.status.hullDown", entity.isHullDown(),
-                  (spec, value) -> spec.hullDown = value > 0));
-        }
-        if (entity.canHide()) {
-            general.add(toggle("UnitEditorDialog.status.hidden", entity.isHidden(),
-                  (spec, value) -> spec.hidden = value > 0));
         }
         if (entity.hasStealth()) {
             boolean on = false;

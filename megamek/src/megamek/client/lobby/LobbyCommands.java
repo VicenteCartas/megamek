@@ -629,19 +629,22 @@ public class LobbyCommands {
             return;
         }
         Entity entity = CollectionUtil.anyOneElement(entities);
-        if (!canEditDamage(client(), entity)) {
-            asks().error(LobbyError.CANNOT_EDIT_DAMAGE);
-            return;
-        }
+        boolean damage = canEditDamage(client(), entity);
         // An asset has no armor/structure/criticals; its only persistent damage is a lowered Destroy Check.
         if (entity instanceof BattlefieldSupportAsset asset) {
+            if (!damage) {
+                asks().error(LobbyError.CANNOT_EDIT_DAMAGE);
+                return;
+            }
             asks().editAssetDamage(asset, () -> sendUpdates(entities));
             return;
         }
 
-        // Reaching here means the local player may edit this unit: the gamemaster, or the owner when no gamemaster
-        // is present. Either way the editor offers the full editing tools without re-checking the gamemaster role.
-        asks().editDamage(entity, () -> sendUpdates(entities));
+        // Any unit the local player may configure opens: its deployment is its owner's to set, while its damage is
+        // the gamemaster's when one is present, so the editor shows the damage read-only to anyone else.
+        UnitDamageForm.Options options = new UnitDamageForm.Options(damage,
+              Game.rulesManager.getRulesGame().isWalkOnDeployment(), LobbyUnitMenu.isScanTargetMenuUseful(client()));
+        asks().editDamage(entity, options, () -> sendUpdates(entities));
     }
 
     /**

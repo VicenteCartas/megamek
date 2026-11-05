@@ -1379,6 +1379,21 @@ work for Swing, and item 11 is under investigation.
          - Planetary conditions and Victory are summary cards (`UiSummaryCard`, `UiKit.summaryCard`): the whole card
            opens the setting, its edge strong under the pointer and a › chevron by the title, instead of a quiet
            Change button beside the overline. In space the conditions card is disabled, muted and without a chevron.
+       - The damage editor became the Unit Status dialog and took in the unit menu's Deploy submenu. The Whole unit
+         values end with a Deployment section (`UnitDamageForm.deployment()`): heat at start (moved off a Mek's
+         centre torso), prone, hull down, hidden, wanted for scanning (a Game Master's, in a game with objectives)
+         and the deployment round, a select from pre-game (walk-on rules only) and game start to round 40. These are
+         written straight to the unit, and neither Restore Unit nor a roll touches them.
+         - The card's wrench opens it for every unit the player configures. Under a Game Master, a player who isn't
+           one sees the damage read-only (`UnitDamageForm.Options.damage`), with a note in place of the roller and
+           Restore Unit disabled, and the dialog opens on the Deployment section. An asset's damage is still the
+           Game Master's alone.
+         - A single wide card's ⋮ leaves Deploy out, because a submenu can now be omitted by key (`LMP_DEPLOY`).
+           Compact rows and multi-select menus keep it, and the item is renamed Unit Status... in every menu.
+         - Checks: `UnitDamageFormTest.theDeploymentReachesTheUnitAndRepairAndRollsLeaveIt` and
+           `readOnlyDamageWritesOnlyTheDeployment`, `LobbyAsksTest.readOnlyDamageIsRefusedBySwing`,
+           `LobbyUnitMenuTest.theUnitStatusIconLeavesTheDeploySubmenuOut` and
+           `LobbyDamageSmokeTest.underAGameMasterTheDamageShowsAndTheDeploymentEdits`.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded`,

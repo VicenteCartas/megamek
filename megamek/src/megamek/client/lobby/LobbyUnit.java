@@ -60,7 +60,8 @@ import megamek.common.util.CrewSkillSummaryUtil;
  * @param editable    whether the local player may configure the unit
  * @param c3          whether the unit has any C3 system
  * @param sheet       movement, protection, heat sinks and weapons, for a wide card's second block; null when hidden
- * @param damage      whether the local player may edit the unit's damage, which a Game Master keeps to themselves
+ * @param damage      whether the local player may open the unit's status: every unit they configure, whose damage a
+ *                    Game Master shows them read-only, but an asset only where they may edit its damage
  */
 public record LobbyUnit(int id, int ownerId, String name, String details, String weightClass, double tons, int bv,
       String bvText, String pilot, String skills, List<Tag> tags, int depth, Link link, boolean hidden,
@@ -258,7 +259,7 @@ public record LobbyUnit(int id, int ownerId, String name, String details, String
     /**
      * As {@link #of(Entity, Game, Player, int, boolean)}.
      *
-     * @param damage whether the local player may edit the unit's damage
+     * @param damage whether the local player may open the unit's status
      */
     public static LobbyUnit of(Entity entity, Game game, @Nullable Player local, int medium, boolean editable,
           boolean damage) {

@@ -62,7 +62,7 @@ class LobbyUnitCardActionsSmokeTest {
             assertNull(panel.findActor("lobby-unit-camo-3"));
             assertNull(panel.findActor("lobby-unit-delete-3"));
             assertNull(panel.findActor("lobby-unit-secondary-3"), "nor a second row");
-            assertNull(panel.findActor("lobby-unit-damage-4"), "damage only a Game Master may edit has no icon");
+            assertNull(panel.findActor("lobby-unit-damage-4"), "a unit whose status may not open, an asset a Game Master keeps, has no icon");
             assertNotNull(panel.findActor("lobby-unit-camo-4"));
 
             Table first = (Table) panel.findActor("lobby-unit-configure-1").getParent();
@@ -79,7 +79,7 @@ class LobbyUnitCardActionsSmokeTest {
 
             actions.log.clear();
             click(ui, unitMore(panel));
-            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, INDI_CAMO, VIEW]"), actions.log,
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, VIEW]"), actions.log,
                   "the card's ⋮ leaves out what its icons offer");
 
             forces.compact(true);
@@ -102,7 +102,7 @@ class LobbyUnitCardActionsSmokeTest {
             Actor more = unitMore(panel);
             assertNotNull(more);
             click(ui, more);
-            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, INDI_CAMO, VIEW]"), actions.log);
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, VIEW]"), actions.log);
             forces.showMenu(List.of(LobbyMenuEntry.item("View...", true), LobbyMenuEntry.SEPARATOR,
                   LobbyMenuEntry.submenu("Deploy", true, List.of(LobbyMenuEntry.item("Round 1", true),
                         LobbyMenuEntry.item("Round 2", true))),

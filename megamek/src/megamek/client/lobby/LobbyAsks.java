@@ -38,7 +38,7 @@ public interface LobbyAsks {
     void configureAsset(BattlefieldSupportAsset asset, boolean editable, Runnable applied);
 
     /** Shows the damage editor of a unit, not an asset; {@code done} runs when it closes. */
-    void editDamage(Entity unit, Runnable done);
+    void editDamage(Entity unit, UnitDamageForm.Options options, Runnable done);
 
     /** Shows an asset's damage editor; {@code applied} runs once the choice is applied to the asset. */
     void editAssetDamage(BattlefieldSupportAsset asset, Runnable applied);
@@ -91,7 +91,12 @@ public interface LobbyAsks {
             }
 
             @Override
-            public void editDamage(Entity unit, Runnable done) {
+            public void editDamage(Entity unit, UnitDamageForm.Options options, Runnable done) {
+                // the Swing editor edits only damage, so a player who may not edit it has nothing to open there
+                if (!options.damage()) {
+                    prompts.error(LobbyError.CANNOT_EDIT_DAMAGE);
+                    return;
+                }
                 prompts.editDamage(unit);
                 done.run();
             }

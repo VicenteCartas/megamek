@@ -179,7 +179,7 @@ class UnitDamageFormTest {
         assertEquals(atlas.getOArmor(Mek.LOC_CENTER_TORSO, true), torso.rear().max());
         assertEquals(atlas.getOInternal(Mek.LOC_CENTER_TORSO), torso.internal().max());
         assertTrue(labels(torso).contains("Gyro"));
-        assertTrue(labels(torso).contains("Heat"));
+        assertFalse(labels(torso).contains("Heat"), "heat is how the unit starts, with its deployment");
 
         UnitDamageForm.Place head = form.place("HD");
         assertNull(head.rear());
@@ -189,8 +189,65 @@ class UnitDamageFormTest {
         UnitDamageForm.Place arm = form.place("LA");
         assertTrue(labels(arm).contains("Blown Off"));
         assertTrue(labels(arm).contains("Shoulder"));
-        assertTrue(form.general().stream().anyMatch(value -> value.label().equals("Prone")));
+        List<String> deployment = form.deployment().stream().map(UnitDamageForm.Value::label).toList();
+        assertTrue(deployment.containsAll(List.of("Heat", "Prone", "Hull Down", "Deploys")), deployment.toString());
+        assertFalse(deployment.contains("Wanted for scanning"), "only a game master with objectives marks targets");
         assertFalse(form.changed());
+    }
+
+    @Test
+    void theDeploymentReachesTheUnitAndRepairAndRollsLeaveIt() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        UnitDamageForm form = UnitDamageForm.of(atlas, new UnitDamageForm.Options(true, true, true));
+        UnitDamageForm.Value round = deployment(form, "Deploys");
+        assertEquals(UnitDamageForm.Kind.CHOICE, round.kind());
+        assertEquals("Pre-game", round.choices().get(0));
+        assertEquals("At game start", round.choices().get(round.value()));
+        assertEquals("Before round 40", round.choices().getLast());
+        round.value(round.choices().indexOf("Before round 3"));
+        deployment(form, "Heat").value(4);
+        deployment(form, "Prone").value(1);
+        deployment(form, "Wanted for scanning").value(1);
+        form.repairAll();
+        form.roll(PreExistingDamageLevel.HEAVY);
+        assertEquals("Before round 3", round.choices().get(round.value()), "Restore Unit and rolls keep it");
+
+        form.apply();
+
+        assertEquals(3, atlas.getDeployRound());
+        assertEquals(4, atlas.heat);
+        assertTrue(atlas.isProne());
+        assertTrue(atlas.isDesignatedScanTarget());
+        UnitDamageForm again = UnitDamageForm.of(atlas);
+        assertEquals("Before round 3", deployment(again, "Deploys").choices()
+              .get(deployment(again, "Deploys").value()));
+
+        UnitDamageForm preGame = UnitDamageForm.of(atlas, new UnitDamageForm.Options(true, true, false));
+        deployment(preGame, "Deploys").value(0);
+        preGame.apply();
+        assertEquals(Entity.DEPLOY_ROUND_PRE_GAME, atlas.getDeployRound());
+    }
+
+    @Test
+    void readOnlyDamageWritesOnlyTheDeployment() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        UnitDamageForm form = UnitDamageForm.of(atlas, new UnitDamageForm.Options(false, false, false));
+        assertFalse(form.damageEditable());
+        UnitDamageForm.Place torso = form.place("CT");
+        torso.armor().value(0);
+        UnitDamageForm.Value round = deployment(form, "Deploys");
+        assertEquals("At game start", round.choices().get(0), "no pre-game deployment without walk-on rules");
+        round.value(2);
+
+        form.apply();
+
+        assertEquals(atlas.getOArmor(Mek.LOC_CENTER_TORSO), atlas.getArmor(Mek.LOC_CENTER_TORSO),
+              "a player who may not edit the damage cannot change it");
+        assertEquals(2, atlas.getDeployRound());
+    }
+
+    private static UnitDamageForm.Value deployment(UnitDamageForm form, String label) {
+        return form.deployment().stream().filter(value -> value.label().equals(label)).findFirst().orElseThrow();
     }
 
     @Test

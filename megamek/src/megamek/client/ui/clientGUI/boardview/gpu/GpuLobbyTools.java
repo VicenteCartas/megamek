@@ -160,8 +160,8 @@ final class GpuLobbyTools {
         }
 
         @Override
-        public void editDamage(Entity unit, Runnable done) {
-            UnitDamageForm form = UnitDamageForm.of(unit);
+        public void editDamage(Entity unit, UnitDamageForm.Options options, Runnable done) {
+            UnitDamageForm form = UnitDamageForm.of(unit, options);
             open(dialogs -> dialogs.damage(form, GpuLobbyTools.this::edt, done));
         }
 

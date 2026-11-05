@@ -22,6 +22,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiLevelTiles;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
@@ -29,6 +30,7 @@ import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Crew;
 import megamek.common.units.CrewType;
 import megamek.common.units.Entity;
+import megamek.common.units.Mek;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -258,6 +260,66 @@ class LobbyDamageSmokeTest {
             assertEquals(troops.general().get(0).max() - 1, UnitDamageForm.of(platoon).general().get(0).value(),
                   "OK writes the troopers left");
             alone.close();
+            ui.draw();
+        });
+    }
+
+    @Test
+    void underAGameMasterTheDamageShowsAndTheDeploymentEdits() throws Exception {
+        Entity atlas = new MekFileParser(new File("testresources/megamek/common/units/Atlas AS7-D.mtf"))
+              .getEntity();
+        atlas.setGame(new Game());
+        if (atlas.getCrew() == null) {
+            atlas.setCrew(new Crew(CrewType.SINGLE));
+        }
+        int torso = atlas.getArmor(Mek.LOC_CENTER_TORSO);
+        GpuPaperdolls paperdolls = new GpuPaperdolls(Path.of("../../mm-data/data/images/paperdolls"));
+        UiTestStage.run(ui -> {
+            UnitDamageForm form = UnitDamageForm.of(atlas, new UnitDamageForm.Options(false, false, false));
+            int[] applied = { 0 };
+            UiDialog dialog = new UiDialog(ui.kit, "Status", () -> { }).width("dialog.xl");
+            LobbyDamageView view = new LobbyDamageView(ui.kit, dialog, form, paperdolls,
+                  (work, then) -> {
+                      work.run();
+                      then.run();
+                  }, () -> applied[0]++, () -> { });
+            dialog.show(ui.stage, false);
+            ui.draw();
+            assertNull(view.chosen(), "a player who may not edit the damage opens on the deployment");
+            find(ui, "status-read-only");
+            find(ui, "status-deployment");
+            assertNull(ui.stage.getRoot().findActor("damage-roller"), "nothing to roll");
+            assertTrue(((UiButton) find(ui, "damage-repair")).isDisabled(), "nothing to restore");
+
+            List<UnitDamageForm.Value> deployment = form.deployment();
+            int roundRow = -1;
+            for (int index = 0; index < deployment.size(); index++) {
+                if (deployment.get(index).kind() == UnitDamageForm.Kind.CHOICE) {
+                    roundRow = index;
+                }
+            }
+            UiSelect round = find(ui, "status-deploy-" + roundRow);
+            reveal(ui, round);
+            click(ui, round);
+            assertTrue(round.isOpen(), "the round's list opens");
+            click(ui, round.popup().label(3));
+            assertEquals(3, deployment.get(roundRow).value(), "a pick sets the round");
+
+            GpuPaperdoll doll = find(ui, "damage-doll");
+            clickAt(ui, doll, spot(doll, "CT"));
+            assertEquals("CT", view.chosen().abbr(), "the doll still picks a location to look at");
+            int armorRow = view.chosen().values().indexOf(view.chosen().armor());
+            UiHealthBar bar = find(ui, "damage-value-" + armorRow);
+            assertTrue(bar.disabled(), "but its armour is locked");
+            Actor down = find(ui, "damage-value-" + armorRow + "-down");
+            click(ui, down);
+            assertEquals(torso, form.place("CT").armor().value(), "and does not step");
+
+            click(ui, find(ui, "damage-ok"));
+            assertEquals(1, applied[0]);
+            assertEquals(3, atlas.getDeployRound(), "OK writes the round");
+            assertEquals(torso, atlas.getArmor(Mek.LOC_CENTER_TORSO), "and leaves the damage alone");
+            dialog.close();
             ui.draw();
         });
     }

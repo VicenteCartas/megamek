@@ -58,17 +58,20 @@ import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiLevelTiles;
+import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 
 /**
- * The lobby's damage editor (L-polish, item 6): the unit's paperdoll on the left, coloured live by the edits with the
- * change from the unit as read, or a list of its locations when it has no paperdoll, the Whole unit button under it;
- * a Mek shows its record sheet's three dolls instead, front armor beside rear armor over structure. On the right the
- * picked location's name, stepped through with the chevrons beside it, over its values: armor and structure as health
- * bars, hits as boxes and states as switches; under both, the pre-existing damage roller's level tiles. A click on any
- * doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to edit, such
- * as conventional infantry, shows its values alone.
+ * The lobby's Unit Status dialog (L-polish, item 6): the unit's paperdoll on the left, coloured live by the edits with
+ * the change from the unit as read, or a list of its locations when it has no paperdoll, the Whole unit button under
+ * it; a Mek shows its record sheet's three dolls instead, front armor beside rear armor over structure. On the right
+ * the picked location's name, stepped through with the chevrons beside it, over its values: armor and structure as
+ * health bars, hits as boxes and states as switches; under both, the pre-existing damage roller's level tiles. A click
+ * on any doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to edit,
+ * such as conventional infantry, shows its values alone. The whole unit's values end with its deployment: heat,
+ * stance, hidden, scan target and deployment round, which its owner sets even where a Game Master keeps the damage,
+ * showing it read-only.
  */
 final class LobbyDamageView {
     /** The doll's width, and the most height it may take; a tall doll is fitted by its height instead. */
@@ -209,7 +212,14 @@ final class LobbyDamageView {
         valuesScroll.setName("damage-values");
         right.add(valuesScroll).growX().height(PANE_HEIGHT).padTop(space("md"));
         body.add(right).top().growX().row();
-        if (form.rollable()) {
+        boolean damage = form.damageEditable();
+        if (!damage) {
+            // the damage is the Game Master's, so it only shows, and the roller's row says why
+            Label note = kit.typeLabel(Messages.getString("Lobby.status.readOnly"), "small", "text.muted");
+            note.setName("status-read-only");
+            note.setWrap(true);
+            body.add(note).colspan(located ? 2 : 1).growX().padTop(space("lg"));
+        } else if (form.rollable()) {
             // the roller is the whole unit's, so it spans both columns under them
             Table rolling = new Table();
             rolling.add(kit.typeLabel(Messages.getString("UnitEditorDialog.preExistingDamage"), "body",
@@ -219,13 +229,15 @@ final class LobbyDamageView {
             body.add(rolling).colspan(located ? 2 : 1).growX().padTop(space("lg"));
         }
 
-        dialog.tool(Messages.getString("UnitEditorDialog.preExistingDamage.reset"), () -> {
+        UiButton repair = dialog.tool(Messages.getString("UnitEditorDialog.preExistingDamage.reset"), () -> {
             form.repairAll();
             rolled = null;
             roller.select(-1);
             reroll.setDisabled(true);
             refresh();
-        }).setName("damage-repair");
+        });
+        repair.setName("damage-repair");
+        repair.setDisabled(!damage);
         dialog.primary(Messages.getString("Ok.text"), () -> edt.edt(() -> {
             form.apply();
             applied.run();
@@ -233,7 +245,8 @@ final class LobbyDamageView {
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("damage-cancel");
 
         reroll.setDisabled(true);
-        choose(places.stream().filter(place -> place.abbr().equals("CT")).findFirst()
+        // a player who may not edit the damage comes for the deployment, which the whole unit's values hold
+        choose(!damage ? null : places.stream().filter(place -> place.abbr().equals("CT")).findFirst()
               .orElse(places.isEmpty() ? null : places.get(0)));
     }
 
@@ -379,47 +392,72 @@ final class LobbyDamageView {
     private void fillValues() {
         values.clearChildren();
         List<UnitDamageForm.Value> shown = chosen == null ? form.general() : chosen.values();
-        float gap = space("sm");
+        boolean damage = form.damageEditable();
+        int rows = 0;
         for (int index = 0; index < shown.size(); index++) {
-            UnitDamageForm.Value value = shown.get(index);
-            if (value.kind() == UnitDamageForm.Kind.BOXES && value.max() <= 0) {
-                continue;
-            }
-            Label label = kit.typeLabel(value.label(), "body", "text.secondary");
-            label.setEllipsis(true);
-            String name = "damage-value-" + index;
-            if (value.kind() == UnitDamageForm.Kind.STEPPER) {
-                // a bar takes the row's width under its label, as a stat block in a game shows it
-                float top = index == 0 ? 0 : space("md");
-                if (value.hits() != null) {
-                    // an ammunition bin: its hit boxes sit on its name's row, its shots in the bar under it
-                    values.add(label).left().growX().minWidth(0).padTop(top);
-                    values.add(boxes(value.hits(), name + "-hits", true)).right().padLeft(space("lg")).padTop(top)
-                          .row();
-                } else {
-                    values.add(label).left().growX().minWidth(0).colspan(2).padTop(top).row();
-                }
-                UiHealthBar bar = bar(value, name);
-                bar.disabled(value.locked());
-                values.add(bar).growX().colspan(2).padTop(space("xxs")).row();
-                continue;
-            }
-            values.add(label).left().growX().minWidth(0).padTop(gap);
-            values.add(control(value, name)).right().padLeft(space("lg")).padTop(gap).row();
-            List<UnitDamageForm.Value> flags = value.flags();
-            for (int flag = 0; flag < flags.size(); flag++) {
-                // a weapon's state sits under its hit boxes, indented as part of it
-                UnitDamageForm.Value state = flags.get(flag);
-                Label caption = kit.typeLabel(state.label(), "small", "text.secondary");
-                caption.setEllipsis(true);
-                Actor toggle = control(state, name + "-flag-" + flag);
-                if (state.tip() != null) {
-                    kit.tip(toggle, true).getActor().setText(state.tip());
-                }
-                values.add(caption).left().growX().minWidth(0).padLeft(space("lg")).padTop(space("xxs"));
-                values.add(toggle).right().padLeft(space("lg")).padTop(space("xxs")).row();
+            if (row(shown.get(index), "damage-value-" + index, rows == 0, damage)) {
+                rows++;
             }
         }
+        List<UnitDamageForm.Value> deployment = form.deployment();
+        if (chosen == null && !deployment.isEmpty()) {
+            // how the unit starts the game, its owner's to set even where its damage is the Game Master's
+            Label caption = kit.typeLabel(Messages.getString("Lobby.status.deployment"), "body.strong",
+                  "text.primary");
+            caption.setName("status-deployment");
+            values.add(caption).left().colspan(2).padTop(rows == 0 ? 0 : space("xl")).row();
+            for (int index = 0; index < deployment.size(); index++) {
+                row(deployment.get(index), "status-deploy-" + index, false, true);
+            }
+        }
+    }
+
+    /**
+     * Adds a value's row, with its controls locked unless {@code editable}; false when the value has nothing to show,
+     * such as a weapon with no hit boxes.
+     */
+    private boolean row(UnitDamageForm.Value value, String name, boolean first, boolean editable) {
+        if (value.kind() == UnitDamageForm.Kind.BOXES && value.max() <= 0) {
+            return false;
+        }
+        float gap = space("sm");
+        Label label = kit.typeLabel(value.label(), "body", "text.secondary");
+        label.setEllipsis(true);
+        if (value.kind() == UnitDamageForm.Kind.STEPPER) {
+            // a bar takes the row's width under its label, as a stat block in a game shows it
+            float top = first ? 0 : space("md");
+            if (value.hits() != null) {
+                // an ammunition bin: its hit boxes sit on its name's row, its shots in the bar under it
+                values.add(label).left().growX().minWidth(0).padTop(top);
+                values.add(boxes(value.hits(), name + "-hits", true, editable)).right().padLeft(space("lg"))
+                      .padTop(top).row();
+            } else {
+                values.add(label).left().growX().minWidth(0).colspan(2).padTop(top).row();
+            }
+            UiHealthBar bar = bar(value, name);
+            bar.disabled(value.locked() || !editable);
+            values.add(bar).growX().colspan(2).padTop(space("xxs")).row();
+            return true;
+        }
+        values.add(label).left().growX().minWidth(0).padTop(gap);
+        Actor control = control(value, name, editable);
+        // a select keeps its widest choice in view; its own preferred width would show the arrow alone
+        float width = value.kind() == UnitDamageForm.Kind.CHOICE ? size("dialog.sm") / 3 : 0;
+        values.add(control).right().minWidth(width).padLeft(space("lg")).padTop(gap).row();
+        List<UnitDamageForm.Value> flags = value.flags();
+        for (int flag = 0; flag < flags.size(); flag++) {
+            // a weapon's state sits under its hit boxes, indented as part of it
+            UnitDamageForm.Value state = flags.get(flag);
+            Label caption = kit.typeLabel(state.label(), "small", "text.secondary");
+            caption.setEllipsis(true);
+            Actor toggle = control(state, name + "-flag-" + flag, editable);
+            if (state.tip() != null) {
+                kit.tip(toggle, true).getActor().setText(state.tip());
+            }
+            values.add(caption).left().growX().minWidth(0).padLeft(space("lg")).padTop(space("xxs"));
+            values.add(toggle).right().padLeft(space("lg")).padTop(space("xxs")).row();
+        }
+        return true;
     }
 
     private UiHealthBar bar(UnitDamageForm.Value value, String name) {
@@ -436,10 +474,19 @@ final class LobbyDamageView {
         return bar;
     }
 
-    private Actor control(UnitDamageForm.Value value, String name) {
+    private Actor control(UnitDamageForm.Value value, String name, boolean editable) {
+        if (value.kind() == UnitDamageForm.Kind.CHOICE) {
+            UiSelect select = kit.tokenSelect(true, value.choices().toArray(String[]::new));
+            select.setName(name);
+            select.select(value.value());
+            select.setDisabled(!editable);
+            UiKit.onChange(select, () -> value.value(select.getSelectedIndex()));
+            return select;
+        }
         if (value.kind() == UnitDamageForm.Kind.TOGGLE) {
             UiChoice toggle = kit.toggleSwitch("", value.on());
             toggle.setName(name);
+            toggle.setDisabled(!editable);
             UiKit.onChange(toggle, () -> {
                 value.value(toggle.isChecked() ? 1 : 0);
                 // a limb brought back fills its armor and structure, which the rebuilt rows show
@@ -447,16 +494,17 @@ final class LobbyDamageView {
             });
             return toggle;
         }
-        return boxes(value, name, false);
+        return boxes(value, name, false, editable);
     }
 
     /** Hit boxes; {@code rebuild} when other rows follow them, such as a bin's shots that a hit empties. */
-    private Table boxes(UnitDamageForm.Value value, String name, boolean rebuild) {
+    private Table boxes(UnitDamageForm.Value value, String name, boolean rebuild, boolean editable) {
         Table boxes = new Table();
         List<UiChoice> checks = new ArrayList<>();
         for (int box = 0; box < value.max(); box++) {
             UiChoice check = kit.check("", box < value.value());
             check.setName(name + "-" + box);
+            check.setDisabled(!editable);
             int at = box;
             UiKit.onChange(check, () -> {
                 // a click on a hit box past the hits hits up to it; on the last hit, clears that one
@@ -475,7 +523,6 @@ final class LobbyDamageView {
         }
         return boxes;
     }
-
     private void refreshDoll() {
         if (geometry == null) {
             return;

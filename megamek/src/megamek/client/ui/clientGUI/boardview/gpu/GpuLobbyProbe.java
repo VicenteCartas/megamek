@@ -101,7 +101,7 @@ import org.lwjgl.glfw.GLFW;
  *     opens its first submenu in its place.</li>
  *     <li>{@code lobby+unitdamage}: clicks the first unit card's damage icon through the stage {@value GpuLobbyScreen#PROBE_CLICK_AT} s
  *     in, opening the damage editor; with {@code +next} it then steps the editor on to the next location, and with
- *     {@code +heavy} clicks the roller's Heavy tile.</li>
+ *     {@code +heavy} clicks the roller's Heavy tile; {@code +whole} picks the whole unit and its deployment.</li>
  *     <li>{@code lobby+zones}: deploys the player at the west edge and the bots at the east, so the map shows
  *     zones.</li>
  *     <li>{@code lobby+autoresolve}: turns on the client setting that shows auto-resolve, and opens its settings in

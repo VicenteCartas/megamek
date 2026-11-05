@@ -616,10 +616,11 @@ final class LobbyForcesPanel {
                 main.add(cardTool(unit, "delete", "Lobby.card.delete", "delete",
                       () -> actions.delete(List.of(unit.id()), List.of())));
                 offered.add(LobbyUnitMenu.LMP_DELETE);
-                // Under a Game Master only they may; everyone else finds it, greyed with the reason, in the ⋮ menu
+                // Any unit they configure: under a Game Master its damage shows read-only, its deployment editable
                 if (unit.damage()) {
                     secondary.add(commandTool(unit, "build", "Lobby.card.damage", "damage",
                           LobbyUnitMenu.LMP_DAMAGE, offered));
+                    offered.add(LobbyUnitMenu.LMP_DEPLOY);
                 }
                 secondary.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
                       offered));

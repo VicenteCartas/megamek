@@ -143,6 +143,20 @@ class LobbyUnitMenuTest {
     }
 
     @Test
+    void theUnitStatusIconLeavesTheDeploySubmenuOut() {
+        Entity hunchback = mek(local, "Hunchback");
+        assertTrue(menu(List.of(hunchback), List.of(), false).entries().stream()
+              .anyMatch(entry -> entry.label().equals("Deploy")), "the menu has a Deploy submenu");
+
+        LobbyUnitMenu menu = LobbyUnitMenu.of(client, commands, List.of(hunchback), List.of(), false,
+              Set.of(LobbyUnitMenu.LMP_DAMAGE, LobbyUnitMenu.LMP_DEPLOY));
+        assertTrue(menu.entries().stream().noneMatch(entry -> entry.label().equals("Deploy")),
+              "a card whose Unit Status dialog sets the deployment leaves it out");
+        assertTrue(leafCommands(menu).stream().map(LobbyUnitMenu::name)
+              .noneMatch(LobbyUnitMenu.LMP_DEPLOY::equals));
+    }
+
+    @Test
     void aCardIconRunsTheMenusCommandOnItsUnit() {
         Entity hunchback = mek(local, "Hunchback");
         String command = LobbyUnitMenu.unitCommand(LobbyUnitMenu.LMP_VIEW, hunchback.getId());

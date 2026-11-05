@@ -151,8 +151,10 @@ public final class LobbyUnitMenu {
     private final List<Node> nodes;
 
     private LobbyUnitMenu(Item popup, Set<String> omit) {
-        nodes = nodes(popup.children.stream()
-              .filter(item -> item.command == null || !omit.contains(name(item.command))).toList());
+        nodes = nodes(popup.children.stream().filter(item -> {
+            String name = (item.command == null) ? item.key : name(item.command);
+            return name == null || !omit.contains(name);
+        }).toList());
     }
 
     /**
@@ -251,6 +253,8 @@ public final class LobbyUnitMenu {
         private final @Nullable String command;
         private final boolean menu;
         private final boolean separator;
+        /** The name {@code omit} knows a submenu by, which has no command of its own, or null. */
+        private @Nullable String key;
         private boolean enabled = true;
         private boolean visible = true;
         private String tooltip = "";
@@ -381,12 +385,11 @@ public final class LobbyUnitMenu {
         }
         boolean canEditDamage = hasJoinedEntities && joinedEntities.stream()
               .allMatch(entity -> LobbyCommands.canEditDamage(client, entity));
-        Item damageItem = menuItem("Edit Damage...",
-              LMP_DAMAGE + NO_INFO + seIds,
-              canEditDamage);
+        Item damageItem = menuItem(Messages.getString("Lobby.status.menu"), LMP_DAMAGE + NO_INFO + seIds,
+              hasJoinedEntities);
         if (!canEditDamage) {
-            // a greyed out item with no reason is a puzzle, so say who may edit the damage of a unit
-            damageItem.setToolTipText(Messages.getString("ChatLounge.editDamage.notAllowed.tooltip"));
+            // say why the damage shows but cannot be changed
+            damageItem.setToolTipText(Messages.getString("Lobby.status.readOnly"));
         }
         popup.add(damageItem);
         popup.add(menuItem("Set individual camo...", LMP_INDI_CAMO + NO_INFO + seIds, hasJoinedEntities));
@@ -872,7 +875,7 @@ public final class LobbyUnitMenu {
      * The mission's scan targets are a game master's to set, and only matter in a game that uses objectives, so the
      * submenu is offered to nobody else.
      */
-    private static boolean isScanTargetMenuUseful(Client client) {
+    static boolean isScanTargetMenuUseful(Client client) {
         Player personAtTheKeyboard = client.getLocalPlayer();
         if ((personAtTheKeyboard == null) || !personAtTheKeyboard.isGameMaster()) {
             logger.debug("[Scan] Scan target items hidden: {} is not a game master",
@@ -892,6 +895,8 @@ public final class LobbyUnitMenu {
     private static Item deployMenu(Client client, boolean enabled, Set<Entity> entities) {
         String eIds = enToken(entities);
         Item menu = Item.menu("Deploy");
+        // a unit's card offers all of this in its Unit Status dialog, so the card's own menu can leave it out
+        menu.key = LMP_DEPLOY;
         if (enabled) {
             // Hidden, Prone, Hull-down
             if (client.getGame().getOptions().booleanOption(OptionsConstants.ADVANCED_HIDDEN_UNITS)) {
