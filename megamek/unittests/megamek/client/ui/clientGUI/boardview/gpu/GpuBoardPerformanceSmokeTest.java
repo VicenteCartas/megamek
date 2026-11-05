@@ -278,6 +278,8 @@ class GpuBoardPerformanceSmokeTest {
         boolean compareCache = Boolean.getBoolean("megamek.gpu.performanceCompareMaterialCache");
         // High, Normal, Normal, High in one GL context, so other work on the machine weighs on both alike.
         boolean compareQuality = Boolean.getBoolean("megamek.gpu.performanceCompareQuality");
+        // Each comparison runs High, this level, this level, High.
+        BoardQuality comparedQuality = BoardQuality.parse(System.getProperty("megamek.gpu.performanceComparedQuality", "NORMAL"));
         Map<String, String> shaderBaseline = shaderSources(System.getProperty("megamek.gpu.performanceCompareShaders"));
         boolean compareShaders = !shaderBaseline.isEmpty();
         boolean waitForCache = compareCache || compareShaders || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");
@@ -303,7 +305,6 @@ class GpuBoardPerformanceSmokeTest {
         boolean savedTessellation = preferences.getBoardTessellation();
         boolean savedParallax = preferences.getBoardTerrainParallax();
         String savedQuality = preferences.getBoardQuality();
-        float savedResolution = preferences.getBoardRenderResolution();
         TerrainLod.Tuning savedLod = TerrainLod.tuning();
         float savedUiScale = preferences.getBoardUiScale();
         float savedRenderScale = BoardCamera.renderScale;
@@ -318,7 +319,6 @@ class GpuBoardPerformanceSmokeTest {
                 preferences.setBoardTessellation(Boolean.parseBoolean(System.getProperty("megamek.gpu.performanceTessellation", "true")));
                 preferences.setBoardTerrainParallax(Boolean.getBoolean("megamek.gpu.performanceTerrainParallax"));
                 preferences.setBoardQuality(System.getProperty("megamek.gpu.performanceQuality", "HIGH"));
-                preferences.setBoardRenderResolution(1);
                 preferences.setBoardUiScale(1);
             });
             // A quality comparison measures the game's own pre-pass; older comparisons keep their pinned set.
@@ -418,8 +418,8 @@ class GpuBoardPerformanceSmokeTest {
                         assertEquals(false, tuning.antiAliasing());
                         assertEquals(true, GpuEnvironmentLighting.specularAntialiasing);
                         assertEquals(Boolean.getBoolean("megamek.gpu.performanceAmbientOcclusion"), tuning.ambientOcclusion());
-                        assertEquals("NORMAL".equalsIgnoreCase(System.getProperty("megamek.gpu.performanceQuality")),
-                              tuning.normalQuality());
+                        assertEquals(BoardQuality.parse(System.getProperty("megamek.gpu.performanceQuality", "HIGH")),
+                              tuning.quality());
                         if (System.getProperty("megamek.gpu.performanceQuality") == null) {
                             assertEquals(Set.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
                                   GpuTerrain.Prepass.IMPOSTORS), GpuTerrain.depthPrepass);
@@ -506,13 +506,8 @@ class GpuBoardPerformanceSmokeTest {
                         // The switch takes effect in this warmup frame, which builds what the variant first draws.
                         if (configureFrame && graphics.size() > 1 && view == 0 && phase == 0) { setGraphics(shown); }
                         if (configureFrame && compareQuality && view == 0 && phase == 0) {
-                            SelectBox<String> quality = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-quality");
-                            quality.setSelectedIndex(variant == 0 || variant == 3 ? 1 : 0);
-                            String resolution = System.getProperty("megamek.gpu.performanceNormalResolution");
-                            if (resolution != null) {
-                                Slider scale = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-render-resolution");
-                                scale.setValue(variant == 0 || variant == 3 ? 100 : Float.parseFloat(resolution));
-                            }
+                            SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(GpuBoardTestUi.tuning(this), "tuning-quality");
+                            quality.setSelected(variant == 0 || variant == 3 ? BoardQuality.HIGH : comparedQuality);
                         }
                         if (configureFrame && frame == 1) {
                             boardCamera.setIsometric(!Boolean.getBoolean("megamek.gpu.performanceTopView"));
@@ -542,7 +537,10 @@ class GpuBoardPerformanceSmokeTest {
                         if (compareShaders) {
                             scenario += (variant == 0 || variant == 3 ? "-baseline-" : "-candidate-") + variant;
                         }
-                        if (compareQuality) { scenario += (variant == 0 || variant == 3 ? "-high-" : "-normal-") + variant; }
+                        if (compareQuality) {
+                            BoardQuality shownQuality = variant == 0 || variant == 3 ? BoardQuality.HIGH : comparedQuality;
+                            scenario += "-" + shownQuality.name().toLowerCase(Locale.ROOT) + "-" + variant;
+                        }
                         if (shown != null) { scenario += "-" + shown.name().toLowerCase(Locale.ROOT); }
                         if (phase == 0 && detailFrames == 0) {
                             phase(frame == 0 ? "terrain-build" : scenario + "-warmup");
@@ -799,7 +797,6 @@ class GpuBoardPerformanceSmokeTest {
                     preferences.setBoardTessellation(savedTessellation);
                     preferences.setBoardTerrainParallax(savedParallax);
                     preferences.setBoardQuality(savedQuality);
-                    preferences.setBoardRenderResolution(savedResolution);
                     preferences.setBoardUiScale(savedUiScale);
                 });
                 BoardCamera.renderScale = savedRenderScale;

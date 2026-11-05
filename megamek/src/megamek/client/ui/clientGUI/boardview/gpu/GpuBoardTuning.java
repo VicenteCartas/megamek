@@ -39,8 +39,6 @@ import megamek.common.planetaryConditions.AtmosphericTaint;
 final class GpuBoardTuning {
     private static final float SLIDER_WIDTH = 120;
     private static final float LABEL_WIDTH = 120;
-    /** The render resolution, percent, that choosing Normal quality sets. */
-    private static final float NORMAL_RENDER_RESOLUTION = 80;
 
     private record Knob(String name, float min, float max, float step, String format, String help) {
         Knob(String name, float min, float max, float step, String format) {
@@ -128,7 +126,7 @@ final class GpuBoardTuning {
     private final List<Control> uiScale;
     /** The UI scale last saved: the slider's value once no button is held (see {@link #saveUiScale()}). */
     private float uiScaleSaved;
-    private final SelectBox<String> quality;
+    private final SelectBox<BoardQuality> quality;
     private final SelectBox<String> antiAliasing;
     private final SelectBox<String> shadows;
     private final CheckBox specularAntialiasing;
@@ -248,16 +246,16 @@ final class GpuBoardTuning {
         // The Display page: the window's output, from its mode to the graphics card.
         display = rows = new Table();
         rows.top().defaults().pad(0, 3, 0, 3);
-        quality = choice(skin, "Quality", "tuning-quality", new String[] { "Normal", "High" }, this::applyQuality);
+        quality = choice(skin, "Quality", "tuning-quality", BoardQuality.values(), this::applyQuality);
         // The saved choice; like anti-aliasing, Defaults leaves it alone.
         syncing = true;
-        quality.setSelectedIndex("NORMAL".equalsIgnoreCase(GUIPreferences.getInstance().getBoardQuality()) ? 0 : 1);
+        quality.setSelected(BoardQuality.parse(GUIPreferences.getInstance().getBoardQuality()));
         syncing = false;
         quality.addListener(new TextTooltip("Normal shades the board with cheaper light and materials, coarser distant "
-              + "terrain and fewer grass blades, for a much higher frame rate on a similar look. High shadows, specular "
-              + "anti-aliasing, terrain parallax, tessellation and ambient occlusion are off in it; High brings your "
-              + "choices back. Choosing Normal sets the render resolution to 80%, High to 100%; you can still move it. "
-              + "Switching rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
+              + "terrain and fewer grass blades, for a higher frame rate on a similar look. Low does the same with no "
+              + "grass blades at all and a quarter fewer plants in fields. Both leave out high shadows, specular "
+              + "anti-aliasing, terrain parallax, tessellation and ambient occlusion; High brings your choices back. "
+              + "Switching to or from High rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
         displayMode = choice(skin, "Display mode", "tuning-display-mode", new String[] { "Windowed", "Fullscreen" },
               this::applyDisplayMode);
         vsync = checkbox(skin, "VSync", "tuning-vsync");
@@ -400,7 +398,6 @@ final class GpuBoardTuning {
                 SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardVignette(enabled));
             }
         });
-        updateQualityOptions();
         Label graphics = new Label("Graphics: " + GpuGlsl.description(), skin, "small");
         graphics.setName("tuning-graphics");
         graphics.addListener(new TextTooltip("Detected when the board opens: the board compiles its shaders for the newest "
@@ -840,6 +837,7 @@ final class GpuBoardTuning {
             }
         });
         restoreDefaults();
+        updateQualityOptions();
         // The Display page's saved choices; Defaults leaves them alone.
         GUIPreferences preferences = GUIPreferences.getInstance();
         setValues(uiScale, new float[] { preferences.getBoardUiScale() * 100 });
@@ -1255,14 +1253,14 @@ final class GpuBoardTuning {
 
     /** The Display page's effective rendering choices. */
     BoardDisplaySettings displaySettings() {
-        return new BoardDisplaySettings(normalQuality(), BoardCamera.renderScale, antiAliasing(), highShadows(),
+        return new BoardDisplaySettings(quality(), BoardCamera.renderScale, antiAliasing(), highShadows(),
               specularAntialiasing.isChecked(), normalMaps(), terrainParallax(), tessellation(), ambientOcclusion(),
               depthCues(), vignette());
     }
 
-    /** Normal quality (BoardDisplaySettings, normalQualityFlag). */
-    boolean normalQuality() {
-        return quality.getSelectedIndex() == 0;
+    /** The chosen Quality level. */
+    BoardQuality quality() {
+        return quality.getSelected();
     }
 
     /** SMAA on the window's 3D scene. */
@@ -1305,19 +1303,19 @@ final class GpuBoardTuning {
     /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread as the card is. */
     private void applyQuality() {
         updateQualityOptions();
-        renderResolution.getFirst().slider().setValue(normalQuality() ? NORMAL_RENDER_RESOLUTION : 100);
-        String choice = quality.getSelected().toUpperCase(Locale.ROOT);
+        String choice = quality().name();
         SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardQuality(choice));
     }
 
-    /** The options Normal quality leaves out keep their choices, disabled, until High brings them back. */
+    /** What a level leaves out keeps its choice, disabled, until a level that has it brings the choice back. */
     private void updateQualityOptions() {
-        boolean normal = normalQuality();
-        shadows.setDisabled(normal);
-        specularAntialiasing.setDisabled(normal);
-        terrainParallax.setDisabled(normal);
-        tessellation.setDisabled(normal || !GpuTessellation.available());
-        ambientOcclusion.setDisabled(normal);
+        BoardQuality level = quality();
+        shadows.setDisabled(!level.costlyOptions);
+        specularAntialiasing.setDisabled(!level.costlyOptions);
+        terrainParallax.setDisabled(!level.costlyOptions);
+        tessellation.setDisabled(!level.costlyOptions || !GpuTessellation.available());
+        ambientOcclusion.setDisabled(!level.costlyOptions);
+        grass.setDisabled(level.meadowShare == 0);
     }
 
     private void applyAntiAliasing() {

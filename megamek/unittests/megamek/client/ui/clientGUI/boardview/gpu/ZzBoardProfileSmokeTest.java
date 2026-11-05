@@ -145,7 +145,6 @@ class ZzBoardProfileSmokeTest {
         GUIPreferences preferences = GUIPreferences.getInstance();
         // The switches below only count in High.
         preferences.setBoardQuality("HIGH");
-        preferences.setBoardRenderResolution(1);
         preferences.setBoardAmbientOcclusion(Boolean.getBoolean("megamek.gpu.profileAo"));
         preferences.setBoardTessellation(Boolean.getBoolean("megamek.gpu.profileTessellation"));
         Board board = BoardFile.loadSheet(new File(path), false, true);

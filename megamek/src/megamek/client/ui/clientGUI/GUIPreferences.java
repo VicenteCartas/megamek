@@ -923,7 +923,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(BOARD_VIGNETTE, false);
         store.setDefault(BOARD_TESSELLATION, false);
         store.setDefault(BOARD_UI_SCALE, 1f);
-        store.setDefault(BOARD_RENDER_RESOLUTION, .8f);
+        store.setDefault(BOARD_RENDER_RESOLUTION, 1f);
         store.setDefault(BOARD_GRAPHICS, BoardGraphics.ENHANCED.name());
         store.setDefault(BOARD_EDITOR_LAYERS_SPLIT, -1f);
         store.setDefault(REQUISITION_READOUT_TRO, false);

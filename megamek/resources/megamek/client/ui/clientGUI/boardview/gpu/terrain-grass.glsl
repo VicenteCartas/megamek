@@ -6,6 +6,8 @@
 #endif
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
+// The shares its quality draws of a meadow's blades and of a field's plants (BoardQuality).
+uniform vec2 u_coverShare;
 uniform float u_coverHexWidth;
 uniform float u_levelHeight;
 uniform float u_metre;
@@ -36,12 +38,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // A field's plants thin out as they shrink, each survivor widening by as much, until they fade into the ground's
     // crop colour (terrain-crops.glsl); so does a rim's fringe once it has stood up. Grass only thins out, over the
     // ground's own grass.
-#ifdef normalQualityFlag
-    float meadowShare = GRASS_NORMAL_SHARE; // Fewer blades, each survivor wider, so the sward keeps most of its cover.
-#else
-    float meadowShare = 1.0;
-#endif
-    float share = crop ? cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : meadowShare;
+    float share = crop ? u_coverShare.y * cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0)
+          : u_coverShare.x;
     float density = (crop ? share * cropPlants(pixels) : rim ? share * smoothstep(GRASS_RIM_START, GRASS_RIM_STAND, pixels)
           : share * smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }

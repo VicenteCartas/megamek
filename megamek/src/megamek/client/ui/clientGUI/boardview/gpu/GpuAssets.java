@@ -352,7 +352,7 @@ final class GpuAssets implements Disposable {
     /** The anisotropy the sculpt arrays filter with, now and when built ({@link #setTerrainAnisotropy}). */
     private float terrainAnisotropy = MATERIAL_ANISOTROPY;
 
-    /** The sculpted terrain's material filtering; GL thread. Normal quality lowers it (GpuTerrain.setNormalQuality). */
+    /** The sculpted terrain's material filtering; GL thread. {@link BoardQuality#terrainAnisotropy} sets it. */
     void setTerrainAnisotropy(float level) {
         if (terrainAnisotropy == level) { return; }
         terrainAnisotropy = level;

@@ -34,8 +34,6 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
      * compiled in: a lighting takes it as {@link #antialiasing} when its environment applies it (applyAntialiasing).
      */
     static boolean specularAntialiasing = true;
-    /** Normal quality's cheaper light and materials, compiled in and taken up as {@link #antialiasing} is. */
-    static boolean normalQuality;
     /** The {@link #flags} bits: the features below. */
     static final int CLOUD_SHADOW = 1, AMBIENT_OCCLUSION = 2, LAVA_LIGHTING = 4, BIOMES = 8, ANTIALIASING = 16,
           CRYSTAL_TRANSMISSION = 32, NORMAL_QUALITY = 64;
@@ -65,7 +63,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     boolean biomes;
     /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
     boolean antialiasing;
-    /** Normal quality as last applied (applyAntialiasing): normalQualityFlag. */
+    /** {@link BoardQuality#cheaperShading} as last applied (applyAntialiasing): normalQualityFlag. */
     boolean cheaperShading;
 
     GpuEnvironmentLighting() { super(TYPE); }
@@ -140,7 +138,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
         var lighting = of(environment);
         if (lighting != null) {
             lighting.antialiasing = specularAntialiasing;
-            lighting.cheaperShading = normalQuality;
+            lighting.cheaperShading = BoardQuality.current.cheaperShading;
         }
     }
 

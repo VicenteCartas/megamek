@@ -112,11 +112,9 @@ class GpuShaderLoadSmokeTest {
             }).when(source).takeFrame();
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
-            // Each quality loads at its own resolution. From High's 100%, the switch to 75% below links FSR at its first
-            // use, an optional setting; Normal's 80% links it while loading.
-            float loadedResolution = "NORMAL".equals(quality) ? .8f : 1;
+            // The game loads at 100%: the switch to 75% below links FSR at its first use, an optional setting.
             preferences.setBoardQuality(quality);
-            preferences.setBoardRenderResolution(loadedResolution);
+            preferences.setBoardRenderResolution(1);
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step, links, programs;
 
@@ -172,7 +170,7 @@ class GpuShaderLoadSmokeTest {
                             watch.optionalView(false);
                             tuning.setWireframe(false);
                             ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
-                            BoardCamera.renderScale = loadedResolution;
+                            BoardCamera.renderScale = 1;
                             step++;
                         } else if (step == 9 && seconds > 45) {
                             // Hits on walls: their scar patches draw with the walls' own programs.
@@ -308,9 +306,7 @@ class GpuShaderLoadSmokeTest {
         AtomicReference<Watch> relight = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         String savedQuality = preferences.getBoardQuality();
-        float savedResolution = preferences.getBoardRenderResolution();
         preferences.setBoardQuality("NORMAL");
-        preferences.setBoardRenderResolution(.8f);
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             editor.game().setBoard(BoardFile.loadSheet(GRASSLAND, false, true));
@@ -445,8 +441,8 @@ class GpuShaderLoadSmokeTest {
                             assertTrue(output.isDirectory() || output.mkdirs());
                             GpuBoardTestUi.capture(new File(output, "editor-scorch-gallery.png"));
                             watch.check();
-                            SelectBox<String> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
-                            quality.setSelected("High");
+                            SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
+                            quality.setSelected(BoardQuality.HIGH);
                             changedLighting = true;
                             relightStarted = System.nanoTime();
                         } else if (seconds - stepAt > 60) {
@@ -463,9 +459,7 @@ class GpuShaderLoadSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 source.close();
                 preferences.setBoardQuality(savedQuality);
-                preferences.setBoardRenderResolution(savedResolution);
             });
-            BoardCamera.renderScale = 1;
         }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
         assertTrue(relight.get() != null, "The changed lighting must reach its presented phase");

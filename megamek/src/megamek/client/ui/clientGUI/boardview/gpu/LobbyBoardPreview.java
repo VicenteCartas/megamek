@@ -546,6 +546,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
         installed = false;
         image.setDrawable(null);
         if (terrain != null) {
+            // As the battle view does: nothing drawn without a view inherits this one's choice.
+            BoardQuality.current = BoardQuality.HIGH;
             terrain.dispose();
             terrain = null;
         }

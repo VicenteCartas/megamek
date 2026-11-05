@@ -402,6 +402,7 @@ final class GpuTerrain implements Disposable {
                 private final int vegetationPhaseUniform = register("u_vegetationPhase");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
+                private final int coverShareUniform = register("u_coverShare");
                 private final int coverHexWidthUniform = register("u_coverHexWidth");
                 private final int gridShadeUniform = register("u_gridShade");
                 private final int waterDetailUniform = register("u_waterDetail");
@@ -537,6 +538,7 @@ final class GpuTerrain implements Disposable {
                     set(vegetationPhaseUniform, vegetationPhase);
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
+                    set(coverShareUniform, BoardQuality.current.meadowShare, BoardQuality.current.cropShare);
                     // Scene pixels: the render resolution's target, not the window's.
                     set(coverPixelsUniform, BoardGeometry.width()
                           * Math.abs(camera.projection.val[Matrix4.M11]) * camera.viewportHeight * .5f
@@ -6791,9 +6793,9 @@ final class GpuTerrain implements Disposable {
         flagRevisions.put(cloth, flag.revision);
     }
 
-    /** Normal quality advances the waves every other frame, and not at all while no water shows; they follow the clock. */
+    /** Whether the waves advance this frame ({@link BoardQuality#halfRateWaves}); they follow the clock. */
     private boolean wavesDue() {
-        if (!environmentLighting.cheaperShading || ocean.texture() == null) { return true; }
+        if (!BoardQuality.current.halfRateWaves || ocean.texture() == null) { return true; }
         waveFrame = !waveFrame;
         if (waveFrame) { return false; }
         if (flagView == null) { return true; }
@@ -8619,7 +8621,8 @@ final class GpuTerrain implements Disposable {
      */
     private void renderCover(Camera camera) {
         if (coverScene == null) { return; }
-        boolean coverVisible = GpuGroundCover.visibleAtScale(camera, grass, fields());
+        boolean grassShown = grass && BoardQuality.current.meadowShare > 0;
+        boolean coverVisible = GpuGroundCover.visibleAtScale(camera, grassShown, fields());
         // At a scale where no cover draws, no hexes are gathered; the empty list still releases the plants' buffers.
         List<BoardScene.Tile> candidates = new ArrayList<>();
         if (coverVisible || GpuBiomeVegetation.visibleAtScale(camera)) {
@@ -8635,7 +8638,7 @@ final class GpuTerrain implements Disposable {
         }
         coverBatch.begin(camera);
         if (coverVisible) {
-            groundCover.showGrass(grass);
+            groundCover.showGrass(grassShown);
             for (ModelInstance instance : groundCover.visible(coverScene, camera, candidates, this::planted)) {
                 coverBatch.render(instance, environment);
             }
@@ -8787,6 +8790,15 @@ final class GpuTerrain implements Disposable {
         terrainParallax = enabled;
     }
 
+    /** The level to draw at. The cache's fills take no lighting: their material stays as it is whatever the level. */
+    void setQuality(BoardQuality quality) {
+        // Detail levels follow its hex sizes (TerrainLod.select), the same across levels sharing a shading: a still camera
+        // selects again. Each terrain notices for itself: an embedded view shares the level but not this one's selection.
+        if (environmentLighting.cheaperShading != quality.cheaperShading) { detailPixelsPerUnit = Float.NaN; }
+        BoardQuality.current = quality;
+        assets.setTerrainAnisotropy(quality.terrainAnisotropy);
+    }
+
     /**
      * Live grass visibility (the Grass blades option): the meadows' grass and their banks' rims, not the fields' plants.
      * Hidden grass skips its buffers and drawing without rebuilding the terrain.
@@ -8834,17 +8846,6 @@ final class GpuTerrain implements Disposable {
             part.environment = environment;
             batch.render(part);
         }
-    }
-
-    /**
-     * Normal quality's shading (normalQualityFlag; the cache's fills take no lighting and stay as they are) and its lower
-     * anisotropy: the board's isometric view asks for about 2x.
-     */
-    void setNormalQuality(boolean enabled) {
-        // Its detail levels follow other hex sizes (TerrainLod.select): a still camera selects again.
-        if (environmentLighting.cheaperShading != enabled) { detailPixelsPerUnit = Float.NaN; }
-        GpuEnvironmentLighting.normalQuality = enabled;
-        assets.setTerrainAnisotropy(enabled ? 2 : GpuAssets.MATERIAL_ANISOTROPY);
     }
 
     /**

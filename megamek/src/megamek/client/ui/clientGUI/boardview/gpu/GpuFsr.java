@@ -57,19 +57,11 @@ final class GpuFsr implements Disposable {
             upscaled = GpuSmaa.target(width, height, GL30.GL_RGBA8, GL20.GL_RGBA);
         }
         GpuAtmosphere.screenState();
-        if (GpuEnvironmentLighting.normalQuality) {
-            // Normal quality scales up by a plain linear blit; RCAS still sharpens it. EASU alone costs about 0.7 ms at 4K.
-            Gdx.gl.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, input.getFramebufferHandle());
-            Gdx.gl.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, upscaled.getFramebufferHandle());
-            Gdx.gl30.glBlitFramebuffer(0, 0, input.getWidth(), input.getHeight(), 0, 0, width, height,
-                  GL20.GL_COLOR_BUFFER_BIT, GL20.GL_LINEAR);
-        } else {
-            upscaled.begin();
-            input.getColorBufferTexture().bind(0);
-            easu.bind();
-            easu.setUniformi("u_color", 0);
-            quad.render(easu, GL20.GL_TRIANGLES);
-        }
+        upscaled.begin();
+        input.getColorBufferTexture().bind(0);
+        easu.bind();
+        easu.setUniformi("u_color", 0);
+        quad.render(easu, GL20.GL_TRIANGLES);
         if (target != null) { target.begin(); }
         else {
             FrameBuffer.unbind();

@@ -21,8 +21,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Quality choice through the real view: Normal's programs link and draw a real board, it takes the costly options out
- * and sets the render resolution, and High brings back the player's own choices.
+ * The Quality choice through the real view: Normal's programs link and draw a real board, it takes the costly options out,
+ * High brings back the player's own choices, and neither touches the render resolution.
  */
 @Tag("on-demand")
 class GpuQualitySmokeTest {
@@ -48,43 +48,59 @@ class GpuQualitySmokeTest {
                         view.boardCamera.setIsometric(true);
                         view.boardCamera.center(BoardGeometry.center(new Coords(5, 5), 0));
                         view.boardCamera.zoom(.3f);
-                        SelectBox<String> quality = GpuBoardTestUi.tuning(view, "tuning-quality");
+                        SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(view, "tuning-quality");
                         Slider resolution = GpuBoardTestUi.tuning(view, "tuning-render-resolution");
                         CheckBox occlusion = GpuBoardTestUi.tuning(view, "tuning-ambient-occlusion");
+                        CheckBox grass = GpuBoardTestUi.tuning(view, "tuning-grass");
                         var tuning = GpuBoardTestUi.tuning(view);
-                        assertEquals("Normal", quality.getSelected(), "A new player starts in Normal");
-                        assertEquals(80, resolution.getValue(), "at its render resolution");
-                        assertEquals(.8f, BoardCamera.renderScale);
+                        assertEquals(BoardQuality.NORMAL, quality.getSelected(), "A new player starts in Normal");
+                        assertEquals(100, resolution.getValue(), "at the full render resolution");
+                        assertEquals(1, BoardCamera.renderScale);
                         assertTrue(occlusion.isDisabled(), "with what it leaves out disabled");
-                        view.render();
-                        assertTrue(GpuEnvironmentLighting.normalQuality);
+                        assertFalse(grass.isDisabled());
+                        GpuCamouflageReview.renderReady(view);
+                        assertEquals(BoardQuality.NORMAL, BoardQuality.current);
 
-                        quality.setSelected("High");
+                        // Low keeps Normal's programs: its switch links nothing and needs no loading stage.
+                        int links = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
+                        quality.setSelected(BoardQuality.LOW);
+                        for (int frame = 0; frame < 30; frame++) {
+                            GpuBoardTestUi.present(view);
+                            view.render();
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Low draws the board");
+                            assertFalse(GpuBoardTestUi.loading(view), "Low shares Normal's programs");
+                        }
+                        assertEquals(BoardQuality.LOW, BoardQuality.current);
+                        assertEquals(links, GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading());
+                        assertTrue(grass.isChecked() && grass.isDisabled(), "Low leaves grass out, keeping the choice");
+
+                        quality.setSelected(BoardQuality.HIGH);
+                        assertFalse(grass.isDisabled());
                         occlusion.setChecked(true);
+                        resolution.setValue(70);
                         view.render();
                         assertTrue(tuning.displaySettings().ambientOcclusion(), "High takes the player's choice");
 
-                        quality.setSelected("Normal");
+                        quality.setSelected(BoardQuality.NORMAL);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Normal's programs draw the board");
                         }
-                        assertTrue(GpuEnvironmentLighting.normalQuality);
-                        assertEquals(80, resolution.getValue(), "Choosing Normal sets the render resolution");
-                        assertEquals(.8f, BoardCamera.renderScale);
+                        assertEquals(BoardQuality.NORMAL, BoardQuality.current);
+                        assertEquals(70, resolution.getValue(), "Quality leaves the render resolution alone");
+                        assertEquals(.7f, BoardCamera.renderScale, .001f);
                         assertFalse(tuning.displaySettings().ambientOcclusion(), "Normal leaves it out");
                         assertTrue(occlusion.isChecked() && occlusion.isDisabled(), "keeping the choice, disabled");
 
-                        quality.setSelected("High");
+                        quality.setSelected(BoardQuality.HIGH);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         }
-                        assertFalse(GpuEnvironmentLighting.normalQuality);
-                        assertEquals(100, resolution.getValue());
-                        assertEquals(1, BoardCamera.renderScale);
+                        assertEquals(BoardQuality.HIGH, BoardQuality.current);
+                        assertEquals(70, resolution.getValue());
                         assertFalse(occlusion.isDisabled());
                         assertTrue(tuning.displaySettings().ambientOcclusion(), "High brings the choice back");
                         occlusion.setChecked(false);
