@@ -54,7 +54,7 @@ import megamek.client.ui.design.DesignTokens;
 
 /**
  * A health bar for a number from 0 to its most, such as a location's armor (docs/design-system/tokens.md, Steppers):
- * − bar + then the value as a field and "/ most", and the change from the value it was made with. A click on the bar
+ * − bar + then the change from the value it was made with, the value as a field and "/ most". A click on the bar
  * sets the value there and a drag scrubs it, so taking 30 points off is one gesture; the wheel over the bar steps by
  * one, or five with Shift; the arrow keys step with the focus; − and + step by one; and the value can be typed. The
  * fill takes the paperdoll's damage tiers: the accent while whole, text.primary while lightly damaged, status.warning
@@ -92,6 +92,8 @@ public final class UiHealthBar extends Table {
         field.setTextFieldFilter(new TextField.TextFieldFilter.DigitsOnlyFilter());
         field.setMaxLength(String.valueOf(this.max).length());
         Label most = kit.typeLabel("/ " + this.max, "small", "text.secondary");
+        // the row ends on the most, flush with the controls of the rows round it
+        most.setAlignment(Align.right);
         delta = kit.typeLabel("", "small", "status.danger");
         delta.setAlignment(Align.right);
         // the number columns are at least three digits wide, so the bars of a form's rows line up
@@ -99,9 +101,9 @@ public final class UiHealthBar extends Table {
         add(down).size(control);
         add(bar).growX().height(control).padLeft(gap).padRight(gap);
         add(up).size(control);
-        add(field).width(width(kit, digits) + 2 * space("lg")).height(control).padLeft(space("sm"));
-        add(most).width(width(kit, "/ " + digits)).padLeft(gap);
         add(delta).width(width(kit, "\u2212" + digits)).padLeft(gap);
+        add(field).width(width(kit, digits) + 2 * space("lg")).height(control).padLeft(gap);
+        add(most).width(width(kit, "/ " + digits)).padLeft(gap);
         down.addListener(stepping(-1));
         up.addListener(stepping(1));
         field.addListener(new ChangeListener() {

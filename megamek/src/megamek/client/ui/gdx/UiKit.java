@@ -999,6 +999,23 @@ public final class UiKit {
     }
 
     /**
+     * A selector ({@link UiStepper}): one of {@code choices}, the {@code index}th first, between chevrons that step
+     * through them, as a game's settings menu picks a value; for a short ordered run of choices, such as a round, where
+     * a dropdown would be a long list. Its value is the chosen index.
+     */
+    public UiStepper selector(List<String> choices, int index) {
+        return new UiStepper(this, choices, index);
+    }
+
+    /**
+     * A row of status chips that keeps each chip whole ({@link UiChipRow}): those past its width fold into
+     * {@code more}'s "+n", with {@code folded} chips already left out before it.
+     */
+    public UiChipRow chipRow(List<Actor> chips, int folded, java.util.function.IntFunction<String> more) {
+        return new UiChipRow(this, chips, folded, more);
+    }
+
+    /**
      * A filter chip ({@link UiFilterChip}): a control, so {@code control.sm} high like the compact buttons, fields and
      * selects beside it, in the status chip's type; at each end it keeps {@code md}, {@code icon.sm} and {@code xs}, so
      * its text is centred; toggling on a click, on it fills in the accent's pressed tint and a check shows in its

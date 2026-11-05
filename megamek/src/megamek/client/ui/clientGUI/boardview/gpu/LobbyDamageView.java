@@ -58,7 +58,7 @@ import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiLevelTiles;
-import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 
@@ -405,7 +405,7 @@ final class LobbyDamageView {
             Label caption = kit.typeLabel(Messages.getString("Lobby.status.deployment"), "body.strong",
                   "text.primary");
             caption.setName("status-deployment");
-            values.add(caption).left().colspan(2).padTop(rows == 0 ? 0 : space("xl")).row();
+            values.add(caption).left().padTop(rows == 0 ? 0 : space("xl")).row();
             for (int index = 0; index < deployment.size(); index++) {
                 row(deployment.get(index), "status-deploy-" + index, false, true);
             }
@@ -426,24 +426,15 @@ final class LobbyDamageView {
         if (value.kind() == UnitDamageForm.Kind.STEPPER) {
             // a bar takes the row's width under its label, as a stat block in a game shows it
             float top = first ? 0 : space("md");
-            if (value.hits() != null) {
-                // an ammunition bin: its hit boxes sit on its name's row, its shots in the bar under it
-                values.add(label).left().growX().minWidth(0).padTop(top);
-                values.add(boxes(value.hits(), name + "-hits", true, editable)).right().padLeft(space("lg"))
-                      .padTop(top).row();
-            } else {
-                values.add(label).left().growX().minWidth(0).colspan(2).padTop(top).row();
-            }
+            // an ammunition bin's hit boxes sit on its name's row, its shots in the bar under it
+            values.add(line(label, value.hits() == null ? null : boxes(value.hits(), name + "-hits", true, editable)))
+                  .growX().padTop(top).row();
             UiHealthBar bar = bar(value, name);
             bar.disabled(value.locked() || !editable);
-            values.add(bar).growX().colspan(2).padTop(space("xxs")).row();
+            values.add(bar).growX().padTop(space("xxs")).row();
             return true;
         }
-        values.add(label).left().growX().minWidth(0).padTop(gap);
-        Actor control = control(value, name, editable);
-        // a select keeps its widest choice in view; its own preferred width would show the arrow alone
-        float width = value.kind() == UnitDamageForm.Kind.CHOICE ? size("dialog.sm") / 3 : 0;
-        values.add(control).right().minWidth(width).padLeft(space("lg")).padTop(gap).row();
+        values.add(line(label, control(value, name, editable))).growX().padTop(gap).row();
         List<UnitDamageForm.Value> flags = value.flags();
         for (int flag = 0; flag < flags.size(); flag++) {
             // a weapon's state sits under its hit boxes, indented as part of it
@@ -454,10 +445,22 @@ final class LobbyDamageView {
             if (state.tip() != null) {
                 kit.tip(toggle, true).getActor().setText(state.tip());
             }
-            values.add(caption).left().growX().minWidth(0).padLeft(space("lg")).padTop(space("xxs"));
-            values.add(toggle).right().padLeft(space("lg")).padTop(space("xxs")).row();
+            values.add(line(caption, toggle)).growX().padLeft(space("lg")).padTop(space("xxs")).row();
         }
         return true;
+    }
+
+    /**
+     * A row of its own: the label taking what is left, the control at its right end. Each row lays out alone, so every
+     * control ends at the pane's edge whatever the rows round it hold.
+     */
+    private Table line(Label label, Actor control) {
+        Table line = new Table();
+        line.add(label).left().growX().minWidth(0);
+        if (control != null) {
+            line.add(control).right().padLeft(space("lg"));
+        }
+        return line;
     }
 
     private UiHealthBar bar(UnitDamageForm.Value value, String name) {
@@ -476,12 +479,13 @@ final class LobbyDamageView {
 
     private Actor control(UnitDamageForm.Value value, String name, boolean editable) {
         if (value.kind() == UnitDamageForm.Kind.CHOICE) {
-            UiSelect select = kit.tokenSelect(true, value.choices().toArray(String[]::new));
-            select.setName(name);
-            select.select(value.value());
-            select.setDisabled(!editable);
-            UiKit.onChange(select, () -> value.value(select.getSelectedIndex()));
-            return select;
+            // a short ordered run, such as the rounds a unit may deploy in: stepped through, as a game's menu does
+            UiStepper selector = kit.selector(value.choices(), value.value());
+            selector.setName(name);
+            selector.down().setDisabled(!editable || selector.value() == 0);
+            selector.up().setDisabled(!editable || selector.value() == value.choices().size() - 1);
+            UiKit.onChange(selector, () -> value.value(selector.value()));
+            return selector;
         }
         if (value.kind() == UnitDamageForm.Kind.TOGGLE) {
             UiChoice toggle = kit.toggleSwitch("", value.on());

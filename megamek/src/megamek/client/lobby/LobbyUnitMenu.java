@@ -55,6 +55,10 @@ public final class LobbyUnitMenu {
     public static final String LMP_SKILLS = "SKILLS";
     public static final String LMP_CALLSIGN = "CALLSIGN";
     public static final String LMP_NAME = "NAME";
+    /** The Randomize submenu, by which a unit's card leaves it out of its menu. */
+    public static final String LMP_RANDOMIZE = "RANDOMIZE";
+    /** The C3 submenu, by which a unit's card leaves it out of its menu. */
+    public static final String LMP_C3 = "C3";
     public static final String LMP_C3DISCONNECT = "C3DISCONNECT";
     public static final String LMP_DEPLOY = "DEPLOY";
     public static final String LMP_HEAT = "HEAT";
@@ -964,6 +968,8 @@ public final class LobbyUnitMenu {
      */
     private static Item randomizeMenu(boolean enabled, String eIds) {
         Item menu = Item.menu("Randomize");
+        // a unit's card offers this as its die icon, so the card's own menu can leave it out
+        menu.key = LMP_RANDOMIZE;
         menu.setEnabled(enabled);
 
         menu.add(menuItem("Name", LMP_NAME + NO_INFO + eIds, enabled));
@@ -993,6 +999,8 @@ public final class LobbyUnitMenu {
     /** Returns the C3 computer submenu. */
     private static Item c3Menu(boolean enabled, Collection<Entity> entities, Client client) {
         Item menu = Item.menu("C3");
+        // a C3 unit's card offers the network manager as its icon, so the card's own menu can leave this out
+        menu.key = LMP_C3;
 
         if (entities.stream().anyMatch(Entity::hasAnyC3System)) {
 

@@ -19,10 +19,13 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import megamek.client.lobby.LobbyForces;
 import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyUnit;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiChipRow;
+import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.force.Force;
 import org.junit.jupiter.api.Tag;
@@ -71,7 +74,7 @@ class LobbyUnitCardActionsSmokeTest {
                   "the first row holds the main actions");
             assertEquals(4, first.getChildren().size, "and ends with the ⋮");
             Table second = panel.findActor("lobby-unit-secondary-1");
-            assertEquals(List.of("lobby-unit-damage-1", "lobby-unit-camo-1", "lobby-unit-c3-1"),
+            assertEquals(List.of("lobby-unit-damage-1", "lobby-unit-camo-1", "lobby-unit-randomize-1", "lobby-unit-c3-1"),
                   Arrays.stream(second.getChildren().toArray()).map(Actor::getName).toList(),
                   "the second row the secondary ones");
             assertEquals(first.localToStageCoordinates(new Vector2()).x,
@@ -79,13 +82,61 @@ class LobbyUnitCardActionsSmokeTest {
 
             actions.log.clear();
             click(ui, unitMore(panel));
-            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, VIEW]"), actions.log,
+            assertEquals(List.of("menu [1] [C3, CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, RANDOMIZE, VIEW]"),
+                  actions.log,
                   "the card's ⋮ leaves out what its icons offer");
 
             forces.compact(true);
             ui.draw();
             assertNull(panel.findActor("lobby-unit-configure-1"), "a compact row keeps only its ⋮");
             panel.remove();
+        });
+    }
+
+    @Test
+    void theRandomizeIconOffersNameCallsignAndSkills() {
+        UiTestStage.run(ui -> {
+            Recorder actions = new Recorder();
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, actions, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            forces.show(forces(unit(1, true, false)));
+            ui.draw();
+
+            click(ui, panel.findActor("lobby-unit-randomize-1"));
+            Group menu = ui.stage.getRoot().findActor("lobby-unit-menu");
+            assertTrue(menu.isVisible(), "the icon opens its own short menu");
+            assertNotNull(menu.findActor("lobby-unit-randomize-name"));
+            assertNotNull(menu.findActor("lobby-unit-randomize-callsign"));
+            click(ui, menu.findActor("lobby-unit-randomize-skills"));
+            assertEquals(List.of("SKILLS 1"), actions.log, "a pick runs the menu's command on the unit");
+            panel.remove();
+        });
+    }
+
+    @Test
+    void chipsThatDoNotFitFoldIntoACountWhole() {
+        UiTestStage.run(ui -> {
+            List<Actor> chips = new ArrayList<>();
+            for (int index = 0; index < 4; index++) {
+                chips.add(ui.kit.chip("Warning number " + index, UiKit.Tone.WARN, false));
+            }
+            UiChipRow row = ui.kit.chipRow(chips, 1, n -> "+" + n);
+            Table holder = new Table();
+            holder.add(row).width(260).height(30);
+            holder.setFillParent(true);
+            ui.stage.addActor(holder);
+            ui.draw();
+
+            assertTrue(row.shownChips() >= 1 && row.shownChips() < 4, "only what fits shows: " + row.shownChips());
+            for (int index = 0; index < row.shownChips(); index++) {
+                Actor chip = chips.get(index);
+                assertEquals(((Layout) chip).getPrefWidth(), chip.getWidth(), 0.5f, "a shown chip keeps its size");
+                assertTrue(chip.getX() + chip.getWidth() <= row.getWidth() + 0.5f, "and stays inside");
+            }
+            assertEquals("+" + (4 - row.shownChips() + 1), row.more().getText().toString(),
+                  "the rest, and those folded before, count in the +n");
+            holder.remove();
         });
     }
 
@@ -102,7 +153,7 @@ class LobbyUnitCardActionsSmokeTest {
             Actor more = unitMore(panel);
             assertNotNull(more);
             click(ui, more);
-            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, VIEW]"), actions.log);
+            assertEquals(List.of("menu [1] [CONFIGURE, DAMAGE, DELETE, DEPLOY, INDI_CAMO, RANDOMIZE, VIEW]"), actions.log);
             forces.showMenu(List.of(LobbyMenuEntry.item("View...", true), LobbyMenuEntry.SEPARATOR,
                   LobbyMenuEntry.submenu("Deploy", true, List.of(LobbyMenuEntry.item("Round 1", true),
                         LobbyMenuEntry.item("Round 2", true))),

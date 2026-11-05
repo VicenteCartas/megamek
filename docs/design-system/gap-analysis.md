@@ -1394,6 +1394,19 @@ work for Swing, and item 11 is under investigation.
            `readOnlyDamageWritesOnlyTheDeployment`, `LobbyAsksTest.readOnlyDamageIsRefusedBySwing`,
            `LobbyUnitMenuTest.theUnitStatusIconLeavesTheDeploySubmenuOut` and
            `LobbyDamageSmokeTest.underAGameMasterTheDamageShowsAndTheDeploymentEdits`.
+       - Unit Status and card polish. Each value row is its own Table (`LobbyDamageView.line`), because one Table
+         mixing full-width bars with label/control rows squeezed the control column until toggles and hit boxes
+         were clipped. Controls now end on one right edge: a label-less `UiChoice` has no trailing gap and a
+         `UiHealthBar` ends on its "/ max". The deployment round is a ‹ › selector (`UiKit.selector`, a
+         `UiStepper` over named choices), not a 40-entry dropdown.
+         - The card's second icon row is Unit Status, Camo, Randomize (a die opening Name, Callsign or Skills) and
+           C3, up to eight icons. The ⋮ leaves out Randomize and C3, which are now omitted by key
+           (`LMP_RANDOMIZE`, `LMP_C3`); the C3 network manager has the rest of that submenu.
+         - Warning chips keep their size in a `UiChipRow` (`UiKit.chipRow`). Those that don't fit fold into "+n",
+           instead of squeezing until the icon and text spill out.
+         - Checks: `LobbyUnitMenuTest.theRandomizeAndC3IconsLeaveTheirSubmenusOut`,
+           `LobbyUnitCardActionsSmokeTest.theRandomizeIconOffersNameCallsignAndSkills` and
+           `chipsThatDoNotFitFoldIntoACountWhole`, and `LobbyDamageSmokeTest` stepping the round.
        Checks: `LobbyNativeDialogsSmokeTest.theSaveQuestionBeforeLeavingSavesLeavesOrStays`,
        `LobbyTogglesSmokeTest.theMenuButtonInTheTopBarOpensTheSystemMenu`,
        `gameOptionsInTheTopBarOpensTheGameOptionsNamedOrFolded`,

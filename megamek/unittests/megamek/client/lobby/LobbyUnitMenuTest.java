@@ -157,6 +157,22 @@ class LobbyUnitMenuTest {
     }
 
     @Test
+    void theRandomizeAndC3IconsLeaveTheirSubmenusOut() {
+        Entity hunchback = mek(local, "Hunchback");
+        List<String> all = leafCommands(menu(List.of(hunchback), List.of(), false));
+        for (String name : List.of(LobbyUnitMenu.LMP_NAME, LobbyUnitMenu.LMP_CALLSIGN, LobbyUnitMenu.LMP_SKILLS)) {
+            assertTrue(all.contains(LobbyUnitMenu.unitCommand(name, hunchback.getId())),
+                  "the randomize icon runs the menu's own command: " + all);
+        }
+
+        LobbyUnitMenu menu = LobbyUnitMenu.of(client, commands, List.of(hunchback), List.of(), false,
+              Set.of(LobbyUnitMenu.LMP_RANDOMIZE, LobbyUnitMenu.LMP_C3));
+        assertTrue(menu.entries().stream().noneMatch(entry -> entry.label().equals("Randomize")));
+        assertTrue(menu.entries().stream().noneMatch(entry -> entry.label().equals("C3")));
+        assertTrue(leafCommands(menu).stream().map(LobbyUnitMenu::name).noneMatch(LobbyUnitMenu.LMP_SKILLS::equals));
+    }
+
+    @Test
     void aCardIconRunsTheMenusCommandOnItsUnit() {
         Entity hunchback = mek(local, "Hunchback");
         String command = LobbyUnitMenu.unitCommand(LobbyUnitMenu.LMP_VIEW, hunchback.getId());

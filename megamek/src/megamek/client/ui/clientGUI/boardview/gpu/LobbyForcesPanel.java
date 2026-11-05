@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntFunction;
@@ -42,6 +43,7 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.LobbyForcesController.Target;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiChipRow;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiKit.Tone;
 import megamek.client.ui.gdx.UiMenuList;
@@ -566,16 +568,15 @@ final class LobbyForcesPanel {
             }
             LobbyUnit.Shown tags = unit.shown(LobbyUnit.MAX_TAGS);
             if (!tags.tags().isEmpty()) {
-                Table chips = new Table();
-                chips.left();
+                List<Actor> chips = new ArrayList<>();
                 for (LobbyUnit.Tag tag : tags.tags()) {
-                    chips.add(chip(tag)).padRight(space("xs")).minWidth(0);
+                    chips.add(chip(tag));
                 }
-                if (tags.folded() > 0) {
-                    chips.add(kit.typeLabel(Messages.getString("Lobby.card.more", tags.folded()), "small",
-                          "text.muted"));
-                }
-                lines.add(chips).left().minWidth(0).padTop(space("xs"));
+                // the chips past the card's width fold into "+n" whole, rather than squeeze until they spill over
+                UiChipRow row = kit.chipRow(chips, tags.folded(),
+                      folded -> Messages.getString("Lobby.card.more", folded));
+                row.setName("lobby-unit-chips-" + unit.id());
+                lines.add(row).growX().minWidth(0).padTop(space("xs"));
             }
             card.add(new CardBody(lines, (unit.sheet() == null) ? null : sheet(unit.sheet()))).growX().minWidth(0)
                   .top();
@@ -624,8 +625,14 @@ final class LobbyForcesPanel {
                 }
                 secondary.add(commandTool(unit, "palette", "Lobby.card.camo", "camo", LobbyUnitMenu.LMP_INDI_CAMO,
                       offered));
+                UiButton[] randomize = new UiButton[1];
+                randomize[0] = cardTool(unit, "die", "Lobby.card.randomizeTip", "randomize",
+                      () -> openRandomize(randomize[0], unit));
+                secondary.add(randomize[0]);
+                offered.add(LobbyUnitMenu.LMP_RANDOMIZE);
                 if (unit.c3()) {
                     secondary.add(cardTool(unit, "hub", "Lobby.card.c3", "c3", () -> actions.c3(unit.id())));
+                    offered.add(LobbyUnitMenu.LMP_C3);
                 }
             }
             main.add(more);
@@ -1135,6 +1142,39 @@ final class LobbyForcesPanel {
             menu.cancel();
             actions.command(command);
         });
+    }
+
+    /**
+     * Opens the card's Randomize menu under its die icon: a new name, callsign or skills for the unit, each a click,
+     * in the unit menu's popover.
+     */
+    private void openRandomize(Actor face, LobbyUnit unit) {
+        if (menu.isVisible()) {
+            menu.cancel();
+            return;
+        }
+        UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
+        items.setName("lobby-unit-randomize-items");
+        String[][] choices = { { "Lobby.card.randomName", LobbyUnitMenu.LMP_NAME },
+              { "Lobby.card.randomCallsign", LobbyUnitMenu.LMP_CALLSIGN },
+              { "Lobby.card.randomSkills", LobbyUnitMenu.LMP_SKILLS } };
+        for (String[] choice : choices) {
+            UiButton item = items.item(Messages.getString(choice[0]), null, null, false, true, () -> {
+                menu.cancel();
+                actions.unitCommand(unit.id(), choice[1]);
+            });
+            item.setName("lobby-unit-randomize-" + choice[1].toLowerCase(Locale.ROOT));
+        }
+        menuEntries = List.of();
+        menuPath.clear();
+        pendingMenu = null;
+        menu.header(Messages.getString("Lobby.card.randomize"), unit.name()).content(items);
+        menu.openedFrom(face);
+        Vector2 corner = face.localToStageCoordinates(new Vector2(0, 0));
+        menu.showAt(corner.x, corner.y);
+        if (menu.getStage() != null) {
+            menu.getStage().setKeyboardFocus(items);
+        }
     }
 
     private void openMenuUnder(Actor button) {

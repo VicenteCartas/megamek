@@ -22,7 +22,7 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiHealthBar;
 import megamek.client.ui.gdx.UiLevelTiles;
-import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
@@ -298,12 +298,14 @@ class LobbyDamageSmokeTest {
                     roundRow = index;
                 }
             }
-            UiSelect round = find(ui, "status-deploy-" + roundRow);
+            UiStepper round = find(ui, "status-deploy-" + roundRow);
             reveal(ui, round);
-            click(ui, round);
-            assertTrue(round.isOpen(), "the round's list opens");
-            click(ui, round.popup().label(3));
-            assertEquals(3, deployment.get(roundRow).value(), "a pick sets the round");
+            assertEquals(deployment.get(roundRow).choices().get(deployment.get(roundRow).value()),
+                  round.shown().getText().toString(), "the round shows its name");
+            for (int step = 0; step < 3; step++) {
+                click(ui, round.up());
+            }
+            assertEquals(3, deployment.get(roundRow).value(), "each step moves the round on by one");
 
             GpuPaperdoll doll = find(ui, "damage-doll");
             clickAt(ui, doll, spot(doll, "CT"));
