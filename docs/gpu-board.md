@@ -413,7 +413,8 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   bridge footings and tunnels as Enhanced. Natural bridges have a full hex cap over
   their hollow arch, topped with the art of an abutting bank of the span's surface; without one the arch shows its rock.
   Flat road and rail carriers retain normal Classic tops and vertical terrain edges;
-  actual grades and tunnel openings retain their shared carrier geometry. A nearby
+  actual grades keep their course and end heights on straight ramps, which Enhanced eases, and
+  tunnel openings retain their shared carrier geometry. A nearby
   flat route does not introduce sculpted hillsides into Classic terrain.
   Unrelated hexes retain plain columns; no water
   or lava field or planting is prepared.

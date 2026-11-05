@@ -514,7 +514,7 @@ final class BoardSurface {
 
     TerrainLod lod() { return lod; }
 
-    /** Classic routes use the same vertical profiles inside an otherwise sharp, unmoved hex column. */
+    /** Classic routes keep their course and end heights in an otherwise sharp, unmoved column, on straight ramps. */
     static BoardSurface columns(BoardScene scene, BoardScene.Tile tile, TerrainLod lod) {
         return new BoardSurface(scene, tile, false, lod, true);
     }
