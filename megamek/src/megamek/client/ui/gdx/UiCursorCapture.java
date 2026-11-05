@@ -12,12 +12,13 @@ import com.badlogic.gdx.math.Vector2;
  * <p>
  * On Windows, GLFW's first event poll after the capture can still report the pointer where it was before GLFW centred
  * it, and turns that into one bogus step of about the distance to the window's centre (glfw/glfw#1523, open). The
- * drag's owner therefore reads its pointer through {@link #trusted}, which drops the movement of that frame.
+ * drag's owner therefore reads its pointer through {@link #trusted}, which drops the first frame delivering motion
+ * after capture. Frames without input must not expire this guard.
  */
 public final class UiCursorCapture {
     /** The window input that hid the cursor; each window has its own. */
     private Input captured;
-    private long frame;
+    private long captureFrame, firstMotionFrame;
     private float lastX, lastY, offsetX, offsetY;
     private final Vector2 point = new Vector2();
 
@@ -33,17 +34,23 @@ public final class UiCursorCapture {
         if (captured != null || Gdx.input.isCursorCatched()) { return; }
         captured = Gdx.input;
         captured.setCursorCatched(true);
-        frame = Gdx.graphics.getFrameId();
+        captureFrame = Gdx.graphics.getFrameId();
+        firstMotionFrame = -1;
     }
 
     /**
-     * The pointer at (x, y), in the caller's coordinates, without the movement GLFW reported in the frame after the
-     * capture: events of the capture's own frame were polled before it and are kept.
+     * The pointer at (x, y), in the caller's coordinates, without the first batch of motion GLFW reports after capture.
+     * Events of the capture's own frame were polled before it and are kept. The first later frame with motion is
+     * rebased even if several frames passed without input; subsequent frames retain their relative movement.
      */
     public Vector2 trusted(float x, float y) {
-        if (captured != null && Gdx.graphics.getFrameId() == frame + 1) {
-            offsetX += x - lastX;
-            offsetY += y - lastY;
+        if (captured != null) {
+            long frame = Gdx.graphics.getFrameId();
+            if (frame > captureFrame && firstMotionFrame < 0) { firstMotionFrame = frame; }
+            if (frame == firstMotionFrame) {
+                offsetX += x - lastX;
+                offsetY += y - lastY;
+            }
         }
         lastX = x;
         lastY = y;

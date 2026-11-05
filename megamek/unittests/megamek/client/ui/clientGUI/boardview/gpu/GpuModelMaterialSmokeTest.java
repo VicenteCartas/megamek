@@ -38,6 +38,83 @@ class GpuModelMaterialSmokeTest {
     private static final int SIZE = 256;
 
     @Test
+    void nightEmissionSwitchesBothGltfAndLibraryGlowWithoutChangingTheSurface() {
+        nativeCheck(output -> {
+            var model = new ModelBuilder().createBox(120, 120, 4,
+                  new Material(ColorAttribute.createDiffuse(Color.BLACK), new GpuLinearColors(),
+                        ColorAttribute.createEmissive(.2f, .1f, .02f, 1), new GpuModelLight(1, 0, 1, true),
+                        new GpuModelMaterial(1, 1, 0, null, new float[] { 1, 1, 1 },
+                              new float[] { .1f, .1f, .1f }, false, new float[4])),
+                  VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
+            var object = new ModelInstance(model);
+            var batch = new ModelBatch(GpuUnitShader.provider());
+            var environment = new Environment();
+            var lighting = new GpuEnvironmentLighting();
+            environment.set(lighting, ColorAttribute.createAmbientLight(0, 0, 0, 1));
+            int pixel = (SIZE / 2 * SIZE + SIZE / 2) * 4;
+            try {
+                for (boolean iso : new boolean[] { false, true }) {
+                    var camera = camera(iso);
+                    for (int hour : new int[] { 12, 0, 12 }) {
+                        lighting.set(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0, 2.5f, 0, 0)));
+                        draw(output, batch, object, camera, environment);
+                        float[] actual = output.linearPixels();
+                        float[] expected = hour == 0 ? new float[] { .3f, .2f, .12f } : new float[3];
+                        for (int c = 0; c < 3; c++) {
+                            assertEquals(expected[c], actual[pixel + c], .002,
+                                  "All emission follows day/night in the native model shader; hour=" + hour);
+                        }
+                    }
+                }
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally {
+                batch.dispose(); model.dispose(); lighting.dispose();
+            }
+        });
+    }
+
+    @Test
+    void buildingPaintRespectsAtlasMasksInLitAndUnlitRendering() {
+        nativeCheck(output -> {
+            Texture fixed = texture(0xbfbfbf00), mixed = texture(0xbfbfbf80), wall = texture(0xbfbfbfff);
+            var model = new ModelBuilder().createBox(120, 120, 4,
+                  new Material(TextureAttribute.createDiffuse(fixed), new GpuBuildingPaint(Color.WHITE),
+                        new GpuModelMaterial(.8f, 0, 0, null, new float[] { 1, 1, 1 }, new float[3], false,
+                              new float[4], true)),
+                  VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal | VertexAttributes.Usage.TextureCoordinates);
+            var object = new ModelInstance(model);
+            var material = object.materials.first();
+            var batch = new ModelBatch(GpuUnitShader.provider());
+            var lit = new Environment();
+            lit.set(ColorAttribute.createAmbientLight(.3f, .3f, .3f, 1));
+            lit.add(new DirectionalLight().set(.5f, .5f, .5f, 0, 0, -1));
+            try {
+                for (Environment environment : new Environment[] { lit, null }) {
+                    var camera = camera(false);
+                    for (Texture map : new Texture[] { fixed, mixed, wall }) {
+                        material.set(TextureAttribute.createDiffuse(map), new GpuBuildingPaint(Color.WHITE));
+                        int neutral = draw(output, batch, object, camera, environment);
+                        assertTrue(red(neutral) > 40, "Zero mask alpha must not make windows transparent");
+                        material.set(new GpuBuildingPaint(new Color(.08f, .8f, .15f, 1)));
+                        int tinted = draw(output, batch, object, camera, environment);
+                        if (map == fixed) {
+                            assertEquals(neutral, tinted, "Window/metal atlas pixels retain their original finish");
+                        } else {
+                            assertTrue(red(neutral) - red(tinted) > (map == wall ? 25 : 5), "Wall pixels receive the paint");
+                            assertTrue(green(tinted) > red(tinted), "Paint hue survives lighting");
+                        }
+                        material.remove(GpuBuildingPaint.TYPE);
+                        assertEquals(neutral, draw(output, batch, object, camera, environment), "Unpainted material uses white identity");
+                    }
+                }
+                assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
+            } finally {
+                fixed.dispose(); mixed.dispose(); wall.dispose(); batch.dispose(); model.dispose();
+            }
+        });
+    }
+
+    @Test
     void boardCameraProjectionDeterminesWhetherViewRaysAreParallel() {
         nativeCheck(output -> {
             var model = new ModelBuilder().createBox(120, 120, 4,
@@ -110,10 +187,12 @@ class GpuModelMaterialSmokeTest {
                     var camera = camera(iso);
                     var environment = new Environment();
                     environment.set(ColorAttribute.createAmbientLight(0, 0, 0, 1));
-                    environment.add(new DirectionalLight().set(.2f, .2f, .2f,
-                          -camera.direction.x, -camera.direction.y, camera.direction.z));
+                    var sun = new DirectionalLight().set(.2f, .2f, .2f,
+                          -camera.direction.x, -camera.direction.y, camera.direction.z);
+                    environment.add(sun);
                     var depth = new TextureDescriptor<>(clear);
-                    var shadowProjection = new Matrix4().setToScaling(0, 0, 0);
+                    // Near-constant UVs, with real projection axes for the receiver-plane drift calculation.
+                    var shadowProjection = new Matrix4().setToScaling(1e-6f, 1e-6f, 1e-6f);
                     environment.shadowMap = new ShadowMap() {
                         @Override public Matrix4 getProjViewTrans() { return shadowProjection; }
                         @Override public TextureDescriptor<Texture> getDepthMap() { return depth; }
@@ -124,14 +203,22 @@ class GpuModelMaterialSmokeTest {
                     depth.texture = dark;
                     int shadowed = red(draw(output, batch, object, camera, environment));
                     float shadowRadiance = output.linearPixels()[centerPixel];
+                    depth.texture = clear;
+                    sun.color.set(0, 0, 0, 1);
+                    draw(output, batch, object, camera, environment);
+                    float emissionRadiance = output.linearPixels()[centerPixel];
+                    sun.color.set(.2f, .2f, .2f, 1);
+                    // The isometric reflection can retain indirect ground light, which direct shadows leave intact.
+                    assertTrue(shadowRadiance >= emissionRadiance,
+                          "Geometry shadow retains at least the emission-only control's scene radiance");
                     assertEquals(26, shadowed, 1, "Geometry shadow removes diffuse and specular light, leaving emission");
-                    // Left texels block, right texels pass. The unchanged four taps at U=.125/.625 have
-                    // comparison weights 0/.75, so their mean is .375 (nearest sampling would give .5).
+                    // Left depth texels block, right pass. At U=.375 the 1.5-texel tent gives texels -1/0/1
+                    // weights .25/1.25/.75; clamping texel -1 to the left edge makes transmission one third.
                     depth.texture = edgeDepth.getColorBufferTexture();
                     shadowProjection.setTranslation(-.25f, 0, 0);
                     draw(output, batch, object, camera, environment);
                     float filteredRadiance = output.linearPixels()[centerPixel];
-                    assertEquals(shadowRadiance + (litRadiance - shadowRadiance) * .375f, filteredRadiance,
+                    assertEquals(shadowRadiance + (litRadiance - shadowRadiance) / 3, filteredRadiance,
                           .002f * Math.max(litRadiance, .01f),
                           "The real model provider filters hardware comparisons and leaves emission intact");
                     shadowProjection.setTranslation(0, 0, 0);

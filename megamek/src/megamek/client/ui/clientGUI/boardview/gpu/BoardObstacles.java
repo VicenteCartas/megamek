@@ -22,6 +22,9 @@ final class BoardObstacles {
     private static final float EARTHWORK_THIN = .2f;
     private final List<Footprint> footprints = new ArrayList<>();
     private final boolean plants;
+    private final List<BoardSurface.Face> ground;
+    private final float plantHeight, plantRadius;
+    private final List<BoardGroundFootprint> groundFootprints = new ArrayList<>();
 
     /** Model and kit files that could not be read: their features keep no clearance, and are not read again. */
     private static final java.util.Set<File> UNREADABLE = ConcurrentHashMap.newKeySet();
@@ -100,7 +103,18 @@ final class BoardObstacles {
 
     /** {@code plants}: what obstructs ground cover (grass, crops, reeds, turf), which grows through a civilian wall's net. */
     BoardObstacles(BoardScene scene, BoardScene.Tile tile, boolean plants) {
+        this(scene, tile, plants, null, 0, 0);
+    }
+
+    /** Grass supplies its actual support surfaces and maximum blade dimensions once per planting pass. */
+    BoardObstacles(BoardScene scene, BoardScene.Tile tile, List<BoardSurface.Face> ground, float height, float radius) {
+        this(scene, tile, true, ground, height, radius);
+    }
+
+    private BoardObstacles(BoardScene scene, BoardScene.Tile tile, boolean plants,
+          List<BoardSurface.Face> ground, float height, float radius) {
         this.plants = plants;
+        this.ground = ground; plantHeight = height; plantRadius = radius;
         add(scene, tile, false);
         // Rim rocks can overhang their hex; a neighbour's structure can do the same.
         for (int direction = 0; direction < 6; direction++) {
@@ -109,7 +123,7 @@ final class BoardObstacles {
         }
     }
 
-    private BoardObstacles() { plants = true; }
+    private BoardObstacles() { plants = true; ground = null; plantHeight = plantRadius = 0; }
 
     /**
      * The solid bodies of the structures standing on {@code tile} as placed on the board (buildings, fuel tanks,
@@ -122,10 +136,11 @@ final class BoardObstacles {
         return result.footprints;
     }
 
-    boolean isEmpty() { return footprints.isEmpty(); }
+    boolean isEmpty() { return footprints.isEmpty() && groundFootprints.isEmpty(); }
 
     boolean obstructs(Vector3 base, float radius, float height) {
-        return footprints.stream().anyMatch(footprint -> footprint.obstructs(base, radius, height));
+        return groundFootprints.stream().anyMatch(area -> area.contains(base.x, base.y))
+              || footprints.stream().anyMatch(footprint -> footprint.obstructs(base, radius, height));
     }
 
     private void add(BoardScene scene, BoardScene.Tile tile, boolean structures) {
@@ -135,6 +150,10 @@ final class BoardObstacles {
                   && captured.kind() != BoardScene.FeatureKind.FUEL_TANK) { continue; }
             var feature = BoardGroundCut.fitted(scene, tile, captured);
             var object = feature.decoration();
+            if (GpuAuthoredBuilding.supports(feature)) {
+                authored(scene, tile, feature);
+                continue;
+            }
             if (feature.asset().equals("bridge") && object == null) {
                 // A pier stands from below the floor up to the deck: its whole column is solid wherever cover could grow.
                 for (int d = 0; d < 6; d++) {
@@ -172,7 +191,7 @@ final class BoardObstacles {
             ConnectedKit.Kit kit = null;
             if (custom) {
                 try {
-                    kit = GpuBuilding.kit(feature.asset());
+                    kit = GpuBuilding.kit(feature.asset(), feature.footprintScale());
                 } catch (RuntimeException failure) {
                     // The asset's own model then draws (GpuAssets#building), and keeps its clearance.
                     unreadable(customFile, failure);
@@ -213,7 +232,7 @@ final class BoardObstacles {
                 // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
                 int levels = Math.max(1, Math.round(feature.height()));
                 for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
-                      GpuBuilding.seed(tile, feature))) {
+                      GpuBuilding.seed(tile, feature), megamek.common.board.HexAppearance.steppedBuilding(tile.appearance()))) {
                     var triangles = ConnectedKit.triangles(kit, 0, piece);
                     var underside = !piece.role().startsWith("roof") ? List.<Vector3>of()
                           : GpuBuildingInterior.plane(triangles, piece.level() * GpuBuilding.LEVEL_HEIGHT, false);
@@ -226,7 +245,7 @@ final class BoardObstacles {
                 });
             }
             float turn = (float) Math.toRadians(feature.rotation()), c = (float) Math.cos(turn), s = (float) Math.sin(turn);
-            float scale = feature.scale() * BoardGeometry.hexScale();
+            float scale = feature.modelScale() * BoardGeometry.hexScale();
             float x = BoardGeometry.centerX(tile.coords()) + feature.x() * BoardGeometry.hexScale();
             float y = BoardGeometry.centerY(tile.coords()) + feature.y() * BoardGeometry.hexScale();
             BoundingBox bounds = new BoundingBox().inf();
@@ -287,6 +306,44 @@ final class BoardObstacles {
                 continue;
             }
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall || multiHex));
+        }
+    }
+
+    /**
+     * Use the rendered member's actual mesh and generated floors, in its own frame. A generic decoration transform
+     * placed a duplicate of the entire building at every member. Grass compiles only the geometry within blade
+     * reach of its terrain, once per planting pass; distant dishes and raised overhangs do not clear ground below.
+     */
+    private void authored(BoardScene scene, BoardScene.Tile tile, BoardScene.Feature feature) {
+        var layout = GpuAuthoredBuilding.layout(scene, tile, feature);
+        var prepared = GpuAuthoredBuilding.prepare(scene, List.of(tile)).get(layout);
+        float scale = BoardGeometry.hexScale();
+        float x = BoardGeometry.centerX(tile.coords()), y = BoardGeometry.centerY(tile.coords());
+        List<Vector3> points = new ArrayList<>();
+        var meshes = prepared.levels().getFirst().meshes;
+        // LibGDX Array reuses its iterator; these immutable meshes are read by several workers at once.
+        for (int m = 0; m < meshes.size; m++) {
+            var mesh = meshes.get(m);
+            for (var part : mesh.parts) {
+                for (short index : part.indices) {
+                    int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                    points.add(new Vector3(x + mesh.vertices[at] * scale, y + mesh.vertices[at + 1] * scale,
+                          mesh.vertices[at + 2] * scale));
+                }
+            }
+        }
+        for (int floor = 0; floor < prepared.floors().size(); floor++) {
+            float z = GpuAuthoredBuilding.floorHeight(layout, floor) * scale;
+            for (var p : prepared.floors().get(floor)) { points.add(new Vector3(x + p.x * scale, y + p.y * scale, z)); }
+        }
+        if (ground != null) {
+            var area = BoardGroundFootprint.of(points, ground, plantHeight, plantRadius);
+            if (!area.isEmpty()) { groundFootprints.add(area); }
+        } else if (!points.isEmpty()) {
+            // Other dressing and sky visibility retain the actual height-bearing triangles.
+            var bounds = new BoundingBox().inf();
+            for (var point : points) { bounds.ext(point); }
+            footprints.add(new Footprint(List.copyOf(points), bounds.min.z, bounds.max.z, bounds, true));
         }
     }
 

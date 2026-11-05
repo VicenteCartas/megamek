@@ -23,6 +23,53 @@ import org.junit.jupiter.api.Test;
  * draws no legacy art the conversion takes, never decoding it itself.
  */
 class BoardTilesTest {
+    @Test void movingAnUncoveredOwnerRefreshesEveryRemoteShareWithoutRecapturingUnrelatedTiles() {
+        Coords owner = new Coords(1, 1), remote = new Coords(7, 7), unrelated = new Coords(9, 1);
+        Board board = Board.createEmptyBoard(10, 10);
+        var object = new megamek.common.board.BoardDecoration("remote-hpg", "prop", "buildings/authored/hpg-headquarters",
+              null, 0, 0, 0, false, 1, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        board.getHex(owner).setDecorations(List.of(object));
+        board.setHex(remote, new Hex(0, "building:2;bldg_cf:60;bldg_elev:3", ""));
+        board.getHex(remote).setBuildingReference(new megamek.common.board.BuildingVolumes.Reference(object.id(), owner));
+        try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+            var before = capture.tiles(board, (at, art) -> { });
+            var moved = object.transform(.3, -.2, 37, false, 1.2, object.placement());
+            board.getHex(owner).setDecorations(List.of(moved)); capture.changed(owner);
+            var after = capture.tiles(board, (at, art) -> { });
+            var share = after.get(remote.getX() * board.getHeight() + remote.getY());
+            assertEquals(moved, share.features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow().decoration());
+            int untouched = unrelated.getX() * board.getHeight() + unrelated.getY();
+            assertSame(before.get(untouched), after.get(untouched));
+            assertSame(after, capture.tiles(board, (at, art) -> { }));
+        }
+    }
+
+    @Test
+    void onlyPlacementsWithoutSavedMembershipUseTheVisualPropFallback() {
+        Coords owner = new Coords(1, 1), remote = new Coords(5, 5);
+        Board board = Board.createEmptyBoard(7, 7);
+        var object = new megamek.common.board.BoardDecoration("small-hpg", "prop", "buildings/authored/hpg-headquarters",
+              null, 0, 0, 90, false, .05, megamek.common.board.BoardDecoration.Placement.ground(), 0);
+        board.getHex(owner).setDecorations(List.of(object));
+        try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+            int index = owner.getX() * board.getHeight() + owner.getY();
+            var tiny = capture.tiles(board, (at, art) -> { }).get(index);
+            var feature = tiny.features().stream().filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow();
+            assertEquals(BoardScene.FeatureKind.PROP, feature.kind());
+            assertEquals(object, feature.decoration());
+            assertEquals(0, feature.height());
+
+            // Membership is authoritative even with an uncovered owner or a fully collapsed remote member.
+            board.getHex(remote).setBuildingReference(new megamek.common.board.BuildingVolumes.Reference(object.id(), owner));
+            capture.changed(remote);
+            assertTrue(capture.tiles(board, (at, art) -> { }).get(index).features().stream().noneMatch(GpuAuthoredBuilding::supports));
+            board.getHex(remote).setBuildingReference(null);
+            capture.changed(remote);
+            assertEquals(feature, capture.tiles(board, (at, art) -> { }).get(index).features().stream()
+                  .filter(GpuAuthoredBuilding::supports).findFirst().orElseThrow());
+        }
+    }
+
     @Test
     void aRoadEditThatSilentlyChangesANeighboursExitsRecapturesThatNeighbourInTheGame() throws Exception {
         Coords road = new Coords(3, 3), extension = road.translated(3), distant = new Coords(8, 8);

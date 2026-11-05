@@ -62,7 +62,7 @@ class LunarHabitatKitTest {
     void aLoneHexStandsEnclosed() {
         var walls = placed(kit(), new int[6], "base");
         assertFalse(GpuBuildingInterior.walls(walls, LEVEL / 2).isEmpty(), "Its ground storey's facades close round it");
-        assertTrue(northFacade(walls), "A facade stands on its north hexside");
+        assertFalse(northFacade(walls), "An isolated building leaves space before the north hexside");
     }
 
     @Test
@@ -79,7 +79,8 @@ class LunarHabitatKitTest {
             boolean wide = Math.max(a.y, Math.max(b.y, c.y)) - Math.min(a.y, Math.min(b.y, c.y)) > 4
                   || Math.max(a.x, Math.max(b.x, c.x)) - Math.min(a.x, Math.min(b.x, c.x)) > 4;
             if (upright && wide && Math.abs(a.x - b.x) < .01f && Math.abs(a.x - c.x) < .01f) {
-                assertEquals(half, Math.abs(a.x), .05f, "A facade along the band's side");
+                assertTrue(Math.abs(Math.abs(a.x) - half) < .05f || Math.abs(Math.abs(a.x) - (half - 2)) < .05f,
+                      "The exterior and its solid inner wall follow the band's side");
             }
         }
         assertFalse(northFacade(through), "Its north hexside stays open");

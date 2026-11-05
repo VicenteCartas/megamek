@@ -7,6 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.awt.BasicStroke;
+import java.awt.geom.Area;
+import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -20,6 +24,7 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
@@ -76,6 +81,90 @@ class GpuRoadSourceTest {
     }
 
     @Test
+    void neighbouringSlabSidesKeepTheirSourcePositionAndStopAtTheReceivingHex() {
+        var scene = BoardSurfaceBlendTest.scene(at -> BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, 9, 0,
+              BoardScene.Surface.GRASS));
+        var source = scene.tile(new Coords(3, 3));
+        var road = BoardRoad.of(scene, source);
+        var texture = mock(Texture.class);
+        when(texture.getWidth()).thenReturn(16);
+        when(texture.getHeight()).thenReturn(16);
+        float scale = BoardGeometry.hexScale(), half = 15;
+        var origin = BoardGeometry.center(source.coords(), 0);
+        for (int direction = 0; direction < 6; direction++) {
+            var receiving = scene.neighbor(source, direction);
+            var centre = BoardGeometry.center(receiving.coords(), 0);
+            var axis = new Vector3(centre).sub(origin);
+            float end = axis.len() / scale / 2 + 1;
+            axis.nor();
+            var across = new Vector3(-axis.y, axis.x, 0);
+            List<Vector3> outline = new ArrayList<>();
+            var path = new Path2D.Float();
+            for (float[] corner : new float[][] { { -10, -half }, { end, -half }, { end, half }, { -10, half } }) {
+                var local = new Vector3(axis).scl(corner[0]).mulAdd(across, corner[1]);
+                if (outline.isEmpty()) { path.moveTo(local.x, local.y); } else { path.lineTo(local.x, local.y); }
+                outline.add(new Vector3(local).scl(scale).add(origin));
+            }
+            path.closePath();
+            var patch = new GpuRoads.Patch(new Area(path), GpuRoads.SLABS, Color.WHITE, 1, GpuRoads.SLAB_RISE, null);
+            var surface = new BoardSurface(scene, receiving);
+            var triangles = GpuRoads.drape(source, surface, patch);
+            assertFalse(triangles.isEmpty(), "The road extends one unit onto its neighbour");
+            var data = GpuRoads.mask(road, patch);
+            var shifted = new GpuRoads.MaskData(data.pixels(), data.x() + (origin.x - centre.x) / scale,
+                  data.y() + (origin.y - centre.y) / scale, data.width(), data.height());
+            var mask = new GpuRoads.Mask(new TextureRegion(texture), shifted);
+            var hex = new Path2D.Float();
+            for (int corner = 0; corner < 6; corner++) {
+                var point = BoardGeometry.corner(receiving.coords(), 0, corner);
+                if (corner == 0) { hex.moveTo(point.x, point.y); } else { hex.lineTo(point.x, point.y); }
+            }
+            hex.closePath();
+            Area bounds = new Area(hex);
+            bounds.add(new Area(new BasicStroke(.005f * scale).createStrokedShape(hex)));
+            for (boolean tessellated : new boolean[] { false, true }) {
+                var attributes = tessellated ? GpuRoads.TESSELLATED_VERTICES : GpuRoads.VERTICES;
+                var mesh = new MeshBuilder();
+                mesh.begin(attributes, GL20.GL_TRIANGLES);
+                GpuRoads.write(() -> mesh, triangles, patch, mask, surface, source.coords(), false, 0, 1, tessellated, null);
+                int stride = attributes.vertexSize / Float.BYTES;
+                float[] vertices = new float[mesh.getNumVertices() * stride];
+                short[] indices = new short[mesh.getNumIndices()];
+                mesh.getVertices(vertices, 0); mesh.getIndices(indices, 0);
+                double terminalArea = 0;
+                int sides = 0;
+                for (int index = 0; index < indices.length; index += 3) {
+                    List<Vector3> points = new ArrayList<>();
+                    boolean vertical = true;
+                    for (int corner = 0; corner < 3; corner++) {
+                        int v = Short.toUnsignedInt(indices[index + corner]) * stride;
+                        vertical &= Math.abs(vertices[v + 5]) < .001f;
+                        points.add(new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]));
+                    }
+                    if (!vertical) { continue; }
+                    sides++;
+                    for (var point : points) {
+                        assertTrue(bounds.contains(point.x, point.y), "A neighbour's patch emits sides only in its receiving hex");
+                    }
+                    boolean originalEdge = false;
+                    for (int edge = 0; edge < outline.size(); edge++) {
+                        var a = outline.get(edge); var b = outline.get((edge + 1) % outline.size());
+                        originalEdge |= points.stream().allMatch(p -> Line2D.ptSegDist(a.x, a.y, b.x, b.y, p.x, p.y) < .005f * scale);
+                    }
+                    assertTrue(originalEdge, "Slab sides keep the source outline; the hex cut creates no extra end wall");
+                    if (points.stream().allMatch(p -> Math.abs(new Vector3(p).sub(origin).dot(axis) / scale - end) < .005f)) {
+                        terminalArea += new Vector3(points.get(1)).sub(points.get(0))
+                              .crs(new Vector3(points.get(2)).sub(points.get(0))).len() / 2;
+                    }
+                }
+                assertTrue(sides > 0, "The small overlap retains its actual slab side faces");
+                assertEquals(2 * half * scale * 1.6f * GpuRoads.SLAB_RISE * scale, terminalArea, .02f,
+                      "The real terminal cap is kept once at the source road's end");
+            }
+        }
+    }
+
+    @Test
     void tessellatedRoadsUseTheirSupportingControlTriangles() throws Exception {
         var scene = scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         var texture = mock(Texture.class);
@@ -100,7 +189,7 @@ class GpuRoadSourceTest {
                 var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
                 var mesh = new MeshBuilder();
                 mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
-                GpuRoads.write(() -> mesh, triangles, patch, mask, surface, false, 0, 1, true, null);
+                GpuRoads.write(() -> mesh, triangles, patch, mask, surface, tile.coords(), false, 0, 1, true, null);
                 int stride = GpuRoads.TESSELLATED_VERTICES.vertexSize / Float.BYTES;
                 float[] vertices = new float[mesh.getNumVertices() * stride];
                 mesh.getVertices(vertices, 0);
@@ -218,7 +307,7 @@ class GpuRoadSourceTest {
                     var mask = new GpuRoads.Mask(new TextureRegion(texture), GpuRoads.mask(road, patch));
                     var mesh = new MeshBuilder();
                     mesh.begin(GpuRoads.TESSELLATED_VERTICES, GL20.GL_TRIANGLES);
-                    GpuRoads.write(() -> mesh, GpuRoads.drape(tile, surface, patch), patch, mask, surface, false, 0, 1,
+                    GpuRoads.write(() -> mesh, GpuRoads.drape(tile, surface, patch), patch, mask, surface, tile.coords(), false, 0, 1,
                           true, GpuTerrain.coatSupports(plan, surface, scene, surfaces));
                     int stride = GpuRoads.TESSELLATED_VERTICES.vertexSize / Float.BYTES, shape = stride - 5;
                     float[] vertices = new float[mesh.getNumVertices() * stride];

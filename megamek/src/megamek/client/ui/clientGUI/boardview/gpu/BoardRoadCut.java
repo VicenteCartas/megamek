@@ -831,7 +831,11 @@ final class BoardRoadCut {
             if (stations.get(i) - stations.get(i - 1) < 1e-6f) { continue; }
             Vector3 a = i == 1 ? p : new Vector3(p).lerp(q, stations.get(i - 1));
             Vector3 b = i == stations.size() - 1 ? q : new Vector3(p).lerp(q, stations.get(i));
-            if (!region.contains((a.x + b.x) / 2 + nx * probe, (a.y + b.y) / 2 + ny * probe)) { continue; }
+            float x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
+            // Independently rounded road mouths can leave a sub-tolerance slit in their union. Both sides are road:
+            // it is not an exposed cut, and closing it would grow a full-height soil fin across the carriageway.
+            if (!region.contains(x + nx * probe, y + ny * probe)
+                  || toward == null && region.contains(x - nx * probe, y - ny * probe)) { continue; }
             // The emitted road's own surface, so the face's top runs along the road's edge between its vertices.
             float ra = roadHeight(road, a.x, a.y, edge(grade, a.x, a.y)), rb = roadHeight(road, b.x, b.y, edge(grade, b.x, b.y));
             float da = a.z - ra, db = b.z - rb;
@@ -907,6 +911,11 @@ final class BoardRoadCut {
                         nx = -nx;
                         ny = -ny;
                     }
+                    // A rounding-width slit between road mouths is internal to the reservation. Skip its detour
+                    // so the wall stays one run, with the same panel joints through the mouth as everywhere else.
+                    float mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2, seam = 4 * epsilon;
+                    if (region.contains(mx + nx * seam, my + ny * seam)
+                          && region.contains(mx - nx * seam, my - ny * seam)) { continue; }
                     int count = Math.max(1, (int) Math.ceil(length / m));
                     for (int k = 0; k < count; k++) {
                         float x = a[0] + dx * k / count, y = a[1] + dy * k / count;

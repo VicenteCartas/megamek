@@ -44,13 +44,14 @@ struct Surface {
     vec3 emission;           // radiance the light does not scale
     float scatter;           // subsurface scattering (Godot's subsurf_scatter), 0 to 1: light wraps past the terminator
     float regolith;          // share lit as moon dust (regolithResponse), 0 to 1; 0 elsewhere
+    float dielectric;        // normal-incidence dielectric reflection; .04 ordinarily, .0758 for ruby (IOR 1.76)
 };
 
 // An opaque dielectric over GROUND_ALBEDO, without occlusion, transmission, heat, emission or scattering; callers set
 // what they have.
 Surface opaqueSurface(vec3 albedo, vec3 normal, vec3 geometric, float roughness, float film, float visibility) {
     return Surface(albedo, normal, geometric, roughness, film, vec3(.04), 0.0, 1.0, 1.0, 1.0, 1.0, visibility,
-          vec3(1.0), vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0, 0.0);
+          vec3(1.0), vec3(0.0), 0.0, GROUND_ALBEDO, vec3(0.0), 0.0, 0.0, .04);
 }
 
 // Moon dust scatters the sun as lunar regolith does, not as a Lambertian surface: it takes cos i / (cos i + cos e)
@@ -114,7 +115,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     // The water coat, the metallic share and specular antialiasing (surfaceVariance) set every lobe's roughness and
     // f0, once.
     float roughness = dielectricRoughness(s.film, s.roughness);
-    vec3 f0 = mix(dielectricF0(s.film), s.f0, s.metallic);
+    vec3 f0 = mix(vec3(mix(s.dielectric, .02037, clamp(s.film, 0.0, 1.0))), s.f0, s.metallic);
     vec3 diffuseBudget = 1.0 - specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);
     vec3 multiscatter = specularMultiscatter(max(0.0, dot(normal, view)), roughness, f0);
     // The sky's ambient occlusion, with the screen-space occlusion of the opaque scene (ambient-occlusion.glsl): once,
@@ -132,7 +133,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     vec3 ambient = (sky * occlusion * s.cavity + localLight * s.cavity) * diffuseBudget;
     vec3 light = sunDirection();
     // Contact shadows (ambient-occlusion.glsl) add the small occluders the shadow map is too coarse for.
-    vec3 sun = sunColor() * s.visibility * screen.y;
+    vec3 sun = sunColor() * crystalTransmission(v_cloudPosition) * s.visibility * screen.y;
     bool lit = dot(s.geometric, light) > 0.0;
     vec3 incidence = lit ? diffuseReflectance(normal, light, view, roughness, f0) : vec3(0.0);
     if (s.scatter > 0.0) {
@@ -160,7 +161,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
         // The material response and spill light are identical on both sides of the blend. Only the sky bounce,
         // occlusion and shadow filter differ; reuse the expensive terms instead of shading twice.
         vec3 hotAmbient = (skyLight(normal, GROUND_ALBEDO) + localLight) * diffuseBudget;
-        vec3 hotDirect = sunColor() * incident * surfaceVisibility();
+        vec3 hotDirect = sunColor() * crystalTransmission(v_cloudPosition) * incident * surfaceVisibility();
         ambient = mix(ambient, hotAmbient * s.cavity, s.heat);
         direct = mix(direct, hotDirect, s.heat);
         sheen *= 1.0 - s.heat;

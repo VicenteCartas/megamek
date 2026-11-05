@@ -89,7 +89,7 @@ final class BoardFiringGeometry {
             if (tile == null || coords.equals(line.source().coords()) || coords.equals(line.target().coords())) {
                 continue;
             }
-            float[] interval = crossing(start, end, coords);
+            float[] interval = BoardGeometry.crossing(start, end, coords);
             if (interval == null) {
                 continue;
             }
@@ -114,28 +114,6 @@ final class BoardFiringGeometry {
             result.add(new Vector3(start).lerp(end, t).add(0, 0, 4 * lift * t * (1 - t)));
         }
         return result;
-    }
-
-    /** Segment/hex clipping, including both neighbours when a shot travels exactly along an edge. */
-    static float[] crossing(Vector3 start, Vector3 end, Coords coords) {
-        float enter = 0, exit = 1;
-        for (int corner = 0; corner < 6; corner++) {
-            Vector3 a = BoardGeometry.corner(coords, 0, corner);
-            Vector3 b = BoardGeometry.corner(coords, 0, corner + 1);
-            float ex = b.x - a.x, ey = b.y - a.y;
-            float offset = ex * (start.y - a.y) - ey * (start.x - a.x);
-            float slope = ex * (end.y - start.y) - ey * (end.x - start.x);
-            if (Math.abs(slope) < 0.001f) {
-                if (offset < -0.001f) {
-                    return null;
-                }
-            } else if (slope > 0) {
-                enter = Math.max(enter, -offset / slope);
-            } else {
-                exit = Math.min(exit, -offset / slope);
-            }
-        }
-        return enter <= exit ? new float[] { enter, exit } : null;
     }
 
     static RangeEdge rangeEdge(BoardScene scene, Coords coords, int edge) {

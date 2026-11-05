@@ -174,6 +174,26 @@ final class BoardGeometry {
         return out.set(HexTile.cornerX(coords, k, width()), HexTile.cornerY(coords, k, height()), elevation * level());
     }
 
+    /** The parameter interval of a world-space segment inside a hex; boundary segments belong to both neighbours. */
+    static float[] crossing(Vector3 start, Vector3 end, Coords coords) {
+        float enter = 0, exit = 1;
+        for (int corner = 0; corner < 6; corner++) {
+            Vector3 a = corner(coords, 0, corner);
+            Vector3 b = corner(coords, 0, corner + 1);
+            float ex = b.x - a.x, ey = b.y - a.y;
+            float offset = ex * (start.y - a.y) - ey * (start.x - a.x);
+            float slope = ex * (end.y - start.y) - ey * (end.x - start.x);
+            if (Math.abs(slope) < 0.001f) {
+                if (offset < -0.001f) { return null; }
+            } else if (slope > 0) {
+                enter = Math.max(enter, -offset / slope);
+            } else {
+                exit = Math.min(exit, -offset / slope);
+            }
+        }
+        return enter <= exit ? new float[] { enter, exit } : null;
+    }
+
     static int edgeDirection(int edge) {
         return HexTile.edgeDirection(edge);
     }

@@ -193,6 +193,117 @@ class GpuMovePlanTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void backwardsWaypointCanTurnLeftAndContinueForward(boolean turnBeforeToggle) throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            Coords behind = GpuMovementFixture.START.translated(3, 2);
+            Coords destination = behind.translated(5);
+            onSwing(() -> {
+                moving.unit.setOriginalWalkMP(6);
+                for (Coords coords : List.of(GpuMovementFixture.START.translated(3), behind, destination)) {
+                    moving.board.game.getBoard().setHex(coords, new Hex());
+                }
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            plan.setMode(Mode.BACK);
+            plan.planTo(behind, 0, true);
+            Snapshot backed = shown(moving);
+            assertEquals(List.of(Band.BACK, Band.BACK), backed.route().stream().map(Step::band).toList());
+            assertEquals(List.of(behind), pinHexes(backed));
+
+            if (turnBeforeToggle) {
+                plan.turn(-1);
+            }
+            Snapshot beforeToggle = shown(moving);
+            plan.setMode(Mode.BACK);
+            Snapshot forward = shown(moving);
+            assertEquals(Mode.AUTO, forward.mode());
+            assertEquals(beforeToggle.route(), forward.route(), "Changing direction keeps the planned steps");
+            assertEquals(beforeToggle.pins(), forward.pins(), "Changing direction keeps the waypoints");
+            if (!turnBeforeToggle) {
+                plan.turn(-1);
+            }
+            Snapshot turned = shown(moving);
+            assertEquals(5, turned.facing());
+            assertEquals(5, turned.pins().getLast().facing(), "The waypoint retains its chosen facing");
+
+            plan.planTo(destination, 0, false);
+            Snapshot continued = shown(moving);
+            assertEquals(turned.route(), continued.route().subList(0, turned.route().size()));
+            assertEquals(List.of(MoveStepType.BACKWARDS, MoveStepType.BACKWARDS, MoveStepType.TURN_LEFT,
+                  MoveStepType.FORWARDS), onSwing(() -> moving.display.getPlannedMovement().getStepVector().stream()
+                  .map(MoveStep::getType).toList()));
+            assertEquals(destination, continued.destination());
+            assertEquals(4, continued.cost());
+            assertEquals(EntityMovementType.MOVE_WALK, continued.type());
+            assertTrue(continued.legal());
+            assertEquals(turned.pins(), continued.pins());
+
+            plan.undo();
+            assertEquals(turned.route(), shown(moving).route());
+            // Undo the turn and direction change in either order, including the waypoint's original facing.
+            plan.undo();
+            plan.undo();
+            Snapshot undone = shown(moving);
+            assertEquals(Mode.BACK, undone.mode());
+            assertEquals(backed.route(), undone.route());
+            assertEquals(backed.pins(), undone.pins());
+            verify(moving.gui, never()).addToast(any(), anyString());
+        }
+    }
+
+    @Test
+    void directionChangesKeepPinnedAndDraftStepsAndCanBeUndoneOrCleared() throws Exception {
+        try (GpuMovementFixture moving = GpuMovementFixture.create()) {
+            onSwing(() -> {
+                moving.board.game.getBoard().setHex(GpuMovementFixture.START, new Hex());
+                return null;
+            });
+            GpuMovePlan plan = plan(moving);
+            plan.planTo(NORTH_1, 0, true);
+            plan.planTo(NORTH_2, 0, false);
+            Snapshot before = shown(moving);
+            plan.setMode(Mode.BACK);
+            Snapshot backwards = shown(moving);
+            assertEquals(Mode.BACK, backwards.mode());
+            assertEquals(before.route(), backwards.route());
+            assertEquals(before.pins(), backwards.pins());
+
+            // The new backward leg replaces only the unpinned draft after the forward waypoint.
+            plan.planTo(GpuMovementFixture.START, 0, true);
+            Snapshot mixed = shown(moving);
+            assertEquals(List.of(Band.WALK, Band.BACK), mixed.route().stream().map(Step::band).toList());
+            assertEquals(List.of(NORTH_1, GpuMovementFixture.START), pinHexes(mixed));
+            assertEquals(2, mixed.cost());
+            plan.setMode(Mode.BACK);
+            assertEquals(mixed.route(), shown(moving).route());
+            plan.planTo(NORTH_1, 0, false);
+            Snapshot continued = shown(moving);
+            assertEquals(List.of(Band.WALK, Band.BACK, Band.WALK),
+                  continued.route().stream().map(Step::band).toList());
+            assertEquals(3, continued.cost());
+            assertTrue(continued.legal());
+
+            plan.clearRoute();
+            Snapshot cleared = shown(moving);
+            assertTrue(cleared.route().isEmpty() && cleared.pins().isEmpty());
+            plan.undo();
+            assertEquals(continued.route(), shown(moving).route());
+            assertEquals(continued.pins(), shown(moving).pins());
+
+            plan.setMode(Mode.JUMP);
+            Snapshot jumping = shown(moving);
+            assertEquals(Mode.JUMP, jumping.mode());
+            assertTrue(jumping.route().isEmpty() && jumping.pins().isEmpty());
+            plan.undo();
+            assertEquals(Mode.AUTO, shown(moving).mode());
+            assertEquals(continued.route(), shown(moving).route());
+            assertEquals(continued.pins(), shown(moving).pins());
+        }
+    }
+
     /** interaction-test.mjs 33-52: automatic walk and run, undo, explicit walk and back, a pin, its continuation, X. */
     @Test
     void plotsPinsContinuesUndoesTurnsAndChangesModeAsThePrototype() throws Exception {

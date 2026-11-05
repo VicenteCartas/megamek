@@ -34,7 +34,8 @@ class BoardModelIdsTest {
             String path = entry.getValue().asText();
             assertNull(ids.put(path, entry.getKey()), "Two ids name " + path);
             // A generated asset has no file: its generator (BoardGenerator) is its model.
-            if (!Files.isRegularFile(board.resolve(path + ".glb")) && BoardGenerator.of(path) == null) {
+            if (!Files.isRegularFile(board.resolve(path + ".glb")) && BoardGenerator.of(path) == null
+                  && !(path.startsWith("buildings/") && TilesetScenery.customBuildingFile(path).isFile())) {
                 missing.add(entry.getKey() + ": " + path);
             }
         }

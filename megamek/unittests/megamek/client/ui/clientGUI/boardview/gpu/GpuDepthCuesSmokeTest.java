@@ -50,7 +50,7 @@ class GpuDepthCuesSmokeTest {
           new View("top", new Coords(15, 8), .5f, 0, 0));
     /** The frames after the cut that the easing review saves. */
     private static final List<Integer> EASING_FRAMES = List.of(1, 6, 18, 60);
-    private static final File BOARD = new File("data/boards/Alien Worlds/32x17 Crystalline Canyon.board");
+    private static final File BOARD = new File("data/boards/Alien Worlds/32x17 Crystalline Canyon.board2");
 
     @Test
     void capturesCanyonWithAndWithoutDepthCues() throws Exception {

@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -48,13 +47,12 @@ import org.junit.jupiter.api.Test;
  * clear hexes; no Theme row) and stays highlighted; Ground & water's Liquids hold Water and Lava; the Water card's Brush
  * offers Depth and Current, and the cards then preview clear water, since Water does not paint the Volcano theme it
  * keeps; the Lava card previews lava and its Brush offers Depth only; "lava" and "magma" find it; a picker family's Type
- * changes the brush's asset; the DropShip blueprint paints its seven hexes and erases as its component, over a radius;
+ * changes the brush's asset;
  * and a new editor window opens on the page the last one showed. Captures under b12-palette at 1366x768 and 1280x800.
  */
 @Tag("on-demand")
 class GpuEditorPaletteSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "b12-palette");
-    private static final Coords DROPSHIP = new Coords(5, 5);
 
     /** One step of a run: false while it waits for something (previews, the board) and runs again next frame. */
     interface Step { boolean run(GpuBattleView view, GpuMapSource source, Group root) throws Exception; }
@@ -110,6 +108,11 @@ class GpuEditorPaletteSmokeTest {
               (view, source, root) -> { GpuBoardTestUi.click("editor-category-item-buildings"); return true; },
               (view, source, root) -> {
                   assertNotNull(root.findActor("editor-section-buildings/looks"), "The list jumps to Buildings");
+                  for (String section : List.of("standard", "fortresses", "hangars", "gun-emplacements", "walls")) {
+                      assertNotNull(root.findActor("editor-section-buildings/" + section));
+                  }
+                  if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
+                  GpuBoardTestUi.capture(new File(OUTPUT, "buildings.png"));
                   search(root, "tree");
                   return true;
               },
@@ -130,18 +133,22 @@ class GpuEditorPaletteSmokeTest {
                   assertEquals("", ((TextField) root.findActor("editor-search")).getText(), "Esc clears the search first");
                   assertNotNull(root.findActor("editor-section-buildings/looks"));
                   assertNotNull(root.findActor("editor-category"), "The category's drop-down is back");
-                  GpuBoardTestUi.click("editor-gallery-Modular buildings");
+                  GpuBoardTestUi.category("vegetation");
+                  return true;
+              },
+              (view, source, root) -> {
+                  GpuBoardTestUi.click("editor-gallery-Container yard");
                   return true;
               },
               (view, source, root) -> {
                   assertNull(root.findActor("editor-category"), "A gallery's header names it");
                   if (!GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))) { return false; }
-                  GpuBoardTestUi.capture(new File(OUTPUT, "gallery-modular.png"));
-                  search(root, modular().label());
+                  GpuBoardTestUi.capture(new File(OUTPUT, "gallery-container-yard.png"));
+                  search(root, yardDesign().label());
                   return true;
               },
               (view, source, root) -> {
-                  assertNotNull(root.findActor("editor-library-" + modular().key()), "The search reaches inside the gallery");
+                  assertNotNull(root.findActor("editor-library-" + yardDesign().key()), "The search reaches inside the gallery");
                   escape();
                   return true;
               },
@@ -236,33 +243,6 @@ class GpuEditorPaletteSmokeTest {
                   assertEquals("scenery/roofs/landing-beacon-round", source.editorState().activeBrush().key(), "Type re-arms the member");
                   assertTrue(((UiButton) root.findActor("editor-library-scenery/roofs/landing-beacon-hex")).isChecked(),
                         "The family's card stays highlighted");
-                  search(root, "dropship");
-                  return true;
-              },
-              (view, source, root) -> { GpuBoardTestUi.click("editor-library-building/dropship"); return true; },
-              (view, source, root) -> {
-                  assertEquals("building/dropship", source.editorState().activeBrush().key());
-                  source.editorPointer(DROPSHIP, 0, 0, false, source.takeFrame().boardGeneration()); source.endEditorStroke();
-                  return true;
-              },
-              (view, source, root) -> {
-                  assertEquals(72, source.editorState().property("building").exits(), "The DropShip's centre piece");
-                  view.boardCamera.center(BoardGeometry.center(DROPSHIP, 0));
-                  view.boardCamera.zoom(.35f / view.boardCamera.camera.zoom);
-                  return true;
-              },
-              (view, source, root) -> {
-                  if (busy(view)) { return false; }
-                  GpuBoardTestUi.capture(new File(OUTPUT, "dropship.png"));
-                  source.editorCommand(new BoardEditorSession.Command(BoardEditorSession.Action.TOOL, "", "ERASE"),
-                        source.takeFrame().boardGeneration());
-                  return true;
-              },
-              (view, source, root) -> {
-                  // The DropShip's Erase is its component's: a radius, and the Erase hint instead of the blueprint's.
-                  Group brush = root.findActor("editor-brush");
-                  assertNotNull(brush.findActor("editor-brush-"), "Radius");
-                  assertNotEquals(UiKit.text("BoardEditor.hint.hexBlueprint"), ((Label) brush.findActor("editor-brush-hint")).getText().toString());
                   return true;
               }));
     }
@@ -355,10 +335,10 @@ class GpuEditorPaletteSmokeTest {
               }));
     }
 
-    /** The gallery's sixth design. */
-    private static BoardEditorBlueprint.Entry modular() {
+    /** A design inside a current gallery. */
+    private static BoardEditorBlueprint.Entry yardDesign() {
         return BoardEditorBlueprint.get().categories().stream().flatMap(c -> c.sections().stream()).flatMap(s -> s.cards().stream())
-              .filter(card -> card.label().equals("Modular buildings")).findFirst().orElseThrow().members().get(5);
+              .filter(card -> card.label().equals("Container yard")).findFirst().orElseThrow().members().get(2);
     }
 
     private static boolean busy(GpuBattleView view) throws ReflectiveOperationException {

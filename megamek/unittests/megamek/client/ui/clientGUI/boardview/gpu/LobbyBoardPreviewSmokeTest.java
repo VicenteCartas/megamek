@@ -75,14 +75,20 @@ class LobbyBoardPreviewSmokeTest {
                 conditions.setLight(Light.FULL_MOON);
                 Inspection inspection = inspection(board, conditions);
                 preview.loading("Inspection test");
+                Image image = preview.findActor("map-inspection-image");
+                assertSame(image, stage.getKeyboardFocus(), "opening the preview claims camera focus immediately");
                 preview.show(inspection.source());
                 GpuLoadingPanel loading = preview.findActor("board-loading-panel");
                 assertTrue(loading.isVisible());
                 assertNotNull(loading.findActor("board-loading-grid"));
                 assertNotNull(loading.findActor("board-loading-shaders"));
+                // A window/input reset during loading must not leave the newly presented preview unfocused.
+                stage.setKeyboardFocus(null);
+                stage.setScrollFocus(null);
                 awaitImage(stage, preview);
                 assertFalse(loading.isVisible());
-                Image image = preview.findActor("map-inspection-image");
+                assertSame(image, stage.getKeyboardFocus());
+                assertSame(image, stage.getScrollFocus());
                 assertEquals(preview.getWidth(), image.getWidth(), .01f);
                 assertEquals(preview.getHeight(), image.getHeight(), .01f);
                 assertEquals(0, image.getY(), .01f, "title, controls and hints must overlay the full preview");
@@ -114,8 +120,14 @@ class LobbyBoardPreviewSmokeTest {
                 stage.act(1 / 60f);
                 assertTrue(loading.isVisible(), "the loading screen must get a frame before the new build starts");
                 assertNull(image.getDrawable());
+                TextField search = new TextField("", theme.skin, "input");
+                search.setBounds(20, 70, 220, 35);
+                stage.addActor(search);
+                click(stage, search);
                 awaitImage(stage, preview);
                 assertFalse(loading.isVisible());
+                assertSame(search, stage.getKeyboardFocus(), "finishing a load must not steal focus after an outside click");
+                search.remove();
                 assertEquals(45, camera.azimuth(), .001f, "a new preview resets the camera bearing");
                 assertEquals(BoardCamera.ISOMETRIC_TILT, camera.tilt(), .001f, "a new preview starts in ISO");
                 float fittedZoom = camera.camera.zoom;
@@ -147,18 +159,17 @@ class LobbyBoardPreviewSmokeTest {
           Inspection inspection) throws Exception {
         click(stage, preview.findActor("map-view-top"));
         click(stage, preview.findActor("map-view-fit"));
-        click(stage, preview.findActor("map-inspection-los"));
+        Image image = preview.findActor("map-inspection-image");
+        Coords from = new Coords(0, 3), to = new Coords(5, 3);
+        clickHex(stage, image, camera, from, Input.Buttons.RIGHT);
+        awaitImage(stage, preview);
+        click(stage, stage.getRoot().findActor("map-line-of-sight"));
         SwingUtilities.invokeAndWait(() -> { });
         awaitImage(stage, preview);
         assertTrue(inspection.source().takeFrame().panels().los().open());
-        Image image = preview.findActor("map-inspection-image");
-        Coords from = new Coords(0, 3), to = new Coords(5, 3);
-        clickHex(stage, image, camera, from);
-        SwingUtilities.invokeAndWait(() -> { });
-        awaitImage(stage, preview);
         assertEquals(from, inspection.source().takeFrame().panels().los().start().coords(),
               "picking is local to the resized embedded viewport");
-        clickHex(stage, image, camera, to);
+        clickHex(stage, image, camera, to, Input.Buttons.LEFT);
         SwingUtilities.invokeAndWait(() -> { });
         awaitImage(stage, preview);
         var result = inspection.source().takeFrame().panels().los();
@@ -173,13 +184,13 @@ class LobbyBoardPreviewSmokeTest {
         assertFalse(inspection.source().takeFrame().panels().los().open());
     }
 
-    private static void clickHex(Stage stage, Image image, BoardCamera camera, Coords coords) {
+    private static void clickHex(Stage stage, Image image, BoardCamera camera, Coords coords, int button) {
         Vector3 point = camera.camera.project(BoardGeometry.center(coords, 0), 0, 0,
               camera.camera.viewportWidth, camera.camera.viewportHeight);
         Vector2 at = screen(stage, image, point.x * image.getWidth() / camera.camera.viewportWidth,
               point.y * image.getHeight() / camera.camera.viewportHeight);
-        stage.touchDown(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
-        stage.touchUp(Math.round(at.x), Math.round(at.y), 0, Input.Buttons.LEFT);
+        stage.touchDown(Math.round(at.x), Math.round(at.y), 0, button);
+        stage.touchUp(Math.round(at.x), Math.round(at.y), 0, button);
     }
 
     private static void checkDisplayPreferences(Stage stage, LobbyBoardPreview preview, BoardCamera camera,
@@ -302,6 +313,11 @@ class LobbyBoardPreviewSmokeTest {
         field.setAccessible(true);
         BoardCamera camera = (BoardCamera) field.get(preview);
         Image image = preview.findActor("map-inspection-image");
+        float openedBearing = camera.azimuth();
+        assertTrue(stage.keyDown(Input.Keys.E), "camera keys work before clicking inside a newly opened preview");
+        preview.act(.05f);
+        stage.keyUp(Input.Keys.E);
+        assertNotEquals(openedBearing, camera.azimuth());
         click(stage, preview.findActor("map-view-top"));
         assertEquals(0, camera.tilt(), .001f);
         assertSame(image, stage.getKeyboardFocus());
@@ -368,6 +384,29 @@ class LobbyBoardPreviewSmokeTest {
         assertEquals("we", search.getText());
         assertEquals(bearing, camera.azimuth(), .001f, "focus loss clears held rotation even without its key-up");
         assertTrue(still.epsilonEquals(camera.focus, .001f), "typing in another field must not move the camera");
+        Vector2 overMap = screen(stage, image, image.getWidth() / 2, image.getHeight() / 2);
+        stage.mouseMoved(Math.round(overMap.x), Math.round(overMap.y));
+        assertSame(search, stage.getKeyboardFocus(), "hovering alone must not take a field's keyboard focus");
+        // Resolve the wheel target before Stage's next hover update, as the lobby's input stage does.
+        UiKit.focusScrollAt(stage, Math.round(overMap.x), Math.round(overMap.y));
+        float beforeZoom = camera.camera.zoom;
+        assertTrue(stage.scrolled(0, -1));
+        assertNotEquals(beforeZoom, camera.camera.zoom, "the first wheel tick zooms without a preceding click");
+        assertSame(image, stage.getKeyboardFocus(), "wheel zoom also enables camera keys");
+        assertSame(image, stage.getScrollFocus());
+        bearing = camera.azimuth();
+        assertTrue(stage.keyDown(Input.Keys.E));
+        preview.act(.05f);
+        stage.keyUp(Input.Keys.E);
+        assertNotEquals(bearing, camera.azimuth());
+        click(stage, search);
+        Vector2 overSearch = screen(stage, search, search.getWidth() / 2, search.getHeight() / 2);
+        stage.mouseMoved(Math.round(overSearch.x), Math.round(overSearch.y));
+        UiKit.focusScrollAt(stage, Math.round(overSearch.x), Math.round(overSearch.y));
+        beforeZoom = camera.camera.zoom;
+        stage.scrolled(0, -1);
+        assertEquals(beforeZoom, camera.camera.zoom, "scrolling elsewhere must not zoom the preview");
+        assertSame(search, stage.getKeyboardFocus());
         search.remove();
         click(stage, image);
         assertSame(image, stage.getKeyboardFocus());

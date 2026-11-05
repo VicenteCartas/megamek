@@ -47,11 +47,14 @@ import megamek.client.bot.princess.CardinalEdge;
 import megamek.common.Hex;
 import megamek.common.OffBoardDirection;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardType;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
+import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
@@ -227,14 +230,6 @@ public class BoardUtilities {
                 source.getAnnotations().forEach((at, notes) -> result.setAnnotations(
                       new Coords(at.getX() + dx, at.getY() + dy), java.util.List.copyOf(notes)));
             }
-        }
-        java.util.Set<String> identities = new java.util.HashSet<>();
-        for (Hex hex : resultData) {
-            hex.setDecorations(hex.getDecorations().stream().map(object -> {
-                var copy = object;
-                while (!identities.add(copy.id())) { copy = copy.duplicate().withGroup(object.group()); }
-                return copy;
-            }).toList());
         }
         result.setRoadsAutoExit(roadsAutoExit);
         // Initialize all hexes - buildings, exits, etc
@@ -432,9 +427,29 @@ public class BoardUtilities {
      * Copies the data of another board into given array of Hexes, offset by the specified x and y.
      */
     protected static void copyBoardInto(Hex[] dest, int destWidth, int x, int y, Board copied) {
+        Set<String> identities = new HashSet<>();
+        for (Hex hex : dest) { if (hex != null) { hex.getDecorations().forEach(object -> identities.add(object.id())); } }
+        Map<String, String> ids = new HashMap<>();
         for (int i = 0; i < copied.getHeight(); i++) {
             for (int j = 0; j < copied.getWidth(); j++) {
-                dest[(i + y) * destWidth + j + x] = copied.getHex(j, i).duplicate();
+                Hex hex = copied.getHex(j, i).duplicate();
+                hex.setDecorations(hex.getDecorations().stream().map(object -> {
+                    var copy = object;
+                    while (!identities.add(copy.id())) { copy = copy.duplicate().withGroup(object.group()); }
+                    ids.put(object.id(), copy.id());
+                    return copy;
+                }).toList());
+                dest[(i + y) * destWidth + j + x] = hex;
+            }
+        }
+        for (int i = 0; i < copied.getHeight(); i++) {
+            for (int j = 0; j < copied.getWidth(); j++) {
+                Hex hex = dest[(i + y) * destWidth + j + x];
+                var ref = hex.getBuildingReference();
+                if (ref != null) {
+                    hex.setBuildingReference(new BuildingVolumes.Reference(ids.getOrDefault(ref.id(), ref.id()),
+                          new Coords(ref.anchor().getX() + x, ref.anchor().getY() + y)));
+                }
             }
         }
     }
@@ -1663,12 +1678,38 @@ public class BoardUtilities {
             for (int x = 0; x < board.getWidth(); x++) {
                 Coords to = resized(new Coords(x, y), north, west);
                 if (to.getX() >= 0 && to.getX() < width && to.getY() >= 0 && to.getY() < height) {
-                    data[to.getY() * width + to.getX()] = board.getHex(x, y).duplicate();
+                    Hex hex = board.getHex(x, y).duplicate();
+                    var ref = hex.getBuildingReference();
+                    if (ref != null) { hex.setBuildingReference(new BuildingVolumes.Reference(ref.id(), resized(ref.anchor(), north, west))); }
+                    data[to.getY() * width + to.getX()] = hex;
                 }
             }
         }
         for (int i = 0; i < data.length; i++) {
             if (data[i] == null) { data[i] = new Hex(); }
+        }
+        // Cropping an anchor keeps the surviving sections at the same world pose, owned by a remaining member.
+        Map<String, Coords> anchors = new HashMap<>();
+        for (int i = 0; i < data.length; i++) {
+            var ref = data[i].getBuildingReference();
+            if (ref == null || ref.anchor().getX() >= 0 && ref.anchor().getX() < width
+                  && ref.anchor().getY() >= 0 && ref.anchor().getY() < height) { continue; }
+            if (!anchors.containsKey(ref.id())) {
+                Coords at = new Coords(i % width, i / width);
+                Coords source = new Coords(ref.anchor().getX() - west,
+                      ref.anchor().getY() - north - ((ref.anchor().getX() - west) & 1 & west));
+                Hex owner = board.getHex(source);
+                var object = owner == null ? null : owner.getDecorations().stream().filter(o -> o.id().equals(ref.id())).findFirst().orElse(null);
+                if (object == null) { data[i].setBuildingReference(null); continue; }
+                double dx = (HexTile.centerX(ref.anchor(), HexTile.MODEL_WIDTH) - HexTile.centerX(at, HexTile.MODEL_WIDTH)) / HexTile.MODEL_WIDTH;
+                double dy = (HexTile.centerY(ref.anchor(), HexTile.HEIGHT) - HexTile.centerY(at, HexTile.HEIGHT)) / HexTile.HEIGHT;
+                List<BoardDecoration> objects = new ArrayList<>(data[i].getDecorations());
+                objects.add(object.transform(object.x() + dx, object.y() + dy, object.rotation(), object.mirror(), object.scale(),
+                      BoardDecoration.Placement.absolute(object.placement().level(owner))));
+                data[i].setDecorations(objects);
+                anchors.put(ref.id(), at);
+            }
+            data[i].setBuildingReference(new BuildingVolumes.Reference(ref.id(), anchors.get(ref.id())));
         }
         Board result = new Board();
         result.copyMetadataFrom(board);
@@ -1719,6 +1760,11 @@ public class BoardUtilities {
                     if (terrain != null && terrain.getExits() >= 0 && terrain.getExits() <= 63) { terrain.flipExits(horiz, vert); }
                 }
                 hex.setDecorations(hex.getDecorations().stream().map(object -> object.flip(horiz, vert)).toList());
+                if (hex.getBuildingReference() != null) {
+                    var reference = hex.getBuildingReference(); var anchor = reference.anchor();
+                    hex.setBuildingReference(new BuildingVolumes.Reference(reference.id(),
+                          new Coords(horiz ? width - anchor.getX() - 1 : anchor.getX(), vert ? height - anchor.getY() - 1 : anchor.getY())));
+                }
                 Map<String, HexAppearance> appearance = new HashMap<>(hex.getAppearance());
                 HexAppearance look = appearance.get("vegetation");
                 if (look != null) {

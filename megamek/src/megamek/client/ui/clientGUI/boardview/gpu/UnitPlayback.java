@@ -398,7 +398,7 @@ final class UnitPlayback {
               : shove.event.target() != null && unit.id() == shove.event.target().id() ? shove.event.target() : null;
         if (before == null || before.location().coords().equals(unit.location().coords())) { return; }
         float progress = com.badlogic.gdx.math.MathUtils.clamp((shove.seconds - shove.contactSeconds)
-              / UnitAttack.RECOVERY_SECONDS, 0, 1);
+              / shove.recoverySeconds, 0, 1);
         progress *= progress * (3 - 2 * progress);
         var origin = BoardGeometry.center(before.location().coords(), before.location().elevation());
         position.set(origin.lerp(position, progress));

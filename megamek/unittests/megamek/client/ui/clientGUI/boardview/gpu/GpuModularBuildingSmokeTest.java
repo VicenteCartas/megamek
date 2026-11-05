@@ -123,8 +123,8 @@ class GpuModularBuildingSmokeTest {
                 var struts = new ModelInstance(assembly.interior(), "struts").calculateBoundingBox(new BoundingBox());
                 assertEquals(count * 18, struts.getDepth(), .001f);
                 var triangles = GpuTerrain.triangles(assembly.interior());
-                // A lone hex stands on its whole-hex pieces (ConnectedKit.Piece#whole): its front is built out too.
-                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(972, -456, 250), new Vector3(0, 0, -1)),
+                // Probe inside the translated front wall, leaving room for its authored thickness.
+                assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(972, -451, 250), new Vector3(0, 0, -1)),
                       triangles, new Vector3()), "A lone hex fills its front at every floor");
                 assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(959, -423, 250), new Vector3(0, 0, -1)),
                       triangles, new Vector3()));
@@ -132,7 +132,7 @@ class GpuModularBuildingSmokeTest {
                 assertFalse(assembly.hit(new Ray(new Vector3(0, 0, 250), new Vector3(0, 0, -1)), hit),
                       "Picking must not recenter the building");
                 assertTrue(assembly.hit(new Ray(new Vector3(971, -423, 250), new Vector3(0, 0, -1)), hit));
-                assertEquals(count * 18 + .65f, hit.z, .002f, "LOD0 roof picking follows the translated stack");
+                assertEquals(count * 18 + 1.2f, hit.z, .002f, "LOD0 roof picking includes the roof slab's thickness");
             }
             var mesh = five.model(0).meshes.first();
             kit.retain(Set.of(five));
@@ -184,13 +184,11 @@ class GpuModularBuildingSmokeTest {
     }
 
     private static void checkTerrain() throws Exception {
-        // A family without a kit of its own (building_light now has one, data/models/buildings).
-        String fallback = "buildings/saxarba/hangar_light/hangar_light_42";
+        String hangar = "buildings/hangar_light/hangar_light_a";
         GpuAssets assets = new GpuAssets();
         try {
-            assertNull(assets.building(fallback, 5, new int[6], 4, true));
-            assertNotNull(assets.model(fallback), "Legacy fallback still loads");
-            assertNotNull(assets.model(GpuBuildingTest.ASSET), "The custom kit must win even when a board model exists");
+            assertNotNull(assets.building(hangar, 5, new int[6], 4, true), "Hangars use their current modular kit");
+            assertNotNull(assets.model(GpuBuildingTest.ASSET), "The default building kit loads");
         } finally { assets.dispose(); }
         var terrain = new GpuTerrain();
         var settings = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
@@ -201,14 +199,14 @@ class GpuModularBuildingSmokeTest {
         BoardScene scene = scene(5, GpuBuildingTest.ASSET);
         var tuning = BoardGeometry.tuning();
         try {
-            BoardScene legacy = scene(5, fallback);
-            terrain.update(legacy);
+            BoardScene hangars = scene(5, hangar);
+            terrain.update(hangars);
             for (int x : new int[] { 2, 4, 6 }) {
                 var coords = new Coords(x, 4);
-                assertEquals(legacy.tile(coords).features().getFirst().height() * BoardGeometry.level(),
-                      terrain.roofBounds(coords).getDepth(), .02f, "All structure types keep their board-model fallback");
+                assertEquals(hangars.tile(coords).features().getFirst().height() * BoardGeometry.level(),
+                      terrain.roofBounds(coords).max.z, BoardGeometry.level() * .1f, "The kit follows the gameplay height");
             }
-            checkFloorCutaways(terrain, legacy, frame, camera);
+            checkFloorCutaways(terrain, hangars, frame, camera);
             terrain.update(scene);
             checkFloorCutaways(terrain, scene, frame, camera);
             camera.setIsometric(true);
@@ -307,7 +305,7 @@ class GpuModularBuildingSmokeTest {
                         }
                     }
                     frame.render(terrain, camera, scene, false);
-                    float floorZ = UnitBounds.world(floors.get(lowest)).min.z;
+                    float floorZ = UnitBounds.world(floors.get(lowest)).max.z;
                     int samples = 0;
                     for (int x = -20; x <= 20; x += 5) {
                         for (int y = -20; y <= 20; y += 5) {
@@ -364,17 +362,17 @@ class GpuModularBuildingSmokeTest {
                 renderables.add((com.badlogic.gdx.graphics.g3d.Renderable) value);
             }
             for (var part : renderables) {
-                if (part.material.id.equals("struts") || part.material.id.equals("floors")) { interiors++; }
+                if (part.material.id.equals("struts")) { interiors++; }
             }
             for (String field : List.of("sharedShadows", "shadowPropRenderables")) {
                 for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, field)) {
                     var part = (com.badlogic.gdx.graphics.g3d.Renderable) value;
-                    assertFalse(part.material.id.equals("struts") || part.material.id.equals("floors"),
-                          "Generated cutaway aids must not cast exterior shadows");
+                    assertFalse(part.material.id.equals("struts"),
+                          "Cutaway struts must not cast exterior shadows; solid floors are structural geometry");
                 }
             }
         }
-        assertEquals(visible, interiors > 0, "Interior geometry is submitted only while an occupied shell is faded");
+        assertEquals(visible, interiors > 0, "Cutaway struts are submitted only while an occupied shell is faded");
     }
 
     private static void checkPicking(GpuTerrain terrain, BoardScene scene) {
@@ -386,10 +384,10 @@ class GpuModularBuildingSmokeTest {
             var hit = terrain.hit(scene, ray);
             assertNotNull(hit);
             assertEquals(coords, hit.coords());
-            assertEquals(400 - (levels + .65f / 18) * BoardGeometry.level(),
+            assertEquals(400 - (levels + 1.2f / 18) * BoardGeometry.level(),
                   Math.sqrt(hit.distance()), .02f);
             var bounds = terrain.roofBounds(coords);
-            assertEquals((levels + 4.15f / 18) * BoardGeometry.level(), bounds.max.z, .02f);
+            assertEquals((levels + 4.72f / 18) * BoardGeometry.level(), bounds.max.z, .02f);
         }
     }
 }

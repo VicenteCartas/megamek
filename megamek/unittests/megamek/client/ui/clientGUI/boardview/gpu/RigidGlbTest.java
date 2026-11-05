@@ -32,6 +32,48 @@ class RigidGlbTest {
 
     private final ObjectMapper json = new ObjectMapper();
 
+    @Test
+    void emissionOffPreservesTheAuthoredLightAndSurvivesLodCopies() throws Exception {
+        var document = levels();
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
+        var extras = material.putObject("extras").put("mmEmission", "off").put("mmNightEmission", true);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertEquals(java.util.Set.of("paint"), data.emissionOff);
+            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            assertEquals(.4f, data.materials.first().emissive.r, 1e-6);
+            var sliced = new RigidGlb.Data(); sliced.inheritMaterials(data);
+            assertEquals(data.emissionOff, sliced.emissionOff);
+        }
+        extras.remove("mmEmission");
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            assertTrue(((RigidGlb.Data) level).emissionOff.isEmpty());
+            assertEquals(.4f, level.materials.first().emissive.r, 1e-6);
+        }
+        extras.put("mmEmission", "invalid");
+        var invalid = file(document, false);
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(invalid));
+    }
+
+    @Test
+    void nightEmissionIsOptInAndSurvivesLodAndGeometryCopies() throws Exception {
+        var document = levels();
+        var material = (ObjectNode) document.get("materials").get(0);
+        material.putObject("extras").put("mmNightEmission", true);
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            var data = (RigidGlb.Data) level;
+            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            var sliced = new RigidGlb.Data();
+            sliced.inheritMaterials(data);
+            assertEquals(data.nightEmission, sliced.nightEmission);
+        }
+        material.remove("extras");
+        for (var level : RigidGlb.loadLods(file(document, false))) {
+            assertTrue(((RigidGlb.Data) level).nightEmission.isEmpty());
+        }
+    }
+
     private ObjectNode document() throws Exception {
         return (ObjectNode) json.readTree("""
               {"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],
@@ -532,6 +574,9 @@ class RigidGlbTest {
         var crate = (RigidGlb.Data) RigidGlb.loadLods(new FileHandle(file), root).getFirst();
         assertEquals(java.util.Set.of("cargo-crate"), crate.paintMasks);
         assertEquals(java.util.Set.of("cargo-crate-stencil"), crate.labels);
+        var slotted = (RigidGlb.Data) RigidGlb.colourSlotMesh(crate);
+        assertEquals(crate.paintMasks, slotted.paintMasks, "Shared colour meshes retain the albedo paint mask");
+        assertEquals(crate.labels, slotted.labels);
         var label = java.util.Arrays.stream(crate.meshes.first().parts).filter(part -> part.id.equals("cargo-crate-label"))
               .findFirst().orElseThrow();
         java.util.Set<Integer> places = new java.util.TreeSet<>();

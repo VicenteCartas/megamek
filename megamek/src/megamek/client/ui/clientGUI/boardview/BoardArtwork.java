@@ -153,7 +153,8 @@ public final class BoardArtwork implements AutoCloseable {
     public HexImage capture(Board board, Coords coords, Hex hex) {
         // Bound the transient raster cache; immutable snapshots intern and retain the pixels they actually use.
         if (featureArtwork.size() > 256) { clear(); }
-        Map<Integer, String> models = TilesetScenery.structureModels(hex);
+        Map<Integer, String> models = TilesetScenery.structureModels(hex,
+              TilesetScenery.buildingConnected(hex, coords, board::getHex));
         Set<Integer> blank = gpuTileset.blankTerrainTypes(hex);
         DecalArtwork decals = captureDecals(coords, hex, models, blank);
         gpuTileset.clearHex(hex);

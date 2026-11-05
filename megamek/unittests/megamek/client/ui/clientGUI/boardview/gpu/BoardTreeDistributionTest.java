@@ -25,12 +25,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 class BoardTreeDistributionTest {
     static final List<String> BASIC_TREES = List.of("vegetation/tree", "vegetation/tree-broad", "vegetation/tree-slender",
           "vegetation/tree-forked", "vegetation/tree-layered", "vegetation/birch", "vegetation/birch-tall",
-          "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/willow", "vegetation/willow-broad",
+          "vegetation/birch-spreading", "vegetation/birch-young", "vegetation/birch-mature", "vegetation/birch-forked",
+          "vegetation/willow", "vegetation/willow-broad", "vegetation/willow-arching",
           "vegetation/pine", "vegetation/pine-tall", "vegetation/pine-broad", "vegetation/pine-slender", "vegetation/pine-layered");
     /** The grown trees, each with its winter form, and the dead tree, palms and saguaros. */
     static final List<String> IMPORTED_TREES = java.util.stream.Stream.concat(
           BASIC_TREES.stream().flatMap(name -> java.util.stream.Stream.of(name, name + "-snow")),
           java.util.stream.Stream.of("vegetation/tree-dead", "vegetation/tree-dead-snow", "vegetation/palm", "vegetation/palm-bent",
+                "vegetation/palm-compact", "vegetation/palm-arching",
                 "vegetation/cactus", "vegetation/cactus-flowers", "vegetation/cactus-old", "vegetation/cactus-young",
                 "vegetation/cactus-organ")).toList();
 
@@ -47,10 +49,11 @@ class BoardTreeDistributionTest {
         for (int x = 0; x < 24; x++) {
             for (int y = 0; y < 24; y++) {
                 var coords = new Coords(x, y);
+                int density = 1 + (x + y) % 3;
                 for (int mode = 0; mode < 2; mode++) {
-                    var hex = new Hex(0, "woods:2;foliage_elev:2", "", coords);
+                    var hex = new Hex(0, "woods:" + density + ";foliage_elev:2", "", coords);
                     var trees = capture(hex, coords, mode == 1);
-                    assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.canopyLimit(2));
+                    assertTrue(!trees.isEmpty() && trees.size() <= BoardTreeCoverage.canopyLimit(density));
                     assertEquals(trees, capture(hex, coords, mode == 1), "Capture order cannot reroll a stand");
                     if (mode == 1) { trees.forEach(t -> selected.add(t.asset())); }
                     for (int i = 1; i < trees.size(); i++) {
@@ -60,7 +63,9 @@ class BoardTreeDistributionTest {
                 }
             }
         }
-        assertEquals(14, selected.size(), "Temperate woods use twice the original seven shapes");
+        assertEquals(BASIC_TREES.stream().filter(tree -> !tree.startsWith("vegetation/willow"))
+                    .collect(java.util.stream.Collectors.toSet()), selected,
+              "The three cover densities together retain every temperate crown form");
         assertTrue(related[1] / (float) pairs[1] > related[0] / (float) pairs[0] + .20f,
               "Nearby trees must form stands, not merely a different random mix: " + related[0] + " / " + related[1]);
     }
@@ -231,7 +236,7 @@ class BoardTreeDistributionTest {
                 }
             }
         }
-        assertEquals(16, trunks.size(), "Different trunks and branching, not recolored or resized crown copies");
+        assertEquals(BASIC_TREES.size(), trunks.size(), "Different trunks and branching, not recolored or resized crown copies");
         assertTrue(snow || pigments.size() >= 8, "Summer variants have distinct subtle leaf pigments");
     }
 

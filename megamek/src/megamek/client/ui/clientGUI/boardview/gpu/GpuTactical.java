@@ -668,7 +668,7 @@ final class GpuTactical implements Disposable {
 
     private static float rulerEnters(BoardTactical.Ruler ruler, Coords coords) {
         if (coords == null || ruler.end() == null) { return 1; }
-        float[] interval = BoardFiringGeometry.crossing(BoardGeometry.center(ruler.start(), ruler.startHeight()),
+        float[] interval = BoardGeometry.crossing(BoardGeometry.center(ruler.start(), ruler.startHeight()),
               BoardGeometry.center(ruler.end(), ruler.endHeight()), coords);
         return interval == null ? 0 : interval[0];
     }

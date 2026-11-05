@@ -45,6 +45,7 @@ import megamek.common.Hex;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BridgeSpan;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.enums.BuildingType;
@@ -68,8 +69,8 @@ final class GpuEditorPreview implements Disposable {
      * erases, the hexes it changes (while a route is drawn by hand, the hexes of its path), the objects it shows by hex
      * (Paint: each changed hex's objects afterwards; Erase: those that go), the terrain stand-ins, their tint (rgba8888),
      * the label at {@link #at}, route stubs (marked red), the pending tiles of the route neighbourhood the event touches
-     * (empty where it touches no route), and whether the brush draws routes, whose own terrain then shows as their
-     * pieces rather than as stand-ins.
+     * (empty where it touches no route), and whether the brush draws routes or authored buildings, whose own terrain
+     * shows as their pieces rather than as stand-ins.
      */
     record Data(Coords at, boolean erase, List<Coords> hexes, Map<Coords, List<BoardScene.Feature>> objects,
           List<StandIn> standIns, int tint, String label, List<Coords> stubs, List<DeckOutline> decks,
@@ -157,6 +158,9 @@ final class GpuEditorPreview implements Disposable {
         for (var entry : preview.after().entrySet()) {
             Coords at = entry.getKey();
             Hex after = entry.getValue(), before = preview.before().get(at);
+            if (after.getBuildingReference() != null && after.containsTerrain(Terrains.BUILDING)) {
+                decks.add(new DeckOutline(at, after.getLevel() + after.terrainLevel(Terrains.BLDG_ELEV), false));
+            }
             if (!before.hasBridge() && after.hasBridge() && HexAppearance.implicit(after.getAppearance())) {
                 decks.add(new DeckOutline(at, BridgeSpan.deck(after), false));
             } else if (before.hasBridge() && !after.hasBridge()) {
@@ -211,8 +215,9 @@ final class GpuEditorPreview implements Disposable {
                 if (tile != null) { routes.put(at, tile); }
             }
         }
+        boolean authored = brush != null && brush.object() != null && BuildingVolumes.of(brush.object().asset()).present();
         return new Data(labelled == null ? preview.at() : labelled, erase, hexes, objects, List.copyOf(standIns), tint, label,
-              List.copyOf(stubs), List.copyOf(decks), Map.copyOf(routes), routeBrush);
+              List.copyOf(stubs), List.copyOf(decks), Map.copyOf(routes), routeBrush || authored);
     }
 
     /**
@@ -236,8 +241,9 @@ final class GpuEditorPreview implements Disposable {
 
     /** Whether {@code hex} holds what the route builders draw: a road, a bridge, a wall or a route's object. */
     private static boolean routed(Hex hex, Coords at) {
-        return hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.BRIDGE)
-              || hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
+        return hex.containsAnyTerrainOf(Terrains.ROAD, Terrains.BRIDGE, Terrains.BUILDING)
+              || hex.getBuildingReference() != null
+              || hex.getDecorations().stream().anyMatch(object -> BuildingVolumes.of(object.asset()).present())
               || BoardFeatures.decorations(hex, at).stream().anyMatch(feature -> BoardRail.route(feature)
                     || BoardFeatures.terrainOwned(feature.decoration()));
     }
@@ -251,7 +257,7 @@ final class GpuEditorPreview implements Disposable {
      */
     static StandIn standIn(Coords coords, Hex hex, Hex other) {
         float level = hex.getLevel(), low = level, high = level;
-        int way = hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue() ? Terrains.BUILDING
+        int way = hex.containsTerrain(Terrains.BUILDING) ? Terrains.BUILDING
               : hex.containsTerrain(Terrains.BRIDGE) ? Terrains.BRIDGE : Terrains.ROAD;
         Terrain shown = hex.getTerrain(way), was = other.getTerrain(way);
         int exits = shown != null && (was == null || was.getLevel() != shown.getLevel() || was.getExits() != shown.getExits())

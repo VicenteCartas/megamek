@@ -244,6 +244,8 @@ final class GpuPageCache implements Disposable {
         FloatBuffer clear = BufferUtils.newFloatBuffer(4);
         Gdx.gl.glGetFloatv(GL20.GL_COLOR_CLEAR_VALUE, clear);
         int read = Gdx.gl.glGenFramebuffer(), draw = Gdx.gl.glGenFramebuffer();
+        // checkGrowth must see only this growth's errors, not one left by any earlier draw. Bounded: a lost context repeats.
+        for (int stale = 0; stale < 16 && Gdx.gl.glGetError() != GL20.GL_NO_ERROR; stale++) { }
         try {
             for (int i = 0; i < formats.length; i++) { larger[i] = new PageArray(formats[i], texels, levels, capacity); }
             checkGrowth();

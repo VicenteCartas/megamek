@@ -177,6 +177,9 @@ interface BoardSource extends AutoCloseable {
     /** Render-thread report about the timeline consumed with this frame; never a second animation clock. */
     default void playbackState(Frame frame, boolean busy) { }
     default boolean isEditor() { return false; }
+
+    /** This publication belongs to an unfinished transform of selected authored buildings. */
+    default boolean editorAuthoredGesture() { return false; }
     default void paintEditor(Coords coords, int modifiers, long generation) { }
     default List<Coords> editorBrush(Coords coords, long generation) { return List.of(); }
     default void adjustEditorElevation(Coords coords, int levels, long generation) { }

@@ -154,6 +154,10 @@ public final class MapSetupForm {
             return medium == MapSettings.MEDIUM_SPACE;
         }
 
+        public boolean hasGeneratedBoards() {
+            return !space() && slots.stream().anyMatch(slot -> slot.kind() == Kind.GENERATED);
+        }
+
         public boolean canShrinkWidth() {
             return mapWidth > LobbyCommands.MIN_MAP_SIZE;
         }
@@ -551,6 +555,9 @@ public final class MapSetupForm {
     }
 
     private void updateStack(int slot, List<String> boards, String selected) {
+        if (boards.size() == 1 && selected.startsWith(MapSettings.BOARD_SURPRISE)) {
+            selected = boards.getFirst();
+        }
         boolean surprise = selected.startsWith(MapSettings.BOARD_SURPRISE);
         boolean generate = MapSettings.BOARD_GENERATED.equals(selected)
               && !selected.equals(settings.getBoardsSelectedVector().get(slot));

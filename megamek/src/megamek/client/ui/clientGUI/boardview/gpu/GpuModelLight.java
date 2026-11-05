@@ -15,6 +15,7 @@ final class GpuModelLight extends Attribute {
     private final float intensity;
     private final float blinkSeconds;
     private final float offDiffuse;
+    private final boolean nightOnly;
 
     /**
      * Nonnegative emission strength (zero is off) and blink period in seconds (zero is steady).
@@ -22,10 +23,16 @@ final class GpuModelLight extends Attribute {
      * the surface unchanged, or a smaller value for a dark lens. Emission colour and masks come from the material.
      */
     GpuModelLight(float intensity, float blinkSeconds, float offDiffuse) {
+        this(intensity, blinkSeconds, offDiffuse, false);
+    }
+
+    /** Night windows use the atmosphere's daylight share; their unlit glass retains its albedo. */
+    GpuModelLight(float intensity, float blinkSeconds, float offDiffuse, boolean nightOnly) {
         super(TYPE);
         this.intensity = intensity;
         this.blinkSeconds = blinkSeconds;
         this.offDiffuse = offDiffuse;
+        this.nightOnly = nightOnly;
     }
 
     static void register(DefaultShader shader, DoubleSupplier clock) {
@@ -39,14 +46,16 @@ final class GpuModelLight extends Attribute {
                 } else {
                     boolean on = light.intensity > 0 && (light.blinkSeconds == 0
                           || clock.getAsDouble() % light.blinkSeconds < light.blinkSeconds * .5);
-                    target.set(id, 1f, on ? light.intensity : 0f, on ? 1f : light.offDiffuse);
+                    var environment = GpuEnvironmentLighting.of(attributes);
+                    float daylight = light.nightOnly && environment != null ? environment.daylight() : 0;
+                    target.set(id, 1f, on ? light.intensity * (1 - daylight) : 0f, on ? 1f : light.offDiffuse);
                 }
             }
         });
     }
 
     @Override
-    public Attribute copy() { return new GpuModelLight(intensity, blinkSeconds, offDiffuse); }
+    public Attribute copy() { return new GpuModelLight(intensity, blinkSeconds, offDiffuse, nightOnly); }
 
     @Override
     protected boolean equals(Attribute other) { return compareTo(other) == 0; }
@@ -55,7 +64,8 @@ final class GpuModelLight extends Attribute {
     public int hashCode() {
         int result = 31 * super.hashCode() + Float.floatToIntBits(intensity);
         result = 31 * result + Float.floatToIntBits(blinkSeconds);
-        return 31 * result + Float.floatToIntBits(offDiffuse);
+        result = 31 * result + Float.floatToIntBits(offDiffuse);
+        return 31 * result + Boolean.hashCode(nightOnly);
     }
 
     @Override
@@ -65,6 +75,7 @@ final class GpuModelLight extends Attribute {
         int order = Float.compare(intensity, light.intensity);
         if (order == 0) { order = Float.compare(blinkSeconds, light.blinkSeconds); }
         if (order == 0) { order = Float.compare(offDiffuse, light.offDiffuse); }
+        if (order == 0) { order = Boolean.compare(nightOnly, light.nightOnly); }
         return order;
     }
 }

@@ -46,6 +46,9 @@ final class GpuLavaLighting implements Disposable {
     private List<BoardScene.Tile> tiles;
     private List<Source> sources = List.of();
     private List<Source> fungus = List.of();
+    private List<Source> buildings = List.of();
+    private List<Source> nightBuildings = List.of();
+    private float nightShare = Float.NaN;
     /** This frame's effect lights, replaced whole by the render thread; shown wherever the effect is drawn. */
     private List<Source> effects = List.of();
     private float width;
@@ -72,6 +75,13 @@ final class GpuLavaLighting implements Disposable {
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
     void setFungus(List<Source> sources) { fungus = List.copyOf(sources); }
 
+    /** Installed fixtures, independent of terrain detail mode and LOD. Stable sources keep the current GL upload. */
+    void setBuildings(List<Source> sources) {
+        if (buildings.equals(sources)) { return; }
+        buildings = List.copyOf(sources);
+        nightShare = Float.NaN;
+    }
+
     /** Each frame's fireballs and weapon fire (GpuAttackEffects.lights); empty when nothing burns. */
     void setEffects(List<Source> sources) { effects = sources; }
 
@@ -81,7 +91,17 @@ final class GpuLavaLighting implements Disposable {
     }
 
     void update(BoardScene scene, boolean showFungus) {
+        update(scene, showFungus, 1);
+    }
+
+    void update(BoardScene scene, boolean showFungus, float night) {
         if (scene == null) { bin(List.of()); return; }
+        night = MathUtils.clamp(night, 0, 1);
+        if (nightShare != night) {
+            nightShare = night;
+            nightBuildings = night == 0 ? List.of() : buildings.stream().map(source -> new Source(source.tile(),
+                  source.position(), source.power() * nightShare, source.color(), source.size())).toList();
+        }
         if (tiles != scene.tiles() || width != BoardGeometry.width() || level != BoardGeometry.level()) {
             tiles = scene.tiles();
             width = BoardGeometry.width();
@@ -112,7 +132,7 @@ final class GpuLavaLighting implements Disposable {
         var visible = new ArrayList<Source>();
         var fov = scene.fieldOfView();
         boolean masked = fov.width() == scene.width() && fov.height() == scene.height() && fov.active();
-        for (List<Source> group : List.of(sources, showFungus ? fungus : List.<Source>of(), effects)) {
+        for (List<Source> group : List.of(sources, showFungus ? fungus : List.<Source>of(), nightBuildings, effects)) {
             for (Source source : group) {
                 if (!masked || source.tile() < 0 || fov.hexes().get(source.tile()).hasLineOfSight()) {
                     visible.add(source);

@@ -14,6 +14,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -40,7 +41,7 @@ import org.junit.jupiter.api.Test;
 class GpuEditorPickHandleSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"));
     private static final Coords DECAL = new Coords(2, 4), WATER = new Coords(6, 4), CAR = new Coords(4, 5), LOT = new Coords(6, 6),
-          PAD = new Coords(2, 6), BRIDGE = new Coords(4, 2);
+          PAD = new Coords(2, 6), BRIDGE = new Coords(4, 2), BURIED = new Coords(6, 2);
 
     @Test
     void decalsAndObjectsUnderWaterSelectAndTheHandleTurnsTheSelection() throws Exception {
@@ -58,6 +59,8 @@ class GpuEditorPickHandleSmokeTest {
             board.getHex(WATER).setDecorations(List.of(new BoardDecoration("pillar", "prop", "scenery/parks/pillar", null,
                   0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0)));
             board.getHex(CAR).setDecorations(List.of(car("car", 0, 20)));
+            board.getHex(BURIED).setDecorations(List.of(new BoardDecoration("buried", "prop", "scenery/vehicles/car", null,
+                  0, 0, 35, false, 1, BoardDecoration.Placement.absolute(-2), 0, false, 20, -30)));
             board.getHex(LOT).setDecorations(List.of(car("left", -.25, 0).withGroup("lot"), car("right", .25, 0).withGroup("lot")));
             editor.game().setBoard(board);
             session.set(editor);
@@ -68,6 +71,7 @@ class GpuEditorPickHandleSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var configuration = GpuBoardWindow.configuration(false);
         configuration.setWindowedMode(1600, 1000);
+        configuration.setInitialVisible(false);
         try {
             new Lwjgl3Application(new ApplicationAdapter() {
                 @Override public void create() {
@@ -82,6 +86,7 @@ class GpuEditorPickHandleSmokeTest {
                         decal(view, source);
                         underWater(view, source);
                         handle(view, source, session.get());
+                        buriedControls(view, source, session.get());
                     } catch (Throwable error) { failure.set(error); }
                     finally { view.dispose(); Gdx.app.exit(); }
                 }
@@ -207,8 +212,14 @@ class GpuEditorPickHandleSmokeTest {
         clickAt(point); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "pillar")), source.editorState().selection(),
               "On its selected hex, a click through the water selects the pillar beneath it");
-        click(view, new Coords(4, 7)); settle(view, source);
-        assertEquals(List.of(new BoardEditorSession.Selection(new Coords(4, 7), "")), source.editorState().selection());
+        // Keep the next board click above the section panel, which now occupies the lower-right board area.
+        Coords elsewhere = new Coords(3, 3);
+        Vector2 next = screen(view, BoardGeometry.center(elsewhere, 0));
+        var stage = GpuBoardTestUi.stage();
+        var intercepted = stage.hit(next.x, Gdx.graphics.getHeight() - next.y, true);
+        assertTrue(intercepted == null || intercepted == stage.getRoot(), () -> "The test's empty hex click must reach the board: " + intercepted);
+        clickAt(next); settle(view, source);
+        assertEquals(List.of(new BoardEditorSession.Selection(elsewhere, "")), source.editorState().selection());
         clickAt(point); settle(view, source);
         assertEquals(List.of(new BoardEditorSession.Selection(WATER, "pillar")), source.editorState().selection(),
               "From another selection too");
@@ -235,12 +246,13 @@ class GpuEditorPickHandleSmokeTest {
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle.png"));
         drag(view, source, 90);
         assertEquals(Math.IEEEremainder(start + 90, 360), rotation(source), 1, "The car turned with the pointer's quarter sweep");
+        assertHandleAttached(view, terrain, CAR, "car");
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle-turned.png"));
         undo(view, source, session);
         assertEquals(start, rotation(source), .001, "One undo restores the rotation");
         assertFalse(source.editorState().canUndo(), "The whole drag was one undo step");
 
-        // The handle follows the camera: in the angled view it is grabbable too. Undo emptied the selection.
+        // The handle stays attached to the object and remains grabbable in the angled view. Undo emptied the selection.
         view.boardCamera.setIsometric(true); settle(view, source);
         car = installed(view, terrain, CAR, "car");
         top = car.bounds().getCenter(new Vector3());
@@ -249,6 +261,7 @@ class GpuEditorPickHandleSmokeTest {
         assertEquals(List.of(new BoardEditorSession.Selection(CAR, "car")), source.editorState().selection());
         drag(view, source, -45);
         assertEquals(Math.IEEEremainder(start - 45, 360), rotation(source), 1, "Clockwise in the angled view");
+        assertHandleAttached(view, terrain, CAR, "car");
         GpuBoardTestUi.capture(new File(OUTPUT, "editor-rotation-handle-angled.png"));
         undo(view, source, session);
         assertEquals(start, rotation(source), .001);
@@ -270,6 +283,59 @@ class GpuEditorPickHandleSmokeTest {
         assertEquals(-.25, source.editorState().objects().stream().filter(object -> object.id().equals("left")).findFirst()
               .orElseThrow().x(), .001, "One undo restores the group");
         assertFalse(source.editorState().canUndo());
+    }
+
+    /** Even entirely buried geometry keeps a readable selection frame and a working, base-attached handle. */
+    private static void buriedControls(GpuBattleView view, GpuMapSource source, BoardEditorSession session) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            session.command(new Command(Action.SELECT_AT, BURIED.getX() + "," + BURIED.getY(), ""), null);
+            session.command(new Command(Action.SELECT_OBJECT, "buried"), null);
+        });
+        settle(view, source);
+        var object = installed(view, terrain(view), BURIED, "buried");
+        assertTrue(object.bounds().max.z < 0, "The entire test object must be below opaque ground");
+        view.boardCamera.center(object.bounds().getCenter(new Vector3())); view.boardCamera.zoom(.35f);
+        for (boolean perspective : new boolean[] {false, true}) {
+            view.boardCamera.setPerspective(perspective); settle(view, source);
+            object = installed(view, terrain(view), BURIED, "buried");
+            GpuBoardTestUi.capture(new File(OUTPUT, "editor-buried-controls-" + perspective + ".png"));
+            Vector3[] corners = object.outline().getVertices();
+            for (int i = 0; i < corners.length; i++) {
+                for (int bit = 1; bit <= 4; bit <<= 1) {
+                    if ((i & bit) == 0) {
+                        assertControlPixel(view, new Vector3(corners[i]).lerp(corners[i | bit], .5f),
+                              "A buried selection edge stays fully visible");
+                    }
+                }
+            }
+            Object grip = handle(view);
+            var radiusMethod = grip.getClass().getDeclaredMethod("radius"); radiusMethod.setAccessible(true);
+            float radius = (float) radiusMethod.invoke(grip);
+            Vector3 across = new Vector3(view.boardCamera.camera.direction).crs(view.boardCamera.camera.up).nor();
+            assertControlPixel(view, new Vector3(component(grip, "tip")).mulAdd(across, radius),
+                  "The buried rotation circle stays fully visible");
+            double before = source.editorState().objects().getFirst().rotation();
+            drag(view, source, 30);
+            assertEquals(before + 30, source.editorState().objects().getFirst().rotation(), 1,
+                  "The visible buried handle remains usable");
+            assertHandleAttached(view, terrain(view), BURIED, "buried");
+        }
+    }
+
+    private static void assertControlPixel(GpuBattleView view, Vector3 world, String message) {
+        Vector3 pixel = view.boardCamera.camera.project(new Vector3(world), 0, 0,
+              Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        Pixmap patch = Pixmap.createFromFrameBuffer(Math.round(pixel.x) - 2, Math.round(pixel.y) - 2, 5, 5);
+        try {
+            for (int x = 0; x < 5; x++) {
+                for (int y = 0; y < 5; y++) {
+                    int colour = patch.getPixel(x, y);
+                    // Mint at rest, white when hovered: neither should be dimmed by the ground's depth.
+                    if (((colour >>> 16) & 255) > 235 && ((colour >>> 8) & 255) > 180) { return; }
+                }
+            }
+            fail(message + " at " + pixel);
+        } finally { patch.dispose(); }
     }
 
     private static BoardDecoration car(String id, double x, double rotation) {
@@ -308,6 +374,14 @@ class GpuEditorPickHandleSmokeTest {
 
     private static double rotation(GpuMapSource source) {
         return source.editorState().objects().stream().filter(object -> object.id().equals("car")).findFirst().orElseThrow().rotation();
+    }
+
+    private static void assertHandleAttached(GpuBattleView view, GpuTerrain terrain, Coords coords, String id) throws Exception {
+        var box = terrain.editorObjects(coords).stream().filter(o -> o.id().equals(id)).findFirst().orElseThrow().outline();
+        Vector3 expected = box.getBounds().getCenter(new Vector3()); expected.x = box.getBounds().max.x;
+        expected.z = box.getBounds().min.z;
+        expected.mul(box.getTransform());
+        assertTrue(expected.epsilonEquals(component(handle(view), "base"), .001f), "The displayed handle uses the current prop pose, including after release");
     }
 
     /** The view's rotation handle for the current selection, or null. */

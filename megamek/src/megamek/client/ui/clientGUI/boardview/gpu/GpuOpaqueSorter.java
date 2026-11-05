@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.Shader;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.DefaultRenderableSorter;
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.Array;
 
 /** Group opaque shaders unless ground cover needs the original depth order; transparency keeps its depth ordering. */
@@ -18,6 +19,8 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
     private final Map<Shader, Integer> shaderOrder = new IdentityHashMap<>();
     private final Map<Shader, Integer> groupOrder = new IdentityHashMap<>();
     private final Function<Shader, Shader> group;
+    private Camera view;
+    private final Vector3 leftCentre = new Vector3(), rightCentre = new Vector3();
 
     GpuOpaqueSorter() { this(Function.identity()); }
 
@@ -26,6 +29,7 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
 
     @Override
     public void sort(Camera camera, Array<Renderable> renderables) {
+        view = camera;
         groupShaders = true;
         shaderOrder.clear();
         groupOrder.clear();
@@ -68,6 +72,10 @@ final class GpuOpaqueSorter extends DefaultRenderableSorter {
             // A lake slab's margin floats over the open water beside it: blend the ice after that water.
             boolean iceA = GpuIceShader.floating(left.material), iceB = GpuIceShader.floating(right.material);
             if (iceA != iceB) { return iceA ? 1 : -1; }
+            // The default integer distance key saturates on large boards, losing transparent primitive order.
+            float leftDistance = leftCentre.set(left.meshPart.center).mul(left.worldTransform).dst2(view.position);
+            float rightDistance = rightCentre.set(right.meshPart.center).mul(right.worldTransform).dst2(view.position);
+            return Float.compare(rightDistance, leftDistance);
         }
         if (groupShaders && (a == null || !a.blended) && (b == null || !b.blended)) {
             int shader = Integer.compare(shaderOrder.get(left.shader), shaderOrder.get(right.shader));

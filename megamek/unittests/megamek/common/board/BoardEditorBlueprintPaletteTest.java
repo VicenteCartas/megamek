@@ -170,46 +170,49 @@ class BoardEditorBlueprintPaletteTest {
     }
 
     @Test
-    void theSealedDomeAndTankFarmLooksHaveAPieceForEveryWeightAndExits() {
-        assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12",
-              BLUEPRINT.variant("building/sealed").model(new Hex(0, "building:2:12", "")));
-        assertEquals("", BLUEPRINT.variant("building/sealed").model(new Hex(0, "pavement:1", "")));
-        // The 3D board draws the look's piece, not the automatic building.
+    void domesAndTankFarmsUseTheCurrentGeneratorsAndKits() {
         Hex sealed = new Hex(0, "building:2:12", "");
-        sealed.setAppearance(java.util.Map.of("building", new HexAppearance("building/sealed", null, null, null)));
-        assertEquals("buildings/saxarba/bsealed_medium/bsealed_medium_12", TilesetScenery.structureModels(sealed).get(Terrains.BUILDING));
-        for (String look : List.of("building/sealed", "building/tank-farm")) {
-            String terrain = look.equals("building/tank-farm") ? "fuel_tank" : "building";
-            for (int weight = 1; weight <= 4; weight++) {
-                for (int exits = 0; exits < 64; exits++) {
-                    String model = BLUEPRINT.variant(look).model(new Hex(0, terrain + ":" + weight + ":" + exits, ""));
-                    // A legacy per-combination model, or the design's kit that stands for all of them.
-                    assertTrue(new File(Configuration.dataDir(), "models/board/" + model + ".glb").isFile()
-                          || TilesetScenery.customBuildingFile(model).isFile(), look + ": " + model);
-                }
+        sealed.setAppearance(java.util.Map.of("building", new HexAppearance("building/glass-dome", null, null, null)));
+        assertEquals("buildings/multihex/dome", TilesetScenery.structureModels(sealed).get(Terrains.BUILDING));
+        assertEquals(BuildingInteriors.NO, BuildingInteriors.resolve(sealed));
+        for (int weight = 1; weight <= 4; weight++) {
+            for (int exits = 0; exits < 64; exits++) {
+                String model = BLUEPRINT.variant("building/tank-farm").model(new Hex(0, "fuel_tank:" + weight + ":" + exits, ""));
+                assertTrue(TilesetScenery.customBuildingFile(model).isFile(), model);
             }
         }
     }
 
     @Test
-    void theDropShipBlueprintPaintsTheSevenHexesOfTheShippedDropShip() throws IOException {
-        var entry = BLUEPRINT.entry("building/dropship");
-        assertTrue(entry.blueprint() && entry.sections().equals(List.of("buildings/blueprints")));
-        Board board = BoardFile.read(Configuration.boardsDir().toPath().resolve("unofficial/Radar/56x30 Repo man.board"), true);
-        Coords centre = new Coords(49, 8); // hex 5009
-        assertPaints(entry.preset().terrain(), board.getHex(centre));
-        assertEquals(6, entry.preset().hexes().size());
-        for (int direction = 0; direction < 6; direction++) {
-            assertPaints(entry.preset().hexes().get(direction), board.getHex(centre.translated(direction)));
+    void eachBuildingClassHasFourWeightCardsAndWallsHaveTheirOwnSixCards() {
+        var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
+        int[] classes = { 0, 2, 1, 3 };
+        List<String> sections = List.of("standard", "fortresses", "hangars", "gun-emplacements");
+        for (int family = 0; family < sections.size(); family++) {
+            var cards = section("buildings/" + sections.get(family)).cards();
+            assertEquals(List.of("Light", "Medium", "Heavy", "Hardened"), cards.stream().map(BoardEditorBlueprint.Card::label).toList());
+            for (int weight = 1; weight <= 4; weight++) {
+                var entry = cards.get(weight - 1).members().getFirst();
+                editor.command(new megamek.client.ui.boardeditor.BoardEditorSession.Command(
+                      megamek.client.ui.boardeditor.BoardEditorSession.Action.CHOOSE_BRUSH, "building", entry.preset().id()), null);
+                Coords at = new Coords(weight * 2, family * 2);
+                editor.pointer(at, 0, 0, false); editor.finishStroke();
+                Hex painted = editor.board().getHex(at);
+                assertEquals(weight, painted.terrainLevel(Terrains.BUILDING));
+                assertEquals(classes[family], painted.terrainLevel(Terrains.BLDG_CLASS));
+            }
         }
-    }
-
-    /** Every terrain of {@code terrain} is on {@code hex} with its level and exits. */
-    private static void assertPaints(String terrain, Hex hex) {
-        Hex painted = new Hex(0, terrain, "");
-        for (int type : painted.getTerrainTypes()) {
-            assertEquals(painted.getTerrain(type).toString(), hex.getTerrain(type).toString(), terrain);
+        var walls = section("buildings/walls").cards();
+        assertEquals(List.of("Civilian", "Light", "Medium", "Heavy", "Hardened", "Castle Brian"),
+              walls.stream().map(BoardEditorBlueprint.Card::label).toList());
+        for (var card : walls) {
+            Hex wall = new Hex(0, card.members().getFirst().preset().terrain(), "");
+            assertEquals(5, wall.terrainLevel(Terrains.BUILDING));
+            assertEquals(BuildingInteriors.NO, BuildingInteriors.resolve(wall));
         }
+        assertEquals(List.of("Lunar habitat", "Glass dome", "Biodome"), section("buildings/looks").cards().stream()
+              .map(BoardEditorBlueprint.Card::label).toList());
+        assertEquals(4, BLUEPRINT.variants("building").size(), "Only current looks, including the authored example");
     }
 
     @Test

@@ -35,7 +35,6 @@ import com.badlogic.gdx.utils.Scaling;
 import jakarta.annotation.Nullable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.BoardGraphics;
-import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiCursorCapture;
@@ -57,7 +56,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private final Stack stack = new Stack();
     private final GpuMapHexCard hexCard;
     private final Table hexCorner = new Table();
-    private final UiButton measure;
     private final BoardCamera camera = new BoardCamera();
     private final Map<Integer, KeyCommandBind> cameraKeys = new HashMap<>();
     private final UiCursorCapture cursor = new UiCursorCapture();
@@ -88,6 +86,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
     private FrameBuffer target;
     private boolean installed;
     private boolean loadingDrawn;
+    private boolean focusOnReady;
 
     LobbyBoardPreview(UiKit kit, Runnable close) {
         this.kit = kit;
@@ -118,13 +117,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
         Table controls = new Table();
         GpuUtilityBar.cameraButtons(kit, controls, camera, () -> {
             if (scene != null) { camera.fit(scene); }
-        });
-        measure = GpuUtilityBar.iconButton(kit, "locate", Messages.getString("GpuBoard.map.lineOfSight"),
-              "map-inspection-los");
-        measure.setDisabled(true);
-        controls.add(measure).size(GpuUtilityBar.HEIGHT).padLeft(gap);
-        UiKit.onChange(measure, () -> {
-            if (source != null && frame != null) { source.changeRuler(frame.boardGeneration(), RulerModel::open); }
         });
         // The shared utility buttons clear the previous field's focus; this view then takes camera keys.
         UiKit.onChange(controls, this::focus);
@@ -176,6 +168,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
     }
 
     private void unfocus() {
+        focusOnReady = false;
         input.clear();
         if (getStage() != null) {
             if (getStage().getKeyboardFocus() == image) { getStage().setKeyboardFocus(null); }
@@ -282,6 +275,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         @Override
         public boolean scrolled(InputEvent event, float x, float y, float amountX, float amountY) {
             if (!interactive()) { return false; }
+            focus();
             camera.zoomAt(GpuBattleView.wheelZoom(amountY), x * camera.camera.viewportWidth / image.getWidth(),
                   y * camera.camera.viewportHeight / image.getHeight());
             return true;
@@ -331,6 +325,7 @@ final class LobbyBoardPreview extends Table implements Disposable {
         loading.reset(Messages.getString("GpuBoard.previewLoading"));
         loading.setVisible(true);
         focus();
+        focusOnReady = true;
     }
 
     void show(@Nullable BoardSource board) {
@@ -388,7 +383,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
     }
 
     private void closeSource() {
-        measure.setDisabled(true);
         if (los != null) { los.dispose(); los.actor().remove(); los = null; }
         if (menu != null) { menu.cancel(); menu.remove(); menu = null; }
         if (source != null) { source.close(); source = null; }
@@ -485,7 +479,6 @@ final class LobbyBoardPreview extends Table implements Disposable {
         if (!terrain.ready(scene)) {
             loading.update(terrain);
             loading.setVisible(true);
-            measure.setDisabled(true);
             los.actor().setVisible(false);
             hexCorner.setVisible(false);
             return;
@@ -520,7 +513,11 @@ final class LobbyBoardPreview extends Table implements Disposable {
             image.setDrawable(new TextureRegionDrawable(region));
         }
         loading.setVisible(false);
-        measure.setDisabled(false);
+        if (focusOnReady) {
+            focusOnReady = false;
+            // Loading may outlast the opening gesture; an outside click cancels this focus request.
+            if (getStage().getKeyboardFocus() == null || getStage().getKeyboardFocus() == image) { focus(); }
+        }
         if (hexCard.update(frame.tooltip())) {
             hexCorner.clearChildren();
             if (hexCard.actor().hasChildren()) {

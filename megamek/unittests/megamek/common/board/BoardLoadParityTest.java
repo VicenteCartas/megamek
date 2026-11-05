@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -32,8 +33,9 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * Same file, same board on every load path: the game's sheet load ({@link BoardFile#loadSheet}, as the game start, the
  * lobby preview and scenarios call it), the file preview ({@link GpuBoardWindow#loadPreview}) and the 3D editor
- * ({@link BoardEditorSession#open}) all give the one converted board and write the same .board2 text. The game and the
- * preview keep the legacy tokens in memory for their 2D views; the editor holds none of the tokens the conversion took.
+ * ({@link BoardEditorSession#open}) share the conversion. Finished game and preview maps close outer building exits;
+ * source sheets and editor documents retain them. The game and preview keep legacy tokens for their 2D views; the
+ * editor holds none of the tokens the conversion took.
  */
 class BoardLoadParityTest {
     /** Every legacy case of the conversion: car parks, emblems, bridges, seaport art, maglev and terrain-owned art. */
@@ -46,6 +48,12 @@ class BoardLoadParityTest {
         return out.toString(StandardCharsets.UTF_8);
     }
 
+    private static Board finishedCopy(Board sheet) {
+        Board board = BoardUtilities.resize(sheet, 0, 0, 0, 0);
+        board.closeOffBoardBuildingExits();
+        return board;
+    }
+
     /** Loads {@code file} the three ways, checks they agree and that the board is converted, and returns the game's. */
     private static Board loadEveryWay(File file) throws Exception {
         Board game = BoardFile.loadSheet(file, false, true);
@@ -53,7 +61,7 @@ class BoardLoadParityTest {
         var session = new BoardEditorSession();
         session.open(file.toPath());
         String expected = text(game);
-        assertEquals(expected, text(preview), "The file preview shows the game's board: " + file);
+        assertEquals(text(finishedCopy(game)), text(preview), "The file preview shows the finished game board: " + file);
         assertEquals(expected, text(session.board()), "The editor opens the game's board: " + file);
 
         Board loaded = BoardFile.read(file.toPath());
@@ -164,7 +172,36 @@ class BoardLoadParityTest {
         Game game = new Game();
         game.setBoard(BoardFile.read(FIXTURE.toPath()));
         game.initializeAfterLoad();
-        assertEquals(text(BoardFile.loadSheet(FIXTURE, false, true)), text(game.getBoard()));
+        assertEquals(text(finishedCopy(BoardFile.loadSheet(FIXTURE, false, true))), text(game.getBoard()));
+    }
+
+    @Test
+    void previewClosesEdgesButEditingAndSavingKeepTheSourceConnections(@TempDir Path folder) throws Exception {
+        Board sheet = Board.createEmptyBoard(1, 1);
+        sheet.setHex(0, 0, new Hex(0, "building:1:63;bldg_cf:15;bldg_elev:2", ""));
+        sheet.setNativeFormat(true);
+        Path file = folder.resolve("Edge.board2");
+        BoardFile.save(sheet, file);
+        String original = Files.readString(file);
+
+        Board preview = GpuBoardWindow.loadPreview(file.toFile());
+        assertEquals(0, preview.getHex(0, 0).getTerrain(Terrains.BUILDING).getExits());
+        var editor = new BoardEditorSession();
+        editor.open(preview, file);
+        assertEquals(63, editor.board().getHex(0, 0).getTerrain(Terrains.BUILDING).getExits());
+        Path saved = folder.resolve("Edited.board2");
+        editor.save(saved);
+        assertEquals(63, BoardFile.read(saved).getHex(0, 0).getTerrain(Terrains.BUILDING).getExits());
+        assertEquals(original, Files.readString(file));
+
+        Game restored = new Game();
+        restored.setBoard(BoardFile.read(file));
+        var building = restored.getBoard().getBuildingAt(new Coords(0, 0));
+        building.setCurrentCF(7, new Coords(0, 0));
+        restored.initializeAfterLoad();
+        assertEquals(0, restored.getBoard().getHex(0, 0).getTerrain(Terrains.BUILDING).getExits());
+        assertSame(building, restored.getBoard().getBuildingAt(new Coords(0, 0)));
+        assertEquals(7, building.getCurrentCF(new Coords(0, 0)), "Closing outer exits does not reset damage");
     }
 
     /** The game converts a sheet before turning it, so its car-park lanes turn with it, as the editor's flip does. */
@@ -180,6 +217,6 @@ class BoardLoadParityTest {
         session.open(new File(Configuration.boardsDir(), BIG_BOARD + ".board").toPath());
         Board turned = session.board();
         BoardUtilities.flip(turned, true, true);
-        assertEquals(text(turned), text(game));
+        assertEquals(text(finishedCopy(turned)), text(game));
     }
 }

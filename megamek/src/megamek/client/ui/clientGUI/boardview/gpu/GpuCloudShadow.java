@@ -33,10 +33,12 @@ final class GpuCloudShadow {
               + (diffuse != null && GpuColorTexture.isColor(diffuse.textureDescription.texture) ? "#define linearTextureFlag\n" : "")
               + (renderable.material.has(GpuLinearColors.TYPE) ? "#define linearColorsFlag\n" : "")
               + (renderable.material.has(GpuModelMaterial.TYPE) ? "#define modelSurfaceFlag\n" : "")
+              + (GpuCrystalTransmission.ruby(renderable.material) ? "#define modelRubyFlag\n" : "")
               + (renderable.material.has(GpuModelMaterial.TYPE) && renderable.material.has(TextureAttribute.Bump)
                     ? "#define modelReliefFlag\n" : "")
               + (RigidGlb.colourSlotted(renderable.meshPart.mesh.getVertexAttributes()) ? "#define colourSlotsFlag\n" : "")
               + (lighting != null ? "#define environmentLightingFlag\n" : "")
+              + (lighting != null && lighting.crystals != null ? "#define crystalTransmissionFlag\n" : "")
               + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
               + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);

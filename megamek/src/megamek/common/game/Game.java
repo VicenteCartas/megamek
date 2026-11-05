@@ -2790,6 +2790,7 @@ public final class Game extends AbstractGame implements Serializable,
         for (Board board : getBoards().values()) {
             BoardSceneryLayouts.convert(board);
             BoardSceneryLayouts.joinSheets(board);
+            board.closeOffBoardBuildingExits();
         }
     }
 

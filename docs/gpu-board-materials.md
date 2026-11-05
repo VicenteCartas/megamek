@@ -86,6 +86,12 @@ Two contracts carry it to the shaders:
   the GLB leaves out (normal, occlusion, emission, height). `GpuAssets.finish` gives the board's
   own single-material draws (classic tiles, industrial plants) the same.
 
+GLB material extras `mmEmission: "off"` suppress all emission on that surface, including inherited
+shared-material glow. The albedo, reflectivity, textures and stored emission remain intact; removing the
+override (or setting `"inherit"`) restores them. `mmNightEmission: true`, or a shared `.tres` with
+`metadata/mmNightEmission = true`, fades inherited emission with daylight. Explicit Off takes precedence.
+These controls survive authored hex slicing, LOD copies and generated modular kit assembly.
+
 What keeps its own shading:
 
 - Lava, crust and ice are `ShaderMaterial`s with shaders of their own ([above](#shadermaterials)).

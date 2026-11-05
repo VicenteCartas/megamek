@@ -36,6 +36,7 @@ package megamek.common.rules;
 
 import jakarta.annotation.Nullable;
 import megamek.common.Hex;
+import megamek.common.board.BuildingInteriors;
 import megamek.common.board.Coords;
 import megamek.common.game.Game;
 import megamek.common.moves.MovePath;
@@ -48,10 +49,10 @@ import megamek.common.units.Mek;
 public abstract class RulesMovement {
     /**
      * Whether the ruleset permits this building elevation, relative to the underlying hex. Other terrain, unit and
-     * movement restrictions still apply. Total Warfare adds no restriction here.
+     * movement restrictions still apply. Authored interior access applies to every ruleset.
      */
     public boolean isBuildingElevationAllowed(Entity entity, Hex hex, int elevation) {
-        return true;
+        return BuildingInteriors.allows(entity, hex, elevation);
     }
 
     /**

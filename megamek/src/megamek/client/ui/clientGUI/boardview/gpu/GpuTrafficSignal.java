@@ -10,7 +10,7 @@ final class GpuTrafficSignal {
     /** Called on a placement's own materials, never on the shared GLB model. */
     static void mark(String asset, Material material) {
         if ((asset.equals("scenery/road/traffic-signal") || asset.equals("scenery/road/traffic-signal-gantry"))
-              && material.id.equals("Amber")) {
+              && material.id.equals("Amber") && !material.has(GpuModelLight.TYPE)) {
             // One second per cycle, half on and half off, with a dark lens between flashes.
             material.set(new GpuModelLight(1, 1, .06f));
         }

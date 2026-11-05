@@ -5,6 +5,7 @@ import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -35,8 +36,11 @@ import megamek.common.board.BoardConnectivityCheck;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
+import megamek.common.board.BoardGenerator;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BridgeSpan;
+import megamek.common.board.BuildingInteriors;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexIssue;
@@ -90,11 +94,18 @@ public final class BoardEditorSession {
          * step: its colour slot, stored per span like a placed object's colours.
          */
         BRIDGE_COLOUR,
+        /** Tints the selected building's whole connected structure; an empty value restores its original colours. */
+        BUILDING_COLOUR,
+        BUILDING_INTERIORS,
+        /** The selected hex's upper storeys: keep the ground footprint (straight, default) or step back (stepped). */
+        BUILDING_PROFILE,
+        SELECT_STRUCTURE,
         /**
          * Gives the selected building's whole connected structure ({@link #structure}) one {@link HexAppearance.Footprint}
          * (value "angled" or "square") in one undo step.
          */
         FOOTPRINT,
+        BUILDING_PADDING,
         /**
          * Gives the selected building's whole connected structure ({@link #structure}) one variant of its generated kit
          * (value: the variant's name in the kit's JSON spec, {@link HexAppearance#kitVariant}) in one undo step.
@@ -206,7 +217,8 @@ public final class BoardEditorSession {
           String object, String message, int width, int height, Brush activeBrush, List<Selection> selection,
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
-          int copies, List<String> kitVariants) {
+          int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
+          boolean buildingProfileAvailable) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -451,6 +463,7 @@ public final class BoardEditorSession {
               brushElevation, brushTheme, precision, magnetic, sculpt, slope, clearOnly, fill,
               levelHeight, wayOffset, wayPillars);
         BoardDecoration prototype = active.object();
+        Hex building = buildingSample();
         return new Snapshot(revision, title(), dirty(), !undo.isEmpty(), !redo.isEmpty(), tool, component,
               prototype == null ? "" : prototype.asset(), brush,
               selected, hex == null ? 0 : hex.getLevel(), hex == null || hex.getTheme() == null ? "" : hex.getTheme(),
@@ -458,7 +471,10 @@ public final class BoardEditorSession {
               selectedObject, message, board().getWidth(), board().getHeight(), active, List.copyOf(selection), movePreview(),
               selectionGroups(), groupSizes(hex), issueList, levels(hex), board().getTags().stream().sorted().toList(),
               board().getRoadsAutoExit(), boardComponents(), drawsRoutes(),
-              copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex));
+              copies.values().stream().mapToInt(Integer::intValue).sum(), hex == null ? List.of() : kitVariants(hex),
+              TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
+              building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
+              TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex));
     }
 
     /**
@@ -504,8 +520,9 @@ public final class BoardEditorSession {
                 // The structures objects stand on; a canopy holds none.
                 String receiver = Set.of("bridge", "building", "industrial", "fuelTank").contains(component.receiver())
                       ? component.receiver() : "";
-                levels.add(new Level(component.id(), false, ground + value.getLevel(), ground + field.min(),
-                      ground + Math.max(field.max(), value.getLevel()), receiver));
+                boolean derived = component.id().equals("building") && hex.getBuildingReference() != null;
+                levels.add(new Level(component.id(), false, ground + value.getLevel(), derived ? ground + value.getLevel() : ground + field.min(),
+                      derived ? ground + value.getLevel() : ground + Math.max(field.max(), value.getLevel()), receiver));
             }
         }
         for (BoardDecoration object : hex.getDecorations()) {
@@ -513,7 +530,8 @@ public final class BoardEditorSession {
             // An object whose support is missing shows at the ground, where the editor draws it.
             if (Double.isNaN(at)) { at = ground + object.placement().offset(); }
             // A decal lies on its support, and so does a rail (on the ground or its bridge's deck).
-            boolean fixed = object.kind().equals("decal") || RailRoute.kind(object) == RailRoute.Kind.RAIL;
+            boolean fixed = object.kind().equals("decal") || RailRoute.kind(object) == RailRoute.Kind.RAIL
+                  || BuildingVolumes.of(object.asset()).present();
             levels.add(new Level(object.id(), true, at, fixed ? at : Math.min(at, BoardEditorSnapping.lowestLevel(hex)),
                   fixed ? at : Double.MAX_VALUE, ""));
         }
@@ -542,6 +560,18 @@ public final class BoardEditorSession {
         return new Brush(key, key, "ground", hex.getLevel(), hex.getTheme() == null ? "" : hex.getTheme(), properties(hex),
               hex.getAppearance(), hex.getDecorations(), new Coords(0, 0), true, true, false, false, LevelSculpt.Mode.RAISE,
               true, false, false, false, 0, false);
+    }
+
+    private Hex buildingSample() {
+        if (selected == null) { return null; }
+        if (selectedObject.isEmpty()) { return board().getHex(selected); }
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Hex hex = board().getHex(x, y);
+                if (hex.getBuildingReference() != null && hex.getBuildingReference().id().equals(selectedObject)) { return hex; }
+            }
+        }
+        return board().getHex(selected);
     }
 
     private static List<Property> properties(Hex hex) {
@@ -605,10 +635,16 @@ public final class BoardEditorSession {
         fromAssembledPreview = reopeningAssembled;
     }
 
-    /** Opens an independent copy of a preview, retaining its source file when known; generated maps have none. */
+    /** Reopens a file preview's source sheet, or copies an assembled preview that has no source file. */
     public void open(Board preview, Path file) {
-        openDocument(BoardUtilities.resize(preview, 0, 0, 0, 0), file);
-        fromAssembledPreview = file == null;
+        if (file != null) {
+            // A finished preview closes outer building exits; the editable sheet must retain its authored connections.
+            try { open(file); }
+            catch (IOException failure) { throw new UncheckedIOException(failure); }
+            return;
+        }
+        openDocument(BoardUtilities.resize(preview, 0, 0, 0, 0), null);
+        fromAssembledPreview = true;
     }
 
     private void openDocument(Board loaded, Path file) {
@@ -676,7 +712,7 @@ public final class BoardEditorSession {
                 case CHOOSE_BRUSH -> chooseBrush(command.target(), command.value());
                 case BRUSH_VALUE -> configureBrush(command.target(), command.value());
                 case SAMPLE -> sampleBrush();
-                case CLEAR_SELECTION -> { selection.clear(); selectedObject = ""; }
+                case CLEAR_SELECTION -> { selection.clear(); selected = null; selectedObject = ""; }
                 case DELETE_SELECTION -> deleteSelection();
                 case ADD_COMPONENT -> edit(hex -> addComponent(hex, blueprint.component(command.value())));
                 case REMOVE_COMPONENT -> {
@@ -692,7 +728,9 @@ public final class BoardEditorSession {
                 case TERRAIN -> edit(hex -> setTerrain(hex, command.target(), Integer.parseInt(command.value())));
                 case REMOVE_TERRAIN -> edit(hex -> {
                     int type = Terrains.getType(command.value());
-                    if (type == Terrains.BRIDGE) { removeDeck(hex); } else { removeWay(hex, type); }
+                    if (type == Terrains.BRIDGE) { removeDeck(hex); }
+                    else if (type == Terrains.BUILDING) { removeComponent(hex, blueprint.component("building")); }
+                    else { removeWay(hex, type); }
                     if (!hex.containsAnyTerrainOf(Terrains.WOODS, Terrains.JUNGLE)) { hex.removeTerrain(Terrains.FOLIAGE_ELEV); }
                 });
                 case EDGE -> editEdge(command.target(), Integer.parseInt(command.value()));
@@ -757,7 +795,8 @@ public final class BoardEditorSession {
                     styles.put("ground", new HexAppearance(current.variant(), null, null, Double.parseDouble(command.value())));
                     hex.setAppearance(styles);
                 });
-                case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value()));
+                case DESIGN_ROTATION -> edit(hex -> rotate(hex, command.target(), command.value(),
+                      TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)));
                 case EDGES -> edit(hex -> setEdges(hex, command.value()));
                 case TRAFFIC_CONTROL -> edit(hex -> setTrafficControl(hex, command.target(), command.value()));
                 case ASSET -> {
@@ -772,6 +811,11 @@ public final class BoardEditorSession {
                                     // A maglev is suspended a level up; a rail lies on the ground.
                                     megamek.common.board.RailRoute.Kind.of(design.id()) == megamek.common.board.RailRoute.Kind.MAGLEV ? 1 : 0), 0, false)
                               .withColours(design.colours())));
+                    }
+                    if (BuildingVolumes.of(design.model()).present()) {
+                        var building = paintTemplate.getDecorations().getFirst();
+                        paintTemplate = new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null);
+                        paintTemplate.setDecorations(List.of(building.withLevels(BuildingVolumes.of(design.model()).modular() ? 3 : 0)));
                     }
                     levelHeight = false; wayOffset = RailRoute.Kind.of(design.id()) == RailRoute.Kind.MAGLEV ? 1 : 0;
                     wayPillars = wayOffset > 0;
@@ -818,11 +862,60 @@ public final class BoardEditorSession {
                     });
                     if (!continuousEdit) { finishStroke(); }
                 }
+                case SELECT_STRUCTURE -> {
+                    var reference = selected == null ? null : board().getHex(selected).getBuildingReference();
+                    if (reference != null) {
+                        selected = reference.anchor(); selectedObject = reference.id(); selection.clear();
+                        selection.add(new Selection(selected, selectedObject)); tool = Tool.SELECT;
+                    }
+                }
+                case BUILDING_INTERIORS -> {
+                    if (selected != null) {
+                        var choice = BuildingInteriors.values()[Integer.parseInt(command.value())];
+                        var object = selectedObject.isEmpty() ? null : object(board().getHex(selected));
+                        String id = object != null && BuildingVolumes.of(object.asset()).present() ? object.id() : null;
+                        if (id == null) { edit(hex -> BuildingInteriors.set(hex, choice)); }
+                        else {
+                            for (int x = 0; x < board().getWidth(); x++) {
+                                for (int y = 0; y < board().getHeight(); y++) {
+                                    Coords cell = new Coords(x, y);
+                                    var ref = board().getHex(cell).getBuildingReference();
+                                    if (ref != null && ref.id().equals(id)) { change(cell, hex -> BuildingInteriors.set(hex, choice)); }
+                                }
+                            }
+                            if (!continuousEdit) { finishStroke(); }
+                        }
+                    }
+                }
+                case BUILDING_PROFILE -> {
+                    require(selected != null && TilesetScenery.buildingProfileAvailable(board().getHex(selected), selected, board()::getHex),
+                          "Select a modular building hex with a shorter connected neighbour.");
+                    require(command.value().equals("straight") || command.value().equals("stepped"), "Unknown building profile");
+                    change(selected, hex -> appearance(hex, "buildingProfile",
+                          command.value().equals("stepped") ? HexAppearance.STEPPED_BUILDING : null));
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case BUILDING_COLOUR -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    var colours = BoardDecoration.Colours.NONE.with(0, command.value().isEmpty() ? null : command.value());
+                    for (Coords cell : structure(selected, Terrains.BUILDING)) {
+                        change(cell, hex -> appearance(hex, "building", HexAppearance.withColours(hex.getAppearance().get("building"), colours)));
+                    }
+                    if (!continuousEdit) { finishStroke(); }
+                }
                 case FOOTPRINT -> {
                     require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
                           Messages.getString("BoardEditor.selectBuildingFirst"));
                     var footprint = HexAppearance.Footprint.valueOf(command.value().toUpperCase(java.util.Locale.ROOT));
                     for (Coords cell : structure(selected, Terrains.BUILDING)) { change(cell, hex -> footprint(hex, footprint)); }
+                    if (!continuousEdit) { finishStroke(); }
+                }
+                case BUILDING_PADDING -> {
+                    require(selected != null && board().getHex(selected).containsTerrain(Terrains.BUILDING),
+                          Messages.getString("BoardEditor.selectBuildingFirst"));
+                    double padding = Double.parseDouble(command.value());
+                    edit(hex -> appearance(hex, "building", HexAppearance.withPadding(hex.getAppearance().get("building"), padding)));
                     if (!continuousEdit) { finishStroke(); }
                 }
                 case KIT_VARIANT -> {
@@ -1262,9 +1355,9 @@ public final class BoardEditorSession {
     }
 
     /**
-     * Whether a Paint drag draws a road, bridge, rail or wall path. Erase applies each event at once.
+     * Whether a Paint drag draws a road, bridge, rail or building path. Erase applies each event at once.
      */
-    private boolean drawsRoutes() { return tool == Tool.PAINT && (wayBrush() || wallBrush()); }
+    private boolean drawsRoutes() { return tool == Tool.PAINT && (wayBrush() || buildingBrush()); }
 
     private boolean wayBrush() {
         return sampledHex == null && stampLayout() == null && (brushComponent.equals("road")
@@ -1290,7 +1383,7 @@ public final class BoardEditorSession {
             drawing = RoutePath.start(at);
         } else {
             drawing = crossed(at);
-            if (!at.equals(drawing.end()) && core(x, y)) { drawing = drawing.enter(at, board()::contains); }
+            if (!at.equals(drawing.end()) && (buildingBrush() || core(x, y))) { drawing = drawing.enter(at, board()::contains); }
         }
         // The preview's heading is the pointer's movement since it took, or came back into, the path's last hex (heading).
         if (at.equals(drawing.end()) && (drawing != was || !at.equals(drawingAt))) { routeEntryX = x; routeEntryY = y; }
@@ -1321,7 +1414,7 @@ public final class BoardEditorSession {
         if (drawing == null) { return; }
         List<Coords> hexes = drawing.hexes();
         drawing = null;
-        if (wallBrush()) { paintWalls(hexes); }
+        if (buildingBrush()) { paintBuildings(hexes); }
         else { paintWays(hexes); }
     }
 
@@ -1715,10 +1808,8 @@ public final class BoardEditorSession {
                     change(spot, hex -> {
                         int level = hex.getLevel(); String theme = hex.getTheme();
                         copyInto(sample, hex);
-                        if (tool == Tool.PAINT) {
-                            if (!brushElevation) { hex.setLevel(level); }
-                            if (!brushTheme) { hex.setTheme(theme); }
-                        }
+                        if (tool == Tool.ERASE || !brushElevation) { hex.setLevel(level); }
+                        if (tool == Tool.PAINT && !brushTheme) { hex.setTheme(theme); }
                     });
                 }
             } else if (!paintTemplate.getDecorations().isEmpty()) {
@@ -1787,8 +1878,11 @@ public final class BoardEditorSession {
                 // A Theme card paints no ground field: the hex keeps its sand, mud, swamp and the rest.
                 boolean theme = brushKey.startsWith(THEME_BRUSH);
                 require(!theme || tool == Tool.PAINT, Messages.getString("BoardEditor.themeNoErase"));
-                selected = at; selectedObject = ""; component = brushComponent;
-                var definition = blueprint.component(brushComponent);
+                // A ground eraser on a roof or floor removes the pointed building, keeping the ground beneath it.
+                String target = tool == Tool.ERASE && brushComponent.equals("ground") && "building".equals(receiver)
+                      ? "building" : brushComponent;
+                selected = at; selectedObject = ""; component = target;
+                var definition = blueprint.component(target);
                 List<Coords> spots = new ArrayList<>();
                 for (Coords spot : brush(at)) {
                     if (!painted.add(spot)) { continue; }
@@ -1801,7 +1895,7 @@ public final class BoardEditorSession {
                             var style = paintTemplate.getAppearance().get(brushComponent);
                             if (brushComponent.equals("road")) { style = colonyFinish(hex, style); }
                             styles.put(brushComponent, brushComponent.equals("bridge") ? retype(style).apply(styles.get("bridge")) : style);
-                        } else { styles.remove(brushComponent); }
+                        } else { styles.remove(target); }
                         hex.setAppearance(styles);
                         if (tool != Tool.ERASE && brushComponent.equals("ground")) {
                             if (brushTheme) { hex.setTheme(paintTemplate.getTheme()); }
@@ -2222,6 +2316,7 @@ public final class BoardEditorSession {
             boolean fixed = object.placement().mode().equals("absolute");
             BoardDecoration next = objectValue(object, fixed ? "level" : "offset",
                   Double.toString(fixed ? target : target - (level.level() - object.placement().offset())));
+            checkBuildingGeometry(selected, object, next);
             change(selected, h -> h.setDecorations(h.getDecorations().stream().map(d -> d.id().equals(key) ? next : d).toList()));
         } else if (key.equals("ground")) {
             change(selected, h -> h.setLevel(whole));
@@ -2746,11 +2841,31 @@ public final class BoardEditorSession {
               name -> megamek.common.board.BoardGenerator.exists(name, megamek.common.board.BoardGenerator.OBJECT));
     }
 
+    /** Saved member heights cannot be rebaked without the placement's structural geometry. */
+    private void checkBuildingGeometry(Coords owner, BoardDecoration original, BoardDecoration object) {
+        if ((original == null || !BuildingVolumes.sameGeometry(original, object)) && BuildingVolumes.of(object.asset()).present()) {
+            require(BuildingVolumes.onBoardFraction(owner, object, board().getWidth(), board().getHeight()) >= .1 - 1e-6,
+                  Messages.getString("BoardEditor.buildingOutside"));
+        }
+        if (original != null && !BuildingVolumes.sameGeometry(original, object) && !BuildingVolumes.of(object.asset()).present()) {
+            for (int x = 0; x < board().getWidth(); x++) {
+                for (int y = 0; y < board().getHeight(); y++) {
+                    var ref = board().getHex(x, y).getBuildingReference();
+                    require(ref == null || !ref.id().equals(object.id()), Messages.getString("BoardEditor.buildingAssetMissing"));
+                }
+            }
+        }
+    }
+
     /** XY is normalized to the same odd-column lattice as the board renderer, with north-positive Y. */
     private Map.Entry<Selection, BoardDecoration> positioned(Coords owner, BoardDecoration object) {
+        var original = board().getHex(owner).getDecorations().stream().filter(o -> o.id().equals(object.id())).findFirst().orElse(null);
+        checkBuildingGeometry(owner, original, object);
         var cube = owner.toCube();
         double q = cube.q() + object.x() / .75, r = cube.r() - object.y() - object.x() / 1.5;
         Coords target = new megamek.common.board.CubeCoords(q, r, -q - r).roundToNearestHex().toOffset();
+        // The in-map owner retains an authored building whose actual pivot has crossed the edge.
+        if (!board().contains(target) && BuildingVolumes.of(object.asset()).present()) { target = owner; }
         require(board().contains(target), Messages.getString("BoardEditor.objectOutside"));
         double x = object.x() + (owner.getX() - target.getX()) * .75;
         double y = object.y() + (target.getY() - owner.getY()) + ((target.getX() & 1) - (owner.getX() & 1)) * .5;
@@ -2790,7 +2905,11 @@ public final class BoardEditorSession {
             next = next.transform(next.x(), next.y(), next.rotation(), next.mirror(), next.scale(),
                   BoardEditorSnapping.clamp(board().getHex(selected), next.placement()));
         }
-        var destination = positioned(selected, next);
+        // A cropped structure can retain its center outside the board, owned by a surviving member.
+        boolean samePosition = current.x() == next.x() && current.y() == next.y();
+        if (samePosition) { checkBuildingGeometry(selected, current, next); }
+        var destination = samePosition
+              ? Map.entry(new Selection(selected, next.id()), next) : positioned(selected, next);
         selection.add(new Selection(selected, selectedObject));
         moveObjects(Map.of(destination.getKey(), destination.getValue()));
         if (!continuousEdit) { finishStroke(); }
@@ -2815,7 +2934,7 @@ public final class BoardEditorSession {
         return new BoardDecoration(object.id(), object.kind(), to.model(), name, object.x(), object.y(), object.rotation(),
               object.mirror(), object.scale(), object.placement(), object.drawOrder(), object.clipToHex(), object.rotationX(),
               object.rotationY(), object.group(), object.bare(), object.connections(), object.stretch(), colours,
-              object.tracks(), object.pillars());
+              object.tracks(), object.pillars(), to.model().equals(object.asset()) ? object.uid() : null, object.levels());
     }
 
     private void setVariant(Hex hex, String owner, String value) {
@@ -2824,6 +2943,10 @@ public final class BoardEditorSession {
         var control = stored == null ? null : stored.trafficControl();
         if (value.isEmpty()) {
             HexAppearance retained = HexAppearance.withTrafficControl(null, control);
+            if (owner.equals("building") && stored != null && stored.rotation() != null) {
+                retained = HexAppearance.withRotation(retained, stored.rotation());
+            }
+            if (owner.equals("building") && stored != null) { retained = HexAppearance.withColours(retained, stored.colours()); }
             if (retained == null) { styles.remove(owner); } else { styles.put(owner, retained); }
         }
         else {
@@ -2845,28 +2968,33 @@ public final class BoardEditorSession {
                 styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(current == null ? null : current.variant(),
                       null, variant.material(), null), control));
             } else {
-                // Switching between skins keeps the look's rotation; any other design has none.
+                // A building's pivot and a skin's heading survive a change of design.
                 var was = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
                 boolean skins = variant.skin() != null && was != null && was.skin() != null;
                 styles.put(owner, HexAppearance.withTrafficControl(new HexAppearance(variant.id(), null, current == null ? null : current.material(),
-                      variant.blend() ? .5 : null, BoardDecoration.Colours.NONE, skins ? current.rotation() : null), control));
+                      variant.blend() ? .5 : null, owner.equals("building") && current != null ? current.colours() : BoardDecoration.Colours.NONE,
+                      (skins || owner.equals("building")) && current != null ? current.rotation() : null), control));
             }
+        }
+        if (owner.equals("building") && stored != null && stored.padding() != null) {
+            styles.put(owner, HexAppearance.withPadding(styles.get(owner), stored.padding()));
         }
         hex.setAppearance(styles);
     }
 
     /**
-     * Turns {@code hex}'s skin design of {@code owner} ({@link BoardEditorBlueprint.Skin}) to {@code degrees} clockwise,
-     * snapped to a 30-degree step: the Edit panel's and the Brush's Rotation row.
+     * Turns an isolated building in whole degrees, or a skin in 30-degree steps, clockwise: the Edit panel's and the
+     * Brush's Rotation row. Connections keep buildings aligned to the board.
      */
-    private void rotate(Hex hex, String owner, String degrees) {
+    private void rotate(Hex hex, String owner, String degrees, boolean connected) {
         HexAppearance current = hex.getAppearance().get(owner);
         var variant = current == null || current.variant() == null ? null : blueprint.variant(current.variant());
-        require(variant != null && variant.skin() != null, Messages.getString("BoardEditor.skinFirst"));
-        int rotation = Math.floorMod((int) Math.round(Double.parseDouble(degrees) / 30) * 30, 360);
-        Map<String, HexAppearance> styles = new LinkedHashMap<>(hex.getAppearance());
-        styles.put(owner, new HexAppearance(current.variant(), null, null, null, BoardDecoration.Colours.NONE, rotation));
-        hex.setAppearance(styles);
+        boolean building = owner.equals("building") && hex.containsTerrain(Terrains.BUILDING);
+        require(building || variant != null && variant.skin() != null, Messages.getString("BoardEditor.skinFirst"));
+        require(!building || !connected, Messages.getString("BoardEditor.buildingRotationConnected"));
+        int step = building ? 1 : 30;
+        int rotation = Math.floorMod((int) Math.round(Double.parseDouble(degrees) / step) * step, 360);
+        appearance(hex, owner, HexAppearance.withRotation(current, rotation));
     }
 
     /**
@@ -2882,9 +3010,10 @@ public final class BoardEditorSession {
     }
 
     /** The variants of the generated kit {@code hex}'s building draws ({@link TilesetScenery#kitVariants}); none: empty. */
-    private static List<String> kitVariants(Hex hex) {
+    private List<String> kitVariants(Hex hex) {
         return hex.containsTerrain(Terrains.BUILDING)
-              ? TilesetScenery.kitVariants(TilesetScenery.structureModels(hex).get(Terrains.BUILDING)) : List.of();
+              ? TilesetScenery.kitVariants(TilesetScenery.structureModels(hex,
+                    TilesetScenery.buildingConnected(hex, hex.getCoords(), board()::getHex)).get(Terrains.BUILDING)) : List.of();
     }
 
     /** Stores the kit variant {@code name} in {@code hex}'s appearance ({@link HexAppearance#kitVariant}); null: none. */
@@ -2943,7 +3072,9 @@ public final class BoardEditorSession {
         if (target.startsWith("terrain:") && value.isEmpty()) { next.removeTerrain(Terrains.getType(target.substring(8))); }
         else if (target.startsWith("terrain:")) { setTerrain(next, target.substring(8), Integer.parseInt(value), false); }
         else if (target.startsWith("variant:")) { setVariant(next, target.substring(8), value); }
-        else if (target.startsWith("rotation:")) { rotate(next, target.substring(9), value); }
+        else if (target.startsWith("rotation:")) {
+            rotate(next, target.substring(9), value, TilesetScenery.buildingConnected(next, null, null));
+        }
         else if (target.equals("edges")) { setEdges(next, value); }
         else if (target.equals("trafficControl")) { setTrafficControl(next, "road", value); }
         else if (target.startsWith("object:")) {
@@ -2969,6 +3100,10 @@ public final class BoardEditorSession {
         } else if (target.equals("wayPillars")) { wayPillars = Boolean.parseBoolean(value); }
         else if (target.equals("zone")) { setZones(next, zoneMask(value)); }
         else { throw new IllegalArgumentException("Unknown brush setting " + target); }
+        var object = next.getDecorations().stream().findFirst().orElse(null);
+        if (object != null && BuildingVolumes.of(object.asset()).present()) {
+            BuildingInteriors.set(next, BuildingInteriors.forAuthored(object, BuildingInteriors.choice(next)));
+        }
         paintTemplate = next;
     }
 
@@ -2978,6 +3113,11 @@ public final class BoardEditorSession {
         if (!selectedObject.isEmpty()) {
             BoardDecoration object = object(hex);
             paintTemplate = new Hex(0); paintTemplate.setDecorations(List.of(object));
+            if (BuildingVolumes.of(object.asset()).present()) {
+                Hex building = buildingSample();
+                BuildingInteriors.set(paintTemplate, BuildingInteriors.forAuthored(object,
+                      building == null ? BuildingInteriors.DEFAULT : BuildingInteriors.choice(building)));
+            }
             sampledHex = null;
             brushComponent = ""; brushKey = object.asset();
             var asset = blueprint.asset(object.asset()); brushLabel = asset == null ? object.asset() : asset.label();
@@ -3093,6 +3233,10 @@ public final class BoardEditorSession {
      * (crust hides water too), and the Water component's Erase takes liquid magma with the depth; crust stays.
      */
     private void paintFields(Hex hex, Hex template, BoardEditorBlueprint.Component definition) {
+        if (tool == Tool.ERASE && definition.id().equals("building")) {
+            removeComponent(hex, definition);
+            return;
+        }
         Set<Integer> fields = new java.util.HashSet<>();
         for (var field : definition.fields()) {
             int type = Terrains.getType(field.terrain());
@@ -3162,11 +3306,17 @@ public final class BoardEditorSession {
         return String.join(", ", Board.exitsAsIntList(mask).stream().map(String::valueOf).toList());
     }
 
-    /** Removes {@code definition}'s terrain fields and its appearance from {@code hex}; its objects stay. */
+    /** Removes a component and its appearance; detaching an authored building removes its placement on commit. */
     private static void removeComponent(Hex hex, BoardEditorBlueprint.Component definition) {
         if (definition.id().equals("bridge")) { removeDeck(hex); return; }
         definition.fields().forEach(field -> removeWay(hex, Terrains.getType(field.terrain())));
-        var appearance = new LinkedHashMap<>(hex.getAppearance()); appearance.remove(definition.id()); hex.setAppearance(appearance);
+        var appearance = new LinkedHashMap<>(hex.getAppearance());
+        appearance.remove(definition.id());
+        if (definition.id().equals("building")) {
+            appearance.keySet().removeAll(Set.of("footprint", "kitVariant", "buildingProfile"));
+            hex.setBuildingReference(null);
+        }
+        hex.setAppearance(appearance);
     }
 
     /**
@@ -3259,7 +3409,209 @@ public final class BoardEditorSession {
         // Resolve any legacy tokens pasted by an older brush before reconciling the authored layers.
         convertTokens();
         wayDecks();
+        authoredBuildings();
+        // Also constrain direct member edits and pasted terrain, not only object-transform commands.
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            Hex hex = board().getHex(at);
+            var reference = hex.getBuildingReference();
+            if (reference == null || !board().contains(reference.anchor()) || !hex.containsTerrain(Terrains.BUILDING)) { continue; }
+            var object = board().getHex(reference.anchor()).getDecorations().stream()
+                  .filter(o -> o.id().equals(reference.id())).findFirst().orElse(null);
+            if (object == null) { continue; }
+            var choice = BuildingInteriors.forAuthored(object, BuildingInteriors.choice(hex));
+            if (choice != BuildingInteriors.choice(hex)) { change(at, current -> BuildingInteriors.set(current, choice)); }
+        }
         joinBuildingLooks();
+        connectedBuildingLooks();
+    }
+
+    /** Placement or ground edits rebake coverage; appearance edits and collapse keep the saved gameplay state. */
+    private void authoredBuildings() {
+        // Erasing any authored member removes the owning placement too. A collapsed member retains its reference,
+        // so gameplay damage and cosmetic edits never become deletion requests.
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            var reference = stroke.get(at).getBuildingReference();
+            if (reference != null && !reference.equals(board().getHex(at).getBuildingReference())
+                  && board().contains(reference.anchor())) {
+                change(reference.anchor(), hex -> hex.setDecorations(hex.getDecorations().stream()
+                      .filter(object -> !object.id().equals(reference.id())).toList()));
+            }
+        }
+        Map<String, Map.Entry<Coords, BoardDecoration>> before = new LinkedHashMap<>(), after = new LinkedHashMap<>();
+        Set<String> groundChanges = new LinkedHashSet<>();
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            for (var object : stroke.get(at).getDecorations()) {
+                before.put(object.id(), Map.entry(at, object));
+            }
+            for (var object : board().getHex(at).getDecorations()) {
+                after.put(object.id(), Map.entry(at, object));
+            }
+            if (stroke.get(at).getLevel() != board().getHex(at).getLevel()) {
+                board().getHex(at).getDecorations().stream().filter(o -> BuildingVolumes.of(o.asset()).present())
+                      .forEach(o -> groundChanges.add(o.id()));
+                var ref = board().getHex(at).getBuildingReference();
+                if (ref != null && board().contains(ref.anchor())) {
+                    board().getHex(ref.anchor()).getDecorations().stream().filter(o -> o.id().equals(ref.id())).findFirst().ifPresent(object -> {
+                        groundChanges.add(object.id());
+                        after.put(object.id(), Map.entry(ref.anchor(), object));
+                    });
+                }
+            }
+        }
+        Set<String> changed = new LinkedHashSet<>(before.keySet()); changed.addAll(after.keySet());
+        changed.removeIf(id -> Objects.equals(before.get(id), after.get(id)));
+        changed.addAll(groundChanges);
+        if (changed.isEmpty()) { return; }
+        Map<String, Map<Coords, Hex>> old = new LinkedHashMap<>();
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Coords at = new Coords(x, y); Hex hex = board().getHex(at);
+                var ref = hex.getBuildingReference();
+                if (ref != null && changed.contains(ref.id())) {
+                    old.computeIfAbsent(ref.id(), ignored -> new LinkedHashMap<>()).put(at, hex.duplicate());
+                }
+            }
+        }
+        var definition = blueprint.component("building");
+        Set<Coords> freed = new LinkedHashSet<>();
+        Set<String> rebuilt = new LinkedHashSet<>();
+        // Removed placements first: the hexes they free are open to the placements after them.
+        for (String id : changed.stream().sorted(Comparator.comparing(id -> after.containsKey(id))).toList()) {
+            var members = old.getOrDefault(id, Map.of());
+            var next = after.get(id);
+            var previousObject = before.get(id);
+            if (next != null) {
+                if (!BuildingVolumes.of(next.getValue().asset()).present()) { continue; }
+                if (!groundChanges.contains(id) && previousObject != null && previousObject.getKey().equals(next.getKey())
+                      && BuildingVolumes.sameGeometry(previousObject.getValue(), next.getValue())) {
+                    // A cosmetic edit still refreshes all rendered shares, without recreating collapsed terrain.
+                    members.keySet().forEach(at -> { beginHexEdit(at); board().setHex(at, board().getHex(at).duplicate()); });
+                    continue;
+                }
+            }
+            Hex template = members.values().stream().filter(h -> h.containsTerrain(Terrains.BUILDING)).findFirst()
+                  .orElse(paintTemplate.containsTerrain(Terrains.BUILDING) ? paintTemplate
+                        : new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null));
+            for (Coords at : members.keySet()) {
+                change(at, hex -> {
+                    removeComponent(hex, definition);
+                    hex.removeTerrain(Terrains.BLDG_INTERIORS);
+                });
+            }
+            freed.addAll(members.keySet());
+            if (next == null) { continue; }
+            claimBuildingHexes(id, next.getKey(), next.getValue(), members, template, null, rebuilt);
+        }
+        reclaimBuildingHexes(freed, rebuilt);
+        authoredExits(rebuilt);
+    }
+
+    private Map<Coords, BuildingVolumes.Cover> covers(Coords anchor, BoardDecoration object) {
+        return BuildingVolumes.covers(anchor, object, board().getWidth(), board().getHeight(), board()::getHex);
+    }
+
+    /**
+     * Gives an authored placement the hexes it covers ({@code only}: of these, or all). Placements may overlap: a hex
+     * another one holds goes to whichever has more of its roof over it, on equal shares the taller, then the holder.
+     * The other keeps its model and its remaining hexes.
+     */
+    private void claimBuildingHexes(String id, Coords anchor, BoardDecoration object, Map<Coords, Hex> members, Hex template,
+          Set<Coords> only, Set<String> rebuilt) {
+        var definition = blueprint.component("building");
+        rebuilt.add(id);
+        for (var member : covers(anchor, object).entrySet()) {
+            Coords at = member.getKey();
+            if (only != null && !only.contains(at)) { continue; }
+            var holder = board().getHex(at).getBuildingReference();
+            if (holder != null && !holder.id().equals(id)) {
+                if (!outweighs(member.getValue(), holder, at)) { continue; }
+                rebuilt.add(holder.id());
+            }
+            Hex previous = members.get(at), source = previous != null && previous.containsTerrain(Terrains.BUILDING) ? previous : template;
+            change(at, hex -> {
+                if (previous == null || previous.containsTerrain(Terrains.BUILDING)) {
+                    paintFields(hex, source, definition);
+                    BuildingInteriors.set(hex, BuildingInteriors.choice(source));
+                    hex.addTerrain(new Terrain(Terrains.BUILDING, source.terrainLevel(Terrains.BUILDING), true, 0));
+                    hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, member.getValue().height()));
+                }
+                hex.setBuildingReference(new BuildingVolumes.Reference(id, anchor));
+            });
+        }
+    }
+
+    private boolean outweighs(BuildingVolumes.Cover cover, BuildingVolumes.Reference holder, Coords at) {
+        var object = board().getHex(holder.anchor()).getDecorations().stream()
+              .filter(candidate -> candidate.id().equals(holder.id())).findFirst().orElse(null);
+        var held = object == null ? null : covers(holder.anchor(), object).get(at);
+        if (held == null) { return true; }
+        boolean equalShares = Math.abs(cover.area() - held.area()) <= Math.max(cover.area(), held.area()) * 1e-3;
+        return equalShares ? cover.height() > held.height() : cover.area() > held.area();
+    }
+
+    /** Hexes a moved or removed placement let go of return to whichever other placement covers most of them. */
+    private void reclaimBuildingHexes(Set<Coords> freed, Set<String> rebuilt) {
+        freed.removeIf(at -> board().getHex(at).containsTerrain(Terrains.BUILDING) || board().getHex(at).getBuildingReference() != null);
+        if (freed.isEmpty()) { return; }
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Coords anchor = new Coords(x, y);
+                for (var object : board().getHex(anchor).getDecorations()) {
+                    if (!BuildingVolumes.of(object.asset()).present()) { continue; }
+                    claimBuildingHexes(object.id(), anchor, object, Map.of(), memberSample(object.id()), freed, rebuilt);
+                }
+            }
+        }
+    }
+
+    /** The building terrain a placement's hexes share, for a hex it gains. */
+    private Hex memberSample(String id) {
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Hex hex = board().getHex(x, y);
+                var reference = hex.getBuildingReference();
+                if (reference != null && reference.id().equals(id) && hex.containsTerrain(Terrains.BUILDING)) { return hex.duplicate(); }
+            }
+        }
+        return paintTemplate.containsTerrain(Terrains.BUILDING) ? paintTemplate
+              : new Hex(0, "building:2;bldg_cf:60;bldg_elev:3;bldg_basement_type:1", null);
+    }
+
+    /** A placement's hexes connect to its own other hexes, whichever ones its neighbours won. */
+    private void authoredExits(Set<String> rebuilt) {
+        for (int x = 0; x < board().getWidth(); x++) {
+            for (int y = 0; y < board().getHeight(); y++) {
+                Coords at = new Coords(x, y);
+                Hex hex = board().getHex(at);
+                var reference = hex.getBuildingReference();
+                var building = hex.getTerrain(Terrains.BUILDING);
+                if (reference == null || building == null || !rebuilt.contains(reference.id())) { continue; }
+                int sides = 0;
+                for (int side = 0; side < 6; side++) {
+                    Coords next = at.translated(side);
+                    var other = board().contains(next) ? board().getHex(next).getBuildingReference() : null;
+                    if (other != null && other.id().equals(reference.id())) { sides |= 1 << side; }
+                }
+                int exits = sides, level = building.getLevel();
+                if (building.getExits() != exits || !building.hasExitsSpecified()) {
+                    change(at, current -> current.addTerrain(new Terrain(Terrains.BUILDING, level, true, exits)));
+                }
+            }
+        }
+    }
+
+    /** Connecting a building drops its pivot and replaces core-only authored artwork with its generic modular kit. */
+    private void connectedBuildingLooks() {
+        for (Coords at : List.copyOf(stroke.keySet())) {
+            Hex hex = board().getHex(at);
+            if (hex.getBuildingReference() != null || !TilesetScenery.buildingConnected(hex, at, board()::getHex)) { continue; }
+            var design = hex.getAppearance().get("building");
+            if (design == null) { continue; }
+            String asset = TilesetScenery.structureModels(hex, false).get(Terrains.BUILDING);
+            var next = TilesetScenery.singleHexBuilding(asset) ? HexAppearance.withColours(null, design.colours())
+                  : HexAppearance.withRotation(design, 0);
+            if (!java.util.Objects.equals(design, next)) { change(at, changed -> appearance(changed, "building", next)); }
+        }
     }
 
     /**
@@ -3272,7 +3624,7 @@ public final class BoardEditorSession {
         java.util.function.Predicate<Coords> changed = at -> stroke.containsKey(at)
               && !BoardFile.hexNode(stroke.get(at)).equals(BoardFile.hexNode(board().getHex(at)));
         for (Coords at : List.copyOf(stroke.keySet())) {
-            if (done.contains(at) || !board().getHex(at).containsTerrain(Terrains.BUILDING) || !changed.test(at)) { continue; }
+            if (board().getHex(at).getBuildingReference() != null || done.contains(at) || !board().getHex(at).containsTerrain(Terrains.BUILDING) || !changed.test(at)) { continue; }
             List<Coords> building = structure(at, Terrains.BUILDING);
             done.addAll(building);
             var kept = building.stream().filter(changed.negate())
@@ -3288,33 +3640,46 @@ public final class BoardEditorSession {
                       Integer::sum);
             });
             String variant = java.util.Collections.max(variants.entrySet(), Map.Entry.comparingByValue()).getKey();
+            Map<BoardDecoration.Colours, Integer> colours = new LinkedHashMap<>();
+            building.stream().filter(changed.negate()).forEach(cell -> {
+                var design = board().getHex(cell).getAppearance().get("building");
+                colours.merge(design == null ? BoardDecoration.Colours.NONE : design.colours(), 1, Integer::sum);
+            });
+            var tint = java.util.Collections.max(colours.entrySet(), Map.Entry.comparingByValue()).getKey();
             building.forEach(cell -> change(cell, hex -> {
                 footprint(hex, joined);
                 kitVariant(hex, variant.isEmpty() ? null : variant);
+                appearance(hex, "building", HexAppearance.withColours(hex.getAppearance().get("building"), tint));
             }));
         }
     }
 
-    private boolean wallBrush() {
+    private boolean buildingBrush() {
         return sampledHex == null && brushComponent.equals("building")
-              && paintTemplate.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
               && (tool == Tool.PAINT || tool == Tool.ERASE);
     }
 
+    private boolean wallBrush() {
+        return buildingBrush() && paintTemplate.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue();
+    }
+
     /** The shared drawing path supplies explicit connections, retaining branches already drawn at its endpoints. */
-    private void paintWalls(List<Coords> path) {
+    private void paintBuildings(List<Coords> path) {
+        int weight = paintTemplate.terrainLevel(Terrains.BUILDING);
         Set<Coords> allowed = new java.util.HashSet<>();
         for (Coords at : path) {
             Hex hex = board().getHex(at);
             if (overwrites(at) && !hex.containsAnyTerrainOf(Terrains.FUEL_TANK, Terrains.BRIDGE)
-                  && (!hex.containsTerrain(Terrains.BUILDING) || hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue())) {
+                  && (!hex.containsTerrain(Terrains.BUILDING) || hex.terrainLevel(Terrains.BUILDING) == weight)) {
                 allowed.add(at);
             } else { strokeNotice = Messages.getString("BoardEditor.way.structure"); }
         }
+        HexAppearance dome = path.size() > 1 ? connectingDome(path, allowed) : null;
         for (int i = 0; i < path.size(); i++) {
             Coords at = path.get(i);
             if (!allowed.contains(at)) { continue; }
             Terrain existing = board().getHex(at).getTerrain(Terrains.BUILDING);
+            boolean keepDome = dome != null && domed(board().getHex(at));
             int sides = existing == null ? 0 : existing.getExits();
             for (int j : new int[] { i - 1, i + 1 }) {
                 if (j >= 0 && j < path.size() && allowed.contains(path.get(j)) && at.distance(path.get(j)) == 1) {
@@ -3323,9 +3688,11 @@ public final class BoardEditorSession {
             }
             int exits = sides;
             change(at, hex -> {
-                paintFields(hex, paintTemplate, blueprint.component("building"));
-                hex.addTerrain(new Terrain(Terrains.BUILDING, BuildingType.WALL.getTypeValue(), true, exits));
-                appearance(hex, "building", paintTemplate.getAppearance().get("building"));
+                if (!keepDome) { paintFields(hex, paintTemplate, blueprint.component("building")); }
+                hex.addTerrain(new Terrain(Terrains.BUILDING, weight, true, exits));
+                if (!keepDome) {
+                    appearance(hex, "building", dome == null ? paintTemplate.getAppearance().get("building") : dome);
+                }
             });
         }
         if (!path.isEmpty()) {
@@ -3333,6 +3700,21 @@ public final class BoardEditorSession {
             selection.clear(); selection.add(new Selection(selected, ""));
         }
         message = strokeNotice;
+    }
+
+    /** A connecting stroke extends the dome design, retaining the existing domes' appearance and height. */
+    private HexAppearance connectingDome(List<Coords> path, Set<Coords> allowed) {
+        for (Coords at : path) {
+            Hex original = board().getHex(at);
+            if (!allowed.contains(at) || !domed(original)) { continue; }
+            var look = original.getAppearance().get("building");
+            return look != null ? look : new HexAppearance(null, TilesetScenery.structureModels(original).get(Terrains.BUILDING), null, null);
+        }
+        return null;
+    }
+
+    private static boolean domed(Hex hex) {
+        return BoardGenerator.of(TilesetScenery.structureModels(hex).get(Terrains.BUILDING)) == BoardGenerator.MULTI_HEX_BUILDING;
     }
 
     /** Erasing a wall clears the neighbours' back edges in the same preview and undo step. */
@@ -3395,6 +3777,9 @@ public final class BoardEditorSession {
     /** {@code colony}: a board hex, whose ground decides a new road's finish; false for a brush's template. */
     private void setTerrain(Hex hex, String name, int value, boolean colony) {
         int type = Terrains.getType(name); require(type > 0, "Unknown terrain " + name);
+        if (type == Terrains.BUILDING && (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()
+              || value == BuildingType.WALL.getTypeValue())) { return; }
+        if (type == Terrains.BLDG_ELEV && hex.getBuildingReference() != null) { return; }
         Terrain old = hex.getTerrain(type);
         // A new industrial elevator's shaft reaches at least the surface and carries 100 t, the old editor's default. A new
         // deployment zone is zone 1 at level 0, as the old editor wrote it (its level is never read).
@@ -3563,6 +3948,8 @@ public final class BoardEditorSession {
 
     private BoardDecoration objectValue(BoardDecoration d, String property, String value) {
         require(!RailRoute.isRoute(d), Messages.getString("BoardEditor.routeExtend"));
+        if (property.startsWith("flag.")) { return d.withFlag(d.flag().with(property.substring(5), value)); }
+        if (property.equals("levels")) { return d.withLevels(Math.max(1, Integer.parseInt(value))); }
         double x = d.x(), y = d.y(), rotation = d.rotation(), scale = d.scale();
         double rotationX = d.rotationX(), rotationY = d.rotationY();
         boolean clipToHex = d.clipToHex();
@@ -3602,13 +3989,14 @@ public final class BoardEditorSession {
             default -> throw new IllegalArgumentException("Unknown object property " + property);
         }
         return new BoardDecoration(d.id(), d.kind(), d.asset(), name, x, y, rotation, mirror, scale, placement, order, clipToHex,
-              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars());
+              rotationX, rotationY, d.group(), bare, d.connections(), stretch, colours, d.tracks(), d.pillars(), d.uid(), d.levels(), d.flag());
     }
 
     private static void copyInto(Hex source, Hex target) {
         target.removeAllTerrains(); for (int type : source.getTerrainTypes()) { target.addTerrain(new Terrain(source.getTerrain(type))); }
         target.setLevel(source.getLevel()); target.setTheme(source.getTheme()); target.setAppearance(source.getAppearance());
         target.setDecorations(BoardDecoration.copies(source.getDecorations()));
+        target.setBuildingReference(null);
     }
     private static void require(boolean valid, String message) { if (!valid) { throw new IllegalArgumentException(message); } }
 }

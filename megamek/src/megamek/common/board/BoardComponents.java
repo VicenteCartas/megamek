@@ -1,0 +1,312 @@
+/* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
+package megamek.common.board;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import megamek.common.Hex;
+import megamek.common.IndustrialElevator;
+import megamek.common.enums.BasementType;
+import megamek.common.enums.BuildingType;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
+
+/**
+ * Version 3's named components at the file boundary. The game's Hex/Terrain model remains authoritative. This fixed
+ * schema deliberately does not depend on the editor palette, installed artwork, or translated labels.
+ */
+final class BoardComponents {
+    private static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
+    private static final Map<String, List<Field>> COMPONENTS = schema();
+
+    private record Field(String name, int terrain, String connections) { }
+
+    private BoardComponents() { }
+
+    private static Map<String, List<Field>> schema() {
+        Map<String, List<Field>> result = new LinkedHashMap<>();
+        fields(result, "building", "type=building", "cf=bldg_cf", "height=bldg_elev", "class=bldg_class",
+              "basement=bldg_basement_type", "armor=bldg_armor", "basementCollapsed=bldg_base_collapsed", "legacyArt=bldg_fluff",
+              "interiors=bldg_interiors");
+        fields(result, "bridge", "type=bridge", "cf=bridge_cf", "height=bridge_elev", "mud=bridge_mud");
+        fields(result, "fuelTank", "type=fuel_tank", "cf=fuel_tank_cf", "height=fuel_tank_elev", "magnitude=fuel_tank_magn");
+        fields(result, "road", "type=road", "legacyArt=road_fluff");
+        fields(result, "bridgeRoad", "type=bridge_road");
+        fields(result, "rail", "type=rail");
+        fields(result, "bridgeRail", "type=bridge_rail");
+        fields(result, "water", "depth=water", "rapids=rapids", "legacyArt=water_fluff");
+        fields(result, "vegetation", "woods=woods", "jungle=jungle", "height=foliage_elev");
+        fields(result, "ground", "sand=sand", "tundra=tundra", "fields=planted_fields", "swamp=swamp", "mud=mud", "legacyArt=ground_fluff");
+        fields(result, "pavement", "level=pavement");
+        fields(result, "rough", "level=rough");
+        fields(result, "rubble", "type=rubble");
+        fields(result, "industry", "height=heavy_industrial");
+        fields(result, "cliff", "level=cliff_top");
+        fields(result, "weather", "ice=ice", "snow=snow", "blackIce=black_ice");
+        fields(result, "hazards", "fire=fire", "smoke=smoke", "magma=magma", "geyser=geyser",
+              "hazardousLiquid=hazardous_liquid", "ultraSublevel=ultra_sublevel");
+        fields(result, "scenario", "impassable=impassable", "fortified=fortified", "metalDeposit=metal_deposit", "deploymentZones=deployment_zone");
+        fields(result, "salvage", "arms=arms", "legs=legs");
+        fields(result, "elevators", "solaris=solaris_elevator", "industrial=industrial_elevator");
+        fields(result, "space", "level=space", "screen=screen");
+        fields(result, "legacyAppearance", "fluff=fluff", "none=none");
+        fields(result, "scorch");
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private static void fields(Map<String, List<Field>> components, String component, String... names) {
+        List<Field> fields = new ArrayList<>();
+        for (String pair : names) {
+            String[] parts = pair.split("=");
+            int type = Terrains.getType(parts[1]);
+            String connections = switch (type) {
+                case Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.BRIDGE, Terrains.ROAD, Terrains.BRIDGE_ROAD,
+                      Terrains.RAIL, Terrains.BRIDGE_RAIL, Terrains.PAVEMENT, Terrains.WATER, Terrains.CLIFF_TOP -> "connections";
+                default -> null;
+            };
+            fields.add(new Field(parts[0], type, connections));
+        }
+        components.put(component, List.copyOf(fields));
+    }
+
+    /** Values with game-defined names. Unknown numeric values survive editor repair and legacy imports unchanged. */
+    private static List<String> names(int terrain) {
+        return switch (terrain) {
+            case Terrains.BUILDING -> List.of("", "light", "medium", "heavy", "hardened");
+            case Terrains.BRIDGE, Terrains.FUEL_TANK -> List.of("", "light", "medium", "heavy", "hardened", "wall");
+            case Terrains.BLDG_CLASS -> List.of("standard", "hangar", "fortress", "gunEmplacement");
+            case Terrains.BLDG_INTERIORS -> List.of("default", "yes", "noFloors", "no");
+            case Terrains.BLDG_BASEMENT_TYPE -> List.of("unknown", "none", "twoDeepFeet", "oneDeepFeet",
+                  "oneDeepNormal", "oneDeepInfantry", "oneDeepHead", "twoDeepHead");
+            case Terrains.ROAD, Terrains.BRIDGE_ROAD -> List.of("", "paved", "alley", "dirt", "gravel");
+            case Terrains.RAIL, Terrains.BRIDGE_RAIL -> List.of("", "rail", "maglev");
+            case Terrains.WOODS, Terrains.JUNGLE -> List.of("", "light", "heavy", "ultra");
+            case Terrains.ROUGH -> List.of("", "normal", "ultra");
+            case Terrains.RUBBLE -> List.of("", "light", "medium", "heavy", "hardened", "wall", "ultra");
+            default -> List.of();
+        };
+    }
+
+    /** Writes rule components and folds the internal owner map into their appearance; decorations stay unchanged. */
+    static void write(Hex hex, ObjectNode node) {
+        node.remove("terrain");
+        JsonNode appearances = node.remove("appearance");
+        ObjectNode components = node.putObject("components");
+        COMPONENTS.forEach((owner, fields) -> {
+            ObjectNode component = object();
+            boolean closed = owner.equals("building") && hex.containsTerrain(Terrains.BUILDING)
+                  && BuildingInteriors.resolve(hex) == BuildingInteriors.NO;
+            for (Field field : fields) {
+                Terrain terrain = hex.getTerrain(field.terrain());
+                if (closed && field.terrain() == Terrains.BLDG_BASEMENT_TYPE) {
+                    terrain = new Terrain(Terrains.BLDG_BASEMENT_TYPE, BasementType.NONE.ordinal());
+                }
+                if (closed && field.terrain() == Terrains.BLDG_BASE_COLLAPSED) { continue; }
+                if (terrain == null) { continue; }
+                if (writeSpecial(component, field, terrain)) { continue; }
+                var names = names(field.terrain());
+                int level = terrain.getLevel();
+                if (field.terrain() == Terrains.BUILDING) {
+                    boolean wall = level == BuildingType.WALL.getTypeValue();
+                    component.put("type", wall ? "wall" : "building");
+                    int weight = wall ? (hex.containsTerrain(Terrains.BLDG_WEIGHT) ? hex.terrainLevel(Terrains.BLDG_WEIGHT) : 4) : level;
+                    if (weight > 0 && weight < 5) { component.put("weight", names.get(weight)); }
+                    else { component.put("weight", weight); }
+                }
+                else if (level >= 0 && level < names.size() && !names.get(level).isEmpty()) { component.put(field.name(), names.get(level)); }
+                else { component.put(field.name(), level); }
+                if (field.connections() != null && (terrain.getExits() & ~63) == 0) {
+                    var exits = component.putArray(field.connections());
+                    for (int direction = 0; direction < 6; direction++) {
+                        if ((terrain.getExits() & (1 << direction)) != 0) { exits.add(DIRECTIONS.get(direction)); }
+                    }
+                } else if (terrain.hasExitsSpecified()) {
+                    // Some legacy selectors (and Solaris elevator die rolls) reuse the exits integer as data.
+                    component.withObject("/legacyExits").put(field.name(), terrain.getExits());
+                }
+            }
+            if (appearances != null && appearances.has(owner)) { component.set("appearance", appearances.get(owner).deepCopy()); }
+            if (owner.equals("building") && appearances != null) { buildingAppearance(component, appearances); }
+            if (!component.isEmpty()) { components.set(owner, component); }
+        });
+        if (components.isEmpty()) { node.remove("components"); }
+    }
+
+    private static void buildingAppearance(ObjectNode component, JsonNode appearances) {
+        if (!component.has("appearance") && !appearances.has("footprint") && !appearances.has("kitVariant")
+              && !appearances.has("buildingProfile")) { return; }
+        ObjectNode style = component.withObject("/appearance");
+        if (appearances.has("footprint")) {
+            String footprint = appearances.get("footprint").path("variant").asText();
+            style.put("footprint", footprint.substring("footprint/".length()));
+        }
+        if (appearances.has("kitVariant")) { style.set("kitVariant", appearances.get("kitVariant").get("variant")); }
+        if (appearances.has("buildingProfile")) { style.put("profile", "stepped"); }
+    }
+
+    /** Reads gameplay components into the real hex and returns the owner map consumed by the existing visual reader. */
+    static ObjectNode read(JsonNode components, Hex hex, boolean visuals) {
+        ObjectNode appearances = object();
+        if (components == null) { return appearances; }
+        require(components.isObject(), "components must be an object");
+        COMPONENTS.forEach((owner, fields) -> {
+            JsonNode component = components.get(owner);
+            if (component == null) { return; }
+            require(component.isObject(), "Component " + owner + " must be an object");
+            JsonNode legacy = component.get("legacyExits");
+            if (legacy != null) {
+                require(legacy.isObject(), owner + ".legacyExits must be an object");
+            }
+            for (Field field : fields) {
+                boolean connections = field.connections() != null && component.has(field.connections());
+                if (!component.has(field.name())) { continue; }
+                boolean raw = legacy != null && legacy.has(field.name());
+                if (readSpecial(component, field, hex, legacy)) { continue; }
+                int level;
+                if (field.terrain() == Terrains.BUILDING) {
+                    int weight = value(component.path("weight").isMissingNode() ? JsonNodeFactory.instance.textNode("light")
+                          : component.get("weight"), Terrains.BUILDING, "building.weight");
+                    boolean wall = component.path("type").asText().equals("wall");
+                    level = wall ? BuildingType.WALL.getTypeValue() : weight;
+                    if (wall) { hex.addTerrain(new Terrain(Terrains.BLDG_WEIGHT, weight)); }
+                } else { level = value(component.get(field.name()), field.terrain(), owner + "." + field.name()); }
+                int exits = raw ? integer(legacy.get(field.name()), owner + ".legacyExits." + field.name())
+                      : connections ? directions(component.get(field.connections()), owner + "." + field.connections()) : 0;
+                // Native connection fields describe the saved topology, including an explicit isolated structure.
+                hex.addTerrain(new Terrain(field.terrain(), level, raw || field.connections() != null, exits));
+            }
+            if (visuals && HexAppearance.OWNERS.contains(owner) && component.has("appearance")) {
+                require(component.get("appearance").isObject(), owner + ".appearance must be an object");
+                ObjectNode style = component.get("appearance").deepCopy();
+                if (owner.equals("building")) { readBuildingAppearance(style, appearances); }
+                if (!style.isEmpty()) { appearances.set(owner, style); }
+            }
+            if (!visuals && owner.equals("building") && BuildingInteriors.choice(hex) == BuildingInteriors.DEFAULT) {
+                var style = component.path("appearance");
+                if (BuildingInteriors.defaultFor(hex.terrainLevel(Terrains.BLDG_CLASS),
+                      style.path("variant").asText(null), style.path("asset").asText(null)) == BuildingInteriors.NO) {
+                    BuildingInteriors.set(hex, BuildingInteriors.NO);
+                }
+            }
+        });
+        return appearances;
+    }
+
+    private static void readBuildingAppearance(ObjectNode style, ObjectNode appearances) {
+        JsonNode profile = style.remove("profile");
+        if (profile != null) {
+            require(profile.isTextual() && (profile.asText().equals("straight") || profile.asText().equals("stepped")),
+                  "building.appearance.profile must be straight or stepped");
+            if (profile.asText().equals("stepped")) { appearances.putObject("buildingProfile").put("variant", "building/stepped"); }
+        }
+        JsonNode footprint = style.remove("footprint");
+        if (footprint != null && "square".equals(footprint.asText())) {
+            appearances.putObject("footprint").put("variant", "footprint/square");
+        }
+        JsonNode variant = style.remove("kitVariant");
+        if (variant != null) {
+            require(variant.isTextual(), "building.appearance.kitVariant must be a string");
+            appearances.putObject("kitVariant").set("variant", variant);
+        }
+    }
+
+    /** The old exits integer is data, not directions, for elevators and deployment zones. */
+    private static boolean writeSpecial(ObjectNode component, Field field, Terrain terrain) {
+        int type = field.terrain(), exits = terrain.getExits();
+        if (type == Terrains.BLDG_BASEMENT_TYPE && terrain.getLevel() == BasementType.UNKNOWN.ordinal()) { return true; }
+        if (type == Terrains.DEPLOYMENT_ZONE) {
+            if (terrain.getLevel() == 0 && exits >= 0) { indices(component, field.name(), exits, 31); }
+            else {
+                component.put(field.name(), terrain.getLevel());
+                component.withObject("/legacyExits").put(field.name(), exits);
+            }
+            return true;
+        }
+        if (type != Terrains.INDUSTRIAL_ELEVATOR && type != Terrains.SOLARIS_ELEVATOR) { return false; }
+        ObjectNode elevator = component.putObject(field.name());
+        if (type == Terrains.SOLARIS_ELEVATOR) {
+            elevator.put("alternateElevation", terrain.getLevel());
+            if ((exits & ~63) == 0) { indices(elevator, "rolls", exits, 6); }
+            else { component.withObject("/legacyExits").put(field.name(), exits); }
+        } else {
+            elevator.put("bottom", terrain.getLevel());
+            int top = IndustrialElevator.shaftTop(exits), capacity = IndustrialElevator.capacityTons(exits);
+            if (exits == IndustrialElevator.exits(top, capacity)) { elevator.put("top", top).put("capacity", capacity); }
+            else { component.withObject("/legacyExits").put(field.name(), exits); }
+        }
+        return true;
+    }
+
+    private static boolean readSpecial(JsonNode component, Field field, Hex hex, JsonNode legacy) {
+        JsonNode value = component.get(field.name());
+        boolean raw = legacy != null && legacy.has(field.name());
+        int type = field.terrain();
+        if (type == Terrains.DEPLOYMENT_ZONE && value.isArray()) {
+            hex.addTerrain(new Terrain(type, 0, true, indices(value, 31, "deploymentZones")));
+            return true;
+        }
+        if (type != Terrains.SOLARIS_ELEVATOR && type != Terrains.INDUSTRIAL_ELEVATOR) { return false; }
+        require(value.isObject(), field.name() + " must be an elevator object");
+        boolean solaris = type == Terrains.SOLARIS_ELEVATOR;
+        int level = integer(value.get(solaris ? "alternateElevation" : "bottom"), field.name());
+        int exits;
+        if (raw) {
+            exits = integer(legacy.get(field.name()), field.name() + ".legacyExits");
+        } else if (solaris) { exits = indices(value.get("rolls"), 6, "solaris.rolls"); }
+        else {
+            int top = integer(value.get("top"), "industrial.top"), capacity = integer(value.get("capacity"), "industrial.capacity");
+            require(top >= 0 && top <= 255 && capacity >= 0 && capacity <= 2550 && capacity % 10 == 0,
+                  "Industrial elevator top must be 0..255; capacity must be 0..2550 tons in steps of 10");
+            exits = IndustrialElevator.exits(top, capacity);
+        }
+        hex.addTerrain(new Terrain(type, level, true, exits));
+        return true;
+    }
+
+    private static void indices(ObjectNode parent, String field, int mask, int count) {
+        var values = parent.putArray(field);
+        for (int i = 0; i < count; i++) { if ((mask & (1 << i)) != 0) { values.add(i + 1); } }
+    }
+
+    private static int indices(JsonNode values, int count, String path) {
+        require(values != null && values.isArray(), path + " must be an integer array");
+        int mask = 0;
+        for (JsonNode value : values) {
+            int index = integer(value, path);
+            require(index >= 1 && index <= count, path + " values must be 1.." + count);
+            mask |= 1 << (index - 1);
+        }
+        return mask;
+    }
+
+    private static int value(JsonNode value, int terrain, String path) {
+        if (!value.isTextual()) { return integer(value, path); }
+        int index = names(terrain).indexOf(value.textValue());
+        require(index >= 0 && !value.textValue().isEmpty(), "Unknown value for " + path + ": " + value.textValue());
+        return index;
+    }
+
+    private static int directions(JsonNode list, String path) {
+        require(list.isArray(), path + " must be an array of directions");
+        int mask = 0;
+        for (JsonNode item : list) {
+            int direction = item.isTextual() ? DIRECTIONS.indexOf(item.textValue()) : -1;
+            require(direction >= 0, "Unknown direction in " + path + ": " + item);
+            mask |= 1 << direction;
+        }
+        return mask;
+    }
+
+    private static int integer(JsonNode value, String path) {
+        require(value != null && value.isIntegralNumber() && value.canConvertToInt(), path + " must be an integer");
+        return value.intValue();
+    }
+
+    private static ObjectNode object() { return JsonNodeFactory.instance.objectNode(); }
+    private static void require(boolean condition, String message) { if (!condition) { throw new IllegalArgumentException(message); } }
+}

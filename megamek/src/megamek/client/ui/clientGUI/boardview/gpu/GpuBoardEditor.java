@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import megamek.common.board.BoardFlag;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -53,6 +54,8 @@ import megamek.common.Configuration;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BuildingInteriors;
+import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexIssue;
 import megamek.common.board.RailRoute;
@@ -169,7 +172,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     private String layersHover = "", boardHover = "", shownHover;
     /** The items of the shown hover (a shared pill stands for several), and those of them the 3D view outlines. */
     private List<String> shownHovers = List.of(), outlined = List.of();
-    private boolean sideOpen = GUIPreferences.getInstance().getBoardEditorSideView(), sideViewPlaced;
+    private boolean sideOpen;
     /** Shown only while the document has issues; a click lists them, and an issue frames and selects its hex. */
     private final UiKit.Icon issues;
     private final com.badlogic.gdx.scenes.scene2d.ui.TextTooltip issuesTip;
@@ -423,7 +426,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         ui.tip(sectionReveal).getActor().setText(UiKit.text("BoardEditor.reveal.tooltip"));
         // Side view: the bottom-right corner of the board area; its header collapses it to a one-line summary.
         sideView = ui.panel(); sideView.setName("editor-side-view"); sideView.pad(4, 8, 6, 8); sideView.defaults().growX().minWidth(0);
-        sideToggle = ui.button("hud-mini", sideOpen ? "chevron-down" : "chevron-up", "", null); sideToggle.setName("editor-side-view-toggle");
+        sideToggle = ui.button("hud-mini", "chevron-down", "", null); sideToggle.setName("editor-side-view-toggle");
         sideToggle.clearChildren(); sideToggle.pad(0); sideToggle.icons.forEach(icon -> sideToggle.add(icon).size(18));
         onChange(sideToggle, () -> { stage.setKeyboardFocus(null); openSideView(!sideOpen); });
         ui.tip(sideToggle).getActor().setText(UiKit.text("BoardEditor.sideView.tooltip"));
@@ -432,11 +435,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         Table sideHeader = new Table(); sideHeader.add(ui.caption(UiKit.text("BoardEditor.hexSection"))).left().padRight(8);
         sideHeader.add(sideSummary).growX().minWidth(0).left();
         sideRevealCell = sideHeader.add(sectionReveal).height(22).padLeft(6);
-        if (!sideOpen) { sideRevealCell.setActor(null); }
         sideHeader.add(sideToggle).size(24).padLeft(6);
         sideView.add(sideHeader).height(26).row();
         sideBody = sideView.add(sectionPanel);
         stage.addActor(sideView);
+        openSideView(true);
         designLayer.setFillParent(true); designLayer.setName("editor-design-gallery");
         designLayer.setBackground(ui.skin.newDrawable("white", UiTheme.alpha(UiTheme.PANEL, .85f)));
         designLayer.setTouchable(Touchable.enabled); designLayer.setVisible(false);
@@ -553,11 +556,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         library.setBounds(GAP, GAP, LIBRARY_WIDTH, Math.max(120, height - top - GAP));
         inspector.setBounds(width - INSPECTOR_WIDTH - GAP, GAP, INSPECTOR_WIDTH, Math.max(120, height - top - GAP));
         inspector.validate();
-        if (!sideViewPlaced) {
-            // The first layout decides: a board area too narrow for both corner panels starts with the side view collapsed.
-            sideViewPlaced = true;
-            if (boardAreaWidth() < BRUSH_WIDTH + GAP + SIDE_WIDTH) { openSideView(false, false); }
-        }
         fitSplit();
         layoutCorners();
         if (designLayer.isVisible()) { layoutDesigns(); }
@@ -622,15 +620,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     private void brushRow(Actor... controls) { brushRows.add(List.of(controls)); }
 
-    /** Opens or collapses the side view, remembering the choice when the user made it. */
-    private void openSideView(boolean open) { openSideView(open, true); }
-    private void openSideView(boolean open, boolean remember) {
+    /** Applies the complete side view state, both at startup and when toggled. */
+    private void openSideView(boolean open) {
         sideOpen = open;
         sideBody.setActor(open ? sectionPanel : null);
         sideRevealCell.setActor(open ? sectionReveal : null);
         if (snapshot != null) { sideSummary.setText(sideSummary(snapshot)); }
         ((UiKit.Icon) sideToggle.icons.getFirst()).setDrawable(ui.skin.getDrawable(open ? "icon-chevron-down" : "icon-chevron-up"));
-        if (remember) { javax.swing.SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardEditorSideView(open)); }
         if (width > 0) { layoutCorners(); }
     }
 
@@ -1184,7 +1180,14 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         var entry = blueprint.entry(brush.key());
         List<String> settings = entry == null || entry.preset() == null ? List.of() : entry.preset().settings();
+        boolean wall = brush.property("building") != null && brush.property("building").value() == 5;
         for (var field : brush.sampledHex() != null ? List.<BoardEditorBlueprint.Field>of() : definition.fields()) {
+            if (wall && field.terrain().equals("building")) {
+                var weight = brush.property("bldg_weight");
+                controls.add(wallWeight(weight == null ? 4 : weight.value(), chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_weight", chosen)));
+                continue;
+            }
+            if (wallField(field.terrain(), wall)) { continue; }
             var value = brush.property(field.terrain());
             boolean offered = settings.contains(field.terrain());
             if (!field.brush() || value == null && !offered || brush.way() && field.terrain().equals("bridge_elev")) { continue; }
@@ -1207,6 +1210,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (design != null && design.skin() != null) {
             controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"), style.rotation() == null ? 0 : style.rotation(),
                   0, 330, 30, Action.BRUSH_VALUE, "rotation:" + definition.id()));
+        }
+        if (brush.sampledHex() == null && definition.id().equals("building") && !wall) {
+            var interior = brush.property("bldg_interiors");
+            controls.add(interiors(interior == null ? 0 : interior.value(), chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_interiors", chosen)));
+            controls.add(brushNumber(UiKit.text("BoardEditor.designRotation"),
+                  style == null || style.rotation() == null ? 0 : style.rotation(),
+                  0, 359, 1, Action.BRUSH_VALUE, "rotation:building"));
         }
         if (brush.sampledHex() == null && definition.id().equals("scorch")) {
             controls.add(scorchSeverity(brush.appearance(), chosen -> send(Action.BRUSH_VALUE, "variant:scorch", chosen)));
@@ -1301,6 +1311,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         onChange(precision, () -> send(Action.BRUSH_VALUE, "precision", Boolean.toString(precision.isTicked())));
         ui.tip(precision).getActor().setText(UiKit.text("BoardEditor.precision.tooltip"));
         brushRow(precision);
+        if (BuildingVolumes.of(object.asset()).present()) {
+            brushRow(rotations(object, true, action), brushNumber(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, action, prefix + "scale"));
+            brushRow(stretch(object, true, action));
+            if (BuildingVolumes.of(object.asset()).modular()) {
+                brushRow(brushNumber(UiKit.text("BoardEditor.assembledLevels"), Math.max(1, object.levels()), 1, 20, 1, action, prefix + "levels"));
+            } else { brushRow(hint(UiKit.text("BoardEditor.authoredHeight"))); }
+            var policy = brush.property("bldg_interiors");
+            brushRow(interiors(policy == null ? 0 : policy.value(), object, chosen -> send(Action.BRUSH_VALUE, "terrain:bldg_interiors", chosen)));
+            brushRow(hint(UiKit.text("BoardEditor.hint.place")));
+            return;
+        }
         brushRow(rotations(object, true, action), brushNumber(UiKit.text("BoardEditor.scale"), object.scale(), .05, 8, .05, action, prefix + "scale"));
         // A brush sampled from a stretched object places stretched copies: it shows the stretch, which can be reset there.
         if (!object.stretch().equals(BoardDecoration.Stretch.NONE)) { brushRow(stretch(object, true, action)); }
@@ -1313,6 +1334,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             onChange(span, () -> send(action, prefix + "clipToHex", Boolean.toString(!span.isTicked())));
             brushRow(span, mirror, brushNumber(UiKit.text("BoardEditor.paintOrder"), object.drawOrder(), -20, 20, 1, action, prefix + "order"));
         }
+        if (BoardFlag.ASSET.equals(object.asset())) { flag(object, true); }
         var asset = blueprint.asset(object.asset());
         if (asset != null && asset.snap() != null) {
             var magnetic = ui.checkbox(UiKit.text("BoardEditor.magnetic"), brush.magnetic()); magnetic.setName("editor-magnetic");
@@ -1641,8 +1663,40 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         for (var field : definition.fields()) { if (!field.optional() || snapshot.property(field.terrain()) != null) { field(field); } }
         if (definition.id().equals("pavement")) { pavementEdges(); }
         if (definition.id().equals("building") && snapshot.property("building") != null) {
+            if (snapshot.buildingProfileAvailable()) {
+                var profiles = List.of(new Option(UiKit.text("BoardEditor.buildingProfile.straight"), "straight"),
+                      new Option(UiKit.text("BoardEditor.buildingProfile.stepped"), "stepped"));
+                var profile = choice(UiKit.text("BoardEditor.buildingProfile"),
+                      profiles.get(megamek.common.board.HexAppearance.steppedBuilding(snapshot.appearance()) ? 1 : 0).label(),
+                      profiles, chosen -> send(Action.BUILDING_PROFILE, chosen));
+                profile.setName("editor-building-profile");
+                detail.add(profile).growX().row();
+            }
+            if (snapshot.property("building").value() != 5) {
+                detail.add(interiors(snapshot.buildingInteriors(), chosen -> send(Action.BUILDING_INTERIORS, chosen))).growX().row();
+            }
+            if (snapshot.buildingReference() != null) {
+                detail.add(button(UiKit.text("BoardEditor.selectStructure"), () -> send(Action.SELECT_STRUCTURE))).growX().row();
+            } else {
             buildingFootprint();
             buildingVariant();
+            if (!snapshot.buildingConnected()) {
+                if (!snapshot.kitVariants().isEmpty()) {
+                    number(UiKit.text("BoardEditor.buildingPadding"), megamek.common.board.HexAppearance.padding(snapshot.appearance()),
+                          0, 80, 1, Action.BUILDING_PADDING, "building");
+                }
+                var design = snapshot.appearance().get("building");
+                number(UiKit.text("BoardEditor.designRotation"), design == null || design.rotation() == null ? 0 : design.rotation(),
+                      0, 359, 1, Action.DESIGN_ROTATION, "building");
+            }
+            var design = snapshot.appearance().get("building");
+            heading(UiKit.text("BoardEditor.colours"));
+            var presets = new ArrayList<RigidGlb.ColourSlot.Preset>();
+            presets.add(new RigidGlb.ColourSlot.Preset(UiKit.text("BoardEditor.defaultDesign"), "#ffffff"));
+            presets.addAll(BoardBridgeTruss.BODY.presets());
+            colourRows(List.of(new RigidGlb.ColourSlot(UiKit.text("BoardEditor.buildingTint"), "#ffffff", presets)),
+                  design == null ? BoardDecoration.Colours.NONE : design.colours(), (slot, value) -> send(Action.BUILDING_COLOUR, value));
+            }
         }
         if (definition.id().equals("road")) { trafficControl("road"); }
         if (definition.id().equals("scorch")) {
@@ -1653,6 +1707,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         boolean deckMud = Boolean.FALSE.equals(megamek.common.board.HexAppearance.bridgeBuilt(snapshot.appearance()))
               && deck != null && deck.value() > 0;
         var optional = definition.fields().stream().filter(f -> f.optional() && !f.terrain().contains("fluff") && !f.terrain().equals("cliff_top")
+              && !wallField(f.terrain(), snapshot.property("building") != null && snapshot.property("building").value() == 5)
               && (deckMud || !f.terrain().equals("bridge_mud")) && snapshot.property(f.terrain()) == null).toList();
         if (!optional.isEmpty()) {
             choose(UiKit.text("BoardEditor.addProperty"), UiKit.text("BoardEditor.choose"), optional.stream().map(f -> new Option(f.label(), f.terrain())).toList(), key -> {
@@ -1772,7 +1827,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var names = snapshot.kitVariants();
         if (names.size() < 2) { return; }
         String stored = megamek.common.board.HexAppearance.kitVariant(snapshot.appearance());
-        choose(UiKit.text("BoardEditor.kitVariant"), names.contains(stored) ? stored : names.getFirst(),
+        choose(UiKit.text("BoardEditor.kitVariant"), stored != null && names.contains(stored) ? stored : names.getFirst(),
               names.stream().map(name -> new Option(name, name)).toList(), name -> send(Action.KIT_VARIANT, name));
     }
 
@@ -1849,9 +1904,32 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         detail.add(layers).growX().row();
     }
 
+    private static boolean wallField(String field, boolean wall) {
+        return field.equals("bldg_weight") || wall && List.of("building", "bldg_class", "bldg_basement_type", "bldg_base_collapsed", "bldg_interiors").contains(field);
+    }
+
+    private Table wallWeight(int weight, Consumer<String> choose) {
+        var field = blueprint.component("building").fields().stream().filter(f -> f.terrain().equals("building")).findFirst().orElseThrow();
+        var options = field.choices().stream().map(c -> new Option(c.label(), Integer.toString(c.value()))).toList();
+        return choice(field.label(), options.get(weight - 1).label(), options, choose);
+    }
+
     private void field(BoardEditorBlueprint.Field field) {
+        boolean wall = snapshot.property("building") != null && snapshot.property("building").value() == 5;
+        if (wallField(field.terrain(), wall)) {
+            if (field.terrain().equals("building")) {
+                var weight = snapshot.property("bldg_weight");
+                detail.add(wallWeight(weight == null ? 4 : weight.value(), chosen -> send(Action.TERRAIN, "bldg_weight", chosen))).growX().row();
+                edges("building");
+            }
+            return;
+        }
         var value = snapshot.property(field.terrain());
-        if (field.terrain().contains("fluff") || field.terrain().equals("cliff_top")) { return; }
+        if (field.terrain().contains("fluff") || field.terrain().equals("cliff_top") || field.terrain().equals("bldg_interiors")) { return; }
+        if (field.terrain().equals("bldg_elev") && snapshot.buildingReference() != null) {
+            if (value != null) { text(UiKit.text("BoardEditor.derivedBuildingHeight", Integer.toString(value.value()))); }
+            return;
+        }
         if (value == null) {
             if (field.optional()) {
                 int initial = field.choices().isEmpty() ? 1 : field.choices().getFirst().value();
@@ -1943,6 +2021,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
     private void object(BoardDecoration object) {
         heading(objectLabel(object));
+        boolean authored = BuildingVolumes.of(object.asset()).present();
         // An object of a picker family swaps to another member in place: Type.
         var asset = blueprint.assetOf(object);
         var entry = asset == null ? null : blueprint.entry(asset.id());
@@ -1950,14 +2029,19 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (family != null && family.picker()) {
             choose(UiKit.text("BoardEditor.familyType"), entry.label(), members(family), key -> send(Action.OBJECT_VALUE, "asset", key));
         }
-        text(UiKit.text(object.kind().equals("prop") ? "BoardEditor.visualProp" : "BoardEditor.surfaceDecal"));
+        text(UiKit.text(authored ? "BoardEditor.authoredBuilding" : object.kind().equals("prop") ? "BoardEditor.visualProp" : "BoardEditor.surfaceDecal"));
         var placement = object.placement();
         String support = placement.receiver() == null ? "fixed" : switch (placement.receiver().terrain()) {
             case "bridge", "building", "industrial", "fuelTank", "ice" -> placement.receiver().terrain();
             default -> "ground";
         };
         text(UiKit.text("BoardEditor.support." + support));
-        if (object.kind().equals("prop")) {
+        if (authored) {
+            if (BuildingVolumes.of(object.asset()).modular()) {
+                number(UiKit.text("BoardEditor.assembledLevels"), Math.max(1, object.levels()), 1, 20, 1, Action.OBJECT_VALUE, "levels");
+            } else { text(UiKit.text("BoardEditor.authoredHeight")); }
+            detail.add(interiors(snapshot.buildingInteriors(), object, chosen -> send(Action.BUILDING_INTERIORS, chosen))).growX().row();
+        } else if (object.kind().equals("prop")) {
             // Scrubbing stops at the surface; a typed value may still sink the object into it.
             number(UiKit.text("BoardEditor.heightAboveSurface"), heightOffset(object), 0, 30, .1, Action.OBJECT_VALUE, "offset");
         } else { number(UiKit.text("BoardEditor.paintOrder"), object.drawOrder(), -20, 20, 1, Action.OBJECT_VALUE, "order"); }
@@ -1978,8 +2062,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             overflow.setName("editor-object-span"); overflow.pressed(!object.clipToHex()); detail.add(overflow).row();
         }
         UiButton mirror = button(UiKit.text("BoardEditor.mirror"), () -> send(Action.OBJECT_VALUE, "mirror", Boolean.toString(!object.mirror())));
-        mirror.setName("editor-object-mirror"); mirror.pressed(object.mirror()); detail.add(mirror).row();
-        colours(object);
+        if (!authored) { mirror.setName("editor-object-mirror"); mirror.pressed(object.mirror()); detail.add(mirror).row(); }
+        if (authored) {
+            heading(UiKit.text("BoardEditor.colours"));
+            colourRows(List.of(new RigidGlb.ColourSlot(UiKit.text("BoardEditor.buildingTint"), "#ffffff", BoardBridgeTruss.BODY.presets())),
+                  object.colours(), (slot, value) -> send(Action.OBJECT_VALUE, "colour0", value));
+        } else { colours(object); }
+        if (BoardFlag.ASSET.equals(object.asset())) { flag(object, false); }
         if (BoardFeatures.hasSnowForm(object.asset())) {
             // On by default: the tree takes its winter form on a snow surface; off keeps this tree bare there.
             UiButton snow = button(UiKit.text("BoardEditor.snow"), () -> send(Action.OBJECT_VALUE, "bare", Boolean.toString(!object.bare())));
@@ -2027,6 +2116,24 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         ui.fitSearch(designDialog.getCell(designSearch), false); layoutDesigns();
         designLayer.setVisible(true); designLayer.toFront();
     }
+    private Table interiors(int current, java.util.function.Consumer<String> changed) {
+        return interiors(current, null, changed);
+    }
+    private Table interiors(int current, BoardDecoration object, java.util.function.Consumer<String> changed) {
+        var labels = List.of("default", "yes", "noFloors", "no");
+        List<Option> options = new ArrayList<>();
+        boolean tilted = object != null && BuildingVolumes.tilted(object);
+        for (int i = 0; i < labels.size(); i++) {
+            if (tilted && i < 2) { continue; }
+            options.add(new Option(UiKit.text("BoardEditor.interiors." + labels.get(i)), Integer.toString(i)));
+        }
+        var policy = BuildingInteriors.values()[Math.max(0, Math.min(3, current))];
+        if (object != null) { policy = BuildingInteriors.forAuthored(object, policy); }
+        Table result = choice(UiKit.text("BoardEditor.interiors"), UiKit.text("BoardEditor.interiors." + labels.get(policy.ordinal())), options, changed);
+        if (tilted) { ui.tip(result).getActor().setText(UiKit.text("BoardEditor.buildingTilt")); }
+        return result;
+    }
+
     private record Option(String label, String id) { }
 
     /** Each model's colour slots, read from its file once. */
@@ -2049,7 +2156,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     /**
      * One row per colour slot: its preset swatches, then its colour as #rrggbb to type any other. {@code chosen} gets the
      * slot and the chosen colour, "" for the slot's own (which stores nothing). The colours of an object, a group's
-     * members and a truss bridge.
+     * members, a truss bridge and a building.
      */
     private void colourRows(List<RigidGlb.ColourSlot> slots, BoardDecoration.Colours colours,
           java.util.function.BiConsumer<Integer, String> chosen) {
@@ -2061,7 +2168,6 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             Table swatches = new Table();
             swatches.left();
             for (var preset : slot.presets()) {
-                if (swatches.getCells().size % 10 == 0 && swatches.getCells().size > 0) { swatches.row(); }
                 Actor swatch = swatch(preset, preset.colour().equals(current), choose);
                 swatch.setName("editor-colour-" + index + "-" + swatches.getCells().size);
                 swatches.add(swatch).left();
@@ -2071,7 +2177,52 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
     }
 
+    private void flag(BoardDecoration object, boolean brush) {
+        var flag = object.flag();
+        Action action = brush ? Action.BRUSH_VALUE : Action.OBJECT_VALUE;
+        String prefix = brush ? "object:" : "";
+        List<Actor> controls = new ArrayList<>();
+        Consumer<Actor> add = actor -> { if (brush) { controls.add(actor); } else { detail.add(actor).growX().row(); } };
+        if (!brush) { heading(UiKit.text("BoardEditor.flag")); }
+        add.accept(hint(UiKit.text("BoardEditor.flag.anchor")));
+        add.accept(choice(UiKit.text("BoardEditor.flag.pattern"), UiKit.text("BoardEditor.flag.pattern." + flag.pattern()),
+              BoardFlag.PATTERNS.stream().map(pattern ->
+                    new Option(UiKit.text("BoardEditor.flag.pattern." + pattern), pattern)).toList(),
+              value -> send(action, prefix + "flag.pattern", value)));
+        List<Option> emblems = new ArrayList<>();
+        emblems.add(new Option(UiKit.text("BoardEditor.flag.none"), ""));
+        blueprint.assets().stream().filter(asset -> asset.id().startsWith("decal/emblems/"))
+              .forEach(asset -> emblems.add(new Option(asset.label(), asset.id())));
+        String selected = emblems.stream().filter(option -> option.id().equals(flag.emblem())).map(Option::label)
+              .findFirst().orElse(flag.emblem());
+        add.accept(choice(UiKit.text("BoardEditor.flag.emblem"), selected, emblems,
+              value -> send(action, prefix + "flag.emblem", value)));
+        String[] properties = { "x", "y", "scale" };
+        double[] values = { flag.x(), flag.y(), flag.scale() };
+        for (int i = 0; i < properties.length; i++) {
+            String label = UiKit.text("BoardEditor.flag." + properties[i]), target = prefix + "flag." + properties[i];
+            double min = i == 2 ? .05 : -1, max = i == 2 ? 4 : 1, step = i == 2 ? .05 : .01;
+            add.accept(brush ? brushNumber(label, values[i], min, max, step, action, target)
+                  : numeric(label, values[i], min, max, step, action, target));
+        }
+        add.accept(angle(UiKit.text("BoardEditor.flag.rotation"), flag.rotation(), brush, action, prefix + "flag.rotation"));
+        if (brush) {
+            var slots = colourSlots(object.asset());
+            for (int i = 0; i < slots.size(); i++) {
+                int index = i;
+                String colour = object.colours().slot(i) == null ? slots.get(i).colour() : object.colours().slot(i);
+                add.accept(inputRow(slots.get(i).name(), colour, value -> send(action, prefix + "colour" + index, value)));
+            }
+            brushRows.add(controls);
+        }
+    }
+
     private List<RigidGlb.ColourSlot> colourSlots(String model) {
+        if (BoardFlag.ASSET.equals(model)) {
+            return java.util.stream.IntStream.range(0, 4).mapToObj(index -> new RigidGlb.ColourSlot(
+                  UiKit.text("BoardEditor.flag.colour", Integer.toString(index + 1)),
+                  BoardFlag.COLOURS.get(index), BoardBridgeTruss.BODY.presets())).toList();
+        }
         return colourSlots.computeIfAbsent(model, asset -> {
             var source = RigidGlb.source(new java.io.File(Configuration.dataDir(), "models/board"), asset);
             try { return source.file().isFile() ? RigidGlb.colourSlots(source.file()) : List.of(); }
@@ -2171,13 +2322,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         detail.add(numeric(label, value, min, max, step, action, target)).row();
     }
     private Table rotations(BoardDecoration object, boolean compact, Action action) {
+        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
         Table row = new Table();
         row.add(ui.label(UiKit.text("BoardEditor.rotation"), "hud-small", 12, UiTheme.TEXT)).colspan(3).left().padBottom(3).row();
         String[] axes = {"X", "Y", "Z"}, keys = {"rotationX", "rotationY", "rotation"};
         String[] descriptions = {UiKit.text("BoardEditor.rotation.pitch"), UiKit.text("BoardEditor.rotation.roll"),
               UiKit.text("BoardEditor.rotation.yaw")};
         double[] values = {object.rotationX(), object.rotationY(), object.rotation()};
-        String prefix = action == Action.BRUSH_VALUE ? "object:" : "";
         for (int i = 0; i < 3; i++) {
             UiNumber number = angle(axes[i], values[i], compact, action, prefix + keys[i]).compactCaption().fieldSize(48, 27);
             ui.tip(number).getActor().setText(descriptions[i]);
@@ -2245,8 +2396,11 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         return field;
     }
     private void input(String label, String value, Consumer<String> commit) {
+        detail.add(inputRow(label, value, commit)).row();
+    }
+    private Table inputRow(String label, String value, Consumer<String> commit) {
         Table row = new Table(); row.add(ui.label(label, "hud-small", 12, UiTheme.MUTED)).left().padRight(8);
-        row.add(textField(label, value, commit)).growX().minWidth(0).height(29); detail.add(row).row();
+        row.add(textField(label, value, commit)).growX().minWidth(0).height(29); return row;
     }
     /**
      * Board settings in three sections: Map (the board's own settings: Arena, exit roads to pavement, tags), Whole board

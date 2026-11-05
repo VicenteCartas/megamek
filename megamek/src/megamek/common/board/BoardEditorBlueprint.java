@@ -46,10 +46,9 @@ public final class BoardEditorBlueprint {
     /**
      * {@code pieces}: a model per structure weight and exits ({@link #model}) for a look that names no single asset;
      * {@code skin}: the scenery a vegetation look draws in place of its trees, or null.
-     * {@code legacyOnly}: retained for saved maps, absent from the palette and design choices.
      */
     public record Variant(String id, String label, String owner, String selectors, String asset, String thumbnail,
-          String material, boolean blend, List<String> sections, String family, String pieces, Skin skin, boolean legacyOnly) {
+          String material, boolean blend, List<String> sections, String family, String pieces, Skin skin) {
         /** The model this design shows on {@code hex}: its asset, else its pieces for the structure's weight and exits ("" if none). */
         public String model(Hex hex) {
             Terrain structure = hex.getAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK);
@@ -281,13 +280,13 @@ public final class BoardEditorBlueprint {
             Variant variant = new Variant(required(entry, "id"), required(entry, "label"), required(entry, "owner"),
                   entry.path("selectors").asText(), entry.path("asset").asText(), entry.path("thumbnail").asText(),
                   entry.path("material").asText(), entry.path("blend").asBoolean(), sections(entry, sections),
-                  entry.path("family").asText(null), entry.path("pieces").asText(), skin(entry), entry.path("legacyOnly").asBoolean());
+                  entry.path("family").asText(null), entry.path("pieces").asText(), skin(entry));
             if (!HexAppearance.OWNERS.contains(variant.owner()) || variants.putIfAbsent(variant.id(), variant) != null
                   || variant.skin() != null && (!variant.owner().equals("vegetation") || !variant.selectors().isBlank()
                         || !variant.asset().isBlank())) {
                 throw new IOException("Invalid or duplicate variant " + variant.id());
             }
-            if (!variant.legacyOnly()) { add(entries, new Entry(variant.id(), variant.owner(), variant.label(), null, variant, null)); }
+            add(entries, new Entry(variant.id(), variant.owner(), variant.label(), null, variant, null));
         }
         checkSkins(variants);
         for (JsonNode entry : root.withArray("assets")) {
@@ -469,7 +468,7 @@ public final class BoardEditorBlueprint {
     }
 
     public List<Component> components() { return components; }
-    public List<Variant> variants(String owner) { return variants.values().stream().filter(v -> v.owner().equals(owner) && !v.legacyOnly()).toList(); }
+    public List<Variant> variants(String owner) { return variants.values().stream().filter(v -> v.owner().equals(owner)).toList(); }
     public Variant variant(String id) { return variants.get(id); }
     public List<Asset> assets() { return List.copyOf(assets.values()); }
     public Asset asset(String id) { return assets.get(id); }

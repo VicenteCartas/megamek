@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
@@ -97,6 +98,7 @@ class LegacySceneryCorpusTest {
             Map<Coords, Terrain> roads = new HashMap<>();
             // The art tokens each hex loaded with, which the conversion keeps in memory, and the designs it had.
             Map<Coords, List<String>> tokens = new HashMap<>();
+            Set<Coords> retiredDropships = new HashSet<>();
             Map<Coords, Map<String, HexAppearance>> appearances = new HashMap<>();
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) {
@@ -104,6 +106,10 @@ class LegacySceneryCorpusTest {
                     if (road != null) { roads.put(new Coords(x, y), new Terrain(road)); }
                     var loaded = tokens(board.getHex(x, y));
                     if (!loaded.isEmpty()) { tokens.put(new Coords(x, y), loaded); }
+                    var building = board.getHex(x, y).getTerrain(Terrains.BUILDING);
+                    if (building != null && building.getLevel() == 4 && building.getExits() >= 69 && building.getExits() <= 75) {
+                        retiredDropships.add(new Coords(x, y));
+                    }
                     appearances.put(new Coords(x, y), Map.copyOf(board.getHex(x, y).getAppearance()));
                 }
             }
@@ -114,7 +120,11 @@ class LegacySceneryCorpusTest {
             assertEquals(List.of(), issues, "Every emblem and pad set in the corpus is complete or partial: " + file);
             long millis = (System.nanoTime() - start) / 1_000_000;
             board.isValid(after);
-            assertEquals(before, after, "The conversion adds no rule errors: " + file);
+            // Retiring art-only buildings can remove old connection errors. Compare by hex so
+            // fixing one cell cannot conceal a new error in another.
+            var addedErrors = validationErrors(after);
+            addedErrors.removeAll(validationErrors(before));
+            assertTrue(addedErrors.isEmpty(), () -> "New rule errors in " + file + ": " + addedErrors);
             // The only road change: a ground car park without a road gains its lane; kept neighbours only write theirs out.
             for (int y = 0; y < board.getHeight(); y++) {
                 for (int x = 0; x < board.getWidth(); x++) {
@@ -148,10 +158,14 @@ class LegacySceneryCorpusTest {
                     var hex = board.getHex(x, y);
                     String where = file.getFileName() + " " + x + "," + y;
                     // K: the tokens stay on the converted board, so the 2D views of a game still draw the old sprites; legacy
-                    // rail art becomes rail terrain, which draws its sprite (b13 ways).
+                    // rail art becomes rail terrain, which draws its sprite (b13 ways). Retired DropShip pieces lose
+                    // their building state, including their building-art token.
                     boolean laid = hex.containsAnyTerrainOf(Terrains.RAIL, Terrains.BRIDGE_RAIL);
                     assertEquals(tokens.getOrDefault(new Coords(x, y), List.of()).stream()
-                          .filter(token -> !(laid && token.matches("fluff:10(:.*)?"))).toList(), tokens(hex), where + ": the tokens stay");
+                          .filter(token -> !(laid && token.matches("fluff:10(:.*)?")))
+                          .filter(token -> !(RailRoute.find(hex, RailRoute.Kind.MAGLEV) != null && token.matches("fluff:9:[012]")))
+                          .filter(token -> !(retiredDropships.contains(hex.getCoords()) && token.startsWith("bldg_fluff:")))
+                          .toList(), tokens(hex), where + ": the tokens stay");
                     if (hex.containsTerrain(Terrains.RAIL)) { railTerrain++; }
                     if (hex.containsTerrain(Terrains.BRIDGE_RAIL)) { deckRailTerrain++; }
                     // K2: every 3D view draws the hex without its taken tokens, and that hex selects nothing the
@@ -255,20 +269,30 @@ class LegacySceneryCorpusTest {
             assertEquals(written.toString(StandardCharsets.UTF_8), again.toString(StandardCharsets.UTF_8),
                   "Converting twice is converting once: " + file);
             // K2: the .board2 text is the board without its taken tokens, and reads back as exactly that.
-            Board reread = BoardFile.readNative(written.toString(StandardCharsets.UTF_8));
-            for (int y = 0; y < board.getHeight(); y++) {
-                for (int x = 0; x < board.getWidth(); x++) {
-                    var stored = reread.getHex(x, y);
-                    assertEquals(BoardFile.hexNode(BoardSceneryLayouts.withoutTakenTokens(board.getHex(x, y))),
-                          BoardFile.hexNode(stored), file + " " + x + "," + y);
-                    assertTrue(BoardSceneryLayouts.withoutTakenTokens(stored) == stored,
-                          file + " " + x + "," + y + ": the .board2 holds no taken token");
-                    // Batch 10: nor any legacy art token at all (server rubble values are game state).
-                    for (int type : ART) {
-                        assertFalse(stored.containsTerrain(type) && !server(stored, type),
-                              file + " " + x + "," + y + ": the .board2 holds " + stored.getTerrain(type));
+            if (after.isEmpty()) {
+                Board reread = BoardFile.readNative(written.toString(StandardCharsets.UTF_8));
+                var reencoded = new ByteArrayOutputStream();
+                BoardFile.write(reread, reencoded);
+                assertEquals(written.toString(StandardCharsets.UTF_8), reencoded.toString(StandardCharsets.UTF_8),
+                      "Saved connection topology survives reload: " + file);
+                for (int y = 0; y < board.getHeight(); y++) {
+                    for (int x = 0; x < board.getWidth(); x++) {
+                        var stored = reread.getHex(x, y);
+                        assertTrue(BoardSceneryLayouts.withoutTakenTokens(stored) == stored,
+                              file + " " + x + "," + y + ": the .board2 holds no taken token");
+                        // Batch 10: nor any legacy art token at all (server rubble values are game state).
+                        for (int type : ART) {
+                            assertFalse(stored.containsTerrain(type) && !server(stored, type),
+                                  file + " " + x + "," + y + ": the .board2 holds " + stored.getTerrain(type));
+                        }
                     }
                 }
+            } else {
+                // Synthetic coverage fixtures and some old maps already contain illegal connections.
+                // Conversion preserves those errors; the native reader is intentionally strict.
+                assertThrows(java.io.IOException.class,
+                      () -> BoardFile.readNative(written.toString(StandardCharsets.UTF_8)),
+                      "Native validation still rejects the preserved rule errors: " + file);
             }
             results.add(new Result(Configuration.boardsDir().toPath().relativize(file).toString(), objects, groups.size(), millis));
         }
@@ -284,12 +308,13 @@ class LegacySceneryCorpusTest {
         designs.forEach((design, count) -> System.out.printf("CORPUS design %7d hexes  %s%n", count, design));
         families.forEach((family, count) -> System.out.printf("CORPUS batch-10 family %7d  %s%n", count, family));
         // Batch 12: the seaport yards and cranes are the container yard looks (rows, and the crane looks by boom side).
-        assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("building/legacy-art-N", 9_759),
-              Map.entry("building model (art the model was chosen beside)", 108), Map.entry("ground/blend/*", 6_705),
+        var nonBuildingDesigns = new TreeMap<>(designs);
+        List.of("building/lunar-habitat", "building/glass-dome", "building/biodome").forEach(nonBuildingDesigns::remove);
+        assertEquals(new TreeMap<>(Map.ofEntries(Map.entry("ground/blend/*", 6_705),
               Map.entry("ground/quay-*", 66), Map.entry("road/horizontal", 1_760), Map.entry("road/rounded", 19_749),
               Map.entry("rough/felled-trees", 967), Map.entry("rough/obstacles", 1_314),
               Map.entry("woods/container-yard/quay-crane", 193), Map.entry("woods/container-yard/quay-crane-mirrored", 212),
-              Map.entry("woods/container-yard/rows", 3_819), Map.entry("woods/orchard", 4_291))), designs);
+              Map.entry("woods/container-yard/rows", 3_819), Map.entry("woods/orchard", 4_291))), nonBuildingDesigns);
         // The 105 crane tips: the 61 a converted crane's boom reaches place nothing, the others are boom segments.
         assertEquals(44, perAsset.get("scenery/seaport/yard/crane-boom"));
         assertTrue(perAsset.keySet().stream().noneMatch(asset -> asset.startsWith("scenery/seaport/")
@@ -344,6 +369,16 @@ class LegacySceneryCorpusTest {
         return result;
     }
 
+    private static Set<String> validationErrors(List<String> lines) {
+        Set<String> errors = new HashSet<>();
+        String hex = "board";
+        for (String line : lines) {
+            if (line.startsWith("Errors in hex ")) { hex = line; }
+            else { errors.add(hex + " " + line); }
+        }
+        return errors;
+    }
+
     /** FLUFF and GROUND_FLUFF from 2000 up: cleared-rubble state written in play, never legacy art. */
     private static boolean server(Hex hex, int type) {
         return (type == Terrains.FLUFF || type == Terrains.GROUND_FLUFF) && hex.terrainLevel(type) >= 2000;
@@ -351,8 +386,6 @@ class LegacySceneryCorpusTest {
 
     /** A design's family */
     private static String designFamily(String variant) {
-        if (variant.startsWith("building/legacy-art-")) { return "building/legacy-art-N"; }
-        if (variant.startsWith("buildings/")) { return "building model (art the model was chosen beside)"; }
         if (variant.startsWith("ground/quay-")) { return "ground/quay-*"; }
         return variant.startsWith("ground/blend/") ? "ground/blend/*" : variant;
     }

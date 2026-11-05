@@ -21,14 +21,20 @@ class BoardEditorWallTest {
     private static final Coords CENTER = new Coords(5, 5);
 
     @Test
-    void wallDrawingKeepsTheExistingBuildingWeightAndPaletteEntry() {
+    void wallDrawingKeepsItsKindWhenItsIndependentWeightChanges() {
         var blueprint = BoardEditorBlueprint.get();
         assertNotNull(blueprint.entry("building/wall"));
         var session = wallBrush();
         assertTrue(session.snapshot().drawsRoutes());
         assertEquals(5, session.snapshot().activeBrush().property("building").value());
         send(session, Action.BRUSH_VALUE, "terrain:building", "4");
-        assertFalse(session.snapshot().drawsRoutes(), "Changing the brush to an ordinary building stops path drawing");
+        assertEquals(5, session.snapshot().activeBrush().property("building").value());
+        send(session, Action.BRUSH_VALUE, "terrain:bldg_weight", "2");
+        assertEquals(2, session.snapshot().activeBrush().property("bldg_weight").value());
+        assertEquals(5, session.snapshot().activeBrush().property("building").value());
+        assertTrue(session.snapshot().drawsRoutes());
+        assertTrue(blueprint.component("building").fields().stream().filter(field -> field.terrain().equals("building"))
+              .flatMap(field -> field.choices().stream()).noneMatch(choice -> choice.value() == 5));
     }
 
     @Test

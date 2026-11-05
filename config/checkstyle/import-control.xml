@@ -26,4 +26,7 @@
     <file name="UiTestStage">
         <allow pkg="com.badlogic.gdx.backends.lwjgl3" />
     </file>
+    <file name="UiCursorCaptureTest">
+        <allow pkg="org.mockito" />
+    </file>
 </import-control>

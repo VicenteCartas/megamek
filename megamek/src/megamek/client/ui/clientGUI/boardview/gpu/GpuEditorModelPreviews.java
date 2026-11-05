@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.board.BoardFlag;
 import megamek.common.Configuration;
 import megamek.common.board.RailRoute;
 import megamek.logging.MMLogger;
@@ -163,13 +164,15 @@ final class GpuEditorModelPreviews implements Disposable {
                 File root = new File(Configuration.dataDir(), "models/board");
                 // A route is generated, not a file: the builder lays its pieces on a flat carrier.
                 var route = megamek.common.board.RailRoute.Kind.of(asset);
+                if (BoardFlag.ASSET.equals(asset)) { return GpuFlag.data(); }
                 if (route != null) { return BoardRail.model(BoardRail.flat(route, sides, tracks)); }
                 if (asset.startsWith("buildings/")) {
+                    if (megamek.common.board.BuildingVolumes.of(asset).present()) { return GpuAuthoredBuilding.preview(asset); }
                     File custom = megamek.common.board.TilesetScenery.customBuildingFile(asset);
                     // A design stands alone, two levels high: one of each module, its closed sides' pieces.
                     if (custom.isFile()) { return ConnectedKit.model(GpuBuilding.kit(asset), 0, 2, new int[6], 0, 0, asset); }
                 }
-                var data = RigidGlb.loadLods(RigidGlb.source(root, asset), root.toPath()).getFirst();
+                var data = RigidGlb.loadLods(RigidGlb.source(root, asset), asset.startsWith("buildings/") ? root.getParentFile().toPath() : root.toPath()).getFirst();
                 RigidGlb.recolour(data, colours);
                 return data;
             });

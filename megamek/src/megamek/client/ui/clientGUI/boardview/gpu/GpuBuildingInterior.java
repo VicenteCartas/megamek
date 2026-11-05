@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.geom.Area;
 import java.awt.geom.Path2D;
+import java.awt.geom.PathIterator;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -22,7 +23,7 @@ import com.badlogic.gdx.math.Intersector;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 
-/** Simple box columns and two-sided floor sheets, clipped to the building's external wall outline. */
+/** Solid columns and floor slabs, clipped to the building's external wall outline. */
 final class GpuBuildingInterior {
     private static final float SPACING = 22;
     private static final float STRUT_WIDTH = 1.6f;
@@ -105,7 +106,11 @@ final class GpuBuildingInterior {
 
     static Model build(Model shell, int levels) {
         float height = shell.calculateBoundingBox(new BoundingBox()).max.z;
-        return build(plane(GpuTerrain.triangles(shell), height, true), height, levels);
+        var triangles = GpuTerrain.triangles(shell);
+        var roof = plane(triangles, height, true);
+        // Curved dome shells have no horizontal top cap. Their projected shell still bounds an explicit interior override.
+        if (roof.isEmpty()) { roof = triangles(area(triangles)); }
+        return build(roof, height, levels);
     }
 
     /** Horizontal cap faces delimit occupied volume; roof furniture and bounding boxes cannot fill courtyards. */
@@ -130,6 +135,38 @@ final class GpuBuildingInterior {
         if (roof.isEmpty() || height <= 0 || levels < 1) {
             throw new IllegalArgumentException("Building interior needs a footprint and positive height");
         }
+        return buildStoreys(java.util.Collections.nCopies(levels, roof), height / levels, levels);
+    }
+
+    /** Floors and supports stay within their own storey's shell, including setbacks above shorter neighbours. */
+    static Model buildStoreys(List<List<Vector3>> footprints, float levelHeight, int floorCount) {
+        ModelBuilder builder = new ModelBuilder();
+        builder.begin();
+        builder.node().id = "struts";
+        Material strutMaterial = new Material("struts", ColorAttribute.createDiffuse(0.29f, 0.31f, 0.33f, 1));
+        for (int level = 0; level < footprints.size(); level++) {
+            var columns = columns(footprints.get(level), levelHeight);
+            if (columns.isEmpty()) { continue; }
+            MeshPartBuilder struts = builder.part("struts-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, strutMaterial);
+            for (Vector3 column : columns) {
+                BoxShapeBuilder.build(struts, column.x, column.y, (level + .499f) * levelHeight,
+                      STRUT_WIDTH, STRUT_WIDTH, levelHeight);
+            }
+        }
+        builder.node().id = "floors";
+        Material floorMaterial = new Material("floors", ColorAttribute.createDiffuse(0.58f, 0.56f, 0.52f, 1));
+        for (int level = 0; level < floorCount; level++) {
+            if (footprints.get(level).isEmpty()) { continue; }
+            // Separate parts let ModelBuilder split tall structures before a mesh exceeds its vertex limit.
+            MeshPartBuilder floors = builder.part("floor-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, floorMaterial);
+            // Ground floor clears the terrain; upper floors sit at the game's level boundaries.
+            float z = (level == 0 ? 0.002f : level) * levelHeight;
+            floor(floors, footprints.get(level), z);
+        }
+        return builder.end();
+    }
+
+    private static List<Vector3> columns(List<Vector3> roof, float height) {
         BoundingBox bounds = new BoundingBox().inf();
         roof.forEach(bounds::ext);
         List<Vector3> columns = new ArrayList<>();
@@ -149,28 +186,28 @@ final class GpuBuildingInterior {
                 addColumn(columns, roof, center.x, center.y, height);
             }
         }
-        ModelBuilder builder = new ModelBuilder();
-        builder.begin();
-        builder.node().id = "struts";
-        MeshPartBuilder struts = builder.part("struts", GL20.GL_TRIANGLES, ATTRIBUTES,
-              new Material("struts", ColorAttribute.createDiffuse(0.29f, 0.31f, 0.33f, 1)));
-        for (Vector3 column : columns) {
-            BoxShapeBuilder.build(struts, column.x, column.y, 0.499f * height, STRUT_WIDTH, STRUT_WIDTH, height);
+        return columns;
+    }
+
+    /** A floor's walking surface stays at its gameplay level; the slab extends below it and closes at its outline. */
+    static void floor(MeshPartBuilder floors, List<Vector3> triangles, float z) {
+        float bottom = z - 1.2f;
+        for (int index = 0; index < triangles.size(); index += 3) {
+            Vector3 a = triangles.get(index), b = triangles.get(index + 1), c = triangles.get(index + 2);
+            floors.triangle(vertex(a, z, 1), vertex(b, z, 1), vertex(c, z, 1));
+            floors.triangle(vertex(c, bottom, -1), vertex(b, bottom, -1), vertex(a, bottom, -1));
         }
-        builder.node().id = "floors";
-        Material floorMaterial = new Material("floors", ColorAttribute.createDiffuse(0.58f, 0.56f, 0.52f, 1));
-        for (int level = 0; level < levels; level++) {
-            // Separate parts let ModelBuilder split tall structures before a mesh exceeds its vertex limit.
-            MeshPartBuilder floors = builder.part("floor-" + level, GL20.GL_TRIANGLES, ATTRIBUTES, floorMaterial);
-            // Ground floor clears the terrain; upper floors sit at the game's level boundaries.
-            float z = (level == 0 ? 0.002f : level) * height / levels;
-            for (int index = 0; index < roof.size(); index += 3) {
-                Vector3 a = roof.get(index), b = roof.get(index + 1), c = roof.get(index + 2);
-                floors.triangle(vertex(a, z, 1), vertex(b, z, 1), vertex(c, z, 1));
-                floors.triangle(vertex(c, z, -1), vertex(b, z, -1), vertex(a, z, -1));
-            }
+        Vector3 first = new Vector3(), previous = new Vector3();
+        float[] point = new float[6];
+        for (var path = area(triangles).getPathIterator(null); !path.isDone(); path.next()) {
+            int kind = path.currentSegment(point);
+            if (kind == PathIterator.SEG_MOVETO) { first.set(point[0], point[1], z); previous.set(first); continue; }
+            Vector3 next = kind == PathIterator.SEG_CLOSE ? first.cpy() : new Vector3(point[0], point[1], z);
+            Vector3 normal = new Vector3(previous.y - next.y, next.x - previous.x, 0).nor();
+            floors.rect(new Vector3(next.x, next.y, bottom), new Vector3(previous.x, previous.y, bottom),
+                  previous, next, normal);
+            previous.set(next);
         }
-        return builder.end();
     }
 
     private static MeshPartBuilder.VertexInfo vertex(Vector3 point, float z, float normalZ) {

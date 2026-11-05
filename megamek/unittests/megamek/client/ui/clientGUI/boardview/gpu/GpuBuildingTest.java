@@ -111,7 +111,8 @@ class GpuBuildingTest {
         for (int[] reach : List.of(new int[6], new int[] { 3, 0, 0, 3, 0, 0 })) {
             int triangles = ConnectedKit.placements(kit, 1, 3, reach, 0, 1).stream()
                   .mapToInt(piece -> ConnectedKit.triangles(kit, 1, piece).size() / 3).sum();
-            assertTrue(triangles <= 800, "A distant hex must remain lightweight: " + triangles);
+            // Includes the panels' own thickness and the roof slab's underside and edges.
+            assertTrue(triangles <= 1200, "A distant hex must remain lightweight: " + triangles);
         }
     }
 
@@ -128,35 +129,39 @@ class GpuBuildingTest {
     }
 
     @Test
-    void shippedLightBuildingVariantsCoverTheSamePiecesInBothLods() {
+    void shippedLightBuildingVariantsShareTheirFloorFootprintInBothLods() {
         var lods = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00").lods();
         assertEquals(2, lods.size());
         for (var lod : lods) {
             assertEquals(Set.of("base0", "base1", "floor0", "floor1", "roof0"), roles(lod).keySet());
-            // Variants replace each other on one hex: a piece of base0 and base1 (floor0 and floor1) covers the same
-            // ground, so connected neighbours meet whichever stands.
+            // Variants share the room footprint, so neighbours join whichever stands. Recesses and the panels'
+            // own inward thickness may differ; the floor caps define the occupied area.
             Map<String, com.badlogic.gdx.math.collision.BoundingBox> pieces = new java.util.HashMap<>();
             for (var node : lod.nodes) {
                 var bounds = new com.badlogic.gdx.math.collision.BoundingBox().inf();
-                var mesh = lod.meshes.first();
-                for (var nodePart : node.parts) {
-                    for (var part : mesh.parts) {
-                        if (!part.id.equals(nodePart.meshPartId)) { continue; }
-                        for (short index : part.indices) {
-                            int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
-                            bounds.ext(mesh.vertices[at] + node.translation.x, mesh.vertices[at + 1] + node.translation.y, 0);
+                for (var mesh : lod.meshes) {
+                    for (var nodePart : node.parts) {
+                        if (!nodePart.materialId.endsWith(GeneratedMesh.BUILDING_FLOOR)) { continue; }
+                        for (var part : mesh.parts) {
+                            if (!part.id.equals(nodePart.meshPartId)) { continue; }
+                            for (short index : part.indices) {
+                                int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+                                bounds.ext(mesh.vertices[at] + node.translation.x, mesh.vertices[at + 1] + node.translation.y, 0);
+                            }
                         }
                     }
                 }
+                if (!bounds.isValid()) { continue; }
                 String piece = node.id.replaceFirst("-(base|floor)[0-9]", "-$1");
                 var other = pieces.putIfAbsent(piece, bounds);
                 if (other != null) {
-                    assertEquals(other.min.x, bounds.min.x, .5f, node.id);
-                    assertEquals(other.max.x, bounds.max.x, .5f, node.id);
-                    assertEquals(other.min.y, bounds.min.y, .5f, node.id);
-                    assertEquals(other.max.y, bounds.max.y, .5f, node.id);
+                    assertEquals(other.min.x, bounds.min.x, .01f, node.id);
+                    assertEquals(other.max.x, bounds.max.x, .01f, node.id);
+                    assertEquals(other.min.y, bounds.min.y, .01f, node.id);
+                    assertEquals(other.max.y, bounds.max.y, .01f, node.id);
                 }
             }
+            assertFalse(pieces.isEmpty(), "The kit supplies its room outlines");
         }
     }
 

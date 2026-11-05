@@ -803,7 +803,8 @@ public final class BoardSceneryLayouts {
             carryRails(board, scanned);
             clearOfConcreteWalls(board, scanned);
             roadLinks(board);
-            lunarBases(board, scanned);
+            legacyBuildingSelectors(board, scanned);
+            themedBuildings(board, scanned);
         }
         design(board, scanned);
         typeBridges(board, bridges);
@@ -816,6 +817,29 @@ public final class BoardSceneryLayouts {
         return List.copyOf(issues);
     }
 
+    /** Legacy roof selectors are isolated buildings; retired DropShip pieces leave only their underlying terrain. */
+    private static void legacyBuildingSelectors(Board board, List<Coords> hexes) {
+        Map<BoardLocation, Hex> changed = new LinkedHashMap<>();
+        for (Coords at : hexes) {
+            Hex hex = board.getHex(at);
+            Terrain building = hex.getTerrain(Terrains.BUILDING);
+            if (building == null || building.getExits() < 64 || building.getExits() > 75) { continue; }
+            Hex next = replacement(hex);
+            if (building.getExits() <= 68) {
+                next.addTerrain(new Terrain(Terrains.BUILDING, building.getLevel(), true, 0));
+            } else if (building.getLevel() == 4) {
+                for (int type : hex.getTerrainTypes()) {
+                    if (type == Terrains.BUILDING || Terrains.getName(type).startsWith("bldg_")) { next.removeTerrain(type); }
+                }
+            } else { continue; }
+            changed.put(BoardLocation.of(at, board.getBoardId()), next);
+        }
+        if (!changed.isEmpty()) {
+            board.setHexes(changed);
+            board.initializeAll(null);
+        }
+    }
+
     /** The lunar theme's building designs, generated over whole buildings (the 3D board's BoardMultiHexBuilding). */
     static final String LUNAR_HABITAT = "building/lunar-habitat", GLASS_DOME = "building/glass-dome",
           BIODOME = "building/biodome";
@@ -823,16 +847,18 @@ public final class BoardSceneryLayouts {
           "scenery/roofs/glass-dome");
 
     /**
-     * Lunar bases (the lunar theme's sealed buildings): every building of a legacy board without a design of its own
+     * Lunar bases (the lunar theme's sealed buildings): every standard building of a legacy board without a design of its own
      * becomes a lunar habitat, except a round one glazed over most of its hexes (skylights or glass roofs), which is a
      * glass dome: a full ring of hexes round a centre holds most of it. Two full rings make it a biodome. A dome's
-     * glazing objects go, since the dome is its glass; the tokens stay for the 2D board.
+     * glazing objects go, since the dome is its glass; the tokens stay for the 2D board. The old sealed buildings of
+     * Mars and volcano boards use glass domes. Fortresses, hangars and gun emplacements keep their class kits.
      */
-    private static void lunarBases(Board board, List<Coords> hexes) {
+    private static void themedBuildings(Board board, List<Coords> hexes) {
         Set<Coords> done = new HashSet<>();
         Map<BoardLocation, Hex> designed = new HashMap<>();
         for (Coords start : hexes) {
-            if (done.contains(start) || !lunarBuilding(board.getHex(start))) { continue; }
+            if (done.contains(start) || !themedBuilding(board.getHex(start))) { continue; }
+            String theme = board.getHex(start).getTheme();
             Set<Coords> building = new LinkedHashSet<>(List.of(start));
             List<Coords> open = new ArrayList<>(building);
             while (!open.isEmpty()) {
@@ -841,7 +867,7 @@ public final class BoardSceneryLayouts {
                 for (int direction = 0; direction < 6; direction++) {
                     Coords next = at.translated(direction);
                     if ((exits & 1 << direction) == 0 || building.contains(next) || !board.contains(next)
-                          || !lunarBuilding(board.getHex(next))
+                          || !themedBuilding(board.getHex(next)) || !theme.equals(board.getHex(next).getTheme())
                           || (board.getHex(next).getTerrain(Terrains.BUILDING).getExits() & 1 << (direction + 3) % 6) == 0) {
                         continue;
                     }
@@ -858,8 +884,9 @@ public final class BoardSceneryLayouts {
             }
             int disc = 1 + 3 * rings * (rings + 1);
             long glazed = building.stream().filter(member -> glazed(board.getHex(member))).count();
-            boolean dome = rings >= 1 && disc * 5 >= building.size() * 3 && glazed * 2 >= building.size();
-            String variant = !dome ? LUNAR_HABITAT : rings >= 2 ? BIODOME : GLASS_DOME;
+            boolean lunar = "lunar".equals(theme);
+            boolean dome = !lunar || rings >= 1 && disc * 5 >= building.size() * 3 && glazed * 2 >= building.size();
+            String variant = !dome ? LUNAR_HABITAT : lunar && rings >= 2 ? BIODOME : GLASS_DOME;
             for (Coords member : building) {
                 Hex next = replacement(board.getHex(member));
                 Map<String, HexAppearance> appearance = new HashMap<>(next.getAppearance());
@@ -881,11 +908,14 @@ public final class BoardSceneryLayouts {
         return result;
     }
 
-    /** A building of the lunar theme with no design of its own and no legacy building art chosen for it. */
-    private static boolean lunarBuilding(Hex hex) {
-        return "lunar".equals(hex.getTheme()) && hex.containsTerrain(Terrains.BUILDING)
+    /** A standard sealed building, excluding explicit art. */
+    private static boolean themedBuilding(Hex hex) {
+        return ("lunar".equals(hex.getTheme()) || "mars".equals(hex.getTheme()) || "volcano".equals(hex.getTheme()))
+              && hex.containsTerrain(Terrains.BUILDING) && hex.terrainLevel(Terrains.BLDG_CLASS) <= 0
               && hex.terrainLevel(Terrains.BUILDING) != megamek.common.enums.BuildingType.WALL.getTypeValue()
-              && !hex.containsTerrain(Terrains.BLDG_FLUFF) && !hex.getAppearance().containsKey("building");
+              && hex.getTerrain(Terrains.BUILDING).getExits() < 64
+              && !hex.containsTerrain(Terrains.BLDG_FLUFF)
+              && !hex.getAppearance().containsKey("building");
     }
 
     /** Skylights (fluff 6, variants 0 to 5) or glass roofs (fluff 90) over the hex. */
@@ -1477,6 +1507,10 @@ public final class BoardSceneryLayouts {
           Map<Integer, Map<String, HexAppearance>> designs) {
         Map<Integer, Taken> result = new TreeMap<>();
         for (var layer : layers) {
+            if (layer.kind() == TilesetScenery.Kind.SKIPPED && layer.terrains().contains(Terrains.BUILDING)
+                  && layer.terrains().contains(Terrains.FLUFF)) {
+                result.putIfAbsent(Terrains.FLUFF, Taken.DROP);
+            }
             if (!layer.taken()) { continue; }
             if (layer.terrains().contains(Terrains.FLUFF)) { result.put(Terrains.FLUFF, Taken.OBJECTS); }
             if (layer.terrains().contains(Terrains.ROAD_FLUFF) && hex.terrainLevel(Terrains.ROAD_FLUFF) == 3) {
@@ -1496,8 +1530,7 @@ public final class BoardSceneryLayouts {
     /**
      * The hex designs that draw what the hex's legacy art tokens draw, by token and design owner: the blueprint variant
      * whose selector is the token ({@link BoardEditorBlueprint#reproducing}: transitions, kerbs and road pieces,
-     * orchards, container yards with their rotation, rough, building art), and for building art beside which the
-     * building's structure model was chosen ({@link TilesetScenery.Kind#SKIPPED}), that model's design. Quay art maps to its quay design (a ground design), which
+     * orchards, container yards with their rotation and rough). Quay art maps to its quay design (a ground design), which
      * only the 2D board of a {@code .board2} draws: the 3D views derive the fitted quay wall. A token absent from the
      * result has no design. {@code layers} are the hex's ({@link #layers}).
      */
@@ -1510,13 +1543,6 @@ public final class BoardSceneryLayouts {
             for (var layer : layers) {
                 if (token != Terrains.FLUFF || !layer.terrains().contains(Terrains.FLUFF)) { continue; }
                 quay |= layer.kind() == TilesetScenery.Kind.QUAY;
-                if (layer.kind() == TilesetScenery.Kind.SKIPPED && layer.terrains().contains(Terrains.BUILDING)) {
-                    String model = TilesetScenery.structureModels(hex).get(Terrains.BUILDING);
-                    var variant = model == null ? null : blueprint.variant(model);
-                    if (variant != null && variant.owner().equals("building")) {
-                        owners.put("building", new HexAppearance(variant.id(), null, null, null));
-                    }
-                }
             }
             HexAppearance design = blueprint.reproducing(hex, hex.getTerrain(token));
             if (design != null) { owners.putIfAbsent(blueprint.variant(design.variant()).owner(), design); }
@@ -1571,21 +1597,15 @@ public final class BoardSceneryLayouts {
 
     /**
      * The building's legacy art level (its {@code bldg_fluff} value, 0 for its ordinary artwork): the token a game of a
-     * loaded {@code .board} keeps, else the level the hex's building design selects ({@code building/legacy-art-N}).
+     * loaded {@code .board} keeps for its 2D sprites. Modern buildings use their weight/class kit.
      */
     public static int buildingArt(Hex hex) {
-        if (hex.containsTerrain(Terrains.BLDG_FLUFF)) { return Math.max(0, hex.terrainLevel(Terrains.BLDG_FLUFF)); }
-        HexAppearance design = hex.getAppearance().get("building");
-        var variant = design == null || design.variant() == null ? null : BoardEditorBlueprint.get().variant(design.variant());
-        if (variant == null || variant.selectors().isBlank() || variant.selectors().contains(";")) { return 0; }
-        Terrain selector = new Terrain(variant.selectors());
-        return selector.getType() == Terrains.BLDG_FLUFF ? selector.getLevel() : 0;
+        return hex.containsTerrain(Terrains.BLDG_FLUFF) ? Math.max(0, hex.terrainLevel(Terrains.BLDG_FLUFF)) : 0;
     }
 
     /**
      * Sets the building's legacy art level ({@link #buildingArt}) on {@code hex}, which holds its building: the token,
-     * which a game's 2D board draws, and the design that stands for it ({@link #designs}), which the 3D board draws and a
-     * {@code .board2} keeps; level 0 removes both, giving the building its ordinary artwork.
+     * which a game's 2D board draws. It creates no modern design; level 0 removes the token.
      */
     public static void setBuildingArt(Hex hex, int level) {
         hex.removeTerrain(Terrains.BLDG_FLUFF);
@@ -1594,8 +1614,6 @@ public final class BoardSceneryLayouts {
         if (level > 0) {
             Terrain token = new Terrain(Terrains.BLDG_FLUFF, level);
             hex.addTerrain(token);
-            HexAppearance design = BoardEditorBlueprint.get().reproducing(hex, token);
-            if (design != null) { appearance.put("building", design); }
         }
         hex.setAppearance(appearance);
     }

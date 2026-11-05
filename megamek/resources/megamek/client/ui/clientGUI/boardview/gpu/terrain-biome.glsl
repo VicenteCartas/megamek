@@ -161,9 +161,14 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
     fringe.w = max(fringe.w, deckMud);
     float strength = max(max(fringe.x, fringe.y), max(fringe.z, fringe.w));
     if (strength < .0001) return;
-    float broad = biomeNoise(world.xy / 4.7 + 13.0);
-    float fine = biomeNoise(world.xy * 12.0);
-    float grain = mix(fine, .5, smoothstep(.03, .15, pixelMetres));
+    float broad = 0.0, grain = .5;
+    if (max(fringe.x, max(fringe.y, fringe.z)) > 0.0) {
+        broad = biomeNoise(world.xy / 4.7 + 13.0);
+        if (pixelMetres < .15) {
+            float fine = biomeNoise(world.xy * 12.0);
+            grain = mix(fine, .5, smoothstep(.03, .15, pixelMetres));
+        }
+    }
     if (fringe.x > 0.0) {
         // Each parcel has its crop, wheat or maize, and its row direction (BoardFields). Parcels meet at grass
         // headlands, their width kept to a pixel at least.
@@ -255,17 +260,20 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
         float peatRoughness = mix(.80, .72, quick) + (grain - .5) * .06;
         finish.roughness = mix(finish.roughness, mix(peatRoughness, .93, max(hummock, algae * water)), wetland);
         coverFinish(finish, wetland);
-        // Low hummocks alter the shading normal without moving the shared picking/support surface.
-        float bumpT = clamp((wet - .45) / (.64 - .45), 0.0, 1.0);
-        vec2 bumpGradient = wetness.yz * (.23 * 6.0 * bumpT * (1.0 - bumpT) / (.64 - .45));
-        float area = dot(worldDx, cross(worldDy, face));
-        vec3 gradient = (cross(worldDy, face) * dot(bumpGradient, worldDx.xy)
-              + cross(face, worldDx) * dot(bumpGradient, worldDy.xy)) / max(abs(area), .00001) * sign(area);
-        if (u_normalMaps > .5) {
-            vec3 soilNormal = biomeSoilNormal(projection, face, broad);
-            normal = normalize(mix(normal, soilNormal, wetland * (1.0 - sand)));
+        // A completely open pool replaces this normal with its ripple normal below.
+        if (pool != 1.0) {
+            // Low hummocks alter the shading normal without moving the shared picking/support surface.
+            float bumpT = clamp((wet - .45) / (.64 - .45), 0.0, 1.0);
+            vec2 bumpGradient = wetness.yz * (.23 * 6.0 * bumpT * (1.0 - bumpT) / (.64 - .45));
+            float area = dot(worldDx, cross(worldDy, face));
+            vec3 gradient = (cross(worldDy, face) * dot(bumpGradient, worldDx.xy)
+                  + cross(face, worldDx) * dot(bumpGradient, worldDy.xy)) / max(abs(area), .00001) * sign(area);
+            if (u_normalMaps > .5) {
+                vec3 soilNormal = biomeSoilNormal(projection, face, broad);
+                normal = normalize(mix(normal, soilNormal, wetland * (1.0 - sand)));
+            }
+            normal = normalize(normal - gradient * wetland * (1.0 - bare));
         }
-        normal = normalize(normal - gradient * wetland * (1.0 - bare));
         // The water's eased wind and integrated drift (GpuOcean): a change of wind never makes the ripples jump. The
         // swell's crests keep one world direction, as turning them would sweep them across the board.
         if (pool > 0.0) {

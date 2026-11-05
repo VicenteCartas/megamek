@@ -2,7 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.A;
-import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.EXTEND;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.H;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.LEVEL;
 import static megamek.client.ui.clientGUI.boardview.gpu.KitOutline.MIDPOINTS;
@@ -82,6 +81,10 @@ final class HabitatKit {
 
     /** The kit's levels of detail ({@link GeneratedKit#lods}); {@code modelled}, the pieces GLB's levels. */
     static List<RigidGlb.Data> lods(Spec spec, List<ModelData> modelled, boolean square, String name) {
+        return lods(spec, modelled, square, name, 1);
+    }
+
+    static List<RigidGlb.Data> lods(Spec spec, List<ModelData> modelled, boolean square, String name, float footprintScale) {
         if (spec.cornerRadius() > 0 && spec.cornerSegments() < 1 || spec.eave() != null
               && (spec.eave().segments() == null || spec.eave().segments().length == 0
                     || java.util.Arrays.stream(spec.eave().segments()).anyMatch(n -> n < 1))) {
@@ -92,9 +95,7 @@ final class HabitatKit {
                 throw new IllegalArgumentException("Habitat kit " + name + " names a joint and a corner piece for each upright");
             }
         }
-        List<double[]> lone = List.of(new double[] { -A, -spec.lone().halfLength() }, new double[] { A, -spec.lone().halfLength() },
-              new double[] { A, spec.lone().halfLength() }, new double[] { -A, spec.lone().halfLength() });
-        List<KitOutline.Piece> pieces = KitOutline.footprint(square, lone, spec.lone().bandEnd(), false).stream()
+        List<KitOutline.Piece> pieces = KitOutline.footprint(square, spec.lone().bandEnd(), false, footprintScale).stream()
               .map(piece -> KitOutline.rounded(piece, spec.cornerRadius(), spec.cornerSegments())).toList();
         Fitting fitting = square ? spec.fittings().square() : spec.fittings().angled();
         List<Layout> roofs = fitting.layouts();
@@ -102,19 +103,32 @@ final class HabitatKit {
         roles.add("base0");
         for (int k = 0; k < spec.storeys().size(); k++) { roles.add("floor" + k); }
         for (int k = 0; k < roofs.size(); k++) { roles.add("roof" + k); }
-        return GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
+        var levels = GeneratedKit.lods(name, square, modelled, roles, pieces, Map.of(), (role, piece, lod) -> {
             boolean roof = role.startsWith("roof");
+            // The deck must be inset along the same walls as its rim. A separate cap would sit under the open deck.
+            if (roof && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
             double z0 = role.equals("base0") ? 0 : roof ? 2 * LEVEL : LEVEL;
-            List<String> twins = new ArrayList<>(List.of(""));
+            Map<String, KitOutline.Piece> twins = new LinkedHashMap<>();
+            twins.put("", piece);
             // A linkless Angled corner's roof also as it stands behind a 60-degree bend (ConnectedKit.Twin).
-            if (roof && !square && piece.direction() != null && !piece.tags().contains("link")) { twins.add("-bend"); }
+            if (roof && !square && piece.direction() != null && !piece.tags().contains("link")) { twins.put("-bend", piece); }
+            if (roof) {
+                int links = 0;
+                for (int direction = 0; direction < 6; direction++) {
+                    if ((piece.tags() + "-").contains("-link-" + KitOutline.DIRECTIONS[direction] + "-")) { links |= 1 << direction; }
+                }
+                for (int closed = links; closed > 0; closed = (closed - 1) & links) {
+                    twins.put("-closed-" + closed, KitOutline.closedRoof(piece, closed));
+                }
+            }
             Map<String, GeneratedMesh> result = new LinkedHashMap<>();
-            for (String twin : twins) {
-                Plating plating = square ? new Plating(0, 0, null) : plating(piece, twin.equals("-bend"));
+            for (var twin : twins.entrySet()) {
+                var outline = twin.getValue();
+                Plating plating = square ? new Plating(0, 0, null) : plating(outline, twin.getKey().equals("-bend"));
                 Laid laid;
                 if (roof) {
-                    laid = roof(spec, modelled, piece, z0, lod, fitting, roofs.get(Integer.parseInt(role.substring(4))),
-                          square, plating);
+                    laid = roof(spec, modelled, outline, z0, lod, fitting, roofs.get(Integer.parseInt(role.substring(4))),
+                          square, plating, footprintScale);
                 } else {
                     Storey storey = role.equals("base0") ? new Storey("lit", 0)
                           : spec.storeys().get(Integer.parseInt(role.substring(5)));
@@ -130,10 +144,15 @@ final class HabitatKit {
                         if (role.equals("base0")) { upright(mesh, modelled, lod, spec.footings(), pier, z0, 0); }
                     }
                 }
-                result.put(twin, mesh);
+                result.put(twin.getKey(), mesh);
             }
             return result;
         });
+        for (var level : levels) {
+            level.buildingPaint.add(spec.materials().get("wall"));
+            level.paintMasks.add(spec.materials().get("wall"));
+        }
+        return levels;
     }
 
     // ---- Surfaces ------------------------------------------------------------------------------------------------------
@@ -292,49 +311,10 @@ final class HabitatKit {
     /** How high a roof's edge stands over the roof's foot: its parapet, or its rounded rim. */
     private static double rim(Spec spec) { return spec.parapet() != null ? spec.parapet().height() : eave(spec); }
 
-    /**
-     * A wall's ends for a band along it (skirt, parapet): each end point and its outward direction there, joined with
-     * the next round wall's (scaled so the bands meet), moved on past a cut or corner end, which the piece's cut or the
-     * wall's mitre trims.
-     */
-    private static double[][] offsets(KitOutline.Wall wall, List<KitOutline.Wall> walls) {
-        double[] n = normal(wall.p(), wall.q()), u = KitOutline.direction(wall);
-        double[][] result = new double[4][];
-        for (int k = 0; k < 2; k++) {
-            double[] point = k == 0 ? wall.p() : wall.q();
-            KitOutline.End kind = k == 0 ? wall.start() : wall.end();
-            double sign = k == 0 ? -1 : 1;
-            KitOutline.Wall other = null;
-            if (kind == KitOutline.End.ROUND) {
-                for (var candidate : walls) {
-                    double[] meets = k == 0 ? candidate.q() : candidate.p();
-                    if (candidate != wall && Math.hypot(meets[0] - point[0], meets[1] - point[1]) < 1e-6) {
-                        other = candidate;
-                        break;
-                    }
-                }
-            }
-            if (other != null) {
-                double[] m = normal(other.p(), other.q());
-                double[] half = { n[0] + m[0], n[1] + m[1] };
-                double scale = 2 / (half[0] * half[0] + half[1] * half[1]);
-                result[2 * k] = point;
-                result[2 * k + 1] = new double[] { half[0] * scale, half[1] * scale };
-            } else if (kind == KitOutline.End.CUT || kind == KitOutline.End.CORNER) {
-                result[2 * k] = new double[] { point[0] + u[0] * sign * EXTEND, point[1] + u[1] * sign * EXTEND };
-                result[2 * k + 1] = n;
-            } else {
-                result[2 * k] = point;
-                result[2 * k + 1] = n;
-            }
-        }
-        return result;
-    }
-
     /** The ground storey's battered dark steel skirt along a wall: from its foot out up to the wall. */
     private static void skirt(Spec spec, GeneratedMesh geometry, KitOutline.Wall wall, List<KitOutline.Wall> walls, double z0) {
         double[] n = normal(wall.p(), wall.q());
-        double[][] ends = offsets(wall, walls);
+        double[][] ends = KitOutline.offsets(wall, walls);
         double[] p = ends[0], a = ends[1], q = ends[2], b = ends[3];
         double height = spec.skirt().height(), out = spec.skirt().out();
         double[] foot0 = { p[0] + a[0] * out, p[1] + a[1] * out }, foot1 = { q[0] + b[0] * out, q[1] + b[1] * out };
@@ -357,12 +337,17 @@ final class HabitatKit {
           Plating plating, Storey storey) {
         var geometry = new GeneratedMesh();
         List<Pier> piers = new ArrayList<>();
-        for (var polygon : piece.polygons()) { plate(geometry, material(spec, "concrete"), polygon, z0 + .05, plating, .8); }
+        for (var polygon : piece.polygons()) {
+            for (var part : KitOutline.inset(polygon, piece.walls(), 2)) {
+                plate(geometry, material(spec, "concrete") + GeneratedMesh.BUILDING_FLOOR, part, z0 + .05, plating, .8);
+            }
+        }
         double v0 = storey.windows().equals("dim") ? DIM : LIT;
         for (var wall : piece.walls()) {
             double[] u = wallU(wall, square);
             face(geometry, material(spec, "wall"), wall.p(), wall.q(), normal(wall.p(), wall.q()), z0, z0 + LEVEL,
                   u[0] + storey.shift(), u[1] + storey.shift(), ground ? .72 : 1, v0);
+            KitOutline.wallBody(geometry, wall, piece.walls(), z0, z0 + LEVEL, 0, 2);
             if (ground && spec.skirt() != null) {
                 var band = new GeneratedMesh();
                 skirt(spec, band, wall, piece.walls(), z0);
@@ -379,24 +364,27 @@ final class HabitatKit {
      * the fittings of its layout about the hex's middle.
      */
     private static Laid roof(Spec spec, List<ModelData> modelled, KitOutline.Piece piece, double z0, int lod, Fitting fitting,
-          Layout layout, boolean square, Plating plating) {
+          Layout layout, boolean square, Plating plating, float footprintScale) {
         var geometry = new GeneratedMesh();
         List<Pier> piers = new ArrayList<>();
         String roof = material(spec, "roof"), wallMaterial = material(spec, "wall");
         double radius = eave(spec);
         int segments = spec.eave() == null ? 0 : spec.eave().segments(lod);
         // Without a parapet the plating stands on the rim's top, set in to meet it.
-        double deck = spec.parapet() != null ? z0 : z0 + radius;
+        double deck = z0 + (spec.parapet() != null ? 0 : radius);
         for (var polygon : piece.polygons()) {
             var laid = spec.parapet() != null || radius == 0 ? List.of(polygon)
                   : KitOutline.inset(polygon, piece.walls(), ROOF_INSET + radius);
-            for (var part : laid) { plate(geometry, roof, part, deck, plating, 1); }
+            for (var part : laid) {
+                plate(geometry, roof, part, deck, plating, 1);
+                geometry.slab(GeneratedMesh.BUILDING_BODY, part, deck - 1.2, deck, false);
+            }
         }
         for (var wall : piece.walls()) {
             double[] n = normal(wall.p(), wall.q());
             double[] u = wallU(wall, square);
             // Its outer face a hair inside the wall line (a storey going on above stands in front of it).
-            double[][] ends = offsets(wall, piece.walls());
+            double[][] ends = KitOutline.offsets(wall, piece.walls());
             double[] a = ends[1], b = ends[3];
             double[] p = { ends[0][0] - a[0] * ROOF_INSET, ends[0][1] - a[1] * ROOF_INSET };
             double[] q = { ends[2][0] - b[0] * ROOF_INSET, ends[2][1] - b[1] * ROOF_INSET };
@@ -413,10 +401,18 @@ final class HabitatKit {
                 round(band, wallMaterial, p, q, a, b, n, z0, radius, segments, u);
             }
             geometry.add(mitred(band, wall));
-            if (piered(spec, wall, lod)) { piers.add(pierAt(wall, piece.walls())); }
+            // Closed link walls span the hexside before the sector cut; place each top only in the piece holding it.
+            if (piered(spec, wall, lod) && (piece.direction() == null || KitOutline.inSector(piece.direction(), wall.p()))) {
+                piers.add(pierAt(wall, piece.walls()));
+            }
         }
-        for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck), 0); }
-        for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck), 0); }
+        // Move the fittings with a compact isolated roof; the fittings themselves keep their authored dimensions.
+        boolean isolated = piece.direction() == null && !piece.tags().contains("-link-");
+        double across = isolated ? footprintScale : 1;
+        double along = isolated
+              ? piece.polygons().stream().flatMap(List::stream).mapToDouble(p -> Math.abs(p[1])).max().orElse(0) / spec.lone().halfLength() : 1;
+        for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck, across, along), 0); }
+        for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck, across, along), 0); }
         return new Laid(geometry, piers);
     }
 
@@ -449,8 +445,8 @@ final class HabitatKit {
     }
 
     /** A fitting's place on the roof at (x, y). */
-    private static Matrix4 on(double[] at, double deck) {
-        return new Matrix4().setToTranslation((float) at[0], (float) at[1], (float) deck);
+    private static Matrix4 on(double[] at, double deck, double across, double along) {
+        return new Matrix4().setToTranslation((float) (at[0] * across), (float) (at[1] * along), (float) deck);
     }
 
     private static String material(Spec spec, String role) {

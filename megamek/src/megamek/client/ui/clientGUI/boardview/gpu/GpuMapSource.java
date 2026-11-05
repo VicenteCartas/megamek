@@ -130,7 +130,7 @@ final class GpuMapSource implements BoardSource {
     private BoardTactical editorTerrain = BoardTactical.EMPTY;
     private long boardGeneration;
     private record Publication(Frame frame, BoardEditorSession.Snapshot editor, GpuEditorPreview.Data preview,
-          Map<Coords, List<BoardEditorTerrain.Badge>> badges) { }
+          Map<Coords, List<BoardEditorTerrain.Badge>> badges, boolean authoredGesture) { }
     private volatile Publication publication;
     /** Render-thread latch: selection and geometry must describe the same EDT capture for the entire frame. */
     private Publication rendering;
@@ -248,8 +248,12 @@ final class GpuMapSource implements BoardSource {
         if (editor != null && state.activeBrush().way() && editorHover != null) {
             editorBrush = new EditorBrush(hover, boardGeneration, editor.brush(hover), editor.wayHint(editorHover.coords(), shownPreview));
         }
+        boolean authoredGesture = editorStrokeBoard == board && state != null && state.tool() == BoardEditorSession.Tool.SELECT
+              && state.selection().stream().anyMatch(item -> board.getHex(item.coords()).getDecorations().stream()
+                    .anyMatch(object -> object.id().equals(item.object())
+                          && megamek.common.board.BuildingVolumes.of(object.asset()).present()));
         publication = new Publication(nextFrame, state != null && state.equals(previous) ? previous : state, projected,
-              badgeSnapshot);
+              badgeSnapshot, authoredGesture);
     }
 
     /** Map workspaces expose their existing document and application actions without requiring a game client. */
@@ -590,6 +594,8 @@ final class GpuMapSource implements BoardSource {
 
     public BoardEditorSession.Snapshot editorState() { return (rendering == null ? publication : rendering).editor(); }
 
+    @Override public boolean editorAuthoredGesture() { return (rendering == null ? publication : rendering).authoredGesture(); }
+
     @Override public Map<Coords, List<BoardEditorTerrain.Badge>> editorBadges() {
         return (rendering == null ? publication : rendering).badges();
     }
@@ -611,9 +617,11 @@ final class GpuMapSource implements BoardSource {
               : editor.preview(hover.coords(), hover.x(), hover.y(), hover.receiver());
         if (next != shownPreview) {
             shownPreview = next;
+            java.util.function.Function<Coords, Hex> pending = at -> next.after().getOrDefault(at, board.getHex(at));
+            var references = BoardTiles.referenceIds(board, pending);
+            var previewImages = new BoardScene.PixelPool();
             previewData = GpuEditorPreview.data(next, state.tool() == BoardEditorSession.Tool.ERASE,
-                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex,
-                        at -> next.after().getOrDefault(at, board.getHex(at))));
+                  state.activeBrush(), state.drawsRoutes(), (coords, hex) -> terrain.preview(board, coords, hex, pending, references, previewImages));
         }
         return previewData;
     }

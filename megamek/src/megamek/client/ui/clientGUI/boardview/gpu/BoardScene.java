@@ -114,12 +114,17 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      */
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board) {
-        return captureTile(hex, pixels, previous, terrainImages, board, coords -> null);
+        return captureTile(hex, pixels, previous, terrainImages, board, (Set<String>) null);
+    }
+
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
+          java.util.function.Function<Coords, megamek.common.Hex> board, Set<String> buildingReferences) {
+        return captureTile(hex, pixels, previous, terrainImages, board, coords -> null, buildingReferences);
     }
 
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board,
-          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings) {
+          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings, Set<String> buildingReferences) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
@@ -127,7 +132,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               BoardFeatures.surface(hex),
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
-              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery()),
+              BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery(),
+                    megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences),
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
               BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),
@@ -152,7 +158,11 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
      * ({@code exits}, MegaMek directions), its current construction factor (the hex tooltip's rule: the board's
      * building, else the hex's own CF; 0 for industry), pristine map CF for wall appearance, and height in levels.
      */
-    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height) {
+    record Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height,
+          megamek.common.board.BuildingInteriors interiors, megamek.common.board.BuildingVolumes.Reference reference) {
+        Cover(int woods, boolean jungle, int structure, int exits, int cf, int pristineCF, int height) {
+            this(woods, jungle, structure, exits, cf, pristineCF, height, megamek.common.board.BuildingInteriors.YES, null);
+        }
         static final int FUEL_TANK = 6;
         static final int INDUSTRIAL = 7;
         static final Cover NONE = new Cover(0, false, 0, 0, 0, 0, 0);
@@ -165,7 +175,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                       hex.getTerrain(Terrains.BUILDING).getExits() & 63,
                       building == null ? hex.terrainLevel(Terrains.BLDG_CF) : building.getCurrentCF(coords),
                       hex.terrainLevel(Terrains.BLDG_CF),
-                      hex.terrainLevel(Terrains.BLDG_ELEV));
+                      hex.terrainLevel(Terrains.BLDG_ELEV), megamek.common.board.BuildingInteriors.resolve(hex), hex.getBuildingReference());
             }
             if (hex.containsTerrain(Terrains.FUEL_TANK)) {
                 return new Cover(woods, jungle, FUEL_TANK, hex.getTerrain(Terrains.FUEL_TANK).getExits() & 63,
@@ -176,7 +186,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             if (hex.containsTerrain(Terrains.INDUSTRIAL)) {
                 return new Cover(woods, jungle, INDUSTRIAL, 0, 0, 0, hex.terrainLevel(Terrains.INDUSTRIAL));
             }
-            return woods == 0 ? NONE : new Cover(woods, jungle, 0, 0, 0, 0, 0);
+            return woods == 0 && hex.getBuildingReference() == null ? NONE
+                  : new Cover(woods, jungle, 0, 0, 0, 0, 0, megamek.common.board.BuildingInteriors.YES, hex.getBuildingReference());
         }
     }
 
@@ -283,6 +294,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
           FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
           megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours,
           int parts) {
+        // Generated kits fit their outline before laying full-size facade pieces and roof fittings.
+        float footprintScale() { return megamek.common.board.TilesetScenery.generatedKit(asset) ? scale : 1; }
+        float modelScale() { return megamek.common.board.TilesetScenery.generatedKit(asset) ? 1 : scale; }
         Feature(String asset, float x, float y, float rotation, float scale, float height, float elevation,
               FeatureKind kind, int bridgeExits, boolean authoredPlacement, megamek.common.board.BoardDecoration decoration,
               megamek.common.board.BoardDecoration.Stretch stretch, megamek.common.board.BoardDecoration.Colours colours) {
@@ -700,6 +714,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                   && corridor.equals(other.corridor) && deckCorridor.equals(other.deckCorridor)
                   && surface == other.surface && detailedGround == other.detailedGround && road == other.road && biome == other.biome
                   && liquid.equals(other.liquid) && features.equals(other.features) && groundCover.equals(other.groundCover)
+                  && cover.exits() == other.cover.exits()
+                  && cover.interiors() == other.cover.interiors() && java.util.Objects.equals(cover.reference(), other.cover.reference())
                   && BoardWall.family(this) == BoardWall.family(other)
                   && appearance.equals(other.appearance);
         }
@@ -1235,6 +1251,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     static final class PixelPool {
         private final Map<Pixels, Pixels> images = new HashMap<>();
         private final Map<Integer, int[]> buffers = new HashMap<>();
+        private final Map<Pixels, Boolean> visible = new HashMap<>();
 
         Pixels capture(BufferedImage image, Pixels previous) {
             if (image == null) {
@@ -1257,7 +1274,8 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
 
         Pixels captureOverlay(BufferedImage image, Pixels previous) {
             Pixels pixels = capture(image, previous);
-            return pixels == null || Arrays.stream(pixels.argb).allMatch(pixel -> (pixel >>> 24) == 0) ? null : pixels;
+            return pixels != null && visible.computeIfAbsent(pixels,
+                  value -> Arrays.stream(value.argb).anyMatch(pixel -> (pixel >>> 24) != 0)) ? pixels : null;
         }
 
         void retain(List<Tile> tiles) {
@@ -1270,11 +1288,13 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
                 used.add(tile.tilesetScenery());
             }
             images.keySet().retainAll(used);
+            visible.keySet().retainAll(images.keySet());
         }
 
         void clear() {
             images.clear();
             buffers.clear();
+            visible.clear();
         }
     }
 }

@@ -35,6 +35,15 @@ import megamek.common.util.BoardUtilities;
 /** Shared board-file boundary. Native documents contain the Board's rules and authored visuals, never a projection. */
 public final class BoardFile {
     public static final String EXTENSION = ".board2";
+    public static final int VERSION = 3;
+    private static BoardFlag flag(JsonNode object) {
+        if (!object.has("flag")) { return BoardFlag.DEFAULT; }
+        JsonNode flag = object.get("flag");
+        requireObject(flag);
+        return new BoardFlag(string(flag, "pattern", "solid"), string(flag, "emblem", ""),
+              number(flag, "x", 0), number(flag, "y", 0), number(flag, "scale", 1), number(flag, "rotation", 0));
+    }
+
     private static final ObjectMapper JSON = new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -66,16 +75,15 @@ public final class BoardFile {
             while (parser.nextToken() != com.fasterxml.jackson.core.JsonToken.END_OBJECT) {
                 if (parser.currentToken() != com.fasterxml.jackson.core.JsonToken.FIELD_NAME) { throw new IOException("Malformed board header"); }
                 String name = parser.currentName(); parser.nextToken();
-                if (Set.of("format", "version", "size", "tags").contains(name)) {
+                if (Set.of("format", "size", "tags").contains(name)) {
                     header.set(name, JSON.reader().without(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(parser));
                 } else { parser.skipChildren(); }
             }
             if (parser.nextToken() != null) { throw new IOException("Trailing board data"); }
         }
         try {
-            require("megamek-board".equals(string(header, "format", "")) && integer(header, "version", -1) == 2,
-                  "Unsupported native board");
-            JsonNode size = header.get("size"); only(size, "width", "height");
+            require("megamek-board".equals(string(header, "format", "")), "Not a MegaMek board document");
+            JsonNode size = header.get("size"); requireObject(size);
             int width = integer(size, "width", 0), height = integer(size, "height", 0);
             require(width > 0 && height > 0, "Invalid board size");
             Set<String> tags = new HashSet<>();
@@ -163,8 +171,8 @@ public final class BoardFile {
 
     /**
      * Reads a .board2 document. {@code continueOnError} reads a board that breaks the game's rules ({@link Board#isValid})
-     * anyway, as {@link #read(Path, boolean)} does; the document's own format (fields, coordinates, terrain names, object
-     * IDs) is checked either way.
+     * anyway, as {@link #read(Path, boolean)} does. Coordinates, terrain values and object IDs are checked either way;
+     * fields the reader does not use are ignored.
      */
     public static Board readNative(String text, boolean continueOnError) throws IOException {
         return readNative(text, continueOnError, true);
@@ -173,11 +181,10 @@ public final class BoardFile {
     private static Board readNative(String text, boolean continueOnError, boolean visuals) throws IOException {
         try {
             JsonNode root = JSON.readTree(text.startsWith("\uFEFF") ? text.substring(1) : text);
-            only(root, "format", "version", "size", "hexes", "name", "description", "tags", "boardType", "options", "notes", "sourceHeader");
+            requireObject(root);
             require("megamek-board".equals(string(root, "format", null)), "Not a MegaMek board document");
-            require(integer(root, "version", -1) == 2, "Unsupported board version; editing refused");
             JsonNode size = root.get("size");
-            only(size, "width", "height");
+            requireObject(size);
             int width = integer(size, "width", 0), height = integer(size, "height", 0);
             JsonNode entries = root.get("hexes");
             require(entries != null && entries.isArray(), "hexes must be an array");
@@ -187,17 +194,21 @@ public final class BoardFile {
             Hex[] hexes = new Hex[(int) count];
             Set<String> ids = new HashSet<>();
             for (JsonNode entry : entries) {
-                only(entry, "at", "elevation", "terrain", "theme", "appearance", "decorations");
+                requireObject(entry);
                 Coords coords = coordinate(entry.get("at"));
                 require(coords.getX() >= 0 && coords.getY() >= 0 && coords.getX() < width && coords.getY() < height,
                       "Hex outside board: " + coords);
                 int index = coords.getY() * width + coords.getX();
                 require(hexes[index] == null, "Duplicate hex coordinates: " + coords);
                 require(entry.has("elevation"), "Hex elevation is required");
-                String terrain = string(entry, "terrain", "");
-                validateTerrain(terrain);
-                Hex hex = new Hex(integer(entry, "elevation", 0), terrain, string(entry, "theme", null), coords);
-                if (visuals) { readVisuals(entry, hex); }
+                Hex hex = new Hex(integer(entry, "elevation", 0), "", string(entry, "theme", null), coords);
+                var appearances = BoardComponents.read(entry.get("components"), hex, visuals);
+                if (visuals) {
+                    ObjectNode visual = JSON.createObjectNode().set("appearance", appearances);
+                    if (entry.has("decorations")) { visual.set("decorations", entry.get("decorations")); }
+                    if (entry.has("structure")) { visual.set("structure", entry.get("structure")); }
+                    readVisuals(visual, hex);
+                }
                 for (BoardDecoration decoration : hex.getDecorations()) {
                     require(ids.add(decoration.id()), "Duplicate board object ID: " + decoration.id());
                 }
@@ -206,7 +217,7 @@ public final class BoardFile {
             Board board = new Board();
             if (root.has("options")) {
                 JsonNode options = root.get("options");
-                only(options, "exitRoadsToPavement");
+                requireObject(options);
                 board.setRoadsAutoExit(bool(options, "exitRoadsToPavement", true));
             }
             board.setBoardType(BoardType.valueOf(string(root, "boardType", "GROUND")));
@@ -224,7 +235,7 @@ public final class BoardFile {
             if (root.has("notes")) {
                 require(root.get("notes").isArray(), "notes must be an array");
                 for (JsonNode note : root.get("notes")) {
-                    only(note, "at", "text");
+                    requireObject(note);
                     Coords at = coordinate(note.get("at"));
                     require(!board.getAnnotations().containsKey(at), "Duplicate note coordinate");
                     require(note.has("text") && note.get("text").isArray(), "Note text must be an array");
@@ -282,23 +293,37 @@ public final class BoardFile {
     }
 
     private static void readVisuals(JsonNode entry, Hex hex) {
+        if (entry.has("structure")) {
+            var structure = entry.get("structure");
+            var anchor = structure.path("anchor");
+            hex.setBuildingReference(new BuildingVolumes.Reference(structure.path("id").asText(),
+                  new Coords(anchor.path(0).asInt() - 1, anchor.path(1).asInt() - 1)));
+        }
         if (entry.has("appearance")) {
             JsonNode appearances = entry.get("appearance");
-            only(appearances, HexAppearance.OWNERS.toArray(String[]::new));
+            requireObject(appearances);
             Map<String, HexAppearance> values = new LinkedHashMap<>();
             appearances.fields().forEachRemaining(field -> {
+                if (!HexAppearance.OWNERS.contains(field.getKey())) { return; }
                 JsonNode style = field.getValue();
-                only(style, "variant", "asset", "uid", "material", "strength", "colours", "rotation", "tracks", "beside", "trafficControl");
+                requireObject(style);
                 var control = style.has("trafficControl") ? HexAppearance.TrafficControl.valueOf(
                       string(style, "trafficControl", "").toUpperCase(java.util.Locale.ROOT)) : null;
                 if (control != null) {
                     require(field.getKey().equals("road") || field.getKey().equals("bridgeRoad"), "Traffic controls belong to a road");
                 }
-                HexAppearance value = new HexAppearance(string(style, "variant", null), asset(style),
-                      string(style, "material", null), style.has("strength") ? number(style, "strength", 0) : null,
-                      colours(style), style.has("rotation") ? integer(style, "rotation", 0) : null,
+                String variant = string(style, "variant", null), asset = asset(style), material = string(style, "material", null);
+                var colours = colours(style);
+                Integer rotation = style.has("rotation") ? integer(style, "rotation", 0) : null;
+                double padding = style.path("padding").asDouble();
+                // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
+                if (variant == null && asset == null && material == null && control == null
+                      && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) { return; }
+                HexAppearance value = new HexAppearance(variant, asset,
+                      material, style.has("strength") ? number(style, "strength", 0) : null,
+                      colours, rotation,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
-                      style.has("beside") ? integer(style, "beside", 0) : null, control);
+                      style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style), padding);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -308,8 +333,7 @@ public final class BoardFile {
             require(entry.get("decorations").isArray(), "decorations must be an array");
             List<BoardDecoration> values = new ArrayList<>();
             for (JsonNode object : entry.get("decorations")) {
-                only(object, "id", "kind", "asset", "uid", "name", "position", "rotation", "rotationX", "rotationY", "mirror", "scale", "placement", "drawOrder", "clipToHex", "group", "bare",
-                      "connections", "tracks", "pillars", "stretch", "colours");
+                requireObject(object);
                 double x = 0, y = 0;
                 if (object.has("position")) {
                     JsonNode position = object.get("position");
@@ -326,11 +350,11 @@ public final class BoardFile {
                 String kind = string(object, "kind", null);
                 require(!"prop".equals(kind) || !object.has("drawOrder"), "Props cannot have paint order");
                 JsonNode placement = object.get("placement");
-                only(placement, "mode", "level", "receiver", "offset");
+                requireObject(placement);
                 BoardDecoration.Receiver receiver = null;
                 if (placement.has("receiver")) {
                     JsonNode target = placement.get("receiver");
-                    only(target, "terrain", "surface");
+                    requireObject(target);
                     receiver = new BoardDecoration.Receiver(string(target, "terrain", null), string(target, "surface", null));
                 }
                 values.add(new BoardDecoration(string(object, "id", null), kind, asset(object),
@@ -340,7 +364,7 @@ public final class BoardFile {
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
                       bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
                       string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
-                      colours, integer(object, "tracks", 0), bool(object, "pillars", false)));
+                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object)));
             }
             hex.setDecorations(values);
         }
@@ -358,7 +382,7 @@ public final class BoardFile {
     public static void write(Board board, OutputStream stream) throws IOException {
         if (board.getWidth() <= 0 || board.getHeight() <= 0) { throw new IOException("Cannot save an empty board"); }
         Set<String> ids = new HashSet<>();
-        ObjectNode root = JSON.createObjectNode().put("format", "megamek-board").put("version", 2);
+        ObjectNode root = JSON.createObjectNode().put("format", "megamek-board").put("version", VERSION);
         root.putObject("size").put("width", board.getWidth()).put("height", board.getHeight());
         put(root, "name", board.getDocumentName());
         put(root, "description", board.getDescription());
@@ -398,7 +422,8 @@ public final class BoardFile {
         stream.write((header.substring(0, header.length() - 1) + ",\n\"hexes\":[\n").getBytes(StandardCharsets.UTF_8));
         for (int y = 0; y < board.getHeight(); y++) {
             for (int x = 0; x < board.getWidth(); x++) {
-                ObjectNode entry = hexNode(written[y * board.getWidth() + x]); at(entry, new Coords(x, y));
+                ObjectNode entry = hexNode(written[y * board.getWidth() + x], true); at(entry, new Coords(x, y));
+                BoardComponents.write(written[y * board.getWidth() + x], entry);
                 String comma = x == board.getWidth() - 1 && y == board.getHeight() - 1 ? "" : ",";
                 stream.write((JSON.writeValueAsString(entry) + comma + "\n").getBytes(StandardCharsets.UTF_8));
             }
@@ -419,19 +444,29 @@ public final class BoardFile {
         } finally { Files.deleteIfExists(temporary); }
     }
 
-    public static ObjectNode hexNode(Hex hex) {
+    /** Authored state for editor comparisons; omit exits derived from neighbours so they do not count as direct edits. */
+    public static ObjectNode hexNode(Hex hex) { return hexNode(hex, false); }
+
+    private static ObjectNode hexNode(Hex hex, boolean saveConnections) {
         ObjectNode node = JSON.createObjectNode().put("elevation", hex.getLevel());
+        if (hex.getBuildingReference() != null) {
+            var reference = hex.getBuildingReference();
+            var structure = node.putObject("structure").put("id", reference.id());
+            structure.putArray("anchor").add(reference.anchor().getX() + 1).add(reference.anchor().getY() + 1);
+        }
         String terrain = Arrays.stream(hex.getTerrainTypes()).filter(t -> !Terrains.AUTOMATIC.contains(t)).sorted()
-              .mapToObj(t -> hex.getTerrain(t).toString()).collect(Collectors.joining(";"));
+              .mapToObj(t -> saveConnections ? hex.getTerrain(t).toBoardString() : hex.getTerrain(t).toString())
+              .collect(Collectors.joining(";"));
         if (!terrain.isEmpty()) { node.put("terrain", terrain); }
         if (hex.getTheme() != null && !hex.getTheme().isEmpty()) { node.put("theme", hex.getTheme()); }
         if (!hex.getAppearance().isEmpty()) {
             ObjectNode styles = node.putObject("appearance");
             hex.getAppearance().entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
                 ObjectNode style = styles.putObject(entry.getKey()); HexAppearance value = entry.getValue();
-                put(style, "variant", value.variant()); putAsset(style, value.asset()); put(style, "material", value.material());
+                put(style, "variant", value.variant()); putAsset(style, value.asset(), value.uid()); put(style, "material", value.material());
                 if (value.strength() != null) { style.put("strength", value.strength()); }
                 if (value.rotation() != null) { style.put("rotation", value.rotation()); }
+                if (value.padding() != null) { style.put("padding", value.padding()); }
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
                 if (value.beside() != null) { style.put("beside", value.beside()); }
                 if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
@@ -442,7 +477,7 @@ public final class BoardFile {
             ArrayNode objects = node.putArray("decorations");
             hex.getDecorations().forEach(value -> {
                 ObjectNode object = objects.addObject().put("id", value.id()).put("kind", value.kind());
-                putAsset(object, value.asset());
+                putAsset(object, value.asset(), value.uid());
                 put(object, "name", value.name());
                 put(object, "group", value.group());
                 if (value.x() != 0 || value.y() != 0) { object.putArray("position").add(value.x()).add(value.y()); }
@@ -454,6 +489,15 @@ public final class BoardFile {
                 if (value.connections() != 0) { object.put("connections", value.connections()); }
                 if (value.tracks() != 0) { object.put("tracks", value.tracks()); }
                 if (value.pillars()) { object.put("pillars", true); }
+                if (BoardFlag.ASSET.equals(value.asset())) {
+                    var flag = value.flag();
+                    var settings = object.putObject("flag");
+                    settings.put("pattern", flag.pattern());
+                    settings.put("emblem", flag.emblem());
+                    settings.put("x", flag.x()); settings.put("y", flag.y());
+                    settings.put("scale", flag.scale()); settings.put("rotation", flag.rotation());
+                }
+                if (value.levels() > 0) { object.put("levels", value.levels()); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }
                 if (!value.stretch().equals(BoardDecoration.Stretch.NONE)) {
                     object.putArray("stretch").add(value.stretch().x()).add(value.stretch().y()).add(value.stretch().z());
@@ -473,12 +517,12 @@ public final class BoardFile {
         return node;
     }
 
-    public static String clipboard(Hex hex) { return "MegaMek Hex2\n" + hexNode(hex); }
+    public static String clipboard(Hex hex) { return "MegaMek Hex2\n" + hexNode(hex, true); }
 
     public static Hex fromClipboard(String text) throws IOException {
         try {
             JsonNode node = JSON.readTree(text.substring("MegaMek Hex2\n".length()));
-            only(node, "elevation", "terrain", "theme", "appearance", "decorations");
+            requireObject(node);
             String terrain = string(node, "terrain", ""); validateTerrain(terrain);
             Hex hex = new Hex(integer(node, "elevation", 0), terrain, string(node, "theme", null));
             readVisuals(node, hex); hex.duplicateDecorationIds();
@@ -490,18 +534,22 @@ public final class BoardFile {
     private static void put(ObjectNode node, String key, String value) { if (value != null) { node.put(key, value); } }
 
     /** A model's path and its stable id ({@link BoardModelIds}), so the board still finds it once it moves. */
-    private static void putAsset(ObjectNode node, String asset) {
+    private static void putAsset(ObjectNode node, String asset, String uid) {
         put(node, "asset", asset);
-        put(node, "uid", BoardModelIds.uid(asset));
+        put(node, "uid", uid == null ? BoardModelIds.uid(asset) : uid);
+    }
+
+    /** Known IDs are derivable; retain an unknown saved ID so installing its pack later can still relocate the asset. */
+    private static String retainedUid(JsonNode node) {
+        String uid = string(node, "uid", null);
+        return uid != null && !uid.equals(BoardModelIds.uid(asset(node))) ? uid : null;
     }
 
     /** A saved model's current path: by its stable id, else as saved. */
     private static String asset(JsonNode node) { return BoardModelIds.path(string(node, "uid", null), string(node, "asset", null)); }
     private static void require(boolean condition, String message) { if (!condition) { throw new IllegalArgumentException(message); } }
-    private static void only(JsonNode node, String... names) {
+    private static void requireObject(JsonNode node) {
         require(node != null && node.isObject(), "Expected an object");
-        Set<String> allowed = Set.of(names);
-        node.fieldNames().forEachRemaining(name -> require(allowed.contains(name), "Unknown field: " + name));
     }
     private static String string(JsonNode node, String key, String fallback) {
         if (!node.has(key)) { return fallback; }

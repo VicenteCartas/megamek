@@ -34,6 +34,9 @@ final class GpuTerrainShadows implements Disposable {
 
         /** A unit's bounds in the world, which hold all it casts. */
         BoundingBox bounds(ModelInstance unit);
+
+        /** Revision of a deforming caster whose transform and node pose can remain unchanged. */
+        default int revision(ModelInstance unit) { return 0; }
     }
 
     /**
@@ -87,6 +90,9 @@ final class GpuTerrainShadows implements Disposable {
     private final GpuShadowLight.SlabCamera boardShadowFit = new GpuShadowLight.SlabCamera();
     private boolean shadowBoardWide;
     private boolean shadowDirty;
+    private long revision;
+
+    long revision() { return revision; }
     // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
     private int refinedShadowFrames = -1;
     // The battle view's scene (setScene): its longer side in pixels, 0 for none, and High shadows (Display tab); the map's
@@ -189,6 +195,7 @@ final class GpuTerrainShadows implements Disposable {
         }
         if (!directLight) {
             if (!shadowEmpty) {
+                revision++;
                 shadow.begin();
                 shadow.end();
                 shadowBase = null;
@@ -207,7 +214,7 @@ final class GpuTerrainShadows implements Disposable {
         boolean changed = shadowDirty || !shadowProjectionValid || units.size() != shadowModels.size();
         for (int index = 0; index < units.size(); index++) {
             ModelInstance unit = units.get(index);
-            poses[index] = shadowPose(unit);
+            poses[index] = 31 * shadowPose(unit) + casters.revision(unit);
             moved[index] = index >= shadowModels.size() || unit.model != shadowModels.get(index)
                   || !Arrays.equals(unit.transform.val, shadowTransforms.get(index).val) || poses[index] != shadowPoses.get(index);
             changed |= moved[index];
@@ -331,6 +338,7 @@ final class GpuTerrainShadows implements Disposable {
         }
         shadowProjectionValid = true;
         shadowDirty = false;
+        revision++;
     }
 
     /**

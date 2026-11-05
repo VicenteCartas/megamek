@@ -172,6 +172,7 @@ public class ServerBoardHelper {
             Arrays.fill(resultData, new Hex());
             finalBoard.newData(totalWidth, totalHeight, resultData, null);
         }
+        finalBoard.closeOffBoardBuildingExits();
         return finalBoard;
     }
 

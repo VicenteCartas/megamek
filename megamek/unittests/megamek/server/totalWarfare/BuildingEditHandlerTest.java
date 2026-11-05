@@ -414,17 +414,15 @@ class BuildingEditHandlerTest {
         assertNull(refusal, "changing only the picture should be allowed");
         assertEquals(7, board.getHex(BUILDING_HEX).terrainLevel(Terrains.BLDG_FLUFF),
               "the hex should hold the picture that was chosen");
-        assertEquals("building/legacy-art-7", board.getHex(BUILDING_HEX).getAppearance().get("building").variant(),
-              "and the design the 3D board draws and a .board2 keeps");
+        assertNull(board.getHex(BUILDING_HEX).getAppearance().get("building"), "Modern buildings use their gameplay kit");
     }
 
     @Test
-    void aBoard2BuildingKeepsItsPictureInItsDesignAndANewBuildingDoesNotInheritIt() {
-        // A .board2 holds no picture terrain: the level lives in the building's design, which the dialog reads.
+    void aNewBuildingDoesNotInheritTheRemovedBuildingsDesign() {
         Hex hex = board.getHex(BUILDING_HEX).duplicate();
-        hex.setAppearance(Map.of("building", new HexAppearance("building/legacy-art-7", null, null, null)));
+        hex.setAppearance(Map.of("building", new HexAppearance("building/lunar-habitat", null, null, null)));
         board.setHex(BUILDING_HEX, hex);
-        assertEquals(7, BoardSceneryLayouts.buildingArt(board.getHex(BUILDING_HEX)));
+        assertEquals(0, BoardSceneryLayouts.buildingArt(board.getHex(BUILDING_HEX)));
 
         BuildingEditSpec remove = new BuildingEditSpec(BUILDING_HEX, board.getBoardId());
         remove.setRemovingBuilding(true);

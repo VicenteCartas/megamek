@@ -80,6 +80,11 @@ public class Hex implements Serializable {
     // Null in historical serialized games. Immutable values can safely be shared by undo snapshots.
     private Map<String, HexAppearance> appearance;
     private List<BoardDecoration> decorations;
+    private megamek.common.board.BuildingVolumes.Reference buildingReference;
+
+    public megamek.common.board.BuildingVolumes.Reference getBuildingReference() { return buildingReference; }
+
+    public void setBuildingReference(megamek.common.board.BuildingVolumes.Reference reference) { buildingReference = reference; }
     //endregion Variable Declarations
 
     //region Constructors
@@ -210,7 +215,7 @@ public class Hex implements Serializable {
         decorations = value.isEmpty() ? null : List.copyOf(value);
     }
 
-    public boolean hasAppearance() { return !getAppearance().isEmpty() || !getDecorations().isEmpty(); }
+    public boolean hasAppearance() { return buildingReference != null || !getAppearance().isEmpty() || !getDecorations().isEmpty(); }
 
     /** Use on paste/stamp/merge, not on snapshots for undo or movement. */
     public void duplicateDecorationIds() {
@@ -755,6 +760,7 @@ public class Hex implements Serializable {
         Hex copy = new Hex(level, terrainCopy, theme, coords);
         copy.appearance = appearance;
         copy.decorations = decorations;
+        copy.buildingReference = buildingReference;
         return copy;
     }
 

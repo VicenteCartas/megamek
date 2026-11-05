@@ -124,18 +124,20 @@ class GpuConnectedKitSmokeTest {
                 if (!hexes.isEmpty()) { hexes.append(",\n"); }
                 hexes.append(String.format(Locale.ROOT, "{\"at\":[%d,%d],\"elevation\":0", x + 1, y + 1));
                 if (heights.containsKey(at)) {
-                    int exits = 0;
+                    var connections = new java.util.StringJoiner(",", "[", "]");
                     for (int direction = 0; direction < 6; direction++) {
-                        if (groups.get(at).equals(groups.get(at.translated(direction)))) { exits |= 1 << direction; }
+                        if (groups.get(at).equals(groups.get(at.translated(direction)))) {
+                            connections.add("\"" + List.of("n", "ne", "se", "s", "sw", "nw").get(direction) + "\"");
+                        }
                     }
-                    hexes.append(String.format(Locale.ROOT, ",\"terrain\":\"building:1:%d;bldg_elev:%d;bldg_cf:15\","
-                          + "\"appearance\":{\"building\":{\"variant\":\"%s\"}%s}", exits, heights.get(at), looks.get(at),
-                          squares.get(at) ? ",\"footprint\":{\"variant\":\"footprint/square\"}" : ""));
+                    hexes.append(String.format(Locale.ROOT, ",\"components\":{\"building\":{\"type\":\"light\","
+                          + "\"connections\":%s,\"height\":%d,\"cf\":15,\"appearance\":{\"variant\":\"%s\"%s}}}",
+                          connections, heights.get(at), looks.get(at), squares.get(at) ? ",\"footprint\":\"square\"" : ""));
                 }
                 hexes.append('}');
             }
         }
-        return String.format(Locale.ROOT, "{\"format\":\"megamek-board\",\"version\":2,\"size\":{\"width\":%d,\"height\":%d},"
-              + "\"hexes\":[%s]}", WIDTH, HEIGHT, hexes);
+        return String.format(Locale.ROOT, "{\"format\":\"megamek-board\",\"version\":%d,\"size\":{\"width\":%d,\"height\":%d},"
+              + "\"hexes\":[%s]}", BoardFile.VERSION, WIDTH, HEIGHT, hexes);
     }
 }

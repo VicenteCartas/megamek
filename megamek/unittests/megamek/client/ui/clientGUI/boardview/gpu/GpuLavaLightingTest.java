@@ -17,6 +17,26 @@ import org.junit.jupiter.api.Test;
 class GpuLavaLightingTest {
     private static final int SAMPLES = 17;
 
+    @Test void buildingLightsFadeWithoutDependingOnTerrainModeOrReuploadingUnchangedSources() throws Exception {
+        var lights = new GpuLavaLighting(null);
+        var fixture = new GpuLavaLighting.Source(0, new Vector3(0, 0, 27), 1.8f, new Vector3(.8f, .9f, 1), 40);
+        lights.setBuildings(List.of(fixture));
+        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, BoardScene.Surface.ROCK, null,
+              null, List.of(), List.of(), BoardLiquid.NONE);
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+        lights.update(scene, false, 0);
+        assertEquals(List.of(), GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned"), "Daylight switches floodlights off");
+        lights.update(scene, false, .5f);
+        var binned = (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned");
+        assertEquals(1, binned.size(), "Classic mode retains building illumination");
+        assertEquals(.9f, ((GpuLavaLighting.Source) binned.getFirst()).power(), .0001f);
+        Object revision = GpuMixedUnitBenchmarkSmokeTest.field(lights, "revision");
+        lights.setBuildings(List.of(fixture)); lights.update(scene, false, .5f);
+        assertEquals(revision, GpuMixedUnitBenchmarkSmokeTest.field(lights, "revision"), "An idle stadium does not rebin/reupload lights");
+        lights.setBuildings(List.of()); lights.update(scene, false, 1);
+        assertEquals(List.of(), GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned"), "Removing the geometry removes its illumination");
+    }
+
     @Test
     void cellsListEveryEmitterTheirSquareReachesAndSegmentsAllAlongTheirLength() throws Exception {
         float hex = BoardGeometry.width(), size = hex * .35f;

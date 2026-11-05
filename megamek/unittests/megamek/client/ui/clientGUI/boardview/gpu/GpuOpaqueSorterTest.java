@@ -21,6 +21,23 @@ import org.junit.jupiter.api.Test;
 
 class GpuOpaqueSorterTest {
     @Test
+    void translucentFacetsKeepDepthOrderAtBoardCameraDistances() {
+        var camera = new OrthographicCamera();
+        camera.position.set(10_000, 0, 0);
+        Shader shader = mock(Shader.class);
+        var near = part(shader, 20);
+        var far = part(shader, 0);
+        near.material.set(new BlendingAttribute(true, .8f));
+        far.material.set(new BlendingAttribute(true, .8f));
+        var parts = new Array<>(new Renderable[] { near, far });
+        new GpuOpaqueSorter().sort(camera, parts);
+        assertSame(far, parts.first());
+        camera.position.set(-10_000, 0, 0);
+        new GpuOpaqueSorter().sort(camera, parts);
+        assertSame(near, parts.first());
+    }
+
+    @Test
     void roadCoatsFollowTheirSurfaceOrderWithOtherTransparencyAndGroundCover() {
         var camera = new OrthographicCamera();
         var sorter = new GpuOpaqueSorter();

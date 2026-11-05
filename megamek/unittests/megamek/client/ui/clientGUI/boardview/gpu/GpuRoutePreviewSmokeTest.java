@@ -50,7 +50,7 @@ class GpuRoutePreviewSmokeTest {
                     camera.setIsometric(true);
                     for (boolean classic : new boolean[] { false, true }) {
                         terrain.setColumns(classic);
-                        for (String kind : List.of("wall", "road", "rail", "maglev", "bridge")) {
+                        for (String kind : List.of("wall", "road", "rail", "maglev", "bridge", "building", "habitat", "fortress")) {
                             var session = new BoardEditorSession();
                             session.game().setBoard(Board.createEmptyBoard(8, 8));
                             GpuRoutePreviewTest.choose(session, kind);

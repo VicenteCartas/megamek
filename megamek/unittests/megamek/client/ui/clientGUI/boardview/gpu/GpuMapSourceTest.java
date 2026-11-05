@@ -43,6 +43,41 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class GpuMapSourceTest {
+    @Test void authoredGestureIsPublishedWithItsPoseAndEndsOnRelease() throws Exception {
+        onEdt(() -> {
+            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
+            var at = new Coords(4, 4);
+            editor.command(new Command(Action.ASSET, "buildings/debug/debug-authored"), null);
+            editor.pointer(at, 0, 0, false); editor.finishStroke();
+            var id = editor.board().getHex(at).getDecorations().getFirst().id();
+            editor.command(new Command(Action.TOOL, "SELECT"), null);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) {
+                long generation = source.takeFrame().boardGeneration();
+                assertFalse(source.editorAuthoredGesture());
+                source.editorPointer(at, 0, 0, false, id, generation);
+                source.editorPointer(at, .2, .1, true, id, generation);
+                source.refresh();
+                assertFalse(source.editorAuthoredGesture(), "The renderer retains its latched publication until takeFrame");
+                source.takeFrame();
+                assertTrue(source.editorAuthoredGesture(), "Pointer drags defer terrain slicing");
+                source.endEditorStroke(); source.takeFrame();
+                assertFalse(source.editorAuthoredGesture());
+                source.editorValue(new Command(Action.OBJECT_VALUE, "rotation", "15"), false, generation);
+                source.refresh(); source.takeFrame();
+                assertTrue(source.editorAuthoredGesture(), "Inspector drags use the same release boundary");
+                source.editorValue(new Command(Action.OBJECT_VALUE, "rotation", "30"), true, generation);
+                source.takeFrame();
+                assertFalse(source.editorAuthoredGesture());
+                source.editorValue(new Command(Action.OBJECT_VALUE, "rotation", "45"), false, generation);
+                source.refresh(); source.takeFrame();
+                assertTrue(source.editorAuthoredGesture());
+                source.cancelEditorStroke(); source.takeFrame();
+                assertFalse(source.editorAuthoredGesture(), "Cancelling a gesture also resumes normal terrain updates");
+            }
+            return null;
+        });
+    }
+
     @TempDir
     Path temporary;
 

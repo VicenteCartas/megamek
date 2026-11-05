@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.geom.Area;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,6 +23,48 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadSlopeTest {
+    @ParameterizedTest
+    @EnumSource(TerrainLod.class)
+    void grasslandRoadMouthSeamsDoNotGrowSoilFins(TerrainLod lod) throws Exception {
+        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2.board");
+        var at = new Coords(3, 10);
+        var previous = BoardRelief.tuning();
+        BoardRelief.tune(new BoardRelief.Tuning(previous.cliffsIntoWater(), true, previous.stepOutline()));
+        try {
+            var reserved = new Area();
+            for (var tile : scene.tiles()) {
+                var grade = BoardRoadGrade.of(scene, tile, true);
+                if (grade != null) { reserved.add(grade.region()); }
+            }
+            var near = new HashMap<Coords, BoardSurface>();
+            for (var tile : scene.tiles()) {
+                if (tile.coords().distance(new Coords(2, 10)) <= 2) {
+                    near.put(tile.coords(), new BoardSurface(scene, tile, lod));
+                }
+            }
+            var surface = near.get(at);
+            int cuts = 0;
+            for (var face : surface.walls(scene, BoardGeometry.floor(scene), near)) {
+                if (face.landEdge() >= 0 || face.scatter()) { continue; }
+                var middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
+                if (middle.z <= .1f || middle.z >= BoardRoadGrade.CLEARANCE * BoardGeometry.level()) { continue; }
+                var normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                if (normal.len2() < 1e-10f || Math.abs(normal.z) > .001f * normal.len()) { continue; }
+                normal.nor().scl(.02f * BoardGeometry.hexScale());
+                // The 0311/0410 mouths leave a rounding-width slit through 0411's bank. The emitted cuts must
+                // border actual ground, not run across road reserved on both sides of that internal seam.
+                assertTrue(!reserved.contains(middle.x + normal.x, middle.y + normal.y)
+                            || !reserved.contains(middle.x - normal.x, middle.y - normal.y),
+                      lod + " soil cut inside the road reservation: " + face);
+                cuts++;
+            }
+            assertTrue(cuts > 0, "Keep the actual exposed cuts behind the retaining wall");
+            assertClosed(scene, at, lod, p -> Math.hypot(p.x - 205, p.y + 751) < 5);
+        } finally {
+            BoardRelief.tune(previous);
+        }
+    }
+
     @Test
     void bridgeRampFillDoesNotGrowGrass() {
         var at = BoardRoadTest.CENTER;

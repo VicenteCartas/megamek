@@ -47,29 +47,22 @@ void main() {
     vec3 modelShading = modelNormal(modelView, modelFace);
 #endif
     // surface-frame-ready
-#if defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag) && defined(lightingFlag) \
-      && defined(modelSurfaceFlag)
-    // With a paint mask (u_modelPaintMask) the albedo's alpha confines the vertex colour, a colour slot's, to the paint.
-    vec4 paintAlbedo = texture(u_diffuseTexture, v_diffuseUV + modelShift);
-    float paintShare = u_modelPaintMask > .5 ? paintAlbedo.a : 1.0;
-    vec4 diffuse = vec4(paintAlbedo.rgb * mix(vec3(1.0), v_color.rgb, paintShare),
-          (u_modelPaintMask > .5 ? 1.0 : paintAlbedo.a) * v_color.a) * u_diffuseColor;
-#elif defined(diffuseTextureFlag) && defined(diffuseColorFlag) && defined(colorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor * v_color;
-#elif defined(diffuseTextureFlag) && defined(diffuseColorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * u_diffuseColor;
-#elif defined(diffuseTextureFlag) && defined(colorFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift) * v_color;
-#elif defined(diffuseTextureFlag)
-    vec4 diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift);
-#elif defined(diffuseColorFlag) && defined(colorFlag)
-    vec4 diffuse = u_diffuseColor * v_color;
-#elif defined(diffuseColorFlag)
-    vec4 diffuse = u_diffuseColor;
-#elif defined(colorFlag)
-    vec4 diffuse = v_color;
-#else
     vec4 diffuse = vec4(1.0);
+    float paintShare = 1.0;
+#ifdef diffuseTextureFlag
+    diffuse = texture(u_diffuseTexture, v_diffuseUV + modelShift);
+#ifdef modelSurfaceFlag
+    if (u_modelPaintMask > .5) { paintShare = diffuse.a; diffuse.a = 1.0; }
+#endif
+#endif
+#ifdef colorFlag
+    diffuse *= vec4(mix(vec3(1.0), v_color.rgb, paintShare), v_color.a);
+#endif
+#ifdef diffuseColorFlag
+    diffuse *= u_diffuseColor;
+#endif
+#ifdef modelSurfaceFlag
+    diffuse.rgb *= mix(vec3(1.0), u_buildingPaint, paintShare);
 #endif
     // unit-overlays
 #if defined(emissiveTextureFlag) && defined(emissiveColorFlag)
@@ -87,12 +80,12 @@ void main() {
     if (u_modelPremultiplied > 0.5) { diffuse.rgb *= diffuse.a * v_opacity; }
 #endif
     if (u_modelLight.x > 0.0) {
-        emissive.rgb *= u_modelLight.y;
         diffuse.rgb *= u_modelLight.z;
     }
 #ifdef lightingFlag
     fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb, modelShading, modelFace, modelView);
 #else
+    if (u_modelLight.x > 0.0) { emissive.rgb *= u_modelLight.y; }
     fragColor.rgb = diffuse.rgb + emissive.rgb;
 #endif
 #ifdef blendedFlag

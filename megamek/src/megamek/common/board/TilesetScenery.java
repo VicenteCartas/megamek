@@ -3,6 +3,7 @@ package megamek.common.board;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -11,10 +12,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
+import de.javagl.jgltf.model.io.GltfAssetReader;
+import de.javagl.jgltf.model.io.v2.GltfAssetV2;
 import megamek.common.Configuration;
 import megamek.common.Hex;
+import megamek.common.enums.BuildingType;
+import megamek.common.units.IBuilding;
 import megamek.common.units.Terrains;
 import megamek.logging.MMLogger;
 
@@ -42,6 +48,7 @@ public final class TilesetScenery {
     private record BuildingFile(File custom, boolean customExists, boolean legacyExists) { }
     private record BuildingFiles(File root, Map<String, BuildingFile> files) { }
     private static volatile BuildingFiles buildingFiles;
+    private static final Map<File, Boolean> SINGLE_HEX_BUILDINGS = new ConcurrentHashMap<>();
 
     /** The terrains whose tileset art is scenery: a layer matching one of them is classified ({@link #resolve}). */
     public static final List<Integer> SCENERY_TERRAINS = List.of(Terrains.FLUFF, Terrains.GROUND_FLUFF,
@@ -133,6 +140,8 @@ public final class TilesetScenery {
     public static synchronized TilesetMatcher reload() {
         tileset = load();
         buildingFiles = null;
+        SINGLE_HEX_BUILDINGS.clear();
+        BuildingVolumes.reload();
         VARIANTS.clear();
         MISSING.clear();
         return tileset;
@@ -157,6 +166,77 @@ public final class TilesetScenery {
      */
     public static File customBuildingFile(String asset) {
         return buildingFile(asset).custom();
+    }
+
+    /** A core-only authored GLB uses the stacking contract but has no pieces for connected hexsides. */
+    public static boolean singleHexBuilding(String asset) {
+        if (asset == null || !asset.startsWith("buildings/")) { return false; }
+        var file = buildingFile(asset);
+        if (!file.customExists() || !file.custom().getName().endsWith(".glb")) { return false; }
+        return SINGLE_HEX_BUILDINGS.computeIfAbsent(file.custom().getAbsoluteFile(), path -> {
+            try (var input = Files.newInputStream(path.toPath())) {
+                var data = new GltfAssetReader().readWithoutReferences(input);
+                if (!(data instanceof GltfAssetV2 glb) || glb.getGltf().getNodes() == null) { return false; }
+                var names = glb.getGltf().getNodes().stream().filter(node -> node.getMesh() != null)
+                      .map(node -> node.getName() == null ? "" : node.getName()).toList();
+                // ConnectedKit owns validation. Here only distinguish complete storeys from side-dependent pieces.
+                return names.stream().anyMatch(name -> name.matches(".*-base[0-9]+"))
+                      && names.stream().noneMatch(name -> name.contains("-link-") || name.contains("-end-"));
+            } catch (IOException | RuntimeException failure) {
+                LOGGER.warn("Cannot read building kit metadata for {}: {}", path, failure.getMessage());
+                return false;
+            }
+        });
+    }
+
+    /** Any authored building side, including a neighbour's incoming side. Null board: the hex's own sides only. */
+    public static boolean buildingConnected(Hex hex, Coords at, Function<Coords, Hex> board) {
+        if (hex == null || !hex.containsTerrain(Terrains.BUILDING)) { return false; }
+        if ((hex.getTerrain(Terrains.BUILDING).getExits() & 63) != 0) { return true; }
+        if (board == null || at == null) { return false; }
+        for (int direction = 0; direction < 6; direction++) {
+            Hex neighbour = board.apply(at.translated(direction));
+            if (neighbour != null && neighbour.containsTerrainExit(Terrains.BUILDING, (direction + 3) % 6)) { return true; }
+        }
+        return false;
+    }
+
+    /** Whether this generated building has a connected, overlapping neighbour whose roof stops below its own. */
+    public static boolean buildingProfileAvailable(Hex hex, Coords at, Function<Coords, Hex> board) {
+        if (hex == null || at == null || hex.getBuildingReference() != null || !hex.containsTerrain(Terrains.BUILDING)) { return false; }
+        String asset = structureModels(hex, true).get(Terrains.BUILDING);
+        if (asset == null || !generatedKit(asset)) { return false; }
+        int top = hex.getLevel() + Math.max(1, hex.terrainLevel(Terrains.BLDG_ELEV));
+        for (int direction = 0; direction < 6; direction++) {
+            if (!hex.containsTerrainExit(Terrains.BUILDING, direction)) { continue; }
+            Hex next = board.apply(at.translated(direction));
+            if (next == null || !next.containsTerrainExit(Terrains.BUILDING, (direction + 3) % 6)) { continue; }
+            int nextTop = next.getLevel() + Math.max(1, next.terrainLevel(Terrains.BLDG_ELEV));
+            if (nextTop > hex.getLevel() && next.getLevel() < top && nextTop < top) { return true; }
+        }
+        return false;
+    }
+
+    /** The generic modular kit is determined by gameplay weight and class, independently of height and connections. */
+    public static String genericBuilding(Hex hex) {
+        if (!hex.containsTerrain(Terrains.BUILDING)) { return null; }
+        if (hex.terrainLevel(Terrains.BUILDING) == BuildingType.WALL.getTypeValue()) {
+            return "buildings/wall-" + (hex.getTerrain(Terrains.BUILDING).getExits() & 63);
+        }
+        String weight = switch (hex.terrainLevel(Terrains.BUILDING)) {
+            case 2 -> "medium";
+            case 3 -> "heavy";
+            case 4 -> "hard";
+            default -> "light";
+        };
+        String family = switch (hex.terrainLevel(Terrains.BLDG_CLASS)) {
+            case IBuilding.HANGAR -> "hangar";
+            case IBuilding.FORTRESS -> "fortress";
+            case IBuilding.GUN_EMPLACEMENT -> "gun_emplacement";
+            default -> "building";
+        };
+        String name = family + "_" + weight;
+        return "buildings/" + name + "/" + name + (family.equals("building") ? "" : "_a");
     }
 
     private static BuildingFile buildingFile(String asset) {
@@ -283,10 +363,15 @@ public final class TilesetScenery {
      * only models that exist for that structure ({@link BoardGenerator#exists}, or a custom kit).
      */
     public static Map<Integer, String> structureModels(Hex hex) {
-        return structureModels(tileset(), hex);
+        return structureModels(hex, buildingConnected(hex, null, null));
     }
 
-    private static Map<Integer, String> structureModels(TilesetMatcher definitions, Hex hex) {
+    /** Resolves the hex with the board's incoming building connections included in {@code connected}. */
+    public static Map<Integer, String> structureModels(Hex hex, boolean connected) {
+        return structureModels(tileset(), hex, connected);
+    }
+
+    private static Map<Integer, String> structureModels(TilesetMatcher definitions, Hex hex, boolean connected) {
         Map<Integer, String> models = new HashMap<>();
         for (int terrain : new int[] { Terrains.BUILDING, Terrains.FUEL_TANK }) {
             var design = hex.getAppearance().get(terrain == Terrains.BUILDING ? "building" : "fuelTank");
@@ -296,6 +381,11 @@ public final class TilesetScenery {
             if (asset != null && !asset.isBlank() && (BoardGenerator.exists(asset, terrain)
                   || asset.startsWith("buildings/") && buildingFile(asset).customExists())) { models.put(terrain, asset); }
         }
+        String generic = genericBuilding(hex);
+        // Only an explicit modern design overrides the gameplay weight/class. Old tileset artwork must not
+        // displace the modular kit merely because a retired GLB still exists in a user's data directory.
+        if (generic != null && (BoardGenerator.exists(generic, Terrains.BUILDING)
+              || buildingFile(generic).customExists())) { models.putIfAbsent(Terrains.BUILDING, generic); }
         if (hex.containsAnyTerrainOf(Terrains.BUILDING, Terrains.FUEL_TANK, Terrains.INDUSTRIAL)) {
             List<TilesetMatcher.Pick> images = new ArrayList<>(appearanceLayers(definitions, hex, false));
             images.add(definitions.select(hex).base());
@@ -319,6 +409,7 @@ public final class TilesetScenery {
                 }
             }
         }
+        if (connected && singleHexBuilding(models.get(Terrains.BUILDING))) { models.put(Terrains.BUILDING, generic); }
         models.computeIfPresent(Terrains.BUILDING, (terrain, asset) -> kitVariant(footprint(asset,
               HexAppearance.footprint(hex.getAppearance())), HexAppearance.kitVariant(hex.getAppearance())));
         // Walls are a supported building type without legacy building art. The renderer generates their solid mesh.
@@ -331,7 +422,7 @@ public final class TilesetScenery {
     /** {@link #resolve(Hex, Map, boolean)} with the hex's own {@link #structureModels}. */
     public static Resolved resolve(Hex hex, boolean nativeBoard) {
         TilesetMatcher definitions = tileset();
-        return resolve(definitions, hex, structureModels(definitions, hex), nativeBoard);
+        return resolve(definitions, hex, structureModels(definitions, hex, buildingConnected(hex, null, null)), nativeBoard);
     }
 
     /**

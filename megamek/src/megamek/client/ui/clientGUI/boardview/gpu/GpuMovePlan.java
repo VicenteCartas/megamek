@@ -130,7 +130,8 @@ final class GpuMovePlan implements AutoCloseable {
           EntityMovementType type, int heat, int tmm, boolean legal, List<String> warnings) { }
 
     private final GpuBoardSource source;
-    // The plan of entityId, EDT only. Pins are path lengths; landMode filters the walk/run gear (G10).
+    // The plan of entityId, EDT only. Pins retain MovePath prefixes, including each step's direction;
+    // landMode filters the walk/run gear (G10).
     private MovementDisplay display;
     private int entityId = Entity.NONE;
     private Mode landMode = Mode.AUTO;
@@ -415,13 +416,15 @@ final class GpuMovePlan implements AutoCloseable {
     /**
      * G9: without a route, or in a jump, one turn step at the path's end. With a walk or run route, the cheaper legal
      * one of the computed path from the last pin that ends on the destination in the new facing, and the route plus a
-     * turn at the destination. Neither legal: the facing stays, with a toast.
+     * turn at the destination. Turning at the last pin includes the turn in that pin. Neither legal: the facing stays,
+     * with a toast.
      */
     private void face(MovementDisplay md, int wanted) {
         MovePath path = md.getPlannedMovement();
         if (wanted == path.getFinalFacing() || !facingMatters(path.getEntity())
               || !available(md, MoveCommand.MOVE_TURN)) { return; }
         boolean route = path.length() > base(path);
+        boolean pinned = !pins.isEmpty() && (pins.getLast() == path.length());
         Entry before = entry(md);
         Mode mode = mode(md);
         MovePath reroute = (route && (mode != Mode.JUMP)) ? reroute(md, path, wanted) : null;
@@ -436,6 +439,9 @@ final class GpuMovePlan implements AutoCloseable {
             restore(md, before);
             toast(md, route ? "GpuBoard.hud.move.noMpToFace" : "GpuBoard.hud.move.noMpToTurn");
             return;
+        }
+        if (pinned) {
+            pins = Stream.concat(pins.stream().limit(pins.size() - 1), Stream.of(after.length())).toList();
         }
         record(md, before);
     }
@@ -465,7 +471,8 @@ final class GpuMovePlan implements AutoCloseable {
 
     /**
      * G10: Walk and Run are MegaMek's walk gear with the plan's filter, Jump and Walk backwards its jump and back-up
-     * gears (each through its own command); the same mode again is automatic. A mode change clears the route.
+     * gears (each through its own command); the same mode again is automatic. Switching between forward and backward
+     * movement keeps the route and pins; other mode changes clear them.
      */
     private void switchMode(MovementDisplay md, Mode requested) {
         Mode next = (mode(md) == requested) ? Mode.AUTO : requested;
@@ -479,15 +486,19 @@ final class GpuMovePlan implements AutoCloseable {
             return;
         }
         Entry before = entry(md);
-        md.truncateTo(base(md.getPlannedMovement()));
+        boolean directionChange = ((md.getGear() == MovementDisplay.GEAR_LAND) && (next == Mode.BACK))
+              || ((md.getGear() == MovementDisplay.GEAR_BACKUP) && (gear(next) == MovementDisplay.GEAR_LAND));
+        if (!directionChange) {
+            md.truncateTo(base(md.getPlannedMovement()));
+            pins = List.of();
+            external = false;
+        }
         if (switching) {
             press(md, command);
         }
         if (gear(next) == MovementDisplay.GEAR_LAND) {
             landMode = next;
         }
-        pins = List.of();
-        external = false;
         record(md, before);
     }
 

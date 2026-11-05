@@ -10,6 +10,7 @@ import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
+import com.badlogic.gdx.math.Matrix4;
 
 /**
  * A model's finish (RigidGlb.Surface): roughness, metallic and subsurface scattering factors over an optional map
@@ -94,6 +95,30 @@ final class GpuModelMaterial extends Attribute {
     }
 
     static void register(DefaultShader shader) {
+        // Only ruby programs have these uniforms (modelRubyFlag), and only ruby materials draw with them.
+        shader.register("u_modelRuby", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, 1f / (18 * BoardGeometry.hexScale()));
+            }
+        });
+        shader.register("u_rubyVolume", new BaseShader.LocalSetter() {
+            private final Matrix4 inverse = new Matrix4();
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                inverse.set(renderable.worldTransform).inv();
+                target.set(id, inverse);
+            }
+        });
+        shader.register("u_rubyPlanes[0]", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                float[] planes = GpuCrystalTransmission.planes(renderable.meshPart);
+                target.program.setUniform4fv(target.loc(id), planes, 0, planes.length);
+            }
+        });
+        shader.register("u_rubyFacets", new BaseShader.LocalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, GpuCrystalTransmission.planes(renderable.meshPart).length / 4);
+            }
+        });
         shader.register("u_modelSurface", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -144,6 +169,14 @@ final class GpuModelMaterial extends Attribute {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 target.set(id, attributes.get(GpuModelMaterial.class, TYPE).paintMask ? 1f : 0f);
+            }
+        });
+        shader.register("u_buildingPaint", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var paint = attributes.get(GpuBuildingPaint.class, GpuBuildingPaint.TYPE);
+                if (paint == null) { target.set(id, 1f, 1f, 1f); }
+                else { target.set(id, paint.colour.r, paint.colour.g, paint.colour.b); }
             }
         });
         shader.register("u_modelGlow", new BaseShader.LocalSetter() {

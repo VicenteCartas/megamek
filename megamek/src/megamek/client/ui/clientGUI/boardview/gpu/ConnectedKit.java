@@ -39,14 +39,16 @@ import megamek.common.board.HexTile;
  * kit authors only the north (and north-east) pieces; the others are those turned. A whole-hex piece, tagged in all six
  * directions, stands alone for exactly those connections, in place of its module's other pieces. A linkless corner
  * piece may have a {@code -bend} variant, which stands in for it behind a 60-degree bend (the hex connects across just
- * the two hexsides opposite it): a roof whose plating mitres along the bend's two arms.
+ * the two hexsides opposite it): a roof whose plating mitres along the bend's two arms. Kits with {@code -cap} pieces
+ * retain their ground footprint above shorter neighbours, closing the exposed hexsides with those walls and roof rims.
+ * A roof's {@code -closed-N} variant includes the exposed links in bitmask N in its deck and edge calculation.
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
     static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
     private static final String DIRECTION = "(?:ne|nw|se|sw|n|s)";
     private static final Pattern NODE = Pattern.compile(
-          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend)?");
+          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
     private static final float REACH_TOLERANCE = 1;
@@ -56,22 +58,23 @@ final class ConnectedKit {
 
     /**
      * One mesh node: its module role ({@code base0}, {@code floor1}, ...), the directions that must (not) connect, and
-     * whether it is a linkless corner's {@code -bend} variant.
+     * whether it is a linkless corner's {@code -bend} variant or a {@code -cap} closing a link above a shorter neighbour.
+     * {@code closed} names a roof twin's exposed links in the same direction mask as {@code links}.
      */
-    record Piece(String node, String role, int links, int ends, boolean bend) {
+    record Piece(String node, String role, int links, int ends, boolean bend, boolean cap, int closed) {
         boolean core() { return links == 0 && ends == 0; }
 
         boolean whole() { return (links | ends) == 63; }
 
         boolean holds(int connected) { return (connected & links) == links && (connected & ends) == 0; }
 
-        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps), bend); }
+        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps), bend, cap, turn(closed, steps)); }
 
         /** The same tags, as an identity shared by every module role; a bend shares its plain piece's. */
         long tags() { return (long) links << 6 | ends; }
 
-        /** The tags and the bend: what a kit holds once per role. */
-        long identity() { return tags() | (bend ? 1L << 12 : 0); }
+        /** The tags and piece kind: what a kit holds once per role. */
+        long identity() { return tags() | (bend ? 1L << 12 : 0) | (cap ? 1L << 13 : 0) | (long) closed << 14; }
     }
 
     /**
@@ -91,7 +94,8 @@ final class ConnectedKit {
             require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
             var match = NODE.matcher(node.id);
             require(match.matches(), "Expected -baseN, -floorN or -roofN, then -link-<dir> or -end-<dir> tags: " + node.id);
-            require(node.parts != null && node.parts.length > 0 && (node.children == null || node.children.length == 0),
+            require(node.parts != null && (node.parts.length > 0 || match.group(1).equals("roof") && "-cap".equals(match.group(4)))
+                  && (node.children == null || node.children.length == 0),
                   "Building modules must be mesh nodes: " + node.id);
             int links = 0, ends = 0;
             var tags = TAG.matcher(match.group(3));
@@ -102,10 +106,15 @@ final class ConnectedKit {
             }
             require(Integer.bitCount(links | ends) <= 2 || (links | ends) == 63,
                   "One or two tags, or all six for a whole hex: " + node.id);
-            boolean bend = match.group(4) != null;
+            boolean bend = "-bend".equals(match.group(4)), cap = "-cap".equals(match.group(4));
+            int closed = match.group(4) != null && match.group(4).startsWith("-closed-")
+                  ? Integer.parseInt(match.group(4).substring(8)) : 0;
             require(!bend || match.group(1).equals("roof") && links == 0 && Integer.bitCount(ends) == 2,
                   "A bend piece is a linkless corner's roof: " + node.id);
-            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend);
+            require(!cap || Integer.bitCount(links) == 1 && ends == 0, "A cap closes one link: " + node.id);
+            require(closed == 0 || match.group(1).equals("roof") && (closed & ~links) == 0,
+                  "A closed roof includes only its own exposed links: " + node.id);
+            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend, cap, closed);
             require(seen.add(piece.role() + "/" + piece.identity()), "Duplicate building module: " + node.id);
             result.add(piece);
         }
@@ -159,6 +168,12 @@ final class ConnectedKit {
                   "Every module needs the kit's whole-hex pieces: " + piece.node());
             require(!piece.bend() || pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && !other.bend()
                   && other.tags() == piece.tags()), "A bend piece stands in for its plain corner piece: " + piece.node());
+            require(piece.closed() == 0 || pieces.stream().anyMatch(other -> other.role().equals(piece.role())
+                  && other.closed() == 0 && !other.cap() && other.tags() == piece.tags()),
+                  "A closed roof stands in for its open roof piece: " + piece.node());
+            require(!piece.cap() || roles.keySet().stream().filter(role -> !role.startsWith("base")).allMatch(role -> pieces.stream()
+                  .anyMatch(other -> other.role().equals(role) && other.cap() && other.links() == piece.links())),
+                  "Every floor and roof needs the kit's link caps: " + piece.node());
             for (int steps = 1; steps < 6 && symmetric && piece.whole(); steps++) {
                 long turned = piece.turned(steps).tags();
                 require(turned == piece.tags() || !wholes.contains(turned),
@@ -168,9 +183,10 @@ final class ConnectedKit {
         if (!symmetric) {
             for (var piece : pieces) {
                 for (int steps = 1; steps < 6 && !piece.core(); steps++) {
-                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps);
+                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps), closed = turn(piece.closed(), steps);
                     require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == links
-                          && other.ends() == ends && other.bend() == piece.bend()),
+                          && other.ends() == ends && other.bend() == piece.bend() && other.cap() == piece.cap()
+                          && other.closed() == closed),
                           "A kit tags north only, or every direction: " + piece.node());
                 }
             }
@@ -189,8 +205,9 @@ final class ConnectedKit {
             Map<String, BoundingBox> bounds = new HashMap<>();
             for (var piece : parts(lod)) {
                 var node = node(lod, piece.node());
+                if (node.parts.length == 0) { continue; }
                 bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(lod, node, new Matrix4()));
-                if (Integer.bitCount(piece.links()) == 1 && piece.ends() == 0) { reach(lod, node, piece); }
+                if (!piece.cap() && Integer.bitCount(piece.links()) == 1 && piece.ends() == 0) { reach(lod, node, piece); }
             }
             Map<String, Float> ground = new HashMap<>();
             bounds.forEach((role, box) -> {
@@ -235,16 +252,18 @@ final class ConnectedKit {
 
     static List<Vector3> triangles(RigidGlb.Data data, ModelNode node, Matrix4 view) {
         Matrix4 placement = new Matrix4(view).mul(new Matrix4(node.translation, node.rotation, node.scale));
-        var mesh = data.meshes.first();
         Set<String> parts = new HashSet<>();
         for (var part : node.parts) { parts.add(part.meshPartId); }
         List<Vector3> result = new ArrayList<>();
+        for (int meshIndex = 0; meshIndex < data.meshes.size; meshIndex++) {
+            var mesh = data.meshes.get(meshIndex);
         for (var part : mesh.parts) {
             if (!parts.contains(part.id)) { continue; }
             for (short index : part.indices) {
                 int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                 result.add(new Vector3(mesh.vertices[at], mesh.vertices[at + 1], mesh.vertices[at + 2]).mul(placement));
             }
+        }
         }
         return result;
     }
@@ -321,7 +340,7 @@ final class ConnectedKit {
 
     /** Adds {@code source}'s materials, with their images and finishes, to {@code result} for its placed nodes. */
     static void materials(RigidGlb.Data result, RigidGlb.Data source) {
-        result.images.putAll(source.images);
+        result.inheritMaterials(source);
         // libGDX Array reuses its iterator: immutable kit data is read concurrently by terrain workers.
         for (int index = 0; index < source.materials.size; index++) {
             var material = source.materials.get(index);
@@ -332,9 +351,6 @@ final class ConnectedKit {
             copy.shininess = material.shininess; copy.opacity = material.opacity; copy.textures = material.textures;
             result.materials.add(copy);
         }
-        result.surfaces.putAll(source.surfaces);
-        result.alphaTests.putAll(source.alphaTests);
-        result.boardUVs.putAll(source.boardUVs);
     }
 
     /**
@@ -344,18 +360,28 @@ final class ConnectedKit {
     record Placement(String node, String role, int level, Matrix4 matrix, String prefix) { }
 
     static List<Placement> placements(Kit kit, int lod, int height, int[] reach, int steps, long seed) {
-        return placements(kit, lod, GpuBuilding.select(kit.roles(), height, seed), reach, steps);
+        return placements(kit, lod, height, reach, steps, seed, false);
+    }
+
+    static List<Placement> placements(Kit kit, int lod, int height, int[] reach, int steps, long seed, boolean stepped) {
+        return placements(kit, lod, GpuBuilding.select(kit.roles(), height, seed), reach, steps, stepped);
     }
 
     /** {@code selected}: the base, the floors and the roof chosen for the levels ({@link GpuBuilding#select}). */
     static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps) {
+        return placements(kit, lod, selected, reach, steps, false);
+    }
+
+    static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps, boolean stepped) {
         var source = kit.lods().get(lod);
         var ground = kit.grounds().get(lod);
         int height = selected.size() - 1;
-        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>();
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedRoofs = new HashMap<>();
         for (var piece : parts(source)) {
-            (piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.tags(), piece);
+            (piece.closed() != 0 ? closedRoofs : piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>())
+                  .put(piece.bend() ? piece.tags() : piece.identity(), piece);
         }
+        boolean capped = !stepped && kit.pieces().stream().anyMatch(Piece::cap);
         int[] connected = new int[height];
         for (int level = 0; level < height; level++) {
             for (int direction = 0; direction < 6; direction++) {
@@ -366,8 +392,8 @@ final class ConnectedKit {
         List<Placement> result = new ArrayList<>();
         Set<Long> identities = new HashSet<>();
         byRole.values().forEach(pieces -> identities.addAll(pieces.keySet()));
-        // The whole-hex piece (and its turn) for the ground level's connections. It stands while a level keeps them;
-        // above, the corner pieces follow the falling connections, whose footprint only shrinks with them.
+        // The ground connections choose the footprint. With caps it continues to the roof, while each exposed link
+        // gets a wall above its neighbour. Authored kits without caps retain their existing stepped assembly.
         long whole = -1;
         int wholeTurn = 0;
         for (long tags : identities.stream().sorted().toList()) {
@@ -384,16 +410,22 @@ final class ConnectedKit {
                 Piece turned = any.turned(turn);
                 boolean before = false;
                 for (int level = 0; level <= height; level++) {
-                    boolean wholeLevel = whole >= 0 && level < height && connected[level] == connected[0];
-                    boolean holds = level < height && (any.whole() ? tags == whole && turn == wholeTurn && wholeLevel
-                          : !wholeLevel && turned.holds(connected[level]));
+                    boolean wholeLevel = whole >= 0 && level < height && (capped || connected[level] == connected[0]);
+                    boolean holds = level < height && (any.cap()
+                          ? capped && (connected[0] & turned.links()) != 0 && (connected[level] & turned.links()) == 0
+                          : any.whole() ? tags == whole && turn == wholeTurn && wholeLevel
+                                : !wholeLevel && turned.holds(capped ? connected[0] : connected[level]));
                     // A run's modules, then its own roof where it stops: below the top, or at the top.
                     String role = holds ? selected.get(level) : before ? selected.getLast() : null;
                     Piece piece = role == null ? null : byRole.get(role).get(tags);
                     // Where it stops behind a 60-degree bend (connected across just the two hexsides opposite it).
                     Piece bend = holds || role == null ? null : bends.getOrDefault(role, Map.of()).get(tags);
-                    if (bend != null && connected[level - 1] == turn(turned.ends(), 3)) { piece = bend; }
-                    if (piece != null) {
+                    if (bend != null && connected[capped ? 0 : level - 1] == turn(turned.ends(), 3)) { piece = bend; }
+                    if (capped && piece != null && role.startsWith("roof") && !piece.cap()) {
+                        int closed = piece.links() & ~turn(connected[level - 1], -turn);
+                        piece = closedRoofs.getOrDefault(role, Map.of()).getOrDefault(piece.identity() | (long) closed << 14, piece);
+                    }
+                    if (piece != null && node(source, piece.node()).parts.length > 0) {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
                               - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
                     }
@@ -420,10 +452,15 @@ final class ConnectedKit {
 
     /** Adds {@code node}'s parts, placed by {@code frame}, to {@code result} as a mesh of their own. */
     static void append(RigidGlb.Data result, RigidGlb.Data source, ModelNode node, Matrix4 frame, String prefix) {
+        for (int index = 0; index < source.meshes.size; index++) {
+            append(result, source.meshes.get(index), node, frame, prefix + index + "/");
+        }
+    }
+
+    private static void append(RigidGlb.Data result, ModelMesh mesh, ModelNode node, Matrix4 frame, String prefix) {
         Matrix4 placement = new Matrix4(frame).mul(new Matrix4(node.translation, node.rotation, node.scale));
         Matrix3 normals = new Matrix3().set(placement).inv().transpose();
         var point = new Vector3();
-        var mesh = source.meshes.first();
         var included = new HashSet<String>();
         for (var part : node.parts) { included.add(part.meshPartId); }
         var copy = new ModelMesh();
@@ -455,6 +492,7 @@ final class ConnectedKit {
             part.indices = indices.toArray();
             parts.add(part);
         }
+        if (parts.isEmpty()) { return; }
         copy.vertices = vertices.toArray();
         copy.parts = parts.toArray(ModelMeshPart[]::new);
         result.meshes.add(copy);
@@ -463,6 +501,7 @@ final class ConnectedKit {
         copiedNode.children = new ModelNode[0];
         List<ModelNodePart> nodeParts = new ArrayList<>();
         for (var original : node.parts) {
+            if (parts.stream().noneMatch(part -> part.id.equals(prefix + original.meshPartId))) { continue; }
             var part = new ModelNodePart();
             part.meshPartId = prefix + original.meshPartId;
             part.materialId = original.materialId;

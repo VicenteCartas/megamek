@@ -1,6 +1,29 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Every custom lit surface shares per-fragment lighting and geometry-shadow sampling, after light-model.glsl.
 #ifdef lightingFlag
+#ifdef crystalTransmissionFlag
+uniform sampler2D u_crystalTransmission;
+uniform mat4 u_crystalProjection;
+uniform float u_crystalEnabled;
+#endif
+
+// Only directional light transmitted to receivers is tinted; ambient sky and self-emission are unchanged.
+vec3 crystalTransmission(vec3 position) {
+#ifdef crystalTransmissionFlag
+    if (u_crystalEnabled < .5) return vec3(1.0);
+    vec4 projected = u_crystalProjection * vec4(position, 1.0);
+    vec2 uv = projected.xy / projected.w * .5 + .5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(1.0);
+    vec2 step = .75 / vec2(textureSize(u_crystalTransmission, 0));
+    vec3 transmission = (texture(u_crystalTransmission, uv + step).rgb
+          + texture(u_crystalTransmission, uv - step).rgb
+          + texture(u_crystalTransmission, uv + vec2(step.x, -step.y)).rgb
+          + texture(u_crystalTransmission, uv + vec2(-step.x, step.y)).rgb) * .25;
+    return mix(vec3(1.0), transmission, u_shadowStrength);
+#else
+    return vec3(1.0);
+#endif
+}
 uniform vec3 u_ambientCubemap[6];
 #if numDirectionalLights > 0
 struct DirectionalLight {
@@ -179,7 +202,7 @@ const float RECEIVER_PLANE_METRES = 1.0;
 // metre: world units per metre. lift: how far the visible surface stands out along normal from the mesh, its relief
 // (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first. fray: a shift
 // of the lookup across the light, in metres: the grass, clods and stones that fray a natural shadow's edge.
-float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) {
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, bool receivesSun) {
 #ifdef shadowMapFlag
     // Normal offset: the lookup moves out along the surface normal by half a shadow texel, and by up to two where the
     // light skims the surface, so a flat face lit at a grazing angle never shadows itself.
@@ -206,6 +229,8 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) 
           u_shadowMapProjViewTrans[2][2]), light));
     shadowPlaneLimit = RECEIVER_PLANE_METRES * metre * depthPerUnit;
     shadowPlaneDrift = shadowDrift();
+    // Derivatives above remain defined across the light horizon; only unused comparisons are skipped.
+    if (!receivesSun) return 1.0;
     // After the receiver plane: the fray moves where the edge falls, along the surface as the taps do, never into it.
     vec2 frayUv = fray * metre * .5 * length(row);
     shadowUv += vec3(frayUv, shadowPlane(frayUv, slope));
@@ -238,6 +263,10 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) 
 #else
     return 1.0;
 #endif
+}
+
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) {
+    return sculptShadow(normal, light, metre, lift, fray, true);
 }
 
 // Shared dielectric response: callers can reuse their shadow sample for mapped leaves as well as opaque surfaces.
@@ -274,7 +303,7 @@ void incidentLighting(vec3 normal, bool local, out vec3 ambient, out vec3 direct
     direct = vec3(0.0);
 #if numDirectionalLights > 0
     for (int i = 0; i < numDirectionalLights; i++) {
-        direct += u_dirLights[i].color * max(0.0, dot(normal, -u_dirLights[i].direction));
+        direct += u_dirLights[i].color * crystalTransmission(v_cloudPosition) * max(0.0, dot(normal, -u_dirLights[i].direction));
     }
 #endif
     direct *= surfaceVisibility();
@@ -295,8 +324,9 @@ void surfaceLighting(vec3 normal, vec3 face, float film, float roughness,
     for (int i = 0; i < numDirectionalLights; i++) {
         vec3 light = -u_dirLights[i].direction;
         if (dot(face, light) > 0.0) {
-            direct += u_dirLights[i].color * dielectricDiffuse(normal, light, view, film, roughness);
-            sheen += u_dirLights[i].color * dielectricSheen(normal, light, view, film, roughness);
+            vec3 transmitted = u_dirLights[i].color * crystalTransmission(v_cloudPosition);
+            direct += transmitted * dielectricDiffuse(normal, light, view, film, roughness);
+            sheen += transmitted * dielectricSheen(normal, light, view, film, roughness);
         }
     }
 #endif

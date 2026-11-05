@@ -37,6 +37,8 @@ final class BoardTiles implements AutoCloseable {
     /** Every hex is recaptured next; else {@link #dirty} (null: none). */
     private boolean all = true;
     private Rectangle dirty;
+    /** A placement edit changes the pose of every saved share, including members outside the dirty rectangle. */
+    private final Set<String> dirtyBuildings = new java.util.HashSet<>();
     /** The boards the tripwire reported, each once. */
     private final Set<Board> warned = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -58,10 +60,25 @@ final class BoardTiles implements AutoCloseable {
     void changed(Coords coords) {
         if (coords == null) {
             all = true;
+            dirtyBuildings.clear();
             artwork.clear();
             return;
         }
         Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
+        // A member can be remote from its owner. Losing its last reference changes the owner's prop fallback.
+        if (board != null && board.contains(coords)) {
+            board.getHex(coords).getDecorations().stream().filter(object -> megamek.common.board.BuildingVolumes.of(object.asset()).present())
+                  .forEach(object -> dirtyBuildings.add(object.id()));
+            var current = board.getHex(coords).getBuildingReference();
+            int index = coords.getX() * board.getHeight() + coords.getY();
+            var previous = index < tiles.size() ? tiles.get(index).cover().reference() : null;
+            for (var reference : new megamek.common.board.BuildingVolumes.Reference[] { current, previous }) {
+                if (reference != null) {
+                    dirtyBuildings.add(reference.id());
+                    area.add(new Rectangle(reference.anchor().getX(), reference.anchor().getY(), 1, 1));
+                }
+            }
+        }
         dirty = dirty == null ? area : dirty.union(area);
         for (int x = area.x; x < area.x + area.width; x++) {
             for (int y = area.y; y < area.y + area.height; y++) { artwork.invalidate(new Coords(x, y)); }
@@ -79,12 +96,35 @@ final class BoardTiles implements AutoCloseable {
 
     /** Preview neighbours come from the same pending edit, including rail corridors and ground clearance. */
     BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending) {
+        return preview(board, coords, hex, pending, referenceIds(board, pending));
+    }
+
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
+          Set<String> buildingReferences) {
+        return preview(board, coords, hex, pending, buildingReferences, new BoardScene.PixelPool());
+    }
+
+    /** One pending event shares its immutable pixels, without retaining them in the document's pool. */
+    BoardScene.Tile preview(Board board, Coords coords, Hex hex, java.util.function.Function<Coords, Hex> pending,
+          Set<String> buildingReferences, BoardScene.PixelPool previewImages) {
         if (hex == null) { hex = pending.apply(coords); }
         if (hex == null) { return null; }
         artwork.invalidate(coords);
         try {
-            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, new BoardScene.PixelPool(), pending);
+            return BoardScene.captureTile(hex, artwork.capture(board, coords, hex), null, previewImages, pending, buildingReferences);
         } finally { artwork.invalidate(coords); }
+    }
+
+    /** A capture-time snapshot of saved membership, including collapsed hexes; never inferred from current artwork. */
+    static Set<String> referenceIds(Board board, java.util.function.Function<Coords, Hex> hexes) {
+        Set<String> result = new java.util.HashSet<>();
+        for (int x = 0; x < board.getWidth(); x++) {
+            for (int y = 0; y < board.getHeight(); y++) {
+                Hex hex = hexes.apply(new Coords(x, y));
+                if (hex != null && hex.getBuildingReference() != null) { result.add(hex.getBuildingReference().id()); }
+            }
+        }
+        return result;
     }
 
     /** Rereads the artwork (the 3D views' asset reload); every hex is recaptured. */
@@ -105,6 +145,7 @@ final class BoardTiles implements AutoCloseable {
             changed(null);
         }
         if (!all && dirty == null) { return tiles; }
+        Set<String> buildingReferences = referenceIds(board, board::getHex);
         Rectangle area = all ? new Rectangle(0, 0, width, height) : dirty.intersection(new Rectangle(0, 0, width, height));
         List<BoardScene.Tile> next = tiles.size() == width * height ? new ArrayList<>(tiles)
               : new ArrayList<>(Collections.nCopies(width * height, null));
@@ -116,14 +157,29 @@ final class BoardTiles implements AutoCloseable {
                 BoardArtwork.HexImage art = artwork.capture(board, coords, hex);
                 BoardScene.Tile previous = next.get(index);
                 BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex,
-                      board::getBuildingAt);
+                      board::getBuildingAt, buildingReferences);
                 next.set(index, tile.equals(previous) ? previous : tile);
                 captured.accept(coords, art);
+            }
+        }
+        if (!all && !dirtyBuildings.isEmpty()) {
+            for (int index = 0; index < next.size(); index++) {
+                var previous = next.get(index);
+                var reference = previous.cover().reference();
+                Coords at = previous.coords();
+                if (reference == null || !dirtyBuildings.contains(reference.id()) || area.contains(at.getX(), at.getY())) { continue; }
+                Hex hex = drawn(board, at);
+                // Only the owning decoration changed: reuse the member's cached terrain artwork.
+                var art = artwork.capture(board, at, hex);
+                var tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex, board::getBuildingAt, buildingReferences);
+                next.set(index, tile.equals(previous) ? previous : tile);
+                captured.accept(at, art);
             }
         }
         tiles = List.copyOf(next);
         all = false;
         dirty = null;
+        dirtyBuildings.clear();
         return tiles;
     }
 

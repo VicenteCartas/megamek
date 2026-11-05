@@ -39,11 +39,13 @@ final class UnitAttack {
     static final float PPC_RECOIL_SCALE = 1.5f;
     /** In playback seconds; an impact immediately restores the normal battle clock before the death plays. */
     static final float DEATH_SECONDS = .6f;
-    static final float MELEE_WALK_SECONDS = 1.05f;
-    static final float MELEE_RUN_SECONDS = .65f;
-    static final float MELEE_SWING_SECONDS = .4f;
+    /** Duration scale for 25% faster melee playback. */
+    private static final float MELEE_TIME_SCALE = 1 / 1.25f;
+    static final float MELEE_WALK_SECONDS = 1.05f * MELEE_TIME_SCALE;
+    static final float MELEE_RUN_SECONDS = .65f * MELEE_TIME_SCALE;
+    static final float MELEE_SWING_SECONDS = .4f * MELEE_TIME_SCALE;
     /** A death from above's jump onto its target, which lands as it touches down, and its arc's height in levels. */
-    static final float DFA_LEAP_SECONDS = .8f;
+    static final float DFA_LEAP_SECONDS = .8f * MELEE_TIME_SCALE;
     private static final float DFA_LEAP_LEVELS = 1.5f;
     static final float MELEE_DODGE_HEXES = .14f;
     static final float PHYSICAL_APPROACH_HEXES = .9f;
@@ -63,6 +65,7 @@ final class UnitAttack {
     final BoardScene.Combat event;
     final float flightSeconds;
     final float contactSeconds;
+    final float recoverySeconds;
     /** Its whole clock; a shove that pushes its target off the board lasts until the target's fall ends. */
     float duration;
     /** The hex off the board this shove pushed its target into ({@link #pushOff}), or null. */
@@ -99,6 +102,7 @@ final class UnitAttack {
 
     UnitAttack(BoardScene.Combat event) {
         this.event = event;
+        recoverySeconds = RECOVERY_SECONDS * (shot() || death() || removal() ? 1 : MELEE_TIME_SCALE);
         event.result().mounts().forEach(mount -> firingMounts
               .computeIfAbsent(mount.entityId(), ignored -> new HashSet<>()).add(mount.equipmentIndex()));
         event.result().mounts().forEach(mount -> {
@@ -116,11 +120,11 @@ final class UnitAttack {
         contactSeconds = removal() ? .85f : death() ? DEATH_SECONDS : shot() ? ANTICIPATION_SECONDS + flightSeconds + firingSeconds
               : approachSeconds + (dfa() ? 0 : MELEE_SWING_SECONDS);
         duration = removal() ? 1.4f : death() ? DEATH_SECONDS
-              : contactSeconds + RECOVERY_SECONDS + (shot() || carriesOn() ? 0 : MELEE_RUN_SECONDS)
+              : contactSeconds + recoverySeconds + (shot() || carriesOn() ? 0 : MELEE_RUN_SECONDS)
               + (designatorHolds() ? DESIGNATOR_HOLD_SECONDS : 0) + fuelAirIgnitionHold();
         firingEndSeconds = event.result().mounts().stream()
               .anyMatch(mount -> "flame".equals(effect(mount.entityId(), mount.equipmentIndex())))
-              ? Math.max(contactSeconds, ANTICIPATION_SECONDS + flightSeconds + RECOVERY_SECONDS) : contactSeconds;
+              ? Math.max(contactSeconds, ANTICIPATION_SECONDS + flightSeconds + recoverySeconds) : contactSeconds;
     }
 
     boolean shot() {
@@ -197,7 +201,7 @@ final class UnitAttack {
      */
     float leap(float landing) {
         if (!dfa()) { return 0; }
-        if (seconds > contactSeconds) { return landing * (1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS)); }
+        if (seconds > contactSeconds) { return landing * (1 - smooth((seconds - contactSeconds) / recoverySeconds)); }
         float flight = MathUtils.clamp(seconds / contactSeconds, 0, 1);
         return landing * flight * flight + DFA_LEAP_LEVELS * BoardGeometry.level() * 4 * flight * (1 - flight);
     }
@@ -528,7 +532,7 @@ final class UnitAttack {
         if (death()) { return 0; }
         if (!shot()) { return seconds < duration ? 1 : 0; }
         return seconds < ANTICIPATION_SECONDS ? smooth(seconds / ANTICIPATION_SECONDS)
-              : 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
+              : 1 - smooth((seconds - contactSeconds) / recoverySeconds);
     }
 
     ResolvedAttack.Shot profile(UnitEquipmentAssembly.Binding binding) {
@@ -589,7 +593,7 @@ final class UnitAttack {
      * attack starts: none for any other attack.
      */
     private float fuelAirIgnitionHold() {
-        return shot() ? Math.max(0, terrainDelaySeconds() + .1f - RECOVERY_SECONDS) : 0;
+        return shot() ? Math.max(0, terrainDelaySeconds() + .1f - recoverySeconds) : 0;
     }
 
     /**
@@ -646,7 +650,7 @@ final class UnitAttack {
     }
 
     float contactFlash(float contact) {
-        return seconds >= contact ? Math.max(0, 1 - (seconds - contact) / RECOVERY_SECONDS) : 0;
+        return seconds >= contact ? Math.max(0, 1 - (seconds - contact) / recoverySeconds) : 0;
     }
 
     private static long mountKey(int owner, int index) { return (long) owner << 32 | index & 0xFFFFFFFFL; }
@@ -754,9 +758,9 @@ final class UnitAttack {
      * no return: its approach gives way over the recovery to the move into the target's hex that follows it.
      */
     float approachWeight() {
-        if (carriesOn() && seconds > contactSeconds) { return 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS); }
-        return seconds <= contactSeconds + RECOVERY_SECONDS ? smooth(seconds / approachSeconds)
-              : 1 - smooth((seconds - contactSeconds - RECOVERY_SECONDS) / MELEE_RUN_SECONDS);
+        if (carriesOn() && seconds > contactSeconds) { return 1 - smooth((seconds - contactSeconds) / recoverySeconds); }
+        return seconds <= contactSeconds + recoverySeconds ? smooth(seconds / approachSeconds)
+              : 1 - smooth((seconds - contactSeconds - recoverySeconds) / MELEE_RUN_SECONDS);
     }
 
     float approachFacingWeight() {
@@ -766,7 +770,7 @@ final class UnitAttack {
     float dodgeWeight() {
         if (shot() || death() || removal() || event.result().hit() || event.target() == null) { return 0; }
         return seconds <= contactSeconds ? smooth((seconds - contactSeconds + MELEE_SWING_SECONDS) / MELEE_SWING_SECONDS)
-              : 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
+              : 1 - smooth((seconds - contactSeconds) / recoverySeconds);
     }
 
     Vector3 dodgeOffset(Vector3 result) {
@@ -777,14 +781,14 @@ final class UnitAttack {
 
     float travelProgress() {
         return seconds < approachSeconds ? seconds / approachSeconds
-              : returning() ? (seconds - contactSeconds - RECOVERY_SECONDS) / MELEE_RUN_SECONDS : 0;
+              : returning() ? (seconds - contactSeconds - recoverySeconds) / MELEE_RUN_SECONDS : 0;
     }
 
-    boolean returning() { return !carriesOn() && seconds > contactSeconds + RECOVERY_SECONDS; }
+    boolean returning() { return !carriesOn() && seconds > contactSeconds + recoverySeconds; }
 
     float contactWeight() {
-        return seconds <= contactSeconds ? smooth((seconds - contactSeconds + .16f) / .16f)
-              : 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
+        return seconds <= contactSeconds ? smooth((seconds - contactSeconds + .16f * MELEE_TIME_SCALE) / (.16f * MELEE_TIME_SCALE))
+              : 1 - smooth((seconds - contactSeconds) / recoverySeconds);
     }
 
     boolean thrust() {
@@ -797,13 +801,13 @@ final class UnitAttack {
         if (seconds < contactSeconds) {
             return smooth((seconds - contactSeconds + MELEE_SWING_SECONDS) / MELEE_SWING_SECONDS);
         }
-        return 1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS);
+        return 1 - smooth((seconds - contactSeconds) / recoverySeconds);
     }
 
     float windup() {
         float start = event.result().kind() == ResolvedAttack.Kind.PUNCH || event.result().kind() == ResolvedAttack.Kind.KICK
               ? approachSeconds : approachSeconds * .45f;
-        return smooth((seconds - start) / .25f) * (1 - smooth((seconds - contactSeconds) / RECOVERY_SECONDS));
+        return smooth((seconds - start) / (.25f * MELEE_TIME_SCALE)) * (1 - smooth((seconds - contactSeconds) / recoverySeconds));
     }
 
     static float smooth(float value) {

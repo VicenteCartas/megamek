@@ -99,9 +99,7 @@ class BoardLegacyArtTest {
     @ParameterizedTest(name = "{0} gets {1} = {2}")
     @CsvSource({ "ground_fluff:1:5, ground, ground/blend/desert", "road:1:09;road_fluff:1, road, road/rounded",
           "road:1:18;road_fluff:2, road, road/horizontal", "woods:1;fluff:12, vegetation, woods/orchard",
-          "rough:1;fluff:1, rough, rough/obstacles", "rough:1;fluff:2, rough, rough/felled-trees",
-          "building:1;bldg_elev:2;bldg_cf:15;fluff:11:7, building, buildings/saxarba/building_single/legacy_barn",
-          "building:2;bldg_elev:1;bldg_cf:30;bldg_fluff:29, building, building/legacy-art-29" })
+          "rough:1;fluff:1, rough, rough/obstacles", "rough:1;fluff:2, rough, rough/felled-trees" })
     void aTokenAHexDesignDrawsGetsThatDesign(String terrain, String owner, String variant) throws Exception {
         Board board = converted(terrain);
         Hex game = board.getHex(AT);
@@ -232,14 +230,14 @@ class BoardLegacyArtTest {
     }
 
     @Test
-    void theGmBuildingEditKeepsTheBuildingsArtLevelInItsTokenAndDesign() {
+    void theGmBuildingEditKeepsLegacyArtOnlyForThe2DBoard() {
         Hex hex = new Hex(0, "building:2;bldg_elev:1;bldg_cf:30", "");
         BoardSceneryLayouts.setBuildingArt(hex, 29);
         assertEquals(29, hex.terrainLevel(Terrains.BLDG_FLUFF), "The 2D board's token");
-        assertEquals("building/legacy-art-29", hex.getAppearance().get("building").variant(), "The 3D board's design");
+        assertNull(hex.getAppearance().get("building"), "Modern buildings use the gameplay weight/class kit");
         Hex saved = BoardSceneryLayouts.withoutTakenTokens(hex);
         assertFalse(saved.containsTerrain(Terrains.BLDG_FLUFF));
-        assertEquals(29, BoardSceneryLayouts.buildingArt(saved), "A .board2 building keeps its level in its design");
+        assertEquals(0, BoardSceneryLayouts.buildingArt(saved));
         BoardSceneryLayouts.setBuildingArt(hex, 0);
         assertFalse(hex.containsTerrain(Terrains.BLDG_FLUFF));
         assertNull(hex.getAppearance().get("building"), "The ordinary artwork");

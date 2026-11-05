@@ -33,7 +33,9 @@ final class GpuBuildingCutaway extends Attribute {
     }
 
     private static String clip(String height) {
-        return "bool insideStorey = " + height + " >= u_buildingCutaway.x && " + height + " < u_buildingCutaway.y;\n"
+        // Keep horizontal caps on the storey boundaries opaque. A small margin gives colour and depth
+        // interpolation the same answer for the newly solid wall ends and slabs at those exact heights.
+        return "bool insideStorey = " + height + " > u_buildingCutaway.x + 0.001 && " + height + " < u_buildingCutaway.y - 0.001;\n"
               + "if (insideStorey != (u_buildingCutaway.z > 0.0)) discard;\n";
     }
 

@@ -49,6 +49,9 @@ final class GpuTerrainDepth implements RenderableProvider {
             protected Renderable newObject() { return new Renderable(); }
         };
         for (ModelInstance instance : instances) { instance.getRenderables(result, pool); }
+        for (int i = result.size - 1; i >= 0; i--) {
+            if (result.get(i).meshPart.size == 0) { result.removeIndex(i); }
+        }
         return result;
     }
 
