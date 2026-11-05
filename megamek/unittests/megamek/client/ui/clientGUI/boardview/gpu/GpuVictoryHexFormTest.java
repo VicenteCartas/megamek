@@ -2,14 +2,14 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.components;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.set;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.set;
 import static megamek.client.ui.gdx.UiKit.text;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,7 +19,6 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mockStatic;
 
 import java.awt.Container;
-import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -40,40 +39,26 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
 import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane.Result;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.equipment.ObjectiveMarker;
 import megamek.common.equipment.ObjectiveScoringScheme;
 import megamek.common.equipment.ObjectiveScoringScheme.HoldCounting;
 import megamek.common.equipment.ObjectiveScoringScheme.SchemePreset;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
  * The control point editor of the Victory Setup phase: what its Okay applies to the point, in the Swing pane and in
  * the native form over the GPU battle window. The test thread answers the native form as the render thread would.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuVictoryHexFormTest {
     /** Okay, Remove Flag and Cancel, as the pane numbers its options. */
     private static final int OKAY = 0;
     private static final int REMOVE = 1;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /**
      * Characterization of the Swing pane: the values set in its controls are what Okay writes to the point, the

@@ -94,7 +94,7 @@ class GpuMagmaSmokeTest {
                     camera.near = .01f;
                     camera.far = 200;
                     camera.update();
-                    var batch = (ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "batch");
+                    var batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
                     var part = new Renderable();
                     part.meshPart.set("authored-emission", mesh, 0, mesh.getNumVertices(), GL20.GL_TRIANGLES);
                     part.environment = terrain.environment();
@@ -1032,7 +1032,7 @@ class GpuMagmaSmokeTest {
             }
             for (int view = 0; view < (context || dome ? 2 : 1); view++) {
                 frame.prepare(terrains[view], cameras[view], scenes[view]);
-                GpuTerrainLodSmokeTest.settle(terrains[view], null, scenes[view], cameras[view]);
+                GpuReviewFrame.settle(terrains[view], null, scenes[view], cameras[view]);
                 for (int warmup = 0; warmup < 8; warmup++) {
                     frame.render(terrains[view], cameras[view], scenes[view]);
                 }
@@ -1198,7 +1198,7 @@ class GpuMagmaSmokeTest {
         terrain.animate(.5f, List.of());
         for (BoardCamera camera : List.of(top, angled)) {
             frame.prepare(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             for (int warmup = 0; warmup < 8; warmup++) { frame.render(terrain, camera, scene); }
         }
         frame.render(terrain, top, scene);
@@ -1861,7 +1861,7 @@ class GpuMagmaSmokeTest {
     /** The original molten material remains finite, bounded and visibly emissive in canonical radiance. */
     private static void checkMoltenMaterial(GpuShaderManager manager, GpuSceneTestOutput surface,
           GpuTerrain terrain, BoardCamera camera) throws Exception {
-        var assets = (GpuAssets) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "assets");
+        var assets = (GpuAssets) GpuTestSupport.field(terrain, "assets");
         float sourceScale = assets.lavaEmission().scale();
         String fragment = GpuShaderSource.readDisk("terrain-magma-flow.frag");
         String output = "fragColor = magmaOutput(magmaChill(material, shore), geometric, bank, 1.0);";

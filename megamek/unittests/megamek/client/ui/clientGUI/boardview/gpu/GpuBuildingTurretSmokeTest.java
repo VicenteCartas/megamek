@@ -425,7 +425,7 @@ class GpuBuildingTurretSmokeTest {
     private static GpuUnitInstance pilots(GpuPilotFlames pilots, GpuUnitModel model, UnitModelState state, float seconds) {
         var instance = new GpuUnitInstance(model);
         var appearance = new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, state);
-        var unit = new BoardScene.Unit(1, -1, "Turret", UnitPlaybackTest.unit(1, 0).location(), null, false, null, 2,
+        var unit = new BoardScene.Unit(1, -1, "Turret", UnitPlaybackFixture.unit(1, 0).location(), null, false, null, 2,
               false, appearance, 0);
         pilots.beginFrame(seconds);
         pilots.update(model, instance, unit);
@@ -541,7 +541,7 @@ class GpuBuildingTurretSmokeTest {
     }
 
     private static void checkRetainedYaw(GpuUnitModel model, UnitModelState state) {
-        var source = UnitPlaybackTest.unit(1, 0);
+        var source = UnitPlaybackFixture.unit(1, 0);
         var appearance = new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, state);
         var unit = new BoardScene.Unit(1, -1, "Turret", source.location(), null, false, null, 2, false, appearance, 0);
         var placed = new GpuUnitInstance(model);
@@ -551,7 +551,7 @@ class GpuBuildingTurretSmokeTest {
         var bearing = placed.getNode("yaw");
         var restForward = new Vector3(Vector3.Y).mul(bearing.rotation);
         var fixed = placed.getNode("mount").globalTransform.cpy();
-        var attack = new UnitAttack(UnitPlaybackTest.attack(unit, UnitPlaybackTest.unit(2, 3), ResolvedAttack.Kind.SHOT, true));
+        var attack = new UnitAttack(UnitPlaybackFixture.attack(unit, UnitPlaybackFixture.unit(2, 3), ResolvedAttack.Kind.SHOT, true));
         attack.seconds = UnitAttack.ANTICIPATION_SECONDS + UnitAttack.RECOIL_KICK_SECONDS;
         animator.aimShots(model, unit, List.of(attack), ignored -> null);
         var fired = bearing.rotation.cpy();
@@ -573,7 +573,7 @@ class GpuBuildingTurretSmokeTest {
 
     /** Casemates stand on their own facade at mid-floor, and turn no further than their weapons' 120-degree arc. */
     private static void checkCasemates(GpuUnitModel model, UnitModelState state) {
-        var source = UnitPlaybackTest.unit(1, 0);
+        var source = UnitPlaybackFixture.unit(1, 0);
         var appearance = new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, state);
         var unit = new BoardScene.Unit(1, 0, "Fort", source.location(), null, false, null, 2, false, appearance, 0);
         var placed = new GpuUnitInstance(model);
@@ -602,7 +602,7 @@ class GpuBuildingTurretSmokeTest {
         }
         assertEquals(6, casemates, "Two twin casemates on each armed face");
         // A target behind the building: each casemate turns toward it only as far as its arc allows.
-        var original = UnitPlaybackTest.attack(unit, UnitPlaybackTest.unit(2, 3), ResolvedAttack.Kind.SHOT, true);
+        var original = UnitPlaybackFixture.attack(unit, UnitPlaybackFixture.unit(2, 3), ResolvedAttack.Kind.SHOT, true);
         var result = original.result();
         for (var binding : model.equipment()) {
             if (!binding.node().startsWith("wall-")) { continue; }

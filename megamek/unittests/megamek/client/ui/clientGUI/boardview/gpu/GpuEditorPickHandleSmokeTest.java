@@ -189,7 +189,7 @@ class GpuEditorPickHandleSmokeTest {
     /** (b) Water is see-through: the pillar on the depth-3 bed takes a click through the surface; open water takes the hex. */
     private static void underWater(GpuBattleView view, GpuMapSource source) throws Exception {
         GpuTerrain terrain = terrain(view);
-        BoardScene scene = (BoardScene) field(view, "scene");
+        BoardScene scene = (BoardScene) GpuTestSupport.field(view, "scene");
         var pillar = installed(view, terrain, WATER, "pillar");
         float surface = BoardGeometry.waterZ(scene.tile(WATER));
         assertTrue(pillar.bounds().max.z < surface, "The pillar stands under water: " + pillar.bounds() + " below " + surface);
@@ -351,7 +351,7 @@ class GpuEditorPickHandleSmokeTest {
         Vector2 press = screen(view, tip);
         var input = Gdx.input.getInputProcessor();
         input.mouseMoved(Math.round(press.x), Math.round(press.y));
-        assertEquals(SystemCursor.Hand, field(view, "cursor"), "A hand over the handle");
+        assertEquals(SystemCursor.Hand, GpuTestSupport.field(view, "cursor"), "A hand over the handle");
         GpuBoardTestUi.withModifiers(0, () -> input.touchDown(Math.round(press.x), Math.round(press.y), 0, Input.Buttons.LEFT));
         float radius = Vector2.dst(pivot.x, pivot.y, tip.x, tip.y);
         double from = Math.atan2(tip.y - pivot.y, tip.x - pivot.x);
@@ -405,11 +405,7 @@ class GpuEditorPickHandleSmokeTest {
         }
     }
 
-    private static Object field(GpuBattleView view, String name) throws Exception {
-        var field = GpuBattleView.class.getDeclaredField(name); field.setAccessible(true); return field.get(view);
-    }
-
-    private static GpuTerrain terrain(GpuBattleView view) throws Exception { return (GpuTerrain) field(view, "terrain"); }
+    private static GpuTerrain terrain(GpuBattleView view) throws Exception { return (GpuTerrain) GpuTestSupport.field(view, "terrain"); }
 
     /** A world point in input coordinates. */
     private static Vector2 screen(GpuBattleView view, Vector3 world) {

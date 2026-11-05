@@ -20,7 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class BoardSurfaceContactTest {
     @Test
     void lowBridgeBanksKeepTheirClearanceAcrossHexesAndCachedWater() throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
         for (var at : List.of(new Coords(6, 7), new Coords(6, 8))) {
             var surface = new BoardSurface(scene, scene.tile(at));
             var cached = surface.waterGeometry().surface(scene);

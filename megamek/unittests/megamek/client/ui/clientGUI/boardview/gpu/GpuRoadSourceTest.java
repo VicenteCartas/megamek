@@ -19,8 +19,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 import javax.swing.SwingUtilities;
 
@@ -35,7 +33,6 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Board;
-import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.RailRoute;
 import megamek.common.units.Terrain;
@@ -166,7 +163,7 @@ class GpuRoadSourceTest {
 
     @Test
     void tessellatedRoadsUseTheirSupportingControlTriangles() throws Exception {
-        var scene = scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
+        var scene = BoardScenes.installedScene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         var texture = mock(Texture.class);
         when(texture.getWidth()).thenReturn(16);
         when(texture.getHeight()).thenReturn(16);
@@ -240,7 +237,7 @@ class GpuRoadSourceTest {
         int pieces = 0;
         for (String board : List.of("unofficial/Drewbacca/16x17 Fire And Ice 2.board",
               "AGoAC Maps/16x17 Grassland 2 (Low Bridges).board")) {
-            var scene = scene(board);
+            var scene = BoardScenes.installedScene(board);
             Map<Coords, BoardSurface> surfaces = new HashMap<>();
             for (int x = 0; x < scene.width(); x++) {
                 for (int y = 0; y < scene.height(); y++) {
@@ -342,7 +339,7 @@ class GpuRoadSourceTest {
 
     @Test
     void forestsEndRoadsReachBothEndsOfTheBridgeAtEveryDetail() throws Exception {
-        var scene = scene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
+        var scene = BoardScenes.installedScene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
         var bridge = scene.tile(new Coords(8, 8));
         assertEquals(36, bridge.features().stream().filter(f -> f.asset().equals("bridge"))
               .findFirst().orElseThrow().bridgeExits());
@@ -394,7 +391,7 @@ class GpuRoadSourceTest {
 
     @Test
     void lavaTubesBridgeFloorsKeepTheNativeVolcanicGround() throws Exception {
-        var scene = scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var scene = BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         var bridges = scene.tiles().stream().filter(t -> t.features().stream().anyMatch(f -> f.asset().equals("bridge")))
               .toList();
         assertEquals(4, bridges.size());
@@ -410,7 +407,7 @@ class GpuRoadSourceTest {
     void minesCapturesEveryAuthoredRoadExitWithDesertGroundUnderTheCurves() throws Exception {
         Board board = new Board();
         board.load(new File("data/boards/Deserts/16x17 Mines 1.board"));
-        BoardScene scene = minesScene();
+        BoardScene scene = BoardScenes.minesScene();
         int roads = 0, decorated = 0;
         for (var tile : scene.tiles()) {
             Hex hex = board.getHex(tile.coords());
@@ -428,7 +425,7 @@ class GpuRoadSourceTest {
 
     @Test
     void referenceRoadsClearTheirTreesWallOnlySlopesTheyCutAndNeverFoldTheirGround() throws Exception {
-        var scene = scene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
+        var scene = BoardScenes.installedScene("unofficial/Drewbacca/16x17 Fire And Ice 2.board");
         for (var tile : scene.tiles()) {
             if (!BoardRoad.rendered(tile)) { continue; }
             // Capture places scenery clear of the same bent course the scene gives the road.
@@ -455,7 +452,7 @@ class GpuRoadSourceTest {
     @Test
     void rocksAndShrubsStandBesideRoadsAndBridgesNeverOnThem() throws Exception {
         // MesaCity's promontory 3725 once kept a rim boulder on its bridge deck, where neither side had room for it.
-        var scene = scene("unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board");
+        var scene = BoardScenes.installedScene("unofficial/SimonLandmine/64x51/64x51 MesaCity1 N - Mesas.board");
         float scale = BoardGeometry.hexScale();
         int checked = 0;
         for (var tile : scene.tiles()) {
@@ -477,31 +474,6 @@ class GpuRoadSourceTest {
             }
         }
         assertTrue(checked > 0, "The board's roads and bridge banks carry rocks and shrubs to check");
-    }
-
-    static BoardScene minesScene() throws Exception {
-        return scene("Deserts/16x17 Mines 1.board");
-    }
-
-    /** The shipped board as a game shows it: converted where it loads, as every load site does. */
-    static BoardScene scene(String path) throws Exception {
-        return scene(path, board -> { });
-    }
-
-    /** The shipped board after {@code edit}, as an editor would change it, then converted and shown. */
-    static BoardScene scene(String path, Consumer<Board> edit) throws Exception {
-        Board board = new Board();
-        board.load(new File("data/boards/" + path));
-        edit.accept(board);
-        BoardSceneryLayouts.convert(board);
-        var scene = new AtomicReference<BoardScene>();
-        try (var fixture = GpuBoardFixture.create(board)) {
-            SwingUtilities.invokeAndWait(() -> {
-                fixture.source.refresh();
-                scene.set(fixture.source.takeFrame().scene());
-            });
-        }
-        return scene.get();
     }
 
     /** A destroyed rail ({@code rail:0}) draws no track and no buffer stop, but its bed stays shaped as the intact one's. */

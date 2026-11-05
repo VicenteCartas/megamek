@@ -719,7 +719,7 @@ class GpuContextMenuSmokeTest {
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire,
           BoardScene scene) {
         return new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire,
+              GpuReportLog.Snapshot.EMPTY, status, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 
@@ -732,7 +732,7 @@ class GpuContextMenuSmokeTest {
           BoardScene.Context context) {
         return new GpuBoardSource.Frame(called(false), List.of(), context, List.of(),
               GpuContextMenuTest.terrainLine(0, "woods:1;foliage_elev:2;road:1:9"), null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, GpuHudInputTest.panels(move, GpuFireOrders.Snapshot.EMPTY,
+              GpuReportLog.Snapshot.EMPTY, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 
@@ -751,7 +751,7 @@ class GpuContextMenuSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values()).map(bind -> new GpuBoardSource.Bind(bind,
               bind.keyDefault, bind.modifiersDefault, KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault)))
               .toList();
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", binds));
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("binds", binds));
     }
 
     // ---------------------------------------------------------------- reading and pressing the menu

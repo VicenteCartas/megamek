@@ -92,7 +92,7 @@ class GpuWideBridgeSmokeTest {
                                   : BoardGeometry.center(variant.ramp(), 1).lerp(BoardGeometry.center(variant.bank(), 0), .5f));
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, variant.name() + ".png"));
                             // Diagonal grade geometry is covered at all six orientations in BoardBridgeWideTest.

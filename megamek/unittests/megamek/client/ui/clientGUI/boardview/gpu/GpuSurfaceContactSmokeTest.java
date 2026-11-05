@@ -78,7 +78,7 @@ class GpuSurfaceContactSmokeTest {
         camera.camera.zoom = zoom;
         camera.center(BoardGeometry.center(new Coords(4, 3), 1));
         terrain.update(scene, camera.camera);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         assertTrue(terrain.ready(scene));
         terrain.animate(.5f, List.of());
         frame.render(terrain, camera, scene);

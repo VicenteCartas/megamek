@@ -62,13 +62,13 @@ class GpuShrubSmokeTest {
                         terrain.update(scene(List.of(tile(family, new Coords(0, 0), ground)), 1, 1));
                         // The placed shrub's projected diameter selects its level: the board measures its placed bounds.
                         float diameter = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                var instance = (ModelInstance) field(prop, "instance");
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
                                 var scale = instance.transform.getScale(new Vector3());
                                 assertEquals(scale.z, scale.x, .0001f, "Shrubs must never be squashed: " + family);
                                 assertEquals(scale.z, scale.y, .0001f);
-                                diameter = ((BoundingBox) field(prop, "bounds")).getDimensions(new Vector3()).len();
+                                diameter = ((BoundingBox) GpuTestSupport.field(prop, "bounds")).getDimensions(new Vector3()).len();
                             }
                         }
                         var atlases = new HashMap<String, Texture>();
@@ -192,12 +192,6 @@ class GpuShrubSmokeTest {
                 }
             }
         } finally { batch.dispose(); }
-    }
-
-    private static Object field(Object target, String name) throws ReflectiveOperationException {
-        var field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
     }
 
     private static BoardScene.Tile tile(String family, Coords coords, BoardScene.Pixels ground) {

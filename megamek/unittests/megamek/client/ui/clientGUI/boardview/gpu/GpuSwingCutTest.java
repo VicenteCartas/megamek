@@ -1,11 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -22,7 +22,6 @@ import static org.mockito.Mockito.when;
 import java.awt.Color;
 import java.awt.Window;
 import java.awt.event.InputEvent;
-import java.io.File;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -39,42 +38,28 @@ import megamek.client.ui.clientGUI.boardview.RulerModel;
 import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.boardview.sprite.FiringSolutionSprite;
 import megamek.client.ui.panels.phaseDisplay.DeployMinefieldDisplay;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
-import megamek.common.Configuration;
 import megamek.common.RangeType;
 import megamek.common.ToHitData;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
 import megamek.common.game.GameTurn;
 import megamek.common.util.FiringSolution;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The Swing cut's EDT side (I3): the board state's tactical capture leaves out what the HUD draws itself (G4), the
  * minefield display's undeployed question and the map menu go through the native window, and native line of sight
  * uses the shared ruler model without constructing a Swing ruler.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuSwingCutTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /**
      * G4: the native frame leaves MegaMek's firing solution out (the board labels' to-hit badges stand for it), and the

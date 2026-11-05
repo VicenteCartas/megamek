@@ -90,14 +90,14 @@ final class GpuUnitPanelFixture implements AutoCloseable {
         CommonMenuBar menu = mock(CommonMenuBar.class);
         when(menu.getComponents()).thenReturn(new Component[0]);
         when(gui.getMenuBar()).thenReturn(menu);
-        GpuBoardSource source = onSwing(() -> {
+        GpuBoardSource source = GpuTestSupport.onSwing(() -> {
             BoardClientState view = spy(board.view);
             doReturn(gui).when(view).getClientgui();
             board.source.close();
             return new GpuBoardSource(view, () -> board.panel);
         });
         GpuUnitPanelFixture fixture = new GpuUnitPanelFixture(board, source, originalData);
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             fixture.addUnits();
             return null;
         });
@@ -215,7 +215,7 @@ final class GpuUnitPanelFixture implements AutoCloseable {
 
     /** EDT edits of the fixture's units, captured by the next {@link #frame}. */
     void edit(Runnable change) throws Exception {
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             change.run();
             frames.clear();
             return null;
@@ -239,7 +239,7 @@ final class GpuUnitPanelFixture implements AutoCloseable {
             List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(captured.status().units());
             units.add(contact());
             GpuBattleStatus.Snapshot status = captured.status();
-            frames.put(unit, GpuHudInputTest.frame(new GpuBattleStatus.Snapshot(status.round(), status.phase(),
+            frames.put(unit, GpuHudFixtures.frame(new GpuBattleStatus.Snapshot(status.round(), status.phase(),
                   status.myTurn(), status.localPlayerId(), status.actorId(), status.turns(), status.turnIndex(), units,
                   status.initiative(), status.turnOrderHidden()), captured.panels()));
         }
@@ -262,12 +262,6 @@ final class GpuUnitPanelFixture implements AutoCloseable {
 
     private static Entity unit(String file) throws Exception {
         return new MekFileParser(new File(UNITS + file)).getEntity();
-    }
-
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 
     @Override

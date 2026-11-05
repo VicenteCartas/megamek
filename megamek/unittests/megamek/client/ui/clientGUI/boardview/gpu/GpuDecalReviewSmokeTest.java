@@ -321,7 +321,7 @@ class GpuDecalReviewSmokeTest {
                                 camera.center(BoardGeometry.center(shot.at(), scene.tile(shot.at()).elevation()));
                                 camera.camera.zoom = shot.zoom();
                                 camera.update();
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 if (shot.name().equals("overview")) {
                                     profiler.enable();

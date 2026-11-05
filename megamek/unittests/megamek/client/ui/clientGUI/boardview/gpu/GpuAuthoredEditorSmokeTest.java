@@ -87,10 +87,10 @@ class GpuAuthoredEditorSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "arena-editor.png"));
                             source.editorCommand(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), source.takeFrame().boardGeneration());
                         } else {
-                            var preview = field(this, "editorPreview");
+                            var preview = GpuTestSupport.field(this, "editorPreview");
                             if (source.editorState().tool() != BoardEditorSession.Tool.PAINT || source.editorPreview().routes().isEmpty()) { return; }
-                            if (field(preview, "built") != source.editorPreview() || field(preview, "comparing") != null) { return; }
-                            assertFalse(((java.util.Collection<?>) field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
+                            if (GpuTestSupport.field(preview, "built") != source.editorPreview() || GpuTestSupport.field(preview, "comparing") != null) { return; }
+                            assertFalse(((java.util.Collection<?>) GpuTestSupport.field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
                                   + source.editorPreview().label() + ", hexes " + source.editorPreview().hexes() + ", routes " + source.editorPreview().routes().keySet());
                             GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : step == 4 ? "arena-ghost.png" : "small-arena-ghost.png"));
                             if (step == 3) {
@@ -108,13 +108,5 @@ class GpuAuthoredEditorSmokeTest {
             }, config);
         } finally { SwingUtilities.invokeAndWait(source::close); }
         if (failure.get() != null) { throw new AssertionError("Authored editor", failure.get()); }
-    }
-
-    private static Object field(Object object, String name) throws Exception {
-        for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) {
-            try { var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(object); }
-            catch (NoSuchFieldException ignored) { /* The view fields live in its superclass. */ }
-        }
-        throw new NoSuchFieldException(name);
     }
 }

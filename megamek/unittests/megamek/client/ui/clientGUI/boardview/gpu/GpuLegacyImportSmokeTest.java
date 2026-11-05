@@ -238,19 +238,19 @@ class GpuLegacyImportSmokeTest {
                     // Every placed object's parts draw instanced or one by one, never packed with the scenery; only the
                     // poses the instance data cannot hold draw one by one.
                     int instanced = 0, loose = 0, objectParts = 0, mirroredInstanced = 0, tableParts = 0, roofParts = 0;
-                    for (Object chunk : (List<?>) field(game, "chunks")) {
-                        instanced += ((com.badlogic.gdx.utils.Array<?>) field(chunk, "decorationRenderables")).size;
-                        loose += ((com.badlogic.gdx.utils.Array<?>) field(chunk, "looseDecorations")).size;
-                        for (Object owner : (com.badlogic.gdx.utils.Array<?>) field(chunk, "decorationOwners")) {
-                            if ("mirrored".equals(field(owner, "decorationId"))) { mirroredInstanced++; }
+                    for (Object chunk : (List<?>) GpuTestSupport.field(game, "chunks")) {
+                        instanced += ((com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "decorationRenderables")).size;
+                        loose += ((com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "looseDecorations")).size;
+                        for (Object owner : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "decorationOwners")) {
+                            if ("mirrored".equals(GpuTestSupport.field(owner, "decorationId"))) { mirroredInstanced++; }
                         }
-                        for (Object prop : (List<?>) field(chunk, "props")) {
-                            var feature = (BoardScene.Feature) field(prop, "decorationFeature");
-                            if (feature == null || BoardRail.route(feature) || field(prop, "treeAsset") != null) { continue; }
-                            int parts = GpuTerrainDepth.snapshot(List.of((ModelInstance) field(prop, "instance"))).size;
+                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                            var feature = (BoardScene.Feature) GpuTestSupport.field(prop, "decorationFeature");
+                            if (feature == null || BoardRail.route(feature) || GpuTestSupport.field(prop, "treeAsset") != null) { continue; }
+                            int parts = GpuTerrainDepth.snapshot(List.of((ModelInstance) GpuTestSupport.field(prop, "instance"))).size;
                             objectParts += parts;
-                            if ("mirrored".equals(field(prop, "decorationId"))) { tableParts = parts; }
-                            if (NARROW_ROOF.equals(field(prop, "coords"))) { roofParts = parts; }
+                            if ("mirrored".equals(GpuTestSupport.field(prop, "decorationId"))) { tableParts = parts; }
+                            if (NARROW_ROOF.equals(GpuTestSupport.field(prop, "coords"))) { roofParts = parts; }
                         }
                     }
                     System.out.printf("PERF legacy-import object parts: %d instanced, %d one by one, of %d%n", instanced,
@@ -274,8 +274,8 @@ class GpuLegacyImportSmokeTest {
                     unit.transform.setToTranslation(BoardGeometry.center(ROOF, .5f));
                     game.animate(0, List.of(unit), .3f);
                     boolean roofFaded = false;
-                    for (Object chunk : (List<?>) field(game, "chunks")) {
-                        for (Object prop : (Set<?>) field(chunk, "faded")) {
+                    for (Object chunk : (List<?>) GpuTestSupport.field(game, "chunks")) {
+                        for (Object prop : (Set<?>) GpuTestSupport.field(chunk, "faded")) {
                             Installed placed = installed(prop);
                             roofFaded |= placed.coords().equals(ROOF) && placed.bounds().min.z > 2 * BoardGeometry.level() - 1;
                         }
@@ -294,11 +294,11 @@ class GpuLegacyImportSmokeTest {
                         sideBySide(frame, terrain, camera, gameSheet, new File(OUTPUT, "b9-48x48-game.png"),
                               List.of(GROUND_PARK, ROOF_PARK), new float[] { 0, 6 });
                         List<Float> roofCars = new ArrayList<>();
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                if (ROOF_PARK.equals(field(prop, "coords"))
-                                      && ((ModelInstance) field(prop, "instance")).nodes.first().id.equals("car")) {
-                                    roofCars.add(((BoundingBox) field(prop, "bounds")).min.z);
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                if (ROOF_PARK.equals(GpuTestSupport.field(prop, "coords"))
+                                      && ((ModelInstance) GpuTestSupport.field(prop, "instance")).nodes.first().id.equals("car")) {
+                                    roofCars.add(((BoundingBox) GpuTestSupport.field(prop, "bounds")).min.z);
                                 }
                             }
                         }
@@ -331,7 +331,7 @@ class GpuLegacyImportSmokeTest {
                 camera.center(BoardGeometry.center(hexes.get(i), levels[i]));
                 camera.camera.zoom = .25f;
                 camera.update();
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
                 var shot = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(0, 0, width, height);
                 sheet.drawPixmap(shot, i * width, 0);
@@ -379,13 +379,13 @@ class GpuLegacyImportSmokeTest {
             int editorDraws = opaqueDraws(view);
             Set<List<Object>> modelParts = new java.util.HashSet<>();
             int placedParts = 0, loose = 0;
-            for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                for (Object value : (com.badlogic.gdx.utils.Array<?>) field(chunk, "decorationRenderables")) {
+            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "decorationRenderables")) {
                     var part = (com.badlogic.gdx.graphics.g3d.Renderable) value;
                     modelParts.add(List.of(part.meshPart.mesh, part.meshPart.offset, part.meshPart.size, part.material));
                     placedParts++;
                 }
-                loose += ((com.badlogic.gdx.utils.Array<?>) field(chunk, "looseDecorations")).size;
+                loose += ((com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "looseDecorations")).size;
             }
             System.out.printf("PERF legacy-import close-up opaque draws: preview %d, editor %d; editor object parts: %d placed, "
                   + "%d model parts, %d loose%n", previewDraws.get(), editorDraws, placedParts, modelParts.size(), loose);
@@ -458,7 +458,7 @@ class GpuLegacyImportSmokeTest {
             Vector3 dropped = standPlace(terrain, tree.get());
             assertTrue(standHas(terrain, dropped) && !standHas(terrain, planted));
             GpuBoardTestUi.capture(new File(OUTPUT, "legacy-import-tree-moved.png"));
-            var scene = (BoardScene) field(view, "scene");
+            var scene = (BoardScene) GpuTestSupport.field(view, "scene");
             var down = new com.badlogic.gdx.math.collision.Ray(new Vector3(dropped).add(0, 0, 500), new Vector3(0, 0, -1));
             assertEquals(tree.get(), terrain.decorationHit(scene, down).id(), "Object picking finds the stand tree");
             // The Tactical View hides every placed object, plants included: no object part draws there,
@@ -520,7 +520,7 @@ class GpuLegacyImportSmokeTest {
                   source.takeFrame().boardGeneration());
             settle(view, source);
             // The runtime middle deck is what hovering, placing and the side view find there.
-            var deckScene = (BoardScene) field(view, "scene");
+            var deckScene = (BoardScene) GpuTestSupport.field(view, "scene");
             var onDeck = new com.badlogic.gdx.math.collision.Ray(BoardGeometry.center(DECK, 0).add(0, 0, 200), new Vector3(0, 0, -1));
             var walk = terrain.walkableHit(deckScene, onDeck);
             float walkZ = onDeck.getEndPoint(new Vector3(), (float) Math.sqrt(walk.distance())).z;
@@ -767,9 +767,9 @@ class GpuLegacyImportSmokeTest {
     /** The installed piers of each hex that has any: how many of its edges carry one, its pier facets and their bounds. */
     static Map<Coords, String> piers(GpuTerrain terrain) throws Exception {
         Map<Coords, String> result = new LinkedHashMap<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (var entry : ((Map<?, ?>) field(chunk, "tileMeshes")).entrySet()) {
-                var shape = (BoardBridge.Shape) field(entry.getValue(), "bridgeShape");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (var entry : ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).entrySet()) {
+                var shape = (BoardBridge.Shape) GpuTestSupport.field(entry.getValue(), "bridgeShape");
                 var at = (Coords) entry.getKey();
                 var facets = shape == null ? List.<BoardBridge.Facet>of()
                       : shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.PIER).toList();
@@ -793,15 +793,15 @@ class GpuLegacyImportSmokeTest {
     /** Every installed prop of a terrain, read from its chunks. */
     static List<Installed> installed(GpuTerrain terrain) throws Exception {
         List<Installed> result = new ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) { result.add(installed(prop)); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) { result.add(installed(prop)); }
         }
         return result;
     }
 
     private static Installed installed(Object prop) throws Exception {
-        return new Installed((Coords) field(prop, "coords"), new BoundingBox((BoundingBox) field(prop, "bounds")),
-              field(prop, "treeAsset") != null, (String) field(prop, "decorationId"), (Boolean) field(prop, "structure"));
+        return new Installed((Coords) GpuTestSupport.field(prop, "coords"), new BoundingBox((BoundingBox) GpuTestSupport.field(prop, "bounds")),
+              GpuTestSupport.field(prop, "treeAsset") != null, (String) GpuTestSupport.field(prop, "decorationId"), (Boolean) GpuTestSupport.field(prop, "structure"));
     }
 
     private static BoardDecoration object(BoardEditorSession session, String id) throws Exception {
@@ -809,20 +809,6 @@ class GpuLegacyImportSmokeTest {
         SwingUtilities.invokeAndWait(() -> found.set(session.board().getHex(TABLES).getDecorations().stream()
               .filter(o -> o.id().equals(id)).findFirst().orElse(null)));
         return found.get();
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var type = owner.getClass();
-        while (true) {
-            try {
-                var field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(owner);
-            } catch (NoSuchFieldException missing) {
-                type = type.getSuperclass();
-                if (type == null) { throw missing; }
-            }
-        }
     }
 
     private interface Steps<S extends BoardSource> { void run(GpuBattleView view, S source) throws Exception; }
@@ -898,7 +884,7 @@ class GpuLegacyImportSmokeTest {
     }
 
     private static GpuTerrain terrain(GpuBattleView view) throws Exception {
-        return (GpuTerrain) field(view, "terrain");
+        return (GpuTerrain) GpuTestSupport.field(view, "terrain");
     }
 
     /** The top of an object's installed geometry, where a real click picks it. */
@@ -913,9 +899,9 @@ class GpuLegacyImportSmokeTest {
     /** The placed object parts the terrain draws now: those whose object passes its draw rule ({@link #drawn}). */
     private static int objectParts(GpuTerrain terrain) throws Exception {
         int parts = 0;
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (String owners : List.of("decorationOwners", "looseOwners")) {
-                for (Object owner : (com.badlogic.gdx.utils.Array<?>) field(chunk, owners)) {
+                for (Object owner : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, owners)) {
                     if (drawn(terrain, owner)) { parts++; }
                 }
             }
@@ -940,23 +926,23 @@ class GpuLegacyImportSmokeTest {
     /** The instanced batches of the editor objects' model parts, by part. */
     private static Map<Object, Object> objectBatches(GpuTerrain terrain) throws Exception {
         Set<Object> meshes = new java.util.HashSet<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object part : (com.badlogic.gdx.utils.Array<?>) field(chunk, "decorationRenderables")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object part : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "decorationRenderables")) {
                 meshes.add(((com.badlogic.gdx.graphics.g3d.Renderable) part).meshPart.mesh);
             }
         }
         Map<Object, Object> result = new java.util.HashMap<>();
-        for (var entry : ((Map<?, ?>) field(field(terrain, "trees"), "sharedParts")).entrySet()) {
-            if (meshes.contains(field(entry.getKey(), "mesh"))) { result.put(entry.getKey(), entry.getValue()); }
+        for (var entry : ((Map<?, ?>) GpuTestSupport.field(GpuTestSupport.field(terrain, "trees"), "sharedParts")).entrySet()) {
+            if (meshes.contains(GpuTestSupport.field(entry.getKey(), "mesh"))) { result.put(entry.getKey(), entry.getValue()); }
         }
         return result;
     }
 
     /** Where an editable object's drawn (preview-aware) transform places it. */
     private static Vector3 standPlace(GpuTerrain terrain, String id) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                if (!id.equals(field(prop, "decorationId"))) { continue; }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if (!id.equals(GpuTestSupport.field(prop, "decorationId"))) { continue; }
                 var instance = prop.getClass().getDeclaredMethod("instance");
                 instance.setAccessible(true);
                 return ((ModelInstance) instance.invoke(prop)).transform.getTranslation(new Vector3());
@@ -967,8 +953,8 @@ class GpuLegacyImportSmokeTest {
 
     /** Whether any chunk's tree stand holds a tree at this place. */
     private static boolean standHas(GpuTerrain terrain, Vector3 place) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object value : ((Map<?, ?>) field(field(chunk, "stand"), "trees")).values()) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object value : ((Map<?, ?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "stand"), "trees")).values()) {
                 var trees = (com.badlogic.gdx.utils.FloatArray) value;
                 for (int i = 0; i < trees.size; i += GpuTreeInstances.STRIDE) {
                     if (Math.abs(trees.get(i) - place.x) < .01f && Math.abs(trees.get(i + 1) - place.y) < .01f

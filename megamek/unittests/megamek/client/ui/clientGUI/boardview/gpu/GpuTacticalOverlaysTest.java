@@ -286,10 +286,10 @@ class GpuTacticalOverlaysTest {
         GpuFireOrders.Snapshot fire = !phase.isFiring() ? GpuFireOrders.Snapshot.EMPTY
               : new GpuFireOrders.Snapshot(true, true, 1, GpuFireOrders.Focus.NONE, -1, List.of(), List.of(),
                     List.of(), 0, false, false, "", null, null, null, List.of(), null, Map.of(), 0, 0, null);
-        GpuBattleStatus.Snapshot status = GpuHudInputTest.status(3, phase, true, 1, 0,
-              GpuHudInputTest.unit(1, OWN, true, true));
+        GpuBattleStatus.Snapshot status = GpuHudFixtures.status(3, phase, true, 1, 0,
+              GpuHudFixtures.unit(1, OWN, true, true));
         return new GpuBoardSource.Frame(mock(BoardScene.class), List.of(), null, global, "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire,
+              GpuReportLog.Snapshot.EMPTY, status, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire,
                     GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 
@@ -302,7 +302,7 @@ class GpuTacticalOverlaysTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     bind == KeyCommandBind.TACTICAL_OVERLAYS ? "H" : "")).toList();
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(),
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(),
               Map.of("minimapEnabled", minimap, "contactsEnabled", contacts, "binds", binds, "overlays", overlays));
     }
 

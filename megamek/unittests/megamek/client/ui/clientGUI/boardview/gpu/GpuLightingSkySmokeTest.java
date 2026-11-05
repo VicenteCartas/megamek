@@ -52,7 +52,7 @@ class GpuLightingSkySmokeTest {
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     var atmosphere = frame.atmosphere();
                     // The transparent export's coverage separates the board from the sky.
                     atmosphere.setTransparentBackground(true);

@@ -105,7 +105,7 @@ class GpuRoadGradeFixtureSmokeTest {
         if (view >= 0) { camera.orbit(view - camera.azimuth(), 0); }
         camera.camera.zoom = zoom;
         camera.center(focus);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         terrain.animate(0, List.of());
         frame.render(terrain, camera, scene);
         GpuReviewFrame.save(new File(output, name + (view < 0 ? "-top" : "-side-" + view) + ".png"));

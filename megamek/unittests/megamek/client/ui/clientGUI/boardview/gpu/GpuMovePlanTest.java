@@ -2,7 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,7 +43,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuMovePlan.Step;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.Player;
 import megamek.common.board.Board;
@@ -69,10 +68,9 @@ import megamek.common.units.IAero;
 import megamek.common.units.Tank;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -84,6 +82,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * and the hold of all remaining units over scripted server turns (the fixture's Atlas is the second own unit).
  * Commands go through the source as the HUD sends them.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuMovePlanTest {
     /** The fixture's local player (GpuBoardFixture) and the opponent the hold tests add, as turn owners. */
@@ -109,19 +108,6 @@ class GpuMovePlanTest {
     private static final Coords NORTH_OF_ENGINEERS = new Coords(10, 9);
     /** The water south of the engineers: a hex a bridge can occupy. */
     private static final Coords BRIDGE_HEX = new Coords(10, 11);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @ParameterizedTest
     @ValueSource(strings = { "CLMASC", "Supercharger", "both", "ISVTOLJetBooster" })
@@ -759,7 +745,7 @@ class GpuMovePlanTest {
                   List.of("Yes", "No"), 0, 1, List.of(), List.of(), "", false, "", null, null, List.of());
             FutureTask<DialogAnswer> asked = new FutureTask<>(() -> source.ask(request));
             SwingUtilities.invokeLater(asked);
-            DialogRequest shown = GpuDialogRoutingTest.awaitDialog(source);
+            DialogRequest shown = GpuDialogFixture.awaitDialog(source);
             assertEquals(List.of(), hoverAfterCapture(source, NORTH_2));
             settle();
             assertEquals(List.of(), hoverAfterCapture(source, NORTH_2), "No search inside the dialog's loop");
@@ -945,7 +931,7 @@ class GpuMovePlanTest {
                   List.of("Yes", "No"), 0, 1, List.of(), List.of(), "", false, "", null, null, List.of());
             FutureTask<DialogAnswer> asked = new FutureTask<>(() -> source.ask(request));
             SwingUtilities.invokeLater(asked);
-            DialogRequest shown = GpuDialogRoutingTest.awaitDialog(source);
+            DialogRequest shown = GpuDialogFixture.awaitDialog(source);
             onSwing(() -> {
                 moving.display.setIgnoringEvents(false);
                 return null;

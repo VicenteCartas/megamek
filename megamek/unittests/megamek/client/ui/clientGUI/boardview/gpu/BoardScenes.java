@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import javax.swing.SwingUtilities;
 
@@ -643,5 +644,30 @@ final class BoardScenes {
             }
         }
         return new BoardScene(0, 5, 5, tiles, List.of(), List.of(), -1, "Movement", List.of());
+    }
+
+    /** The shipped board as a game shows it: converted where it loads, as every load site does. */
+    static BoardScene installedScene(String path) throws Exception {
+        return installedScene(path, board -> { });
+    }
+
+    /** The shipped board after {@code edit}, as an editor would change it, then converted and shown. */
+    static BoardScene installedScene(String path, Consumer<Board> edit) throws Exception {
+        Board board = new Board();
+        board.load(new File("data/boards/" + path));
+        edit.accept(board);
+        BoardSceneryLayouts.convert(board);
+        var installedScene = new AtomicReference<BoardScene>();
+        try (var fixture = GpuBoardFixture.create(board)) {
+            SwingUtilities.invokeAndWait(() -> {
+                fixture.source.refresh();
+                installedScene.set(fixture.source.takeFrame().scene());
+            });
+        }
+        return installedScene.get();
+    }
+
+    static BoardScene minesScene() throws Exception {
+        return BoardScenes.installedScene("Deserts/16x17 Mines 1.board");
     }
 }

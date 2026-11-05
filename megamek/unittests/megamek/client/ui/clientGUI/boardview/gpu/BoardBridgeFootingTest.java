@@ -36,7 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 class BoardBridgeFootingTest {
     @Test
     void airportTerminalFollowsTheWholeRailProfileAtItsRearJoin() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Derv_Maps/25x25 Airport 3000.board");
+        var scene = BoardScenes.installedScene("unofficial/Derv_Maps/25x25 Airport 3000.board");
         var bridge = scene.tile(new Coords(15, 11));
         // Inner rear corner of the reported cap: the rail approaches from negative forward. The wider roads moved the
         // terminal 8.6 px forward and 4.9 px out from where the report found it, and the junction beyond now keeps its
@@ -77,7 +77,7 @@ class BoardBridgeFootingTest {
 
     @Test
     void airportLevelBridgesMeetTheWholeJunctionMouthWithoutBuriedRoadSlabs() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Derv_Maps/25x25 Airport 3000.board");
+        var scene = BoardScenes.installedScene("unofficial/Derv_Maps/25x25 Airport 3000.board");
         var junction = scene.tile(new Coords(14, 12));
         assertEquals(63, junction.roadExits());
         float scale = BoardGeometry.hexScale();
@@ -130,7 +130,7 @@ class BoardBridgeFootingTest {
 
     @Test
     void classicBridgeBorrowsSharpBanksAndPierFoundationsOutsideItsChunk() throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
         var tile = scene.tile(new Coords(8, 7));
         var surfaces = new HashMap<Coords, BoardSurface>();
         // Start empty, as happens when a ground rail borrows a bridge from the adjacent chunk.
@@ -151,7 +151,7 @@ class BoardBridgeFootingTest {
 
     @Test
     void plaineBanksBesideTheDescendingBridgeApproachKeepTheirNaturalMaterial() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
+        var scene = BoardScenes.installedScene("unofficial/Cartes/16x17 Plaine 1.board");
         var tile = scene.tile(new Coords(9, 11));
         var bridge = scene.tile(new Coords(9, 10));
         assertTrue(BoardSurface.roadEdgeElevation(tile, bridge, 0) < tile.elevation(),

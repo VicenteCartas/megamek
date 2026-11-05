@@ -121,7 +121,7 @@ class GpuBoardLabelsSmokeTest {
             List<Rectangle> bounds = new ArrayList<>(List.of(more));
             boolean preview = frame.panels().preview().active();
             panel.setVisible(preview);
-            GpuHud.Inputs inputs = new GpuHud.Inputs(frame, view, null, GpuHudInputTest.preferences(),
+            GpuHud.Inputs inputs = new GpuHud.Inputs(frame, view, null, GpuHudFixtures.preferences(),
                   GpuHud.Metrics.of(hud.width(), hud.height()), bounds);
             contacts.update(inputs);
             if (preview) {

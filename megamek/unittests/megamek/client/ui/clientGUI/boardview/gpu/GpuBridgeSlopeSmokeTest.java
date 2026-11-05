@@ -51,7 +51,7 @@ class GpuBridgeSlopeSmokeTest {
                         boolean paved = step == 1;
                         var scene = BridgeScenes.lowerBank(at, 3, paved);
                         terrain.update(scene);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, step + (paved ? "-road-ramp.png" : "-bare-ramp.png")));
                         for (float t : new float[] { .35f, .45f, .55f, .65f }) {
@@ -111,7 +111,7 @@ class GpuBridgeSlopeSmokeTest {
                                     if (side) { camera.orbit(45, 78 - camera.tilt()); }
                                     camera.camera.zoom = .12f;
                                     camera.center(BoardGeometry.center(at, 1));
-                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    GpuReviewFrame.settle(terrain, null, scene, camera);
                                     frame.render(terrain, camera, scene);
                                     GpuReviewFrame.save(new File(output, "truss-approach-road" + roadLevel + "-lh"
                                           + levelHeight + (side ? "-side" : "-iso") + ".png"));
@@ -158,7 +158,7 @@ class GpuBridgeSlopeSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "manufactured-" + exits + ".png"));
                         float lift = GpuRoads.SURFACE_LIFT * BoardGeometry.hexScale();
@@ -168,14 +168,14 @@ class GpuBridgeSlopeSmokeTest {
                         var edited = BoardScenes.replace(scene,
                               BridgeScenes.bridge(at.translated(3), -2, 6, 9));
                         terrain.update(edited);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                        GpuReviewFrame.settle(terrain, null, edited, camera);
                         assertPick(terrain, edited, at, p, 2 * BoardGeometry.level() + lift);
                     }
                     var natural = BridgeScenes.typed(BridgeScenes.routeScene(at, 9, false),
                           megamek.common.board.HexAppearance.NATURAL_BRIDGE);
                     frame.prepare(terrain, camera, natural);
                     terrain.update(natural);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, natural, camera);
+                    GpuReviewFrame.settle(terrain, null, natural, camera);
                     frame.render(terrain, camera, natural);
                     GpuReviewFrame.save(new File(output, "natural.png"));
                     assertPick(terrain, natural, at, BoardGeometry.center(at, 2), 2 * BoardGeometry.level());

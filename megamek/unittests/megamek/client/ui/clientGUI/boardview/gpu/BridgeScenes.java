@@ -286,7 +286,7 @@ final class BridgeScenes {
     }
 
     static BoardScene raisedLavaTubes(int north, int south) throws Exception {
-        return GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board", board -> {
+        return BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board", board -> {
             int[] heights = { north, south };
             for (int i = 0; i < RAISED.size(); i++) {
                 var hex = board.getHex(RAISED.get(i));

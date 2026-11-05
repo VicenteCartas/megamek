@@ -143,9 +143,9 @@ class GpuAirOpeningTest {
 
     /** An artillery shot across {@link #RANGE} hexes of level ground, like the shared shot fixture but further. */
     static UnitAttack attack(String weaponName, ResolvedAttack.Shot round) {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, RANGE);
-        var original = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, true).result();
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, RANGE);
+        var original = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, true).result();
         var event = new ResolvedAttack(new UUID(7, weaponName.hashCode() ^ round.munitions().hashCode()),
               original.kind(), original.attacker(), original.target(), original.targetType(), 0, weaponName, 4, true,
               original.mounts(), round);

@@ -125,9 +125,9 @@ class GpuShaderLoadSmokeTest {
                         super.render();
                         if (!watch.frame(GpuBoardTestUi.loading(this))) { return; }
                         double seconds = watch.seconds();
-                        var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                        var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                         BoardScene scene = step < 4 || step == 9 ? fixture.source.takeFrame().scene() : null;
-                        var tuning = (GpuBoardTuning) GpuMixedUnitBenchmarkSmokeTest.field(this, "tuning");
+                        var tuning = (GpuBoardTuning) GpuTestSupport.field(this, "tuning");
                         if (step == 0) {
                             boardCamera.setIsometric(true);
                             boardCamera.fit(scene);
@@ -160,7 +160,7 @@ class GpuShaderLoadSmokeTest {
                             step++;
                         } else if (step == 6 && seconds > 36) {
                             watch.optionalView(true);
-                            ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(1);
+                            ((SelectBox<?>) GpuTestSupport.field(tuning, "antiAliasing")).setSelectedIndex(1);
                             BoardCamera.renderScale = .75f;
                             step++;
                         } else if (step == 7 && seconds > 39) {
@@ -169,7 +169,7 @@ class GpuShaderLoadSmokeTest {
                         } else if (step == 8 && seconds > 43) {
                             watch.optionalView(false);
                             tuning.setWireframe(false);
-                            ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
+                            ((SelectBox<?>) GpuTestSupport.field(tuning, "antiAliasing")).setSelectedIndex(0);
                             BoardCamera.renderScale = 1;
                             step++;
                         } else if (step == 9 && seconds > 45) {
@@ -253,15 +253,15 @@ class GpuShaderLoadSmokeTest {
                             boardCamera.center(BoardGeometry.center(bank, scene.tile(bank).elevation()));
                             step++;
                         } else if (step == 2 && watch.seconds() > 15) {
-                            var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                            var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                             boolean curved = false, coated = false;
-                            for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "opaque")) {
+                            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "opaque")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         curved |= GpuTessellation.curved(material);
                                     }
                                 }
-                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "overlays")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "overlays")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         coated |= GpuTessellation.curved(material) && material.has(GpuRoads.Mask.TYPE);
                                     }
@@ -388,10 +388,10 @@ class GpuShaderLoadSmokeTest {
                             if (loading) { return; }
                             assertTrue(sawRelighting, "A changed shader flag gets a loading stage");
                             if (modelCard == null) {
-                                var hud = GpuMixedUnitBenchmarkSmokeTest.field(this, "ui");
-                                var editor = GpuMixedUnitBenchmarkSmokeTest.field(hud, "editor");
-                                var models = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "models");
-                                var junctions = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "junctions");
+                                var hud = GpuTestSupport.field(this, "ui");
+                                var editor = GpuTestSupport.field(hud, "editor");
+                                var models = (GpuEditorModelPreviews) GpuTestSupport.field(editor, "models");
+                                var junctions = (GpuEditorModelPreviews) GpuTestSupport.field(editor, "junctions");
                                 // Fresh image targets cannot reuse cards rendered before the lighting switch.
                                 modelCard = new Image(); railCard = new Image();
                                 modelCard.setBounds(10, 10, 128, 96); railCard.setBounds(148, 10, 128, 96);
@@ -409,7 +409,7 @@ class GpuShaderLoadSmokeTest {
                         double seconds = watch.seconds();
                         sawSpinner |= root.findActor("editor-preparing").isVisible();
                         if (step == -1) {
-                            noScarPrograms(GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain"));
+                            noScarPrograms(GpuTestSupport.field(this, "terrain"));
                             // An editor opened before in this JVM left its page: the start page first.
                             if (root.findActor("editor-back") != null) {
                                 GpuBoardTestUi.click("editor-back");
@@ -421,7 +421,7 @@ class GpuShaderLoadSmokeTest {
                         }
                         // Completed card renders and an idle board permit the next step without a long idle dwell.
                         boolean settled = GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))
-                              && !((GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain")).busy();
+                              && !((GpuTerrain) GpuTestSupport.field(this, "terrain")).busy();
                         if (step < steps.size() && seconds - stepAt > (settled ? .25 : 8)) {
                             steps.get(step++).run();
                             stepAt = seconds;
@@ -471,16 +471,16 @@ class GpuShaderLoadSmokeTest {
 
     /** No program is prepared for scars: they draw with their receivers' programs. */
     private static void noScarPrograms(Object terrain) throws Exception {
-        for (Object sample : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "terrainMaterialSamples")) {
+        for (Object sample : (List<?>) GpuTestSupport.field(terrain, "terrainMaterialSamples")) {
             assertFalse(((Renderable) sample).material.has(GpuSurfaceScars.Marking.TYPE), "A scar program");
         }
     }
 
     /** The programs the shader provider of a renderer's {@code batch} holds: the terrain's, or an unlit overlay's. */
     static int programs(Object renderer) throws Exception {
-        var provider = ((ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(renderer, "batch")).getShaderProvider();
+        var provider = ((ModelBatch) GpuTestSupport.field(renderer, "batch")).getShaderProvider();
         if (provider instanceof GpuShaderProvider edited) { provider = edited.active(); }
-        return ((Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(provider, "shaders")).size;
+        return ((Array<?>) GpuTestSupport.field(provider, "shaders")).size;
     }
 
     /** An autocannon hit on each of the board's three steepest walls, through the game's contact path. */

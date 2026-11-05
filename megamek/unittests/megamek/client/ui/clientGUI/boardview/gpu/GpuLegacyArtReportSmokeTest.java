@@ -640,7 +640,7 @@ class GpuLegacyArtReportSmokeTest {
                         camera.center(shot.getValue().focus());
                         camera.zoom(shot.getValue().zoom() / camera.camera.zoom);
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(folder, shot.getKey() + ".png"));
                     }

@@ -146,7 +146,7 @@ class GpuTerrainBlendSmokeTest {
 
             private void renderSettled(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) throws Exception {
                 // Ground cover is planted with the terrain: once the terrain is installed, one frame shows it completely.
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
             }
 

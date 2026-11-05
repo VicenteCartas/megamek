@@ -81,29 +81,29 @@ class GpuTerrainTextureBindingSmokeTest {
                     atlas.publish();
                     Texture displayed = atlas.region("hex").getTexture();
                     int displayedHandle = displayed.getTextureObjectHandle();
-                    Object displayedPages = field(atlas, "atlas");
+                    Object displayedPages = GpuTestSupport.field(atlas, "atlas");
                     int repacks = 0;
                     for (int i = 1; i <= 32; i++) {
                         Texture pending = atlas.region("hex").getTexture();
-                        Object pendingPages = field(atlas, "atlas");
+                        Object pendingPages = GpuTestSupport.field(atlas, "atlas");
                         // New artwork each time: once the packed slots outgrow the live one, the pages repack.
                         atlas.updateRegions(Map.of("hex", hex(i)));
                         atlas.releaseRetiredPages();
                         assertEquals(displayedHandle, displayed.getTextureObjectHandle());
                         assertTrue(org.lwjgl.opengl.GL11.glIsTexture(displayedHandle));
                         // Pages appended to the displayed atlas retire with it; only an undisplayed atlas is released.
-                        if (field(atlas, "atlas") != pendingPages && pendingPages != displayedPages) {
+                        if (GpuTestSupport.field(atlas, "atlas") != pendingPages && pendingPages != displayedPages) {
                             repacks++;
                             assertEquals(0, pending.getTextureObjectHandle(), "A replaced pending page is released");
                         }
-                        assertTrue(((List<?>) field(atlas, "retired")).size() <= 1,
+                        assertTrue(((List<?>) GpuTestSupport.field(atlas, "retired")).size() <= 1,
                               "Canceled pages must not accumulate");
                     }
                     assertTrue(repacks > 0, "Exercise replacing pending pages");
                     atlas.publish();
                     atlas.releaseRetiredPages();
                     assertEquals(0, displayed.getTextureObjectHandle(), "Retire old pages after replacement meshes publish");
-                    assertTrue(((List<?>) field(atlas, "retired")).isEmpty());
+                    assertTrue(((List<?>) GpuTestSupport.field(atlas, "retired")).isEmpty());
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { atlas.dispose(); Gdx.app.exit(); }
@@ -139,12 +139,12 @@ class GpuTerrainTextureBindingSmokeTest {
                     camera.setIsometric(true);
                     camera.fit(scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     terrain.animate(.37f, List.of());
                     ScreenUtils.clear(.2f, .26f, .31f, 1, true);
                     terrain.render(camera.camera);
                     terrain.renderTransparent(camera.camera);
-                    ModelBatch batch = (ModelBatch) field(terrain, "batch");
+                    ModelBatch batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
                     var shaders = BaseShaderProvider.class.getDeclaredField("shaders");
                     shaders.setAccessible(true);
                     int checked = 0;
@@ -155,10 +155,10 @@ class GpuTerrainTextureBindingSmokeTest {
                         // The bindings belong to the final drawn program, not previously used opaque shaders.
                         if (program.getHandle() != current.get(0)) { continue; }
                         assertTrue(program.getUniformLocation("u_waterField") >= 0, "The last draw must be water");
-                        assertTexture(program, "u_rainNoise", (Texture) field(terrain, "rainNoise"));
-                        Texture detail = (Texture) field(terrain, "waterDetail");
+                        assertTexture(program, "u_rainNoise", (Texture) GpuTestSupport.field(terrain, "rainNoise"));
+                        Texture detail = (Texture) GpuTestSupport.field(terrain, "waterDetail");
                         assertTexture(program, "u_waterDetail", detail);
-                        var ocean = (GpuOcean) field(terrain, "ocean");
+                        var ocean = (GpuOcean) GpuTestSupport.field(terrain, "ocean");
                         for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
                             Texture waves = ocean.waves(cascade);
                             assertTexture(program, "u_waterOcean" + cascade, waves == null ? detail : waves);
@@ -220,11 +220,5 @@ class GpuTerrainTextureBindingSmokeTest {
             Gdx.gl.glGetIntegerv(GL20.GL_TEXTURE_BINDING_2D, value);
             assertEquals(expected.getTextureObjectHandle(), value.get(0), name + " must not sample another chunk's field");
         } finally { Gdx.gl.glActiveTexture(active); }
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

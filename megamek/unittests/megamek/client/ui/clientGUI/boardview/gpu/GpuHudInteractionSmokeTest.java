@@ -1,8 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.BATTLEMASTER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.HEXES;
@@ -31,7 +31,6 @@ import static org.mockito.Mockito.when;
 
 import java.awt.Rectangle;
 import java.awt.event.InputEvent;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -58,7 +57,6 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.ReportDisplay;
 import megamek.client.ui.util.KeyCommandBind;
-import megamek.common.Configuration;
 import megamek.common.HexTarget;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
@@ -73,10 +71,9 @@ import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -87,23 +84,11 @@ import org.mockito.ArgumentCaptor;
  * Not ported, as the plan says: the bot's declaration after the player (the server's timing), "Enter sends local
  * chat" (the network send) and "Shift+M returns to 3D" (an alias MegaMek does not have; T covers it).
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuHudInteractionSmokeTest {
     /** A hex's width on the screen in the prototype's shots, in HUD units, as GpuHudParitySmokeTest frames them. */
     private static final float HEX = 112;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /**
      * Lines 14-27 with the own focus unit (C.5, user item 29(c)): the initiative report shows its card and Continue;
@@ -133,7 +118,7 @@ class GpuHudInteractionSmokeTest {
                 board.source.refresh();
                 return display;
             });
-            GpuDialogRoutingTest.present(moving.gui, board.view, board.source);
+            GpuDialogFixture.present(moving.gui, board.view, board.source);
             try {
                 GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
                     Play play = new Play(live, moving.client);
@@ -246,7 +231,7 @@ class GpuHudInteractionSmokeTest {
                     verify(moving.client).moveEntity(eq(LOCUST), any());
                 });
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
                 onSwing(() -> {
                     report.removeAllListeners();
                     return null;
@@ -279,7 +264,7 @@ class GpuHudInteractionSmokeTest {
                 board.source.refresh();
                 return null;
             });
-            GpuDialogRoutingTest.present(moving.gui, board.view, board.source);
+            GpuDialogFixture.present(moving.gui, board.view, board.source);
             try {
                 GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
                     Play play = new Play(live, moving.client);
@@ -412,7 +397,7 @@ class GpuHudInteractionSmokeTest {
                     assertEquals((facing + 1) % 6, sent.getValue().getFinalFacing(), "turned as planned");
                 });
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
             }
         }
     }
@@ -428,10 +413,10 @@ class GpuHudInteractionSmokeTest {
      */
     @Test
     void aWeaponDeclarationIsDraftedAndResolved() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             GpuBoardFixture board = firing.board;
             GpuHudParitySmokeTest.firingTurn(firing);
-            GpuDialogRoutingTest.present(firing.gui, board.view, board.source);
+            GpuDialogFixture.present(firing.gui, board.view, board.source);
             ReportDisplay[] report = new ReportDisplay[1];
             try {
                 GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
@@ -444,11 +429,11 @@ class GpuHudInteractionSmokeTest {
                     assertTrue(fire.editable() && fire.actorId() == ATLAS, "The Atlas declares");
                     assertEquals(ATLAS, live.hud.state.focus());
                     // 93: clicking a weapon arms it and opens its solution card.
-                    int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-                    int srm = GpuFireOrdersTest.eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO);
-                    int lrm = GpuFireOrdersTest.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
-                    int leftLaser = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-                    int rightLaser = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+                    int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+                    int srm = GpuFiringFixture.eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO);
+                    int lrm = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
+                    int leftLaser = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+                    int rightLaser = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
                     int armed = fire.selectedWeapon() == cannon ? srm : cannon;
                     play.click("weapons-name-" + armed);
                     assertEquals(armed, live.hud.state.armedWeapon, "The weapon is armed");
@@ -582,7 +567,7 @@ class GpuHudInteractionSmokeTest {
                     assertTrue(live.hud.state.logOpen() && play.shown("log-panel"), "The combat log opens");
                 });
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
                 onSwing(() -> {
                     if (report[0] != null) {
                         report[0].removeAllListeners();
@@ -603,7 +588,7 @@ class GpuHudInteractionSmokeTest {
      */
     @Test
     void theRoundIsReviewedAndTheNextOneBegins() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             GpuBoardFixture board = firing.board;
             Game game = board.game;
             Object[] displays = new Object[3];
@@ -623,7 +608,7 @@ class GpuHudInteractionSmokeTest {
                 board.source.refresh();
                 return display;
             });
-            GpuDialogRoutingTest.present(firing.gui, board.view, board.source);
+            GpuDialogFixture.present(firing.gui, board.view, board.source);
             try {
                 GpuLiveBoardSpaceSmokeTest.run(board.source, live -> {
                     Play play = new Play(live, firing.client);
@@ -782,7 +767,7 @@ class GpuHudInteractionSmokeTest {
                     assertTrue(far / near > 1.9f, "Zoomed out the units grow: " + near + " -> " + far);
                 });
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
                 onSwing(() -> {
                     for (Object display : displays) {
                         if (display instanceof ReportDisplay report) {
@@ -805,7 +790,7 @@ class GpuHudInteractionSmokeTest {
     @Test
     void theTargetingPhaseKeepsMegaMeksTool() throws Exception {
         try (GpuTargetingFixture targeting = GpuTargetingFixture.create()) {
-            GpuDialogRoutingTest.present(targeting.gui, targeting.view, targeting.source);
+            GpuDialogFixture.present(targeting.gui, targeting.view, targeting.source);
             try {
                 GpuLiveBoardSpaceSmokeTest.run(targeting.source, live -> {
                     Play play = new Play(live, targeting.client);
@@ -824,7 +809,7 @@ class GpuHudInteractionSmokeTest {
                     verify(live.source, never()).key(eq(KeyCommandBind.CANCEL.key), anyBoolean(), anyInt());
                 });
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
             }
         }
     }

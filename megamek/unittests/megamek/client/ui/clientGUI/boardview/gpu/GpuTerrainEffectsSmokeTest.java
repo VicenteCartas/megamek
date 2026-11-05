@@ -573,7 +573,7 @@ class GpuTerrainEffectsSmokeTest {
                         terrain.setAtmosphere(atmosphere.lighting());
                         atmosphere.configureClouds(terrain, board);
                         if (hour == 13) { terrain.update(board); }
-                        GpuTerrainLodSmokeTest.settle(terrain, null, board, camera);
+                        GpuReviewFrame.settle(terrain, null, board, camera);
                         if (hour == 13) {
                             terrain.animate(.5f, List.of());
                             if (!lava) {

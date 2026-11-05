@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -241,7 +241,7 @@ class GpuMoveClickRoutingTest {
         // The envelope is the actor's board's: the same hex on another board picks its unit.
         BoardScene otherBoard = mock(BoardScene.class);
         when(otherBoard.boardId()).thenReturn(1);
-        hud.update(frame(null).withScene(otherBoard), GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+        hud.update(frame(null).withScene(otherBoard), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         assertEquals(SAGITTAIRE, hud.boardUnit(sagHex, SAGITTAIRE), "another board's hex");
 
         // Inside the envelope the menu inspects the Archer and selects the Sagittaire.
@@ -654,7 +654,7 @@ class GpuMoveClickRoutingTest {
     private String hint() throws Exception {
         hudUpdate(null);
         return GpuHintLine.items(new GpuHud.Inputs(frame(null), GpuHud.HudView.EMPTY, null,
-              GpuHudInputTest.preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1);
+              GpuHudFixtures.preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1);
     }
 
     /** MegaMek's map menu at the hex, as the source captures it for an open menu (GpuBoardActions.contextCommands). */
@@ -677,7 +677,7 @@ class GpuMoveClickRoutingTest {
 
     /** The HUD's next frame in the phase; the local player's turn in the movement phase only. */
     private void hudUpdate(BoardScene.Context context, GamePhase phase) throws Exception {
-        hud.update(frame(context, phase), GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+        hud.update(frame(context, phase), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         clearInvocations(hudSource);
     }
 
@@ -741,10 +741,10 @@ class GpuMoveClickRoutingTest {
             }
             return list;
         });
-        GpuBattleStatus.Snapshot status = GpuHudInputTest.status(1, phase, phase == GamePhase.MOVEMENT, actor(), 0,
+        GpuBattleStatus.Snapshot status = GpuHudFixtures.status(1, phase, phase == GamePhase.MOVEMENT, actor(), 0,
               units.toArray(GpuBattleStatus.UnitStatus[]::new));
         return new GpuBoardSource.Frame(scene, List.of(), context, List.of(), "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, GpuHudInputTest.panels(move, GpuFireOrders.Snapshot.EMPTY,
+              GpuReportLog.Snapshot.EMPTY, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 

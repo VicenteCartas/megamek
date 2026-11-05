@@ -59,7 +59,7 @@ class GpuVerticalScarsSmokeTest {
             Coords at = new Coords(2, 1);
             var desired = BoardGeometry.center(at, 2).add(-BoardGeometry.width() * .45f, 0, 0);
             camera.center(desired);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             var walls = terrain.tacticalSurface(at).walls();
             var face = walls.stream().filter(f -> normal(f).x < -.6f && Math.abs(normal(f).z) < .5f)
                   .min(java.util.Comparator.comparingDouble(f -> center(f).dst2(desired))).orElseThrow();
@@ -72,7 +72,7 @@ class GpuVerticalScarsSmokeTest {
             camera.camera.lookAt(point);
             camera.camera.update();
             frame.render(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             assertTrue(terrain.ready(scene));
             frame.render(terrain, camera, scene);
             int[] clean = pixels();
@@ -168,7 +168,7 @@ class GpuVerticalScarsSmokeTest {
                   List.of(), List.of(), BoardLiquid.NONE, null, true));
             var editedScene = scene.withTiles(replacement);
             terrain.update(editedScene, camera.camera);
-            GpuTerrainLodSmokeTest.settle(terrain, null, editedScene, camera);
+            GpuReviewFrame.settle(terrain, null, editedScene, camera);
             assertTrue(before != terrain.tacticalSurface(at), "The edit must replace the receiving terrain mesh");
             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, editedScene); }
             assertEquals(tiles, terrain.surfaceScars().tileCount(), "Replacing terrain must retain the masks");
@@ -286,9 +286,9 @@ class GpuVerticalScarsSmokeTest {
             camera.center(aim);
             camera.camera.position.set(aim).add(-BoardRelief.metres(50), -BoardRelief.metres(10), BoardRelief.metres(5));
             camera.camera.up.set(Vector3.Z); camera.camera.lookAt(aim); camera.camera.update();
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
             int[] clean = pixels();
             GpuReviewFrame.save(new File(output, "building-clean.png"));
@@ -323,7 +323,7 @@ class GpuVerticalScarsSmokeTest {
             camera.camera.position.set(aim).add(-BoardRelief.metres(50), -BoardRelief.metres(10), BoardRelief.metres(5));
             camera.camera.up.set(Vector3.Z); camera.camera.lookAt(aim); camera.camera.update();
             frame.render(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
             int[] perspective = pixels();
             GpuReviewFrame.save(new File(output, "building-ac20-perspective.png"));

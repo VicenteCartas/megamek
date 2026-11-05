@@ -56,10 +56,10 @@ class GpuSceneryCarSmokeTest {
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         var installed = new ArrayList<ModelInstance>();
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                var instance = (ModelInstance) field(prop, "instance");
-                                if (coords.equals(field(prop, "coords")) && instance.nodes.first().id.equals("car")) {
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+                                if (coords.equals(GpuTestSupport.field(prop, "coords")) && instance.nodes.first().id.equals("car")) {
                                     installed.add(instance);
                                 }
                             }
@@ -80,7 +80,7 @@ class GpuSceneryCarSmokeTest {
                             camera.center(BoardGeometry.center(coords, 0));
                             camera.camera.zoom = .10f;
                             camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, "cars_" + BoardSceneryTest.VARIANTS.get(index)
                                   + (artwork ? "-art.png" : view == 2 ? "-oblique.png" : "-models.png")));
@@ -92,11 +92,5 @@ class GpuSceneryCarSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Parked-car alignment", failure.get()); }
-    }
-
-    private static Object field(Object target, String name) throws ReflectiveOperationException {
-        var field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
     }
 }

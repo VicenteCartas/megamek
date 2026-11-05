@@ -52,7 +52,7 @@ class ZzAveragingProbeSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     BoardScene scene = scene(material);
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                     terrain.setGrass(false);
                     terrain.setSmallObjects(false);
                     terrain.setMaterialCache(false);
@@ -76,7 +76,7 @@ class ZzAveragingProbeSmokeTest {
           float footprint, int k) throws InterruptedException {
         camera.camera.zoom = footprint * BoardGeometry.width() / 30;
         camera.center(BoardGeometry.center(new Coords(3, 3), 0));
-        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+        GpuCalibrationScenes.settle(terrain, frame, camera, scene);
         frame.render(terrain, camera, scene);
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
         var pixels = com.badlogic.gdx.graphics.Pixmap.createFromFrameBuffer(0, 0, width, height);

@@ -110,7 +110,7 @@ class GpuAuthoredScorchSmokeTest {
                       tile.withFeatures(tile.coords().equals(dirt) ? samples : List.of())).toList());
                 if (phase.equals("nuclear")) {
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     assertEquals(samples, terrain.presentation(scene).tile(dirt).features(),
                           "Erasing authored scorch restores the existing decorative mesh before the nuclear hit");
                     assertTrue(fieldFaces(terrain.presentation(scene), fieldSurfaces, true) > 0,
@@ -134,7 +134,7 @@ class GpuAuthoredScorchSmokeTest {
                 camera.camera.update();
                 frame.prepare(terrain, camera, scene);
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 BoardScene shown = terrain.presentation(scene);
                 var surface = new BoardSurface(shown, shown.tile(dirt));
                 assertEquals(samples, scene.tile(dirt).features(), "Scorch must not mutate the source scene");
@@ -180,7 +180,7 @@ class GpuAuthoredScorchSmokeTest {
                 terrain.setGrass(true);
                 camera.fit(scene, List.of(scene.tile(dirt)));
                 frame.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
                 GpuReviewFrame.save(new File(output, "dry-grass-" + phase + ".png"));
                 if (!burned) { programs = GpuShaderLoadSmokeTest.programs(terrain); }
@@ -220,7 +220,7 @@ class GpuAuthoredScorchSmokeTest {
         try {
             frame.prepare(terrain, camera, scene);
             terrain.update(scene, camera.camera);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
             var damage = terrain.groundDamage();
             assertTrue(damage.scorchShown(), "The loaded appearance reaches the renderer");
@@ -234,7 +234,7 @@ class GpuAuthoredScorchSmokeTest {
                 camera.setIsometric(iso);
                 camera.fit(scene);
                 frame.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.setCombatScars(true);
                 frame.render(terrain, camera, scene);
                 int[] game = pixels();

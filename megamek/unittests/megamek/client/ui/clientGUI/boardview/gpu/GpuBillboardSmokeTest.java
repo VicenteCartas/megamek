@@ -139,9 +139,9 @@ class GpuBillboardSmokeTest {
                         }
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                         var lights = new ArrayList<GpuLavaLighting.Source>();
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                @SuppressWarnings("unchecked") var drawn = (List<GpuLavaLighting.Source>) field(prop, "drawnLights");
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                @SuppressWarnings("unchecked") var drawn = (List<GpuLavaLighting.Source>) GpuTestSupport.field(prop, "drawnLights");
                                 lights.addAll(drawn);
                             }
                         }
@@ -258,11 +258,5 @@ class GpuBillboardSmokeTest {
             } finally { SwingUtilities.invokeAndWait(source::close); }
             if (failure.get() != null) { throw new AssertionError("Billboard editor", failure.get()); }
         });
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

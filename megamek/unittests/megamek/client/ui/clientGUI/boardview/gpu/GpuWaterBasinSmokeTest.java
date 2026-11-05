@@ -34,7 +34,7 @@ class GpuWaterBasinSmokeTest {
 
     @Test
     void orthographicSunGlareKeepsWaterReadableWithoutChangingPerspective() throws Exception {
-        var scene = GpuDepthPrepassBaselineSmokeTest.scene(new File(
+        var scene = GpuCalibrationScenes.scene(new File(
               "data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
@@ -76,7 +76,7 @@ class GpuWaterBasinSmokeTest {
             camera.center(BoardGeometry.center(new Coords(6, 10), 0));
             frame.prepare(terrain, camera, scene);
             terrain.update(scene, camera.camera);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             for (int i = 0; i < 300; i++) { terrain.animate(1 / 30f, List.of()); }
             for (boolean effects : new boolean[] { true, false }) {
                 terrain.setWaterEffects(effects);
@@ -89,7 +89,7 @@ class GpuWaterBasinSmokeTest {
                     camera.orbit(bearing - camera.azimuth(), tilt - camera.tilt());
                     camera.update();
                     frame.prepare(terrain, camera, scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     assertTrue(shaders.apply(Map.of("water-lighting.glsl", uncapped)).success());
                     for (int i = 0; i < 3; i++) { frame.render(terrain, camera, scene); }
                     byte[] before = ScreenUtils.getFrameBufferPixels(false);
@@ -136,7 +136,7 @@ class GpuWaterBasinSmokeTest {
     }
 
     private void capture(String board, Coords focus, float zoom, String label) throws Exception {
-        var scene = GpuDepthPrepassBaselineSmokeTest.scene(new File(
+        var scene = GpuCalibrationScenes.scene(new File(
               "data/boards/Map Pack Savannahs/" + board));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
@@ -160,7 +160,7 @@ class GpuWaterBasinSmokeTest {
                     camera.update();
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     int pass = 0;
                     for (float wind : new float[] { 0, .5f, 1, 0 }) {
                         var settings = new BoardAtmosphere.Settings(13, 0, 0,
@@ -179,7 +179,7 @@ class GpuWaterBasinSmokeTest {
                             }
                             camera.update();
                             frame.prepare(terrain, camera, scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
                             GpuReviewFrame.save(new File(output, view + "-wind-" + wind + (pass == 3 ? "-settled" : "") + ".png"));
                         }

@@ -68,10 +68,10 @@ class UnitPolishTest {
 
     @Test
     void punchesFinishApproachBeforeSwingAndReturnBeforeTheHold() {
-        var a = UnitPlaybackTest.unit(1, 1);
-        var b = UnitPlaybackTest.unit(2, 2);
+        var a = UnitPlaybackFixture.unit(1, 1);
+        var b = UnitPlaybackFixture.unit(2, 2);
         for (var kind : List.of(ResolvedAttack.Kind.PUNCH, ResolvedAttack.Kind.KICK)) {
-            var attack = new UnitAttack(UnitPlaybackTest.attack(a, b, kind, true));
+            var attack = new UnitAttack(UnitPlaybackFixture.attack(a, b, kind, true));
             attack.seconds = attack.approachSeconds * .5f;
             assertEquals(0, attack.strike());
             assertEquals(0, attack.windup());
@@ -89,7 +89,7 @@ class UnitPolishTest {
 
     @Test
     void missesAreIrregularGroundContactsAndLasersOnlyStopAtLandscape() {
-        var attack = new UnitAttack(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 3), ResolvedAttack.Kind.SHOT, false));
+        var attack = new UnitAttack(UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 3), ResolvedAttack.Kind.SHOT, false));
         var tiles = new ArrayList<BoardScene.Tile>();
         for (int x = 0; x < 8; x++) {
             for (int y = 0; y < 8; y++) {

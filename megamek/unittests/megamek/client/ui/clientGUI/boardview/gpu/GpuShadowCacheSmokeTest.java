@@ -70,7 +70,7 @@ class GpuShadowCacheSmokeTest {
             var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
             terrain.setAtmosphere(lighting);
             terrain.renderShadows(camera.camera, List.of());
-            assertNull(field(field(terrain, "shadowMap"), "staticShadow"), "Map-only views keep one shadow framebuffer");
+            assertNull(GpuTestSupport.field(GpuTestSupport.field(terrain, "shadowMap"), "staticShadow"), "Map-only views keep one shadow framebuffer");
             camera.zoom(.6f);
             // The zoom changes tree levels, which the map picks up at its next redraw: start from that redraw.
             terrain.refreshShadows();
@@ -207,12 +207,6 @@ class GpuShadowCacheSmokeTest {
         return result;
     }
 
-    private static Object field(Object target, String name) throws ReflectiveOperationException {
-        var field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
-    }
-
     private static void fullPass(GpuTerrain terrain, List<ModelInstance> units) throws ReflectiveOperationException {
         var shadow = (DirectionalShadowLight) terrain.environment().shadowMap;
         var draw = GpuTerrain.class.getDeclaredMethod("renderDepth", Camera.class, List.class, ModelBatch.class, boolean.class,
@@ -220,7 +214,7 @@ class GpuShadowCacheSmokeTest {
         draw.setAccessible(true);
         // As the full shadow pass draws: shadows on, scatter included.
         shadow.begin();
-        try { draw.invoke(terrain, shadow.getCamera(), units, field(terrain, "depthBatch"), true, true); }
+        try { draw.invoke(terrain, shadow.getCamera(), units, GpuTestSupport.field(terrain, "depthBatch"), true, true); }
         finally { shadow.end(); }
     }
 
@@ -250,7 +244,7 @@ class GpuShadowCacheSmokeTest {
     /** The sum of the chunks' tree levels the view chose. */
     private static int treeLevels(GpuTerrain terrain) throws ReflectiveOperationException {
         int sum = 0;
-        for (Object chunk : (List<?>) field(terrain, "chunks")) { sum += (int) field(chunk, "treeLod"); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) { sum += (int) GpuTestSupport.field(chunk, "treeLod"); }
         return sum;
     }
 }

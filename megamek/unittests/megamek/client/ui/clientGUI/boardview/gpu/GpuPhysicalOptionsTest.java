@@ -2,10 +2,10 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -45,7 +45,6 @@ import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay.PhysicalCommand;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.Configuration;
 import megamek.common.CriticalSlot;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
@@ -65,10 +64,9 @@ import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
 import megamek.utils.ClearBoard;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -77,6 +75,7 @@ import org.mockito.MockedStatic;
  * leg, the rolls of each limb and the rule questions of a punch reaching the native modal bridge. The others cover the
  * native HUD's options, target switch and declarations, and when the informational to-hit question is asked (U3).
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuPhysicalOptionsTest {
     private static final String ATLAS = "testresources/megamek/common/units/Atlas AS7-D.mtf";
@@ -87,19 +86,6 @@ class GpuPhysicalOptionsTest {
     private static final int SOUTH = 3;
     private static final String MISS_PSR = "GpuBoard.hud.physical.missPsr";
     private static final String HIT_PSR = "GpuBoard.hud.physical.hitPsr";
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void theRollsOfEachLimbAgainstTheAdjacentEnemy() throws Exception {
@@ -323,12 +309,12 @@ class GpuPhysicalOptionsTest {
 
             GpuBoardWindow window = present(gui, scene.view.getClientState(), scene.source);
             try {
-                GpuDialogRoutingTest.set(window, "presented", false);
+                GpuDialogFixture.set(window, "presented", false);
                 assertEquals(List.of(), scene.declare(true, "punchLeft"),
                       "A native window that is not presented yet keeps the question");
                 verify(gui, times(2)).doYesNoDialog(eq(punch), anyString());
 
-                GpuDialogRoutingTest.set(window, "presented", true);
+                GpuDialogFixture.set(window, "presented", true);
                 assertEquals(List.of(PunchAttackAction.LEFT), scene.declare(true, "punchLeft"));
                 verify(gui, times(2)).doYesNoDialog(eq(punch), anyString());
             } finally {

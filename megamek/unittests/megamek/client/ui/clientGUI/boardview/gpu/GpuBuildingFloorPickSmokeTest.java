@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -88,7 +88,7 @@ class GpuBuildingFloorPickSmokeTest {
                     try {
                         assertTrue(System.nanoTime() < deadline, "Building floor pick timed out");
                         super.render();
-                        var terrain = (GpuTerrain) field(this, "terrain");
+                        var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                         if (GpuBoardTestUi.loading(this) || terrain.busy() || frames() < after) { return; }
                         if (phase == 0) {
                             boardCamera.setIsometric(true);
@@ -107,7 +107,7 @@ class GpuBuildingFloorPickSmokeTest {
                             checkFloors(this, floor);
                             if (surrounded) {
                                 checkOccludedUnit(this, fixture.entity.getId());
-                                boardCamera.setTactical(true, (BoardScene) field(this, "scene"));
+                                boardCamera.setTactical(true, (BoardScene) GpuTestSupport.field(this, "scene"));
                                 phase++;
                                 after = frames() + 3;
                             } else { Gdx.app.exit(); }
@@ -126,8 +126,8 @@ class GpuBuildingFloorPickSmokeTest {
     }
 
     private static void checkFloors(GpuBattleView view, int unitFloor) throws Exception {
-        var scene = (BoardScene) field(view, "scene");
-        Object input = field(view, "boardInput");
+        var scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        Object input = GpuTestSupport.field(view, "boardInput");
         var pick = input.getClass().getDeclaredMethod("pickSelection", int.class, int.class);
         pick.setAccessible(true);
         var camera = view.boardCamera.camera;
@@ -148,7 +148,7 @@ class GpuBuildingFloorPickSmokeTest {
                 assertEquals(Entity.NONE, value(picked, "entityId"), "Surface at floor " + level);
                 floors.add(level);
                 ((InputProcessor) input).mouseMoved(x, y);
-                assertEquals(Entity.NONE, field(view, "hoveredUnit"));
+                assertEquals(Entity.NONE, GpuTestSupport.<Object>field(view, "hoveredUnit"));
             }
         }
         assertTrue(floors.size() >= 2, "The pointer sweep must cover multiple floors: " + floors);
@@ -156,9 +156,9 @@ class GpuBuildingFloorPickSmokeTest {
 
     @SuppressWarnings("unchecked")
     private static void checkOccludedUnit(GpuBattleView view, int unitId) throws Exception {
-        var scene = (BoardScene) field(view, "scene");
-        var terrain = (GpuTerrain) field(view, "terrain");
-        var instances = (Map<String, ModelInstance>) field(view, "unitInstances");
+        var scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        var terrain = (GpuTerrain) GpuTestSupport.field(view, "terrain");
+        var instances = (Map<String, ModelInstance>) GpuTestSupport.field(view, "unitInstances");
         var unit = scene.units().stream().filter(candidate -> candidate.id() == unitId).findFirst().orElseThrow();
         assertEquals(10, unit.location().elevation());
         ModelInstance instance = instances.get(unit.id() + ":" + unit.part());
@@ -192,10 +192,10 @@ class GpuBuildingFloorPickSmokeTest {
     }
 
     private static void checkTacticalUnit(GpuBattleView view, int unitId) throws Exception {
-        var scene = (BoardScene) field(view, "scene");
+        var scene = (BoardScene) GpuTestSupport.field(view, "scene");
         assertTrue(view.boardCamera.tactical());
         // The Tactical View's base lies centred on the unit's meeple.
-        ModelInstance base = ((GpuUnitBases) field(view, "unitBases")).base(scene.units().getFirst());
+        ModelInstance base = ((GpuUnitBases) GpuTestSupport.field(view, "unitBases")).base(scene.units().getFirst());
         var camera = view.boardCamera.camera;
         Vector3 center = camera.project(base.transform.getTranslation(new Vector3()), 0, 0,
               camera.viewportWidth, camera.viewportHeight);
@@ -203,7 +203,7 @@ class GpuBuildingFloorPickSmokeTest {
     }
 
     private static void assertUnitClick(GpuBattleView view, int x, int y, int unitId) throws Exception {
-        Object input = field(view, "boardInput");
+        Object input = GpuTestSupport.field(view, "boardInput");
         var pick = input.getClass().getDeclaredMethod("pickSelection", int.class, int.class);
         pick.setAccessible(true);
         Object picked = pick.invoke(input, x, y);
@@ -211,8 +211,8 @@ class GpuBuildingFloorPickSmokeTest {
         assertEquals(BUILDING, value(picked, "coords"));
         assertTrue(Float.isNaN((float) value(picked, "pointedZ")), "A unit click does not point at the outer wall's floor");
         ((InputProcessor) input).mouseMoved(x, y);
-        assertEquals(unitId, field(view, "hoveredUnit"));
-        var hud = (GpuHud) field(view, "ui");
+        assertEquals(unitId, GpuTestSupport.<Object>field(view, "hoveredUnit"));
+        var hud = (GpuHud) GpuTestSupport.field(view, "ui");
         assertFalse(hud.hit(x, y), "The test clicks the board, outside HUD panels");
         hud.state.clearSelection();
         assertEquals(Entity.NONE, hud.state.cardUnit());
@@ -227,11 +227,5 @@ class GpuBuildingFloorPickSmokeTest {
         var method = target.getClass().getDeclaredMethod(name);
         method.setAccessible(true);
         return method.invoke(target);
-    }
-
-    private static Object field(Object target, String name) throws Exception {
-        var field = GpuBattleView.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
     }
 }

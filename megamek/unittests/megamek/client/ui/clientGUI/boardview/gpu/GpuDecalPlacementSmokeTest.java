@@ -131,18 +131,12 @@ class GpuDecalPlacementSmokeTest {
 
     private static List<Vector3> overlayTriangles(GpuTerrain terrain, boolean tactical) throws Exception {
         List<Vector3> triangles = new ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object object : (List<?>) field(chunk, tactical ? "tilesetDecals" : "surfaceDecals")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object object : (List<?>) GpuTestSupport.field(chunk, tactical ? "tilesetDecals" : "surfaceDecals")) {
                 var instance = (ModelInstance) object;
                 triangles.addAll(GpuTerrain.triangles(instance.model));
             }
         }
         return triangles;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

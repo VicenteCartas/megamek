@@ -501,15 +501,15 @@ class GpuFamilyProgramsSmokeTest {
     private static void sameInstalledPrograms(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,
           BoardScene scene, Frame family, StringBuilder report) throws Exception {
         Set<Material> marked = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (Object value : (com.badlogic.gdx.utils.Array<?>)
-                  GpuMixedUnitBenchmarkSmokeTest.field(chunk, "terrainRenderables")) {
+                  GpuTestSupport.field(chunk, "terrainRenderables")) {
                 Material material = ((Renderable) value).material;
                 if (material.has(GpuFamilyPrograms.Constants.TYPE)) { marked.add(material); }
             }
         }
         assertFalse(marked.isEmpty(), "The installed terrain has actual marked family materials");
-        var routing = (GpuTerrainBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "terrainBatch");
+        var routing = (GpuTerrainBatch) GpuTestSupport.field(terrain, "terrainBatch");
         report.append("Same installed meshes: toggling ").append(marked.size()).append(" material markers\n");
         try {
             marked.forEach(material -> material.remove(GpuFamilyPrograms.Constants.TYPE));
@@ -696,12 +696,12 @@ class GpuFamilyProgramsSmokeTest {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             int chunkIndex = 0;
-            for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                 for (String layer : List.of("terrainRenderables", "scatterRenderables")) {
                     var triangles = new ArrayList<String>();
                     var vertices = new IdentityHashMap<Mesh, float[]>();
                     var indices = new IdentityHashMap<Mesh, short[]>();
-                    for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, layer)) {
+                    for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, layer)) {
                         Renderable part = (Renderable) value;
                         Mesh mesh = part.meshPart.mesh;
                         int stride = mesh.getVertexSize() / Float.BYTES;

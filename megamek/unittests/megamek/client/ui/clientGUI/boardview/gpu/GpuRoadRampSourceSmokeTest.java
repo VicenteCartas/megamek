@@ -87,7 +87,7 @@ class GpuRoadRampSourceSmokeTest {
               .map(String::trim).filter(name -> !name.isEmpty()).toList();
         for (var source : SOURCES) {
             if (!selected.isEmpty() && !selected.contains(source.name())) { continue; }
-            var scene = GpuRoadSourceTest.scene(source.board());
+            var scene = BoardScenes.installedScene(source.board());
             for (var at : source.focus()) {
                 var tile = scene.tile(at);
                 assertNotNull(tile, source.name() + " " + at.getBoardNum());
@@ -139,7 +139,7 @@ class GpuRoadRampSourceSmokeTest {
                                     if (view >= 0) { camera.orbit(view - camera.azimuth(), 0); }
                                     camera.camera.zoom = source.zoom();
                                     camera.center(focus);
-                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    GpuReviewFrame.settle(terrain, null, scene, camera);
                                     assertEquals(classic, terrain.columns());
                                     frame.render(terrain, camera, scene);
                                     String mode = classic ? "classic" : "enhanced";

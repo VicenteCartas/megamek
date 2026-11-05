@@ -32,7 +32,7 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void tessellationContactsPreserveMaterialsAfterSubdivision(boolean blended) throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
         // Dry ground beside the ford: its edge shared with the water stays fixed, its own bank curves.
         var tile = scene.tile(7, 6);
         var surface = new BoardSurface(scene, tile);

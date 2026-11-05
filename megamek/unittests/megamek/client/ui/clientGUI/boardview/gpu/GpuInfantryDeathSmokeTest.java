@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -162,7 +162,7 @@ class GpuInfantryDeathSmokeTest {
         });
         var after = fixture.source.takeFrame().scene();
         List<BoardScene.Animation> events = new ArrayList<>(List.of(new BoardScene.SceneUpdate(before), shot));
-        if (fatal) { events.add(UnitPlaybackTest.attack(target, target, ResolvedAttack.Kind.DEATH, true)); }
+        if (fatal) { events.add(UnitPlaybackFixture.attack(target, target, ResolvedAttack.Kind.DEATH, true)); }
         events.add(new BoardScene.SceneUpdate(after));
         var playback = (UnitPlayback) field(view, "playback");
         playback.accept(events, after, ignored -> false);

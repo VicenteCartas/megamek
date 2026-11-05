@@ -72,7 +72,7 @@ class GpuShadowSmokeTest {
 
     private static void runCliffLighting(String board, String name, Coords focus, float level, float hour,
           float shadows) throws Exception {
-        BoardScene scene = GpuRoadSourceTest.scene(board);
+        BoardScene scene = BoardScenes.installedScene(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1058, 1234);

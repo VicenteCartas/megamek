@@ -378,7 +378,7 @@ class GpuRailSmokeTest {
                             camera.zoom(shot.zoom() / camera.camera.zoom);
                         }
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, entry.getKey() + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

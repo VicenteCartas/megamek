@@ -485,7 +485,7 @@ class GpuGroundDamageSmokeTest {
     private static void settle(GpuTerrain terrain, GpuReviewFrame frame, BoardScene scene, BoardCamera camera)
           throws Exception {
         frame.prepare(terrain, camera, scene);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
     }
 
     private static List<Vector3> points(GpuTerrain terrain, Coords at) {

@@ -43,7 +43,7 @@ class GpuNativeDialogOwnerTest {
     void open() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless());
         assumeTrue(GpuNativeDialogOwner.Win32.supported(), "Windows with FlatLaf's native library");
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             board = new JFrame("board");
             board.setBounds(100, 100, 400, 300);
             board.setVisible(true);
@@ -59,7 +59,7 @@ class GpuNativeDialogOwnerTest {
 
     @AfterEach
     void close() throws Exception {
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             if (owner != null) {
                 owner.releaseAll();
             }
@@ -74,11 +74,11 @@ class GpuNativeDialogOwnerTest {
 
     @Test
     void adoptedDialogIsOwnedByTheBoardWithoutFloatingAboveOtherApplications() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
+        long dialogHandle = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
         long previous = nativeOwner(dialogHandle);
         assertNotEquals(owner.ownerHandle(), previous);
 
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
 
         assertEquals(owner.ownerHandle(), nativeOwner(dialogHandle));
         assertTrue(owner.owns(dialog));
@@ -89,21 +89,21 @@ class GpuNativeDialogOwnerTest {
 
         assertEquals(previous, nativeOwner(dialogHandle));
         assertFalse(owner.owns(dialog));
-        assertFalse(onSwing(() -> owner.adopt(dialog)), "a released owner adopts nothing more");
+        assertFalse(GpuTestSupport.onSwing(() -> owner.adopt(dialog)), "a released owner adopts nothing more");
     }
 
     @Test
     void minimizingTheBoardHidesItsDialog() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        long dialogHandle = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
 
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             board.setExtendedState(Frame.ICONIFIED);
             return null;
         });
         assertTrue(eventually(() -> !visible(dialogHandle)), "the dialog hides with its minimized owner");
 
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             board.setExtendedState(Frame.NORMAL);
             return null;
         });
@@ -112,10 +112,10 @@ class GpuNativeDialogOwnerTest {
 
     @Test
     void forgottenDialogIsNotRestored() throws Exception {
-        long dialogHandle = onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        long dialogHandle = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.Win32.handle(dialog));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
 
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             owner.forget(dialog);
             return null;
         });
@@ -140,17 +140,5 @@ class GpuNativeDialogOwnerTest {
             Thread.sleep(50);
         }
         return condition.getAsBoolean();
-    }
-
-    private static <T> T onSwing(Callable<T> task) throws InterruptedException, InvocationTargetException {
-        AtomicReference<T> result = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result.set(task.call());
-            } catch (Exception failure) {
-                throw new IllegalStateException(failure);
-            }
-        });
-        return result.get();
     }
 }

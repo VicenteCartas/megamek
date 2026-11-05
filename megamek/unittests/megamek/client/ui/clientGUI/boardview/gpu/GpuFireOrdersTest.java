@@ -1,10 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.awaitDialog;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.awaitDialog;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,14 +19,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import java.awt.Window;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Vector;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 import javax.swing.JPanel;
 
 import megamek.client.ui.Messages;
@@ -35,7 +32,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.AimedShotDialog;
-import megamek.common.Configuration;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.actions.compute.ComputeToHit;
@@ -44,7 +40,6 @@ import megamek.common.enums.AimingMode;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.EquipmentTypeLookup;
-import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.interfaces.IEntityRemovalConditions;
@@ -54,10 +49,9 @@ import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
 import megamek.common.units.Targetable;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -67,36 +61,22 @@ import org.mockito.MockedStatic;
  * Crab CRB-20 (5, 2) are in its front arc, a Quickdraw QKD-8X (8, 5) is beside it, and the Hachiwara HCA-6P (3, 3) is
  * out of sight.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuFireOrdersTest {
-    static final Coords NORTH = new Coords(5, 2);
-    static final Coords EAST = new Coords(8, 5);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void theRowsShowTheRulesRollsOfTheScenario() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            int missiles = eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
-            GpuFireOrders.Snapshot focused = command(firing,
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int missiles = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
+            GpuFireOrders.Snapshot focused = GpuFiringFixture.command(firing,
                   fire -> fire.focusTarget(TargetKey.unit(firing.ahead.getId())));
-            GpuFireOrders.Snapshot queued = command(firing,
+            GpuFireOrders.Snapshot queued = GpuFiringFixture.command(firing,
                   fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            GpuFireOrders.Snapshot hidden = command(firing,
+            GpuFireOrders.Snapshot hidden = GpuFiringFixture.command(firing,
                   fire -> fire.focusTarget(TargetKey.unit(firing.left.getId())));
             assertEquals(List.of(
                   // The Medium Laser's literal WeaponAttackAction.toHit at the Archer (GpuFiringCharacterizationTest)
@@ -123,12 +103,12 @@ class GpuFireOrdersTest {
 
     @Test
     void badgesAndTheHoverRollShowTheOtherEnemies() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
-            enemy(firing, "Quickdraw QKD-8X.mtf", 45, EAST);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            command(firing, fire -> fire.focusTarget(TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.selectWeapon(right));
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
+            GpuFiringFixture.enemy(firing, "Quickdraw QKD-8X.mtf", 45, GpuFiringFixture.EAST);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.focusTarget(TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.selectWeapon(right));
             GpuFireOrders.Snapshot badged = afterBadgeJob(firing, crab.getPosition());
             assertEquals(List.of("[44 4 91.6 '', 45 4 91.6 '', 43 IMPOSSIBLE 0.0 'LOS blocked by terrain.']",
                   "Badge[targetId=44, value=4, odds=91.6, reason=]"), List.of(badges(badged),
@@ -140,17 +120,17 @@ class GpuFireOrdersTest {
                   firing.board.source.fire().capture(firing.display, crab.getPosition())));
             assertEquals(badged, again.getFirst());
             assertSame(again.getFirst(), again.getLast(), "Nothing changed: the same snapshot, and no new badge job");
-            GpuFireOrders.Snapshot refocused = command(firing, fire -> fire.focusTarget(TargetKey.unit(crab.getId())));
+            GpuFireOrders.Snapshot refocused = GpuFiringFixture.command(firing, fire -> fire.focusTarget(TargetKey.unit(crab.getId())));
             assertEquals("[45 4 91.6 '', 43 IMPOSSIBLE 0.0 'LOS blocked by terrain.']", badges(refocused),
                   "Before its job ran, the focused Crab already has no badge");
             GpuFireOrders.Snapshot rebadged = afterBadgeJob(firing, crab.getPosition());
             assertEquals("[42 4 91.6 '', 45 4 91.6 '', 43 IMPOSSIBLE 0.0 'LOS blocked by terrain.']",
                   badges(rebadged));
             assertNull(rebadged.hoverBest(), "A unit with a card has no hover roll");
-            GpuFireOrders.Snapshot none = command(firing, fire -> fire.selectWeapon(-1));
+            GpuFireOrders.Snapshot none = GpuFiringFixture.command(firing, fire -> fire.selectWeapon(-1));
             GpuFireOrders.FrontArc arc = none.frontArc();
             assertEquals(List.of(-1, 0, 0, 64, true, false), List.of(none.selectedWeapon(), none.badges().size(),
-                  arc.facing(), arc.hexes().size(), arc.hexes().contains(NORTH), arc.hexes().contains(EAST)),
+                  arc.facing(), arc.hexes().size(), arc.hexes().contains(GpuFiringFixture.NORTH), arc.hexes().contains(GpuFiringFixture.EAST)),
                   "Without a weapon: no badges, and the front arc on the board holds the Crab ahead, not the Quickdraw"
                         + " beside");
         }
@@ -158,17 +138,17 @@ class GpuFireOrdersTest {
 
     @Test
     void lettersStayWhenThePrimaryChanges() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            GpuFireOrders.Snapshot before = command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
-            GpuFireOrders.Snapshot after = command(firing, fire -> fire.setPrimary(TargetKey.unit(crab.getId())));
-            assertEquals(List.of("A 42 primary front", "B 44 secondary +1 front"), targets(before));
-            assertEquals(List.of("A 42 secondary +1 front", "B 44 primary front"), targets(after),
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFireOrders.Snapshot before = GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+            GpuFireOrders.Snapshot after = GpuFiringFixture.command(firing, fire -> fire.setPrimary(TargetKey.unit(crab.getId())));
+            assertEquals(List.of("A 42 primary front", "B 44 secondary +1 front"), GpuFiringFixture.targets(before));
+            assertEquals(List.of("A 42 secondary +1 front", "B 44 primary front"), GpuFiringFixture.targets(after),
                   "The letters stay; the rules now make the Crab primary");
-            assertEquals(List.of("Medium Laser LA@44", "AC/20 RT@42"), queue(firing), "Its attacks fire first");
+            assertEquals(List.of("Medium Laser LA@44", "AC/20 RT@42"), GpuFiringFixture.queue(firing), "Its attacks fire first");
             verify(firing.gui).addToast(ToastLevel.INFO, Messages.getString("GpuBoard.hud.fire.primary",
                   "Crab CRB-20", "+1", "+1"));
         }
@@ -176,62 +156,62 @@ class GpuFireOrdersTest {
 
     @Test
     void aFrontArcTargetStaysPrimary() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity quickdraw = enemy(firing, "Quickdraw QKD-8X.mtf", 45, EAST);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(right, TargetKey.unit(quickdraw.getId())));
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity quickdraw = GpuFiringFixture.enemy(firing, "Quickdraw QKD-8X.mtf", 45, GpuFiringFixture.EAST);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(right, TargetKey.unit(quickdraw.getId())));
             List<EntityAction> queued = onSwing(firing.display::getAttacks);
-            GpuFireOrders.Snapshot refused = command(firing,
+            GpuFireOrders.Snapshot refused = GpuFiringFixture.command(firing,
                   fire -> fire.setPrimary(TargetKey.unit(quickdraw.getId())));
-            assertEquals(List.of("A 42 primary front", "B 45 secondary +1"), targets(refused));
-            assertSameActions(queued, onSwing(firing.display::getAttacks));
+            assertEquals(List.of("A 42 primary front", "B 45 secondary +1"), GpuFiringFixture.targets(refused));
+            GpuFiringFixture.assertSameActions(queued, onSwing(firing.display::getAttacks));
             verify(firing.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.fire.cannotBePrimary",
                   "Quickdraw QKD-8X", "Archer ARC-2R"));
-            command(firing, fire -> fire.setPrimary(TargetKey.unit(firing.left.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.setPrimary(TargetKey.unit(firing.left.getId())));
             verify(firing.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.fire.assignFirst"));
         }
     }
 
     @Test
     void retargetKeepsTheAttacksPlaceInTheFireOrder() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
-            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"), queue(firing));
-            GpuFireOrders.Snapshot moved = command(firing, fire -> fire.retarget(cannon, TargetKey.unit(crab.getId())));
-            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@44", "Medium Laser LA@44"), queue(firing),
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"), GpuFiringFixture.queue(firing));
+            GpuFireOrders.Snapshot moved = GpuFiringFixture.command(firing, fire -> fire.retarget(cannon, TargetKey.unit(crab.getId())));
+            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@44", "Medium Laser LA@44"), GpuFiringFixture.queue(firing),
                   "The cannon joins the Crab's attacks ahead of the laser it was declared before");
-            assertEquals(List.of("A 42 primary front", "B 44 secondary +1 front"), targets(moved));
-            assertEquals("used: AC/20 RT, Medium Laser LA, Medium Laser RA", used(firing),
+            assertEquals(List.of("A 42 primary front", "B 44 secondary +1 front"), GpuFiringFixture.targets(moved));
+            assertEquals("used: AC/20 RT, Medium Laser LA, Medium Laser RA", GpuFiringFixture.used(firing),
                   "Only the queued weapons count as fired");
         }
     }
 
     @Test
     void moveSwapsOnlyWithinATarget() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
             List<EntityAction> queued = onSwing(firing.display::getAttacks);
-            GpuFireOrders.Snapshot earlier = command(firing, fire -> fire.move(right, -1));
-            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"), queue(firing));
+            GpuFireOrders.Snapshot earlier = GpuFiringFixture.command(firing, fire -> fire.move(right, -1));
+            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"), GpuFiringFixture.queue(firing));
             assertEquals(List.of(right, cannon, left), earlier.attacks().stream()
                   .map(GpuFireOrders.Attack::eqNum).toList(), "The snapshot lists the attacks in fire order");
-            command(firing, fire -> fire.move(left, -1));
-            command(firing, fire -> fire.move(left, 1));
-            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"), queue(firing),
+            GpuFiringFixture.command(firing, fire -> fire.move(left, -1));
+            GpuFiringFixture.command(firing, fire -> fire.move(left, 1));
+            assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"), GpuFiringFixture.queue(firing),
                   "An attack never moves past another target's attack, nor past the end");
             List<EntityAction> reordered = onSwing(firing.display::getAttacks);
             assertSame(queued.get(1), reordered.get(0), "The display keeps its own action objects");
@@ -247,14 +227,14 @@ class GpuFireOrdersTest {
      */
     @Test
     void aWoodedHexIsTargetedAndAssignedAsAUnitIs() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             // The board's light woods north-east of the Atlas, beside the Archer.
             Coords woods = new Coords(7, 2);
-            int laser = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int laser = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             // Nothing armed: the click only targets the woods, to clear them.
-            GpuFireOrders.Snapshot focused = command(firing, fire -> fire.clickHex(woods, 0, -1));
+            GpuFireOrders.Snapshot focused = GpuFiringFixture.command(firing, fire -> fire.clickHex(woods, 0, -1));
             Targetable chosen = onSwing(firing.display::getTarget);
             TargetKey hex = TargetKey.of(chosen);
             assertEquals(List.of(Targetable.TYPE_HEX_CLEAR, woods), List.of(chosen.getTargetType(),
@@ -263,38 +243,38 @@ class GpuFireOrdersTest {
             assertEquals(List.of(), focused.attacks());
             assertEquals(hex, weaponRow(focused, laser).target(), "The rows roll at the hex");
 
-            command(firing, fire -> fire.clickHex(woods, 0, laser));
-            GpuFireOrders.Snapshot assigned = command(firing, fire -> fire.assign(cannon, hex));
-            assertEquals(List.of("Medium Laser RA@" + hex.id(), "AC/20 RT@" + hex.id()), queue(firing));
+            GpuFiringFixture.command(firing, fire -> fire.clickHex(woods, 0, laser));
+            GpuFireOrders.Snapshot assigned = GpuFiringFixture.command(firing, fire -> fire.assign(cannon, hex));
+            assertEquals(List.of("Medium Laser RA@" + hex.id(), "AC/20 RT@" + hex.id()), GpuFiringFixture.queue(firing));
             assertEquals(List.of(hex, hex), assigned.attacks().stream().map(GpuFireOrders.Attack::target).toList());
-            assertEquals(List.of("A " + hex.id() + " primary front"), targets(assigned));
+            assertEquals(List.of("A " + hex.id() + " primary front"), GpuFiringFixture.targets(assigned));
             assertEquals(woods, assigned.targets().getFirst().hex(), "The board marks the hex");
 
-            GpuFireOrders.Snapshot both = command(firing,
+            GpuFireOrders.Snapshot both = GpuFiringFixture.command(firing,
                   fire -> fire.assign(left, TargetKey.unit(firing.ahead.getId())));
-            assertEquals(List.of("A " + hex.id() + " primary front", "B 42 secondary +1 front"), targets(both));
+            assertEquals(List.of("A " + hex.id() + " primary front", "B 42 secondary +1 front"), GpuFiringFixture.targets(both));
         }
     }
 
     /** A row dropped two places away (H29): the attack takes that place and the others keep their order. */
     @Test
     void moveTakesAnAttackSeveralPlacesInOneCommand() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             for (int weapon : List.of(cannon, right, left)) {
-                command(firing, fire -> fire.assign(weapon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(weapon, TargetKey.unit(firing.ahead.getId())));
             }
-            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), queue(firing));
-            command(firing, fire -> fire.move(left, -2));
-            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), queue(firing),
+            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), GpuFiringFixture.queue(firing));
+            GpuFiringFixture.command(firing, fire -> fire.move(left, -2));
+            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), GpuFiringFixture.queue(firing),
                   "The left arm's laser fires first, the others in their order (no swap with the cannon)");
-            command(firing, fire -> fire.move(left, 3));
-            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), queue(firing),
+            GpuFiringFixture.command(firing, fire -> fire.move(left, 3));
+            assertEquals(List.of("Medium Laser LA@42", "AC/20 RT@42", "Medium Laser RA@42"), GpuFiringFixture.queue(firing),
                   "Nothing moves past the last attack");
-            command(firing, fire -> fire.move(left, 2));
-            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), queue(firing));
+            GpuFiringFixture.command(firing, fire -> fire.move(left, 2));
+            assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@42"), GpuFiringFixture.queue(firing));
         }
     }
 
@@ -304,12 +284,12 @@ class GpuFireOrdersTest {
      */
     @Test
     void aQueuedAttackOnAUnitThatLeftTheGameHasNoRoll() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
             List<Integer> untargeted = new ArrayList<>();
             GpuFireOrders.Snapshot after = onSwing(() -> {
                 firing.board.game.removeEntity(firing.ahead.getId(), IEntityRemovalConditions.REMOVE_SALVAGEABLE);
@@ -332,8 +312,8 @@ class GpuFireOrdersTest {
 
     @Test
     void setAmmoDeclaresTheAttackAgainWithTheNewAmmunitionInItsPlace() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity crab = enemy(firing, "Crab CRB-20.mtf", 44, NORTH);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
             WeaponMounted atm = onSwing(() -> {
                 Mek atlas = (Mek) firing.attacker;
                 WeaponMounted launcher = (WeaponMounted) atlas.addEquipment(EquipmentType.get("CLATM6"),
@@ -346,20 +326,20 @@ class GpuFireOrdersTest {
                 return launcher;
             });
             int launcher = firing.attacker.getEquipmentNum(atm);
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.assign(launcher, TargetKey.unit(crab.getId())));
-            GpuFireOrders.Snapshot standard = command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(launcher, TargetKey.unit(crab.getId())));
+            GpuFireOrders.Snapshot standard = GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(crab.getId())));
             GpuFireOrders.WeaponRow before = weaponRow(standard, launcher);
             int extended = before.ammo().get(1).eqNum();
-            GpuFireOrders.Snapshot changed = command(firing, fire -> fire.setAmmo(launcher, before.ammo().get(1)));
+            GpuFireOrders.Snapshot changed = GpuFiringFixture.command(firing, fire -> fire.setAmmo(launcher, before.ammo().get(1)));
             assertEquals(List.of("ATM 6 LA Missile 2\u00D76 dmg 4 heat mode '' ammo [1/34:[LA] Standard ATM/6  (10),"
                         + " 1/35:[LA] Extended-Range ATM/6  (10)] loaded 0 shots 10 -> 44 7 58.3 '' usable",
                   "ATM 6 LA Missile 1\u00D76 dmg 4 heat mode '' ammo [1/34:[LA] Standard ATM/6  (10),"
                         + " 1/35:[LA] Extended-Range ATM/6  (10)] loaded 1 shots 10 -> 44 7 58.3 '' usable"),
                   List.of(row(standard, launcher), row(changed, launcher)));
-            assertEquals(List.of("AC/20 RT@42", "ATM 6 LA@44", "Medium Laser LA@44"), queue(firing),
+            assertEquals(List.of("AC/20 RT@42", "ATM 6 LA@44", "Medium Laser LA@44"), GpuFiringFixture.queue(firing),
                   "The launcher's attack keeps its place");
             AmmoMounted loaded = onSwing(atm::getLinkedAmmo);
             WeaponAttackAction attack = (WeaponAttackAction) onSwing(firing.display::getAttacks).get(1);
@@ -376,7 +356,7 @@ class GpuFireOrdersTest {
      */
     @Test
     void aBinIsChosenByItsCarrierAndItsNumberThere() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Entity tractor = GpuFiringFixture.unit("Bulldog Medium Tank.blk", 50, new Coords(8, 8));
             Entity trailer = GpuFiringFixture.unit("Bulldog Medium Tank.blk", 51, new Coords(8, 9));
             GpuFireOrders.Snapshot towing = onSwing(() -> {
@@ -403,11 +383,11 @@ class GpuFireOrdersTest {
             assertEquals(own.eqNum(), towed.eqNum(), "The trailer numbers its bin as the tractor numbers its own");
             assertEquals(bins.indexOf(own), weaponRow(towing, srm).loadedAmmo());
 
-            GpuFireOrders.Snapshot loaded = command(firing, fire -> fire.setAmmo(srm, towed));
+            GpuFireOrders.Snapshot loaded = GpuFiringFixture.command(firing, fire -> fire.setAmmo(srm, towed));
             assertSame(trailer, onSwing(() -> launcher.getLinkedAmmo().getEntity()), "The trailer's bin feeds it");
             verify(firing.client).sendAmmoChange(tractor.getId(), srm, towed.eqNum(), trailer.getId(), 0);
             assertEquals(bins.indexOf(towed), weaponRow(loaded, srm).loadedAmmo());
-            command(firing, fire -> fire.setAmmo(srm, own));
+            GpuFiringFixture.command(firing, fire -> fire.setAmmo(srm, own));
             assertSame(tractor, onSwing(() -> launcher.getLinkedAmmo().getEntity()), "and its own bin again");
         }
     }
@@ -420,8 +400,8 @@ class GpuFireOrdersTest {
      */
     @Test
     void theAimedShotChoicesAreTheHandlersOfferInPlaceOfItsDialog() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity tank = enemy(firing, "Bulldog Medium Tank.blk", 46, NORTH);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity tank = GpuFiringFixture.enemy(firing, "Bulldog Medium Tank.blk", 46, GpuFiringFixture.NORTH);
             onSwing(() -> {
                 firing.ahead.setShutDown(true);
                 tank.setShutDown(true);
@@ -430,9 +410,9 @@ class GpuFireOrdersTest {
             });
             present(firing.gui, firing.board.view, firing.board.source);
             try {
-                int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-                int missiles = eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
-                GpuFireOrders.Aim archer = command(firing,
+                int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+                int missiles = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
+                GpuFireOrders.Aim archer = GpuFiringFixture.command(firing,
                       fire -> fire.focusTarget(TargetKey.unit(firing.ahead.getId()))).aim();
                 assertEquals(List.of("Head", "Center Torso", "Right Torso", "Left Torso", "Right Arm", "Left Arm",
                       "Right Leg", "Left Leg"), archer.locations());
@@ -443,21 +423,21 @@ class GpuFireOrdersTest {
                 assertEquals(List.of(), onSwing(() -> Arrays.stream(Window.getWindows())
                       .filter(AimedShotDialog.class::isInstance).toList()), "No Swing aimed shot dialog");
 
-                assertEquals(Mek.LOC_LEFT_ARM, command(firing, fire -> fire.aim(cannon, Mek.LOC_LEFT_ARM)).aim()
+                assertEquals(Mek.LOC_LEFT_ARM, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Mek.LOC_LEFT_ARM)).aim()
                       .location());
-                command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 WeaponAttackAction attack = onSwing(() -> (WeaponAttackAction) firing.display.getAttacks().getFirst());
                 assertEquals(List.of(Mek.LOC_LEFT_ARM, AimingMode.IMMOBILE), List.of(attack.getAimedLocation(),
                       attack.getAimingMode()), "The shot is declared aimed at the chosen location");
-                assertEquals(Entity.LOC_NONE, command(firing, fire -> fire.aim(cannon, Entity.LOC_NONE)).aim()
+                assertEquals(Entity.LOC_NONE, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Entity.LOC_NONE)).aim()
                       .location(), "Don't aim");
 
-                GpuFireOrders.Aim bulldog = command(firing,
+                GpuFireOrders.Aim bulldog = GpuFiringFixture.command(firing,
                       fire -> fire.focusTarget(TargetKey.unit(tank.getId()))).aim();
                 assertEquals(List.of("Body", "Front", "Right", "Left", "Rear", "Turret"), bulldog.locations());
                 assertEquals(List.of(false, false, true, true, true, true), bulldog.enabled());
                 assertEquals(Tank.LOC_REAR, bulldog.location());
-                assertEquals(Tank.LOC_REAR, command(firing, fire -> fire.aim(cannon, Tank.LOC_FRONT)).aim()
+                assertEquals(Tank.LOC_REAR, GpuFiringFixture.command(firing, fire -> fire.aim(cannon, Tank.LOC_FRONT)).aim()
                       .location(), "The front, which the attacker cannot see, is refused");
             } finally {
                 dismiss();
@@ -467,7 +447,7 @@ class GpuFireOrdersTest {
 
     @Test
     void autoEndFiringIsHonouredOnceAfterAPlus() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Entity atlas = firing.attacker;
             onSwing(() -> {
                 // Swing's Fire declares the rear lasers too (they cannot hit the Archer ahead)
@@ -479,35 +459,35 @@ class GpuFireOrdersTest {
                 firing.board.source.refresh();
                 return null;
             });
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int[] others = { eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO), eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO),
-                             eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM) };
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int[] others = { GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO), GpuFiringFixture.eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO),
+                             GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM) };
             for (int weapon : others) {
-                command(firing, fire -> fire.assign(weapon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(weapon, TargetKey.unit(firing.ahead.getId())));
             }
             onSwing(() -> {
                 GUIPreferences.getInstance().setAutoEndFiring(true);
                 return null;
             });
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
-            command(firing, fire -> fire.move(right, -1));
-            command(firing, fire -> fire.setPrimary(TargetKey.unit(firing.ahead.getId())));
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(right, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.move(right, -1));
+            GpuFiringFixture.command(firing, fire -> fire.setPrimary(TargetKey.unit(firing.ahead.getId())));
             verify(firing.client, never()).sendAttackData(anyInt(), any());
-            GpuFireOrders.Snapshot ended = command(firing,
+            GpuFireOrders.Snapshot ended = GpuFiringFixture.command(firing,
                   fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
             verify(firing.client, times(1)).sendAttackData(anyInt(), any());
             assertNull(onSwing(firing.display::currentEntity), "The last weapon ended the turn");
             assertSame(GpuFireOrders.Snapshot.EMPTY, ended);
             assertEquals(List.of("Medium Laser CT@42", "Medium Laser CT@42", "LRM 20 LT@42", "SRM 6 LT@42",
-                  "Medium Laser RA@42", "Medium Laser LA@42", "AC/20 RT@42"), sent(firing, atlas.getId()),
+                  "Medium Laser RA@42", "Medium Laser LA@42", "AC/20 RT@42"), GpuFiringFixture.sent(firing, atlas.getId()),
                   "Sent once, in the order the native commands left; the last shot where Fire queued it");
         }
     }
 
     @Test
     void aSensorContactIsNotTargetable() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             onSwing(() -> {
                 Game game = firing.board.game;
                 game.getOptions().getOption(OptionsConstants.ADVANCED_DOUBLE_BLIND).setValue(true);
@@ -517,14 +497,14 @@ class GpuFireOrdersTest {
                 firing.board.source.refresh();
                 return null;
             });
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            GpuFireOrders.Snapshot focused = command(firing,
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            GpuFireOrders.Snapshot focused = GpuFiringFixture.command(firing,
                   fire -> fire.focusTarget(TargetKey.unit(firing.left.getId())));
-            GpuFireOrders.Snapshot assigned = command(firing,
+            GpuFireOrders.Snapshot assigned = GpuFiringFixture.command(firing,
                   fire -> fire.assign(right, TargetKey.unit(firing.left.getId())));
             assertEquals(List.of(GpuFireOrders.Focus.NONE, GpuFireOrders.Focus.NONE), List.of(focused.focus(),
                   assigned.focus()));
-            assertEquals(List.of(), queue(firing));
+            assertEquals(List.of(), GpuFiringFixture.queue(firing));
             verify(firing.gui, times(2)).addToast(ToastLevel.WARNING,
                   Messages.getString("GpuBoard.hud.fire.contactNotTargetable"));
         }
@@ -532,11 +512,11 @@ class GpuFireOrdersTest {
 
     @Test
     void aRefusalToastCarriesToHitForsReason() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            int left = eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            GpuFireOrders.Snapshot refused = command(firing,
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            GpuFireOrders.Snapshot refused = GpuFiringFixture.command(firing,
                   fire -> fire.assign(left, TargetKey.unit(firing.left.getId())));
-            assertEquals(List.of(), queue(firing));
+            assertEquals(List.of(), GpuFiringFixture.queue(firing));
             assertEquals(List.of(), refused.attacks());
             // toHitFor's reason, as GpuFiringQueueTest recorded it for this shot
             verify(firing.gui).addToast(ToastLevel.WARNING, Messages.getString("GpuBoard.hud.fire.refused",
@@ -546,11 +526,11 @@ class GpuFireOrdersTest {
 
     @Test
     void fireDialogsGoThroughTheNativeModalBridge() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
-            Entity quickdraw = enemy(firing, "Quickdraw QKD-8X.mtf", 45, EAST);
-            int right = eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int cannon = eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            command(firing, fire -> fire.assign(right, TargetKey.unit(quickdraw.getId())));
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity quickdraw = GpuFiringFixture.enemy(firing, "Quickdraw QKD-8X.mtf", 45, GpuFiringFixture.EAST);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            GpuFiringFixture.command(firing, fire -> fire.assign(right, TargetKey.unit(quickdraw.getId())));
             onSwing(() -> {
                 // On the EDT: Mockito stubs the next call on the mock from any thread, and the source's jobs call it
                 doCallRealMethod().when(firing.gui).doYesNoDialog(anyString(), anyString());
@@ -567,9 +547,9 @@ class GpuFireOrdersTest {
                 firing.board.source.answer(asked.id(), new DialogAnswer(0, List.of(), null, false, List.of()));
                 GpuFireOrders.Snapshot answered = onSwing(() -> firing.board.source.fire()
                       .capture(firing.display, null));
-                assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@45"), queue(firing),
+                assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@45"), GpuFiringFixture.queue(firing),
                       "The removal posted during the dialog was dropped; the new primary's attack fires first");
-                assertEquals(List.of("A 45 secondary +1", "B 42 primary front"), targets(answered));
+                assertEquals(List.of("A 45 secondary +1", "B 42 primary front"), GpuFiringFixture.targets(answered));
             } finally {
                 dismiss();
             }
@@ -578,7 +558,7 @@ class GpuFireOrdersTest {
 
     @Test
     void closingTheSourceRemovesTheListenerTheOrdersAddedWhileFiring() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             List<Integer> counts = onSwing(() -> {
                 Game game = firing.board.game;
                 int before = game.getGameListeners().size();
@@ -601,7 +581,7 @@ class GpuFireOrdersTest {
 
     @Test
     void aHandheldWeaponIsReleasedOnItsOwnUnit() throws Exception {
-        try (GpuFiringFixture firing = firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Entity handheld = GpuFiringFixture.unit("TestHandheldWeapon.blk", 70, null);
             WeaponMounted gun = onSwing(() -> {
                 handheld.setOwner(firing.board.player);
@@ -625,7 +605,7 @@ class GpuFireOrdersTest {
             });
             observed.add(handheld(firing, gun));
             // The native reorder requeues both attacks through the display's release step
-            command(firing, fire -> fire.move(firing.attacker.getEquipmentNum(rear), -1));
+            GpuFiringFixture.command(firing, fire -> fire.move(firing.attacker.getEquipmentNum(rear), -1));
             observed.add(handheld(firing, gun));
             onSwing(() -> {
                 firing.undoLastStep();
@@ -639,84 +619,17 @@ class GpuFireOrdersTest {
         }
     }
 
-    // ------------------------------------------------------------------ helpers
-
-    /** The firing fixture with the board source capturing its FiringDisplay, as the native window's source does. */
-    static GpuFiringFixture firing() throws Exception {
-        GpuFiringFixture firing = GpuFiringFixture.create();
-        firing.board.panel = firing.display;
-        onSwing(() -> {
-            // The secondary target modifiers below are the default rules'
-            firing.board.game.initializeRulesManager(OptionsConstants.RULES_CORE);
-            firing.board.source.refresh();
-            return null;
-        });
-        return firing;
-    }
-
-    /** An identified enemy unit of the test resources at the hex, facing north. */
-    static Entity enemy(GpuFiringFixture firing, String file, int id, Coords hex) throws Exception {
-        Entity unit = GpuFiringFixture.unit(file, id, hex);
-        onSwing(() -> {
-            unit.setOwner(firing.enemy);
-            firing.board.game.addEntity(unit, false);
-            unit.addBeenSeenBy(firing.board.player);
-            firing.board.source.refresh();
-            return null;
-        });
-        return unit;
-    }
-
-    /** Posts the command as the render thread does and returns the orders the source captures after it ran. */
-    static GpuFireOrders.Snapshot command(GpuFiringFixture firing, Consumer<GpuFireOrders> command)
-          throws Exception {
-        command.accept(firing.board.source.fire());
-        return onSwing(() -> firing.board.source.fire().capture(firing.display, null));
-    }
-
     /** The orders once the badge job a capture posted ran (it republishes in its own event), hovering the hex. */
     private static GpuFireOrders.Snapshot afterBadgeJob(GpuFiringFixture firing, Coords hover) throws Exception {
         onSwing(() -> null);
         return onSwing(() -> firing.board.source.fire().capture(firing.display, hover));
     }
 
-    static int eqNum(GpuFiringFixture firing, String name, int location) {
-        return firing.attacker.getEquipmentNum(weapon(firing.attacker, name, location));
-    }
-
-    /** The display's weapon attacks in fire order: "weapon location@target". */
-    static List<String> queue(GpuFiringFixture firing) throws Exception {
-        return onSwing(() -> orders(firing.board.game, firing.display.getAttacks()));
-    }
-
-    /** The weapon attacks among the actions: "weapon location@target". */
-    static List<String> orders(Game game, List<EntityAction> actions) {
-        return actions.stream().filter(WeaponAttackAction.class::isInstance).map(WeaponAttackAction.class::cast)
-              .map(attack -> {
-                  Entity carrier = attack.getEntity(game);
-                  Mounted<?> weapon = carrier.getEquipment(attack.getWeaponId());
-                  return weapon.getName() + " " + carrier.getLocationAbbr(weapon.getLocation()) + "@"
-                        + attack.getTargetId();
-              }).toList();
-    }
-
     /** The queue, whether the handheld weapon counts as fired, and how many attacks the game holds. */
     private static String handheld(GpuFiringFixture firing, WeaponMounted gun) throws Exception {
-        List<String> queue = queue(firing);
+        List<String> queue = GpuFiringFixture.queue(firing);
         return onSwing(() -> queue + " handheld fired " + gun.isUsedThisRound() + " game actions "
               + firing.board.game.getActionsVector().size());
-    }
-
-    /** The Atlas's weapons marked as fired this round. */
-    static String used(GpuFiringFixture firing) throws Exception {
-        return onSwing(() -> "used: " + firing.attacker.getWeaponList().stream().filter(Mounted::isUsedThisRound)
-              .map(weapon -> weapon.getName() + " " + firing.attacker.getLocationAbbr(weapon.getLocation()))
-              .sorted().collect(Collectors.joining(", ")));
-    }
-
-    /** The weapon attacks Done sent for the unit (fails unless sent once): "weapon location@target". */
-    static List<String> sent(GpuFiringFixture firing, int unitId) {
-        return orders(firing.board.game, firing.sent(unitId));
     }
 
     private static GpuFireOrders.WeaponRow weaponRow(GpuFireOrders.Snapshot fire, int eqNum) {
@@ -736,12 +649,6 @@ class GpuFireOrdersTest {
         return attack.eqNum() + " " + attack.weapon() + " " + attack.location() + " " + attack.kind() + " -> "
               + attack.target().id() + " ammo '" + attack.ammo() + "' " + attack.shots() + " " + value(attack.value())
               + " " + attack.odds() + " " + attack.detail();
-    }
-
-    static List<String> targets(GpuFireOrders.Snapshot fire) {
-        return fire.targets().stream().map(target -> target.letter() + " " + target.key().id()
-              + (target.primary() ? " primary" : " secondary +" + target.secondaryModifier())
-              + (target.frontArc() ? " front" : "")).toList();
     }
 
     private static String heat(GpuFireOrders.Heat heat) {
@@ -765,12 +672,5 @@ class GpuFireOrdersTest {
 
     private static String value(int value) {
         return (value == TargetRoll.IMPOSSIBLE) ? "IMPOSSIBLE" : Integer.toString(value);
-    }
-
-    static void assertSameActions(List<EntityAction> expected, List<EntityAction> actual) {
-        assertEquals(expected.size(), actual.size());
-        for (int index = 0; index < expected.size(); index++) {
-            assertSame(expected.get(index), actual.get(index), "The same action object at " + index);
-        }
     }
 }

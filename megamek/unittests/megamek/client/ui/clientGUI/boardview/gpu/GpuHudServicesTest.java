@@ -39,34 +39,20 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.widget.MegaMekButton;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** The HUD service contract of the board source: frame wiring, identity reuse, the input guard and lifecycle. */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuHudServicesTest {
     private static final long WAIT_SECONDS = 20;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void framesCarryTheServiceSnapshotsAndKeepUnchangedInstances() throws Exception {
@@ -209,7 +195,7 @@ class GpuHudServicesTest {
     void closingTheSourceRemovesEveryGameListenerItAdded() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             // The fixture's view already holds its lazily created 3D tileset, which listens for the view's lifetime.
-            int[] counts = onSwing(() -> {
+            int[] counts = GpuTestSupport.onSwing(() -> {
                 int before = fixture.game.getGameListeners().size();
                 GpuBoardSource source = new GpuBoardSource(fixture.view, () -> fixture.panel);
                 int open = fixture.game.getGameListeners().size();
@@ -226,9 +212,9 @@ class GpuHudServicesTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             // Mocks are created on the test thread; the inline mock maker may fail to attach on the EDT.
             FiringDisplay phase = mock(FiringDisplay.class);
-            MegaMekButton done = onSwing(() -> new MegaMekButton("<html><b>Fire</b></html>"));
-            MegaMekButton skip = onSwing(() -> new MegaMekButton("<html><b>Skip firing</b></html>"));
-            JPanel donePanel = onSwing(() -> {
+            MegaMekButton done = GpuTestSupport.onSwing(() -> new MegaMekButton("<html><b>Fire</b></html>"));
+            MegaMekButton skip = GpuTestSupport.onSwing(() -> new MegaMekButton("<html><b>Skip firing</b></html>"));
+            JPanel donePanel = GpuTestSupport.onSwing(() -> {
                 JPanel panel = new JPanel();
                 panel.add(done);
                 panel.add(skip);
@@ -240,13 +226,13 @@ class GpuHudServicesTest {
             when(phase.getButDone()).thenReturn(done);
             GpuBoardActions actions = new GpuBoardActions(fixture.view, () -> phase, () -> false, () -> { });
 
-            GpuBoardActions.PhaseInfo info = onSwing(() -> actions.phaseInfo(actions.phaseCommands()));
+            GpuBoardActions.PhaseInfo info = GpuTestSupport.onSwing(() -> actions.phaseInfo(actions.phaseCommands()));
             assertEquals(List.of(GpuBoardActions.DONE_ID, GpuBoardActions.SKIP_ID, GpuBoardActions.CLEAR_ID),
                   List.of(info.doneId(), info.skipId(), info.clearId()));
-            assertEquals("Fire", label(onSwing(actions::phaseCommands), info.doneId()));
+            assertEquals("Fire", label(GpuTestSupport.onSwing(actions::phaseCommands), info.doneId()));
             SwingUtilities.invokeAndWait(() -> done.setText("<html><b>Done</b></html>"));
-            assertEquals("Done", label(onSwing(actions::phaseCommands), info.doneId()));
-            assertEquals("Skip firing", label(onSwing(actions::phaseCommands), info.skipId()));
+            assertEquals("Done", label(GpuTestSupport.onSwing(actions::phaseCommands), info.doneId()));
+            assertEquals("Skip firing", label(GpuTestSupport.onSwing(actions::phaseCommands), info.skipId()));
         }
     }
 
@@ -263,7 +249,7 @@ class GpuHudServicesTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
-            CommonMenuBar menus = onSwing(() -> {
+            CommonMenuBar menus = GpuTestSupport.onSwing(() -> {
                 CommonMenuBar bar = CommonMenuBar.getMenuBarForGame();
                 bar.setPhase(GamePhase.MOVEMENT);
                 return bar;
@@ -271,14 +257,14 @@ class GpuHudServicesTest {
             when(gui.getMenuBar()).thenReturn(menus);
             try {
                 GpuBoardActions actions = new GpuBoardActions(view, () -> fixture.panel, () -> false, () -> { });
-                BoardScene.Command map = GpuBoardActions.menuItem(onSwing(actions::globalCommands),
+                BoardScene.Command map = GpuBoardActions.menuItem(GpuTestSupport.onSwing(actions::globalCommands),
                       ClientGUI.VIEW_MINI_MAP);
                 assertEquals(KeyCommandBind.getDesc(KeyCommandBind.MINIMAP), map.shortcut());
                 assertEquals(Boolean.FALSE, map.selected());
                 SwingUtilities.invokeAndWait(() -> preferences.setMinimapEnabled(true));
-                assertEquals(Boolean.TRUE, GpuBoardActions.menuItem(onSwing(actions::globalCommands),
+                assertEquals(Boolean.TRUE, GpuBoardActions.menuItem(GpuTestSupport.onSwing(actions::globalCommands),
                       ClientGUI.VIEW_MINI_MAP).selected());
-                BoardScene.Command viewMenu = onSwing(actions::globalCommands).stream()
+                BoardScene.Command viewMenu = GpuTestSupport.onSwing(actions::globalCommands).stream()
                       .filter(command -> command.children().stream().anyMatch(child -> child.id().equals(map.id())))
                       .findFirst().orElseThrow();
                 assertEquals("", viewMenu.shortcut(), "A submenu has no accelerator");
@@ -326,11 +312,5 @@ class GpuHudServicesTest {
             Thread.sleep(5);
         }
         return fail("No dialog was shown");
-    }
-
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 }

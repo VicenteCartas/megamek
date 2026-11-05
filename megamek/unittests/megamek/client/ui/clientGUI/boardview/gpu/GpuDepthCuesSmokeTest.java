@@ -80,7 +80,7 @@ class GpuDepthCuesSmokeTest {
                     terrain.animate(.5f, List.of());
                     for (View view : VIEWS) {
                         place(camera, view, scene.get());
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
+                        GpuReviewFrame.settle(terrain, null, scene.get(), camera);
                         // Each look starts from this view's own focus: the first, without cues, forgets the last one.
                         for (Look look : LOOKS) {
                             show(frame, look);
@@ -90,13 +90,13 @@ class GpuDepthCuesSmokeTest {
                     }
                     View from = VIEWS.get(1), to = VIEWS.get(0);
                     place(camera, from, scene.get());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
+                    GpuReviewFrame.settle(terrain, null, scene.get(), camera);
                     show(frame, LOOKS.getFirst());
                     frame.render(terrain, camera, scene.get());
                     show(frame, LOOKS.getLast());
                     frame.render(terrain, camera, scene.get());
                     place(camera, to, scene.get());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene.get(), camera);
+                    GpuReviewFrame.settle(terrain, null, scene.get(), camera);
                     frame.setFrameSeconds(1 / 60f);
                     for (int index = 1; index <= EASING_FRAMES.get(EASING_FRAMES.size() - 1); index++) {
                         frame.render(terrain, camera, scene.get());
@@ -148,19 +148,19 @@ class GpuDepthCuesSmokeTest {
                             view = new GpuBattleView(fixture.source);
                             view.create();
                             GpuBoardTestUi.present(view);
-                            var atmosphere = (GpuAtmosphere) GpuCamouflageReview.field(view, "atmosphere");
-                            assertNotNull(GpuCamouflageReview.field(atmosphere, "depthCues"),
+                            var atmosphere = (GpuAtmosphere) GpuTestSupport.field(view, "atmosphere");
+                            assertNotNull(GpuTestSupport.field(atmosphere, "depthCues"),
                                   "Saved on, the depth cues link while the board loads");
-                            place(view.boardCamera, VIEWS.get(0), (BoardScene) GpuCamouflageReview.field(view, "scene"));
+                            place(view.boardCamera, VIEWS.get(0), (BoardScene) GpuTestSupport.field(view, "scene"));
                             GpuBoardTestUi.present(view);
-                            var sky = (GpuSkyVisibility) GpuCamouflageReview.field(view, "skyVisibility");
-                            assertEquals(GpuDepthCues.STRENGTH, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
-                            assertEquals(GpuSkyVisibility.STRENGTH, GpuCamouflageReview.field(sky, "strength"));
+                            var sky = (GpuSkyVisibility) GpuTestSupport.field(view, "skyVisibility");
+                            assertEquals(GpuDepthCues.STRENGTH, GpuTestSupport.<Object>field(atmosphere, "depthCueStrength"));
+                            assertEquals(GpuSkyVisibility.STRENGTH, GpuTestSupport.<Object>field(sky, "strength"));
                             GpuBoardTestUi.capture(new File(output, "battle-view-on.png"));
                             GpuBoardTestUi.pressTuning(GpuBoardTestUi.tuning(view, "tuning-depth-cues"));
                             GpuBoardTestUi.present(view);
-                            assertEquals(0f, GpuCamouflageReview.field(atmosphere, "depthCueStrength"));
-                            assertEquals(GpuSkyVisibility.STRENGTH, GpuCamouflageReview.field(sky, "strength"),
+                            assertEquals(0f, GpuTestSupport.<Object>field(atmosphere, "depthCueStrength"));
+                            assertEquals(GpuSkyVisibility.STRENGTH, GpuTestSupport.<Object>field(sky, "strength"),
                                   "Sky occlusion is lighting");
                             GpuBoardTestUi.capture(new File(output, "battle-view-off.png"));
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

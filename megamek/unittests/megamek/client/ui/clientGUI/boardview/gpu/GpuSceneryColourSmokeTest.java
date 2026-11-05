@@ -197,14 +197,14 @@ class GpuSceneryColourSmokeTest {
                         camera.center(BoardGeometry.center(coords, 0));
                         camera.camera.zoom = .1f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "game-level-first-" + coords.getBoardNum() + ".png"));
                     }
                     camera.center(BoardGeometry.center(new Coords(6, 5), 0));
                     camera.camera.zoom = .9f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     profiler.enable();
                     profiler.reset();
@@ -218,7 +218,7 @@ class GpuSceneryColourSmokeTest {
                     camera.center(BoardGeometry.center(LEVEL_CORAL, 0).lerp(BoardGeometry.center(LEVEL_TREE, 0), .5f));
                     camera.camera.zoom = .5f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(OUTPUT, "game-levels.png"));
                     levels.addAll(List.of(level(terrain, LEVEL_CORAL), level(terrain, LEVEL_TREE)));
@@ -226,7 +226,7 @@ class GpuSceneryColourSmokeTest {
                         camera.center(BoardGeometry.center(coords, 0));
                         camera.camera.zoom = .1f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "game-level-" + coords.getBoardNum() + ".png"));
                         levels.add(level(terrain, coords));
@@ -235,7 +235,7 @@ class GpuSceneryColourSmokeTest {
                         camera.center(BoardGeometry.center(coords, 0));
                         camera.camera.zoom = .1f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, "game-" + coords.getBoardNum() + ".png"));
                     }
@@ -243,7 +243,7 @@ class GpuSceneryColourSmokeTest {
                     // it leaves, and the roof is drawn as before.
                     camera.center(BoardGeometry.center(ROOF, 2));
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(OUTPUT, "game-roof-" + ROOF.getBoardNum() + ".png"));
                     terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, ROOF, BoardGeometry.level());
@@ -289,13 +289,13 @@ class GpuSceneryColourSmokeTest {
      */
     private static int[] objectParts(GpuTerrain terrain) throws ReflectiveOperationException {
         int[] result = new int[3];
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (String[] kind : new String[][] { { "decorationRenderables", "decorationOwners" }, { "looseDecorations", "looseOwners" } }) {
-                var parts = (Array<?>) field(chunk, kind[0]);
-                var owners = (Array<?>) field(chunk, kind[1]);
+                var parts = (Array<?>) GpuTestSupport.field(chunk, kind[0]);
+                var owners = (Array<?>) GpuTestSupport.field(chunk, kind[1]);
                 for (int i = 0; i < parts.size; i++) {
                     var part = (Renderable) parts.get(i);
-                    var feature = (BoardScene.Feature) field(owners.get(i), "decorationFeature");
+                    var feature = (BoardScene.Feature) GpuTestSupport.field(owners.get(i), "decorationFeature");
                     assertTrue(java.util.Arrays.equals(RigidGlb.packed(feature.colours()), (float[]) part.userData),
                           feature.asset() + " carries its colours " + feature.colours().slots());
                     if (kind[0].equals("looseDecorations")) { result[1]++; } else {
@@ -341,7 +341,7 @@ class GpuSceneryColourSmokeTest {
                     camera.center(BoardGeometry.center(at, 0));
                     camera.camera.zoom = .1f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(OUTPUT, "scar-clean.png"));
                     Vector3 aim = terrain.editorObjects(at).getFirst().bounds().getCenter(new Vector3());
@@ -425,17 +425,17 @@ class GpuSceneryColourSmokeTest {
                     camera.update();
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     for (boolean tactical : new boolean[] { false, true, false }) {
                         terrain.setFluffHidden(tactical);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         String view = tactical ? "Tactical View" : "3D view";
                         GpuReviewFrame.save(new File(OUTPUT, "plants-" + (tactical ? "tactical" : "3d") + ".png"));
                         int plants = 0, objects = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
                             for (String owners : List.of("decorationOwners", "looseOwners")) {
-                                for (Object owner : (Array<?>) field(chunk, owners)) {
+                                for (Object owner : (Array<?>) GpuTestSupport.field(chunk, owners)) {
                                     if (!GpuLegacyImportSmokeTest.drawn(terrain, owner)) { continue; }
                                     if (plant(owner)) { plants++; } else { objects++; }
                                 }
@@ -468,7 +468,7 @@ class GpuSceneryColourSmokeTest {
 
     /** A placed plant: in the tree stand, or a foliage model the stand cannot hold. */
     private static boolean plant(Object prop) throws ReflectiveOperationException {
-        return field(prop, "treeAsset") != null || GpuTerrain.foliageModel(((ModelInstance) field(prop, "instance")).model);
+        return GpuTestSupport.field(prop, "treeAsset") != null || GpuTerrain.foliageModel(((ModelInstance) GpuTestSupport.field(prop, "instance")).model);
     }
 
     /**
@@ -541,7 +541,7 @@ class GpuSceneryColourSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(6, 5), 0));
                         camera.camera.zoom = .9f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         profiler.enable();
                         profiler.reset();
@@ -555,12 +555,12 @@ class GpuSceneryColourSmokeTest {
                     camera.center(BoardGeometry.center(cars, 0));
                     camera.camera.zoom = .1f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, coloured, camera);
+                    GpuReviewFrame.settle(terrain, null, coloured, camera);
                     frame.render(terrain, camera, coloured);
                     GpuReviewFrame.save(new File(OUTPUT, "editor-rebuild-before.png"));
                     Object bounds = carBounds(terrain, cars);
                     terrain.update(edited);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     assertTrue(bounds == carBounds(terrain, cars), "The edit rebuilds the chunk and reuses the cars' hex");
                     frame.render(terrain, camera, edited);
                     GpuReviewFrame.save(new File(OUTPUT, "editor-rebuild-after.png"));
@@ -569,7 +569,7 @@ class GpuSceneryColourSmokeTest {
                     frame.render(terrain, camera, moved);
                     GpuReviewFrame.save(new File(OUTPUT, "editor-drag-preview.png"));
                     terrain.update(moved);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, moved, camera);
+                    GpuReviewFrame.settle(terrain, null, moved, camera);
                     frame.render(terrain, camera, moved);
                     GpuReviewFrame.save(new File(OUTPUT, "editor-drag-released.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -630,9 +630,9 @@ class GpuSceneryColourSmokeTest {
                     terrain.update(scene);
                     camera.center(BoardGeometry.center(ground, 0));
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     // The zoom at which the tree's larger side spans a number of pixels (pixels go as 1 / zoom).
-                    var bounds = (com.badlogic.gdx.math.collision.BoundingBox) field(levelled(terrain, ground), "bounds");
+                    var bounds = (com.badlogic.gdx.math.collision.BoundingBox) GpuTestSupport.field(levelled(terrain, ground), "bounds");
                     float unit = Math.max(bounds.getWidth(), bounds.getHeight()) * BoardCamera.pixelsPerUnit(camera.camera)
                           * camera.camera.zoom;
                     float near = unit / 300, simplest = unit / 12, middle = unit / 45;
@@ -650,7 +650,7 @@ class GpuSceneryColourSmokeTest {
                         zoom(terrain, frame, camera, scene, middle, hover);
                         levels.add(level(terrain, coords));
                         if (hover != null) {
-                            for (var material : ((com.badlogic.gdx.graphics.g3d.ModelInstance) field(levelled(terrain, roof),
+                            for (var material : ((com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(levelled(terrain, roof),
                                   "instance")).materials) {
                                 assertTrue(material.has(GpuBuildingCutaway.TYPE) && material.has(
                                             com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute.Type),
@@ -688,7 +688,7 @@ class GpuSceneryColourSmokeTest {
           Coords hover) throws Exception {
         camera.camera.zoom = zoom;
         camera.update();
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         terrain.animate(0, List.of(), GpuTerrain.DEFAULT_BUILDING_OPACITY, hover, hover == null ? Float.NaN : BoardGeometry.level());
         frame.render(terrain, camera, scene);
     }
@@ -722,7 +722,7 @@ class GpuSceneryColourSmokeTest {
         camera.update();
         Gdx.gl.glViewport(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
         com.badlogic.gdx.utils.ScreenUtils.clear(1, 0, 1, 1, true);
-        terrain.renderEditorSection(camera, coords, (String) field(levelled(terrain, coords), "decorationId"));
+        terrain.renderEditorSection(camera, coords, (String) GpuTestSupport.field(levelled(terrain, coords), "decorationId"));
         GpuReviewFrame.save(new File(OUTPUT, "editor-orchard-section-" + name + ".png"));
     }
 
@@ -744,9 +744,9 @@ class GpuSceneryColourSmokeTest {
 
     /** The hex's placed object with mesh levels (its prop); null for none. */
     private static Object levelled(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                if (coords.equals(field(prop, "coords")) && field(prop, "levels") != null) { return prop; }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if (coords.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "levels") != null) { return prop; }
             }
         }
         return null;
@@ -756,30 +756,24 @@ class GpuSceneryColourSmokeTest {
     private static int level(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
         Object prop = levelled(terrain, coords);
         if (prop == null) { return -1; }
-        var levels = (List<?>) field(prop, "levels");
-        int level = (Integer) field(prop, "lod");
-        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+        var levels = (List<?>) GpuTestSupport.field(prop, "levels");
+        int level = (Integer) GpuTestSupport.field(prop, "lod");
+        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
         assertTrue(instance.model == levels.get(level), coords + " draws its level " + level);
-        assertTrue(field(prop, "pickingModel") == levels.getFirst(), coords + " picks its near level");
+        assertTrue(GpuTestSupport.field(prop, "pickingModel") == levels.getFirst(), coords + " picks its near level");
         return level;
     }
 
     /** The installed bounds of a placed car of the hex, which a reused hex keeps. */
     private static Object carBounds(GpuTerrain terrain, Coords coords) throws ReflectiveOperationException {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
-                if (coords.equals(field(prop, "coords")) && field(prop, "decorationId") != null
-                      && instance.nodes.first().id.equals("car")) { return field(prop, "bounds"); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
+                if (coords.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "decorationId") != null
+                      && instance.nodes.first().id.equals("car")) { return GpuTestSupport.field(prop, "bounds"); }
             }
         }
         throw new AssertionError("No car on " + coords);
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     /** Pixels that differ at all, pixels whose largest channel difference exceeds 1/255, and the largest one. */

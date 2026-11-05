@@ -279,7 +279,7 @@ class GpuUnitCardSmokeTest {
             hud.state.sheetTab = tab;
         }
         for (int pass = 0; pass < 3; pass++) {
-            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
             ScreenUtils.clear(.1f, .13f, .13f, 1, true);
             hud.draw();
         }
@@ -288,7 +288,7 @@ class GpuUnitCardSmokeTest {
     /** The fixture's frame in the firing phase of another player's turn: no movement ribbon, nobody acting. */
     private static GpuBoardSource.Frame firing(GpuBoardSource.Frame captured) {
         GpuBattleStatus.Snapshot status = captured.status();
-        return GpuHudInputTest.frame(new GpuBattleStatus.Snapshot(status.round(), GamePhase.FIRING, false,
+        return GpuHudFixtures.frame(new GpuBattleStatus.Snapshot(status.round(), GamePhase.FIRING, false,
               status.localPlayerId(), Entity.NONE, List.of(), -1, status.units(), List.of(), false), captured.panels());
     }
 }

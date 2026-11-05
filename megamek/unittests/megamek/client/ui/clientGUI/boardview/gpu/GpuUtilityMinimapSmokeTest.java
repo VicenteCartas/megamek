@@ -97,7 +97,7 @@ class GpuUtilityMinimapSmokeTest {
             state.history.advance(0, playback -> true);
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             GpuBoardSource.Frame frame = new GpuBoardSource.Frame(scene, List.of(), null, global, "", null, 0,
-                  "", null, reports, status, GpuHudInputTest.panels(move, GpuFireOrders.Snapshot.EMPTY,
+                  "", null, reports, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
             GpuHud.Inputs inputs = new GpuHud.Inputs(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(),
                   Map.of(), null, Entity.NONE, 0), null, preferences, GpuHud.Metrics.of(width, height), List.of());
@@ -258,7 +258,7 @@ class GpuUtilityMinimapSmokeTest {
 
     /** The preferences with the contacts panel shown or hidden. */
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
-        return GpuHudInputTest.with(p, Map.of("contactsEnabled", enabled));
+        return GpuHudFixtures.with(p, Map.of("contactsEnabled", enabled));
     }
 
     /** The utilities run the camera's Tactical View, the View menu's minimap item and the HUD's panel toggles. */
@@ -707,7 +707,7 @@ class GpuUtilityMinimapSmokeTest {
         BoardScene.Unit enemy = scene.units().stream().filter(unit -> unit.id() == 7).findFirst().orElseThrow();
         List<BoardScene.Combat> shots = new ArrayList<>();
         for (int shot = 0; shot < count; shot++) {
-            shots.add(UnitPlaybackTest.attack(atlas, enemy, ResolvedAttack.Kind.SHOT, shot % 2 == 0));
+            shots.add(UnitPlaybackFixture.attack(atlas, enemy, ResolvedAttack.Kind.SHOT, shot % 2 == 0));
         }
         return shots;
     }
@@ -717,7 +717,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", binds));
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("binds", binds));
     }
 
     private static String text(String key) {

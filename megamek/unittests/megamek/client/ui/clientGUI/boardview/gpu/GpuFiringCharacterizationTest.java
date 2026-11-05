@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -13,7 +13,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +22,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay;
 import megamek.client.ui.panels.phaseDisplay.PointblankShotDisplay;
-import megamek.common.Configuration;
 import megamek.common.actions.DirectionalMountFacingAction;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.FlipArmsAction;
@@ -41,10 +39,9 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -55,6 +52,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * and what to-hit the weapon display shows. The values were recorded on the code before stage E3a extracted requeue,
  * replaceAttacks, removeAttack and toHitFor, and must not change.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuFiringCharacterizationTest {
     /** The settings of a weapon attack declared without bombs, special ammunition, aimed shot or strafing run. */
@@ -84,19 +82,6 @@ class GpuFiringCharacterizationTest {
     static final List<String> BOMBS = List.of(
           "WeaponAttackAction Rocket Launcher Pod NOS->0:42 ammo 4 [M_STANDARD] carrier 7" + UNSET,
           "WeaponAttackAction Rocket Launcher Pod NOS->0:42 ammo 6 [M_STANDARD] carrier 7" + UNSET);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @ParameterizedTest
     @ValueSource(booleans = { false, true })

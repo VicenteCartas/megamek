@@ -121,7 +121,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseConcreteApronsDoNotReceiveRoundedRoadCaps() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var at : List.of(new Coords(5, 6), new Coords(7, 15), new Coords(7, 16),
               new Coords(8, 15), new Coords(8, 16), new Coords(14, 8), new Coords(15, 8), new Coords(15, 9))) {
             var apron = scene.tile(at);
@@ -146,7 +146,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseRoadsMeetConcreteAcrossTheirFullCarriageways() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var lod : TerrainLod.values()) {
             for (int direction : new int[] { 1, 2 }) { assertMeetsConcrete(scene, new Coords(6, 16), direction, lod); }
             for (int direction : new int[] { 4, 5 }) { assertMeetsConcrete(scene, new Coords(9, 15), direction, lod); }
@@ -155,7 +155,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseConcreteEntrancesHaveNoLinesAndRetainPaintFartherAlongTheRoad() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var at : List.of(new Coords(6, 16), new Coords(9, 15))) {
             var tile = scene.tile(at);
             var road = BoardRoad.of(scene, tile);
@@ -218,7 +218,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void parkDistrictThroughRoadsAndRoundaboutsStayPaintedAcrossFittedConcrete() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack City/City Districts/16x17 Park District.board");
+        var scene = BoardScenes.installedScene("Map Pack City/City Districts/16x17 Park District.board");
         record Crossing(Coords road, Coords concrete) { }
         for (var crossing : List.of(
               new Crossing(new Coords(13, 7), new Coords(14, 7)),

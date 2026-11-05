@@ -101,7 +101,7 @@ class GpuFoliageSmokeTest {
                                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                                 camera.setIsometric(!overhead);
                                 camera.fit(forest);
-                                GpuTerrainLodSmokeTest.settle(terrain, null, forest, camera);
+                                GpuReviewFrame.settle(terrain, null, forest, camera);
                                 frame.render(terrain, camera, forest);
                                 GpuReviewFrame.save(new File(System.getProperty("megamek.gpu.screenshots"),
                                       "forest-" + (natural ? "stands" : "mixed") + (overhead ? "-top" : "") + ".png"));
@@ -110,7 +110,7 @@ class GpuFoliageSmokeTest {
                             camera.center(BoardGeometry.center(new Coords(5, 4), 0).add(0, 0, 18));
                             camera.camera.zoom = .32f;
                             camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, forest, camera);
+                            GpuReviewFrame.settle(terrain, null, forest, camera);
                             frame.render(terrain, camera, forest);
                             GpuReviewFrame.save(new File(System.getProperty("megamek.gpu.screenshots"),
                                   "forest-" + (natural ? "stands" : "mixed") + "-close.png"));

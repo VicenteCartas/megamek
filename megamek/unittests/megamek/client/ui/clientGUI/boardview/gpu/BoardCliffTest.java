@@ -293,7 +293,7 @@ class BoardCliffTest {
               "box-canyon", "Map Pack Savannahs/16x17 Box Canyon (Savannah).board");
         var reports = new java.util.LinkedHashMap<String, Object>();
         for (var board : boards.entrySet()) {
-            var scene = GpuRoadSourceTest.scene(board.getValue());
+            var scene = BoardScenes.installedScene(board.getValue());
             Coords focus = board.getKey().equals("mines") ? new Coords(9, 3) : new Coords(4, 9);
             var records = new java.util.ArrayList<Object>();
             for (var tile : scene.tiles()) {

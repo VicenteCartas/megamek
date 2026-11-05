@@ -32,7 +32,7 @@ import org.lwjgl.opengl.GL11C;
 class GpuRoadSmokeTest {
     @Test
     void keepsMinesRoadsVisibleAcrossTheRealBoard() throws Exception {
-        BoardScene scene = GpuRoadSourceTest.minesScene();
+        BoardScene scene = BoardScenes.minesScene();
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "roads");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -53,7 +53,7 @@ class GpuRoadSmokeTest {
                     camera.center(BoardGeometry.center(new Coords(7, 8), 0));
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     terrain.animate(.5f, List.of());
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-roads-top.png"));
@@ -61,7 +61,7 @@ class GpuRoadSmokeTest {
                     for (float zoom : new float[] { 2.5f, 1, .55f, 1 }) {
                         camera.camera.zoom = zoom;
                         camera.center(BoardGeometry.center(new Coords(7, 8), 0));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "mines-roads-zoom-" + zoom + ".png"));
                         // At distant zoom the asphalt/paint/shoulder can share one pixel; check when inspecting it again.
@@ -76,23 +76,23 @@ class GpuRoadSmokeTest {
                     var edited = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                           List.of(), List.of(), -1, "", List.of());
                     terrain.update(edited, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     frame.render(terrain, camera, edited);
                     GpuReviewFrame.save(new File(output, "mines-roads-edited.png"));
                     checkMinesRoads(edited, camera);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     checkMinesRoads(scene, camera);
                     camera.camera.zoom = .2f;
                     camera.center(BoardGeometry.center(new Coords(7, 14), 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-top.png"));
                     checkMinesRoads(scene, camera);
                     camera.setIsometric(true);
                     camera.center(BoardGeometry.center(new Coords(7, 14), 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
                     // This interior plateau fills the upper four fifths of the close view. Test actual scene

@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -46,7 +46,6 @@ import megamek.client.ui.clientGUI.boardview.BoardTactical;
 import megamek.client.ui.clientGUI.boardview.UnitAnnotations;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
 import megamek.common.actions.WeaponAttackAction;
@@ -55,10 +54,9 @@ import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The board-space components in the live battle view (rebuild plan I1b): a real GpuBattleView draws the frames a real
@@ -71,6 +69,7 @@ import org.junit.jupiter.api.Test;
  * front arc. Physical: the ringed neighbours and the target's bold icon. A fourth test times the board-space HUD at
  * 100 v 100.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuLiveBoardSpaceSmokeTest {
     /** The movement fixture's Sagittaire (walk 3, run 5) pins a waypoint north of it and runs on to the road. */
@@ -90,19 +89,6 @@ class GpuLiveBoardSpaceSmokeTest {
     private static final int QUICKDRAW = 45;
     /** The view's render stage that hands the HUD and the board overlay their frame. */
     private static final String STAGE = "board-space HUD";
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void aPlannedRouteShowsTheOverlayLabelsAndPlatesInBothViews() throws Exception {
@@ -120,7 +106,7 @@ class GpuLiveBoardSpaceSmokeTest {
                 assertEquals(List.of(WAYPOINT), move.pins().stream().map(GpuMovePlan.Step::coords).toList());
                 assertEquals(DESTINATION, move.destination());
                 assertFalse(move.envelope().isEmpty(), "The plan has its envelope");
-                assertSame(move, field(live.overlay, "move"), "The overlay draws the published plan");
+                assertSame(move, GpuTestSupport.field(live.overlay, "move"), "The overlay draws the published plan");
                 verifyMovement3d(live, move, moving.unit);
                 verifyUnchangedRecaptures(live, 60);
 
@@ -206,8 +192,8 @@ class GpuLiveBoardSpaceSmokeTest {
         }
         live.publish();
         live.draw(2, 0);
-        assertSame(live.model(SAGITTAIRE), field(live.overlay, "ghostSource"), "The ghost copies the shown model");
-        Vector3 at = ((ModelInstance) field(live.overlay, "ghost")).transform.getTranslation(new Vector3());
+        assertSame(live.model(SAGITTAIRE), GpuTestSupport.field(live.overlay, "ghostSource"), "The ghost copies the shown model");
+        Vector3 at = ((ModelInstance) GpuTestSupport.field(live.overlay, "ghost")).transform.getTranslation(new Vector3());
         Vector3 centre = BoardGeometry.center(DESTINATION, 0);
         assertEquals(centre.x, at.x, .5f, "The ghost stands at the route's end");
         assertEquals(centre.y, at.y, .5f);
@@ -238,7 +224,7 @@ class GpuLiveBoardSpaceSmokeTest {
             assertEquals(side, view.unitRects().get(id).width, .5f, id + ": its rectangle is the ring's square");
         }
         verifyPlate(live, view, "nameplate-" + SAGITTAIRE, SAGITTAIRE);
-        assertSame(live.model(SAGITTAIRE), field(live.overlay, "ghostSource"),
+        assertSame(live.model(SAGITTAIRE), GpuTestSupport.field(live.overlay, "ghostSource"),
               "The Tactical View's ghost copies the unit's meeple");
         // The terrain's top artwork draws the elevation-drop edges; the overlay adds none (GpuBoardOverlaySmokeTest).
         live.show(live.overlayOnly(live.frame.get().panels().move()));
@@ -327,7 +313,7 @@ class GpuLiveBoardSpaceSmokeTest {
 
     /** {@code preferences} at {@code factor} times their HUD scale. */
     private static GpuBoardSource.UiPreferences scaled(GpuBoardSource.UiPreferences preferences, float factor) {
-        return GpuHudInputTest.with(preferences, Map.of("scale", preferences.scale() * factor));
+        return GpuHudFixtures.with(preferences, Map.of("scale", preferences.scale() * factor));
     }
 
     /** A 3D head is the top of the unit's model above its middle, in stage units, y up (C.4 HudView). */
@@ -393,17 +379,17 @@ class GpuLiveBoardSpaceSmokeTest {
 
     @Test
     void aDeclarationShowsBadgesOneTraceEachLeadersAndTheArcs() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             GpuBoardFixture board = firing.board;
-            GpuFireOrdersTest.enemy(firing, "Crab CRB-20.mtf", CRAB, GpuFireOrdersTest.NORTH);
-            Entity quickdraw = GpuFireOrdersTest.enemy(firing, "Quickdraw QKD-8X.mtf", QUICKDRAW,
-                  GpuFireOrdersTest.EAST);
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int left = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            int right = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(left, TargetKey.unit(CRAB)));
-            GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(right));
+            GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", CRAB, GpuFiringFixture.NORTH);
+            Entity quickdraw = GpuFiringFixture.enemy(firing, "Quickdraw QKD-8X.mtf", QUICKDRAW,
+                  GpuFiringFixture.EAST);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+            GpuFiringFixture.command(firing, fire -> fire.assign(left, TargetKey.unit(CRAB)));
+            GpuFiringFixture.command(firing, fire -> fire.selectWeapon(right));
             onSwing(() -> {
                 // The Quickdraw's declared attack on the Atlas, then the board's attacks as the client refreshes them.
                 board.game.addAction(new WeaponAttackAction(QUICKDRAW, ATLAS,
@@ -470,11 +456,11 @@ class GpuLiveBoardSpaceSmokeTest {
         live.publish();
         live.draw(2, 0);
         GpuBoardSource.Frame base = live.frame.get();
-        live.frame.set(base.withTimeline(List.of(UnitPlaybackTest.attack(live.unit(QUICKDRAW), live.unit(ATLAS),
+        live.frame.set(base.withTimeline(List.of(UnitPlaybackFixture.attack(live.unit(QUICKDRAW), live.unit(ATLAS),
               ResolvedAttack.Kind.SHOT, true))));
         live.draw(1, 0);
         live.frame.set(base.withTimeline(List.of()));
-        UnitPlayback playback = (UnitPlayback) field(live.view, "playback");
+        UnitPlayback playback = (UnitPlayback) GpuTestSupport.field(live.view, "playback");
         assertFalse(playback.attacks().isEmpty(), "The Quickdraw's shot plays");
         assertEquals(List.of(), live.firingLines(), "Every line hides while an attack plays");
         for (int frame = 0; frame < 300 && !playback.attacks().isEmpty(); frame++) {
@@ -512,10 +498,10 @@ class GpuLiveBoardSpaceSmokeTest {
 
     /** The labels draw a leader from each placed card that leaves its target's head free, ending in a diamond. */
     private static void verifyLeaders(Live live) throws Exception {
-        GpuTargetCards cards = (GpuTargetCards) field(live.hud, "targetCards");
+        GpuTargetCards cards = (GpuTargetCards) GpuTestSupport.field(live.hud, "targetCards");
         Map<TargetKey, com.badlogic.gdx.math.Rectangle> placed = cards.placed();
         assertEquals(2, placed.size(), "Both targets' cards are placed");
-        assertEquals(placed, field(field(live.hud, "boardLabels"), "cards"), "The labels have this frame's cards");
+        assertEquals(placed, GpuTestSupport.field(GpuTestSupport.field(live.hud, "boardLabels"), "cards"), "The labels have this frame's cards");
         GpuHud.HudView view = live.hudView();
         Pixmap window = live.window();
         try {
@@ -546,12 +532,12 @@ class GpuLiveBoardSpaceSmokeTest {
         live.camera().orbit(0, -BoardCamera.MAX_TILT);
         live.zoom(ATLAS_HEX, 160);
         Pixmap armed = live.board();
-        GpuFireOrders.Snapshot none = GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(-1));
+        GpuFireOrders.Snapshot none = GpuFiringFixture.command(firing, fire -> fire.selectWeapon(-1));
         assertNull(none.solution());
         assertNotNull(none.frontArc(), "Without a weapon, the front arc");
         live.publish();
         live.draw(2, 0);
-        assertSame(live.frame.get().panels().fire(), field(live.overlay, "fire"));
+        assertSame(live.frame.get().panels().fire(), GpuTestSupport.field(live.overlay, "fire"));
         Pixmap front = live.board();
         try {
             Vector3 atlas = BoardGeometry.center(ATLAS_HEX, live.scene().tile(ATLAS_HEX).elevation());
@@ -573,7 +559,7 @@ class GpuLiveBoardSpaceSmokeTest {
         live.camera().fit(live.scene());
         live.zoom(new Coords(6, 4), 130);
         live.capture("i1b-firing-front-arc.png");
-        GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(right));
+        GpuFiringFixture.command(firing, fire -> fire.selectWeapon(right));
         live.publish();
         live.draw(3, 0);
     }
@@ -597,7 +583,7 @@ class GpuLiveBoardSpaceSmokeTest {
                 int attacker = physical.attacker.getId();
                 int enemy = physical.enemy.getId();
                 assertTrue(options.active() && options.actorId() == attacker && options.targetId() == enemy);
-                assertSame(options, field(live.overlay, "physical"), "The overlay draws the published options");
+                assertSame(options, GpuTestSupport.field(live.overlay, "physical"), "The overlay draws the published options");
                 assertEquals(enemy, live.overlay.focus(), "The attack's target is the overlay's focus");
                 GpuHud.HudView view = live.hudView();
                 verifyPlate(live, view, "nameplate-" + attacker, attacker);
@@ -797,20 +783,6 @@ class GpuLiveBoardSpaceSmokeTest {
         return times.stream().mapToLong(Long::longValue).max().orElse(0) / 1e6;
     }
 
-    /** A field of {@code object}, declared by its class or a superclass. */
-    static Object field(Object object, String name) throws ReflectiveOperationException {
-        for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) {
-            try {
-                var field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(object);
-            } catch (NoSuchFieldException absent) {
-                // Declared further up.
-            }
-        }
-        throw new NoSuchFieldException(name);
-    }
-
     /** A step of a test that may throw, on the GL thread. */
     interface Body {
         void run(Live live) throws Exception;
@@ -878,7 +850,7 @@ class GpuLiveBoardSpaceSmokeTest {
         Live(GpuBoardSource real) throws Exception {
             this.real = real;
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures; envelopes and the minimap on.
-            source.uiPreferences = GpuHudInputTest.preferences(.1f
+            source.uiPreferences = GpuHudFixtures.preferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()));
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
@@ -905,8 +877,8 @@ class GpuLiveBoardSpaceSmokeTest {
                 }
             };
             view.create();
-            hud = (GpuHud) field(view, "ui");
-            overlay = (GpuBoardOverlay) field(view, "overlay");
+            hud = (GpuHud) GpuTestSupport.field(view, "ui");
+            overlay = (GpuBoardOverlay) GpuTestSupport.field(view, "overlay");
             input = Gdx.input;
             when(pointer.getInputProcessor()).thenReturn(input.getInputProcessor());
             when(pointer.getX()).thenReturn(120);
@@ -1054,13 +1026,13 @@ class GpuLiveBoardSpaceSmokeTest {
         /** Centres {@code hex} with a hex {@code hexPixels} HUD units wide, and draws a frame. */
         void zoom(Coords hex, float hexPixels) throws Exception {
             camera().center(BoardGeometry.center(hex, scene().tile(hex).elevation()));
-            float scale = (float) field(view, "layoutScale");
+            float scale = (float) GpuTestSupport.field(view, "layoutScale");
             camera().zoom(BoardGeometry.WIDTH / (hexPixels * scale) / camera().camera.zoom);
             draw(3, 0);
         }
 
         BoardScene scene() throws Exception {
-            return (BoardScene) field(view, "scene");
+            return (BoardScene) GpuTestSupport.field(view, "scene");
         }
 
         BoardScene.Unit unit(int id) throws Exception {
@@ -1069,20 +1041,16 @@ class GpuLiveBoardSpaceSmokeTest {
 
         @SuppressWarnings("unchecked")
         ModelInstance model(int id) {
-            try {
-                return ((Map<String, ModelInstance>) field(view, "unitInstances")).get(id + ":-1");
-            } catch (ReflectiveOperationException error) {
-                throw new IllegalStateException(error);
-            }
+            return ((Map<String, ModelInstance>) GpuTestSupport.field(view, "unitInstances")).get(id + ":-1");
         }
 
         GpuUnitBases bases() throws Exception {
-            return (GpuUnitBases) field(view, "unitBases");
+            return (GpuUnitBases) GpuTestSupport.field(view, "unitBases");
         }
 
         /** The facts the view handed the HUD in the last frame. */
         GpuHud.HudView hudView() throws Exception {
-            return ((GpuHud.Inputs) field(hud, "inputs")).view();
+            return ((GpuHud.Inputs) GpuTestSupport.field(hud, "inputs")).view();
         }
 
         Actor actor(String name) {
@@ -1117,18 +1085,18 @@ class GpuLiveBoardSpaceSmokeTest {
         /** The firing lines the fire control draws this frame. */
         @SuppressWarnings("unchecked")
         List<BoardScene.FiringLine> firingLines() throws Exception {
-            return (List<BoardScene.FiringLine>) field(field(view, "fireControl"), "firingLines");
+            return (List<BoardScene.FiringLine>) GpuTestSupport.field(GpuTestSupport.field(view, "fireControl"), "firingLines");
         }
 
         /** The number of strokes the labels' fx layer draws this frame: guides and traces. */
         int strokes() throws Exception {
-            return ((Collection<?>) field(field(field(hud, "boardLabels"), "strokes"), "list")).size();
+            return ((Collection<?>) GpuTestSupport.field(GpuTestSupport.field(GpuTestSupport.field(hud, "boardLabels"), "strokes"), "list")).size();
         }
 
         /** The unit's shown TN badge, bottom-centred 4 units over its nameplate, or null. */
         Actor badgeOn(int unit, GpuHud.HudView view) throws Exception {
             Vector2 head = view.unitHeads().get(unit);
-            GpuNameplates plates = (GpuNameplates) field(field(hud, "boardLabels"), "nameplates");
+            GpuNameplates plates = (GpuNameplates) GpuTestSupport.field(GpuTestSupport.field(hud, "boardLabels"), "nameplates");
             return badge(hud.stage.getRoot(), new Vector2(head.x, plates.top(unit, head.y)));
         }
 

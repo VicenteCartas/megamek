@@ -56,7 +56,7 @@ class BoardCameraFramingTest {
         for (boolean animate : List.of(false, true)) {
             for (var navigate : navigation) {
                 var camera = camera(55);
-                camera.enter(UnitPlaybackTest.scene(unit));
+                camera.enter(UnitPlaybackFixture.scene(unit));
                 camera.advance(.1f);
                 camera.animateOnSelectionChange = animate;
                 var position = BoardGeometry.center(unit.location().coords(), 3);
@@ -82,7 +82,7 @@ class BoardCameraFramingTest {
         List<Consumer<BoardCamera>> frames = List.of(
               camera -> camera.frameSelection(attacker, 420),
               camera -> camera.frameAttacks(List.of(shot(attacker, target)), 420),
-              camera -> camera.frameMovement(move, motion(move), UnitPlaybackTest.scene(attacker), 420));
+              camera -> camera.frameMovement(move, motion(move), UnitPlaybackFixture.scene(attacker), 420));
         for (int disabled = 0; disabled < frames.size(); disabled++) {
             for (int context = 0; context < frames.size(); context++) {
                 var camera = camera(65);
@@ -123,7 +123,7 @@ class BoardCameraFramingTest {
             } else if (mode == 1) {
                 camera.frameSelection(attacker, 420);
             } else {
-                camera.frameMovement(move, motion(move), UnitPlaybackTest.scene(attacker), 420);
+                camera.frameMovement(move, motion(move), UnitPlaybackFixture.scene(attacker), 420);
             }
             camera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
             assertEquals(3 * BoardGeometry.LEVEL, camera.focus.z, .002f,
@@ -180,8 +180,8 @@ class BoardCameraFramingTest {
         camera.frameSelection(unit, 640);
         camera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
         assertEquals(400, project(camera, camera.focus).x, .02f);
-        camera.fit(UnitPlaybackTest.scene(unit));
-        for (var tile : UnitPlaybackTest.scene(unit).tiles()) {
+        camera.fit(UnitPlaybackFixture.scene(unit));
+        for (var tile : UnitPlaybackFixture.scene(unit).tiles()) {
             for (int corner = 0; corner < 6; corner++) {
                 var point = project(camera, BoardGeometry.corner(tile.coords(), tile.elevation(), corner));
                 assertTrue(point.x > 80 && point.x < 720, "The full map fits between the enemy strip and the dock");
@@ -260,7 +260,7 @@ class BoardCameraFramingTest {
         camera.viewableWidth(900);
         var pivot = camera.focus.cpy();
         double duration = motion.remainingSeconds();
-        var scene = UnitPlaybackTest.scene(move.unit());
+        var scene = UnitPlaybackFixture.scene(move.unit());
         camera.frameMovement(move, motion, scene, 900);
         assertFalse(camera.isFraming());
         assertEquals(pivot, camera.focus);
@@ -284,7 +284,7 @@ class BoardCameraFramingTest {
             var screen = camera.camera.project(BoardGeometry.center(point.coords(), 0), 0, 0, 1200, 800);
             assertTrue(screen.x > 0 && screen.x < 700 && screen.y > 0 && screen.y < 800);
         }
-        var scene = UnitPlaybackTest.scene(move.unit());
+        var scene = UnitPlaybackFixture.scene(move.unit());
         camera.frameMovement(move, motion, scene, 700);
         assertTrue(camera.isFraming(), "The middle of the route is covered by the side panel");
         assertEquals(pivot, camera.focus);
@@ -313,7 +313,7 @@ class BoardCameraFramingTest {
             camera.zoom(.5f);
             float bearing = camera.azimuth(), tilt = camera.tilt();
             var motion = motion(move);
-            var scene = UnitPlaybackTest.scene(move.unit());
+            var scene = UnitPlaybackFixture.scene(move.unit());
             camera.frameMovement(move, motion, scene, 700);
             assertTrue(camera.isFraming());
             camera.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
@@ -388,7 +388,7 @@ class BoardCameraFramingTest {
         var large = new BoardScene.Unit(2, -1, "Large target", new BoardScene.Waypoint(new Coords(17, 13), 8, 0),
               null, false, null, 6, true, null, 0, List.of(new Coords(17, 13), new Coords(18, 13), new Coords(18, 14)));
         var hex = unit(3, 2, 18, 4, 0);
-        var hexEvent = UnitPlaybackTest.attack(attacker, hex, ResolvedAttack.Kind.SHOT, true);
+        var hexEvent = UnitPlaybackFixture.attack(attacker, hex, ResolvedAttack.Kind.SHOT, true);
         var attacks = List.of(shot(attacker, large),
               new UnitAttack(new BoardScene.Combat(hexEvent.result(), attacker, null, hex.location())));
         for (float tilt : new float[] { BoardCamera.ATTACK_TOP_VIEW_TILT_DEGREES + 1, BoardCamera.MAX_TILT }) {
@@ -474,7 +474,7 @@ class BoardCameraFramingTest {
     void anAttackerOffTheMapFramesOnlyItsTargetArea() {
         var attacker = unit(1, 0, 0, 0, 2);
         var target = unit(2, 30, 20, 0, 2);
-        var fromTheMap = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var fromTheMap = UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
         var fromOffTheMap = new BoardScene.Combat(fromTheMap.result(), attacker, target, target.location(), false, true);
         var onBoardCamera = camera(65);
         onBoardCamera.frameAttacks(List.of(new UnitAttack(fromTheMap)), 1200);
@@ -521,7 +521,7 @@ class BoardCameraFramingTest {
     }
 
     private static UnitAttack shot(BoardScene.Unit attacker, BoardScene.Unit target) {
-        return new UnitAttack(UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true));
+        return new UnitAttack(UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT, true));
     }
 
     static void assertVisible(BoardCamera camera, float width, BoardScene.Unit unit) {

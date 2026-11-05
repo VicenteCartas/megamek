@@ -2,20 +2,20 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.awaitDialog;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.EAST;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.NORTH;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.assertSameActions;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.command;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.enemy;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.eqNum;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.firing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.orders;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.queue;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.sent;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.targets;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuFireOrdersTest.used;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.awaitDialog;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.EAST;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.NORTH;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.assertSameActions;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.command;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.enemy;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.eqNum;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.firing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.orders;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.queue;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.sent;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.targets;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.used;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,7 +27,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.event.ActionEvent;
-import java.io.File;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +41,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.actions.EntityAction;
 import megamek.common.actions.WeaponAttackAction;
@@ -58,10 +56,9 @@ import megamek.common.game.GameTurn;
 import megamek.common.interfaces.IEntityRemovalConditions;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Drafts and Resolve phase (stage E3c) over a real FiringDisplay (GpuFiringFixture) with a second own unit, the
@@ -69,25 +66,13 @@ import org.junit.jupiter.api.Timeout;
  * one does, and the server's answer to a declaration is scripted as the unit done and the next turn. A declaration is
  * what the display sends with Done (the recording client's sendAttackData).
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuFireDraftsTest {
     private static final int LOCAL = 0;
     private static final int ENEMY = 2;
     private static final int ATLAS = 1;
     private static final int SAGITTAIRE = 46;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /**
      * H33: switching units keeps the actor's orders as its draft, and switching back gives the display the same action

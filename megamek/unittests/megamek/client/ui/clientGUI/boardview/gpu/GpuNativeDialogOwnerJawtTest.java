@@ -40,7 +40,7 @@ class GpuNativeDialogOwnerJawtTest {
     @BeforeEach
     void open() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless());
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             board = new JFrame("board");
             board.setBounds(100, 100, 400, 300);
             board.setVisible(true);
@@ -55,7 +55,7 @@ class GpuNativeDialogOwnerJawtTest {
 
     @AfterEach
     void close() throws Exception {
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             if (owner != null) {
                 owner.releaseAll();
             }
@@ -70,37 +70,37 @@ class GpuNativeDialogOwnerJawtTest {
 
     @Test
     void jawtReadsAShowingDialogsNativeWindow() throws Exception {
-        long platformInfo = onSwing(() -> GpuNativeDialogOwner.Jawt.withPlatformInfo(dialog, info -> info));
+        long platformInfo = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.Jawt.withPlatformInfo(dialog, info -> info));
         assertNotEquals(0, platformInfo);
     }
 
     @Test
     void onWindowsJawtAndFlatLafAgreeOnTheDialogsWindow() throws Exception {
         assumeTrue(GpuNativeDialogOwner.Win32.supported(), "Windows with FlatLaf's native library");
-        long jawt = onSwing(() -> GpuNativeDialogOwner.Jawt.withPlatformInfo(dialog,
+        long jawt = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.Jawt.withPlatformInfo(dialog,
               info -> JAWTWin32DrawingSurfaceInfo.create(info).hwnd()));
-        assertEquals(onSwing(() -> FlatNativeWindowsLibrary.getHWND(dialog)), jawt);
+        assertEquals(GpuTestSupport.onSwing(() -> FlatNativeWindowsLibrary.getHWND(dialog)), jawt);
     }
 
     @Test
     void onMacOsTheDialogBecomesAChildWindowOfTheBoardUntilReleased() throws Exception {
         assumeTrue(SharedLibraryLoader.os == Os.MacOsX);
-        owner = onSwing(() -> GpuNativeDialogOwner.forSwingWindow(board));
+        owner = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.forSwingWindow(board));
         assertNotNull(owner, "the board's NSWindow");
 
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
         long window = owner.adoptedHandle(dialog);
         assertNotEquals(0, window);
         assertTrue(eventually(() -> parentWindow(window) == owner.ownerHandle()), "AppKit made it a child window");
 
-        onSwing(() -> {
+        GpuTestSupport.onSwing(() -> {
             owner.hidden(dialog);
             return null;
         });
         assertFalse(owner.owns(dialog));
         assertTrue(eventually(() -> parentWindow(window) != owner.ownerHandle()), "a hidden dialog is let go");
 
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
         assertTrue(eventually(() -> parentWindow(window) == owner.ownerHandle()), "and taken back when shown");
 
         owner.releaseAll();
@@ -110,10 +110,10 @@ class GpuNativeDialogOwnerJawtTest {
     @Test
     void onLinuxTheDialogsTopLevelWindowIsMarkedTransientForTheBoard() throws Exception {
         assumeTrue(SharedLibraryLoader.os == Os.Linux);
-        owner = onSwing(() -> GpuNativeDialogOwner.forSwingWindow(board));
+        owner = GpuTestSupport.onSwing(() -> GpuNativeDialogOwner.forSwingWindow(board));
         assumeTrue(owner != null, "an X11 display (not native Wayland)");
 
-        assertTrue(onSwing(() -> owner.adopt(dialog)));
+        assertTrue(GpuTestSupport.onSwing(() -> owner.adopt(dialog)));
         assertNotEquals(0, owner.adoptedHandle(dialog));
         assertNotEquals(owner.ownerHandle(), owner.adoptedHandle(dialog));
     }
@@ -130,17 +130,5 @@ class GpuNativeDialogOwnerJawtTest {
             Thread.sleep(50);
         }
         return condition.getAsBoolean();
-    }
-
-    private static <T> T onSwing(Callable<T> task) throws InterruptedException, InvocationTargetException {
-        AtomicReference<T> result = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result.set(task.call());
-            } catch (Exception failure) {
-                throw new IllegalStateException(failure);
-            }
-        });
-        return result.get();
     }
 }

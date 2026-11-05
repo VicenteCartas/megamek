@@ -113,21 +113,21 @@ class GpuRoadBatchSmokeTest {
     @SuppressWarnings("unchecked")
     private static List<Overlay> splitRoads(GpuTerrain terrain) throws ReflectiveOperationException {
         List<Overlay> result = new ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            List<ModelInstance> target = (List<ModelInstance>) field(chunk, "overlays");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            List<ModelInstance> target = (List<ModelInstance>) GpuTestSupport.field(chunk, "overlays");
             List<ModelInstance> batched = List.copyOf(target);
             Array<Renderable> parts = new Array<>();
             for (Renderable part : GpuTerrainDepth.snapshot(target)) {
                 if (!part.material.has(GpuRoads.Mask.TYPE)) { parts.add(part); }
             }
-            for (Object tile : ((java.util.Map<?, ?>) field(chunk, "tileMeshes")).values()) {
-                for (Object range : (List<?>) field(tile, "ranges")) {
-                    Material material = (Material) field(range, "material");
+            for (Object tile : ((java.util.Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).values()) {
+                for (Object range : (List<?>) GpuTestSupport.field(tile, "ranges")) {
+                    Material material = (Material) GpuTestSupport.field(range, "material");
                     if (!material.has(GpuRoads.Mask.TYPE)) { continue; }
                     Renderable part = new Renderable();
                     part.material = material;
-                    part.meshPart.set("road-range", (Mesh) field(range, "mesh"), (int) field(range, "offset"),
-                          (int) field(range, "count"), GL20.GL_TRIANGLES);
+                    part.meshPart.set("road-range", (Mesh) GpuTestSupport.field(range, "mesh"), (int) GpuTestSupport.field(range, "offset"),
+                          (int) GpuTestSupport.field(range, "count"), GL20.GL_TRIANGLES);
                     part.meshPart.update();
                     parts.add(part);
                 }
@@ -142,11 +142,5 @@ class GpuRoadBatchSmokeTest {
             result.add(new Overlay(target, batched, List.of(reference)));
         }
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

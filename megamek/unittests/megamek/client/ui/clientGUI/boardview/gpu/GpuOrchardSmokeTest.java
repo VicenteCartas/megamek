@@ -124,7 +124,7 @@ class GpuOrchardSmokeTest {
                     for (int view = 0; view < 3; view++) {
                         camera.setIsometric(view != 1);
                         camera.setPerspective(view == 2);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, orchard, camera);
+                        GpuReviewFrame.settle(terrain, null, orchard, camera);
                         frame.render(terrain, camera, orchard);
                         GpuReviewFrame.save(new File(output, "orchard-" + view + ".png"));
                     }
@@ -132,12 +132,12 @@ class GpuOrchardSmokeTest {
                     camera.setIsometric(true);
                     camera.camera.zoom = .13f;
                     camera.center(BoardGeometry.center(new Coords(2, 2), 0).add(0, 0, 18));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, orchard, camera);
+                    GpuReviewFrame.settle(terrain, null, orchard, camera);
                     frame.render(terrain, camera, orchard);
                     GpuReviewFrame.save(new File(output, "orchard-close.png"));
                     camera.camera.zoom = .085f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, orchard, camera);
+                    GpuReviewFrame.settle(terrain, null, orchard, camera);
                     frame.render(terrain, camera, orchard);
                     GpuReviewFrame.save(new File(output, "orchard-fruit-detail.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

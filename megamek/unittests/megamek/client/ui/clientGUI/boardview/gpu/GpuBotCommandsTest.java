@@ -37,25 +37,23 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The bot commands on the players panel's rows (plan A.15 O3, stage E7b): for each bot the local player commands, the
  * bot commands panel's popup buttons as groups of that bot's items, which run exactly what clicking the same item of
  * the panel's popup runs; none for other players; the panel's Pause/Continue button as a plain command.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuBotCommandsTest {
-    private static File originalDataDir;
 
     /** The order ends with a hex prompt (a board pick, or a typed prompt without a board view); not run here. */
     private static final Set<String> PROMPTS = Set.of(Messages.getString("BotCommandPanel.ScootToHex.title"),
@@ -68,26 +66,14 @@ class GpuBotCommandsTest {
     /** The game around the fixture's local player: an allied bot, an enemy player and an enemy bot. */
     private record Bots(GpuPlayers players, BotCommandsPanel panel, Client client, Player princess) { }
 
-    /** Earlier test classes can leave the data folder on testresources; the bot behaviors need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
-
     @Test
     void eachBotCommandRunsTheSameActionAsItsSwingPopupItem() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             List<String> sent = new CopyOnWriteArrayList<>();
-            Bots game = onSwing(() -> bots(fixture, sent));
-            GpuPlayers.Snapshot snapshot = onSwing(game.players()::capture);
+            Bots game = GpuTestSupport.onSwing(() -> bots(fixture, sent));
+            GpuPlayers.Snapshot snapshot = GpuTestSupport.onSwing(game.players()::capture);
             GpuPlayers.PlayerRow princess = row(snapshot, game.princess().getId());
-            List<String> buttons = onSwing(() -> game.panel().popupCommands(game.princess()).stream()
+            List<String> buttons = GpuTestSupport.onSwing(() -> game.panel().popupCommands(game.princess()).stream()
                   .map(command -> command.button().getText()).toList());
             // Princess has no artillery, so the Artillery button's popup lists nothing for her.
             assertEquals(buttons.stream().filter(label -> !label.equals(title("Artillery"))).toList(),
@@ -98,7 +84,7 @@ class GpuBotCommandsTest {
                 for (List<BoardScene.Command> path : leaves(group, new ArrayList<>())) {
                     BoardScene.Command item = path.getLast();
                     List<String> labels = path.stream().map(BoardScene.Command::label).toList();
-                    JMenuItem swing = onSwing(() -> find(popup(game, group.label()), labels.subList(1,
+                    JMenuItem swing = GpuTestSupport.onSwing(() -> find(popup(game, group.label()), labels.subList(1,
                           labels.size())));
                     assertNotNull(swing, "the Swing popup has " + labels);
                     assertEquals(swing.isEnabled(), item.enabled(), "availability of " + labels);
@@ -127,15 +113,15 @@ class GpuBotCommandsTest {
     @Test
     void onlyBotsUnderTheLocalPlayersCommandGetCommandsAndOnlyWhileThePanelIsOpen() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Bots game = onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
-            GpuPlayers.Snapshot open = onSwing(game.players()::capture);
+            Bots game = GpuTestSupport.onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
+            GpuPlayers.Snapshot open = GpuTestSupport.onSwing(game.players()::capture);
             assertEquals(List.of("GPU review 0", "Princess 5", "Opponent 0", "Enemy bot 0", "Bot Two 3"),
                   open.players().stream().map(row -> row.name() + " " + row.botCommands().size()).toList(),
                   "an enemy bot is not under the local player's command; a bot without units on the board has no"
                         + " movement, waypoint or artillery orders");
-            assertSame(open, onSwing(game.players()::capture), "unchanged commands keep the snapshot's instance");
+            assertSame(open, GpuTestSupport.onSwing(game.players()::capture), "unchanged commands keep the snapshot's instance");
             game.players().setPanelOpen(false);
-            GpuPlayers.Snapshot closed = onSwing(game.players()::capture);
+            GpuPlayers.Snapshot closed = GpuTestSupport.onSwing(game.players()::capture);
             assertTrue(closed.players().stream().allMatch(row -> row.botCommands().isEmpty()));
             assertNull(closed.pause(), "no commands are captured while the players panel is closed");
         }
@@ -144,8 +130,8 @@ class GpuBotCommandsTest {
     @Test
     void pauseIsAPlainCommandWithThePanelsLabelAvailabilityAndAction() throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            Bots game = onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
-            BoardScene.Command pause = onSwing(game.players()::capture).pause();
+            Bots game = GpuTestSupport.onSwing(() -> bots(fixture, new CopyOnWriteArrayList<>()));
+            BoardScene.Command pause = GpuTestSupport.onSwing(game.players()::capture).pause();
             assertEquals(title("PauseGame"), pause.label());
             assertFalse(pause.enabled(), "a human player still has units");
             assertEquals(Messages.getString("BotCommandPanel.PauseGame.unavailable.tooltip"), pause.detail());
@@ -159,12 +145,12 @@ class GpuBotCommandsTest {
                 fixture.game.getPlayer(4).setBot(true);
                 fixture.game.setPhase(GamePhase.FIRING);
             });
-            pause = onSwing(game.players()::capture).pause();
+            pause = GpuTestSupport.onSwing(game.players()::capture).pause();
             assertTrue(pause.enabled());
             pause.action().run();
             SwingUtilities.invokeAndWait(() -> { });
             verify(game.client()).sendPause();
-            assertEquals(title("ContinueGame"), onSwing(game.players()::capture).pause().label());
+            assertEquals(title("ContinueGame"), GpuTestSupport.onSwing(game.players()::capture).pause().label());
         }
     }
 
@@ -266,11 +252,5 @@ class GpuBotCommandsTest {
     /** A bot commands panel button's label. */
     private static String title(String button) {
         return Messages.getString("BotCommandPanel." + button + ".title");
-    }
-
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 }

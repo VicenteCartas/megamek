@@ -36,7 +36,7 @@ class BoardRoadSlopeTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void grasslandRoadMouthSeamsDoNotGrowSoilFins(TerrainLod lod) throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2.board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2.board");
         var at = new Coords(3, 10);
         var previous = BoardRelief.tuning();
         BoardRelief.tune(new BoardRelief.Tuning(previous.cliffsIntoWater(), true, previous.stepOutline()));
@@ -144,7 +144,7 @@ class BoardRoadSlopeTest {
 
     @Test
     void plaineGradedApproachDoesNotKeepTheOldFlatToePanel() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Cartes/16x17 Plaine 1.board");
+        var scene = BoardScenes.installedScene("unofficial/Cartes/16x17 Plaine 1.board");
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
             var acrossLevelCut = new Ray(new Vector3(629.236f, -883.532f, 17.5f),
                   new Vector3(-.3368f, -.9415f, 0));
@@ -169,7 +169,7 @@ class BoardRoadSlopeTest {
 
     @Test
     void minesRoadBanksDoNotUndercutTheirSupportingRims() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Deserts/16x17 Mines 1.board");
+        var scene = BoardScenes.installedScene("Deserts/16x17 Mines 1.board");
         for (var lod : TerrainLod.values()) {
             for (int[] bank : new int[][] { {3, 7, 0}, {4, 8, 1} }) {
                 var at = new Coords(bank[0], bank[1]);

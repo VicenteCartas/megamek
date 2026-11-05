@@ -93,13 +93,13 @@ class UnitAnimatorTest {
             var entity = new BipedMek();
             entity.setProne(ProneCause.FORCED);
             var appearance = new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE, UnitModelState.capture(entity));
-            var from = UnitPlaybackTest.unit(1, 0).location().withProneCause(ProneCause.NONE);
-            var to = UnitPlaybackTest.unit(1, 1).location().withProneCause(ProneCause.FORCED);
+            var from = UnitPlaybackFixture.unit(1, 0).location().withProneCause(ProneCause.NONE);
+            var to = UnitPlaybackFixture.unit(1, 1).location().withProneCause(ProneCause.FORCED);
             var fallen = new BoardScene.Unit(1, -1, "Mek", to, null, false, null, 2, false, appearance, 0);
-            var target = UnitPlaybackTest.unit(2, 2);
+            var target = UnitPlaybackFixture.unit(2, 2);
             var playback = new UnitPlayback();
             playback.accept(List.of(new BoardScene.Movement(1, 0, List.of(from, to), EntityMovementType.MOVE_WALK, 0, 4, fallen),
-                  UnitPlaybackTest.attack(fallen, target, ResolvedAttack.Kind.SHOT, true)), UnitPlaybackTest.scene(fallen, target), ignored -> false);
+                  UnitPlaybackFixture.attack(fallen, target, ResolvedAttack.Kind.SHOT, true)), UnitPlaybackFixture.scene(fallen, target), ignored -> false);
             playback.togglePaused();
             playback.advance(100, speed);
             var raw = new Model();
@@ -112,7 +112,7 @@ class UnitAnimatorTest {
             try {
                 var placed = new ModelInstance(raw);
                 var animator = new UnitAnimator();
-                var waiting = playback.present(UnitPlaybackTest.scene(fallen, target)).units().getFirst();
+                var waiting = playback.present(UnitPlaybackFixture.scene(fallen, target)).units().getFirst();
                 animator.apply(model, placed, waiting, UnitMotion.Sample.STILL, 0, 0, false, 0);
                 assertEquals(0, placed.getNode("root").rotation.getAngleAround(Vector3.X), .001,
                       "A paused/queued fall must keep the captured starting pose instead of showing its future result");
@@ -143,7 +143,7 @@ class UnitAnimatorTest {
 
     @Test
     void squadronRecoilAndEffectsSelectOnlyTheResolvedOwnersGuns() {
-        var original = UnitPlaybackTest.attack(UnitPlaybackTest.unit(10, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var original = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(10, 1), UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var result = original.result();
         var resolved = new ResolvedAttack(result.id(), result.kind(), result.attacker(), result.target(), result.targetType(),
               result.equipmentIndex(), result.equipmentName(), result.limb(), result.hit(),
@@ -182,14 +182,14 @@ class UnitAnimatorTest {
             var binding = new UnitEquipmentAssembly.Binding(0, "RT", mount.id, "test-gun", false, List.of(emitter));
             var model = new GpuUnitModel(raw, null, true, List.of(binding));
             try {
-                var source = UnitPlaybackTest.unit(1, 1);
+                var source = UnitPlaybackFixture.unit(1, 1);
                 var appearance = new BoardScene.UnitModel("", "", "", 1, 0, BoardScene.LocationDamage.NONE,
                       UnitModelState.capture(new BipedMek()));
                 var unit = new BoardScene.Unit(1, -1, "Mek", source.location(), null, false, null, 2, false, appearance, 0);
                 var placed = new ModelInstance(raw);
                 var animator = new UnitAnimator();
                 animator.apply(model, placed, unit, new UnitMotion(unit.location()).sample(), 0, 0, false, 0);
-                var attack = new UnitAttack(UnitPlaybackTest.attack(unit, UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true));
+                var attack = new UnitAttack(UnitPlaybackFixture.attack(unit, UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true));
                 attack.seconds = UnitAttack.ANTICIPATION_SECONDS + UnitAttack.RECOIL_KICK_SECONDS;
                 var original = placed.getNode("gun").globalTransform.getTranslation(new Vector3());
                 var forward = new Vector3(0, 1, 0).rot(placed.getNode("muzzle").globalTransform).nor();
@@ -209,7 +209,7 @@ class UnitAnimatorTest {
 
     @Test
     void rotaryBarrelsRunUpTurnThroughTheBurstAndStopWhereTheyStarted() {
-        var original = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var original = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var rotary = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISRotaryAC5")));
         var result = original.result();
         var resolved = new ResolvedAttack(result.id(), result.kind(), result.attacker(), result.target(), result.targetType(),
@@ -234,7 +234,7 @@ class UnitAnimatorTest {
 
     @Test
     void mixedGunsUseTheirOwnCalibreAndPpcKicksOnlyAfterCharging() {
-        var original = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var original = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var small = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISAC2")));
         var large = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISAC20")));
         var cannon = ResolvedAttack.Shot.capture(Mounted.createMounted(new BipedMek(), EquipmentType.get("ISLongTomCannon")));

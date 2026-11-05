@@ -7,35 +7,21 @@ import java.awt.event.InputEvent;
 import java.io.File;
 import javax.swing.SwingUtilities;
 
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import megamek.utils.BoardLoader;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** Native measurement integration: menu ownership, endpoint heights, plain completion and legacy isolation. */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuLosResultTest {
     private static final Coords OWN = new Coords(5, 5);
     private static final Coords ENEMY = new Coords(5, 3);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /** A clear 8 x 8 board with the fixture's own Atlas at 0606 and an enemy Atlas at 0604. */
     private static GpuBoardFixture battle() throws Exception {

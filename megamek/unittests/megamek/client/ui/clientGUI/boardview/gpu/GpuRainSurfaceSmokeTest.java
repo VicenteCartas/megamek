@@ -340,7 +340,7 @@ class GpuRainSurfaceSmokeTest {
                     camera.setIsometric(false);
                     camera.fit(scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     float[][] frames = new float[3][];
                     for (int step = 0; step < frames.length; step++) {
                         terrain.setWetness(step * .5f);

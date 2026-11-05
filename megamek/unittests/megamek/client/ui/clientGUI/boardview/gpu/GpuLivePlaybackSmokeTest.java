@@ -1,8 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Rectangle;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -28,17 +27,15 @@ import com.badlogic.gdx.scenes.scene2d.ui.SelectBox;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.Live;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.common.Configuration;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The playback history in the live battle view (rebuild plan I1c; C.6, A.10): a real GpuBattleView draws a real
@@ -49,6 +46,7 @@ import org.junit.jupiter.api.Test;
  * review after a concealment re-presents nothing of the hidden unit; live events that arrive during a review play
  * after it, in their order; and a unit grown when zoomed out walks with strides as much longer.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuLivePlaybackSmokeTest {
     private static final int ATLAS = 1;
@@ -59,19 +57,6 @@ class GpuLivePlaybackSmokeTest {
     private static final float FRAME = 1 / 30f;
     /** More frames than any of the scripted actions takes. */
     private static final int LIMIT = 900;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /**
      * C.6 and the log, forces and labels during live playback: the Atlas's armor drop shows on its card, its forces
@@ -233,7 +218,7 @@ class GpuLivePlaybackSmokeTest {
                 assertTrue(play.playback.reviewing());
 
                 // The Quickdraw walks north two hexes and fires again; the client applies both at once.
-                Coords start = GpuFireOrdersTest.EAST;
+                Coords start = GpuFiringFixture.EAST;
                 Coords end = new Coords(start.getX(), start.getY() - 2);
                 BoardScene.Combat shot = play.walkAndFire(firing, end);
                 play.frames(1);
@@ -347,8 +332,8 @@ class GpuLivePlaybackSmokeTest {
     }
 
     private static GpuFiringFixture firing() throws Exception {
-        GpuFiringFixture firing = GpuFireOrdersTest.firing();
-        GpuFireOrdersTest.enemy(firing, "Quickdraw QKD-8X.mtf", QUICKDRAW, GpuFireOrdersTest.EAST);
+        GpuFiringFixture firing = GpuFiringFixture.firing();
+        GpuFiringFixture.enemy(firing, "Quickdraw QKD-8X.mtf", QUICKDRAW, GpuFiringFixture.EAST);
         onSwing(() -> {
             // The card shows the Atlas's record, which the source captures for its card unit.
             firing.board.source.setCardUnit(ATLAS);
@@ -413,10 +398,10 @@ class GpuLivePlaybackSmokeTest {
             BoardScene.Unit atlas = unit(scene, ATLAS);
             BoardScene.Unit quickdraw = unit(scene, QUICKDRAW);
             List<BoardScene.Combat> shots = List.of(
-                  UnitPlaybackTest.attack(atlas, unit(scene, ARCHER), ResolvedAttack.Kind.SHOT, true),
-                  UnitPlaybackTest.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, true),
-                  UnitPlaybackTest.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, true),
-                  UnitPlaybackTest.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, false));
+                  UnitPlaybackFixture.attack(atlas, unit(scene, ARCHER), ResolvedAttack.Kind.SHOT, true),
+                  UnitPlaybackFixture.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, true),
+                  UnitPlaybackFixture.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, true),
+                  UnitPlaybackFixture.attack(quickdraw, atlas, ResolvedAttack.Kind.SHOT, false));
             int round = Math.max(1, captured.status().round());
             List<GpuReportLog.CombatEvent> events = List.of(event(shots.get(0), round, 5, "CT"),
                   event(shots.get(1), round, 10, "CT"), event(shots.get(2), round, 5, "LT"),
@@ -485,7 +470,7 @@ class GpuLivePlaybackSmokeTest {
                 Coords coords = new Coords(end.getX(), y);
                 path.add(new BoardScene.Waypoint(coords, scene.tile(coords).elevation(), 0));
             }
-            BoardScene.Combat shot = UnitPlaybackTest.attack(walked, unit(scene, ATLAS), ResolvedAttack.Kind.SHOT,
+            BoardScene.Combat shot = UnitPlaybackFixture.attack(walked, unit(scene, ATLAS), ResolvedAttack.Kind.SHOT,
                   true);
             GpuReportLog.Snapshot old = shown.reports();
             GpuReportLog.CombatEvent event = event(shot, old.round(), 5, "RT");

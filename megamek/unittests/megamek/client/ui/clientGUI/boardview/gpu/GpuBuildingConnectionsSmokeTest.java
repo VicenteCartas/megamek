@@ -241,15 +241,11 @@ class GpuBuildingConnectionsSmokeTest {
     }
 
     private static GpuBuilding.Assembly building(GpuTerrain terrain, Coords at) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                if (at.equals(field(prop, "coords")) && field(prop, "building") instanceof GpuBuilding.Assembly assembly) { return assembly; }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if (at.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "building") instanceof GpuBuilding.Assembly assembly) { return assembly; }
             }
         }
         return null;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner);
     }
 }

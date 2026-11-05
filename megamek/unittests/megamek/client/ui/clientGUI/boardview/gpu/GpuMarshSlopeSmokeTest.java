@@ -83,7 +83,7 @@ class GpuMarshSlopeSmokeTest {
             // Shader recompilation must not reorder coplanar terrain by changing program identities.
             var sorter = ModelBatch.class.getDeclaredField("sorter");
             sorter.setAccessible(true);
-            sorter.set(field(terrain, "batch"), new DefaultRenderableSorter());
+            sorter.set(GpuTestSupport.field(terrain, "batch"), new DefaultRenderableSorter());
             for (boolean sloped : new boolean[] { false, true }) {
                 var scene = sloped ? scene("connected")
                       : BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
@@ -97,7 +97,7 @@ class GpuMarshSlopeSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         terrain.animate(1.25f, List.of());
                         byte[] expected = null;
                         byte[] current = null;
@@ -219,7 +219,7 @@ class GpuMarshSlopeSmokeTest {
                             camera.camera.zoom = .15f;
                             camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                             terrain.update(scene, camera.camera);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, contact + "-" + lod + "-iso.png"));
                             camera.setIsometric(false);
@@ -315,11 +315,5 @@ class GpuMarshSlopeSmokeTest {
                 } finally { pixels.dispose(); }
             }
         } finally { mask.dispose(); target.dispose(); mesh.dispose(); shader.dispose(); }
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
     }
 }

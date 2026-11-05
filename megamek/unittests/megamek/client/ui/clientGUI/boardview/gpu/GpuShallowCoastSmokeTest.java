@@ -50,7 +50,7 @@ class GpuShallowCoastSmokeTest {
                         camera.update();
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         terrain.animate(0, List.of());
                         for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
                         GpuReviewFrame.save(new File(output, "waterfall-" + (oblique ? "oblique" : "top") + ".png"));

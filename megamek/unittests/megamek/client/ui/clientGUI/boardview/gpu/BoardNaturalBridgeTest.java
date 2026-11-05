@@ -213,7 +213,7 @@ class BoardNaturalBridgeTest {
 
     @Test
     void branchingLavaTubeSpansShareTheirEntireRockJoinAtEveryLod() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var scene = BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         for (var tile : scene.tiles()) {
             if (BoardBridge.feature(tile) == null) { continue; }
             var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, new HashMap<>());
@@ -578,7 +578,7 @@ class BoardNaturalBridgeTest {
      */
     @Test
     void freeEndsMakeALoneSpanAnOverhang() throws Exception {
-        var kozice = GpuRoadSourceTest.scene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
+        var kozice = BoardScenes.installedScene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
         var overhang = kozice.tile(new Coords(25, 8));
         assertTrue(BoardNaturalBridge.free(kozice, overhang, 0) && BoardNaturalBridge.free(kozice, overhang, 1),
               "2609 runs out over the water towards 2608 and 2709");
@@ -586,7 +586,7 @@ class BoardNaturalBridgeTest {
         for (var hex : List.of(new Coords(9, 11), new Coords(9, 12))) {
             assertFalse(BoardNaturalBridge.overhang(kozice, kozice.tile(hex)), "A joined arch: " + hex.getBoardNum());
         }
-        var tubes = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var tubes = BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         for (var tile : tubes.tiles()) {
             var deck = BoardBridge.deck(tubes, tile);
             if (deck != null && deck.natural()) {
@@ -611,12 +611,12 @@ class BoardNaturalBridgeTest {
             if (extra >= 0) { edited.getHex(keep).getTerrain(Terrains.BRIDGE).setExit(extra, true); }
         };
         if (extra >= 0) {
-            var whole = GpuRoadSourceTest.scene(board, exit);
+            var whole = BoardScenes.installedScene(board, exit);
             assertTrue(BoardNaturalBridge.free(whole, whole.tile(keep), extra),
                   "The added exit runs out over the valley");
         }
         // A game converts its board when it loads it; the collapse comes later.
-        var broken = GpuRoadSourceTest.scene(board, edited -> {
+        var broken = BoardScenes.installedScene(board, edited -> {
             exit.accept(edited);
             BoardSceneryLayouts.convert(edited);
             edited.collapseBuilding(gone);
@@ -634,7 +634,7 @@ class BoardNaturalBridgeTest {
     @ParameterizedTest
     @CsvSource({ "2609", "1012", "1013" })
     void rampsRiseWithoutFolds(String hex) throws Exception {
-        var scene = GpuRoadSourceTest.scene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
+        var scene = BoardScenes.installedScene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board");
         var tile = scene.tile(new Coords(Integer.parseInt(hex.substring(0, 2)) - 1,
               Integer.parseInt(hex.substring(2)) - 1));
         for (var lod : TerrainLod.values()) {
@@ -698,8 +698,8 @@ class BoardNaturalBridgeTest {
      */
     @Test
     void naturalShellsCloseEverywhereButInTheirBanks() throws Exception {
-        var scenes = List.of(GpuRoadSourceTest.scene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board"),
-              GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board"),
+        var scenes = List.of(BoardScenes.installedScene("Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board"),
+              BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board"),
               BridgeScenes.raisedLavaTubes(5, 4), BridgeScenes.raisedLavaTubes(4, 3), BridgeScenes.raisedLavaTubes(4, 4));
         // The tongue check below admits edges beyond one corner of a joint only, never the shared edge itself.
         for (int d = 0; d < 6; d++) {

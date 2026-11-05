@@ -248,7 +248,7 @@ class GpuModularBuildingSmokeTest {
                   12, tuning.gridShade()));
             terrain.update(scene);
             // A retune rebuilds every chunk: until the view settles, a pick meets their shapes only.
-            GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+            GpuCalibrationScenes.settle(terrain, frame, camera, scene);
             checkPicking(terrain, scene);
         } finally {
             BoardGeometry.tune(tuning);
@@ -259,11 +259,11 @@ class GpuModularBuildingSmokeTest {
 
     static List<ModelInstance> floors(GpuTerrain terrain, Coords coords) throws Exception {
         List<ModelInstance> floors = new java.util.ArrayList<>();
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "cutaways")) {
-                float z = (float) GpuMixedUnitBenchmarkSmokeTest.field(prop, "floorZ");
-                if (!Float.isNaN(z) && coords.equals(GpuMixedUnitBenchmarkSmokeTest.field(prop, "coords"))) {
-                    floors.add((ModelInstance) GpuMixedUnitBenchmarkSmokeTest.field(prop, "instance"));
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "cutaways")) {
+                float z = (float) GpuTestSupport.field(prop, "floorZ");
+                if (!Float.isNaN(z) && coords.equals(GpuTestSupport.field(prop, "coords"))) {
+                    floors.add((ModelInstance) GpuTestSupport.field(prop, "instance"));
                 }
             }
         }
@@ -354,18 +354,18 @@ class GpuModularBuildingSmokeTest {
 
     static void checkInteriorCache(GpuTerrain terrain, boolean visible) throws Exception {
         int interiors = 0;
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             var renderables = new com.badlogic.gdx.utils.Array<com.badlogic.gdx.graphics.g3d.Renderable>();
-            ((com.badlogic.gdx.graphics.g3d.RenderableProvider) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "solidProps"))
+            ((com.badlogic.gdx.graphics.g3d.RenderableProvider) GpuTestSupport.field(chunk, "solidProps"))
                   .getRenderables(renderables, null);
-            for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "sharedProps")) {
+            for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, "sharedProps")) {
                 renderables.add((com.badlogic.gdx.graphics.g3d.Renderable) value);
             }
             for (var part : renderables) {
                 if (part.material.id.equals("struts")) { interiors++; }
             }
             for (String field : List.of("sharedShadows", "shadowPropRenderables")) {
-                for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, field)) {
+                for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, field)) {
                     var part = (com.badlogic.gdx.graphics.g3d.Renderable) value;
                     assertFalse(part.material.id.equals("struts"),
                           "Cutaway struts must not cast exterior shadows; solid floors are structural geometry");

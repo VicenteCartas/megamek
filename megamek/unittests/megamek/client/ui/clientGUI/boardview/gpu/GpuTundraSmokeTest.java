@@ -70,7 +70,7 @@ class GpuTundraSmokeTest {
                     var changed = manager.apply(Map.of("terrain-tundra.glsl",
                           source.replace(boundary, boundary + " return " + endpoint + ".0;")));
                     assertTrue(changed.success(), changed.message());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     endpoints[endpoint] = pixels(camera);
                     GpuReviewFrame.save(new File(output, theme + "-variant-" + endpoint + ".png"));
@@ -89,7 +89,7 @@ class GpuTundraSmokeTest {
                 }
                 var restored = manager.apply(Map.of());
                 assertTrue(restored.success(), restored.message());
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
                 assertArrayEquals(baseline, pixels(camera), theme + " must restore the landform wetness");
             }
@@ -222,7 +222,7 @@ class GpuTundraSmokeTest {
           throws Exception {
         frame.prepare(terrain, camera, scene);
         terrain.update(scene);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
     }
 
     private static byte[] pixels(BoardCamera camera) {

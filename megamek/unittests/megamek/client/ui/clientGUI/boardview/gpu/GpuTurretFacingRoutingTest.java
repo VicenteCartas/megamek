@@ -2,13 +2,13 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBombMineDialogRoutingTest.dispose;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.labels;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.pick;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.labels;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.pick;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuImplantBlowFacingRoutingTest.previewingClient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,19 +31,17 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.dialogs.TurretFacingDialog;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.Mounted;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The turret facing picker (swing-inventory table 2, D12) asked in the native battle window: a Mek's shoulder turret
@@ -51,21 +49,9 @@ import org.junit.jupiter.api.Timeout;
  * same choice, cancelling included (GpuSwingDialogGateTest covers the Swing dialog while no native window draws
  * dialogs). The test thread plays the GL thread; the Swing dialogs need a display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuTurretFacingRoutingTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void nativeTurretFacingTurnsTheSameMountAndHandsOnTheSameFacing() throws Exception {
@@ -157,7 +143,7 @@ class GpuTurretFacingRoutingTest {
                 fixture.game.addEntity(tank, false);
                 return tank;
             });
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
         }
 
         static Turrets create() throws Exception {

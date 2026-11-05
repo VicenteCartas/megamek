@@ -55,9 +55,9 @@ class GpuBiomeSmokeTest {
                     BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
-                    var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-                    var cover = (GpuGroundCover) field(terrain, "groundCover");
-                    var mask = (GpuBiomeSurface) field(terrain, "biomes");
+                    var plants = (GpuBiomeVegetation) GpuTestSupport.field(terrain, "biomeVegetation");
+                    var cover = (GpuGroundCover) GpuTestSupport.field(terrain, "groundCover");
+                    var mask = (GpuBiomeSurface) GpuTestSupport.field(terrain, "biomes");
                     StringBuilder metrics = new StringBuilder("Native 1280x960 fields/marsh checks\n");
                     metrics.append(Gdx.gl.glGetString(GL20.GL_RENDERER)).append('\n');
                     for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH, BoardScene.Biome.QUICKSAND, BoardScene.Biome.MUD)) {
@@ -77,13 +77,13 @@ class GpuBiomeSmokeTest {
                                 boolean drawn = false;
                                 if (reeds) {
                                     for (Object batch : batches(plants)) {
-                                        drawn |= (int) field(batch, "lod") == lod && !((List<?>) field(batch, "current")).isEmpty();
+                                        drawn |= (int) GpuTestSupport.field(batch, "lod") == lod && !((List<?>) GpuTestSupport.field(batch, "current")).isEmpty();
                                     }
                                 } else {
-                                    for (Object chunk : ((Map<?, ?>) field(cover, "chunks")).values()) {
+                                    for (Object chunk : ((Map<?, ?>) GpuTestSupport.field(cover, "chunks")).values()) {
                                         for (String layer : List.of("wheat", "maize")) {
-                                            for (Object batch : (Object[]) field(field(chunk, layer), "batches")) {
-                                                drawn |= !((List<?>) field(batch, "current")).isEmpty();
+                                            for (Object batch : (Object[]) GpuTestSupport.field(GpuTestSupport.field(chunk, layer), "batches")) {
+                                                drawn |= !((List<?>) GpuTestSupport.field(batch, "current")).isEmpty();
                                             }
                                         }
                                     }
@@ -93,10 +93,10 @@ class GpuBiomeSmokeTest {
                             long triangles = 0;
                             int draws = 0, roots = 0;
                             for (Object batch : batches(plants)) {
-                                if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
-                                var mesh = (GpuInstancedMesh) field(batch, "mesh");
+                                if (((List<?>) GpuTestSupport.field(batch, "current")).isEmpty()) { continue; }
+                                var mesh = (GpuInstancedMesh) GpuTestSupport.field(batch, "mesh");
                                 if (mesh == null) { continue; }
-                                int instances = ((com.badlogic.gdx.utils.FloatArray) field(batch, "data")).size / 4;
+                                int instances = ((com.badlogic.gdx.utils.FloatArray) GpuTestSupport.field(batch, "data")).size / 4;
                                 draws++; roots += instances;
                                 triangles += (long) mesh.getNumIndices() / 3 * instances;
                             }
@@ -210,7 +210,7 @@ class GpuBiomeSmokeTest {
                             case DISTANT -> new TerrainLod.Tuning(100_000, 100_000);
                         });
                         settle(terrain, plants, frame, camera, marsh);
-                        assertEquals(lod, field(((List<?>) field(terrain, "chunks")).getFirst(), "lod"));
+                        assertEquals(lod, GpuTestSupport.field(((List<?>) GpuTestSupport.field(terrain, "chunks")).getFirst(), "lod"));
                         GpuReviewFrame.save(new File(output, "MARSH-terrain-" + lod + ".png"));
                         for (var kind : List.of(BoardScene.Biome.FIELD, BoardScene.Biome.MARSH)) {
                             for (boolean upper : new boolean[] { false, true }) {
@@ -227,7 +227,7 @@ class GpuBiomeSmokeTest {
                     settle(terrain, plants, frame, camera, clear);
                     assertEquals(0, mask.width(), "Removing the terrain must clear the material mask");
                     for (Object batch : batches(plants)) {
-                        assertTrue(((List<?>) field(batch, "current")).isEmpty(), "No stale crops/reeds after editing");
+                        assertTrue(((List<?>) GpuTestSupport.field(batch, "current")).isEmpty(), "No stale crops/reeds after editing");
                     }
                     TerrainLod.tune(originalLod);
                     for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.QUICKSAND, BoardScene.Biome.MUD)) {
@@ -276,12 +276,12 @@ class GpuBiomeSmokeTest {
                     camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                     settle(terrain, plants, frame, camera, contacts);
                     // The reeds share one cutout across their batches.
-                    var texture = (Texture) field(plants, "sedge");
+                    var texture = (Texture) GpuTestSupport.field(plants, "sedge");
                     assertTrue(texture.getWidth() <= 512 && texture.getHeight() <= 512, "The shared cutout has a bounded upload size");
                     assertEquals(Texture.TextureFilter.MipMapLinearLinear, texture.getMinFilter(),
                           "The reeds' cutout must retain trilinear mipmaps");
                     for (Object batch : batches(plants)) {
-                        var instance = (ModelInstance) field(batch, "instance");
+                        var instance = (ModelInstance) GpuTestSupport.field(batch, "instance");
                         if (instance == null) { continue; }
                         var diffuse = instance.materials.first().get(TextureAttribute.class, TextureAttribute.Diffuse);
                         assertEquals(texture, diffuse.textureDescription.texture, "Every LOD must reuse the reeds' cutout");
@@ -324,7 +324,7 @@ class GpuBiomeSmokeTest {
           BoardCamera camera, BoardScene scene) throws Exception {
         terrain.update(scene, camera.camera);
         frame.prepare(terrain, camera, scene);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         // Plants are installed with the terrain; the first frame after settling draws them all.
         frame.render(terrain, camera, scene);
     }
@@ -355,35 +355,29 @@ class GpuBiomeSmokeTest {
     /** Every batch of a plant renderer: per-chunk batches in board order, then any board-wide distant tiers. */
     static List<Object> batches(Object renderer) throws Exception {
         var chunks = new TreeMap<Coords, Object>(Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY));
-        chunks.putAll((Map<Coords, ?>) field(renderer, "chunks"));
+        chunks.putAll((Map<Coords, ?>) GpuTestSupport.field(renderer, "chunks"));
         var result = new ArrayList<Object>();
         for (Object chunk : chunks.values()) {
-            if (renderer instanceof GpuBiomeVegetation) { result.addAll(List.of((Object[]) field(chunk, "batches"))); }
+            if (renderer instanceof GpuBiomeVegetation) { result.addAll(List.of((Object[]) GpuTestSupport.field(chunk, "batches"))); }
             // The grass engine's chunks hold a layer per kind of blade: grass, then the crops' plants.
             else {
                 for (String layer : List.of("grass", "wheat", "maize")) {
-                    result.addAll(List.of((Object[]) field(field(chunk, layer), "batches")));
+                    result.addAll(List.of((Object[]) GpuTestSupport.field(GpuTestSupport.field(chunk, layer), "batches")));
                 }
             }
         }
-        if (renderer instanceof GpuBiomeVegetation) { result.add(field(renderer, "distantReeds")); }
+        if (renderer instanceof GpuBiomeVegetation) { result.add(GpuTestSupport.field(renderer, "distantReeds")); }
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static void grassMetrics(GpuTerrain terrain, BoardCamera camera, StringBuilder metrics) throws Exception {
         int draws = 0, roots = 0;
         long triangles = 0;
-        for (Object batch : batches(field(terrain, "groundCover"))) {
+        for (Object batch : batches(GpuTestSupport.field(terrain, "groundCover"))) {
             // Terrain skips grass at distant scales without clearing the reusable instance buffers.
             if (!GpuGroundCover.visibleAtScale(camera.camera, true, false)) { break; }
-            if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
-            var mesh = (GpuInstancedMesh) field(batch, "mesh");
+            if (((List<?>) GpuTestSupport.field(batch, "current")).isEmpty()) { continue; }
+            var mesh = (GpuInstancedMesh) GpuTestSupport.field(batch, "mesh");
             if (mesh == null) { continue; }
             int count = mesh.drawInstances;
             draws++; roots += count;
@@ -398,10 +392,10 @@ class GpuBiomeSmokeTest {
           BoardCamera camera, BoardScene scene) throws Exception {
         // Measure the ground material itself; taller cutouts, slabs and plants can otherwise hide the sampled bank pixels.
         var hidden = new ArrayList<IntAttribute>();
-        var plants = batches(field(terrain, "biomeVegetation"));
-        plants.addAll(batches(field(terrain, "groundCover")));
+        var plants = batches(GpuTestSupport.field(terrain, "biomeVegetation"));
+        plants.addAll(batches(GpuTestSupport.field(terrain, "groundCover")));
         for (Object batch : plants) {
-            var instance = (ModelInstance) field(batch, "instance");
+            var instance = (ModelInstance) GpuTestSupport.field(batch, "instance");
             if (instance == null) { continue; }
             var cull = instance.materials.first().get(IntAttribute.class, IntAttribute.CullFace);
             hidden.add(cull);
@@ -450,7 +444,7 @@ class GpuBiomeSmokeTest {
     }
 
     private static int samplerBudget(GpuTerrain terrain) throws Exception {
-        var batch = (ModelBatch) field(terrain, "batch");
+        var batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
         var shaders = BaseShaderProvider.class.getDeclaredField("shaders");
         shaders.setAccessible(true);
         int maximum = 0;

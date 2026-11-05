@@ -1,11 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.closedAfterShowing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.components;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.press;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.closedAfterShowing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.press;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuPreEndDialogsTest.labels;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuPreEndDialogsTest.texts;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuPreEndDialogsTest.ticked;
@@ -22,7 +22,6 @@ import static org.mockito.Mockito.verify;
 
 import java.awt.GraphicsEnvironment;
 import java.awt.event.WindowEvent;
-import java.io.File;
 import java.util.Collections;
 import java.util.List;
 import javax.swing.JCheckBox;
@@ -32,12 +31,11 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPreEndDialogsTest.Declaring;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TriggerAPPodDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TriggerBPodDialog;
-import megamek.common.Configuration;
 import megamek.common.actions.TriggerAPPodAction;
 import megamek.common.actions.TriggerBPodAction;
 import megamek.common.board.Coords;
@@ -46,10 +44,9 @@ import megamek.common.equipment.Mounted;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The special-equipment dialogs (swing-inventory table 3, row R3). The Swing tests record, as literals, which pods each
@@ -58,21 +55,9 @@ import org.junit.jupiter.api.Timeout;
  * window, where the test thread plays the render thread, and expect the same results; without a native window each
  * dialog stays Swing.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuPodEjectionDialogsTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void antiPersonnelPodsInSwingTriggerTheTickedFirablePods() throws Exception {

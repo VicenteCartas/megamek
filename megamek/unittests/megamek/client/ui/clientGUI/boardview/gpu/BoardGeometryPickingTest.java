@@ -246,7 +246,7 @@ class BoardGeometryPickingTest {
                       || material == BoardScene.Surface.CONCRETE);
                 assertEquals(sparks, hit.hardSurface(), "The exposed material matters, including water over rock");
                 var at = ray.origin.cpy().mulAdd(ray.direction, (float) Math.sqrt(hit.distance()));
-                var attack = new UnitAttack(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 0),
+                var attack = new UnitAttack(UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 0),
                       megamek.common.ResolvedAttack.Kind.SHOT, false));
                 var picks = new java.util.concurrent.atomic.AtomicInteger();
                 attack.landscape = probe -> {

@@ -264,8 +264,8 @@ class GpuScatterSmokeTest {
 
     private static Map<Material, TextureAttribute> scatterMaterials(GpuTerrain terrain) throws Exception {
         Map<Material, TextureAttribute> result = new IdentityHashMap<>();
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-            for (Object part : (Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "scatterRenderables")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object part : (Array<?>) GpuTestSupport.field(chunk, "scatterRenderables")) {
                 Material material = ((Renderable) part).material;
                 // Bushes use the same tissue-aware sculpt material as field shrubs. Atlas controls apply
                 // only to rocks and grass; removing the sculpt dummy diffuse slot would also remove its UVs.
@@ -281,7 +281,7 @@ class GpuScatterSmokeTest {
     /** Same meshes, density, camera and lighting in alternating rounds; GPU pass cost, not application FPS. */
     private static void benchmark(GpuTerrain terrain, BoardCamera camera) throws Exception {
         var materials = scatterMaterials(terrain);
-        GpuPropBatch pages = (GpuPropBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "propBatch");
+        GpuPropBatch pages = (GpuPropBatch) GpuTestSupport.field(terrain, "propBatch");
         System.out.println("SCATTER GPU: " + Gdx.gl.glGetString(GL20.GL_RENDERER) + "; "
               + Gdx.graphics.getBackBufferWidth() + "x" + Gdx.graphics.getBackBufferHeight());
         try (GpuStageTimings timings = new GpuStageTimings()) {

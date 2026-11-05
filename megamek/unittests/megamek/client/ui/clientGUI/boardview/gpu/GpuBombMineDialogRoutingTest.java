@@ -2,17 +2,17 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.labels;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.pick;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.button;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.components;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.labels;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.pick;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.button;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.CLUSTER;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.HE;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.LG;
@@ -47,42 +47,28 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogField;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.dialogs.phaseDisplay.BombPayloadDialog;
 import megamek.client.ui.dialogs.phaseDisplay.MineDensityDialog;
 import megamek.client.ui.dialogs.phaseDisplay.MineLayingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.SeaMineDepthDialog;
-import megamek.common.Configuration;
 import megamek.common.equipment.BombLoadout;
 import megamek.common.equipment.EquipmentType;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import megamek.common.units.Tank;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The bomb payload and mine dialogs (swing-inventory table 3, R1) asked in the native battle window: each returns what
  * its Swing dialog returns for the same choices, cancelling included, and shows as before while no native window draws
  * dialogs. The test thread plays the GL thread; the Swing dialogs need a display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuBombMineDialogRoutingTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void swingBombPayloadDropsTheChosenBombsWithinItsLimit() throws Exception {
@@ -90,7 +76,7 @@ class GpuBombMineDialogRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
             try {
                 // A fighter bombing the ground drops at most two bombs; rockets cannot be dropped on the ground
                 List<List<String>> offered = new ArrayList<>();
@@ -161,7 +147,7 @@ class GpuBombMineDialogRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
             Entity tank = minelayer();
             try {
                 List<List<String>> mines = new ArrayList<>();
@@ -218,7 +204,7 @@ class GpuBombMineDialogRoutingTest {
                 // The Swing test's fighter: each pick comes back as the Swing dialog's narrowed entries
                 FutureTask<List<Object>> fighter = started(() -> payload(
                       new BombPayloadDialog(frame, "Bomb Payload, internal", loadout(), false, false, 2, 0)));
-                DialogRequest form = GpuDialogRoutingTest.awaitDialog(fixture.source);
+                DialogRequest form = GpuDialogFixture.awaitDialog(fixture.source);
                 assertEquals(DialogKind.FORM, form.kind());
                 assertEquals("Bomb Payload, internal", form.title());
                 assertEquals("Select the number and type of bombs you wish to drop.", form.message());
@@ -254,7 +240,7 @@ class GpuBombMineDialogRoutingTest {
                 // A salvo beyond the limit falls back to none, as in the Swing dialog
                 FutureTask<List<Object>> limited = started(() -> payload(
                       new BombPayloadDialog(frame, "Bomb Payload, internal", squadronLoadout(), false, false, 2, 2)));
-                DialogRequest salvos = GpuDialogRoutingTest.awaitDialog(fixture.source);
+                DialogRequest salvos = GpuDialogFixture.awaitDialog(fixture.source);
                 fixture.source.answer(salvos.id(), values(DialogAnswer.CHANGED, "2 (4)"));
                 DialogRequest undone = next(fixture.source, salvos, null);
                 assertEquals(List.of(List.of("0", "1 (2)")), choices(undone));
@@ -264,7 +250,7 @@ class GpuBombMineDialogRoutingTest {
 
                 FutureTask<List<Object>> cancelled = started(() -> payload(
                       new BombPayloadDialog(frame, "Bomb Payload, internal", loadout(), false, false, 2, 0)));
-                DialogRequest picked = GpuDialogRoutingTest.awaitDialog(fixture.source);
+                DialogRequest picked = GpuDialogFixture.awaitDialog(fixture.source);
                 fixture.source.answer(picked.id(), values(DialogAnswer.CHANGED, "2", "0", "0"));
                 fixture.source.answer(next(fixture.source, picked, null).id(), values(1));
                 assertEquals(Arrays.asList(false, null), cancelled.get(20, SECONDS), "Cancel drops nothing");

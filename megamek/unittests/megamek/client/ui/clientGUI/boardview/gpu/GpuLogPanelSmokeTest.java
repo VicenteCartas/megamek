@@ -86,7 +86,7 @@ class GpuLogPanelSmokeTest {
         final GpuContextMenu menu = mock(GpuContextMenu.class);
         final GpuLogPanel log;
         final Table root;
-        GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
+        GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
 
         Panel(GpuHudTestStage hud) {
             hud.window.clearChildren();
@@ -269,7 +269,7 @@ class GpuLogPanelSmokeTest {
             // Report keywords (K13): N finds the next card with the keyword; the row shows with the search.
             panel = new Panel(hud);
             play(panel.state.history, round);
-            panel.preferences = GpuHudInputTest.with(GpuHudInputTest.preferences(),
+            panel.preferences = GpuHudFixtures.with(GpuHudFixtures.preferences(),
                   Map.of("reportKeywords", "Piloting\nlaser", "reportFilterKeywords", "Hit Damage"));
             panel.show(hud, status, round.log());
             assertTrue(panel.log.key(Set.of(KeyCommandBind.REPORT_KEY_SELECT_NEXT)));
@@ -299,7 +299,7 @@ class GpuLogPanelSmokeTest {
                   Map.of(), round.log().combat(), round.log().psr(), round.log().moves(), List.of(inbound));
             play(panel.state.history, new Round(log, round.events()));
             GpuBattleStatus.Snapshot status = status(GamePhase.END_REPORT, 4);
-            panel.preferences = GpuHudInputTest.with(GpuHudInputTest.preferences(),
+            panel.preferences = GpuHudFixtures.with(GpuHudFixtures.preferences(),
                   Map.of("reportKeywords", "laser", "reportFilterKeywords", "Piloting\nheat"));
             panel.show(hud, status, log);
             List<String> list = panel.list();
@@ -721,7 +721,7 @@ class GpuLogPanelSmokeTest {
     }
 
     private static BoardScene.Combat attack(int attacker, int target, boolean hit) {
-        return UnitPlaybackTest.attack(UnitPlaybackTest.unit(attacker, attacker), UnitPlaybackTest.unit(target, target),
+        return UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(attacker, attacker), UnitPlaybackFixture.unit(target, target),
               ResolvedAttack.Kind.SHOT, hit);
     }
 
@@ -778,8 +778,8 @@ class GpuLogPanelSmokeTest {
 
     /** The board the events play on: one hex, as the playback only needs the scene's board. */
     private static BoardScene scene() {
-        return UnitPlaybackTest.scene(Stream.of(ATLAS, WARHAMMER, MARAUDER, PANTHER, TIMBER_WOLF, KING_CRAB,
-              BATTLEMASTER).map(id -> UnitPlaybackTest.unit(id, id)).toArray(BoardScene.Unit[]::new));
+        return UnitPlaybackFixture.scene(Stream.of(ATLAS, WARHAMMER, MARAUDER, PANTHER, TIMBER_WOLF, KING_CRAB,
+              BATTLEMASTER).map(id -> UnitPlaybackFixture.unit(id, id)).toArray(BoardScene.Unit[]::new));
     }
 
     private static GpuBattleStatus.Snapshot status(GamePhase phase) {

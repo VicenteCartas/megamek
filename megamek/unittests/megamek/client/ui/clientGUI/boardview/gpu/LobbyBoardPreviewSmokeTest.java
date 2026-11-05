@@ -214,20 +214,20 @@ class LobbyBoardPreviewSmokeTest {
             camera.setIsometric(false);
             camera.fit(inspection.source().takeFrame().scene());
             awaitImage(stage, preview);
-            var atmosphere = (GpuAtmosphere) field(preview, "atmosphere");
-            FrameBuffer scene = (FrameBuffer) field(atmosphere, "sceneColor");
-            FrameBuffer target = (FrameBuffer) field(preview, "target");
+            var atmosphere = (GpuAtmosphere) GpuTestSupport.field(preview, "atmosphere");
+            FrameBuffer scene = (FrameBuffer) GpuTestSupport.field(atmosphere, "sceneColor");
+            FrameBuffer target = (FrameBuffer) GpuTestSupport.field(preview, "target");
             assertEquals(target.getWidth() / 2, scene.getWidth());
             assertEquals(target.getHeight() / 2, scene.getHeight());
-            assertNotNull(field(atmosphere, "smaa"), "SMAA runs on the embedded composite");
-            assertNotNull(field(atmosphere, "fsr"), "the embedded image uses the same upscaler as gameplay");
-            var terrain = field(preview, "terrain");
-            assertEquals(true, field(terrain, "installedTessellation"));
-            assertEquals(false, field(terrain, "normalMaps"));
+            assertNotNull(GpuTestSupport.field(atmosphere, "smaa"), "SMAA runs on the embedded composite");
+            assertNotNull(GpuTestSupport.field(atmosphere, "fsr"), "the embedded image uses the same upscaler as gameplay");
+            var terrain = GpuTestSupport.field(preview, "terrain");
+            assertEquals(true, GpuTestSupport.field(terrain, "installedTessellation"));
+            assertEquals(false, GpuTestSupport.field(terrain, "normalMaps"));
             var tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
             assertTrue(tile.text().stream().anyMatch(text -> text.text().equals("0101")));
-            var labels = field(preview, "hexText");
-            assertFalse(((List<?>) field(labels, "pages")).isEmpty(), "enabled labels reach the GPU");
+            var labels = GpuTestSupport.field(preview, "hexText");
+            assertFalse(((List<?>) GpuTestSupport.field(labels, "pages")).isEmpty(), "enabled labels reach the GPU");
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
             UiTestStage.capture("map-embedded-inspection-display", 960, 720).dispose();
             SwingUtilities.invokeAndWait(() -> {
@@ -239,8 +239,8 @@ class LobbyBoardPreviewSmokeTest {
                 inspection.source().refresh();
             });
             awaitImage(stage, preview);
-            assertEquals(target.getWidth(), ((FrameBuffer) field(atmosphere, "sceneColor")).getWidth());
-            assertEquals(false, field(terrain, "installedTessellation"));
+            assertEquals(target.getWidth(), ((FrameBuffer) GpuTestSupport.field(atmosphere, "sceneColor")).getWidth());
+            assertEquals(false, GpuTestSupport.field(terrain, "installedTessellation"));
             tile = inspection.source().takeFrame().scene().tile(new Coords(0, 0));
             assertTrue(tile.text().isEmpty(), "disabling hex text refreshes the open preview's capture");
             UiTestStage.capture("map-embedded-inspection-top-grid", 960, 720).dispose();
@@ -257,12 +257,6 @@ class LobbyBoardPreviewSmokeTest {
             });
             awaitImage(stage, preview);
         }
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static void checkConditions(Stage stage, LobbyBoardPreview preview, BoardCamera camera,

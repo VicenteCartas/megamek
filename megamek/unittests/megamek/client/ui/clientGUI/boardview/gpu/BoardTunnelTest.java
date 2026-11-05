@@ -75,7 +75,7 @@ class BoardTunnelTest {
 
     @Test
     void lavaTubesNaturalBridgesDoNotReceiveRoadPortals() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var scene = BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         int bridges = 0;
         for (var tile : scene.tiles()) {
             assertTrue(BoardTunnel.entrances(scene, tile).isEmpty(), tile.coords().getBoardNum());
@@ -173,7 +173,7 @@ class BoardTunnelTest {
 
     @Test
     void minesBouldersLeaveBothTunnelMouthsAndTheirApproachesClear() throws Exception {
-        var scene = GpuRoadSourceTest.minesScene();
+        var scene = BoardScenes.minesScene();
         var tunnels = scene.tiles().stream().flatMap(t -> BoardTunnel.entrances(scene, t).stream()).toList();
         assertEquals(2, tunnels.size());
         int retained = 0;

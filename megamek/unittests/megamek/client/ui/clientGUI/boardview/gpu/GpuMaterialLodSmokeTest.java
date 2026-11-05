@@ -33,11 +33,11 @@ class GpuMaterialLodSmokeTest {
     void cacheDebugFollowsDrawPathAndNeverBakesTheTint() {
         UiTestStage.onGl(GpuBoardWindow.configuration(false), () -> {
             var terrain = new GpuTerrain();
-            var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+            var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
             try {
                 var camera = new BoardCamera();
                 BoardScene scene = scene("dirt");
-                GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                 terrain.setGrass(false);
                 terrain.setSmallObjects(false);
                 camera.setIsometric(false);
@@ -45,7 +45,7 @@ class GpuMaterialLodSmokeTest {
                     camera.camera.zoom = footprint * BoardGeometry.width() / 30;
                     camera.center(BoardGeometry.center(new Coords(3, 3), 0));
                     terrain.setMaterialCache(false);
-                    GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                     byte[] plain = debugPixels(frame, terrain, camera, scene);
                     terrain.setMaterialCacheDebug(true);
                     byte[] direct = debugPixels(frame, terrain, camera, scene);
@@ -152,11 +152,11 @@ class GpuMaterialLodSmokeTest {
         var failures = new ArrayList<String>();
         for (String material : List.of("grass", "dirt", "sand", "rock", "snow", "desert", "concrete")) {
             var terrain = new GpuTerrain();
-            var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+            var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
             try {
                 var camera = new BoardCamera();
                 BoardScene scene = scene(material);
-                GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                 // The ground alone: grass blades and small objects have their own levels of detail.
                 terrain.setGrass(false);
                 terrain.setSmallObjects(false);
@@ -185,7 +185,7 @@ class GpuMaterialLodSmokeTest {
           float footprint, int k, boolean cached) throws InterruptedException {
         camera.camera.zoom = footprint * BoardGeometry.width() / 30;
         camera.center(BoardGeometry.center(new Coords(3, 3), 0));
-        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+        GpuCalibrationScenes.settle(terrain, frame, camera, scene);
         for (int i = 0; cached && i < 600 && !terrain.materialCacheComplete(); i++) {
             terrain.refine(camera.camera);
             frame.render(terrain, camera, scene);

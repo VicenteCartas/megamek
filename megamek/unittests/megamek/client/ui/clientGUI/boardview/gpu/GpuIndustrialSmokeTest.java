@@ -138,7 +138,7 @@ class GpuIndustrialSmokeTest {
                     terrain.setColumns(tactical);
                     terrain.update(scene);
                     frame.prepare(terrain, camera, scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     assertTrue(terrain.ready(scene));
                     for (Coords coords : SITES) {
                         var center = BoardGeometry.center(coords, 0);
@@ -209,19 +209,19 @@ class GpuIndustrialSmokeTest {
 
     private static void checkNoCutaways(GpuTerrain terrain) throws Exception {
         int count = 0;
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-            assertTrue(((List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "struts")).isEmpty());
-            assertTrue(((java.util.Set<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "faded")).isEmpty());
-            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "cutaways")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            assertTrue(((List<?>) GpuTestSupport.field(chunk, "struts")).isEmpty());
+            assertTrue(((java.util.Set<?>) GpuTestSupport.field(chunk, "faded")).isEmpty());
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "cutaways")) {
                 count++;
-                assertTrue((boolean) GpuMixedUnitBenchmarkSmokeTest.field(prop, "industrial"));
-                assertNull(GpuMixedUnitBenchmarkSmokeTest.field(prop, "hoverOpaque"));
-                var instance = (ModelInstance) GpuMixedUnitBenchmarkSmokeTest.field(prop, "instance");
+                assertTrue((boolean) GpuTestSupport.field(prop, "industrial"));
+                assertNull(GpuTestSupport.field(prop, "hoverOpaque"));
+                var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
                 for (var material : instance.materials) {
                     assertFalse(material.has(BlendingAttribute.Type));
                     assertFalse(material.has(GpuBuildingCutaway.TYPE));
                 }
-                assertNull(GpuMixedUnitBenchmarkSmokeTest.field(prop, "building"));
+                assertNull(GpuTestSupport.field(prop, "building"));
             }
         }
         assertEquals(4, count, "Only the four industrial shells, without generated interior floors");

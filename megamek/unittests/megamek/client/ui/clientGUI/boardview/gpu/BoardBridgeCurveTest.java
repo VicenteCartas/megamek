@@ -25,7 +25,7 @@ class BoardBridgeCurveTest {
     void grasslandTerminalsKeepTheirAuthoredFootprintAndTheRampHasOneLevelRoadSurface() throws Exception {
         var at = new Coords(8, 7);
         for (boolean low : new boolean[] { true, false }) {
-            var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2"
+            var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2"
                   + (low ? " (Low Bridges)" : "") + ".board");
             for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
                 var surfaces = new HashMap<Coords, BoardSurface>();
@@ -69,7 +69,7 @@ class BoardBridgeCurveTest {
 
     @Test
     void bothEndsOfTheLowGrasslandBridgeKeepHillsidesOutOfTheCarriageway() throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
         for (var lod : List.of(TerrainLod.FULL, TerrainLod.DISTANT)) {
             assertClear(scene, List.of(new Coords(8, 7), new Coords(5, 8)), lod, 2);
         }
@@ -333,7 +333,7 @@ class BoardBridgeCurveTest {
 
     @Test
     void cityJunctionParapetsKeepTheApproachGradeUntilTheyReachTheLevelDeck() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board");
+        var scene = BoardScenes.installedScene("unofficial/Lanceman/16x17 City Hills Residential 2 (with Structures).board");
         var at = new Coords(8, 1);
         var tile = scene.tile(at);
         var deck = BoardBridge.deck(scene, tile);

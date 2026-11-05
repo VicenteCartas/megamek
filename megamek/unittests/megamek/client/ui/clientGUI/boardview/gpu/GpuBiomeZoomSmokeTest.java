@@ -63,9 +63,9 @@ class GpuBiomeZoomSmokeTest {
                             camera.camera.zoom = BoardGeometry.width() / 24;
                             camera.center(BoardGeometry.center(new Coords(12, 12), 0));
                             terrain.update(scene, camera.camera);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                            var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
-                            var grass = (GpuGroundCover) field(terrain, "groundCover");
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
+                            var plants = (GpuBiomeVegetation) GpuTestSupport.field(terrain, "biomeVegetation");
+                            var grass = (GpuGroundCover) GpuTestSupport.field(terrain, "groundCover");
                             try (var timings = new GpuStageTimings()) {
                                 for (int pass = 0; pass < 3; pass++) {
                                     long uploads = plants.uploads(), grassUploads = grass.uploads();
@@ -107,11 +107,5 @@ class GpuBiomeZoomSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Biome zoom profiling", failure.get()); }
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
     }
 }

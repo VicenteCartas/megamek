@@ -2,12 +2,12 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.closedAfterShowing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.components;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.press;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.closedAfterShowing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.press;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -25,7 +25,6 @@ import static org.mockito.Mockito.when;
 
 import java.awt.Component;
 import java.awt.GraphicsEnvironment;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -54,7 +53,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.FieldKind;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.DetonateChargesDialog;
@@ -63,7 +62,6 @@ import megamek.client.ui.dialogs.phaseDisplay.MinesweeperActivationDialog;
 import megamek.client.ui.dialogs.phaseDisplay.NovaNetworkDialog;
 import megamek.client.ui.dialogs.phaseDisplay.VariableRangeTargetingDialog;
 import megamek.client.ui.enums.DialogResult;
-import megamek.common.Configuration;
 import megamek.common.InfantryActionDeclaration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
@@ -83,10 +81,9 @@ import megamek.common.units.DemolitionCharge;
 import megamek.common.units.Entity;
 import megamek.common.units.IBuilding;
 import megamek.utils.BoardLoader;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -95,21 +92,9 @@ import org.mockito.MockedStatic;
  * the native requests. The native tests answer the same choices in the native window, where the test thread plays the
  * render thread, and expect the same results; without a native window each dialog stays Swing.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuPreEndDialogsTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void abandonmentInSwingAnnouncesTheTickedUnits() throws Exception {
@@ -680,7 +665,7 @@ class GpuPreEndDialogsTest {
      */
     static final class Declaring implements AutoCloseable {
         final GpuBoardFixture fixture;
-        final ClientGUI gui = GpuDialogRoutingTest.routingClient();
+        final ClientGUI gui = GpuDialogFixture.routingClient();
         final Client client = mock(Client.class);
         final Player enemy = new Player(2, "Enemy");
         final Player ally = new Player(3, "Ally");
@@ -688,7 +673,7 @@ class GpuPreEndDialogsTest {
 
         private Declaring(GpuBoardFixture fixture) throws Exception {
             this.fixture = fixture;
-            frame = GpuChoiceRoutingTest.clientFrame(gui);
+            frame = GpuDialogFixture.clientFrame(gui);
             when(client.getGame()).thenReturn(fixture.game);
             when(client.getLocalPlayer()).thenReturn(fixture.player);
             when(gui.getClient()).thenReturn(client);
@@ -705,7 +690,7 @@ class GpuPreEndDialogsTest {
 
         /** Registers a presented native window of the client over the fixture's board source. */
         void present() throws Exception {
-            GpuDialogRoutingTest.present(gui, fixture.view, fixture.source);
+            GpuDialogFixture.present(gui, fixture.view, fixture.source);
         }
 
         static Declaring create() throws Exception {
@@ -855,7 +840,7 @@ class GpuPreEndDialogsTest {
         @Override
         public void close() throws Exception {
             try {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
                 onSwing(() -> {
                     frame.dispose();
                     return null;

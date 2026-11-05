@@ -118,10 +118,10 @@ class GpuInfantryPlateauSmokeTest {
                         verify(view);
 
                         // The completion callback can create an animator before the first visible arrival frame.
-                        var scene = (BoardScene) field(view, "scene");
+                        var scene = (BoardScene) GpuTestSupport.field(view, "scene");
                         var unit = scene.units().stream().filter(value -> value.id() == 3).findFirst().orElseThrow();
-                        ((Map<?, ?>) field(view, "animators")).remove("3:-1");
-                        var playback = (UnitPlayback) field(view, "playback");
+                        ((Map<?, ?>) GpuTestSupport.field(view, "animators")).remove("3:-1");
+                        var playback = (UnitPlayback) GpuTestSupport.field(view, "playback");
                         var start = new BoardScene.Waypoint(new Coords(7, 13), 2, 0);
                         playback.accept(List.of(new BoardScene.Movement(3, 0, List.of(start, unit.location()),
                               EntityMovementType.MOVE_WALK, 0, 1, unit)), scene, ignored -> true);
@@ -156,10 +156,10 @@ class GpuInfantryPlateauSmokeTest {
     private static void verify(GpuBattleView view) throws Exception {
         // A replaced board loads behind the loading screen before it can be inspected.
         GpuBoardTestUi.present(view);
-        var scene = (BoardScene) field(view, "scene");
-        var instances = (Map<?, ?>) field(view, "unitInstances");
-        var models = (GpuUnitModels) field(view, "unitModels");
-        var surfaces = (BoardSurface.Cache) field(view, "groundSurfaces");
+        var scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        var instances = (Map<?, ?>) GpuTestSupport.field(view, "unitInstances");
+        var models = (GpuUnitModels) GpuTestSupport.field(view, "unitModels");
+        var surfaces = (BoardSurface.Cache) GpuTestSupport.field(view, "groundSurfaces");
         for (var unit : scene.units()) {
             if (unit.id() != 2 && unit.id() != 3) { continue; }
             var instance = (ModelInstance) instances.get(unit.id() + ":-1");
@@ -192,11 +192,5 @@ class GpuInfantryPlateauSmokeTest {
                 }
             }
         }
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

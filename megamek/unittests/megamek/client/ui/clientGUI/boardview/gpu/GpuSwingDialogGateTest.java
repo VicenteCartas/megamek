@@ -2,8 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -26,7 +26,6 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentEvent;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -99,7 +98,6 @@ import megamek.client.ui.panels.phaseDisplay.TargetingPhaseDisplay;
 import megamek.client.ui.panels.phaseDisplay.VictoryHexPropertiesPane;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
 import megamek.client.ui.util.MULVersionValidator;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.equipment.Cargo;
@@ -121,10 +119,9 @@ import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.layout.PatternLayout;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * With the client's battle window presented and its own dialog listener running, each prompt chokepoint of swing-inventory table 2, each
@@ -133,6 +130,7 @@ import org.junit.jupiter.api.Timeout;
  * surfaces the user kept are raised over the battle window; any other Swing dialog is logged at error level and not
  * raised. The test thread plays the GL thread; the Swing dialogs need a display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(900)
 class GpuSwingDialogGateTest {
     private static final long WAIT_SECONDS = 20;
@@ -140,19 +138,6 @@ class GpuSwingDialogGateTest {
     private static final Predicate<Window> MESSAGE_BOX = window -> shows(window, JOptionPane.class);
     private static final String[] BLOWS = { "No called blow (full body)", "Aim high (Punch table)",
           "Aim low (Kick table)" };
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void theClientsPromptChokepointsAskNativelyOverTheBattleWindowAndInSwingOnTheLegacy2DClient() throws Exception {
@@ -599,16 +584,16 @@ class GpuSwingDialogGateTest {
 
             // While the window cannot ask the client's prompts (it starts or closes), they fall back to Swing, raised
             gate.errors.clear();
-            GpuDialogRoutingTest.set(gate.window, "source", null);
+            GpuDialogFixture.set(gate.window, "source", null);
             assertTrue(gate.raised(() -> declaring.gui.confirm("Flee?", "Confirm", JOptionPane.YES_NO_OPTION,
                   JOptionPane.QUESTION_MESSAGE), MESSAGE_BOX), "A prompt before the board source is ready");
-            GpuDialogRoutingTest.set(gate.window, "source", declaring.fixture.source);
-            GpuDialogRoutingTest.set(gate.window, "closing", true);
+            GpuDialogFixture.set(gate.window, "source", declaring.fixture.source);
+            GpuDialogFixture.set(gate.window, "closing", true);
             assertTrue(gate.raised(() -> {
                 declaring.gui.doAlertDialog("Disconnected", "The server closed the connection.");
                 return null;
             }, MESSAGE_BOX), "An alert while the window closes");
-            GpuDialogRoutingTest.set(gate.window, "closing", false);
+            GpuDialogFixture.set(gate.window, "closing", false);
 
             // Dialogs of no owner or of another window are not the battle window's (R14, R15): left as they are. A
             // local bot's own alert asks natively over its creator's window instead (GpuDialogRoutingTest).
@@ -748,7 +733,7 @@ class GpuSwingDialogGateTest {
 
         /** Registers the client's native window as presented, with its dialog listener. */
         void present() throws Exception {
-            window = GpuDialogRoutingTest.present(gui, fixture.view, fixture.source);
+            window = GpuDialogFixture.present(gui, fixture.view, fixture.source);
             Field field = GpuBoardWindow.class.getDeclaredField("dialogListener");
             field.setAccessible(true);
             listener = (AWTEventListener) field.get(window);
@@ -761,7 +746,7 @@ class GpuSwingDialogGateTest {
                 Toolkit.getDefaultToolkit().removeAWTEventListener(listener);
                 listener = null;
             }
-            GpuDialogRoutingTest.dismiss();
+            GpuDialogFixture.dismiss();
         }
 
         /**

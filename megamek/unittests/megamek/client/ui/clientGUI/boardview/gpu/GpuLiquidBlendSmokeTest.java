@@ -135,7 +135,7 @@ class GpuLiquidBlendSmokeTest {
 
     private static void capture(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) throws Exception {
         terrain.update(scene, camera.camera);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         terrain.animate(.15f, List.of());
         frame.render(terrain, camera, scene);
     }

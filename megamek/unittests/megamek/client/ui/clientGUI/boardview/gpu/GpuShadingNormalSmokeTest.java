@@ -179,7 +179,7 @@ class GpuShadingNormalSmokeTest {
                                 ? biome : BoardScene.Biome.MUD, 0));
                 }
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
                 Runnable draw = () -> terrain.render(camera.camera);
@@ -1049,7 +1049,7 @@ class GpuShadingNormalSmokeTest {
                 assertEquals(projected, BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera, focus), .001f,
                       "Actual FBO footprint and production LOD selection agree");
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
                 Runnable draw = () -> terrain.render(camera.camera);

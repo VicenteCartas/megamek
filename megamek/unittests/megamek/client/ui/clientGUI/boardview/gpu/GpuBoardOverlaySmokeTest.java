@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -386,7 +386,7 @@ class GpuBoardOverlaySmokeTest {
                 GpuHudData waypoint = panels(pantherMove(scene), GpuFireOrders.Snapshot.EMPTY);
                 GpuHudData firing = panels(GpuMovePlan.Snapshot.EMPTY, fire(null));
                 GpuHudData frontArc = panels(GpuMovePlan.Snapshot.EMPTY, fire(frontArc(scene)));
-                GpuHudData physical = GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
+                GpuHudData physical = GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
                       new GpuPhysicalOptions.Snapshot(true, ATLAS, TIMBER_WOLF, List.of(TIMBER_WOLF), List.of()),
                       GpuUnitRecord.Snapshot.EMPTY);
                 GpuBattleStatus.Snapshot moving = GpuHudFixtures.status();
@@ -1023,7 +1023,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire) {
-        return GpuHudInputTest.panels(move, fire, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY);
+        return GpuHudFixtures.panels(move, fire, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY);
     }
 
     static GpuBattleStatus.Snapshot status(GamePhase phase, int actor) {
@@ -1048,7 +1048,7 @@ class GpuBoardOverlaySmokeTest {
     }
 
     static GpuBoardSource.UiPreferences preferences() {
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", List.of()));
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("binds", List.of()));
     }
 
     static BoardScene.Unit unit(BoardScene scene, int id) {
