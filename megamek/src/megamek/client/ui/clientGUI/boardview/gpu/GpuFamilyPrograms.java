@@ -55,9 +55,8 @@ final class GpuFamilyPrograms {
      * Family programs one load (a board, graphics or lighting change behind the loading stage) compiles from source,
      * the most-drawn first; programs the program cache holds load beside them at no such cost. The other variants keep
      * the generic program until a later load, which takes these from the cache and compiles the next ones; without a
-     * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one costs about 15 s on
-     * Iris Xe, its link and the driver's compile at its first draw: with nothing cached, Fire and Ice 2's first load
-     * took 693 s with all 28, 367 s with four (RTX 4070: 112 s and 45 s).
+     * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one links on Iris Xe in
+     * 1.1 to 4 s at Normal, 1.6 to 5.6 s at High.
      */
     static final int FRESH = 4;
 

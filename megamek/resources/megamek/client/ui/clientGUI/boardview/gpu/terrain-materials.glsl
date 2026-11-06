@@ -1345,6 +1345,11 @@ vec4 rockNormal(float layer, float tile, MaterialProjection p, vec3 face, bool s
     return vec4(normalize(normal) * (1.0 - spread), mix(.55, 1.0, cavity));
 }
 
+// Families whose river banks expose earth and gravel: snow and dune sand must not become the submerged bed.
+bool soilBankFamily(float familyId) {
+    return familyId < 2.5 || isFamily(familyId, 5.0) || isFamily(familyId, TROPICAL_FAMILY);
+}
+
 // A light film of the local hardpan, ash or fines left on exposed level stone.
 float familyDust(float familyId) {
     if (isFamily(familyId, DESERT_FAMILY) || isFamily(familyId, MARS_FAMILY)
@@ -1488,8 +1493,7 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
     if (isFamily(familyId, 4.0)) roles = vec4(0.0, 0.0, 1.0, 0.0);
     // Ordinary river shores expose earth and gravel before reaching water. Reassign the existing mantle/deposit
     // slots, rather than sampling an extra layer; snow and dune sand must not become the submerged bed.
-    bool soilBank = riverBank && (familyId < 2.5 || isFamily(familyId, 5.0)
-          || isFamily(familyId, TROPICAL_FAMILY));
+    bool soilBank = riverBank && soilBankFamily(familyId);
     float coverEnd = isFamily(familyId, 0.0) || isFamily(familyId, TROPICAL_FAMILY) ? .6 : .9;
     float bedRock = rock * (1.0 - smoothstep(.2, .8, up)) * smoothstep(.05, 2.2, aboveFoot);
     float bankBlend = 0.0;
@@ -1717,8 +1721,7 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     weights[first] = 1.0;
     if (share < .02) return a;
 #ifdef normalQualityFlag
-    TerrainMaterial b = riverBank ? cliffMaterial(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
-          sediment, coverFamilies, second, coverTilesAt(second), coverLayersAt(second), true, false)
+    TerrainMaterial b = riverBank && soilBankFamily(coverFamilies[second]) ? coverLayer(a, p, u_bankMaterials.x, u_bankMaterials.y, true)
           : rock > .5 ? coverLayer(a, p, coverLayersAt(second).z, coverTilesAt(second).z, true)
           : coverLayer(a, p, coverLayersAt(second).w, coverTilesAt(second).w, true);
 #else
