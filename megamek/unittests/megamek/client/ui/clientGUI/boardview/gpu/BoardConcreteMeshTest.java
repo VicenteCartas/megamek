@@ -407,7 +407,8 @@ class BoardConcreteMeshTest {
                     if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
                     Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
                     for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
-                        assertTrue(surface.relief.shade(point).normal().epsilonEquals(normal, .0001f),
+                        // A sliver's own normal rounds off by about .0001; a road's normal differs by far more.
+                        assertTrue(surface.relief.shade(point).normal().epsilonEquals(normal, .002f),
                               "The map cut must not inherit upward road normals at " + at + ", " + lod + ": " + point);
                     }
                     checked++;

@@ -169,6 +169,11 @@ final class GpuHudState {
         return playbackBusy || selectionCleared && status.myTurn();
     }
 
+    /** The newest status's phase, which {@link #presented} holds back from the rest of the HUD during playback. */
+    GamePhase latestPhase() {
+        return status.phase();
+    }
+
     /**
      * The frame as the HUD and the board overlay present it. Outside the local turn there is no fire preview: no
      * to-hit badges or guides from the last own unit while another player moves or fires.

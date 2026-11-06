@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -60,9 +61,10 @@ class GpuLivePlaybackSmokeTest {
 
     /**
      * C.6 and the log, forces and labels during live playback: the Atlas's armor drop shows on its card, its forces
-     * tile and its overview card only after the Quickdraw's shots played; each shot counts in the log's totals and the
-     * Atlas's review line, and pops up at its target, as it lands. The dock's speed and pause steer the board's
-     * playback, and a paused playback holds its newest pop-up.
+     * tile and its overview card only after the Quickdraw's shots played; each shot counts in the log's totals and
+     * pops up at its target as it lands. The Atlas's forces line holds the phase from before the report, as the whole
+     * HUD does, and counts the shots once they have played. The dock's speed and pause steer the board's playback, and
+     * a paused playback holds its newest pop-up.
      */
     @Test
     void aVolleyShowsItsDamageOnlyOnceItHasPlayed() throws Exception {
@@ -100,8 +102,8 @@ class GpuLivePlaybackSmokeTest {
                 assertEquals(List.of(hit(5, "CT")), play.popUps, "Its pop-up");
                 play.assertAtTarget(ARCHER);
                 assertEquals(List.of("1", "0"), play.totals());
-                assertTrue(play.texts("forces-unit-" + ATLAS).stream().anyMatch(text -> text.contains(counted)),
-                      "The Atlas's review line counts its shot");
+                assertTrue(play.texts("forces-unit-" + ATLAS).stream().noneMatch(text -> text.contains(counted)),
+                      "The forces line holds the phase from before the report until the playback ends");
                 assertEquals(1, play.atlas().armor(), "The Quickdraw's volley still waits: no damage shows");
 
                 // The dock pauses the board: nothing more lands, and the newest pop-up stays, held young.
@@ -128,6 +130,8 @@ class GpuLivePlaybackSmokeTest {
                 // Once the volley has played, the HUD shows the client's units.
                 assertTrue(play.until(() -> !play.history.running()), "The playback ends");
                 assertEquals(List.of("3", "1"), play.totals());
+                assertTrue(play.texts("forces-unit-" + ATLAS).stream().anyMatch(text -> text.contains(counted)),
+                      () -> "The Atlas's review line counts its shot: " + play.texts("forces-unit-" + ATLAS));
                 assertEquals(Set.of(hit(5, "CT"), hit(10, "CT"), hit(5, "LT"), UiTheme.upper(
                       Messages.getString("GpuBoard.hud.common.miss")) + " "
                       + Messages.getString("GpuBoard.hud.labels.missRoll", 7, 9)), Set.copyOf(play.popUps),
@@ -314,15 +318,20 @@ class GpuLivePlaybackSmokeTest {
                 assertTrue(feet.size() < LIMIT, "The walk ends");
             }
             float middle = (float) feet.stream().mapToDouble(Float::doubleValue).average().orElseThrow();
+            float forward = middle + (Collections.max(feet) - middle) / 2;
             int first = -1;
             int last = -1;
             int cycles = -1;
+            boolean swung = false;
             for (int index = 1; index < feet.size(); index++) {
-                // The foot passes under its hips once a cycle going back: it is planted and the body walks on.
-                if (feet.get(index - 1) > middle && feet.get(index) <= middle) {
+                // The foot passes under its hips once a cycle going back: it is planted and the body walks on. It has
+                // swung well forward first: a foot settling by its hips as the walk starts or ends crosses them too.
+                swung |= feet.get(index - 1) > forward;
+                if (swung && feet.get(index - 1) > middle && feet.get(index) <= middle) {
                     first = first < 0 ? index : first;
                     last = index;
                     cycles++;
+                    swung = false;
                 }
             }
             assertTrue(cycles >= 2, "The walk has cycles to measure: " + cycles);

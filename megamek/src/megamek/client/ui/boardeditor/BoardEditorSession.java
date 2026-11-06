@@ -3232,8 +3232,8 @@ public final class BoardEditorSession {
      * or above it stays. A bridge's deck stays where it is over the same ground, so the water can rise past it: its height
      * becomes deck - surface. With {@code remove} a submerged hex also loses every other component with its appearance, and
      * its objects, except a bridge (it keeps its appearance and the objects on it) and its deployment zones, which are
-     * scenario data. Without it, structures, woods and objects on a surface rise with the new level. One undo step; returns
-     * the number of submerged hexes.
+     * scenario data. Without it, structures and woods stay on the same ground as the water rises around them, as their
+     * heights count from the floor in 3D. One undo step; returns the number of submerged hexes.
      */
     private int flood(int surface, boolean remove) {
         return everyHex(hex -> {

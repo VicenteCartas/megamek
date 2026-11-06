@@ -127,6 +127,9 @@ class GpuTerrainBlendSmokeTest {
                     var clock = GpuTerrain.class.getDeclaredField("clock");
                     clock.setAccessible(true);
                     fresh.animate(clock.getFloat(terrain), List.of());
+                    // A renderer's first frame still shows softer ground: the next settle refines what that frame drew,
+                    // as the edited renderer's earlier frames already have.
+                    renderSettled(fresh, frame, camera, scene);
                     renderSettled(fresh, frame, camera, scene);
                     byte[] rebuilt = screen();
                     GpuReviewFrame.save(new File(output, "island-sand-rebuilt.png"));

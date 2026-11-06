@@ -460,7 +460,7 @@ final class GpuCommandDock implements GpuHud.Component {
     private Variant variant() {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
         GpuHudData panels = inputs.frame().panels();
-        GamePhase phase = status.phase();
+        GamePhase phase = playbackPhase();
         if (state.overview || state.turnLocked(status) && !phase.isReport()) { return Variant.CHAT; }
         boolean turns = phase.isMovement() || phase.isFiring() || phase.isTargeting() || phase.isPhysical();
         if (phase.isInitiativeReport()) {
@@ -477,6 +477,16 @@ final class GpuCommandDock implements GpuHud.Component {
             return panels.physical().adjacentTargets().isEmpty() ? Variant.NO_PHYSICAL : Variant.PHYSICAL;
         }
         return Variant.GENERIC;
+    }
+
+    /**
+     * The phase the dock shows: a running report plays under its transport, while the rest of the HUD holds the phase before
+     * it until the playback ends (GpuHudState#presented).
+     */
+    private GamePhase playbackPhase() {
+        GamePhase latest = state.latestPhase();
+        return state.history.running() && (latest.isFiringReport() || latest.isPhysicalReport() || latest.isEndReport())
+              ? latest : inputs.frame().status().phase();
     }
 
     /** The turn slot that acts now, or null. */
@@ -833,7 +843,7 @@ final class GpuCommandDock implements GpuHud.Component {
      */
     private void showPlayback() {
         GpuBattleStatus.Snapshot status = inputs.frame().status();
-        GamePhase phase = status.phase();
+        GamePhase phase = playbackPhase();
         GpuPlaybackHistory history = state.history;
         boolean running = history.running();
         if (phase.isEndReport()) {
@@ -924,7 +934,7 @@ final class GpuCommandDock implements GpuHud.Component {
             case INITIATIVE, PLAN, GENERIC -> run(panels.phase().doneId());
             case NO_PHYSICAL -> run(noAction());
             case PLAYBACK -> {
-                if (!inputs.frame().status().phase().isEndReport() && state.history.running()) {
+                if (!playbackPhase().isEndReport() && state.history.running()) {
                     state.history.skip();
                 } else {
                     run(panels.phase().doneId());
