@@ -431,6 +431,13 @@ public class EntityImage {
         return loadPreviewImage(showDamage, NO_FACING);
     }
 
+    /** A whole multi-hex image ({@link MekTileset#WHOLE}), larger than a hex and without facings: the base, camouflaged. */
+    void loadWholeImage() {
+        if (base != null) {
+            base = applyColor(base, NO_FACING, base.getWidth(null), base.getHeight(null));
+        }
+    }
+
     /** {@link #loadPreviewImage(boolean)} with the shadows and highlights of {@code facing} ({@link #applyColor}). */
     @Nullable Image loadPreviewImage(final boolean showDamage, final int facing) {
         if (base == null) {
@@ -458,6 +465,11 @@ public class EntityImage {
      * none with {@link #NO_FACING}.
      */
     protected Image applyColor(Image image, int facing) {
+        return applyColor(image, facing, IMG_WIDTH, IMG_HEIGHT);
+    }
+
+    /** {@link #applyColor(Image, int)} on an image of the given size, the camouflage repeating from hex to hex. */
+    private Image applyColor(Image image, int facing, int width, int height) {
         if (image == null) {
             return null;
         }
@@ -466,10 +478,10 @@ public class EntityImage {
         final int colour = colourCamouflage ? PlayerColour.parseFromString(getCamouflage().getFilename()).getHex() : -1;
 
         // Prepare the images for access
-        int[] pMek = new int[IMG_SIZE];
+        int[] pMek = new int[width * height];
         int[] pCamo = new int[IMG_SIZE];
         try {
-            grabImagePixels(image, pMek);
+            grabImagePixels(image, pMek, width, height);
             if (!colourCamouflage && hasCamouflage) {
                 grabImagePixels(getCamouflage().getImage(), pCamo);
             }
@@ -480,7 +492,7 @@ public class EntityImage {
 
         if (hasCamouflage) {
             // Overlay the camo or color
-            for (int i = 0; i < IMG_SIZE; i++) {
+            for (int i = 0; i < pMek.length; i++) {
                 int pixel = pMek[i];
                 int alpha = (pixel >> 24) & 0xff;
                 int red = (pixel >> 16) & 0xff;
@@ -495,7 +507,8 @@ public class EntityImage {
                 // Apply the camo only on the icon pixels, not on transparent pixels
                 if (alpha != 0) {
                     int pixel1 = colourCamouflage ? colour
-                          : rotatedAndScaledColor(i, getCamouflage().getRotationRadians(),
+                          : rotatedAndScaledColor((i / width % IMG_HEIGHT) * IMG_WIDTH + i % width % IMG_WIDTH,
+                          getCamouflage().getRotationRadians(),
                           getCamouflage().getScaleFactor(), pCamo);
                     int red1 = (pixel1 >> 16) & 0xff;
                     int green1 = (pixel1 >> 8) & 0xff;
@@ -525,7 +538,7 @@ public class EntityImage {
                 }
             }
         }
-        ImageProducer producer = new MemoryImageSource(IMG_WIDTH, IMG_HEIGHT, pMek, 0, IMG_WIDTH);
+        ImageProducer producer = new MemoryImageSource(width, height, pMek, 0, width);
         Image result = Toolkit.getDefaultToolkit().createImage(producer);
         return ImageUtil.createAcceleratedImage(result);
     }
@@ -810,7 +823,12 @@ public class EntityImage {
 
     /** Initiates the PixelGrabber for the given image and int array. */
     private static void grabImagePixels(Image img, int[] pixels) throws InterruptedException, RuntimeException {
-        PixelGrabber pg = new PixelGrabber(img, 0, 0, IMG_WIDTH, IMG_HEIGHT, pixels, 0, IMG_WIDTH);
+        grabImagePixels(img, pixels, IMG_WIDTH, IMG_HEIGHT);
+    }
+
+    private static void grabImagePixels(Image img, int[] pixels, int width, int height)
+          throws InterruptedException, RuntimeException {
+        PixelGrabber pg = new PixelGrabber(img, 0, 0, width, height, pixels, 0, width);
         pg.grabPixels();
         if ((pg.getStatus() & ImageObserver.ABORT) != 0) {
             throw new RuntimeException("ImageObserver aborted.");

@@ -37,11 +37,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.Mockito.when;
 
 import java.awt.Color;
+import java.awt.GraphicsEnvironment;
 import java.awt.image.BufferedImage;
 
+import megamek.client.ui.util.PlayerColour;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.battlefieldSupport.OverlayStyle;
 import megamek.common.battlefieldSupport.StripeDirection;
@@ -80,6 +84,24 @@ class EntityImageTest {
         assertSame(base, entityImage.getTilesetBase(),
               "getTilesetBase() must keep returning the original tileset image after loadFacings(), "
                     + "otherwise the TilesetManager cache dedup never matches and images leak");
+    }
+
+    @Test
+    void aWholeImageKeepsItsSizeAndIsCamouflagedThroughout() {
+        // Without a display ImageUtil makes no accelerated image.
+        assumeFalse(GraphicsEnvironment.isHeadless());
+        BufferedImage stitched = new BufferedImage(210, 216, BufferedImage.TYPE_INT_ARGB);
+        int grey = 0xFF808080;
+        stitched.setRGB(200, 200, grey);
+
+        EntityImage entityImage = EntityImage.createIcon(stitched, null, Camouflage.of(PlayerColour.RED), mock(Infantry.class), -1, true,
+              false);
+        entityImage.loadWholeImage();
+
+        var whole = (BufferedImage) entityImage.getBase();
+        assertEquals(210, whole.getWidth());
+        assertEquals(216, whole.getHeight());
+        assertNotEquals(grey, whole.getRGB(200, 200), "The camouflage reaches past the first hex");
     }
 
     @Test
