@@ -218,13 +218,6 @@ class GpuDepthPrepassSmokeTest {
                 checkOrder(board + " " + middle.name(), terrain, frame, camera, scene, middle, timings, report);
                 if (calibration) {
                     checkScars(terrain, frame, camera, scene, middle, timings, report);
-                    // The Tactical View hides the plants and draws no pre-pass.
-                    terrain.setFluffHidden(true);
-                    try {
-                        warm(terrain, frame, camera, scene);
-                        checkNoPrepass("calibration Tactical View", terrain, frame, camera, scene, middle, timings,
-                              report);
-                    } finally { terrain.setFluffHidden(false); }
                 }
             } finally { terrain.dispose(); }
             if (calibration) {

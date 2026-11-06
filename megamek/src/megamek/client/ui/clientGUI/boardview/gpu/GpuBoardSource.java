@@ -1310,7 +1310,7 @@ final class GpuBoardSource implements BoardSource {
         if (entity == null) {
             return null;
         }
-        Image image = view.getTilesetManager().imageFor(entity);
+        Image image = view.getTilesetManager().textureFor(entity, -1);
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 

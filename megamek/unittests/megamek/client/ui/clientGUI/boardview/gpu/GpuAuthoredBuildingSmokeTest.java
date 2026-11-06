@@ -819,11 +819,6 @@ class GpuAuthoredBuildingSmokeTest {
                         }
                         assertTrue(picked, "Small authored prop remains selectable at " + owner + " in " + shown.bounds());
                     }
-                    terrain.setFluffHidden(true);
-                    for (Coords owner : List.of(new Coords(2, 2), new Coords(4, 2))) {
-                        assertFalse(terrain.editorObjects(owner).getFirst().shown());
-                    }
-                    terrain.setFluffHidden(false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }

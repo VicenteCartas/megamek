@@ -124,8 +124,8 @@ class GpuRoadRampSourceSmokeTest {
                             try {
                                 terrain.setColumns(classic);
                                 // Keep the installed carriers, roads and bridges while exposing their sides
-                                // through neighbouring buildings and vegetation from the original map.
-                                terrain.setFluffHidden(true);
+                                // through the original map's scatter.
+                                terrain.setScatterHidden(true);
                                 var camera = new BoardCamera();
                                 camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                                 camera.setIsometric(true);

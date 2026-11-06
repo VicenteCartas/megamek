@@ -119,7 +119,7 @@ class GpuGraphicsModeSmokeTest {
         view.setTacticalView(true);
         frames(view, 3);
         assertEquals(roadMasks, infrastructure(terrain), "Enhanced Tactical keeps the same infrastructure");
-        assertTrue(terrain.fluffHidden());
+        assertTrue(terrain.scatterHidden());
         assertFalse(terrain.busy(), "T starts no terrain rebuild");
         capture("graphics-enhanced-tactical.png");
         view.setTacticalView(false);
@@ -164,7 +164,7 @@ class GpuGraphicsModeSmokeTest {
         view.setTacticalView(true);
         frames(view, 3);
         assertTrue(view.boardCamera.tactical());
-        assertTrue(terrain.fluffHidden());
+        assertTrue(terrain.scatterHidden());
         assertTrue(terrain.columns(), "T never changes the build");
         assertFalse(terrain.busy(), "T starts no rebuild");
         assertEquals(roadMasks, infrastructure(terrain), "Classic Tactical keeps the same infrastructure");
@@ -173,7 +173,7 @@ class GpuGraphicsModeSmokeTest {
         captureRailPlateau(view, terrain, scene, true);
         view.setTacticalView(false);
         frames(view, 3);
-        assertFalse(terrain.fluffHidden());
+        assertFalse(terrain.scatterHidden());
         assertTrue(terrain.columns());
         assertFalse(terrain.busy());
         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

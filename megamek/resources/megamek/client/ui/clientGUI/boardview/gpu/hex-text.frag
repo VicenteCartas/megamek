@@ -41,7 +41,8 @@ void main() {
     fragColor = v_color * glyph();
     if (v_ink >= 0.0) { fragColor.rgb = vec3(v_ink); }
     if (u_topView != 0 && v_surface.y == 0.0) {
-        DEPTH = 0.0;
+        // MeepleVisual.ICON_DEPTH: over the board, under the units' icons.
+        DEPTH = 0.001;
         return;
     }
     vec2 screen = (gl_FragCoord.xy - u_viewport.xy) / u_viewport.zw;

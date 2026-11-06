@@ -461,15 +461,7 @@ class GpuLegacyImportSmokeTest {
             var scene = (BoardScene) GpuTestSupport.field(view, "scene");
             var down = new com.badlogic.gdx.math.collision.Ray(new Vector3(dropped).add(0, 0, 500), new Vector3(0, 0, -1));
             assertEquals(tree.get(), terrain.decorationHit(scene, down).id(), "Object picking finds the stand tree");
-            // The Tactical View hides every placed object, plants included: no object part draws there,
-            // and the editor's object pick passes through the tree.
             assertTrue(objectParts(terrain) > 0, "The 3D view draws the other placed objects");
-            terrain.setFluffHidden(true);
-            try {
-                var shown = terrain.decorationHit(scene, down);
-                assertTrue(shown == null || !shown.id().equals(tree.get()), "A Tactical View pick passes through the placed tree");
-                assertEquals(0, objectParts(terrain), "No placed object draws there");
-            } finally { terrain.setFluffHidden(false); }
 
             // The bridge's Pillars toggle, from its Edit panel: the imported span has its piers; off removes them from the
             // whole span, Undo brings them back. A pier is the bridge in the side view too.

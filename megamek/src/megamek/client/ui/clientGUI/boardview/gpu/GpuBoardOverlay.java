@@ -277,7 +277,7 @@ final class GpuBoardOverlay implements Disposable {
      * Draws the marks where the units stand this frame and on their hexes, level as selection bands, half
      * a unit above the unit's base ({@code poses} gives each scene unit's as the view placed it; a unit without one
      * shows none) or on a hex's floating plane: in 3D first the hidden bands faintly where the terrain or a model hides
-     * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases.
+     * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases, under their icons.
      */
     void renderMarks(Camera camera, Function<BoardScene.Unit, UnitFootprint.Pose> poses) {
         if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty() && incomingTargets.isEmpty()
@@ -290,16 +290,18 @@ final class GpuBoardOverlay implements Disposable {
         Gdx.gl.glDepthMask(false);
         shapes.setProjectionMatrix(camera.combined);
         try {
+            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             if (tactical) {
-                Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+                // Flat over the board, under the unit icons alone.
+                Gdx.gl.glDepthRangef(MeepleVisual.ICON_DEPTH, MeepleVisual.ICON_DEPTH);
             } else {
-                Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
                 Gdx.gl.glDepthFunc(GL20.GL_GREATER);
                 drawMarks(poses, hiddenUnitMarks, hiddenHexMarks, HIDDEN_OPACITY);
-                Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             }
+            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             drawMarks(poses, unitMarks, hexMarks, 1);
         } finally {
+            Gdx.gl.glDepthRangef(0, 1);
             Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
@@ -1104,7 +1106,9 @@ final class GpuBoardOverlay implements Disposable {
     private static Material material(boolean alwaysVisible) {
         return new Material(ColorAttribute.createDiffuse(Color.WHITE),
               new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
-              new DepthTestAttribute(alwaysVisible ? GL20.GL_ALWAYS : GL20.GL_LEQUAL, false),
+              // Over the whole scene but the Tactical View's unit icons.
+              alwaysVisible ? new DepthTestAttribute(GL20.GL_LEQUAL, MeepleVisual.ICON_DEPTH, MeepleVisual.ICON_DEPTH, false)
+                    : new DepthTestAttribute(GL20.GL_LEQUAL, false),
               IntAttribute.createCullFace(GL20.GL_NONE));
     }
 

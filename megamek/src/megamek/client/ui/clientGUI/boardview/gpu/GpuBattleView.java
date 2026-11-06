@@ -30,6 +30,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Cursor.SystemCursor;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
@@ -129,7 +130,7 @@ class GpuBattleView extends ApplicationAdapter {
     private final GpuAmbientOcclusion ambientOcclusion = new GpuAmbientOcclusion();
     private final GpuSkyVisibility skyVisibility = new GpuSkyVisibility();
     private final GpuWaterImpacts waterImpacts = new GpuWaterImpacts();
-    private record UnitSprite(BoardScene.Pixels pixels, boolean meeple) { }
+    private record UnitSprite(BoardScene.Pixels pixels, boolean meeple, boolean icon) { }
     private final Map<UnitSprite, GpuUnitModel> spriteModels = new HashMap<>();
     /**
      * The hits last played against a unit: their push and latest landed attack, at {@link #hoverClock}. Its dying
@@ -849,8 +850,8 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.setWind(atmosphereSettings.effects());
         // The board's pressure already reads as vacuum in space or at zero gravity.
         attackEffects.setFuelAirStrength(AreaEffectHelper.fuelAirStrength(atmosphereSettings.pressure(), false));
-        // The Tactical View hides what has no gameplay value, by one draw rule and without a rebuild.
-        terrain.setFluffHidden(boardCamera.tactical());
+        // The Tactical View hides the scatter, by one draw rule and without a rebuild.
+        terrain.setScatterHidden(boardCamera.tactical());
         terrain.setGrass(tuning.grass());
         terrain.setWaterEffects(tuning.waterEffects());
         // Sprite meshes bake their atlas UVs. New artwork is appended, so only the moved slots need new meshes.
@@ -930,8 +931,8 @@ class GpuBattleView extends ApplicationAdapter {
         attackEffects.update(playback.attacks(), completedAttacks, unitModels, unitInstances);
         detonations.forEach(attackEffects::detonate);
         attackEffects.advance(Gdx.graphics.getDeltaTime() * timeScale);
-        // No craters in the Tactical View or on the Classic columns.
-        if (!terrain.columns() && !boardCamera.tactical()) {
+        // No craters on the Classic columns.
+        if (!terrain.columns()) {
             attackEffects.groundImpacts(completedAttacks, impact -> terrain.impact(scene, impact));
             attackEffects.artilleryGroundMarks(impact -> terrain.impact(scene, impact));
             attackEffects.artilleryScorches(scorch -> terrain.scorch(scene, scorch));
@@ -976,11 +977,14 @@ class GpuBattleView extends ApplicationAdapter {
                 occupants.remove(unitInstances.get(unit.id() + ":" + unit.part()));
             }
         }
-        terrain.animate(Gdx.graphics.getDeltaTime(), occupants, tuning.buildingOpacity(),
-              ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
+        // An occupied or hovered building fades. In the Tactical View, whose ground layer marks its roof, an occupied one
+        // goes altogether, so no token is covered, and hovering opens none.
+        terrain.animate(Gdx.graphics.getDeltaTime(), occupants, boardCamera.tactical() ? 0 : tuning.buildingOpacity(),
+              boardCamera.tactical() || ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
         editorPreview.prepare(scene, terrain, ghosts());
         renderStage("geometry shadows");
-        terrain.renderShadows(boardCamera.camera, units);
+        // The Tactical View's icons cast nothing.
+        terrain.renderShadows(boardCamera.camera, boardCamera.tactical() ? List.of() : units);
         renderStage("cloud transmission");
         atmosphere.prepareClouds(terrain, scene, Gdx.graphics.getDeltaTime());
         // The opaque terrain: its preparation and gather, its depth pre-pass (GpuTerrain.depthPrepass), then its colour.
@@ -1000,19 +1004,21 @@ class GpuBattleView extends ApplicationAdapter {
             });
         }
         if (boardCamera.tactical()) {
-            // The Tactical View's ground marks, then the bases, which the meeples cover.
+            // The Tactical View's ground marks, then the bases, which the icons cover.
             renderStage("ground layer");
             hexGrid.render(boardCamera, scene, terrain.columns(), true, frame.status().arc(),
                   source.uiPreferences().overlays().levelShading());
             unitBases.renderBases(boardCamera.camera);
         }
         renderStage("units");
-        renderUnits(wireframeView);
+        if (!boardCamera.tactical()) { renderUnits(wireframeView); }
         // Water and the transparent effects read no occlusion.
         ambientOcclusion.end();
         renderStage("transparent effects");
         renderTethers();
         if (!wireframeView) { terrain.renderTransparent(boardCamera.camera); }
+        // The Tactical View's icons write no depth, so they follow the water; the effects draw over them.
+        if (boardCamera.tactical()) { renderUnits(wireframeView); }
         Color smokeLight = atmosphere.sceneParticleLight();
         terrainEffects.update(scene, groundSurfaces, atmosphereSettings.effects(), animationSeconds());
         effectDepth.begin();
@@ -1026,8 +1032,8 @@ class GpuBattleView extends ApplicationAdapter {
         jumpJets.setSmokeLight(smokeLight);
         attackEffects.setSmokeLight(smokeLight);
         attackEffects.setLightDirection(atmosphere.lighting().direction());
-        // Mines lie on the terrain, so not in the Tactical View or on the Classic columns, which draw no craters.
-        boolean terrainMarks = !terrain.columns() && !boardCamera.tactical();
+        // Mines lie on the terrain, so not on the Classic columns, which draw no craters.
+        boolean terrainMarks = !terrain.columns();
         attackEffects.setMinefields(terrainMarks ? GpuArtilleryBlast.minefields(scene.markers()) : Map.of(),
               ray -> terrain.hit(scene, ray));
         jumpJets.render(boardCamera.camera);
@@ -1036,7 +1042,7 @@ class GpuBattleView extends ApplicationAdapter {
         designators.render(boardCamera.camera, scene.designations(), Gdx.graphics.getDeltaTime());
         starShells.renderFlares(boardCamera.camera, atmosphere.lighting().daylight());
         if (!terrain.waterVisible()) { waterImpacts.clear(); }
-        else if (!boardCamera.tactical()) {
+        else {
             waterImpacts.render(boardCamera.camera, scene, motions, unitInstances, smokeLight, playback.attachment());
         }
         if (boardCamera.tactical()) { unitBases.renderBadges(boardCamera.camera); }
@@ -1048,9 +1054,11 @@ class GpuBattleView extends ApplicationAdapter {
         if (!boardCamera.tactical()) { atmosphere.prepareContrast(boardCamera.camera, scene, 0); }
         if (wireframeView) { wireframe.lines(boardCamera.camera, terrain); }
         renderStage("unit outlines");
+        if (boardCamera.tactical()) { unitVisibility.renderDepth(boardCamera.camera, outlined); }
         unitVisibility.render(boardCamera.camera, outlined, atmosphere.depthTexture(), 0, seeThrough, layoutScale,
               unitBounds, terrain.columns() || boardCamera.tactical() ? null : terrainEffects.opacityTexture(),
               terrain);
+        Gdx.gl.glDepthRangef(0, 1);
         if (source.isEditor()) { traceOverlay.render(boardCamera, source.trace(), Gdx.graphics.getDeltaTime()); }
         renderStage("tactical overlays");
         // Each artillery round in the air marks the hex it is coming down on, until it lands.
@@ -1624,8 +1632,9 @@ class GpuBattleView extends ApplicationAdapter {
                 if (Float.isFinite(ground)) { position.z = MathUtils.lerp(position.z, ground, collapse); }
             }
             if (visual == null) {
-                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), displayMode().meeple(unit.model())),
-                      sprite -> sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
+                visual = spriteModels.computeIfAbsent(new UnitSprite(unit.image(), displayMode().meeple(unit.model()), boardCamera.tactical()),
+                      sprite -> sprite.icon() ? GpuUnitModel.icon(sprite.pixels(), unitTextures.region(sprite.pixels()))
+                            : sprite.meeple() ? GpuUnitModel.meeple(sprite.pixels(), unitTextures.region(sprite.pixels()))
                             : GpuUnitModel.sprite(sprite.pixels(), unitTextures.region(sprite.pixels())));
             }
             boolean resting = !airborne && (motion == null || !motion.isMoving()) && tile != null;
@@ -2510,8 +2519,11 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     private void renderUnits(boolean thermal) {
+        boolean tactical = boardCamera.tactical();
+        // The Tactical View's icons show their own colours, whatever falls on them.
+        Environment light = tactical ? null : terrain.environment();
         unitBatch.begin(boardCamera.camera);
-        List<ModelInstance> fading = new ArrayList<>();
+        List<ModelInstance> depthless = new ArrayList<>();
         for (BoardScene.Unit unit : unitAnchors.keySet()) {
             ModelInstance instance = unitInstances.get(unit.id() + ":" + unit.part());
             if (!unitGhosts.containsKey(instance) && boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance))) {
@@ -2519,10 +2531,10 @@ class GpuBattleView extends ApplicationAdapter {
                     unitBatch.render(instance);
                 } else if (thermal) {
                     wireframe.units.add(instance, unit, unitBounds.get(instance));
-                } else if (instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < 1) {
-                    fading.add(instance);
+                } else if (tactical || instance.userData instanceof GpuUnitShader.Shown shown && shown.opacity < 1) {
+                    depthless.add(instance);
                 } else {
-                    unitBatch.render(instance, terrain.environment());
+                    unitBatch.render(instance, light);
                 }
             }
         }
@@ -2530,20 +2542,23 @@ class GpuBattleView extends ApplicationAdapter {
             var bounds = unitBounds.get(casualty.instance);
             if (!boardCamera.camera.frustum.boundsInFrustum(bounds)) { continue; }
             if (thermal) { wireframe.units.add(casualty.instance, casualty.unit, bounds); }
-            else if (casualty.opacity() < 1) { fading.add(casualty.instance); }
-            else { unitBatch.render(casualty.instance, terrain.environment()); }
+            else if (tactical || casualty.opacity() < 1) { depthless.add(casualty.instance); }
+            else { unitBatch.render(casualty.instance, light); }
         }
         // Every marker writes normal scene depth, independently of its optional see-through outline.
         markers.instances().forEach(unitBatch::render);
         unitBatch.end();
-        // A unit fading out blends over what lies behind it, so it draws after the units, the farthest first.
+        // What writes no depth, a unit fading out or an icon, covers what lies behind it: after the units, the farthest first.
         var eye = boardCamera.camera.position;
-        fading.sort(Comparator.comparingDouble(instance -> -unitBounds.get(instance).getCenter(new Vector3()).dst2(eye)));
-        for (var instance : fading) {
-            unitBatch.begin(boardCamera.camera);
-            unitBatch.render(instance, terrain.environment());
-            unitBatch.end();
+        depthless.sort(Comparator.comparingDouble(instance -> -unitBounds.get(instance).getCenter(new Vector3()).dst2(eye)));
+        unitBatch.begin(boardCamera.camera);
+        for (var instance : depthless) {
+            unitBatch.render(instance, light);
+            unitBatch.flush();
         }
+        unitBatch.end();
+        // An icon's depth range (MeepleVisual.ICON_DEPTH) stays behind for the direct GL passes.
+        Gdx.gl.glDepthRangef(0, 1);
         if (thermal) { wireframe.units.render(boardCamera.camera); }
     }
 

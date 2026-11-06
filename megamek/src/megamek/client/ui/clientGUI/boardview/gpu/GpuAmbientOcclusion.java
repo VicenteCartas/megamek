@@ -93,7 +93,7 @@ final class GpuAmbientOcclusion implements Disposable {
      * This frame's occlusion from the scene depth {@code depth}, which the depth pre-pass has just drawn. It runs inside
      * the terrain's opaque batch, through the render context that tracks the bound textures and the state it changes,
      * and restores the scene target and viewport. Nothing unless the terrain's lighting carries it, or without a
-     * pre-pass (the Tactical View, the Classic columns).
+     * pre-pass (the Classic columns).
      */
     void render(Camera camera, GpuTerrain terrain, Texture depth) {
         current = false;

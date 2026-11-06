@@ -405,12 +405,12 @@ class GpuSceneryColourSmokeTest {
     }
 
     /**
-     * The Tactical View hides every placed object, plants included (GpuTerrain#setFluffHidden): no part
-     * is drawn and the editor cannot pick them there; back in 3D they draw and pick again. Game picking (hover and
-     * selection) finds the same hexes in both views and looks through objects as before.
+     * The Tactical View hides the scatter alone (GpuTerrain#setScatterHidden): placed objects, plants included, draw and
+     * pick as in the 3D view. Game picking (hover and selection) finds the same hexes in both views and looks through
+     * objects as before.
      */
     @Test
-    void theTacticalViewHidesEveryPlacedObjectAndPicksTheSameHexes() throws Exception {
+    void theTacticalViewKeepsEveryPlacedObjectAndPicksTheSameHexes() throws Exception {
         var scene = BoardScenes.scene(imported());
         Coords snowTree = new Coords(1, 8);
         var failure = new AtomicReference<Throwable>();
@@ -432,7 +432,7 @@ class GpuSceneryColourSmokeTest {
                     terrain.update(scene);
                     GpuReviewFrame.settle(terrain, null, scene, camera);
                     for (boolean tactical : new boolean[] { false, true, false }) {
-                        terrain.setFluffHidden(tactical);
+                        terrain.setScatterHidden(tactical);
                         GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         String view = tactical ? "Tactical View" : "3D view";
@@ -447,18 +447,17 @@ class GpuSceneryColourSmokeTest {
                             }
                         }
                         System.out.printf("PLANTS %s: %d plant parts, %d other object parts%n", view, plants, objects);
-                        assertEquals(tactical, plants == 0, view + ": placed plants' parts");
-                        // The Tactical View hides every placed object, the 3D view draws them all.
-                        assertTrue(tactical ? objects == 0 : objects > 100, view + ": the other objects' parts");
+                        assertTrue(plants > 0, view + ": placed plants' parts");
+                        assertTrue(objects > 100, view + ": the other objects' parts");
                         for (var at : List.of(LEVEL_CORAL, LEVEL_TREE, snowTree)) {
-                            assertEquals(!tactical, hit(terrain, scene, at, true) != null, view + ": the plant of " + at.getBoardNum());
-                            assertEquals(!tactical, terrain.editorObjects(at).getFirst().shown(), view + " shows " + at.getBoardNum());
+                            assertTrue(hit(terrain, scene, at, true) != null, view + ": the plant of " + at.getBoardNum());
+                            assertTrue(terrain.editorObjects(at).getFirst().shown(), view + " shows " + at.getBoardNum());
                         }
                         for (var at : List.of(MIRRORED, FAR)) {
-                            // The editor's object pick follows what the view draws; game picking finds the car's hex in
-                            // both views, and the hover outline looks through the car to the ground.
+                            // The editor's object pick and game picking find the car's hex in both views, and the hover
+                            // outline looks through the car to the ground.
                             var car = hit(terrain, scene, at, true);
-                            assertEquals(tactical ? null : at, car == null ? null : car.coords(), view + ": the car of "
+                            assertEquals(at, car == null ? null : car.coords(), view + ": the car of "
                                   + at.getBoardNum());
                             assertEquals(at, hit(terrain, scene, at, false).coords(), view + ": the hex of the car");
                         }

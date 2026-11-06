@@ -243,9 +243,10 @@ class GpuBoardOverlaySmokeTest {
         });
     }
 
+    /** The nearest depth anything but a Tactical View icon reaches. */
     private static void hideBehindDepth() {
         Gdx.gl.glDepthMask(true);
-        Gdx.gl.glClearDepthf(0);
+        Gdx.gl.glClearDepthf(MeepleVisual.ICON_DEPTH);
         Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
         Gdx.gl.glClearDepthf(1);
     }
@@ -338,10 +339,7 @@ class GpuBoardOverlaySmokeTest {
                           view(false, null, Entity.NONE), preferences(), state(GpuHudFixtures.status()));
                     board.draw(camera -> {
                         // Put an occluder in front of every overlay fragment, independent of terrain artwork.
-                        Gdx.gl.glDepthMask(true);
-                        Gdx.gl.glClearDepthf(0);
-                        Gdx.gl.glClear(GL20.GL_DEPTH_BUFFER_BIT);
-                        Gdx.gl.glClearDepthf(1);
+                        hideBehindDepth();
                         overlay.render(camera);
                     });
                     Pixmap hidden = hud.captureBackBuffer("g7-arrow-depth-" + index++);

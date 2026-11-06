@@ -8,6 +8,7 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
+import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshBuilder;
@@ -24,6 +25,11 @@ final class MeepleVisual {
     private static final float UNDERSIDE = .4f;
     // Reuse the four body overlays, limiting coverage so even heavy damage preserves the player's camouflage.
     static final float DAMAGE_OPACITY = .5f;
+    /**
+     * Unit icons' depth range ends here, nearer than anything on the board; markers draw at it, so under them alone. The
+     * scene's water and effects see the board beneath an icon: its depth follows them (GpuUnitVisibility.renderDepth).
+     */
+    static final float ICON_DEPTH = .001f;
 
     private MeepleVisual() { }
 
@@ -48,7 +54,12 @@ final class MeepleVisual {
         socket.set(anchor.sub(reach.mul(orientation)), orientation, scale);
     }
 
-    static Model build(BoardScene.Pixels pixels, TextureRegion region) {
+    static Model build(BoardScene.Pixels pixels, TextureRegion region) { return token(pixels, region, false); }
+
+    /** The Tactical View's token: the unit's icon alone, flat, over the board and its markers. */
+    static Model icon(BoardScene.Pixels pixels, TextureRegion region) { return token(pixels, region, true); }
+
+    private static Model token(BoardScene.Pixels pixels, TextureRegion region, boolean icon) {
         var builder = new ModelBuilder();
         builder.begin();
         builder.node().id = ROOT;
@@ -63,9 +74,11 @@ final class MeepleVisual {
         // The artwork shows on top only; underneath, as when the token lies on its back, it is plain and darker than its
         // walls.
         GpuCutout.extrude(pixels, region, Vector3.Zero, 1, HEIGHT, caps, sides, underside);
-        builder.part("cutout", caps.end(), GL20.GL_TRIANGLES,
-              new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(),
-                    IntAttribute.createCullFace(GL20.GL_NONE)));
+        var artwork = new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(),
+              IntAttribute.createCullFace(GL20.GL_NONE));
+        if (icon) { artwork.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, ICON_DEPTH, false)); }
+        builder.part("cutout", caps.end(), GL20.GL_TRIANGLES, artwork);
+        if (icon) { return builder.end(); }
         builder.part("sides", sides.end(), GL20.GL_TRIANGLES,
               new Material("paint", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),
                     IntAttribute.createCullFace(GL20.GL_NONE)));

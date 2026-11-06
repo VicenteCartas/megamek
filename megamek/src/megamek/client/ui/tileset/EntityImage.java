@@ -118,6 +118,8 @@ public class EntityImage {
 
     /** Facing-dependent camo overlays (add shadows and highlighting) */
     private static final int[][] pOverlays = new int[6][IMG_SIZE];
+    /** {@link #applyColor}: an image no facing's overlay applies to. */
+    private static final int NO_FACING = -1;
 
     // Battlefield Support Asset marker-stripe overlay tuning.
     /** The repeat period in pixels (colored stripe + gap) of the repeating marker pattern. */
@@ -347,8 +349,8 @@ public class EntityImage {
             }
         }
 
-        // Apply the player/unit camouflage
-        base = applyColor(base, 0);
+        // Apply the player/unit camouflage, without a facing's baked shadow: nothing draws this image at a facing of its own
+        base = applyColor(base, NO_FACING);
         if (shouldApplyOverlay()) {
             base = applyAssetStripeOverlay(base);
         }
@@ -430,7 +432,7 @@ public class EntityImage {
             return null;
         }
 
-        base = applyColor(getBase(), 0);
+        base = applyColor(getBase(), NO_FACING);
         if (shouldApplyOverlay()) {
             base = applyAssetStripeOverlay(getBase());
         }
@@ -446,7 +448,10 @@ public class EntityImage {
         return getBase();
     }
 
-    /** Applies the unit individual or player camouflage to the icon. */
+    /**
+     * Applies the unit individual or player camouflage to the icon, with the shadows and highlights of {@code facing}, or
+     * none with {@link #NO_FACING}.
+     */
     protected Image applyColor(Image image, int facing) {
         if (image == null) {
             return null;
@@ -493,7 +498,7 @@ public class EntityImage {
 
                     // Pretreat with the camo overlay (but not Infantry, they're too small, it'll just darken them)
                     int overlayAlpha = 128;
-                    if (GUIP.getUseCamoOverlay() && !isInfantry && isSingleHex) {
+                    if (facing != NO_FACING && GUIP.getUseCamoOverlay() && !isInfantry && isSingleHex) {
                         overlayAlpha = pOverlays[facing][i] & 0xff;
                     }
 

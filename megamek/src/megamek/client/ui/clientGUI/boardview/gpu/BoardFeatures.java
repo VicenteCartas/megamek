@@ -1067,11 +1067,6 @@ final class BoardFeatures {
      */
     static boolean terrainOwned(megamek.common.board.BoardDecoration object) { return object.id().startsWith(TERRAIN_OWNED); }
 
-    /** A row of a woods cover's skin (a container yard, {@link #decorations}): the cover's look, kept in the Tactical View. */
-    static boolean coverSkin(megamek.common.board.BoardDecoration object) {
-        return terrainOwned(object) && object.id().contains(SKIN_ROW);
-    }
-
     /** The id infix of a skin's rows ({@link #decorations}). */
     private static final String SKIN_ROW = ":skin#";
 

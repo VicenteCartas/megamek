@@ -58,7 +58,7 @@ class GpuTunnelSmokeTest {
                         assertEquals(scene == quatreBelle ? BoardTunnel.BRIDGE_ASSET : BoardTunnel.ASSET, closeup.asset());
                         for (boolean columns : new boolean[] { false, true }) {
                             terrain.setColumns(columns);
-                            terrain.setFluffHidden(false);
+                            terrain.setScatterHidden(false);
                             terrain.update(scene);
                             aim(camera, closeup, 0);
                             frame.prepare(terrain, camera, scene);
@@ -74,7 +74,7 @@ class GpuTunnelSmokeTest {
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(output, name + "-oblique.png"));
                             }
-                            terrain.setFluffHidden(true);
+                            terrain.setScatterHidden(true);
                             frame.render(terrain, camera, scene);
                             verifyPortals(terrain, portals);
                             assertFalse(terrain.busy(), "The Tactical View retains portals without rebuilding");
@@ -121,7 +121,6 @@ class GpuTunnelSmokeTest {
             assertArrayEquals(portal.transform().val, instance.transform.val, .0001f);
             assertNotNull(instance.getMaterial("tunnel-portal"));
             assertNotNull(instance.getMaterial("tunnel-lining"));
-            assertTrue((boolean) field(match, "tactical"), "The entrance stays with its road in the Tactical View");
         }
     }
 

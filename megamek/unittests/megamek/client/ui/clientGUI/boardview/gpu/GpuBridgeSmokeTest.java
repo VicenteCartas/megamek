@@ -73,9 +73,9 @@ class GpuBridgeSmokeTest {
                             frame.render(terrain, camera, scene);
                             String mode = classic ? "classic" : "enhanced";
                             GpuReviewFrame.save(new File(output, "canals-" + mode + "-overview.png"));
-                            // Remove neighbouring buildings from the close inspection without altering the
-                            // installed bridge, approach solids, road paint or picking geometry.
-                            terrain.setFluffHidden(true);
+                            // Remove the scatter from the close inspection without altering the installed bridge,
+                            // approach solids, road paint or picking geometry.
+                            terrain.setScatterHidden(true);
                             for (var at : entrances) {
                                 int direction = at.equals(entrances.getFirst()) ? 0 : 3;
                                 var bank = scene.tile(at.translated(direction));
