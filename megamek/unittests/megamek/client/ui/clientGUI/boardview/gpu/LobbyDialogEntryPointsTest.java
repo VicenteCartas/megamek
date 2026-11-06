@@ -81,6 +81,7 @@ class LobbyDialogEntryPointsTest {
         // The camo picker, player settings and bot setup are drawn by the lobby now; their Swing dialogs stay for
         // other screens
         assertFalse(window.contains("new CamoChooserDialog("));
+        assertFalse(window.contains("new PortraitChooserDialog("));
         assertFalse(window.contains("new PlayerSettingsDialog("));
         assertFalse(window.contains("new BotConfigDialog("));
         assertFalse(window.contains("doAlertDialog("));
@@ -89,6 +90,7 @@ class LobbyDialogEntryPointsTest {
         assertFalse(window.contains("new GameOptionsDialog("));
         String screen = Files.readString(GPU.resolve("GpuLobbyScreen.java"));
         assertTrue(screen.contains("nativeDialogs.camo("));
+        assertTrue(screen.contains("nativeDialogs.portrait("));
         assertTrue(screen.contains("nativeDialogs.playerSettings("));
         assertTrue(screen.contains("nativeDialogs.botSetup("));
         assertTrue(screen.contains("nativeDialogs.conditions("));

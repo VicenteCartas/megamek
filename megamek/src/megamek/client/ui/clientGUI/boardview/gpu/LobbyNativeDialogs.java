@@ -22,6 +22,7 @@ import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RandomNamesForm;
@@ -39,6 +40,7 @@ import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.units.Entity;
 
 /**
@@ -47,12 +49,12 @@ import megamek.common.units.Entity;
  * odd-sized board warning, the victory conditions, the random army, skills and names, the unit readout and a help
  * document, the small prompts ({@link LobbyPromptViews}), a message and a confirmation. A
  * dialog shows over the whole lobby on a scrim that takes every click and key ({@link UiDialog}). Opening the camo
- * chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
+ * or portrait chooser, the player settings, the conditions or the game options replaces whatever shows; the bot setup, a message
  * and a confirmation go over it, as the player settings' Bot settings opens the bot setup or hiding a rule category
  * asks first, and closing one shows the one below again. Every {@code new UiDialog} of the lobby is here, which
  * {@code LobbyDialogEntryPointsTest} enforces.
  * <p>
- * GPU thread. The camo pictures are read on a daemon thread of their own.
+ * GPU thread. The camo and portrait pictures are read on a daemon thread of their own.
  */
 final class LobbyNativeDialogs {
     private final UiKit kit;
@@ -73,6 +75,7 @@ final class LobbyNativeDialogs {
     /** The dialogs that show, the top one first, each with what to do once it has closed. */
     private final Deque<Open> open = new ArrayDeque<>();
     private LobbyCamoView camoView;
+    private LobbyPortraitView portraitView;
     private LobbyPlayerSettingsView settingsView;
     private LobbyBotSetupView botView;
     private LobbyConditionsView conditionsView;
@@ -119,17 +122,43 @@ final class LobbyNativeDialogs {
                   camoView.dispose();
                   camoView = null;
               });
+        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures(), bodyWidth(dialog,
+              "dialog.xl"), camoGridHeight(), chosen, this::close);
+        show(dialog);
+        return camoView;
+    }
+
+    /**
+     * Opens the portrait chooser over the lobby and its unit bay, replacing whatever dialog shows.
+     *
+     * @param source  where the portraits come from
+     * @param catalog the portrait directory as first read
+     * @param initial the crew member's portrait, selected at first, or null
+     * @param chosen  takes the confirmed portrait, on this thread
+     */
+    LobbyPortraitView portrait(LobbyPortraitView.Source source, PortraitCatalog catalog, @Nullable Portrait initial,
+          Consumer<Portrait> chosen) {
+        UiDialog dialog = begin(Messages.getString("PortraitChoiceDialog.select_portrait"), "dialog.xl", false,
+              () -> {
+                  portraitView.dispose();
+                  portraitView = null;
+              });
+        portraitView = new LobbyPortraitView(kit, dialog, source, catalog, initial, pictures(),
+              bodyWidth(dialog, "dialog.xl"), camoGridHeight(), chosen, this::close);
+        show(dialog);
+        return portraitView;
+    }
+
+    /** The daemon thread the icon choosers read their pictures on, started at first use. */
+    private ExecutorService pictures() {
         if (pictures == null) {
             pictures = Executors.newSingleThreadExecutor(work -> {
-                Thread thread = new Thread(work, "Lobby camo pictures");
+                Thread thread = new Thread(work, "Lobby icon pictures");
                 thread.setDaemon(true);
                 return thread;
             });
         }
-        camoView = new LobbyCamoView(kit, dialog, source, catalog, choice, assets, pictures, bodyWidth(dialog,
-              "dialog.xl"), camoGridHeight(), chosen, this::close);
-        show(dialog);
-        return camoView;
+        return pictures;
     }
 
     /**
@@ -609,6 +638,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyCamoView camoView() {
         return camoView;
+    }
+
+    @Nullable LobbyPortraitView portraitView() {
+        return portraitView;
     }
 
     @Nullable LobbyPlayerSettingsView settingsView() {

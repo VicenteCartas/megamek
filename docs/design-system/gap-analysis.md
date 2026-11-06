@@ -985,8 +985,8 @@ work for Swing, and item 11 is under investigation.
          the first network on an untouched OK); two ECM suites in use show an inline keep-one choice rather than a
          dialog; implant changes reach the equipment only on OK, so Cancel drops them; the Partial Repairs tab is
          hidden when nothing can be repaired. The Swing dialog's dump box (never shown) and command-detonated mines
-         (not implemented) stay out. The portrait picker is still the Swing `PortraitChooserDialog`, through
-         `LobbyDialogs`.
+         (not implemented) stay out. The portrait picker is native too (`LobbyPortraitView`, through
+         `LobbyNativeDialogs.portrait`).
        - The C3 network manager replaces `C3NetworkManagerDialog` in the lobby, from the unit and forces menus. Each
          network is drawn as an org chart (company master, lance masters, slaves, joined by connector lines; C3i, NC3
          and Nova as a linked row; open slots as ghost chips), the free units sit in a tray grouped as masters,
@@ -1284,8 +1284,8 @@ work for Swing, and item 11 is under investigation.
          instead of the Swing "Save First?" question (`AbstractClientGUI.handleExit`). Save… opens the system
          file dialog and leaves once the game is written; Don't save leaves (`AbstractClientGUI.exitWithoutAsking`);
          Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
-         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window still asks in Swing, since
-         its exit path belongs to hud-v3.
+         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window asks too, in its own
+         window, and picks the save file in the system file dialog (#39).
        - A system menu, as a game's pause menu (`LobbyNativeDialogs.systemMenu`): Resume, Save game…, Quick save,
          Load game…, Quick load, Settings and Leave lobby, one column of buttons in groups, with each shortcut in its
          tooltip. Esc opens it once nothing else is left to close, and closes it again. The top bar's gear, ⋮ game
@@ -1440,7 +1440,6 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the portrait chooser (`PortraitChooserDialog`), next to the native camo chooser;
          - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
          - the map assembly help (`HelpDialog`);
          - the random army's Advanced Search, which still opens the Swing random army dialog;
@@ -1451,8 +1450,11 @@ work for Swing, and item 11 is under investigation.
          - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
          - the auto-resolve dialogs: the chance of winning, the progress and the log.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), the map editor's Client
-         Settings and About, and the "Save First?" question when leaving a battle (`AbstractClientGUI.handleExit`).
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
+         Settings and About. The "Save First?" question when leaving a battle is native since #39.
+       - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
+         thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
+         only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

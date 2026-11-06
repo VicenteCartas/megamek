@@ -51,6 +51,7 @@ import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.lobby.RequisitionFactions;
@@ -72,6 +73,7 @@ import megamek.client.ui.gdx.UiVirtualList;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.alphaStrike.cardDrawer.ASCard;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.loaders.MekSummary;
 import megamek.common.options.OptionsConstants;
 import megamek.common.preference.PreferenceManager;
@@ -964,6 +966,15 @@ final class GpuLobbyScreen extends ApplicationAdapter {
         if (stage != null) {
             closeMenus();
             nativeDialogs.camo(source, catalog, choice, assets, chosen);
+        }
+    }
+
+    /** GPU thread: closes the lobby's open menus, then opens the portrait chooser over the lobby and its unit bay. */
+    void portraitDialog(LobbyPortraitView.Source source, PortraitCatalog catalog, @Nullable Portrait initial,
+          Consumer<Portrait> chosen) {
+        if (stage != null) {
+            closeMenus();
+            nativeDialogs.portrait(source, catalog, initial, chosen);
         }
     }
 
