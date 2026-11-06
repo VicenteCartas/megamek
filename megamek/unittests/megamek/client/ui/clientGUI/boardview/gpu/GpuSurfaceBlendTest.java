@@ -443,17 +443,26 @@ class GpuSurfaceBlendTest {
             programs.request(override, 3, vertices);
             programs.request(anotherOverride, 3, vertices);
             assertEquals(2, programs.requested(), "An override needs a different proof, not a program for each uniform value");
-            assertTrue(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
-            assertTrue(GpuFamilyPrograms.draws(null, 0, override, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(null, 0, false, base, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(null, 0, false, override, FloatAttribute.Shininess));
             assertEquals("", GpuFamilyPrograms.defines(base, FloatAttribute.Shininess), "Generic programs keep runtime dispatch");
             base.set(new GpuFamilyPrograms.Constants()); override.set(new GpuFamilyPrograms.Constants());
             float[] families = GpuFamilyPrograms.constants(base, FloatAttribute.Shininess);
-            assertTrue(GpuFamilyPrograms.draws(families, 3, base, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(families, 3, override, FloatAttribute.Shininess),
+            assertTrue(GpuFamilyPrograms.draws(families, 3, false, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 3, false, override, FloatAttribute.Shininess),
                   "A program that eliminated slot B must reject its actual map/scale override");
-            assertTrue(GpuFamilyPrograms.draws(families, 2, override, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(families, 2, base, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(families, 2, false, override, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 2, false, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(null, 0, false, base, FloatAttribute.Shininess));
+            Material tops = GpuFamilyPrograms.flat(base);
+            assertTrue(GpuFamilyPrograms.draws(families, 3, true, tops, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 3, false, tops, FloatAttribute.Shininess),
+                  "A wall's program never draws level tops: only the tops' program folds them");
+            assertFalse(GpuFamilyPrograms.draws(families, 3, true, base, FloatAttribute.Shininess),
+                  "A level top's program has no walls: it must reject its material's other draws");
+            assertTrue(GpuFamilyPrograms.defines(tops, FloatAttribute.Shininess).contains("#define SCULPT_TOPS"));
+            assertFalse(GpuFamilyPrograms.defines(base, FloatAttribute.Shininess).contains("#define SCULPT_TOPS"));
+            assertFalse(GpuFamilyPrograms.isFlat(GpuFamilyPrograms.unflat(tops)));
             String reused = GpuFamilyPrograms.defines(base, FloatAttribute.Shininess);
             String changed = GpuFamilyPrograms.defines(override, FloatAttribute.Shininess);
             assertTrue(reused.contains("#define COVER_B_IS_BASE") && reused.contains("#define COVER_C_IS_BASE"));

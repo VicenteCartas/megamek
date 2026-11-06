@@ -375,6 +375,7 @@ final class GpuTerrain implements Disposable {
                         tessellated ? GpuTessellation.vertex(chosen.vertexShader) : chosen.vertexShader, fragment)) {
                 private final float[] families = GpuFamilyPrograms.constants(renderable.material, Sculpt.TYPE);
                 private final int baseAliases = families == null ? 0 : GpuFamilyPrograms.baseAliases(renderable.material);
+                private final boolean levelTops = families != null && GpuFamilyPrograms.isFlat(renderable.material);
                 private final int normalMapsUniform = register("u_normalMaps");
                 private final int terrainParallaxUniform = register("u_terrainParallax");
                 private final int iceNormalsUniform = register("u_iceNormals");
@@ -470,7 +471,7 @@ final class GpuTerrain implements Disposable {
                 public boolean canRender(Renderable other) {
                     // libGDX binds only the instance attributes of the renderable a shader was created for (instanceMask).
                     // Family programs (GpuFamilyPrograms) first: the provider's scan rejects them cheaply.
-                    return GpuFamilyPrograms.draws(families, baseAliases, other.material, Sculpt.TYPE)
+                    return GpuFamilyPrograms.draws(families, baseAliases, levelTops, other.material, Sculpt.TYPE)
                           && GpuMaterialCache.isCached(other.material) == cached
                           && (!fill && !cached
                                 || GpuMaterialCache.charted(other.meshPart.mesh.getVertexAttributes()) == charted)
@@ -5282,7 +5283,8 @@ final class GpuTerrain implements Disposable {
                 // program builds in the loading stage's session too, from a copy kept for it, as its other programs
                 // link then (prepareTerrainMaterial).
                 if (familySession && chunk.tessellated && curvable(part.material)) {
-                    Material copy = GpuTessellation.curvedCopy(part.material);
+                    // Level tops never curve; where their ground does, it is their material's ordinary copy.
+                    Material copy = GpuTessellation.curvedCopy(GpuFamilyPrograms.unflat(part.material));
                     curvedFamilies.add(copy);
                     familyPrograms.request(copy, part.meshPart.size,
                           part.material.has(GpuRoads.Mask.TYPE) ? GpuRoads.TESSELLATED_VERTICES
@@ -5733,7 +5735,7 @@ final class GpuTerrain implements Disposable {
      * (GpuTessellation#curved), so only they pass through the tessellation stages, and flat ground draws as without.
      * Whether sloping cache tops or charted walls ({@code charts}) are among them (Chunk#detailTops).
      */
-    private static boolean sculptedTriangles(GpuTerrainLayer solid, Material material, boolean split,
+    private boolean sculptedTriangles(GpuTerrainLayer solid, Material material, boolean split,
           BoardSurface surface, List<BoardSurface.Face> faces, float shore, BoardScene scene,
           Map<Coords, BoardSurface> surfaces, GpuMaterialCache.Charts charts) {
         List<BoardSurface.Face> curved = new ArrayList<>(), plain = split ? new ArrayList<>() : faces;
@@ -5766,20 +5768,14 @@ final class GpuTerrain implements Disposable {
                 }
                 sloped |= top && !GpuMaterialCache.level(face);
             }
-            if (!tops.isEmpty()) {
-                solid.addTriangles(GpuMaterialCache.top(material),
-                      mesh -> sculptedFaces(mesh, surface, tops, shore, scene, surfaces));
-            }
+            sculptedGroups(solid, material, true, surface, tops, shore, scene, surfaces);
             if (!walls.isEmpty()) {
                 solid.addTriangles(GpuMaterialCache.wall(material),
                       mesh -> chartedFaces(mesh, surface, walls, places, shore));
                 sloped = true;
             }
         }
-        List<BoardSurface.Face> direct = rest;
-        if (!direct.isEmpty()) {
-            solid.addTriangles(material, mesh -> sculptedFaces(mesh, surface, direct, shore, scene, surfaces));
-        }
+        sculptedGroups(solid, material, false, surface, rest, shore, scene, surfaces);
         if (!curved.isEmpty()) {
             solid.addTriangles(GpuTessellation.curvedCopy(material),
                   mesh -> sculptedFaces(mesh, surface, curved, shore, scene, surfaces));
@@ -6027,8 +6023,17 @@ final class GpuTerrain implements Disposable {
                 }
                 plain = rest;
             }
-            blendedTriangles(solid, tops && GpuMaterialCache.cacheable(material) ? GpuMaterialCache.top(material)
-                  : material, palette, boundary, plain, null, null);
+            boolean top = tops && GpuMaterialCache.cacheable(material);
+            boolean divides = dividesTops(material);
+            List<GpuSurfaceBlend.Triangle> flat = new ArrayList<>(), other = new ArrayList<>();
+            for (var triangle : plain) {
+                boolean level = divides && flatVertex(triangle.a().vertex()) && flatVertex(triangle.b().vertex())
+                      && flatVertex(triangle.c().vertex());
+                (level ? flat : other).add(triangle);
+            }
+            blendedTriangles(solid, top ? GpuMaterialCache.top(material) : material, palette, boundary, other, null, null);
+            Material level = GpuFamilyPrograms.flat(material);
+            blendedTriangles(solid, top ? GpuMaterialCache.top(level) : level, palette, boundary, flat, null, null);
             if (!walls.isEmpty()) {
                 blendedTriangles(solid, GpuMaterialCache.wall(material), palette, boundary, walls, null, places);
             }
@@ -6214,6 +6219,41 @@ final class GpuTerrain implements Disposable {
             if (volcanic != null) { for (Attribute attribute : volcanic) { material.set(attribute.copy()); } }
         }
         return material;
+    }
+
+    /** Faces in {@code material} ({@code top}: its cache tops' copy), the level tops among them in a copy of their own. */
+    private void sculptedGroups(GpuTerrainLayer solid, Material material, boolean top, BoardSurface surface,
+          List<BoardSurface.Face> faces, float shore, BoardScene scene, Map<Coords, BoardSurface> surfaces) {
+        boolean divides = dividesTops(material);
+        List<BoardSurface.Face> flat = new ArrayList<>(), other = new ArrayList<>();
+        for (var face : faces) {
+            boolean level = divides && flatShade(surface.relief.shade(face.a())) && flatShade(surface.relief.shade(face.b()))
+                  && flatShade(surface.relief.shade(face.c()));
+            (level ? flat : other).add(face);
+        }
+        if (!other.isEmpty()) {
+            solid.addTriangles(top ? GpuMaterialCache.top(material) : material,
+                  mesh -> sculptedFaces(mesh, surface, other, shore, scene, surfaces));
+        }
+        if (!flat.isEmpty()) {
+            Material level = GpuFamilyPrograms.flat(material);
+            solid.addTriangles(top ? GpuMaterialCache.top(level) : level,
+                  mesh -> sculptedFaces(mesh, surface, flat, shore, scene, surfaces));
+        }
+    }
+
+    private boolean dividesTops(Material material) {
+        return familyPrograms.enabled() && GpuFamilyPrograms.divides(material, Sculpt.TYPE);
+    }
+
+    /** A vertex a level top may have, as sculptVertex writes it: ground kind, on a gentle slope. */
+    private static boolean flatShade(BoardRelief.Shade shade) {
+        return shade != null && (shade.kind() == BoardRelief.Kind.GROUND || shade.kind() == BoardRelief.Kind.SUBMERGED_CLIFF)
+              && shade.normal().z >= GpuFamilyPrograms.FLAT_Z;
+    }
+
+    private static boolean flatVertex(MeshPartBuilder.VertexInfo vertex) {
+        return vertex.color.b < .125f && vertex.normal.z >= GpuFamilyPrograms.FLAT_Z;
     }
 
     /** Sculpted faces over shared vertices; shore, unless NaN, is the palette of the water hex they belong to. */

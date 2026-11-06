@@ -35,6 +35,10 @@ import megamek.logging.MMLogger;
  * generic program until the next load. A terrain builds at most {@link #CAPACITY} family programs for each lighting
  * configuration and twice that in all; once it holds that many, a configuration without programs stays generic. The
  * provider keeps every program it built, and returning to a configuration finds its programs there.
+ * <p>
+ * A chunk's level tops ({@link #flat}) draw apart from the rest of their material, in a family program of their own
+ * without walls, rocks, plants or pits (SCULPT_TOPS): the most-drawn programs, and much the cheapest. A generic program
+ * draws them like any other draw of their material.
  */
 final class GpuFamilyPrograms {
     private static final MMLogger LOGGER = MMLogger.create(GpuFamilyPrograms.class);
@@ -79,7 +83,7 @@ final class GpuFamilyPrograms {
     }
 
     /** The families, proven base aliases, vertex layout and generic variant a program is for. */
-    private record Key(List<Float> families, int aliases, VertexAttributes attributes, Object variant) { }
+    private record Key(List<Float> families, int aliases, boolean tops, VertexAttributes attributes, Object variant) { }
 
     /** A material installed by a chunk and the indices it draws; the chunk owns it, so it is held weakly. */
     private record Use(WeakReference<Material> material, int indices) { }
@@ -171,7 +175,7 @@ final class GpuFamilyPrograms {
         if (families == null) { return; }
         List<Float> boxed = new ArrayList<>(families.length);
         for (float family : families) { boxed.add(family); }
-        Variant variant = variants.computeIfAbsent(new Key(boxed, baseAliases(material), attributes, variantOf.apply(material)),
+        Variant variant = variants.computeIfAbsent(new Key(boxed, baseAliases(material), isFlat(material), attributes, variantOf.apply(material)),
               key -> new Variant(key, families));
         variant.uses.removeIf(use -> use.material().get() == null);
         variant.uses.add(new Use(new WeakReference<>(material), indices));
@@ -360,6 +364,40 @@ final class GpuFamilyPrograms {
         return new float[] { sculpt.value, slots[0], slots[1], slots[2], slots[3] };
     }
 
+    /** A marker in the id, as the material cache's and tessellation's, whose suffixes follow it (isTop, curved). */
+    private static final String FLAT = "#flat";
+    /**
+     * The height every vertex normal of a level top reaches. Between such unit normals a pixel's normal stays this
+     * high, so terrain-sculpt.frag's wall test (rocky) is false throughout the triangle.
+     */
+    static final float FLAT_Z = .601f;
+
+    /** Whether a draw in this material divides off its level tops: concrete and crust have no natural ground to lose. */
+    static boolean divides(Material material, long sculptType) {
+        float[] families = families(material, sculptType);
+        return families != null && families[0] != BoardScene.Surface.CONCRETE.ordinal()
+              && !material.has(GpuMagmaShader.TYPE);
+    }
+
+    /** The material a chunk's level tops draw in: the same attributes, so the same generic program, under its own id. */
+    static Material flat(Material material) {
+        Material copy = new Material(material);
+        copy.id = material.id + FLAT;
+        return copy;
+    }
+
+    static boolean isFlat(Material material) { return material.id.contains(FLAT); }
+
+    /** The material without the level tops' marker: what those tops' ground draws as where it curves. */
+    static Material unflat(Material material) {
+        Material copy = new Material(material);
+        copy.id = material.id.replace(FLAT, "");
+        return copy;
+    }
+
+    /** Whether this terrain builds family programs at all: previews and prints don't. */
+    boolean enabled() { return enabled; }
+
     /** Reuse proven from this material's owned uniform values, never family identity alone. */
     static int baseAliases(Material material) {
         var blend = material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE);
@@ -373,10 +411,10 @@ final class GpuFamilyPrograms {
 
     /**
      * Whether a program compiled with these families (null: a generic program) may draw the material: a generic program
-     * no marked material, a family program only marked materials with its families and aliases. The shader provider's
-     * scan rejects other programs first.
+     * no marked material, a family program only marked materials with its families, aliases and level tops. The shader
+     * provider's scan rejects other programs first.
      */
-    static boolean draws(float[] families, int aliases, Material material, long sculptType) {
+    static boolean draws(float[] families, int aliases, boolean tops, Material material, long sculptType) {
         boolean marked = material.has(Constants.TYPE);
         if (families == null || !marked) { return families == null && !marked; }
         var sculpt = (FloatAttribute) material.get(sculptType);
@@ -387,14 +425,14 @@ final class GpuFamilyPrograms {
         for (int i = 1; i < families.length; i++) {
             if (blend.families[i - 1] != families[i]) { return false; }
         }
-        return aliases == baseAliases(material);
+        return aliases == baseAliases(material) && tops == isFlat(material);
     }
 
     /** The defines that make a family program's families constant; none for a generic program. */
     static String defines(Material material, long sculptType) {
         float[] families = constants(material, sculptType);
         if (families == null) { return ""; }
-        String sculpt = "#define SCULPT_FAMILY " + families[0] + "\n";
+        String sculpt = "#define SCULPT_FAMILY " + families[0] + "\n" + (isFlat(material) ? "#define SCULPT_TOPS\n" : "");
         int aliases = baseAliases(material);
         String reuse = ((aliases & 1) != 0 ? "#define COVER_B_IS_BASE\n" : "")
               + ((aliases & 2) != 0 ? "#define COVER_C_IS_BASE\n" : "");
@@ -405,6 +443,6 @@ final class GpuFamilyPrograms {
     /** The program name's suffix, as the shader editor and the compile log show it. */
     static String name(Material material, long sculptType) {
         float[] families = constants(material, sculptType);
-        return families == null ? "" : " families " + Arrays.toString(families) + " aliases " + baseAliases(material);
+        return families == null ? "" : " families " + Arrays.toString(families) + " aliases " + baseAliases(material) + (isFlat(material) ? " tops" : "");
     }
 }

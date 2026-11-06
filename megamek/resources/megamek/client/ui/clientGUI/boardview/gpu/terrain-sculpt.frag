@@ -287,6 +287,13 @@ vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, 
     return groundToneFor(sculptFamily, albedo, world, broad, fine, region, rim, foot);
 }
 
+// A level top's family program (GpuFamilyPrograms.flat) draws only ground on gentle slopes, proven per triangle.
+#ifdef SCULPT_TOPS
+#define unlessTops(condition) false
+#else
+#define unlessTops(condition) (condition)
+#endif
+
 // sculpt-material-functions
 void main() {
     vec2 surfaceUV = v_diffuseUV;
@@ -294,7 +301,7 @@ void main() {
     float occlusion = v_color.r;
     float level = floor(v_color.g * 255.0 + .5) - 64.0;
     float kind = v_color.b;
-    bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
+    bool ground = !unlessTops(kind >= .125), plant = unlessTops(kind >= .125 && kind < .375), cliff = unlessTops(kind >= .375 && kind < .625);
     bool leaf = plant && kind > .325; // Explicit authored tissue; legacy shrubs and wood remain opaque.
     bool panel = cliff && kind < .475;
     float projectionAngle = (v_color.a - .5) * 6.2831853;
@@ -304,17 +311,17 @@ void main() {
     bool abyss = cliff && kind > .55;
     bool mudShell = cliff && !panel && !abyss && kind > 139.0 / 255.0;
     if (mudShell) occlusion = 1.0;
-    bool pit = kind >= .625 && kind < .875;
+    bool pit = unlessTops(kind >= .625 && kind < .875);
     bool shore = ground && v_color.a < .25;
     bool zeroDepth = shore && surfaceUV.y < 0.0;
     if (zeroDepth) surfaceUV.y = -1.0 - surfaceUV.y;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
-    bool wetRock = kind >= .875 && kind < .999;
+    bool wetRock = unlessTops(kind >= .875 && kind < .999);
     bool waterCovered = shore || wetRock;
     // Without gravity nothing lies loose: the dry rock kit stands as bedrock outcrops (BoardScene.Tile.lunar), exposed
     // rock of the ground it breaks through, in that ground's natural material like a rock cliff. Its bedding planes
     // lie as open to the sky as the plain they continue; only its scarps keep the kit's occlusion toward the root.
-    bool bedrock = kind >= .999 && u_gravity <= 0.0;
+    bool bedrock = unlessTops(kind >= .999 && u_gravity <= 0.0);
     if (bedrock) occlusion = mix(occlusion, 1.0, smoothstep(.55, .85, face.z));
     // Without gravity the water is gone: its bed keeps its stones, sediment and wet look, but neither the water's
     // colour nor its light, and draws its own grid.
@@ -406,7 +413,7 @@ void main() {
 #ifdef volcanicFlag
     bool rocky = false;
 #else
-    bool rocky = natural && (cliff || bedrock || (ground && face.z < .6));
+    bool rocky = unlessTops(natural && (cliff || bedrock || (ground && face.z < .6)));
 #endif
     // Reuse the material's world fields for a broken soil/gravel margin. Keep it below the dry rim so the
     // neighbouring land agrees at the seam; no new noise reads or shoreline mesh are needed.
