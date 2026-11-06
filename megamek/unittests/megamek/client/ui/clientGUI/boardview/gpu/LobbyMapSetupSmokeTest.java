@@ -19,6 +19,8 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -646,6 +648,61 @@ class LobbyMapSetupSmokeTest {
     }
 
     @Test
+    void filtersNarrowByTagAndFolderAndAnySizeMakesAPlacedBoardTheWholeMap() {
+        UiTestStage.run(ui -> {
+            Fixture fixture = new Fixture(ui);
+            Table body = fixture.body;
+            assertNull(body.<Container<?>>findActor("map-filter-holder").getActor(),
+                  "the filters start shut");
+            click(ui, body.findActor("map-filters"));
+            assertNotNull(body.findActor("map-filter-panel"), "Filters opens the panel");
+            assertEquals(MapSetupForm.Library.READING, fixture.form.libraryState(),
+                  "opening the filters asks for the library");
+            assertNotNull(body.findActor("map-filter-tags-reading"));
+            assertTrue(body.<Button>findActor("map-filter-scope-any").isDisabled(),
+                  "a map of two boards cannot browse any size");
+
+            fixture.form.library(List.of(
+                  new MapSetupForm.LibraryBoard("16x17/Desert 1.board2", 16, 17, List.of("Desert")),
+                  new MapSetupForm.LibraryBoard("16x17/City Hills.board2", 16, 17, List.of("Urban")),
+                  new MapSetupForm.LibraryBoard(LAKE, 16, 17, List.of("Water")),
+                  new MapSetupForm.LibraryBoard("32x34/Big City.board2", 32, 34, List.of("Urban"))));
+            fixture.show();
+            ui.draw();
+            click(ui, body.findActor("map-filter-tag-Urban"));
+            assertEquals(List.of("16x17/City Hills.board2"),
+                  fixture.view.shown().boards().stream().map(Entry::name).toList(),
+                  "a tag keeps the boards of this size that have it, without Generated");
+            assertEquals(1, fixture.view.shown().filterCount(),
+                  "the button counts the filters at work");
+            click(ui, body.findActor("map-filter-clear"));
+            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter());
+            click(ui, body.findActor("map-filter-folder-16x17"));
+            assertEquals(3, fixture.view.shown().boards().size(), "the folder keeps its three boards");
+            click(ui, body.findActor("map-filter-folder-16x17"));
+
+            fixture.form.mapWidth(1);
+            fixture.show();
+            ui.draw();
+            click(ui, body.findActor("map-filter-scope-any"));
+            assertTrue(fixture.view.shown().anySize(), "a one-board map browses any size");
+            assertNotNull(body.findActor("map-filter-width"), "any size shows the size ranges");
+            List<Entry> boards = fixture.view.shown().boards();
+            int big = boards.indexOf(boards.stream().filter(entry -> entry.name().startsWith("32x34"))
+                  .findFirst().orElseThrow());
+            click(ui, body.findActor("map-board-" + big));
+            assertTrue(body.<UiButton>findActor("map-add-to-stack").isDisabled(),
+                  "a board of another size cannot join the slot's stack");
+            calls.clear();
+            click(ui, body.findActor("map-place"));
+            assertTrue(calls.contains("single 32x34/Big City.board2 32x34"), calls.toString());
+            assertEquals(32, fixture.form.settings().getBoardWidth(), "the map takes the board's own size");
+            fixture.view.dispose();
+            body.remove();
+        });
+    }
+
+    @Test
     void scrollingToTheEndRequestsOnlyTheVisibleThumbnailsInBothViews() {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
@@ -697,7 +754,7 @@ class LobbyMapSetupSmokeTest {
             server();
             form = new MapSetupForm(() -> server, () -> Set.of(new BoardDimensions(16, 17)), new Commands(),
                   board -> "", () -> List.of("", "snow"));
-            view = new LobbyMapSetupView(ui.kit, this);
+            view = new LobbyMapSetupView(ui.kit, this, false);
             body = view.body();
             ui.window.addActor(body);
             body.setBounds(20, 20, 1500, 1000);
@@ -772,6 +829,10 @@ class LobbyMapSetupSmokeTest {
 
         @Override
         public void selectSingleBoard(MapSettings settings, String board, BoardDimensions size) {
+            calls.add("single " + board + " " + size.width() + "x" + size.height());
+            settings.setMapSize(1, 1);
+            settings.setBoardSize(size.width(), size.height());
+            settings.setBoardsSelectedVector(new ArrayList<>(List.of(board)));
         }
 
         @Override

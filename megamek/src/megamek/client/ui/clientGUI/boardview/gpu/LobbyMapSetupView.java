@@ -23,6 +23,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.HorizontalGroup;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
@@ -31,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton.TextButtonStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -42,14 +44,17 @@ import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.MapSetupForm.Entry;
 import megamek.client.lobby.MapSetupForm.Kind;
+import megamek.client.lobby.MapSetupForm.Library;
 import megamek.client.lobby.MapSetupForm.Picture;
 import megamek.client.lobby.MapSetupForm.Slot;
 import megamek.client.lobby.MapSetupForm.Theme;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiPopover;
+import megamek.client.ui.gdx.UiRangeInput;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepper;
@@ -61,7 +66,9 @@ import megamek.common.loaders.MapSettings;
 /**
  * The lobby's map setup, in the forces' place: a war table of the map's board slots, drawn as the boards they hold,
  * with the size controls at its top and load, save, preview and regeneration at its foot. The drawer beside it holds
- * a searchable board browser of thumbnails or rows, with Advanced beside the Boards heading. Each slot's compact
+ * a searchable board browser of thumbnails or rows. Filters beside the Boards heading slides open the Swing advanced
+ * map search's filters: tags, folders and, on a one-board map, boards of any size within size ranges, one of which
+ * Place makes the whole map. Each slot's compact
  * rotation, theme and level controls sit above its full preview. A click picks a slot (Ctrl-click several),
  * and Place, or a double-click, replaces the picked slots; Add to Stack retains their existing boards and mode.
  * Map type and random map settings remain in the toolbar above both panels.
@@ -73,7 +80,7 @@ final class LobbyMapSetupView {
     static final String KEY = "mapsetup";
 
     /** What the view asks of the window, besides the form's actions. */
-    enum Action { LOAD, SAVE, BOARD_EDITOR, RANDOM_MAP, CONDITIONS, HELP, ADVANCED_SEARCH, PREVIEW_3D }
+    enum Action { LOAD, SAVE, BOARD_EDITOR, RANDOM_MAP, CONDITIONS, HELP, PREVIEW_3D }
 
     /** The window's side of the view. */
     interface Host {
@@ -98,9 +105,12 @@ final class LobbyMapSetupView {
     private static final int[] MEDIA = { MapSettings.MEDIUM_GROUND, MapSettings.MEDIUM_ATMOSPHERE,
                                          MapSettings.MEDIUM_SPACE };
     private static final float HEX_HEIGHT = (float) (Math.sqrt(3) / 2);
+    /** How long the filters take to slide open or shut (motion's medium), as the requisition's. */
+    private static final float SLIDE_SECONDS = DesignTokens.shipped().duration("medium") / 1000f;
 
     private final UiKit kit;
     private final Host host;
+    private final boolean motion;
     private final Table body = new Table();
     private final UiSegmented medium;
     private final UiButton conditions;
@@ -145,7 +155,42 @@ final class LobbyMapSetupView {
     private String stackMenuSelection = "";
     private final UiButton load;
     private final UiButton save;
-    private final UiButton advancedSearch;
+    private final UiButton filtersButton;
+    private boolean filtersOpen;
+    /** The filters' slide: the height it set out from, its seconds so far (negative: none) and whether it shuts. */
+    private float slideFrom;
+    private float slideAt = -1;
+    private boolean slideCloses;
+    private final Container<Actor> filterHolder = new Container<>() {
+        @Override
+        public float getPrefHeight() {
+            return slid(super.getPrefHeight());
+        }
+
+        @Override
+        public float getMinHeight() {
+            return slid(super.getMinHeight());
+        }
+
+        @Override
+        public void act(float delta) {
+            super.act(delta);
+            slide(delta);
+        }
+    };
+    private final Table filterPanel = new Table();
+    private final UiSegmented scope;
+    private final Table sizeRanges = new Table();
+    private final UiRangeInput widthRange;
+    private final UiRangeInput heightRange;
+    private final UiFilterChip allTags;
+    private final Table tagsCell = new Table();
+    private final HorizontalGroup folderChips;
+    private final UiButton clearFilters;
+    private @Nullable Boolean rangesShown;
+    private @Nullable List<Object> tagsShown;
+    private @Nullable List<Object> foldersShown;
+    private boolean listedReading;
     private final UiButton preview3D;
     private final Table previewActions = new Table();
     private final UiButton generate;
@@ -164,9 +209,10 @@ final class LobbyMapSetupView {
     private boolean syncing;
     private boolean thumbnails = true;
 
-    LobbyMapSetupView(UiKit kit, Host host) {
+    LobbyMapSetupView(UiKit kit, Host host, boolean motion) {
         this.kit = kit;
         this.host = host;
+        this.motion = motion;
         body.top().pad(space("md"), space("lg"), space("md"), space("lg"));
 
         Table toolbar = new Table();
@@ -279,9 +325,14 @@ final class LobbyMapSetupView {
         boardCount = kit.typeLabel("", "small", "text.muted");
         boardCount.setEllipsis(true);
         browserHead.add(boardCount).left().padLeft(space("sm")).growX().minWidth(0);
-        advancedSearch = toolButton("button-quiet", "search", "Lobby.map.advanced",
-              "map-advanced-search", Action.ADVANCED_SEARCH);
-        browserHead.add(advancedSearch).right().padLeft(space("sm"));
+        filtersButton = kit.button("button-toggle" + UiTheme.COMPACT, "tune", Messages.getString("Lobby.map.filters"),
+              null);
+        filtersButton.setName("map-filters");
+        filtersButton.setProgrammaticChangeEvents(false);
+        tip(filtersButton, Messages.getString("Lobby.map.filtersTip"));
+        // A UiButton never toggles itself (isChecked() is the shown state), so the click flips the filters' own state
+        UiKit.onChange(filtersButton, () -> filters(!filtersOpen));
+        browserHead.add(filtersButton).right().padLeft(space("sm"));
         drawer.add(browserHead).growX().padTop(space("lg")).row();
         search = kit.tokenSearch(Messages.getString("Lobby.map.search"), true);
         search.setName("map-search");
@@ -294,6 +345,57 @@ final class LobbyMapSetupView {
             }
         });
         drawer.add(search).growX().padTop(space("sm")).row();
+
+        scope = kit.tokenSegmented(true, Messages.getString("Lobby.map.filter.thisSize"),
+              Messages.getString("Lobby.map.filter.anySize"));
+        scope.setName("map-filter-scope");
+        scope.option(0).setName("map-filter-scope-this");
+        scope.option(1).setName("map-filter-scope-any");
+        tip(scope.option(1), Messages.getString("Lobby.map.filter.anySizeTip"));
+        UiKit.onChange(scope, () -> {
+            if (!syncing) {
+                boolean any = scope.getSelectedIndex() == 1;
+                host.act(form -> form.filter(filter -> filter.withAnySize(any)));
+            }
+        });
+        widthRange = sizeRange("map-filter-width", true);
+        heightRange = sizeRange("map-filter-height", false);
+        sizeRanges.defaults().left();
+        sizeRanges.add(kit.typeLabel(colonless("ChatLounge.labBoardWidth"), "small", "text.secondary"))
+              .padRight(space("sm"));
+        sizeRanges.add(widthRange).growX().minWidth(0).row();
+        sizeRanges.add(kit.typeLabel(colonless("ChatLounge.labBoardHeight"), "small", "text.secondary"))
+              .padRight(space("sm")).padTop(space("xs"));
+        sizeRanges.add(heightRange).growX().minWidth(0).padTop(space("xs"));
+        allTags = kit.filterChip(Messages.getString("Lobby.map.filter.allTags"));
+        allTags.setName("map-filter-all-tags");
+        allTags.setProgrammaticChangeEvents(false);
+        tip(allTags, Messages.getString("Lobby.map.filter.allTagsTip"));
+        UiKit.onChange(allTags, () -> {
+            if (!syncing) {
+                boolean all = allTags.isChecked();
+                host.act(form -> form.filter(filter -> filter.withAllTags(all)));
+            }
+        });
+        tagsCell.left();
+        folderChips = chipGroup();
+        folderChips.setName("map-filter-folders");
+        clearFilters = kit.button("button-quiet" + UiTheme.COMPACT, "undo",
+              Messages.getString("Lobby.map.filter.clear"), null);
+        clearFilters.setName("map-filter-clear");
+        UiKit.onChange(clearFilters, () -> {
+            widthRange.set(null, null);
+            heightRange.set(null, null);
+            host.act(form -> form.filter(filter -> MapSetupForm.Filter.NONE));
+        });
+        filterPanel.setName("map-filter-panel");
+        filterPanel.top().left();
+        filterHolder.setName("map-filter-holder");
+        // The panel keeps its own height and the holder clips it, so it slides rather than squashes
+        filterHolder.fillX().top().minHeight(Value.prefHeight);
+        filterHolder.setClip(true);
+        drawer.add(filterHolder).growX().minWidth(0).row();
+
         list.top().left();
         listScroll = kit.scrollList(list, true, false);
         listScroll.setScrollingDisabled(true, false);
@@ -447,7 +549,6 @@ final class LobbyMapSetupView {
         randomMap.setDisabled(space);
         load.setDisabled(space);
         save.setDisabled(space);
-        advancedSearch.setDisabled(!picture.advancedSearch());
         generate.setDisabled(!picture.generable());
         generateTip.getActor().setText(plain(picture.generateTip()));
         if (picture.hasGeneratedBoards() != generate.hasParent()) {
@@ -462,8 +563,11 @@ final class LobbyMapSetupView {
         drawerScroll.invalidateHierarchy();
         spaceHint.setVisible(space);
         table.show(picture);
-        if (!picture.boards().equals(listed)) {
+        showFilters(picture);
+        boolean reading = picture.anySize() && (picture.library() != Library.READ);
+        if (!picture.boards().equals(listed) || (reading != listedReading)) {
             listed = picture.boards();
+            listedReading = reading;
             picks.retainAll(listed.stream().map(Entry::name).toList());
             fillList();
         }
@@ -515,6 +619,188 @@ final class LobbyMapSetupView {
         if (picture.space() || picture.customSize()) {
             sizeBar.addActor(boardWidth);
             sizeBar.addActor(boardHeight);
+        }
+    }
+
+    // ---- Filters ----
+
+    private UiRangeInput sizeRange(String name, boolean width) {
+        UiRangeInput range = kit.rangeInput(Messages.getString("Lobby.map.filter.min"),
+              Messages.getString("Lobby.map.filter.max"));
+        range.setName(name);
+        range.minField().setName(name + "-min");
+        range.maxField().setName(name + "-max");
+        UiKit.onChange(range, () -> {
+            if (!syncing) {
+                Integer min = range.min();
+                Integer max = range.max();
+                host.act(form -> form.filter(filter -> width ? filter.withWidth(min, max)
+                      : filter.withHeight(min, max)));
+            }
+        });
+        return range;
+    }
+
+    private HorizontalGroup chipGroup() {
+        HorizontalGroup group = new HorizontalGroup();
+        group.wrap(true).space(space("sm")).wrapSpace(space("xs")).rowLeft();
+        return group;
+    }
+
+    /** Opens or shuts the filters, sliding; the first opening reads the board library for the tags. */
+    private void filters(boolean open) {
+        boolean changed = open != filtersOpen;
+        float from = filterHolder.getHeight();
+        filtersOpen = open;
+        if (changed && motion) {
+            slideFrom = from;
+            slideAt = 0;
+            slideCloses = !open;
+        }
+        if (open) {
+            filterHolder.setActor(filterPanel);
+        } else if (slideAt < 0) {
+            filterHolder.setActor(null);
+        }
+        filtersButton.setChecked(open);
+        filterHolder.invalidateHierarchy();
+        Picture picture = shown;
+        if (open && (picture != null) && (picture.library() == Library.UNREAD)) {
+            host.act(MapSetupForm::wantLibrary);
+        }
+    }
+
+    /** The holder's height for the panel's own {@code natural} one, while it slides open or shut. */
+    private float slid(float natural) {
+        return (slideAt < 0) ? natural
+              : LobbyRequisitionPanel.slideHeight(slideFrom, slideCloses ? 0 : natural, slideAt, SLIDE_SECONDS);
+    }
+
+    private void slide(float delta) {
+        if (slideAt < 0) {
+            return;
+        }
+        slideAt += delta;
+        if (slideAt >= SLIDE_SECONDS) {
+            slideAt = -1;
+            if (slideCloses) {
+                slideCloses = false;
+                filterHolder.setActor(null);
+            }
+        }
+        filterHolder.invalidateHierarchy();
+    }
+
+    /** The filters' button count and panel: the scope, the size ranges at any size, the tags and the folders. */
+    private void showFilters(Picture picture) {
+        MapSetupForm.Filter filter = picture.filter();
+        int count = picture.filterCount();
+        String label = Messages.getString("Lobby.map.filters");
+        filtersButton.setText(kit.cased("button", (count > 0) ? label + " \u00b7 " + count : label));
+        filtersButton.setChecked(filtersOpen);
+        syncing = true;
+        try {
+            int index = picture.anySize() ? 1 : 0;
+            if (scope.getSelectedIndex() != index) {
+                scope.select(index);
+            }
+            scope.option(1).setDisabled(!picture.advancedSearch());
+            sync(widthRange, filter.minWidth(), filter.maxWidth());
+            sync(heightRange, filter.minHeight(), filter.maxHeight());
+            allTags.setChecked(filter.allTags());
+        } finally {
+            syncing = false;
+        }
+        clearFilters.setDisabled(count == 0);
+        boolean ranges = picture.anySize();
+        if (!Objects.equals(rangesShown, ranges)) {
+            rangesShown = ranges;
+            layoutFilters(ranges);
+        }
+        List<Object> tags = List.of(picture.library(), picture.tagChoices(), filter.tags());
+        if (!tags.equals(tagsShown)) {
+            tagsShown = tags;
+            fillTags(picture);
+        }
+        List<Object> folders = List.of(picture.folderChoices(), filter.folders());
+        if (!folders.equals(foldersShown)) {
+            foldersShown = folders;
+            fillFolders(picture);
+        }
+    }
+
+    /** Shows a filter's range unless the player is typing in it, so an older echo cannot undo the newer keys. */
+    private void sync(UiRangeInput range, @Nullable Integer min, @Nullable Integer max) {
+        Actor focus = (body.getStage() == null) ? null : body.getStage().getKeyboardFocus();
+        boolean typing = (focus == range.minField()) || (focus == range.maxField());
+        if (!typing && (!Objects.equals(range.min(), min) || !Objects.equals(range.max(), max))) {
+            range.set(min, max);
+        }
+    }
+
+    /** The panel's rows: the size ranges only at any size; the stacked labels suit the narrow drawer. */
+    private void layoutFilters(boolean ranges) {
+        filterPanel.clearChildren();
+        filterPanel.defaults().left().growX().minWidth(0);
+        filterPanel.add(overline("Lobby.map.filter.scope")).padTop(space("sm")).row();
+        filterPanel.add(scope).growX().padTop(space("xs")).row();
+        if (ranges) {
+            filterPanel.add(sizeRanges).padTop(space("sm")).row();
+        }
+        Table tagsHead = new Table();
+        tagsHead.add(overline("Lobby.map.filter.tags")).left().growX().minWidth(0);
+        tagsHead.add(allTags).right();
+        filterPanel.add(tagsHead).padTop(space("md")).row();
+        filterPanel.add(tagsCell).padTop(space("xs")).row();
+        filterPanel.add(overline("Lobby.map.filter.folders")).padTop(space("md")).row();
+        filterPanel.add(folderChips).padTop(space("xs")).row();
+        filterPanel.add(clearFilters).fill(false, false).expand(false, false).right().padTop(space("sm"))
+              .padBottom(space("xs")).row();
+    }
+
+    private Label overline(String key) {
+        return kit.roleTypeLabel("overline", Messages.getString(key), "text.muted");
+    }
+
+    private void fillTags(Picture picture) {
+        tagsCell.clearChildren();
+        if (picture.library() != Library.READ) {
+            Label reading = kit.typeLabel(Messages.getString("Lobby.map.filter.reading"), "small", "text.muted");
+            reading.setName("map-filter-tags-reading");
+            tagsCell.add(reading).left();
+            return;
+        }
+        if (picture.tagChoices().isEmpty()) {
+            tagsCell.add(kit.typeLabel(Messages.getString("Lobby.map.filter.noTags"), "small", "text.muted")).left();
+            return;
+        }
+        HorizontalGroup chips = chipGroup();
+        chips.setName("map-filter-tags");
+        for (String tag : picture.tagChoices()) {
+            UiFilterChip chip = kit.filterChip(tag);
+            chip.setName("map-filter-tag-" + tag);
+            chip.setChecked(picture.filter().tags().contains(tag));
+            UiKit.onChange(chip, () -> {
+                boolean on = chip.isChecked();
+                host.act(form -> form.filter(filter -> filter.withTag(tag, on)));
+            });
+            chips.addActor(chip);
+        }
+        tagsCell.add(chips).growX().minWidth(0);
+    }
+
+    private void fillFolders(Picture picture) {
+        folderChips.clearChildren();
+        for (String folder : picture.folderChoices()) {
+            UiFilterChip chip = kit.filterChip(folder.isEmpty()
+                  ? Messages.getString("Lobby.map.filter.looseBoards") : folder);
+            chip.setName("map-filter-folder-" + folder);
+            chip.setChecked(picture.filter().folders().contains(folder));
+            UiKit.onChange(chip, () -> {
+                boolean on = chip.isChecked();
+                host.act(form -> form.filter(filter -> filter.withFolder(folder, on)));
+            });
+            folderChips.addActor(chip);
         }
     }
 
@@ -599,7 +885,8 @@ final class LobbyMapSetupView {
             }
         }
         if (listed.isEmpty()) {
-            kit.empty(list, Messages.getString("Lobby.map.noBoards"), true);
+            kit.empty(list, Messages.getString(listedReading ? "Lobby.map.filter.reading" : "Lobby.map.noBoards"),
+                  true);
         }
     }
 
@@ -650,11 +937,21 @@ final class LobbyMapSetupView {
         place.setDisabled(!target || one == null);
         boolean already = target && !picks.isEmpty() && picked().stream().allMatch(slot -> picks.stream()
               .allMatch(board -> slot.stack().contains(MapSettings.stackBoardName(board))));
+        boolean resizes = picks.stream().anyMatch(this::otherSize);
         addToStack.setText(kit.cased("button", Messages.getString(already ? "Lobby.map.alreadyAdded" : "Lobby.map.addToStack")));
-        addToStack.setDisabled(!target || picks.isEmpty() || already);
+        addToStack.setDisabled(!target || picks.isEmpty() || already || resizes);
         pickHint.setText(inspection.isVisible() ? Messages.getString("Lobby.map.inspectHint")
               : !target ? Messages.getString("Lobby.map.noSlot")
+              : resizes ? Messages.getString("Lobby.map.filter.resizeHint")
               : Messages.getString("Lobby.map.pickHint"));
+    }
+
+    /** Whether a listed board is of another size than the map's boards, as only browsing any size lists. */
+    private boolean otherSize(String board) {
+        Picture picture = shown;
+        BoardEntry row = rows.get(board);
+        return (picture != null) && (row != null) && !row.entry.generated()
+              && ((row.entry.width() != picture.boardWidth()) || (row.entry.height() != picture.boardHeight()));
     }
 
     private static float aspect(Picture picture) {
@@ -668,6 +965,11 @@ final class LobbyMapSetupView {
             return;
         }
         String board = picks.iterator().next();
+        if (otherSize(board)) {
+            // Only a one-board map browses any size: the board becomes the whole map, at its own size
+            host.act(form -> form.singleBoard(board));
+            return;
+        }
         List<Integer> targets = List.copyOf(slots);
         host.act(form -> {
             targets.forEach(slot -> form.assign(slot, board));
@@ -875,7 +1177,11 @@ final class LobbyMapSetupView {
                 UiKit.onChange(inspect, () -> inspect(entry));
             }
             Label label = getLabel();
-            label.setText(entry.label());
+            Picture picture = shown;
+            label.setText((picture != null) && picture.anySize() && !entry.generated()
+                  ? MessageFormat.format(Messages.getString("Lobby.map.filter.sizedBoard"), entry.label(),
+                        String.valueOf(entry.width()), String.valueOf(entry.height()))
+                  : entry.label());
             label.setEllipsis(true);
             if (thumbnails) {
                 TextButtonStyle style = new TextButtonStyle(getStyle());
@@ -915,10 +1221,8 @@ final class LobbyMapSetupView {
         }
 
         private @Nullable String pictureKey() {
-            Picture picture = shown;
-            return picture == null || entry.generated() ? null
-                  : LobbyMapSetupController.pictureKey(entry.name(), false, picture.boardWidth(),
-                        picture.boardHeight(), null, 0);
+            return shown == null || entry.generated() ? null
+                  : LobbyMapSetupController.pictureKey(entry.name(), false, entry.width(), entry.height(), null, 0);
         }
 
         void showPicture() {

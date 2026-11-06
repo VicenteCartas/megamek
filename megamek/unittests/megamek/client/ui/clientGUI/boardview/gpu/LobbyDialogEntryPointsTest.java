@@ -88,6 +88,7 @@ class LobbyDialogEntryPointsTest {
         // The planetary conditions and game options too; the window's own command opens them natively
         assertFalse(window.contains("new PlanetaryConditionsDialog("));
         assertFalse(window.contains("new GameOptionsDialog("));
+        assertFalse(window.contains("new AdvancedSearchMapDialog("), "the map setup's drawer filters the boards");
         String screen = Files.readString(GPU.resolve("GpuLobbyScreen.java"));
         assertTrue(screen.contains("nativeDialogs.camo("));
         assertTrue(screen.contains("nativeDialogs.portrait("));

@@ -69,7 +69,6 @@ import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
@@ -374,8 +373,6 @@ public final class GpuLobbyWindow {
 
     /** EDT: set when the lobby comes back from a 3D preview the map setup opened, to show the map setup again. */
     private boolean reopenMapSetup;
-    /** EDT: includes construction, before Swing has announced the modal dialog. */
-    private boolean advancedMapSearchOpen;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -1520,29 +1517,6 @@ public final class GpuLobbyWindow {
                           new File(MAP_ASSEMBLY_HELP).toURI().toURL(), swingDialogs.parent()).setVisible(true);
                 } catch (java.net.MalformedURLException failure) {
                     LOGGER.error(failure, "The map assembly help could not be found");
-                }
-            }
-            case ADVANCED_SEARCH -> {
-                if (advancedMapSearchOpen || swingDialogs.blocked()) {
-                    swingDialogs.frontModal();
-                    return;
-                }
-                advancedMapSearchOpen = true;
-                try {
-                    AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
-                    try {
-                        if (search.showDialog().isConfirmed() && mapSetup != null && !closing) {
-                            String path = search.getPath();
-                            if (path != null) {
-                                mapSetup.act(form -> form.singleBoard(path));
-                                refreshSoon();
-                            }
-                        }
-                    } finally {
-                        search.dispose();
-                    }
-                } finally {
-                    advancedMapSearchOpen = false;
                 }
             }
         }

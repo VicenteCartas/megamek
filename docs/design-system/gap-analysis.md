@@ -626,7 +626,7 @@ work for Swing, and item 11 is under investigation.
        forces (random army, skills, random names, C3 network, load, save and print list with the MUL check, the
        unit menu's customize, C3, loadout, readout, BV and cost), battlefield (planetary conditions, game options,
        victory conditions, random map, map setup with its preview and size questions, load and save map setup,
-       auto-resolve, advanced map search) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
+       auto-resolve) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
        warning, force names, squadrons, battlefield support, unit editor, training, SBF and AS stats). Each is owned
        by the hidden client frame or a dialog of it; `LobbyDialogs` adopts each one as it shows (also the modal
        questions MekHQ asks with no parent, which Swing gives its shared hidden frame), centres it on the window's
@@ -639,7 +639,7 @@ work for Swing, and item 11 is under investigation.
        `randomarmy`, `skills`, `names`, `loadlist`, `alert`) and photographs the window and its dialogs from the
        screen: all 17 checked on Windows, centred within a pixel, modal ones blocking, the focus back on closing.
        MekHQ needs nothing more: its lobby use is the client API and the parentless questions above. Not checked
-       live: the prompts, the save choosers, auto-resolve and advanced map search (the same path, by the source
+       live: the prompts, the save choosers and auto-resolve (the same path, by the source
        test); native ownership and focus on macOS and Linux; dialogs opened from within dialogs, which stay where
        their owner puts them.
      - L9 ~~Removal and checks~~. `ChatLounge` and the Swing lobby's view code are deleted: its player and unit
@@ -1008,8 +1008,9 @@ work for Swing, and item 11 is under investigation.
          board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
          slot. The selected slot shows its rotation, theme and level offset (with Reset), and a searchable board
          browser with a preview that places a board, places it rotated, or makes a random or a surprise board from
-         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, Advanced Search (the Swing
-         `BoardSearchDialog`, through `LobbyDialogs`), the planetary conditions, the map assembly help, the 3D
+         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, the board browser's Filters
+                  (tags, folders and boards of any size, in place of the Swing advanced map search), the planetary
+                  conditions, the map assembly help, the 3D
          preview and Generate Battlefield sit in the view's header and footer.
        - Random Map Settings is a native dialog: the normal view sets each feature as None, Low, Medium or High by
          theme tab; the advanced view shows every generator field as sliders and steppers; the board size and theme
@@ -1440,7 +1441,6 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
          - the map assembly help (`HelpDialog`);
          - the random army's Advanced Search, which still opens the Swing random army dialog;
          - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
@@ -1455,6 +1455,14 @@ work for Swing, and item 11 is under investigation.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
          only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.
+       - Done: the advanced map search is folded into the map setup's board drawer. Filters beside the Boards
+         heading slides open a panel: the board size (this size, or any size on a one-board map off space, with
+         width and height ranges), the tags (any or all of them) and the top folders, with a count on the button and
+         Clear. Any size lists the whole board library (`BoardClassifier`, read once off the Swing thread when the
+         filters first open) with each board's size; Place makes such a board the whole map at its own size, as the
+         Swing dialog's OK did, and Add to stack refuses it. The lobby window's Swing branch is gone; the Swing
+         `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
+         and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.
