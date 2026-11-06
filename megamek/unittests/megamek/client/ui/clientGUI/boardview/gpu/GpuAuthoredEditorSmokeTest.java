@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
-import static org.mockito.Mockito.mockStatic;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -47,8 +45,7 @@ class GpuAuthoredEditorSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         File output = new File("build/gpu-board-review/authored-buildings"); Files.createDirectories(output.toPath());
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000); config.setInitialVisible(false);
-        try (var previews = mockStatic(GpuEditorTerrainPreviews.class, CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 long deadline, nextFrame; int step, aimed = -1;
                 @Override public void create() { super.create(); deadline = System.nanoTime() + 120_000_000_000L; }

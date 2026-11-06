@@ -49,9 +49,7 @@ class GpuAuthoredPerformanceSmokeTest {
         var positions = List.of(new Coords(8, 6), new Coords(14, 18), new Coords(26, 6));
         Path output = Path.of("build/gpu-board-review/authored-buildings/placement-"
               + System.getProperty("megamek.gpu.authoredRun", "review") + ".jfr");
-        try (var recording = new Recording(Configuration.getConfiguration("profile"));
-              var previews = org.mockito.Mockito.mockStatic(GpuEditorTerrainPreviews.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try (var recording = new Recording(Configuration.getConfiguration("profile"))) {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 180_000_000_000L;
                 long warm, started, first, revision, previousFrame;

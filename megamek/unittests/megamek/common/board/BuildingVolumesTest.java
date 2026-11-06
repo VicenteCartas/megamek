@@ -30,7 +30,7 @@ class BuildingVolumesTest {
     }
 
     @Test void areaLimitUsesTheWholeStructuralProjectionForTiltedSourceData() {
-        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/frontier-church", null,
+        var tilted = new BoardDecoration("tilted", "prop", "buildings/authored/civic-church", null,
               0, 0, 0, false, 1, BoardDecoration.Placement.surface("ground", "top", 0), 0, false, 17, 23);
         assertEquals(1, BuildingVolumes.onBoardFraction(new Coords(8, 8), tilted, 16, 16), 1e-8);
     }
@@ -118,14 +118,14 @@ class BuildingVolumesTest {
     }
 
     @Test void civicBuildingsRespectTheirSmallFootprintsAndSeparatePropsFromFloors() {
-        var church = BuildingVolumes.of("buildings/authored/frontier-church");
+        var church = BuildingVolumes.of("buildings/authored/civic-church");
         assertTrue(church.present()); assertFalse(church.modular());
         var solids = church.assemble(8, 0);
         assertEquals(Set.of(18.0, 36.0, 54.0), BuildingVolumes.roofs(solids).keySet());
         assertTrue(BuildingVolumes.section(solids, 45).contains(0, -15));
         assertFalse(BuildingVolumes.section(solids, 45).contains(0, 50));
         assertEquals(0, BuildingVolumes.area(BuildingVolumes.section(solids, 55)), .001);
-        var churchBounds = BoardModelBounds.bounds("buildings/authored/frontier-church");
+        var churchBounds = BoardModelBounds.bounds("buildings/authored/civic-church");
         assertTrue(churchBounds[3] - churchBounds[0] <= HexTile.MODEL_WIDTH);
         assertTrue(churchBounds[4] - churchBounds[1] <= 2 * HexTile.HEIGHT);
         var arena = BuildingVolumes.of("buildings/authored/civic-arena");

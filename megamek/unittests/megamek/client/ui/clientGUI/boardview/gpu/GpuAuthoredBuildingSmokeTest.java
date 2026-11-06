@@ -52,8 +52,8 @@ class GpuAuthoredBuildingSmokeTest {
         reviewCivicTower("civic-citadel", 14, List.of(2, 2, 3, 3, 14), 125, .33f);
     }
 
-    @Test void civicHabitatKeepsSixHexesAndNightGlazingAcrossLods() throws Exception {
-        reviewCivicTower("civic-habitat", 12, List.of(1, 1, 12, 12, 12, 12), 125, .34f);
+    @Test void civicHabitatKeepsSteppedFloorsAndNightGlazingAcrossLods() throws Exception {
+        reviewCivicTower("civic-habitat", 12, List.of(1, 1, 2, 2, 2, 3, 3, 3, 12, 12, 12), 120, .44f);
     }
 
     private static void reviewCivicTower(String asset, int height, List<Integer> roofs, float targetZ, float zoom) throws Exception {
@@ -89,7 +89,7 @@ class GpuAuthoredBuildingSmokeTest {
                                 if (material.has(ColorAttribute.Emissive) || material.has(GpuModelLight.TYPE)) {
                                     assertFalse(material.has(GpuBuildingPaint.TYPE), "Windows and lamps must not take wall tint");
                                     var light = material.get(GpuModelLight.class, GpuModelLight.TYPE);
-                                    if (material.id.contains("fortress-glass")) {
+                                    if (material.id.contains("glass")) {
                                         assertNotNull(light, "Night-window control must survive hex slicing");
                                         if (material.id.contains("#emission-off")) {
                                             assertEquals(new GpuModelLight(0, 0, 1), light);
@@ -177,7 +177,7 @@ class GpuAuthoredBuildingSmokeTest {
     @Test void civicAssetsKeepMaterialsAndLightsAcrossSlicedLods() throws Exception {
         File output = new File("build/gpu-board-review/civic-emission");
         Files.createDirectories(output.toPath());
-        var names = List.of("frontier-church", "classic-church", "civic-arena", "neo-futurist-arena");
+        var names = List.of("civic-church", "classic-church", "civic-arena", "neo-futurist-arena");
         var locations = List.of(new Coords(3, 4), new Coords(9, 4), new Coords(3, 11), new Coords(10, 11));
         var editor = new BoardEditorSession();
         editor.open(Board.createEmptyBoard(16, 17), null);
@@ -353,8 +353,7 @@ class GpuAuthoredBuildingSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900);
         config.setInitialVisible(false); config.useVsync(false); config.setForegroundFPS(60);
-        try (var previews = org.mockito.Mockito.mockStatic(GpuEditorTerrainPreviews.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 180_000_000_000L;
                 List<BoardScene.Tile> installed;
@@ -658,7 +657,7 @@ class GpuAuthoredBuildingSmokeTest {
         Coords hpg = new Coords(13, 10), arena = new Coords(28, 10), church = new Coords(28, 17);
         place(editor, hpg, "hpg-headquarters", 0);
         place(editor, arena, "civic-arena", -12);
-        place(editor, church, "frontier-church", 0);
+        place(editor, church, "civic-church", 0);
         editor.board().setDescription("Authored buildings: HPG headquarters, a two-hex frontier church and a compact oval civic arena. "
               + "Structural helpers define the floors; the antenna, church crown and arena scoreboard are decorative. The arena field is open.");
         editor.save(output.toPath().resolve("Authored Buildings.board2"));

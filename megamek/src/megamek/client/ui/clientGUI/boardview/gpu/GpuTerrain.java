@@ -1589,15 +1589,14 @@ final class GpuTerrain implements Disposable {
         }
 
         /**
-         * The one level rule of buildings and placed objects: the larger side of the placed bounds on screen against
-         * {@link TreeLod#PROPS}, so both camera views choose alike. Picking stays on
+         * The one level rule of buildings and placed objects: the larger side of the placed bounds, up to
+         * {@link TreeLod#PROPS_SIDE}, on screen against {@link TreeLod#PROPS}, so both camera views choose alike. Picking stays on
          * the near level ({@link #pickingModel}); shadows draw the chosen level from the chunk's next cache.
          */
         boolean detail(float pixelsPerUnit) {
             int count = building != null ? building.lodCount() : levels == null ? 1 : levels.size();
             if (count < 2) { return false; }
-            float pixels = Math.max(bounds.getWidth(), bounds.getHeight()) * pixelsPerUnit;
-            lod = Math.min(count - 1, TreeLod.level(TreeLod.PROPS, pixels, lod));
+            lod = Math.min(count - 1, TreeLod.prop(Math.max(bounds.getWidth(), bounds.getHeight()), pixelsPerUnit, lod));
             Model next = building != null ? building.model(lod) : levels.get(lod);
             if (instance.model == next) { return false; }
             instance = level(lod, instance);

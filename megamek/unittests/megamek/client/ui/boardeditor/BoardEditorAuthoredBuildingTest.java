@@ -187,7 +187,7 @@ class BoardEditorAuthoredBuildingTest {
     @Test void fullTurnsStayUprightAndOrdinaryPropsCanStillTilt() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);
-        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/civic-church"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationX", "360"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationY", "-720"), null);
         editor.pointer(at, 0, 0, false); editor.finishStroke();
@@ -382,7 +382,7 @@ class BoardEditorAuthoredBuildingTest {
     @Test void stretchingHeightChangesAllMembersAndDeletingThePlacementClearsOnlyItsBuildingState() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(14, 14), null);
         Coords anchor = new Coords(6, 6);
-        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/civic-church"), null);
         editor.pointer(anchor, 0, 0, false); editor.finishStroke();
         var object = editor.board().getHex(anchor).getDecorations().getFirst();
         var original = members(editor.board(), object.id());
