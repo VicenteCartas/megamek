@@ -1416,7 +1416,9 @@ public final class BoardEditorSession {
         if (tool == Tool.PAINT && !overwrites(at)) { return refused(hex.getLevel(), "BoardEditor.way.clearOnly"); }
         boolean dry = hex.terrainLevel(Terrains.WATER) < 1 || hex.containsTerrain(Terrains.MAGMA);
         int ground = hex.getLevel();
-        int target = levelHeight ? pressed + wayOffset : wayOffset > 0 ? ground + wayOffset
+        // A bridge card stands on the ground, under any water; the other routes ride above the surface.
+        int footing = bridge ? hex.floor() : ground;
+        int target = levelHeight ? pressed + wayOffset : wayOffset > 0 ? footing + wayOffset
               : previous == null ? pressed : previous.level();
         boolean up = levelHeight || wayOffset > 0 || previous != null && previous.deck();
         boolean deck = hex.hasBridge();
@@ -1429,7 +1431,7 @@ public final class BoardEditorSession {
                 return refused(target, "BoardEditor.way.structure");
             }
             if (deck && Math.abs(deckLevel - target) > 1) { return deckRefusal(at, deckLevel, target); }
-            if (ground > target) { return refused(target, "BoardEditor.way.rising"); }
+            if (footing > target) { return refused(target, "BoardEditor.way.rising"); }
             return new WayLayer(deck ? WaySurface.DECK : WaySurface.NEW, deck ? deckLevel : target, "");
         }
         if (deck && Math.abs(deckLevel - target) <= 1 && ("bridge".equals(receiver) || up || !dry)) {
@@ -1747,7 +1749,7 @@ public final class BoardEditorSession {
                 if (before.containsTerrain(way) && !current.containsTerrain(way)) { cutWayNeighbours(at, before, way); }
             }
             change(at, hex -> {
-                BridgeSpan.carry(hex, Math.max(0, hex.terrainLevel(Terrains.BRIDGE_ELEV)), blueprint.component("bridge").defaults());
+                BridgeSpan.carry(hex, hex.hasBridge() ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0, blueprint.component("bridge").defaults());
                 Terrain bridge = hex.getTerrain(Terrains.BRIDGE);
                 if (bridge != null && !bridge.hasExitsSpecified()) {
                     hex.addTerrain(new Terrain(Terrains.BRIDGE, bridge.getLevel(), true, bridge.getExits()));
@@ -3227,18 +3229,20 @@ public final class BoardEditorSession {
     /**
      * Floods the board up to {@code surface}, by the old editor's rules. A hex below the surface (submerged) gets water
      * up to it on top of the water it had (depth = surface - level + depth) and its level becomes the surface; a hex at
-     * or above it stays. With {@code remove} a submerged hex also loses every other component with its appearance, and
-     * its objects, except a bridge whose deck stays at or above the surface (its height becomes deck - surface; it keeps
-     * its appearance and the objects on it) and its deployment zones, which are scenario data. Without it, structures,
-     * woods and objects on a surface rise with the new level. One undo step; returns the number of submerged hexes.
+     * or above it stays. A bridge's deck stays where it is over the same ground, so the water can rise past it: its height
+     * becomes deck - surface. With {@code remove} a submerged hex also loses every other component with its appearance, and
+     * its objects, except a bridge (it keeps its appearance and the objects on it) and its deployment zones, which are
+     * scenario data. Without it, structures, woods and objects on a surface rise with the new level. One undo step; returns
+     * the number of submerged hexes.
      */
     private int flood(int surface, boolean remove) {
         return everyHex(hex -> {
             if (hex.getLevel() >= surface) { return; }
             int depth = hex.containsTerrain(Terrains.WATER) ? hex.terrainLevel(Terrains.WATER) : 0;
+            Terrain height = hex.getTerrain(Terrains.BRIDGE_ELEV);
+            boolean bridge = hex.containsTerrain(Terrains.BRIDGE) && height != null;
             if (remove) {
-                Terrain zones = hex.getTerrain(Terrains.DEPLOYMENT_ZONE), height = hex.getTerrain(Terrains.BRIDGE_ELEV);
-                boolean bridge = hex.containsTerrain(Terrains.BRIDGE) && height != null && hex.getLevel() + height.getLevel() >= surface;
+                Terrain zones = hex.getTerrain(Terrains.DEPLOYMENT_ZONE);
                 for (var component : blueprint.components()) {
                     if (!component.id().equals("water") && !(bridge && (component.id().equals("bridge") || component.id().equals("ways")))) {
                         removeComponent(hex, component);
@@ -3248,12 +3252,12 @@ public final class BoardEditorSession {
                     removeWay(hex, Terrains.RAIL);
                 }
                 if (zones != null) { hex.addTerrain(zones); }
-                if (bridge) {
-                    hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, hex.getLevel() + height.getLevel() - surface,
-                          height.hasExitsSpecified(), height.getExits()));
-                }
                 hex.setDecorations(hex.getDecorations().stream().filter(object -> bridge && object.placement().receiver() != null
                       && object.placement().receiver().terrain().equals("bridge")).toList());
+            }
+            if (bridge) {
+                hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, hex.getLevel() + height.getLevel() - surface,
+                      height.hasExitsSpecified(), height.getExits()));
             }
             hex.addTerrain(new Terrain(Terrains.WATER, surface - hex.getLevel() + depth));
             hex.setLevel(surface);

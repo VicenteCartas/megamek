@@ -1426,11 +1426,23 @@ class BoardEditorSessionTest {
         assertFalse(session.snapshot().canUndo(), "Flood was one undo step");
     }
 
+    /** Your flooded city: the ground stays, the water rises two levels, and a deck one level over the ground ends up under it. */
+    @Test void floodLeavesADeckOverTheSameGround() {
+        var session = session();
+        Coords street = new Coords(2, 2);
+        session.board().setHex(street, new Hex(-2, "bridge:1:9;bridge_cf:40;bridge_elev:1", ""));
+        send(session, Action.FLOOD, "", "0");
+        Hex flooded = session.board().getHex(street);
+        assertEquals(2, flooded.terrainLevel(Terrains.WATER));
+        assertEquals(-1, flooded.terrainLevel(Terrains.BRIDGE_ELEV));
+        assertTrue(flooded.isValid(null), "A deck may lie under water");
+    }
+
     /**
-     * Flood with Remove clears the submerged hexes but keeps a bridge whose deck stays above the water (with the objects
-     * on its deck, its height now above the new surface) and the deployment zones, which are scenario data.
+     * Flood with Remove clears the submerged hexes but keeps a bridge where it is (with the objects on its deck, its height
+     * now from the new surface) and the deployment zones, which are scenario data.
      */
-    @Test void floodRemoveKeepsADeckAboveTheWaterAndTheDeploymentZones() {
+    @Test void floodRemoveKeepsDecksAndTheDeploymentZones() {
         var session = session();
         Coords woods = new Coords(2, 2), building = new Coords(4, 4), bridge = new Coords(6, 6), sunk = new Coords(8, 8);
         session.board().setHex(woods, new Hex(-1, "woods:1;foliage_elev:2;deployment_zone:0:5", ""));
@@ -1451,7 +1463,7 @@ class BoardEditorSessionTest {
         assertTrue(kept.containsTerrain(Terrains.BRIDGE));
         assertEquals(1, kept.terrainLevel(Terrains.BRIDGE_ELEV), "The deck stays at L1, now one level above the surface");
         assertEquals(List.of("on-deck"), kept.getDecorations().stream().map(BoardDecoration::id).toList());
-        assertFalse(session.board().getHex(sunk).containsTerrain(Terrains.BRIDGE), "A deck below the surface goes");
+        assertEquals(-2, session.board().getHex(sunk).terrainLevel(Terrains.BRIDGE_ELEV), "A deck the water rises past stays at L-2");
         send(session, Action.UNDO, "", "");
         assertEquals(before, nodes(session, woods, building, bridge, sunk));
     }

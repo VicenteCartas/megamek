@@ -1025,6 +1025,11 @@ public class Hex implements Serializable {
                   + "the bridge type, bridge elevation and the bridge CF.");
         }
 
+        // A deck can lie under water, but not under the ground the water stands on.
+        if (hasBridge() && containsTerrain(Terrains.BRIDGE_ELEV) && terrainLevel(Terrains.BRIDGE_ELEV) < -depth()) {
+            newErrors.add("Bridge below the ground! A bridge deck must not lie lower than the floor of its hex.");
+        }
+
         // A road or rail on a deck needs the bridge, and runs only along its exits. Automatic bridge exits follow the
         // neighbours, so only specified ones can be checked here.
         Terrain bridge = getTerrain(Terrains.BRIDGE);

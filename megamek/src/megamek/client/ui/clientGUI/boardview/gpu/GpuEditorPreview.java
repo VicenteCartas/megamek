@@ -264,7 +264,7 @@ final class GpuEditorPreview implements Disposable {
               ? shown.getExits() & 63 : 0;
         if (hex.containsTerrain(Terrains.WATER) && hex.terrainLevel(Terrains.WATER) > 0) { low = level - hex.terrainLevel(Terrains.WATER); }
         if (way == Terrains.BRIDGE) {
-            low = high = level + Math.max(0, hex.terrainLevel(Terrains.BRIDGE_ELEV));
+            low = high = level + (hex.hasBridge() ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0);
         } else {
             for (int type : VOLUMES) {
                 if (hex.containsTerrain(type)) { high = Math.max(high, level + hex.terrainLevel(type)); }

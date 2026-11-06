@@ -372,6 +372,18 @@ class WayLayerEditorTest {
         return new Hex(ground, "bridge:1:" + exits + ";bridge_cf:40;bridge_elev:" + height, "");
     }
 
+    @Test void aBridgeCardsHeightCountsFromTheGroundUnderWater() {
+        var session = new BoardEditorSession();
+        for (Coords at : List.of(CENTRE.translated(0), CENTRE, CENTRE.translated(3))) {
+            session.board().setHex(at, new Hex(0, "water:2", ""));
+        }
+        send(session, Action.CHOOSE_BRUSH, "bridge", "bridge/built");
+        height(session, false, 1);
+        stroke(session, CENTRE.translated(0), CENTRE, CENTRE.translated(3));
+        assertEquals(-1, BridgeSpan.deck(session.board().getHex(CENTRE)), "One level over a floor at -2, under the surface at 0");
+        assertTrue(session.board().getHex(CENTRE).isValid(null));
+    }
+
     private static void road(BoardEditorSession session) { send(session, Action.CHOOSE_BRUSH, "road", "1"); }
     private static void height(BoardEditorSession session, boolean level, int offset) {
         send(session, Action.BRUSH_VALUE, "wayHeight", level ? "level" : "follow");
