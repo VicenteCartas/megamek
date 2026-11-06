@@ -789,6 +789,9 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
      * height (TW p.62) and over one lower than its hull reaches. Its levels above and below the surface follow its weight
      * (Airship and Large Vessel Template Table, TO:AUE p.57); at least its height as a unit, a level for a vehicle (TW p.99,
      * getHeight() being one less).
+     * <p>Only custom units reach the heavier rows. Large Naval Vessels are otherwise not implemented: running aground needs
+     * damage, a beached state and tractor recovery (TO:AUE p.22), not a refusal to enter; multi-hex templates (TO:AUE p.22)
+     * need footprints through movement, line of sight and targeting.
      */
     protected boolean deckCutsVessel(Hex hex, int elevation) {
         if (!hex.containsTerrain(Terrains.BRIDGE)) {
