@@ -855,6 +855,27 @@ public class BridgeTest extends GameBoardTestCase {
         assertTrue(underBridgeProhibited(EntityMovementMode.SUBMARINE, 0), "Surfaced, it does not");
     }
 
+    /** A deck at a vessel's elevation stops its move: it cannot go under, and it does not stand on decks (TW p.62). */
+    @Test
+    void testVessels_CannotMoveIntoADeckAtTheirElevation() {
+        setBoard("BOARD_DECK_ON_HIGH_WATER");
+        for (EntityMovementMode mode : List.of(EntityMovementMode.NAVAL, EntityMovementMode.HYDROFOIL,
+              EntityMovementMode.SUBMARINE)) {
+            assertFalse(getMovePathFor(new Tank(), 0, mode, MoveStepType.CLIMB_MODE_OFF, MoveStepType.FORWARDS).isMoveLegal(),
+                  mode + " at the surface");
+        }
+        assertTrue(getMovePathFor(new Tank(), -1, EntityMovementMode.SUBMARINE, MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS).isMoveLegal(), "A submarine a level down passes under it");
+    }
+
+    /** The same deck does not stop a ship a level above it. */
+    @Test
+    void testNaval_MovesOverADeckALevelBelowIt() {
+        setBoard("BOARD_DECKS_AROUND_THE_SURFACE");
+        assertTrue(getMovePathFor(new Tank(), 0, EntityMovementMode.NAVAL, MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS, MoveStepType.FORWARDS).isMoveLegal(), "Decks at -3, -2 and -1 lie below its hull");
+    }
+
     /** The decks, by level, that stop this vessel at this elevation in BOARD_DECKS_AROUND_THE_SURFACE. */
     private List<Integer> decksInTheWay(Tank vessel, EntityMovementMode mode, double tons, int elevation) {
         setBoard("BOARD_DECKS_AROUND_THE_SURFACE");
