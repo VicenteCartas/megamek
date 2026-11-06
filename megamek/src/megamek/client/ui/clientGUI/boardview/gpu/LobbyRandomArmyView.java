@@ -1,21 +1,37 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.text.NumberFormat;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.actions.Actions;
+import com.badlogic.gdx.scenes.scene2d.ui.Cell;
+import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.Scaling;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.BalancedArmy;
+import megamek.client.lobby.BattleValueArmy;
+import megamek.client.lobby.FactionChoice;
+import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RatBrowser;
+import megamek.client.lobby.RatGeneratorForm;
+import megamek.client.lobby.RequisitionAdvancedSearch;
+import megamek.client.ratgenerator.FactionRecord;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.gdx.UiButton;
@@ -26,18 +42,60 @@ import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.loaders.MekSummary;
+import megamek.common.loaders.MekSummaryCache;
+import megamek.common.units.UnitType;
 
 /**
- * The lobby's random army, dealt as unit cards. On the left, the tables to roll on, browsed a folder at a time (source,
- * faction, command, unit type) or searched across all of them by words of their names and folders; on the right, the
- * chosen table, the unit count and the player; Roll deals the hand, rerolling every card not kept; each card shows its
- * unit's sprite, Battle Value and tonnage and can be kept, rerolled or discarded; the army's totals over the hand. Add
- * to game sends the hand. Advanced opens the Swing generator with its Battle Value, RAT generator and force generator
- * tabs. The rolls are a {@link RandomArmyForm}'s, the browsing a {@link RatBrowser}'s.
+ * The lobby's random army, dealt as unit cards. Across the top, the generators the hand is dealt by: the random
+ * assignment tables, a Battle Value army, a balanced lance, a faction's table and a formation. On the left, the
+ * generator's choices: the tables to roll on, browsed a folder at a time (source, faction, command, unit type) or
+ * searched across all of them by words of their names and folders, or the other generators' panes
+ * ({@link LobbyArmyGeneratorPanes}); on the right, what the hand is dealt by, the unit count and the player; Roll deals
+ * the hand, rerolling every card not kept; each card shows its unit's sprite, Battle Value and tonnage and can be kept,
+ * rerolled or discarded, unless the generator deals a whole formation; the army's totals over the hand. Add to game
+ * sends the hand. The Battle Value army and the balanced lance deal from units the unit filter finds, the Requisition
+ * view's advanced search shown in the random army's place. Force generator opens the Swing generator. The rolls are a
+ * {@link RandomArmyForm}'s, the browsing a {@link RatBrowser}'s.
  * <p>
  * GPU thread. The rolls and the adding run on the Swing thread through {@link Host#edt}.
  */
 final class LobbyRandomArmyView {
+    /** The generators that need nothing loaded first. */
+    record Generators(BattleValueArmy battleValue, BalancedArmy balanced) { }
+
+    /** The generators built of the RAT Generator's data, which loads a while. */
+    record Factions(RatGeneratorForm table, FormationForm formation) { }
+
+    /** What the hand is dealt by. */
+    enum Mode {
+        TABLES("die", "tables"),
+        BATTLE_VALUE("military-tech", "battleValue"),
+        BALANCED("balance", "balanced"),
+        FACTION("flag", "faction"),
+        FORMATION("account-tree", "formation");
+
+        private final String icon;
+        private final String key;
+
+        Mode(String icon, String key) {
+            this.icon = icon;
+            this.key = key;
+        }
+
+        String title() {
+            return Messages.getString("Lobby.randomArmy.mode." + key);
+        }
+
+        String about() {
+            return Messages.getString("Lobby.randomArmy.about." + key);
+        }
+
+        /** Whether the generator is built of the RAT Generator's data. */
+        boolean needsFactions() {
+            return this == FACTION || this == FORMATION;
+        }
+    }
+
     /** What the view asks of the window. */
     interface Host {
         /** Runs {@code work} on the Swing thread, then {@code then} back on the GPU thread. */
@@ -46,21 +104,55 @@ final class LobbyRandomArmyView {
         /** Swing thread: adds the hand to the game for the chosen player. */
         void add(RandomArmyForm form);
 
-        /** Opens the Swing random army generator. */
+        /** Opens the Swing force generator. */
         void advanced();
 
         /** Asks for the sprites of {@code units}, which arrive through {@link #spriteArrived}. */
         void sprites(List<MekSummary> units);
+
+        /**
+         * Asks for the faction table and formation generators, built once the RAT Generator has its data; they reach
+         * {@code ready} on the GPU thread.
+         */
+        void factions(Consumer<Factions> ready);
+
+        /** Swing thread: remembers the faction and unit type a hand is dealt for, for the next random army. */
+        void remember(FactionChoice factions, int unitType);
     }
+
+    /** Deals nothing while the RAT Generator loads. */
+    private static final RandomArmyForm.Dealer LOADING = new RandomArmyForm.Dealer() {
+        @Override
+        public boolean canDeal() {
+            return false;
+        }
+
+        @Override
+        public List<MekSummary> deal(int count, List<MekSummary> kept) {
+            return List.of();
+        }
+
+        @Override
+        public @Nullable MekSummary replace(MekSummary unit, List<MekSummary> rest) {
+            return null;
+        }
+    };
 
     private final UiKit kit;
     private final RandomArmyForm form;
     private final RatBrowser browser;
+    private final Generators generators;
     private final Host host;
     private final Runnable close;
     private final Function<String, Drawable> sprites;
     private final float cardWidth;
     private final int columns;
+    private final Table main = new Table();
+    private final Cell<Actor> bodyCell;
+    private final Map<Mode, UiButton> tiles = new EnumMap<>(Mode.class);
+    private final Table tablesPanel;
+    private final Container<Actor> leftPane = new Container<>();
+    private final LobbyArmyGeneratorPanes panes;
     private final Table hand = new Table();
     private final Table list = new Table();
     private final ScrollPane listScroll;
@@ -70,9 +162,12 @@ final class LobbyRandomArmyView {
     private final UiButton back;
     private final Label backTip;
     private final TokenSearch search;
+    private final Label rollingOn;
     private final Label chosen;
     private final Label chosenPath;
     private final float countWidth;
+    private final Actor countField;
+    private final Cell<Actor> countCell;
     private final Label totals;
     private final UiButton add;
     private final UiButton roll;
@@ -80,14 +175,21 @@ final class LobbyRandomArmyView {
     private final List<Image> images = new ArrayList<>();
     /** Every card's keep, reroll and discard buttons, which must not change the hand while a roll runs. */
     private final List<UiButton> cardControls = new ArrayList<>();
+    private Mode mode = Mode.TABLES;
+    private @Nullable Factions factions;
+    private RequisitionAdvancedSearch criteria = RequisitionAdvancedSearch.NONE;
+    private @Nullable LobbyAdvancedSearchView filter;
+    private @Nullable ScrollPane paneScroll;
+    private @Nullable Mode paneMode;
     private boolean busy;
     private boolean syncing;
 
-    LobbyRandomArmyView(UiKit kit, UiDialog dialog, RandomArmyForm form, RatBrowser browser, float bodyWidth,
-          Function<String, Drawable> sprites, Host host, Runnable close) {
+    LobbyRandomArmyView(UiKit kit, UiDialog dialog, RandomArmyForm form, RatBrowser browser, Generators generators,
+          float bodyWidth, Function<String, Drawable> sprites, Host host, Runnable close) {
         this.kit = kit;
         this.form = form;
         this.browser = browser;
+        this.generators = generators;
         this.host = host;
         this.close = close;
         this.sprites = sprites;
@@ -99,17 +201,33 @@ final class LobbyRandomArmyView {
         cardWidth = (handWidth - gap * (columns - 1)) / columns;
         Table body = dialog.body();
         body.top().left();
+        main.top().left();
+
+        // The generators, a tile each, as a game's modes are chosen
+        Table strip = new Table();
+        strip.setName("army-modes");
+        strip.left();
+        for (Mode each : Mode.values()) {
+            UiButton tile = kit.button("button-toggle", each.icon, each.title(), null);
+            tile.setName("army-mode-" + each.key);
+            tile.setProgrammaticChangeEvents(false);
+            kit.tip(tile, true).getActor().setText(each.about());
+            UiKit.onChange(tile, () -> mode(each));
+            tiles.put(each, tile);
+            strip.add(tile).uniformX().fillX().padRight(space("sm"));
+        }
+        main.add(strip).colspan(2).left().padBottom(space("lg")).row();
 
         // The tables, a folder at a time: source, faction, command, unit type; or searched across them all
-        Table tables = kit.plainPanel();
-        tables.setName("army-browser");
-        tables.top().left().defaults().left().growX();
+        tablesPanel = kit.plainPanel();
+        tablesPanel.setName("army-browser");
+        tablesPanel.top().left().defaults().left().growX();
         Table head = new Table();
         head.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.randomArmy.tables"), "text.secondary"))
               .left();
         head.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.tableCount", browser.size()), "small",
               "text.muted")).left().padLeft(space("sm")).growX();
-        tables.add(head).row();
+        tablesPanel.add(head).row();
         search = kit.tokenSearch(Messages.getString("Lobby.randomArmy.search"), true);
         search.setName("army-search");
         search.field.setName("army-search-field");
@@ -120,7 +238,7 @@ final class LobbyRandomArmyView {
                 fillBrowser();
             }
         });
-        tables.add(search).padTop(space("sm")).row();
+        tablesPanel.add(search).padTop(space("sm")).row();
         Table crumbs = new Table();
         back = kit.button("button-quiet-compact", "chevron-left", null, null);
         back.setName("army-up");
@@ -145,29 +263,33 @@ final class LobbyRandomArmyView {
         where.setEllipsis(true);
         titles.add(where).row();
         crumbs.add(titles).growX().minWidth(0);
-        tables.add(crumbs).padTop(space("sm")).row();
+        tablesPanel.add(crumbs).padTop(space("sm")).row();
         list.top().left();
         countWidth = kit.typeLabel(String.valueOf(browser.size()), "small", "text.muted").getPrefWidth();
         listScroll = kit.scrollList(list, true, false);
         listScroll.setScrollingDisabled(true, false);
         listScroll.setName("army-table-list");
-        tables.add(listScroll).height(size("dialog.sm")).padTop(space("xs")).row();
+        tablesPanel.add(listScroll).height(size("dialog.sm")).padTop(space("xs")).row();
         found = kit.typeLabel("", "small", "text.muted");
         found.setName("army-matches");
         found.setWrap(true);
-        tables.add(found).padTop(space("xs")).row();
-        body.add(tables).width(browserWidth).top().fillY();
+        tablesPanel.add(found).padTop(space("xs")).row();
+        // Every generator's pane takes the tables' place and height, so the hand stays where it is
+        leftPane.fill().top();
+        leftPane.setName("army-pane");
+        main.add(leftPane).width(browserWidth).height(tablesPanel.getPrefHeight()).top();
 
         Table deal = new Table();
         deal.top().left().defaults().left().growX();
-        Label rollingOn = kit.roleTypeLabel("overline", Messages.getString("Lobby.randomArmy.rollingOn"),
-              "text.secondary");
+        rollingOn = kit.roleTypeLabel("overline", "", "text.secondary");
+        rollingOn.setName("army-rolling-on");
         deal.add(rollingOn).row();
         chosen = kit.typeLabel("", "title", "text.primary");
         chosen.setName("army-chosen");
         chosen.setEllipsis(true);
         deal.add(chosen).minWidth(0).padTop(space("xs")).row();
         chosenPath = kit.typeLabel("", "small", "text.muted");
+        chosenPath.setName("army-chosen-path");
         chosenPath.setEllipsis(true);
         deal.add(chosenPath).minWidth(0).row();
 
@@ -178,19 +300,20 @@ final class LobbyRandomArmyView {
         count.up().setName("army-count-up");
         count.down().setName("army-count-down");
         UiKit.onChange(count, () -> form.count(count.value()));
-        controls.add(kit.formField(strip("RandomArmyDialog.Unit"), count));
+        countField = kit.formField(strip("RandomArmyDialog.Unit"), count);
+        countCell = controls.add(countField).padRight(gap);
         if (form.players().size() > 1) {
             UiSelect player = kit.tokenSelect(true, form.players().toArray(String[]::new));
             player.setName("army-player");
             player.select(form.player());
             UiKit.onChange(player, () -> form.player(player.getSelectedIndex()));
-            controls.add(kit.formField(strip("RandomArmyDialog.Player"), player)).padLeft(gap)
+            controls.add(kit.formField(strip("RandomArmyDialog.Player"), player)).padRight(gap)
                   .width(size("control.lg") * 5);
         }
         roll = kit.button("button-secondary", "replay", Messages.getString("RandomArmyDialog.Roll"), null);
         roll.setName("army-roll");
-        UiKit.onChange(roll, () -> run(form::roll));
-        controls.add(roll).padLeft(gap).bottom();
+        UiKit.onChange(roll, this::roll);
+        controls.add(roll).bottom();
         controls.add().growX();
         deal.add(controls).padTop(space("md")).row();
 
@@ -199,10 +322,48 @@ final class LobbyRandomArmyView {
         deal.add(totals).padTop(space("lg")).row();
         hand.top().left();
         deal.add(hand).padTop(space("sm")).row();
-        body.add(deal).width(handWidth).top().padLeft(paneGap);
+        main.add(deal).width(handWidth).top().padLeft(paneGap);
+        bodyCell = body.add(main);
         body.row();
 
-        dialog.tool(Messages.getString("RandomArmyDialog.AdvancedSearch").replace("...", "\u2026"), () -> {
+        panes = new LobbyArmyGeneratorPanes(kit, new LobbyArmyGeneratorPanes.Owner() {
+            @Override
+            public void changed(boolean rebuild) {
+                if (rebuild) {
+                    showPane();
+                }
+                showChosen();
+            }
+
+            @Override
+            public void edt(Runnable work, Runnable then) {
+                host.edt(work, then);
+            }
+
+            @Override
+            public void take(MekSummary unit) {
+                LobbyRandomArmyView.this.take(unit);
+            }
+
+            @Override
+            public RequisitionAdvancedSearch criteria() {
+                return criteria;
+            }
+
+            @Override
+            public void openFilter() {
+                LobbyRandomArmyView.this.openFilter();
+            }
+
+            @Override
+            public void clearFilter() {
+                LobbyRandomArmyView.this.criteria(RequisitionAdvancedSearch.NONE);
+                showPane();
+                showChosen();
+            }
+        });
+
+        dialog.tool(Messages.getString("Lobby.randomArmy.forceGenerator"), () -> {
             close.run();
             host.advanced();
         }).setName("army-advanced");
@@ -219,9 +380,165 @@ final class LobbyRandomArmyView {
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("army-cancel");
         browser.locate(form.table());
         fillBrowser();
-        showChosen();
-        rebuild();
+        mode(Mode.TABLES);
+        host.factions(this::factionsReady);
     }
+
+    // ---- The generators ----
+
+    /** Deals the hand by {@code next}: its tile lit, its pane on the left, its dealer the form's. */
+    private void mode(Mode next) {
+        if (!busy) {
+            mode = next;
+            form.dealer(dealer());
+            countCell.setActor(form.dealer() == null || form.dealer().usesCount() ? countField : null);
+            showPane();
+            showChosen();
+            rebuild();
+        }
+        tiles.forEach((each, tile) -> tile.setChecked(each == mode));
+    }
+
+    private @Nullable RandomArmyForm.Dealer dealer() {
+        return switch (mode) {
+            case TABLES -> null;
+            case BATTLE_VALUE -> generators.battleValue();
+            case BALANCED -> generators.balanced();
+            case FACTION -> factions == null ? LOADING : factions.table();
+            case FORMATION -> factions == null ? LOADING : factions.formation();
+        };
+    }
+
+    /** The faction table and formation generators have arrived: their modes deal by them now. */
+    private void factionsReady(Factions ready) {
+        factions = ready;
+        if (mode.needsFactions()) {
+            mode(mode);
+        }
+    }
+
+    /** Shows the generator's choices on the left, built anew, where they were scrolled to. */
+    private void showPane() {
+        if (mode == Mode.TABLES) {
+            paneScroll = null;
+            paneMode = null;
+            leftPane.setActor(tablesPanel);
+            return;
+        }
+        float scrollY = paneScroll != null && paneMode == mode ? paneScroll.getScrollY() : 0;
+        Table pane = switch (mode) {
+            case BATTLE_VALUE -> panes.battleValue(generators.battleValue());
+            case BALANCED -> panes.balanced(generators.balanced());
+            case FACTION -> factions == null ? panes.loading("Lobby.randomArmy.mode.faction")
+                  : panes.faction(factions.table());
+            case FORMATION -> factions == null ? panes.loading("Lobby.randomArmy.mode.formation")
+                  : panes.formation(factions.formation());
+            case TABLES -> throw new IllegalStateException();
+        };
+        Table panel = kit.plainPanel();
+        panel.setName("army-generator");
+        panel.top().left();
+        ScrollPane scroll = kit.scrollList(pane, true, false);
+        scroll.setScrollingDisabled(true, false);
+        scroll.setName("army-generator-scroll");
+        panel.add(scroll).grow().minHeight(0);
+        leftPane.setActor(panel);
+        if (scrollY > 0) {
+            // Laid out on the next frame: the new pane scrolls to where the old one was then
+            scroll.addAction(Actions.run(() -> {
+                scroll.layout();
+                scroll.setScrollY(scrollY);
+                scroll.updateVisualScroll();
+            }));
+        }
+        paneScroll = scroll;
+        paneMode = mode;
+    }
+
+    /** Rolls the hand on the Swing thread, remembering a faction's choices for the next time. */
+    private void roll() {
+        RatGeneratorForm table = mode == Mode.FACTION && factions != null ? factions.table() : null;
+        FormationForm formation = mode == Mode.FORMATION && factions != null ? factions.formation() : null;
+        run(() -> {
+            if (table != null) {
+                host.remember(table.factions(), table.unitType());
+            } else if (formation != null) {
+                host.remember(formation.factions(), formation.unitType());
+            }
+            form.roll();
+        });
+    }
+
+    /** Puts a faction table's unit in the hand. */
+    private void take(MekSummary unit) {
+        if (!busy && form.take(unit)) {
+            rebuild();
+        }
+    }
+
+    // ---- The unit filter ----
+
+    /** Shows the unit filter in the random army's place, as large. */
+    private void openFilter() {
+        if (busy) {
+            return;
+        }
+        if (filter == null) {
+            filter = new LobbyAdvancedSearchView(kit, new LobbyAdvancedSearchView.Host() {
+                @Override
+                public RequisitionAdvancedSearch criteria() {
+                    return criteria;
+                }
+
+                @Override
+                public void criteria(RequisitionAdvancedSearch next) {
+                    LobbyRandomArmyView.this.criteria(next);
+                }
+
+                @Override
+                public void done() {
+                    closeFilter();
+                }
+            });
+            filter.actor().setName("army-filter-view");
+        } else {
+            filter.sync(criteria);
+        }
+        filterMatches();
+        bodyCell.setActor(filter.actor()).size(main.getWidth(), main.getHeight());
+    }
+
+    /** Back to the random army, its pane showing the filter now chosen. */
+    private void closeFilter() {
+        bodyCell.setActor(main).minWidth(Value.minWidth).prefWidth(Value.prefWidth).maxWidth(Value.zero)
+              .minHeight(Value.minHeight).prefHeight(Value.prefHeight).maxHeight(Value.zero);
+        showPane();
+        showChosen();
+    }
+
+    /** Deals the Battle Value army and the balanced lance from the units {@code next} finds. */
+    private void criteria(RequisitionAdvancedSearch next) {
+        criteria = next;
+        Predicate<MekSummary> finds = null;
+        if (!next.isEmpty()) {
+            MekSummaryCache cache = MekSummaryCache.getInstance();
+            finds = unit -> next.matches(unit, unit.isBattlefieldSupportAsset() ? unit : cache.getLinkedAsset(unit));
+        }
+        generators.battleValue().filter(finds);
+        generators.balanced().filter(finds);
+        filterMatches();
+    }
+
+    /** Shows on the filter how many units the shown generator can be dealt. */
+    private void filterMatches() {
+        if (filter != null) {
+            BattleValueArmy army = generators.battleValue();
+            filter.matches(mode == Mode.BALANCED ? generators.balanced().available()
+                  : army.available(BattleValueArmy.Kind.MEK) + army.available(BattleValueArmy.Kind.VEHICLE));
+        }
+    }
+
+    // ---- The tables ----
 
     /** Shows the open folder's rows, or the search's, with where the browser is above them. */
     private void fillBrowser() {
@@ -323,12 +640,80 @@ final class LobbyRandomArmyView {
         browser.search("");
     }
 
-    /** Shows the table the hand is rolled on, with its folders. */
+    /** Shows what the hand is dealt by: the chosen table with its folders, or the generator's choices in brief. */
     private void showChosen() {
-        String table = form.table();
-        chosen.setText(table == null ? "" : table);
-        chosenPath.setText(browser.pathOf(table));
+        String title = mode.title();
+        String headline = "";
+        String detail = "";
+        switch (mode) {
+            case TABLES -> {
+                title = Messages.getString("Lobby.randomArmy.rollingOn");
+                String table = form.table();
+                headline = table == null ? "" : table;
+                detail = browser.pathOf(table);
+            }
+            case BATTLE_VALUE -> {
+                BattleValueArmy army = generators.battleValue();
+                headline = Messages.getString("Lobby.randomArmy.summary.battleValue", army.size(), army.minBV(),
+                      army.maxBV());
+                detail = Messages.getString("Lobby.randomArmy.summary.years", army.minYear(), army.maxYear());
+            }
+            case BALANCED -> {
+                BalancedArmy army = generators.balanced();
+                headline = Messages.getString("Lobby.randomArmy.summary.balanced",
+                      NumberFormat.getIntegerInstance().format(army.target()),
+                      Messages.getString(army.balanceBy().key()), army.tolerance());
+                detail = Messages.getString("Lobby.randomArmy.available", army.available());
+            }
+            case FACTION -> {
+                if (factions == null) {
+                    headline = Messages.getString("Lobby.randomArmy.loadingFactions");
+                } else {
+                    RatGeneratorForm table = factions.table();
+                    FactionChoice choice = table.factions();
+                    headline = factionName(choice);
+                    FactionRecord command = choice.command();
+                    detail = join(String.valueOf(choice.year()),
+                          command == null ? null : command.getName(choice.year()), choice.rating(),
+                          UnitType.getTypeDisplayableName(table.unitType()));
+                }
+            }
+            case FORMATION -> {
+                if (factions == null) {
+                    headline = Messages.getString("Lobby.randomArmy.loadingFactions");
+                } else {
+                    FormationForm formation = factions.formation();
+                    FactionChoice choice = formation.factions();
+                    headline = formation.formation() == null ? Messages.getString("Lobby.randomArmy.noFormation")
+                          : formation.formation().getName();
+                    detail = join(factionName(choice), String.valueOf(choice.year()),
+                          UnitType.getTypeDisplayableName(formation.unitType()));
+                }
+            }
+        }
+        rollingOn.setText(title);
+        chosen.setText(headline);
+        chosenPath.setText(detail);
         refresh();
+    }
+
+    private static String factionName(FactionChoice choice) {
+        FactionRecord faction = choice.faction();
+        return faction == null ? "" : faction.getName(choice.year());
+    }
+
+    /** The parts that are there, between middle dots. */
+    private static String join(@Nullable String... parts) {
+        StringBuilder joined = new StringBuilder();
+        for (String part : parts) {
+            if (part != null && !part.isBlank()) {
+                if (!joined.isEmpty()) {
+                    joined.append(" \u00B7 ");
+                }
+                joined.append(part);
+            }
+        }
+        return joined.toString();
     }
 
     private static float space(String name) {
@@ -343,6 +728,8 @@ final class LobbyRandomArmyView {
         String text = Messages.getString(key);
         return text.endsWith(":") ? text.substring(0, text.length() - 1) : text;
     }
+
+    // ---- The hand ----
 
     /** Runs a roll on the Swing thread, then deals the hand again. */
     private void run(Runnable work) {
@@ -363,22 +750,38 @@ final class LobbyRandomArmyView {
         cardControls.clear();
         List<RandomArmyForm.Card> cards = form.cards();
         if (cards.isEmpty()) {
-            Label empty = kit.typeLabel(Messages.getString(form.canRoll() ? "Lobby.randomArmy.empty"
-                  : "RandomArmyDialog.ratStatusLoading"), "body", "text.muted");
+            Label empty = kit.typeLabel(Messages.getString(emptyKey()), "body", "text.muted");
+            empty.setName("army-empty");
             empty.setWrap(true);
             empty.setAlignment(Align.center);
             hand.add(empty).width(cardWidth * columns).pad(space("xl"));
         }
         float gap = space("md");
+        List<MekSummary> units = new ArrayList<>(cards.size());
         for (int index = 0; index < cards.size(); index++) {
             hand.add(card(index, cards.get(index))).width(cardWidth).top().fillY()
                   .padLeft(index % columns == 0 ? 0 : gap).padTop(index < columns ? 0 : gap);
             if ((index + 1) % columns == 0) {
                 hand.row();
             }
+            units.add(cards.get(index).unit());
         }
-        host.sprites(cards.stream().map(RandomArmyForm.Card::unit).toList());
+        host.sprites(units);
         refresh();
+    }
+
+    /** What an empty hand says: how to deal one, or why none can be dealt. */
+    private String emptyKey() {
+        if (mode.needsFactions() && factions == null) {
+            return "RandomArmyDialog.ratStatusLoading";
+        }
+        if (mode == Mode.FORMATION && factions != null && factions.formation().empty()) {
+            return "Lobby.randomArmy.noFormationBuilt";
+        }
+        if (form.canRoll()) {
+            return mode == Mode.TABLES ? "Lobby.randomArmy.empty" : "Lobby.randomArmy.emptyGenerator";
+        }
+        return mode == Mode.TABLES ? "RandomArmyDialog.ratStatusLoading" : "Lobby.randomArmy.cannotDeal." + mode.key;
     }
 
     private Table card(int index, RandomArmyForm.Card card) {
@@ -397,20 +800,30 @@ final class LobbyRandomArmyView {
         frame.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.stats", unit.getBV(), format(unit.getTons()),
               unit.getUnitType()), "small", "text.secondary")).growX().row();
         Table actions = new Table();
-        UiButton keep = kit.button("button-toggle-compact", "star", Messages.getString("Lobby.randomArmy.keep"), null);
-        keep.setName("army-keep-" + index);
-        keep.setProgrammaticChangeEvents(false);
-        keep.setChecked(card.kept());
-        UiKit.onChange(keep, () -> {
-            if (!busy) {
-                form.keep(index, !form.cards().get(index).kept());
-            }
-            keep.setChecked(form.cards().get(index).kept());
-        });
-        UiButton reroll = kit.button("button-quiet-compact", "replay", null, null);
-        reroll.setName("army-reroll-" + index);
-        kit.tip(reroll, true).getActor().setText(Messages.getString("Lobby.randomArmy.reroll"));
-        UiKit.onChange(reroll, () -> run(() -> form.reroll(index)));
+        // A formation's cards hold together: none is kept or rerolled alone
+        if (form.cardsApart()) {
+            UiButton keep = kit.button("button-toggle-compact", "star", Messages.getString("Lobby.randomArmy.keep"),
+                  null);
+            keep.setName("army-keep-" + index);
+            keep.setProgrammaticChangeEvents(false);
+            keep.setChecked(card.kept());
+            UiKit.onChange(keep, () -> {
+                if (!busy) {
+                    form.keep(index, !form.cards().get(index).kept());
+                }
+                keep.setChecked(form.cards().get(index).kept());
+            });
+            UiButton reroll = kit.button("button-quiet-compact", "replay", null, null);
+            reroll.setName("army-reroll-" + index);
+            kit.tip(reroll, true).getActor().setText(Messages.getString("Lobby.randomArmy.reroll"));
+            UiKit.onChange(reroll, () -> run(() -> form.reroll(index)));
+            cardControls.add(keep);
+            cardControls.add(reroll);
+            actions.add(keep).left().expandX();
+            actions.add(reroll).padLeft(space("xs"));
+        } else {
+            actions.add().expandX();
+        }
         UiButton discard = kit.button("button-quiet-compact", "close", null, null);
         discard.setName("army-discard-" + index);
         kit.tip(discard, true).getActor().setText(Messages.getString("Lobby.randomArmy.discard"));
@@ -421,11 +834,7 @@ final class LobbyRandomArmyView {
             form.discard(index);
             rebuild();
         });
-        cardControls.add(keep);
-        cardControls.add(reroll);
         cardControls.add(discard);
-        actions.add(keep).left().expandX();
-        actions.add(reroll).padLeft(space("xs"));
         actions.add(discard).padLeft(space("xs"));
         frame.add(actions).growX().padTop(space("sm")).expandY().bottom();
         return frame;
@@ -441,7 +850,12 @@ final class LobbyRandomArmyView {
         add.setDisabled(busy || form.cards().isEmpty() || form.playerName() == null);
         roll.setDisabled(busy || !form.canRoll());
         clear.setDisabled(busy);
-        cardControls.forEach(control -> control.setDisabled(busy));
+        for (UiButton control : cardControls) {
+            control.setDisabled(busy);
+        }
+        for (UiButton tile : tiles.values()) {
+            tile.setDisabled(busy);
+        }
     }
 
     /** A unit's sprite has been drawn: shows it on its cards. */
@@ -470,6 +884,20 @@ final class LobbyRandomArmyView {
 
     RatBrowser browser() {
         return browser;
+    }
+
+    Mode mode() {
+        return mode;
+    }
+
+    /** Whether the faction table and formation generators have arrived. */
+    boolean factionsReady() {
+        return factions != null;
+    }
+
+    /** Whether the unit filter shows in the random army's place. */
+    boolean filtering() {
+        return filter != null && bodyCell.getActor() == filter.actor();
     }
 
     @Nullable Actor control(String name) {

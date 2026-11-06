@@ -122,11 +122,16 @@ final class LobbyToolsProbe {
             return "victory, objectives " + form.activeObjectives() + ", changed " + form.changedOptions().size();
         }
         if (dialogs.randomArmyView() != null) {
-            RandomArmyForm form = dialogs.randomArmyView().form();
+            LobbyRandomArmyView view = dialogs.randomArmyView();
+            RandomArmyForm form = view.form();
             List<String> units = form.cards().stream()
                   .map(card -> card.unit().getName() + (card.kept() ? " (kept)" : "")).toList();
-            return "army " + units + ", BV " + form.battleValue() + ", table " + form.table() + ", browsing "
-                  + dialogs.randomArmyView().browser().path();
+            String source = view.mode() == LobbyRandomArmyView.Mode.TABLES
+                  ? "table " + form.table() + ", browsing " + view.browser().path()
+                  : "generator " + view.mode() + (view.factionsReady() ? "" : " (loading)")
+                        + (form.context() != null ? ", for " + form.context().faction() : "");
+            return "army " + units + ", BV " + form.battleValue() + ", " + source
+                  + (view.filtering() ? ", filtering" : "");
         }
         if (dialogs.readoutView() != null) {
             LobbyReadoutView view = dialogs.readoutView();

@@ -235,15 +235,15 @@ final class LobbyNativeDialogs {
     }
 
     /**
-     * Opens the random army, as wide as the game options, with {@code browser} over its tables; {@code sprites} has
-     * the units' sprites drawn so far.
+     * Opens the random army, as wide as the game options, with {@code browser} over its tables and {@code generators}
+     * beside them; {@code sprites} has the units' sprites drawn so far.
      */
-    LobbyRandomArmyView randomArmy(RandomArmyForm form, RatBrowser browser, Function<String, Drawable> sprites,
-          LobbyRandomArmyView.Host host) {
+    LobbyRandomArmyView randomArmy(RandomArmyForm form, RatBrowser browser, LobbyRandomArmyView.Generators generators,
+          Function<String, Drawable> sprites, LobbyRandomArmyView.Host host) {
         UiDialog dialog = begin(Messages.getString("Lobby.randomArmy.title"), OPTIONS_WIDTH, false,
               () -> randomArmyView = null);
-        randomArmyView = new LobbyRandomArmyView(kit, dialog, form, browser, bodyWidth(dialog, OPTIONS_WIDTH),
-              sprites, host, this::close);
+        randomArmyView = new LobbyRandomArmyView(kit, dialog, form, browser, generators,
+              bodyWidth(dialog, OPTIONS_WIDTH), sprites, host, this::close);
         show(dialog);
         return randomArmyView;
     }

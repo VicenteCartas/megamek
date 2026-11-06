@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 
+import megamek.client.ratgenerator.GenerationContext;
 import megamek.common.loaders.MekSummary;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -100,5 +101,109 @@ class RandomArmyFormTest {
         assertEquals(1, form.player());
         form.table("Z");
         assertEquals("B", form.table());
+    }
+
+    /** A dealer of numbered units that notes what it is asked for. */
+    private final class Stub implements RandomArmyForm.Dealer {
+        boolean whole;
+        boolean counts = true;
+        boolean deals = true;
+        GenerationContext context;
+        final List<Integer> asked = new ArrayList<>();
+
+        @Override
+        public boolean canDeal() {
+            return deals;
+        }
+
+        @Override
+        public List<MekSummary> deal(int count, List<MekSummary> kept) {
+            asked.add(count);
+            return roll(counts ? count : 3, "dealer");
+        }
+
+        @Override
+        public MekSummary replace(MekSummary unit, List<MekSummary> rest) {
+            return roll(1, "dealer").get(0);
+        }
+
+        @Override
+        public boolean wholeHand() {
+            return whole;
+        }
+
+        @Override
+        public boolean usesCount() {
+            return counts;
+        }
+
+        @Override
+        public GenerationContext context() {
+            return context;
+        }
+    }
+
+    @Test
+    void aDealerDealsInsteadOfTheTable() {
+        Stub dealer = new Stub();
+        form.dealer(dealer);
+        form.count(2);
+        form.roll();
+        assertEquals(2, form.cards().size());
+        assertTrue(rolledFrom.stream().allMatch("dealer"::equals), "the table is not rolled on");
+        form.keep(0, true);
+        form.roll();
+        assertEquals(List.of(2, 1), dealer.asked, "only the cards not kept are dealt again");
+        dealer.deals = false;
+        assertFalse(form.canRoll(), "Roll follows the dealer");
+        form.dealer(null);
+        assertTrue(form.canRoll(), "back on the table");
+    }
+
+    @Test
+    void aDealerWithCountsOfItsOwnDealsItsWholeArmy() {
+        Stub dealer = new Stub();
+        dealer.counts = false;
+        form.dealer(dealer);
+        form.count(1);
+        form.roll();
+        assertEquals(3, form.cards().size(), "the dealer's counts, not the form's");
+    }
+
+    @Test
+    void aWholeHandIsDealtAnewAndHeldTogether() {
+        Stub dealer = new Stub();
+        dealer.whole = true;
+        form.dealer(dealer);
+        form.count(3);
+        form.roll();
+        MekSummary first = form.cards().get(0).unit();
+        assertFalse(form.cardsApart());
+        form.keep(0, true);
+        assertFalse(form.cards().get(0).kept(), "no card is kept alone");
+        form.reroll(0);
+        assertSame(first, form.cards().get(0).unit(), "no card is rerolled alone");
+        form.roll();
+        assertEquals(3, form.cards().size());
+        assertFalse(first == form.cards().get(0).unit(), "Roll deals every card anew");
+    }
+
+    @Test
+    void theContextIsWhatAGeneratorLastDealtFor() {
+        Stub dealer = new Stub();
+        dealer.context = new GenerationContext("FS", 3050, "A", GenerationContext.Source.RAT_GENERATOR);
+        form.dealer(dealer);
+        form.roll();
+        assertEquals(dealer.context, form.context());
+        form.dealer(null);
+        form.roll();
+        assertEquals(dealer.context, form.context(), "a table's roll keeps the generator's note");
+        form.clear();
+        assertNull(form.context(), "cleared with the hand");
+        MekSummary unit = new MekSummary();
+        form.dealer(dealer);
+        assertTrue(form.take(unit));
+        assertSame(unit, form.cards().get(form.cards().size() - 1).unit());
+        assertEquals(dealer.context, form.context(), "a taken unit notes the dealer's context");
     }
 }
