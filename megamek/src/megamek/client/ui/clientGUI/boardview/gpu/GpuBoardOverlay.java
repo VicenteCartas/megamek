@@ -277,7 +277,7 @@ final class GpuBoardOverlay implements Disposable {
      * Draws the marks where the units stand this frame and on their hexes, level as selection bands, half
      * a unit above the unit's base ({@code poses} gives each scene unit's as the view placed it; a unit without one
      * shows none) or on a hex's floating plane: in 3D first the hidden bands faintly where the terrain or a model hides
-     * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases, under their icons.
+     * them, then every band depth-tested; in the Tactical View flat over the board, the units' bases and their icons.
      */
     void renderMarks(Camera camera, Function<BoardScene.Unit, UnitFootprint.Pose> poses) {
         if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty() && incomingTargets.isEmpty()
@@ -290,18 +290,16 @@ final class GpuBoardOverlay implements Disposable {
         Gdx.gl.glDepthMask(false);
         shapes.setProjectionMatrix(camera.combined);
         try {
-            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
             if (tactical) {
-                // Flat over the board, under the unit icons alone.
-                Gdx.gl.glDepthRangef(MeepleVisual.ICON_DEPTH, MeepleVisual.ICON_DEPTH);
+                Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             } else {
+                Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
                 Gdx.gl.glDepthFunc(GL20.GL_GREATER);
                 drawMarks(poses, hiddenUnitMarks, hiddenHexMarks, HIDDEN_OPACITY);
+                Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             }
-            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             drawMarks(poses, unitMarks, hexMarks, 1);
         } finally {
-            Gdx.gl.glDepthRangef(0, 1);
             Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
             Gdx.gl.glDepthMask(true);
             Gdx.gl.glDisable(GL20.GL_BLEND);
@@ -500,7 +498,7 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * The plotted route's ghost (rebuild plan A.7 G4): a copy of the instance the view draws for the moving unit
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
-     * facing: a translucent cyan copy of the model, or of the meeple in the Tactical View. It shows through scenery
+     * facing: a translucent cyan copy of the model, or of the icon in the Tactical View. It shows through scenery
      * without writing scene depth, drawn after the route and the units.
      * When the route's pulse lands, the ghost surges. Nothing without a plotted route of the planner.
      */
@@ -600,7 +598,8 @@ final class GpuBoardOverlay implements Disposable {
     /** The prototype's layers that lie on hexes, in its drawing order; the batch keeps that order. */
     private ModelInstance build() {
         Sink sink = new Sink(material(tactical));
-        Sink markers = new Sink(material(true));
+        // What a step says about its hex stays readable over the Tactical View's unit icons.
+        Sink markers = new Sink(markerMaterial());
         Map<Integer, BoardScene.Unit> shown = new HashMap<>();
         scene.units().forEach(unit -> shown.putIfAbsent(unit.id(), unit));
         BoardScene.Unit moving = shown.get(move.entityId());
@@ -1103,12 +1102,16 @@ final class GpuBoardOverlay implements Disposable {
      * Unlit vertex colours blended in drawing order, without writing depth: depth-tested against the terrain and
      * models by default, or always visible for movement previews and the flat Tactical View.
      */
+    private static Material markerMaterial() {
+        Material marker = material(true);
+        marker.set(new DepthTestAttribute(GL20.GL_ALWAYS, false));
+        return marker;
+    }
+
     private static Material material(boolean alwaysVisible) {
         return new Material(ColorAttribute.createDiffuse(Color.WHITE),
               new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
-              // Over the whole scene but the Tactical View's unit icons.
-              alwaysVisible ? new DepthTestAttribute(GL20.GL_LEQUAL, MeepleVisual.ICON_DEPTH, MeepleVisual.ICON_DEPTH, false)
-                    : new DepthTestAttribute(GL20.GL_LEQUAL, false),
+              alwaysVisible ? MeepleVisual.overScene() : new DepthTestAttribute(GL20.GL_LEQUAL, false),
               IntAttribute.createCullFace(GL20.GL_NONE));
     }
 

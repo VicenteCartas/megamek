@@ -314,7 +314,7 @@ class GpuBattleView extends ApplicationAdapter {
     }
 
     /**
-     * GL thread. Enters the Tactical View looking straight down, whose next frame shows every unit as its meeple on its
+     * GL thread. Enters the Tactical View looking straight down, whose next frame shows every unit as its icon on its
      * base, with the ground layer over the terrain the graphics setting chose, or returns to the exact 3D pose it
      * replaced. The {@code TOGGLE_ISO} key (T by default) calls this.
      */
@@ -1071,7 +1071,7 @@ class GpuBattleView extends ApplicationAdapter {
         if (ghosts != GpuEditorPreview.Data.NONE) {
             editorPreview.render(boardCamera.camera, scene, terrain, ghosts);
         }
-        fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime());
+        fireControl.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical());
         renderStage("terrain markers");
         tactical.render(boardCamera.camera, Gdx.graphics.getDeltaTime(), boardCamera.tactical(),
               source.uiPreferences().overlays());
@@ -1085,7 +1085,7 @@ class GpuBattleView extends ApplicationAdapter {
         renderStage("overlay labels and ghosts");
         overlay.renderGhost(boardCamera.camera, shownUnit);
         overlay.renderGhosts(boardCamera.camera, unitGhosts);
-        fireControl.renderLabels(boardCamera.camera);
+        fireControl.renderLabels(boardCamera.camera, boardCamera.tactical());
         Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
         tactical.renderLabels(boardCamera.camera);
         renderEditorObjectControls();
@@ -1128,6 +1128,8 @@ class GpuBattleView extends ApplicationAdapter {
                 tactical.prepare();
                 fireControl.prepare();
                 overlay.prepare();
+                scene.units().stream().filter(unit -> !unit.sensorContact() && unit.image() != null).findFirst()
+                      .ifPresent(unit -> MeepleVisual.prepareIcon(unitBatch, unitTextures.region(unit.image()).getTexture()));
                 // Probing moves the camera: not while the board makes its entrance. An editor loads what its starting view
                 // draws and the rest when it is asked for: a closer view's programs link while the board shows.
                 if (probed || source.isEditor() || entrancePending || boardCamera.isFraming() || boardCamera.tactical()) {
@@ -1556,7 +1558,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
     }
 
-    /** The Tactical View shows every unit as its meeple, whatever the tuning's display; the 3D view follows it. */
+    /** The Tactical View shows every unit as its icon, whatever the tuning's display; the 3D view follows it. */
     private UnitDisplayMode displayMode() {
         return boardCamera.tactical() ? UnitDisplayMode.ALL_MEEPLES : tuning.unitDisplayMode();
     }
@@ -1577,7 +1579,7 @@ class GpuBattleView extends ApplicationAdapter {
         unitAnchors.clear();
         unitFootprints.clear();
         unitGhosts.clear();
-        // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's meeples keep their size in the hex.
+        // Zoomed out, the 3D view's units grow to stay visible; the Tactical View's icons keep their size in the hex.
         float growth = boardCamera.tactical() ? 1
               : UnitScreenScale.factor(UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale));
         Set<String> keys = scene.units().stream().map(unit -> unit.id() + ":" + unit.part()).collect(Collectors.toSet());
@@ -2545,8 +2547,6 @@ class GpuBattleView extends ApplicationAdapter {
             else if (tactical || casualty.opacity() < 1) { depthless.add(casualty.instance); }
             else { unitBatch.render(casualty.instance, light); }
         }
-        // Every marker writes normal scene depth, independently of its optional see-through outline.
-        markers.instances().forEach(unitBatch::render);
         unitBatch.end();
         // What writes no depth, a unit fading out or an icon, covers what lies behind it: after the units, the farthest first.
         var eye = boardCamera.camera.position;
@@ -2556,6 +2556,9 @@ class GpuBattleView extends ApplicationAdapter {
             unitBatch.render(instance, light);
             unitBatch.flush();
         }
+        // The board's markers last: a warning shows over the Tactical View's icons, which write no depth. Every marker
+        // writes normal scene depth, independently of its optional see-through outline.
+        markers.instances().forEach(unitBatch::render);
         unitBatch.end();
         // An icon's depth range (MeepleVisual.ICON_DEPTH) stays behind for the direct GL passes.
         Gdx.gl.glDepthRangef(0, 1);

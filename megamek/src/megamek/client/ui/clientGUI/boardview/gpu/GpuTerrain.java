@@ -111,6 +111,8 @@ final class GpuTerrain implements Disposable {
     /** The nearest wave of this frame; the scene's depth keeps the beds and units beneath it. */
     private final GpuWaterDepth waterDepth = new GpuWaterDepth();
     private final GpuCutoutFade cutoutFade = new GpuCutoutFade();
+    /** The editor's side view, whose size differs from the board's: one glass target between them would be rebuilt twice a frame. */
+    private final GpuCutoutFade sectionFade = new GpuCutoutFade();
     private final BoundingBox fadeBounds = new BoundingBox();
     /** The shared FFT engine with a viscous lava spectrum, independent of wind. */
     private final GpuOcean lavaOcean = new GpuOcean(true);
@@ -6703,6 +6705,8 @@ final class GpuTerrain implements Disposable {
     void animate(float delta, List<ModelInstance> units, float buildingAlpha, Coords hovered, float hoverFloorZ) {
         float nextBuilding = MathUtils.clamp(buildingAlpha, 0, 1);
         boolean changedOpacity = nextBuilding != buildingOpacity;
+        // A building faded away fully casts no shadow (renderDepth).
+        if (changedOpacity && (nextBuilding == 0 || buildingOpacity == 0)) { shadowMap.invalidate(); }
         buildingOpacity = nextBuilding;
         clock += delta;
         magmaClock += delta * (float) Math.sqrt(gravity / BoardAtmosphere.STANDARD_GRAVITY);
@@ -7875,13 +7879,14 @@ final class GpuTerrain implements Disposable {
                 for (Prop prop : editorProps(coords)) {
                     if (!Float.isNaN(prop.floorZ) || !isolate.isEmpty() && !isolate.equals(prop.decorationId)) { continue; }
                     // A close-up: a building or object with mesh levels draws its near one, whatever the board's zoom.
-                    batch.render(prop.near(), environment);
-                    objects.add(prop.near());
+                    var near = prop.near();
+                    batch.render(near, environment);
+                    objects.add(near);
                 }
             } finally { batch.end(); }
             BoundingBox bounds = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).bounds;
-            cutoutFade.renderWithGlass(batch, camera, environment, isolate.isEmpty() ? tile.glass : List.of(),
-                  () -> cutoutFade.render(batch, camera, environment, objects, bounds));
+            sectionFade.renderWithGlass(batch, camera, environment, isolate.isEmpty() ? tile.glass : List.of(),
+                  () -> sectionFade.render(batch, camera, environment, objects, bounds));
             return null;
         });
     }
@@ -9187,6 +9192,7 @@ final class GpuTerrain implements Disposable {
         waterDetail.dispose();
         waterDepth.dispose();
         cutoutFade.dispose();
+        sectionFade.dispose();
         ocean.dispose();
         waterExposure.dispose();
         lavaOcean.dispose();

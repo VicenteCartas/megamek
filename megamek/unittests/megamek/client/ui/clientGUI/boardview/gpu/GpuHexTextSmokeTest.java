@@ -1181,8 +1181,8 @@ class GpuHexTextSmokeTest {
                     ScreenUtils.clear(0, 0, 0, 1, true);
                     labels.render(batch, camera, depth, depth, BOTTOM);
                     Pixmap expected = pixels();
-                    // Cover every pixel with the nearest depth short of an icon, independently of any particular model shape.
-                    Gdx.gl.glClearDepthf(MeepleVisual.ICON_DEPTH);
+                    // Cover every pixel with nearer opaque depth, independently of any particular model shape.
+                    Gdx.gl.glClearDepthf(0);
                     ScreenUtils.clear(0, 0, 0, 1, true);
                     Gdx.gl.glClearDepthf(1);
                     labels.render(batch, camera, depth, depth, BOTTOM);

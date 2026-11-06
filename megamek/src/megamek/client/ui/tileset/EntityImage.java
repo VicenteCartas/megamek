@@ -119,7 +119,7 @@ public class EntityImage {
     /** Facing-dependent camo overlays (add shadows and highlighting) */
     private static final int[][] pOverlays = new int[6][IMG_SIZE];
     /** {@link #applyColor}: an image no facing's overlay applies to. */
-    private static final int NO_FACING = -1;
+    static final int NO_FACING = -1;
 
     // Battlefield Support Asset marker-stripe overlay tuning.
     /** The repeat period in pixels (colored stripe + gap) of the repeating marker pattern. */
@@ -428,11 +428,16 @@ public class EntityImage {
     }
 
     public @Nullable Image loadPreviewImage(final boolean showDamage) {
+        return loadPreviewImage(showDamage, NO_FACING);
+    }
+
+    /** {@link #loadPreviewImage(boolean)} with the shadows and highlights of {@code facing} ({@link #applyColor}). */
+    @Nullable Image loadPreviewImage(final boolean showDamage, final int facing) {
         if (base == null) {
             return null;
         }
 
-        base = applyColor(getBase(), NO_FACING);
+        base = applyColor(getBase(), facing);
         if (shouldApplyOverlay()) {
             base = applyAssetStripeOverlay(getBase());
         }

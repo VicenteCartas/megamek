@@ -43,7 +43,7 @@ import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
 /**
- * The Tactical View's unit bases, under and over each meeple, in world space: sized in hex
+ * The Tactical View's unit bases, under and over each icon, in world space: sized in hex
  * apothems, they zoom with the board and stay inside the unit's hex. The base, drawn before the units: a ring in the
  * side's colour with a glow for the acting unit and the focused enemy, an outer ring that pulses while the unit can
  * act, the facing notch and the thinner twist notch. The badges, drawn after the units: the heat pip, the elevation or

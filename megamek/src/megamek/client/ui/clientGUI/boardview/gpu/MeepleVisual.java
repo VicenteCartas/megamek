@@ -2,10 +2,12 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
@@ -26,10 +28,11 @@ final class MeepleVisual {
     // Reuse the four body overlays, limiting coverage so even heavy damage preserves the player's camouflage.
     static final float DAMAGE_OPACITY = .5f;
     /**
-     * Unit icons' depth range ends here, nearer than anything on the board; markers draw at it, so under them alone. The
+     * Unit icons' depth range ends here, nearer than anything on the board; route lines draw at it, so under them alone. The
      * scene's water and effects see the board beneath an icon: its depth follows them (GpuUnitVisibility.renderDepth).
      */
     static final float ICON_DEPTH = .001f;
+    private static final long TOKEN_VERTEX = VertexAttributes.Usage.Position | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.Normal;
 
     private MeepleVisual() { }
 
@@ -59,12 +62,27 @@ final class MeepleVisual {
     /** The Tactical View's token: the unit's icon alone, flat, over the board and its markers. */
     static Model icon(BoardScene.Pixels pixels, TextureRegion region) { return token(pixels, region, true); }
 
+    /** What overdraws the whole scene but the Tactical View's unit icons: a path. */
+    static DepthTestAttribute overScene() { return new DepthTestAttribute(GL20.GL_LEQUAL, ICON_DEPTH, ICON_DEPTH, false); }
+
+    /** Links the icons' unlit program, for artwork in {@code texture}, behind the loading stage (GpuBattleView's warm-up): the first T links none. */
+    static void prepareIcon(ModelBatch units, Texture texture) {
+        GpuUnitShader.prepareUnlit(units, artwork(texture, true), MeshBuilder.createAttributes(TOKEN_VERTEX));
+    }
+
+    private static Material artwork(Texture texture, boolean icon) {
+        var artwork = new Material("meeple-artwork", TextureAttribute.createDiffuse(texture), new GpuLinearColors(),
+              IntAttribute.createCullFace(GL20.GL_NONE));
+        if (icon) { artwork.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, ICON_DEPTH, false)); }
+        return artwork;
+    }
+
     private static Model token(BoardScene.Pixels pixels, TextureRegion region, boolean icon) {
         var builder = new ModelBuilder();
         builder.begin();
         builder.node().id = ROOT;
         // ModelBuilder reuses builders for identical attributes; keep the textured caps and painted walls separate.
-        long attributes = VertexAttributes.Usage.Position | VertexAttributes.Usage.TextureCoordinates | VertexAttributes.Usage.Normal;
+        long attributes = TOKEN_VERTEX;
         var caps = new MeshBuilder();
         var sides = new MeshBuilder();
         var underside = new MeshBuilder();
@@ -74,10 +92,7 @@ final class MeepleVisual {
         // The artwork shows on top only; underneath, as when the token lies on its back, it is plain and darker than its
         // walls.
         GpuCutout.extrude(pixels, region, Vector3.Zero, 1, HEIGHT, caps, sides, underside);
-        var artwork = new Material("meeple-artwork", TextureAttribute.createDiffuse(region.getTexture()), new GpuLinearColors(),
-              IntAttribute.createCullFace(GL20.GL_NONE));
-        if (icon) { artwork.set(new DepthTestAttribute(GL20.GL_LEQUAL, 0, ICON_DEPTH, false)); }
-        builder.part("cutout", caps.end(), GL20.GL_TRIANGLES, artwork);
+        builder.part("cutout", caps.end(), GL20.GL_TRIANGLES, artwork(region.getTexture(), icon));
         if (icon) { return builder.end(); }
         builder.part("sides", sides.end(), GL20.GL_TRIANGLES,
               new Material("paint", ColorAttribute.createDiffuse(GpuCutout.averageColor(pixels)), new GpuLinearColors(),

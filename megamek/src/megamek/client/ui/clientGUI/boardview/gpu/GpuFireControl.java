@@ -65,6 +65,8 @@ final class GpuFireControl implements Disposable {
     private final Material material = new Material(ColorAttribute.createDiffuse(Color.WHITE),
           new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
           new DepthTestAttribute(GL20.GL_LEQUAL, false), IntAttribute.createCullFace(GL20.GL_NONE));
+    /** The attack lines' own: they can draw over the Tactical View's unit icons (#render), which the range frames lie under. */
+    private final Material attackMaterial = new Material("attack-lines", material);
     private List<BoardScene.FiringLine> firingLines = List.of();
     private List<BoardScene.RangeBorder> rangeBorders = List.of();
     private List<BoardScene.RangeLabel> rangeLabels = List.of();
@@ -171,7 +173,7 @@ final class GpuFireControl implements Disposable {
             }
         }
         for (BoardScene.FiringLine line : firingLines) {
-            MeshPartBuilder mesh = builder.part("attack-" + part++, GL20.GL_TRIANGLES, ATTRIBUTES, material);
+            MeshPartBuilder mesh = builder.part("attack-" + part++, GL20.GL_TRIANGLES, ATTRIBUTES, attackMaterial);
             Color color = color(line.rgb(), 1);
             List<Vector3> path = BoardFiringGeometry.trajectory(scene, line);
             for (int i = 1; i < path.size(); i++) {
@@ -380,7 +382,8 @@ final class GpuFireControl implements Disposable {
         }
     }
 
-    void render(Camera camera, float deltaSeconds) {
+    /** {@code overUnits}: the attack lines over the whole scene, the Tactical View's unit icons included. */
+    void render(Camera camera, float deltaSeconds, boolean overUnits) {
         if (BoardTactical.SCROLLING_RANGE_LABELS) {
             scrollDistance += deltaSeconds * RANGE_SCROLL_SPEED * BoardGeometry.hexScale();
         }
@@ -394,17 +397,25 @@ final class GpuFireControl implements Disposable {
                     }
                 }
             }
+            Material attacks = instance.getMaterial(attackMaterial.id);
+            if (attacks != null) {
+                attacks.get(DepthTestAttribute.class, DepthTestAttribute.Type).depthFunc = overUnits ? GL20.GL_ALWAYS : GL20.GL_LEQUAL;
+            }
             batch.begin(camera);
             batch.render(instance);
             batch.end();
         }
     }
 
-    /** Draw after ground markings so their text cannot overpaint the camera-facing letters. */
-    void renderLabels(Camera camera) {
+    /** Draw after ground markings so their text cannot overpaint the camera-facing letters. {@code overUnits}: as {@link #render}. */
+    void renderLabels(Camera camera, boolean overUnits) {
         if (!rangeLabels.isEmpty()) {
-            Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
-            Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            if (overUnits) {
+                Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
+            } else {
+                Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
+                Gdx.gl.glDepthFunc(GL20.GL_LEQUAL);
+            }
             labelBatch.setProjectionMatrix(camera.combined);
             labelBatch.begin();
             for (BoardScene.RangeLabel label : rangeLabels) {

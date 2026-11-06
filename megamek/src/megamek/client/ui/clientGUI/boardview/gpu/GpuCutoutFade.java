@@ -39,7 +39,7 @@ final class GpuCutoutFade implements Disposable {
     private final Mesh quad = GpuAtmosphere.screenQuad();
     private final GpuWaterDepth glassDepth = new GpuWaterDepth();
     private ShaderProgram program;
-    private int framebuffer, attached, attachedType;
+    private int framebuffer;
     private Texture colour, opticalDepth;
 
     GpuCutoutFade() {
@@ -170,23 +170,20 @@ final class GpuCutoutFade implements Disposable {
         query.clear();
         Gdx.gl.glGetIntegerv(GL20.GL_VIEWPORT, query);
         int width = query.get(0) + query.get(2), height = query.get(1) + query.get(3);
-        // The largest scene seen: a view that also draws a small one (the editor's side view) keeps its targets.
+        // The largest scene seen: a window that shrinks keeps its targets.
         if (colour == null || colour.getWidth() < width || colour.getHeight() < height) {
             create(colour == null ? width : Math.max(width, colour.getWidth()), colour == null ? height : Math.max(height, colour.getHeight()));
         }
         Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, framebuffer);
-        if (attached != depth || attachedType != type) {
-            if (type == GL20.GL_TEXTURE) {
-                Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_TEXTURE_2D, depth, 0);
-            } else {
-                Gdx.gl.glFramebufferRenderbuffer(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_RENDERBUFFER, depth);
-            }
-            attached = depth;
-            attachedType = type;
-            if (Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER) != GL20.GL_FRAMEBUFFER_COMPLETE) {
-                Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, scene);
-                throw new IllegalStateException("GPU cutout fade target is incomplete");
-            }
+        // Every time: a rebuilt scene's depth can reuse the old one's name, while this target still holds the old image.
+        if (type == GL20.GL_TEXTURE) {
+            Gdx.gl.glFramebufferTexture2D(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_TEXTURE_2D, depth, 0);
+        } else {
+            Gdx.gl.glFramebufferRenderbuffer(GL20.GL_FRAMEBUFFER, GL20.GL_DEPTH_ATTACHMENT, GL20.GL_RENDERBUFFER, depth);
+        }
+        if (Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER) != GL20.GL_FRAMEBUFFER_COMPLETE) {
+            Gdx.gl.glBindFramebuffer(GL20.GL_FRAMEBUFFER, scene);
+            throw new IllegalStateException("GPU cutout fade target is incomplete");
         }
         ScreenUtils.clear(0, 0, 0, 0, false);
         return scene;
@@ -232,8 +229,6 @@ final class GpuCutoutFade implements Disposable {
     private void disposeTargets() {
         if (framebuffer != 0) { Gdx.gl.glDeleteFramebuffer(framebuffer); }
         framebuffer = 0;
-        attached = 0;
-        attachedType = 0;
         if (colour != null) { colour.dispose(); }
         colour = null;
         if (opticalDepth != null) { opticalDepth.dispose(); }
