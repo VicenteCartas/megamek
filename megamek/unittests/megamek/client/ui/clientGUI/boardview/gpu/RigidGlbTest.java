@@ -495,17 +495,16 @@ class RigidGlbTest {
     }
 
     @Test
-    void aBoardMaterialsTransparencyDecidesOverTheGlbsAlphaMode() throws Exception {
+    void aGlbsAlphaModeDecidesOverItsBoardMaterialsTransparency() throws Exception {
         com.badlogic.gdx.utils.GdxNativesLoader.load();
         var previous = megamek.common.Configuration.dataDir();
         megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
         try {
-            var blended = onBoardMaterial("transparency=1");
-            ((ObjectNode) blended.get("materials").get(0)).put("alphaMode", "MASK");
-            assertTrue(level(blended).blends.containsKey("paint"), "Godot's ALPHA blends, whatever the GLB's alpha mode");
-            var cutout = onBoardMaterial("transparency=2", "alpha_scissor_threshold=0.3");
-            ((ObjectNode) cutout.get("materials").get(0)).put("alphaMode", "MASK");
-            assertFalse(level(cutout).blends.containsKey("paint"), "Godot's ALPHA_SCISSOR is a cutout");
+            var document = onBoardMaterial("transparency=1");
+            ((ObjectNode) document.get("materials").get(0)).put("alphaMode", "MASK").put("alphaCutoff", .3);
+            var plant = level(document);
+            assertFalse(plant.blends.containsKey("paint"), "A plant stays a cutout on a blended .tres, or the ground shows through it");
+            assertEquals(.3f, plant.alphaTests.get("paint"), 1e-6f);
         } finally { megamek.common.Configuration.setDataDir(previous); }
     }
 
