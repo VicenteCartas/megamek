@@ -118,10 +118,10 @@ final class ModelTextures {
                 if (glb.buildingPaint.contains(material.id)) {
                     material.set(new GpuBuildingPaint(com.badlogic.gdx.graphics.Color.WHITE));
                 }
-                if (glb.emissionOff.contains(material.id)) {
-                    material.set(new GpuModelLight(0, 0, 1));
-                } else if (glb.nightEmission.contains(material.id)) {
-                    material.set(new GpuModelLight(1, 0, 1, true));
+                switch (glb.emissions.getOrDefault(material.id, RigidGlb.Emission.ALWAYS)) {
+                    case OFF -> material.set(new GpuModelLight(0, 0, 1));
+                    case NIGHT -> material.set(new GpuModelLight(1, 0, 1, true));
+                    case ALWAYS -> { }
                 }
             });
             glb.surfaces.forEach((id, surface) -> {
@@ -129,7 +129,7 @@ final class ModelTextures {
                 var relief = surface.relief();
                 material.set(new GpuModelMaterial(surface.roughness(), surface.metallic(), surface.scatter(),
                       surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
-                      surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
+                      surface.tint(), surface.glow(), surface.board() != null, relief == null ? new float[4]
                             : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() },
                       glb.paintMasks.contains(id), glb.boardUVs.getOrDefault(id, 0f)));
                 // The heightmap is the material's bump texture (GpuModelMaterial).

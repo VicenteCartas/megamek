@@ -30,24 +30,17 @@ class GpuAuthoredNightLightsTest {
             // Model a kit piece with both a night light and an explicit per-surface override.
             // The habitat's windows are generated from its atlas, rather than a piece in this source GLB.
             String surface = data.materials.first().id;
-            data.nightEmission.add(surface);
-            data.emissionOff.add(surface);
-            data.nightColours.put(surface, new float[] { .1f, .2f, .3f });
+            data.emissions.put(surface, RigidGlb.Emission.OFF);
+            data.ownGlows.put(surface, new float[] { .1f, .2f, .3f });
         }
         var generated = HabitatKit.lods(json.treeToValue(spec, HabitatKit.Spec.class), pieces, true, "review");
         for (int lod = 0; lod < generated.size(); lod++) {
             var source = (RigidGlb.Data) pieces.get(lod);
-            assertEquals(source.emissionOff, generated.get(lod).emissionOff);
-            var expectedNight = new java.util.HashSet<>(source.nightEmission);
-            expectedNight.add("structures/lunar/habitat-wall");
-            assertEquals(expectedNight, generated.get(lod).nightEmission);
-            var used = new java.util.HashSet<String>();
-            for (var material : generated.get(lod).materials) { used.add(material.id); }
-            assertTrue(used.containsAll(source.emissionOff));
-            String surface = source.emissionOff.iterator().next();
+            String surface = source.materials.first().id;
+            assertEquals(RigidGlb.Emission.OFF, generated.get(lod).emissions.get(surface));
+            assertEquals(RigidGlb.Emission.NIGHT, generated.get(lod).emissions.get("structures/lunar/habitat-wall"));
             var finish = generated.get(lod).surfaces.get(surface);
-            assertTrue(java.util.Arrays.equals(new float[] { .1f, .2f, .3f }, finish.glow())
-                  || java.util.Arrays.equals(new float[] { .1f, .2f, .3f }, finish.tint()), "A piece's night colour reaches the kit's own finish");
+            assertArrayEquals(new float[] { .1f, .2f, .3f }, finish.glow(), "A piece's own colour reaches the kit's own finish");
         }
     }
 
@@ -56,12 +49,13 @@ class GpuAuthoredNightLightsTest {
         var data = new RigidGlb.Data();
         RigidGlb.boardMaterial(data, "windows", "structures/buildings/fortress-glass");
         RigidGlb.boardMaterial(data, "wall", "structures/common/cast-concrete");
-        assertEquals(java.util.Set.of("windows"), data.nightEmission);
+        assertEquals(RigidGlb.Emission.NIGHT, data.emissions.get("windows"));
+        assertEquals(RigidGlb.Emission.ALWAYS, data.emissions.get("wall"));
         float[] glow = data.surfaces.get("windows").glow();
         assertTrue(glow[0] > 0 && glow[0] > glow[2], "Shared glass keeps its warm emission");
         assertArrayEquals(new float[3], data.surfaces.get("wall").glow(), "Walls remain unlit");
         var inherited = new RigidGlb.Data(); inherited.inheritMaterials(data);
-        assertEquals(data.nightEmission, inherited.nightEmission);
+        assertEquals(data.emissions, inherited.emissions);
     }
 
     @Test void rotatingAndMirroringAStretchedBuildingKeepsItsLightReach() {

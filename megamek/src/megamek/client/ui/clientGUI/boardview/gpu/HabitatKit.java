@@ -150,7 +150,6 @@ final class HabitatKit {
         });
         for (var level : levels) {
             level.buildingPaint.add(spec.materials().get("wall"));
-            level.paintMasks.add(spec.materials().get("wall"));
         }
         return levels;
     }

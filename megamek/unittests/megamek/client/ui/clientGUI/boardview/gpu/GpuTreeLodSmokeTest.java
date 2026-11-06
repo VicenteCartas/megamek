@@ -404,7 +404,7 @@ class GpuTreeLodSmokeTest {
                         row.put("pngSha256", reviewHash(image));
                         row.put("physicalGlb", source.file().getName());
                         row.put("physicalGlbSha256", reviewHash(source.file().toPath()));
-                        row.put("variant", source.variant());
+                        row.put("variant", source.snow() ? "snow" : null);
                         row.put("referenceBoundsCenter", reviewVector(bounds.getCenter(new Vector3())));
                         row.put("referenceBoundsDimensions", reviewVector(dimensions));
                         row.put("lodBoundsDimensions", reviewVector(assets.lodModel(name, level)

@@ -185,6 +185,12 @@ final class GodotMaterial {
 
     boolean has(String property) { return properties.containsKey(property); }
 
+    /** A string property's value, or null when the property is absent. */
+    String text(String property) {
+        String value = properties.get(property);
+        return value == null ? null : unquote(value);
+    }
+
     /** The file a texture (or shader) property names, or null when the property is absent. */
     File texture(String property) {
         String value = properties.get(property);

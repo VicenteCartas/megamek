@@ -153,7 +153,11 @@ final class GeneratedMesh {
         placement = new Matrix4(frame).mul(placement);
         Matrix3 normals = new Matrix3().set(placement).inv().transpose();
         for (var nodePart : node.parts) {
-            var target = parts.computeIfAbsent(nodePart.materialId, ignored -> new FloatArray());
+            String board = ((RigidGlb.Data) source).surfaces.get(nodePart.materialId).board();
+            if (board == null) {
+                throw new IllegalArgumentException("A building kit's pieces use library materials only, not " + nodePart.materialId);
+            }
+            var target = parts.computeIfAbsent(board, ignored -> new FloatArray());
             for (short index : meshParts.get(nodePart.meshPartId).indices) {
                 int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                 float[] vertex = Arrays.copyOfRange(mesh.vertices, at, at + RigidGlb.STRIDE);

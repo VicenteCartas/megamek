@@ -130,7 +130,7 @@ class BoardBillboardMeshTest {
     @Test void nightEmissionTakesAnyColourOnOneLayout() {
         var warm = BoardBillboardMesh.data(BoardBillboard.DEFAULT, 18, 0);
         var material = warm.materials.select(found -> found.id.equals("billboard-lens")).iterator().next();
-        assertTrue(warm.nightEmission.contains("billboard-lens"));
+        assertEquals(RigidGlb.Emission.NIGHT, warm.emissions.get("billboard-lens"));
         assertNull(material.emissive, "A colour attribute would select another program");
         RigidGlb.nightEmission(warm, "billboard-lens", 0, .4f, 1);
         assertArrayEquals(new float[] { 0, .4f, 1 }, warm.surfaces.get("billboard-lens").glow(), "Without an emission map it glows evenly");

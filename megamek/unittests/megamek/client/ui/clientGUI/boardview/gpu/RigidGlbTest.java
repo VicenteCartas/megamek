@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -37,19 +38,18 @@ class RigidGlbTest {
         var document = levels();
         var material = (ObjectNode) document.get("materials").get(0);
         material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
-        var extras = material.putObject("extras").put("mmEmission", "off").put("mmNightEmission", true);
+        var extras = material.putObject("extras").put("mmEmission", "off");
         for (var level : RigidGlb.loadLods(file(document, false))) {
             var data = (RigidGlb.Data) level;
-            assertEquals(java.util.Set.of("paint"), data.emissionOff);
-            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            assertEquals(RigidGlb.Emission.OFF, data.emissions.get("paint"));
             assertEquals(.4f, data.materials.first().emissive.r, 1e-6);
             var sliced = new RigidGlb.Data(); sliced.inheritMaterials(data);
-            assertEquals(data.emissionOff, sliced.emissionOff);
+            assertEquals(data.emissions, sliced.emissions);
         }
-        extras.remove("mmEmission");
+        extras.put("mmEmission", "night");
         for (var level : RigidGlb.loadLods(file(document, false))) {
-            assertTrue(((RigidGlb.Data) level).emissionOff.isEmpty());
-            assertEquals(.4f, ((RigidGlb.Data) level).surfaces.get("paint").glow()[0], 1e-6, "Inherit restores the factor as a night colour");
+            assertEquals(RigidGlb.Emission.NIGHT, ((RigidGlb.Data) level).emissions.get("paint"));
+            assertEquals(.4f, ((RigidGlb.Data) level).surfaces.get("paint").glow()[0], 1e-6, "Night restores the factor as a night colour");
         }
         extras.put("mmEmission", "invalid");
         var invalid = file(document, false);
@@ -61,19 +61,11 @@ class RigidGlbTest {
         var document = levels();
         var material = (ObjectNode) document.get("materials").get(0);
         material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
-        var extras = material.putObject("extras").put("mmNightEmission", true);
+        material.putObject("extras").put("mmEmission", "night");
         for (var level : RigidGlb.loadLods(file(document, false))) {
             var data = (RigidGlb.Data) level;
             assertNull(data.materials.first().emissive, "A colour attribute would select another program");
             assertArrayEquals(new float[] { .4f, .2f, .1f }, data.surfaces.get("paint").glow(), 1e-6f);
-        }
-        material.remove("emissiveFactor");
-        extras.remove("mmNightEmission");
-        extras.putArray("mmNightColour").add(0).add(.4).add(1);
-        for (var level : RigidGlb.loadLods(file(document, false))) {
-            var data = (RigidGlb.Data) level;
-            assertEquals(java.util.Set.of("paint"), data.nightEmission, "The colour alone makes it a night light");
-            assertArrayEquals(new float[] { 0, .4f, 1 }, data.surfaces.get("paint").glow(), 1e-6f);
         }
     }
 
@@ -81,17 +73,17 @@ class RigidGlbTest {
     void nightEmissionIsOptInAndSurvivesLodAndGeometryCopies() throws Exception {
         var document = levels();
         var material = (ObjectNode) document.get("materials").get(0);
-        material.putObject("extras").put("mmNightEmission", true);
+        material.putObject("extras").put("mmEmission", "night");
         for (var level : RigidGlb.loadLods(file(document, false))) {
             var data = (RigidGlb.Data) level;
-            assertEquals(java.util.Set.of("paint"), data.nightEmission);
+            assertEquals(RigidGlb.Emission.NIGHT, data.emissions.get("paint"));
             var sliced = new RigidGlb.Data();
             sliced.inheritMaterials(data);
-            assertEquals(data.nightEmission, sliced.nightEmission);
+            assertEquals(data.emissions, sliced.emissions);
         }
         material.remove("extras");
         for (var level : RigidGlb.loadLods(file(document, false))) {
-            assertTrue(((RigidGlb.Data) level).nightEmission.isEmpty());
+            assertTrue(((RigidGlb.Data) level).emissions.isEmpty());
         }
     }
 
@@ -424,6 +416,163 @@ class RigidGlbTest {
         } finally { megamek.common.Configuration.setDataDir(previous); }
     }
 
+    /** A level named mesh-lod0 whose one node, arm, draws material "paint" on the albedo of the board material test/glass. */
+    private ObjectNode onBoardMaterial(String... features) throws Exception {
+        Path folder = Files.createDirectories(directory.resolve("data/models/board/textures/test"));
+        // Two colours: a uniform emission map joins the glow (GpuMaterialMaps).
+        var image = new java.awt.image.BufferedImage(2, 1, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        image.setRGB(0, 0, 0x808080);
+        image.setRGB(1, 0, 0x404040);
+        BoardMaterialFiles.write(folder, "glass_albedo.png", image);
+        BoardMaterialFiles.write(folder, "glass_emission.png", image);
+        BoardMaterialFiles.tres(folder, "glass", features);
+        Path tres = folder.resolve("glass.tres");
+        Files.writeString(tres, Files.readString(tres).replace("[resource]",
+              "[ext_resource path=\"glass_emission.png\" type=\"Texture\" id=5]\n[resource]"));
+        var document = document();
+        document.putArray("images").addObject().put("uri", "data/models/board/textures/test/glass_albedo.png");
+        document.putArray("textures").addObject().put("source", 0);
+        ((ObjectNode) document.get("materials").get(0).get("pbrMetallicRoughness")).putObject("baseColorTexture").put("index", 0);
+        ((com.fasterxml.jackson.databind.node.ArrayNode) document.get("nodes")).addObject().put("name", "mesh-lod0").putArray("children").add(1);
+        ((ObjectNode) document.get("scenes").get(0)).putArray("nodes").add(2);
+        return document;
+    }
+
+    private static boolean emissionMapped(RigidGlb.Data data, String id) {
+        for (var material : data.materials) {
+            if (material.id.equals(id)) {
+                for (var texture : material.textures) {
+                    if (texture.usage == ModelTexture.USAGE_EMISSIVE) { return true; }
+                }
+            }
+        }
+        return false;
+    }
+
+    private RigidGlb.Data level(ObjectNode document) throws Exception {
+        return (RigidGlb.Data) RigidGlb.loadLods(file(document, false)).getFirst();
+    }
+
+    @Test
+    void aMaterialsEmissionOverridesItsBoardMaterial() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var previous = megamek.common.Configuration.dataDir();
+        megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
+        try {
+            var document = onBoardMaterial("emission_enabled=true", "emission=Color(1, 0.5, 0, 1)", "emission_texture=ExtResource( 5 )",
+                  "metadata/mmEmission=\"night\"", "metadata/mmPaintMask=true");
+            var material = (ObjectNode) document.get("materials").get(0);
+            var library = level(document);
+            assertEquals("test/glass", library.surfaces.get("paint").board());
+            assertEquals(RigidGlb.Emission.NIGHT, library.emissions.get("paint"), "The .tres says when it glows");
+            assertTrue(library.paintMasks.contains("paint"), "The .tres says its alpha is a paint mask");
+            assertTrue(emissionMapped(library, "paint"));
+
+            var extras = material.putObject("extras").put("mmEmission", "always");
+            var always = level(document);
+            assertEquals(RigidGlb.Emission.ALWAYS, always.emissions.get("paint"), "The GLB's choice wins over a night-only .tres");
+            assertArrayEquals(library.surfaces.get("paint").glow(), always.surfaces.get("paint").glow(), "The library's own glow, now by day too");
+            assertTrue(emissionMapped(always, "paint"));
+
+            material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
+            var own = level(document);
+            assertEquals(.4f, own.materials.first().emissive.r, 1e-6);
+            assertArrayEquals(new float[3], own.surfaces.get("paint").glow(), "An own factor replaces the library's glow");
+            assertFalse(emissionMapped(own, "paint"), "An own factor replaces the library's emission map");
+
+            extras.put("mmEmission", "night");
+            var night = level(document);
+            assertNull(night.materials.first().emissive);
+            assertArrayEquals(new float[] { .4f, .2f, .1f }, night.surfaces.get("paint").glow(), 1e-6f);
+
+            extras.put("mmEmission", "off");
+            assertEquals(RigidGlb.Emission.OFF, level(document).emissions.get("paint"));
+
+            extras.put("mmEmission", "Night");
+            var wrongCase = file(document, false);
+            assertThrows(IllegalArgumentException.class, () -> RigidGlb.loadLods(wrongCase), "The tools read these values exactly");
+        } finally { megamek.common.Configuration.setDataDir(previous); }
+    }
+
+    @Test
+    void aBoardMaterialsTransparencyDecidesOverTheGlbsAlphaMode() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var previous = megamek.common.Configuration.dataDir();
+        megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
+        try {
+            var blended = onBoardMaterial("transparency=1");
+            ((ObjectNode) blended.get("materials").get(0)).put("alphaMode", "MASK");
+            assertTrue(level(blended).blends.containsKey("paint"), "Godot's ALPHA blends, whatever the GLB's alpha mode");
+            var cutout = onBoardMaterial("transparency=2", "alpha_scissor_threshold=0.3");
+            ((ObjectNode) cutout.get("materials").get(0)).put("alphaMode", "MASK");
+            assertFalse(level(cutout).blends.containsKey("paint"), "Godot's ALPHA_SCISSOR is a cutout");
+        } finally { megamek.common.Configuration.setDataDir(previous); }
+    }
+
+    @Test
+    void aGlbsPaintMaskOnlyAppliesToAnImageOfItsOwn() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var previous = megamek.common.Configuration.dataDir();
+        megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
+        try {
+            var document = onBoardMaterial();
+            var material = (ObjectNode) document.get("materials").get(0);
+            material.putObject("extras").put("mmPaintMask", true);
+            assertTrue(level(document).paintMasks.isEmpty(), "A library material's alpha is what its .tres says");
+            ((ObjectNode) material.get("pbrMetallicRoughness")).remove("baseColorTexture");
+            assertTrue(level(document).paintMasks.contains("paint"));
+        } finally { megamek.common.Configuration.setDataDir(previous); }
+    }
+
+    /** The kit of one piece, node arm of the level {@code document} holds. */
+    private List<RigidGlb.Data> kit(ObjectNode document) throws Exception {
+        var modelled = RigidGlb.loadLods(file(document, false));
+        return GeneratedKit.lods("kit", true, modelled, List.of("wall"), List.of(new KitOutline.Piece("", null, List.of(), List.of())),
+              java.util.Map.of(), (role, piece, lod) -> {
+                  var mesh = new GeneratedMesh();
+                  mesh.piece(modelled.get(lod), "arm", new com.badlogic.gdx.math.Matrix4(), 0);
+                  return java.util.Map.of("", mesh);
+              });
+    }
+
+    @Test
+    void aKitDrawsAMaterialAsTheBoardMaterialItsImageBelongsTo() throws Exception {
+        com.badlogic.gdx.utils.GdxNativesLoader.load();
+        var previous = megamek.common.Configuration.dataDir();
+        megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
+        try {
+            var document = onBoardMaterial("emission_enabled=true", "emission=Color(1, 0.5, 0, 1)", "emission_texture=ExtResource( 5 )",
+                  "metadata/mmEmission=\"night\"");
+            var material = (ObjectNode) document.get("materials").get(0);
+            var extras = material.putObject("extras").put("mmBuildingPaint", true);
+            var library = kit(document).getFirst();
+            assertTrue(library.surfaces.containsKey("test/glass"), "The material's name, paint, does not matter");
+            assertTrue(library.buildingPaint.contains("test/glass"));
+            assertEquals(RigidGlb.Emission.NIGHT, library.emissions.get("test/glass"), "From the .tres");
+            assertTrue(emissionMapped(library, "test/glass"));
+
+            extras.put("mmEmission", "always");
+            material.putArray("emissiveFactor").add(.4).add(.2).add(.1);
+            var own = kit(document).getFirst();
+            assertEquals(RigidGlb.Emission.ALWAYS, own.emissions.get("test/glass"));
+            assertArrayEquals(new float[] { .4f, .2f, .1f }, own.surfaces.get("test/glass").glow(), 1e-6f);
+            assertFalse(emissionMapped(own, "test/glass"), "As on a rigid model, an own factor replaces the library's emission map");
+
+            // Two materials of one board material are drawn as one, so they have to say the same.
+            var materials = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("materials");
+            materials.add(material.deepCopy().put("name", "same"));
+            assertTrue(kit(document).getFirst().surfaces.containsKey("test/glass"));
+            ((ObjectNode) materials.get(1).get("extras")).put("mmEmission", "off");
+            var conflict = assertThrows(IllegalArgumentException.class, () -> kit(document));
+            assertTrue(conflict.getMessage().contains("paint") && conflict.getMessage().contains("same"), conflict.getMessage());
+            materials.remove(1);
+
+            ((ObjectNode) material.get("pbrMetallicRoughness")).remove("baseColorTexture");
+            var plain = assertThrows(IllegalArgumentException.class, () -> kit(document));
+            assertTrue(plain.getMessage().contains("library materials only"), plain.getMessage());
+        } finally { megamek.common.Configuration.setDataDir(previous); }
+    }
+
     @Test
     void retainsLinearEmissionWithoutAddingItToOrdinaryMaterials() throws Exception {
         var document = document();
@@ -699,7 +848,7 @@ class RigidGlbTest {
         var root = megamek.common.Configuration.dataDir().toPath().resolve("models/board").toFile();
         var source = RigidGlb.source(root, "vegetation/pine-snow");
         assertEquals(new java.io.File(root, "vegetation/pine.glb"), source.file());
-        assertEquals("snow", source.variant());
+        assertTrue(source.snow());
         var bare = RigidGlb.loadLods(RigidGlb.source(root, "vegetation/pine"), root.toPath());
         var snow = RigidGlb.loadLods(source, root.toPath());
         com.badlogic.gdx.graphics.g3d.model.data.ModelMaterial crown = null;

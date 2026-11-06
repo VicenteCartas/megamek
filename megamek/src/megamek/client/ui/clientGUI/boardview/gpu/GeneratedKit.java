@@ -4,6 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -110,16 +112,31 @@ final class GeneratedKit {
             }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
             var source = (RigidGlb.Data) modelled.get(lod);
-            generated.buildingPaint.addAll(source.buildingPaint);
-            generated.paintMasks.addAll(source.paintMasks);
-            generated.nightEmission.addAll(source.nightEmission);
-            source.nightColours.forEach((id, colour) -> {
-                if (generated.surfaces.containsKey(id)) { RigidGlb.nightEmission(generated, id, colour); }
+            // What the pieces GLB says of a board material holds wherever the kit draws it, as one material.
+            Map<String, String> said = new HashMap<>();
+            source.surfaces.forEach((id, surface) -> {
+                String board = surface.board();
+                if (board == null) { return; }
+                String other = said.putIfAbsent(board, id);
+                if (other != null && !agree(source, other, id)) {
+                    throw new IllegalArgumentException("Materials " + other + " and " + id + " are both " + board
+                          + " but differ in building tint or emission: a kit draws them as one");
+                }
+                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(board); }
+                generated.emissions.put(board, source.emissions.get(id));
+                if (source.ownGlows.containsKey(id) && generated.surfaces.containsKey(board)) {
+                    RigidGlb.ownGlow(generated, board, source.ownGlows.get(id));
+                }
             });
-            generated.emissionOff.addAll(source.emissionOff);
             result.add(generated);
         }
         return result;
+    }
+
+    private static boolean agree(RigidGlb.Data source, String a, String b) {
+        return source.buildingPaint.contains(a) == source.buildingPaint.contains(b)
+              && source.emissions.get(a) == source.emissions.get(b)
+              && Arrays.equals(source.ownGlows.get(a), source.ownGlows.get(b));
     }
 
     /** A modelled piece of the kit's pieces GLB at {@code lod}, {@link GeneratedMesh#piece}. */

@@ -206,6 +206,8 @@ class BoardFoliageTest {
             String name = atlas.getName().replace(".png", "");
             String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/", "crystal/").map(folder -> folder + name)
                   .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
+            // Crystal clusters draw shards at every level: their white atlas is only the crown mask BoardTreeCoverage reads.
+            if (plant.startsWith("crystal/")) { continue; }
             var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
                   .getFirst();
             Map<String, BufferedImage> textures = new HashMap<>();
