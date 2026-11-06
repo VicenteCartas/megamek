@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,7 +29,9 @@ import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.LobbyAsks;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
+import megamek.client.lobby.LobbyFiles;
 import megamek.client.lobby.LobbyUnitMenu;
+import megamek.client.lobby.MegaMekLabPrint;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
@@ -81,6 +84,7 @@ final class GpuLobbyTools {
     private @Nullable Timer namesWait;
     private static final int PROBE_TRIES = 20;
     private int probeTries;
+    private volatile boolean printing;
 
     GpuLobbyTools(GpuLobbyWindow window) {
         this.window = window;
@@ -406,6 +410,48 @@ final class GpuLobbyTools {
                 entity.getCrew().setName(RandomNameGenerator.getInstance()
                       .generate(gender, entity.getCrew().isClanPilot(slot), chosenName), slot);
             }
+        }
+    }
+
+    // ---- Print List ----
+
+    /** Whether MegaMekLab is open to print a unit list; the forces menu offers no second print meanwhile. */
+    boolean printing() {
+        return printing;
+    }
+
+    /**
+     * Swing thread: prints the local player's units through MegaMekLab, in force tree order. The chat says it has
+     * started, as MegaMekLab takes a while to open its print dialog; when MegaMekLab cannot be found or run, a native
+     * notice says why and offers the settings that hold its path.
+     */
+    void printList() {
+        Player player = client().getLocalPlayer();
+        if ((player == null) || printing || client().getGame().getPlayerEntities(player, false).isEmpty()) {
+            return;
+        }
+        String title = Messages.getString("MegaMekLabPrint.title");
+        MegaMekLabPrint print = MegaMekLabPrint.of(PreferenceManager.getClientPreferences().getMmlPath());
+        MegaMekLabPrint.Problem problem = print.problem();
+        if (problem != null) {
+            String text = problem.message(print.executable());
+            open(dialogs -> dialogs.error(title, text, Messages.getString("Ok.text"),
+                  Messages.getString("Lobby.print.openSettings"), window::openSettings));
+            return;
+        }
+        try {
+            File unitFile = File.createTempFile("MegaMekPrint", ".mul");
+            unitFile.deleteOnExit();
+            int count = LobbyFiles.writeUnitList(unitFile, client().getGame(), player);
+            ProcessBuilder command = print.command(unitFile);
+            LOGGER.info("[LobbyPrint] Running {}", String.join(" ", command.command()));
+            Process process = command.start();
+            printing = true;
+            process.onExit().whenComplete((exited, failure) -> printing = false);
+            window.chatNotice(Messages.getString("Lobby.print.started", count));
+        } catch (IOException failure) {
+            LOGGER.error(failure, "The lobby could not print the unit list");
+            message(title, Messages.getString("MegaMekLabPrint.failed", String.valueOf(failure.getMessage())));
         }
     }
 

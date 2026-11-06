@@ -921,8 +921,7 @@ public final class GpuLobbyWindow {
                         files.saveUnitList(gui.getClient().getGame(), local, () -> { });
                     }
                 }
-                case PRINT_LIST -> services.forcesCommand(SwingLobbyServices.ForcesCommand.PRINT_LIST,
-                      gui.getClient().getLocalPlayer());
+                case PRINT_LIST -> tools.printList();
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
             refreshSoon();
@@ -1244,10 +1243,15 @@ public final class GpuLobbyWindow {
 
     /** Swing thread: tells the player in the chat where the game was saved, or that it was not. */
     private void saved(@Nullable File file) {
+        chatNotice((file == null) ? Messages.getString("Lobby.save.failed")
+              : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+    }
+
+    /** Swing thread: tells the player {@code text} in the chat, as a line from the system that only they see. */
+    void chatNotice(String text) {
         ChatterBox chat = gui.getChatterBox();
         if (chat != null) {
-            chat.systemMessage((file == null) ? Messages.getString("Lobby.save.failed")
-                  : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+            chat.systemMessage(text);
             queueRefresh();
         }
     }

@@ -640,6 +640,11 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             }
 
             @Override
+            public boolean printing() {
+                return window.tools().printing();
+            }
+
+            @Override
             public void configure(int unitId) {
                 window.configureUnit(unitId);
             }

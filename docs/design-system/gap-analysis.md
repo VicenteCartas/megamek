@@ -1441,8 +1441,7 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the random army's Advanced Search, which still opens the Swing random army dialog;
-         - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
+         - the random army's Advanced Search, which still opens the Swing random army dialog.
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:
@@ -1471,6 +1470,13 @@ work for Swing, and item 11 is under investigation.
          surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
          `MapAssemblyHelp.html` stays for the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
          `+maphelp`.
+       - Done: Print list runs natively (`GpuLobbyTools.printList`). The lobby writes the player's units in force
+         tree order (`LobbyFiles.writeUnitList`, shared with Save list) and starts MegaMekLab's print dialog through
+         `MegaMekLabPrint`, which `ClientGUI.printList` now uses too. The chat says MegaMekLab is opening, and the
+         forces menu shows "Printing in MegaMekLab…" (disabled) until MegaMekLab exits. When MegaMekLab cannot be
+         found or run, a native notice says why and offers Open settings. With no path set, MegaMek looks for
+         MegaMekLab.jar in its own folder, where the launcher installs the suite. Covered by `MegaMekLabPrintTest`
+         and `LobbyTogglesSmokeTest`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.
