@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,10 +43,12 @@ import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.IconCatalog;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
@@ -57,6 +60,7 @@ import megamek.common.board.Coords;
 import megamek.common.containers.MunitionTree;
 import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
+import megamek.common.icons.Portrait;
 import megamek.common.loaders.MapSettings;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
@@ -241,6 +245,47 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(dialogs.isOpen(), "OK closes the chooser");
             assertEquals(1, chosen.size());
             assertEquals("BLUE", chosen.getFirst().getFilename());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void thePortraitChooserHandsBackTheClickedPortrait() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            PortraitCatalog catalog = new PortraitCatalog(new IconCatalog.Folder("", "", List.of(),
+                  List.of(new IconCatalog.Folder("Pilot", "Pilot/", List.of("Ace.png", "Rookie.png"), List.of()))));
+            BufferedImage picture = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+            LobbyPortraitView.Source source = new LobbyPortraitView.Source() {
+                @Override
+                public PortraitCatalog catalog(boolean refresh) {
+                    return catalog;
+                }
+
+                @Override
+                public BufferedImage thumbnail(Portrait portrait, int size) {
+                    return picture;
+                }
+            };
+            List<Portrait> chosen = new ArrayList<>();
+            LobbyPortraitView view = dialogs.portrait(source, catalog, new Portrait("Pilot/", "Ace.png"),
+                  chosen::add);
+            await(ui, () -> view.previewShown() && view.item(1) != null);
+            assertTrue(dialogs.isOpen());
+            assertEquals(2, view.items().size(), "the initial portrait's category shows");
+
+            click(ui, view.item(1));
+            assertEquals(new Portrait("Pilot/", "Rookie.png"), view.selected());
+            click(ui, ui.stage.getRoot().findActor("portrait-ok"));
+            assertFalse(dialogs.isOpen(), "OK closes the chooser");
+            assertEquals(List.of(new Portrait("Pilot/", "Rookie.png")), chosen);
+
+            LobbyPortraitView again = dialogs.portrait(source, catalog, null, chosen::add);
+            ui.draw();
+            click(ui, ui.stage.getRoot().findActor("portrait-cancel"));
+            assertFalse(dialogs.isOpen(), "Cancel closes the chooser");
+            assertEquals(1, chosen.size(), "Cancel chooses nothing");
+            assertNull(again.selected());
             dialogs.dispose();
         });
     }

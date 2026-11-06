@@ -66,8 +66,11 @@ final class LobbyUnitBayView {
         /** Swing thread: opens the unit after the form's, or the one before, in the bay. */
         void next(UnitConfigForm form, boolean forward);
 
-        /** Swing thread: asks for the crew member's portrait; its picture once chosen, null when none was. */
-        @Nullable BufferedImage portrait(UnitConfigForm form, int slot);
+        /**
+         * GPU thread: opens the portrait chooser for the crew member in {@code slot}; once a portrait is confirmed,
+         * {@code chosen} takes its picture (null when it has none) back on the GPU thread, and not at all on Cancel.
+         */
+        void portrait(UnitConfigForm form, int slot, Consumer<BufferedImage> chosen);
 
         /** GPU thread: closes the bay, showing the forces again. */
         void close();
@@ -1176,18 +1179,14 @@ final class LobbyUnitBayView {
     }
 
     private void choosePortrait(int slot) {
-        if (busy) {
+        if (busy || disposed) {
             return;
         }
-        busy = true;
-        refresh();
-        BufferedImage[] chosen = new BufferedImage[1];
-        host.edt(() -> chosen[0] = host.portrait(form, slot), () -> {
-            busy = false;
-            if (chosen[0] != null) {
-                showPortrait(slot, chosen[0]);
+        // The chooser is a dialog over the bay, which takes no clicks while it shows
+        host.portrait(form, slot, picture -> {
+            if (!disposed && picture != null) {
+                showPortrait(slot, picture);
             }
-            refresh();
         });
     }
 

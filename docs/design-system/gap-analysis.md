@@ -626,7 +626,7 @@ work for Swing, and item 11 is under investigation.
        forces (random army, skills, random names, C3 network, load, save and print list with the MUL check, the
        unit menu's customize, C3, loadout, readout, BV and cost), battlefield (planetary conditions, game options,
        victory conditions, random map, map setup with its preview and size questions, load and save map setup,
-       auto-resolve, advanced map search) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
+       auto-resolve) and the prompts (`SwingLobbyPrompts`: errors, confirmations, the ready
        warning, force names, squadrons, battlefield support, unit editor, training, SBF and AS stats). Each is owned
        by the hidden client frame or a dialog of it; `LobbyDialogs` adopts each one as it shows (also the modal
        questions MekHQ asks with no parent, which Swing gives its shared hidden frame), centres it on the window's
@@ -639,7 +639,7 @@ work for Swing, and item 11 is under investigation.
        `randomarmy`, `skills`, `names`, `loadlist`, `alert`) and photographs the window and its dialogs from the
        screen: all 17 checked on Windows, centred within a pixel, modal ones blocking, the focus back on closing.
        MekHQ needs nothing more: its lobby use is the client API and the parentless questions above. Not checked
-       live: the prompts, the save choosers, auto-resolve and advanced map search (the same path, by the source
+       live: the prompts, the save choosers and auto-resolve (the same path, by the source
        test); native ownership and focus on macOS and Linux; dialogs opened from within dialogs, which stay where
        their owner puts them.
      - L9 ~~Removal and checks~~. `ChatLounge` and the Swing lobby's view code are deleted: its player and unit
@@ -985,8 +985,8 @@ work for Swing, and item 11 is under investigation.
          the first network on an untouched OK); two ECM suites in use show an inline keep-one choice rather than a
          dialog; implant changes reach the equipment only on OK, so Cancel drops them; the Partial Repairs tab is
          hidden when nothing can be repaired. The Swing dialog's dump box (never shown) and command-detonated mines
-         (not implemented) stay out. The portrait picker is still the Swing `PortraitChooserDialog`, through
-         `LobbyDialogs`.
+         (not implemented) stay out. The portrait picker is native too (`LobbyPortraitView`, through
+         `LobbyNativeDialogs.portrait`).
        - The C3 network manager replaces `C3NetworkManagerDialog` in the lobby, from the unit and forces menus. Each
          network is drawn as an org chart (company master, lance masters, slaves, joined by connector lines; C3i, NC3
          and Nova as a linked row; open slots as ghost chips), the free units sit in a tray grouped as masters,
@@ -1008,8 +1008,9 @@ work for Swing, and item 11 is under investigation.
          board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
          slot. The selected slot shows its rotation, theme and level offset (with Reset), and a searchable board
          browser with a preview that places a board, places it rotated, or makes a random or a surprise board from
-         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, Advanced Search (the Swing
-         `BoardSearchDialog`, through `LobbyDialogs`), the planetary conditions, the map assembly help, the 3D
+         several picked ones (Pick All selects every slot at once). Load and Save Map Setup, the board browser's Filters
+                  (tags, folders and boards of any size, in place of the Swing advanced map search), the planetary
+                  conditions, the map assembly help, the 3D
          preview and Generate Battlefield sit in the view's header and footer.
        - Random Map Settings is a native dialog: the normal view sets each feature as None, Low, Medium or High by
          theme tab; the advanced view shows every generator field as sliders and steppers; the board size and theme
@@ -1284,8 +1285,8 @@ work for Swing, and item 11 is under investigation.
          instead of the Swing "Save First?" question (`AbstractClientGUI.handleExit`). Save… opens the system
          file dialog and leaves once the game is written; Don't save leaves (`AbstractClientGUI.exitWithoutAsking`);
          Cancel or Escape stays. No "Don't ask again" box: it pushed the footer past the card, and Settings →
-         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window still asks in Swing, since
-         its exit path belongs to hud-v3.
+         Advanced already turns the question off (`AdvancedNoSaveNag`). The battle window asks too, in its own
+         window, and picks the save file in the system file dialog (#39).
        - A system menu, as a game's pause menu (`LobbyNativeDialogs.systemMenu`): Resume, Save game…, Quick save,
          Load game…, Quick load, Settings and Leave lobby, one column of buttons in groups, with each shortcut in its
          tooltip. Esc opens it once nothing else is left to close, and closes it again. The top bar's gear, ⋮ game
@@ -1440,19 +1441,42 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the portrait chooser (`PortraitChooserDialog`), next to the native camo chooser;
-         - the advanced map search (`AdvancedSearchMapDialog`), from map setup;
-         - the map assembly help (`HelpDialog`);
-         - the random army's Advanced Search, which still opens the Swing random army dialog;
-         - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
+         - the random army's Advanced Search, which still opens the Swing random army dialog.
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:
          - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
          - the auto-resolve dialogs: the chance of winning, the progress and the log.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2), the map editor's Client
-         Settings and About, and the "Save First?" question when leaving a battle (`AbstractClientGUI.handleExit`).
+       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
+         Settings and About. The "Save First?" question when leaving a battle is native since #39.
+       - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
+         thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
+         only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.
+       - Done: the advanced map search is folded into the map setup's board drawer. A compact filter bar under the
+         search holds Tags and Folders drop-down checklists (popovers that scroll on their own, with a find field
+         for a long list and Match all tags) and the board size (this size, or any size on a one-board map off
+         space, with width and height ranges on a second row). Active tags and folders show as removable chips with
+         Clear, and the faces count them, so the drawer never needs a second scrollbar. Automatic tags read as words
+         ("Light forest", not "LightForest (Auto)") and merge with a manual twin. Any size lists the whole board
+         library (`BoardClassifier`, read once off the Swing thread when Tags first opens) with each board's size;
+         Place makes such a board the whole map at its own size, as the Swing dialog's OK did, and Add to stack
+         refuses it. The lobby window's Swing branch is gone; the Swing
+         `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
+         and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
+       - Done: the map setup's help (the ? in Map setup) opens in the lobby's native help dialog, the readout
+         dialog Princess's help uses (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
+         written for the libGDX map setup: the map type and size, the slots and the board drawer, stacks and
+         surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
+         `MapAssemblyHelp.html` stays for the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
+         `+maphelp`.
+       - Done: Print list runs natively (`GpuLobbyTools.printList`). The lobby writes the player's units in force
+         tree order (`LobbyFiles.writeUnitList`, shared with Save list) and starts MegaMekLab's print dialog through
+         `MegaMekLabPrint`, which `ClientGUI.printList` now uses too. The chat says MegaMekLab is opening, and the
+         forces menu shows "Printing in MegaMekLab…" (disabled) until MegaMekLab exits. When MegaMekLab cannot be
+         found or run, a native notice says why and offers Open settings. With no path set, MegaMek looks for
+         MegaMekLab.jar in its own folder, where the launcher installs the suite. Covered by `MegaMekLabPrintTest`
+         and `LobbyTogglesSmokeTest`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

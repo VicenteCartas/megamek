@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.List;
 
-import megamek.client.lobby.CamoCatalog.Folder;
-import megamek.client.lobby.CamoCatalog.Node;
+import megamek.client.lobby.IconCatalog.Folder;
+import megamek.client.lobby.IconCatalog.Node;
 import megamek.common.icons.AbstractIcon;
 import megamek.common.icons.Camouflage;
 import org.junit.jupiter.api.Test;

@@ -22,6 +22,7 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardDimensions;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
@@ -50,6 +51,7 @@ final class LobbyMapSetupController {
     private final Set<String> generatedKeys = new HashSet<>();
     private List<String> visibleBoards = List.of();
     private boolean browserPainting;
+    private boolean libraryReading;
     private Board generatedBoard;
     private int generation;
     /** EDT-owned inspection: the normal map source owns its captures, preferences listener and LOS model. */
@@ -178,9 +180,9 @@ final class LobbyMapSetupController {
         if (disposed || browserPainting) {
             return;
         }
-        MapSettings settings = form.settings();
-        int width = settings.getBoardWidth(), height = settings.getBoardHeight();
         for (String file : visibleBoards) {
+            BoardDimensions size = form.sizeOf(file);
+            int width = size.width(), height = size.height();
             String key = pictureKey(file, false, width, height, null, 0);
             if (file.startsWith(MapSettings.BOARD_GENERATED) || !requested.add(key)) {
                 continue;
@@ -215,6 +217,7 @@ final class LobbyMapSetupController {
     }
 
     private void send() {
+        readLibraryIfDue();
         if (inspection != null && !inspection.isClosed()) {
             inspectionConditions();
             inspection.refresh();
@@ -236,6 +239,33 @@ final class LobbyMapSetupController {
         }
         show.accept(setup, themes);
         generated(setup);
+    }
+
+    /** Reads the board library on a thread of its own, as the filters want it: the first scan takes seconds. */
+    private void readLibraryIfDue() {
+        if (disposed || libraryReading || !form.libraryDue()) {
+            return;
+        }
+        libraryReading = true;
+        Thread reader = new Thread(() -> {
+            List<MapSetupForm.LibraryBoard> boards;
+            try {
+                boards = MapSetupForm.readLibrary();
+            } catch (RuntimeException failure) {
+                LOGGER.error(failure, "The map setup could not read the board library");
+                boards = List.of();
+            }
+            List<MapSetupForm.LibraryBoard> read = boards;
+            SwingUtilities.invokeLater(() -> {
+                libraryReading = false;
+                if (!disposed) {
+                    form.library(read);
+                    send();
+                }
+            });
+        }, "Lobby board library");
+        reader.setDaemon(true);
+        reader.start();
     }
 
     private void clearGenerated() {

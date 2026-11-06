@@ -97,8 +97,8 @@ class UnitBaySmokeTest {
                 }
 
                 @Override
-                public BufferedImage portrait(UnitConfigForm shown, int slot) {
-                    return null;
+                public void portrait(UnitConfigForm shown, int slot, Consumer<BufferedImage> chosen) {
+                    // The tests choose no portrait
                 }
 
                 @Override
@@ -359,8 +359,8 @@ class UnitBaySmokeTest {
             }
 
             @Override
-            public BufferedImage portrait(UnitConfigForm shown, int slot) {
-                return null;
+            public void portrait(UnitConfigForm shown, int slot, Consumer<BufferedImage> chosen) {
+                // The tests choose no portrait
             }
 
             @Override

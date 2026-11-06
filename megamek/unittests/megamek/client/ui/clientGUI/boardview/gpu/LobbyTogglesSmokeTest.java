@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +26,7 @@ import megamek.client.lobby.RequisitionDossier;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.ui.design.DesignTokens;
+import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiFilterChip;
 import megamek.client.ui.gdx.UiTestStage;
@@ -447,6 +449,45 @@ class LobbyTogglesSmokeTest {
             assertEquals(3, deleted.size(), "another centre view cannot delete the hidden selection");
             centre.remove();
             chat.remove();
+        });
+    }
+
+    @Test
+    void theForcesMenuOffersNoSecondPrintWhileMegaMekLabPrints() {
+        UiTestStage.run(ui -> {
+            boolean[] printing = new boolean[1];
+            List<LobbyForcesPanel.Command> commands = new ArrayList<>();
+            LobbyForcesPanel forces = new LobbyForcesPanel(ui.kit, new NoForcesActions() {
+                @Override
+                public void command(LobbyForcesPanel.Command command) {
+                    commands.add(command);
+                }
+
+                @Override
+                public boolean printing() {
+                    return printing[0];
+                }
+            }, id -> null);
+            forces.attach(ui.stage.getRoot());
+            Table panel = place(ui, forces.panel());
+            forces.show(ownedForces());
+            ui.draw();
+
+            click(ui, panel.findActor("forces-menu"));
+            UiButton print = ui.stage.getRoot().findActor("Lobby.forces.print");
+            assertFalse(print.isDisabled(), "the menu offers the print while nothing prints");
+            click(ui, print);
+            assertEquals(List.of(LobbyForcesPanel.Command.PRINT_LIST), commands);
+            run(ui, 0.5f);
+
+            printing[0] = true;
+            click(ui, panel.findActor("forces-menu"));
+            assertNull(ui.stage.getRoot().findActor("Lobby.forces.print"), "no second print while one runs");
+            UiButton busy = ui.stage.getRoot().findActor("Lobby.forces.printing");
+            assertTrue(busy.isDisabled(), "the menu says MegaMekLab is printing");
+            click(ui, busy);
+            assertEquals(1, commands.size(), "the printing row does nothing");
+            panel.remove();
         });
     }
 

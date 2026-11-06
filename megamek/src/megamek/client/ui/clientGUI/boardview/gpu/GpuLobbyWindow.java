@@ -45,6 +45,7 @@ import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.IconCatalog;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
@@ -59,6 +60,7 @@ import megamek.client.lobby.LobbyUnitOrder;
 import megamek.client.lobby.MapSetupForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
+import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.UnitConfigForm;
@@ -67,9 +69,6 @@ import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
-import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
-import megamek.client.ui.dialogs.iconChooser.PortraitChooserDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
@@ -350,7 +349,6 @@ public final class GpuLobbyWindow {
     private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
-    private static final String MAP_ASSEMBLY_HELP = "docs/Customization/MegaMek/Map and Board Stuff/MapAssemblyHelp.html";
     /** EDT: the map setup while it shows in the centre; null otherwise. */
     private LobbyMapSetupController mapSetup;
     /** EDT: the C3 network manager while it shows in the centre; null otherwise. */
@@ -373,8 +371,6 @@ public final class GpuLobbyWindow {
 
     /** EDT: set when the lobby comes back from a 3D preview the map setup opened, to show the map setup again. */
     private boolean reopenMapSetup;
-    /** EDT: includes construction, before Swing has announced the modal dialog. */
-    private boolean advancedMapSearchOpen;
 
     private GpuLobbyWindow(ClientGUI gui) {
         this.gui = gui;
@@ -925,8 +921,7 @@ public final class GpuLobbyWindow {
                         files.saveUnitList(gui.getClient().getGame(), local, () -> { });
                     }
                 }
-                case PRINT_LIST -> services.forcesCommand(SwingLobbyServices.ForcesCommand.PRINT_LIST,
-                      gui.getClient().getLocalPlayer());
+                case PRINT_LIST -> tools.printList();
                 case NEW_FORMATION -> gui.lobbyCommands().forceCreateEmpty();
             }
             refreshSoon();
@@ -1248,10 +1243,15 @@ public final class GpuLobbyWindow {
 
     /** Swing thread: tells the player in the chat where the game was saved, or that it was not. */
     private void saved(@Nullable File file) {
+        chatNotice((file == null) ? Messages.getString("Lobby.save.failed")
+              : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+    }
+
+    /** Swing thread: tells the player {@code text} in the chat, as a line from the system that only they see. */
+    void chatNotice(String text) {
         ChatterBox chat = gui.getChatterBox();
         if (chat != null) {
-            chat.systemMessage((file == null) ? Messages.getString("Lobby.save.failed")
-                  : Messages.getString("Lobby.save.saved", file.getAbsolutePath()));
+            chat.systemMessage(text);
             queueRefresh();
         }
     }
@@ -1513,37 +1513,7 @@ public final class GpuLobbyWindow {
                 previewedFromMapSetup = gui;
                 battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
             }
-            case HELP -> {
-                try {
-                    new HelpDialog(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
-                          new File(MAP_ASSEMBLY_HELP).toURI().toURL(), swingDialogs.parent()).setVisible(true);
-                } catch (java.net.MalformedURLException failure) {
-                    LOGGER.error(failure, "The map assembly help could not be found");
-                }
-            }
-            case ADVANCED_SEARCH -> {
-                if (advancedMapSearchOpen || swingDialogs.blocked()) {
-                    swingDialogs.frontModal();
-                    return;
-                }
-                advancedMapSearchOpen = true;
-                try {
-                    AdvancedSearchMapDialog search = new AdvancedSearchMapDialog(swingDialogs.parent());
-                    try {
-                        if (search.showDialog().isConfirmed() && mapSetup != null && !closing) {
-                            String path = search.getPath();
-                            if (path != null) {
-                                mapSetup.act(form -> form.singleBoard(path));
-                                refreshSoon();
-                            }
-                        }
-                    } finally {
-                        search.dispose();
-                    }
-                } finally {
-                    advancedMapSearchOpen = false;
-                }
-            }
+            case HELP -> tools.mapSetupHelp();
         }
     }
 
@@ -1992,7 +1962,7 @@ public final class GpuLobbyWindow {
         for (PlayerColour colour : PlayerColour.values()) {
             colours.add(colour.name());
         }
-        return new CamoCatalog(CamoCatalog.of(MMStaticDirectoryManager.getCamouflage()), colours);
+        return new CamoCatalog(IconCatalog.of(MMStaticDirectoryManager.getCamouflage()), colours);
     }
 
     /** At most two units to preview: an asset and another unit when there are both, as the Swing chooser picks. */
@@ -2120,14 +2090,20 @@ public final class GpuLobbyWindow {
             }
 
             @Override
-            public @Nullable BufferedImage portrait(UnitConfigForm shown, int slot) {
-                UnitConfigForm.Member member = shown.member(slot);
-                PortraitChooserDialog chooser = new PortraitChooserDialog(swingDialogs.parent(), member.portrait());
-                if (!chooser.showDialog().isConfirmed() || chooser.getSelectedItem() == null) {
-                    return null;
-                }
-                member.portrait(chooser.getSelectedItem());
-                return portraitPicture(member.portrait());
+            public void portrait(UnitConfigForm shown, int slot, Consumer<BufferedImage> chosen) {
+                SwingUtilities.invokeLater(() -> {
+                    if (closing) {
+                        return;
+                    }
+                    UnitConfigForm.Member member = shown.member(slot);
+                    openPortrait(member.portrait(), portrait -> {
+                        member.portrait(portrait);
+                        BufferedImage picture = portraitPicture(portrait);
+                        GpuHost.post(() -> {
+                            if (!closing) { chosen.accept(picture); }
+                        });
+                    });
+                });
             }
 
             @Override
@@ -2181,16 +2157,62 @@ public final class GpuLobbyWindow {
 
     /** The portrait's picture, {@value #PORTRAIT_PICTURE} pixels square, or null; any thread. */
     private static @Nullable BufferedImage portraitPicture(Portrait portrait) {
+        return portraitPicture(portrait, PORTRAIT_PICTURE);
+    }
+
+    /** The portrait's picture, centred in a square {@code size} pixels wide, or null; any thread. */
+    static @Nullable BufferedImage portraitPicture(Portrait portrait, int size) {
         try {
             Image image = portrait.getBaseImage();
             if (image == null || image.getWidth(null) <= 0 || image.getHeight(null) <= 0) {
                 return null;
             }
-            return AbstractIcon.scaleAndCenter(image, PORTRAIT_PICTURE);
+            return AbstractIcon.scaleAndCenter(image, size);
         } catch (RuntimeException failure) {
             LOGGER.warn(failure, "The lobby could not draw the portrait {}", portrait);
             return null;
         }
+    }
+
+    /**
+     * EDT: reads the portrait directory and opens the native portrait chooser over the lobby and its unit bay;
+     * {@code chosen} runs here, on the Swing thread, with the confirmed portrait.
+     */
+    private void openPortrait(@Nullable Portrait initial, Consumer<Portrait> chosen) {
+        if (closing) {
+            return;
+        }
+        PortraitCatalog catalog = portraitCatalog(false);
+        LobbyPortraitView.Source source = new LobbyPortraitView.Source() {
+            @Override
+            public PortraitCatalog catalog(boolean refresh) {
+                return portraitCatalog(refresh);
+            }
+
+            @Override
+            public @Nullable BufferedImage thumbnail(Portrait portrait, int size) {
+                return portraitPicture(portrait, size);
+            }
+        };
+        Consumer<Portrait> confirmed = portrait -> SwingUtilities.invokeLater(() -> {
+            if (!closing) {
+                chosen.accept(portrait);
+            }
+        });
+        GpuHost.post(() -> {
+            GpuLobbyScreen shown = screen;
+            if (shown != null) {
+                shown.portraitDialog(source, catalog, initial, confirmed);
+            }
+        });
+    }
+
+    /** The portrait directory, read from disk again when {@code refresh}. */
+    static PortraitCatalog portraitCatalog(boolean refresh) {
+        if (refresh) {
+            MMStaticDirectoryManager.refreshPortraitDirectory();
+        }
+        return new PortraitCatalog(IconCatalog.of(MMStaticDirectoryManager.getPortraits()));
     }
 
     /** EDT: reads the player settings of the player {@code client} plays and opens them natively over the lobby. */

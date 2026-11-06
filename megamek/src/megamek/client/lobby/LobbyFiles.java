@@ -2,6 +2,7 @@
 package megamek.client.lobby;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
@@ -287,24 +288,37 @@ public final class LobbyFiles {
             }
             folders.saveList = folder(file, folders.saveList);
             File saved = withMul(file);
-            ArrayList<Entity> units = new ArrayList<>(game.getForces()
-                  .sortedInTreeOrder(game.getPlayerEntities(player, false)));
-            for (Entity unit : units) {
-                unit.setForceString(game.getForces().forceStringFor(unit));
-            }
             try {
-                EntityListFile.saveTo(saved, units);
-                LOGGER.info("[LobbyFiles] Saved {} unit(s) to {}", units.size(), saved);
+                int count = writeUnitList(saved, game, player);
+                LOGGER.info("[LobbyFiles] Saved {} unit(s) to {}", count, saved);
             } catch (Exception failure) {
                 LOGGER.error(failure, "saveListFile");
                 report.message(Messages.getString("ClientGUI.errorSavingFile"), String.valueOf(failure.getMessage()));
-            } finally {
-                // A stamp left behind would outrank the live force tree the next time the unit is written
-                for (Entity unit : units) {
-                    unit.setForceString("");
-                }
             }
         }, done);
+    }
+
+    /**
+     * Writes {@code player}'s units to {@code file} as a unit list in force tree order, each stamped with its force
+     * while it is written, so the list reloads with its forces as they were arranged.
+     *
+     * @return how many units it wrote
+     */
+    public static int writeUnitList(File file, Game game, Player player) throws IOException {
+        ArrayList<Entity> units = new ArrayList<>(game.getForces()
+              .sortedInTreeOrder(game.getPlayerEntities(player, false)));
+        for (Entity unit : units) {
+            unit.setForceString(game.getForces().forceStringFor(unit));
+        }
+        try {
+            EntityListFile.saveTo(file, units);
+            return units.size();
+        } finally {
+            // A stamp left behind would outrank the live force tree the next time the unit is written
+            for (Entity unit : units) {
+                unit.setForceString("");
+            }
+        }
     }
 
     /** {@code file}, with ".mul" added unless it is a MUL or XML file, as the Swing client saves a list. */

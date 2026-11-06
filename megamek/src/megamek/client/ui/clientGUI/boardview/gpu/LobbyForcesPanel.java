@@ -105,6 +105,10 @@ final class LobbyForcesPanel {
         /** Chooses the item at {@code path} of the unit menu that last came back. */
         void choose(List<Integer> path);
 
+        /** Whether MegaMekLab is printing a unit list, so the menu offers no second print meanwhile. */
+        default boolean printing() {
+            return false;
+        }
     }
 
     /** What a drag carries: units or formations. */
@@ -172,6 +176,7 @@ final class LobbyForcesPanel {
         kit.tip(addUnit, true).getActor().setText(Messages.getString("Lobby.forces.addUnitTip"));
         UiKit.onChange(addUnit, () -> actions.command(Command.ADD_UNIT));
         UiButton more = kit.button("button-icon" + UiTheme.COMPACT, "more-vert", null, null);
+        more.setName("forces-menu");
         kit.tip(more, true).getActor().setText(Messages.getString("Lobby.forces.menu"));
         UiKit.onChange(more, () -> openForcesMenu(more));
         Table header = kit.header(Messages.getString("Lobby.forcesTitle"), "", true, randomArmy, addUnit, more);
@@ -1126,7 +1131,11 @@ final class LobbyForcesPanel {
         UiMenuList items = new UiMenuList(kit, UiTheme.TOKEN_MENU_ROW);
         command(items, "Lobby.forces.loadList", true, Command.LOAD_LIST);
         command(items, "Lobby.forces.saveList", !shown.units().isEmpty(), Command.SAVE_LIST);
-        command(items, "Lobby.forces.print", !shown.units().isEmpty(), Command.PRINT_LIST);
+        if (actions.printing()) {
+            command(items, "Lobby.forces.printing", false, Command.PRINT_LIST);
+        } else {
+            command(items, "Lobby.forces.print", !shown.units().isEmpty(), Command.PRINT_LIST);
+        }
         items.separator();
         command(items, "Lobby.forces.names", !shown.units().isEmpty(), Command.NAMES);
         command(items, "Lobby.forces.skills", !shown.units().isEmpty(), Command.SKILLS);
@@ -1143,7 +1152,7 @@ final class LobbyForcesPanel {
         items.item(Messages.getString(key), null, null, false, enabled, () -> {
             menu.cancel();
             actions.command(command);
-        });
+        }).setName(key);
     }
 
     /**

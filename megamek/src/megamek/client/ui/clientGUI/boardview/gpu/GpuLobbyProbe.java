@@ -172,7 +172,7 @@ import org.lwjgl.glfw.GLFW;
  *     among it. Since L17 {@code victory}, {@code randomarmy}, {@code skills} and {@code names} open their libGDX
  *     views and {@code loadlist} the system's file dialog; the pages below probe those views.</li>
  *     <li>{@code lobby+victory}, {@code +randomarmy}, {@code +skills}, {@code +names}, {@code +readout},
- *     {@code +princesshelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
+ *     {@code +princesshelp}, {@code +maphelp} and {@code +prompt=name}, with {@code +click=name,name}: the L17 tools and prompts, see
  *     {@link LobbyToolsProbe}.</li>
  * </ul>
  */
