@@ -1441,7 +1441,6 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the map assembly help (`HelpDialog`);
          - the random army's Advanced Search, which still opens the Swing random army dialog;
          - Print list (`SwingLobbyServices.ForcesCommand.PRINT_LIST`).
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
@@ -1466,6 +1465,12 @@ work for Swing, and item 11 is under investigation.
          refuses it. The lobby window's Swing branch is gone; the Swing
          `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
          and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
+       - Done: the map setup's help (the ? in Map setup) opens in the lobby's native help dialog, the readout
+         dialog Princess's help uses (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
+         written for the libGDX map setup: the map type and size, the slots and the board drawer, stacks and
+         surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
+         `MapAssemblyHelp.html` stays for the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
+         `+maphelp`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.

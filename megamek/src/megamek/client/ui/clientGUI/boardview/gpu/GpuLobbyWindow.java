@@ -69,7 +69,6 @@ import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
-import megamek.client.ui.dialogs.helpDialogs.HelpDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
@@ -350,7 +349,6 @@ public final class GpuLobbyWindow {
     private final Set<String> camoKeys = new HashSet<>();
     /** EDT: the unit menu whose items the screen shows, until one is chosen. */
     private LobbyUnitMenu unitMenu;
-    private static final String MAP_ASSEMBLY_HELP = "docs/Customization/MegaMek/Map and Board Stuff/MapAssemblyHelp.html";
     /** EDT: the map setup while it shows in the centre; null otherwise. */
     private LobbyMapSetupController mapSetup;
     /** EDT: the C3 network manager while it shows in the centre; null otherwise. */
@@ -1511,14 +1509,7 @@ public final class GpuLobbyWindow {
                 previewedFromMapSetup = gui;
                 battlefieldCommand(LobbyBattlefieldController.Command.PREVIEW_3D);
             }
-            case HELP -> {
-                try {
-                    new HelpDialog(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
-                          new File(MAP_ASSEMBLY_HELP).toURI().toURL(), swingDialogs.parent()).setVisible(true);
-                } catch (java.net.MalformedURLException failure) {
-                    LOGGER.error(failure, "The map assembly help could not be found");
-                }
-            }
+            case HELP -> tools.mapSetupHelp();
         }
     }
 

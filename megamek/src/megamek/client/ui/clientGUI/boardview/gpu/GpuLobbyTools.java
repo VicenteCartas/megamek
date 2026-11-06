@@ -486,16 +486,27 @@ final class GpuLobbyTools {
 
     /** Any thread: shows Princess's documentation over the bot setup. */
     void princessHelp() {
-        File file = new File(Messages.getString("BotConfigDialog.princessHelpPath"));
+        helpDocument(Messages.getString("Lobby.help.princess"),
+              new File(Messages.getString("BotConfigDialog.princessHelpPath")));
+    }
+
+    /** Any thread: shows the map setup's help over the lobby. */
+    void mapSetupHelp() {
+        helpDocument(Messages.getString("ChatLounge.map.title.mapAssemblyHelp"),
+              new File(Messages.getString("Lobby.help.mapSetupPath")));
+    }
+
+    /** Any thread: shows an HTML help document in the native help dialog; an unreadable one shows empty. */
+    private void helpDocument(String title, File file) {
         List<EntityReadout.Row> rows;
         try {
             rows = RequisitionReadout.fromHtml(unwrapLayoutTables(Files.readString(file.toPath())));
         } catch (Exception failure) {
-            LOGGER.error(failure, "The lobby could not read the Princess help {}", file);
+            LOGGER.error(failure, "The lobby could not read the help {}", file);
             rows = List.of();
         }
         List<EntityReadout.Row> shown = rows;
-        open(dialogs -> dialogs.help(Messages.getString("Lobby.help.princess"), shown));
+        open(dialogs -> dialogs.help(title, shown));
     }
 
     /**
@@ -539,6 +550,7 @@ final class GpuLobbyTools {
             case "skills" -> skills();
             case "names" -> names();
             case "princesshelp" -> princessHelp();
+            case "maphelp" -> mapSetupHelp();
             case "readout" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.SUMMARY);
             case "readout=tro" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.TRO);
             case "readout=bv" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.BV);
