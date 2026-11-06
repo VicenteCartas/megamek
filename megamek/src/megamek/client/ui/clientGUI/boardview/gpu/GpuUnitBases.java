@@ -508,14 +508,15 @@ final class GpuUnitBases implements Disposable {
         Shapes shapes = new Shapes();
         shapes.node("badges");
         if (spec.destroyed()) {
-            // Two bars corner to corner over the unit, on a dark casing, as large against it as on one hex.
-            float x = CROSS_END * oval.halfWidth() / RING;
-            float y = CROSS_END * oval.halfHeight() / RING;
-            float stroke = Math.min(oval.halfWidth(), oval.halfHeight()) / RING;
-            shapes.shift(oval.x(), oval.y());
+            // Two bars corner to corner over the unit, on a dark casing, turned with its oval and as large against it as on
+            // one hex, so they end inside it.
+            float end = CROSS_END / RING;
+            float stroke = oval.minor() / RING;
             for (float sign : new float[] { 1, -1 }) {
-                shapes.bar(CORE_PART, -x, -sign * y, x, sign * y, (CROSS_WIDTH + .05f) * stroke, alpha(INK, .7f));
-                shapes.bar(CORE_PART, -x, -sign * y, x, sign * y, CROSS_WIDTH * stroke, CROSS);
+                Vector2 from = oval.at(-end, -sign * end);
+                Vector2 to = oval.at(end, sign * end);
+                shapes.bar(CORE_PART, from.x, from.y, to.x, to.y, (CROSS_WIDTH + .05f) * stroke, alpha(INK, .7f));
+                shapes.bar(CORE_PART, from.x, from.y, to.x, to.y, CROSS_WIDTH * stroke, CROSS);
             }
         }
         Vector2 north = oval.rim(0);

@@ -39,6 +39,11 @@ final class UnitFootprint {
             return turned((major + grow) * MathUtils.cos(radians), (minor + grow) * MathUtils.sin(radians), angle).add(x, y);
         }
 
+        /** The point at these fractions of the semi-axes from the centre, turned with the oval. */
+        Vector2 at(float along, float across) {
+            return turned(major * along, minor * across, angle).add(x, y);
+        }
+
         float halfWidth() {
             return Vector2.len(major * MathUtils.cosDeg(angle), minor * MathUtils.sinDeg(angle));
         }
