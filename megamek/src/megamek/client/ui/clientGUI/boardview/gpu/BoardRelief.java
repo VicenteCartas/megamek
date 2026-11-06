@@ -1372,7 +1372,7 @@ final class BoardRelief {
             Vector3 normal = bandNormal(upper, lower);
             float nx = normal.x, ny = normal.y;
             float b = band(upper, lower, z, corner.x, corner.y);
-            widest = Math.max(widest, room(upper, lower));
+            widest = Math.max(widest, Math.max(room(upper, lower), Math.abs(b)));
             a11 += weight * nx * nx;
             a12 += weight * nx * ny;
             a22 += weight * ny * ny;
@@ -1883,18 +1883,19 @@ final class BoardRelief {
 
     /**
      * A corner of a bay's edge, {x, y, top}: it recedes along the water's next edge where land lies below the water there
-     * too, so the slope round that corner stands clear of the road. Water or higher ground beside it holds it in place.
-     * {@link #NO_PUSH} for every other corner.
+     * too, so the slope round that corner stands clear of the road. Water, higher ground or an outline that stays beside it
+     * holds it in place. {@link #NO_PUSH} for every other corner.
      */
     private float[] bayCorner(Corner corner) {
         return bayCorners.computeIfAbsent(corner, key -> {
-            for (Site water : key.around) {
+            for (Site water : key.pinned ? new Site[0] : key.around) {
                 if (water == null || !water.liquid()) { continue; }
                 for (Site road : key.around) {
                     float bay = road == null || road == water ? 0 : deckBay(water, road);
                     if (bay <= 0) { continue; }
                     for (Site land : key.around) {
-                        if (land == null || land == water || land == road || land.liquid() || land.level() >= water.level()) { continue; }
+                        if (land == null || land == water || land == road || !land.sculpted() || land.fixedOutline()
+                              || land.level() >= water.level()) { continue; }
                         Edge side = edge(water, edgeTo(water, land));
                         Corner next = side.a == key ? side.b : side.a;
                         float scale = bay / side.length;

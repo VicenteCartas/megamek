@@ -283,7 +283,9 @@ final class GpuGroundCover implements Disposable {
         float w = Math.max(0, 1 - u - v);
         float up = normal.set(normals.get(a)).scl(u).mulAdd(normals.get(b), v).mulAdd(normals.get(c), w).nor().z;
         float growth = BoardRelief.smooth((up - .6f) / .35f);
-        if (waterHeights.containsKey(a)) {
+        // A wall is never wet ground (GpuTerrain#sculptVertex): water standing above land leaves its outer slope dry.
+        boolean wall = face.finish() == BoardSurface.Finish.WALL || face.finish() == BoardSurface.Finish.CAP;
+        if (!wall && waterHeights.containsKey(a)) {
             float water = (waterHeights.get(a) * u + waterHeights.get(b) * v + waterHeights.get(c) * w) / (u + v + w);
             // Keep a bare wet toe, then restore the meadow over the exposed shallow bank.
             float above = (z - water) / BoardGeometry.hexScale();

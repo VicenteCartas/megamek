@@ -393,8 +393,6 @@ final class BoardSurface {
     private int waterSeamEdges;
     /** The roads around and, on natural ground, its easing into them (Enhanced); null where none reaches. */
     private BoardRoadBank bank;
-    /** A water hex's own: its walls down to lower land stand past its cell, on ground that field eases. */
-    private BoardRoadBank shoreBank;
 
     final BoardRelief relief;
     /**
@@ -2455,7 +2453,6 @@ final class BoardSurface {
             faces.clear();
             faces.addAll(split);
             bank.move(faces);
-            shoreBank = bank;
         } else if (natural()) {
             // A copy: with no bank to shape, conform hands back the list itself.
             List<Face> eased = new ArrayList<>(bank.conform(faces, Float.NEGATIVE_INFINITY));
@@ -2629,7 +2626,9 @@ final class BoardSurface {
 
     /** Slopes ease into the roads around, as the top does, and give way to the carriageways that reserve their ground. */
     private List<Face> reserveWalls(List<Face> walls, float floor) {
-        var field = tile.liquid().present() ? shoreBank : bank;
+        // A water hex's walls stand past its cell, on ground the roads' banks ease. Built here, as a water hex restored
+        // from finished geometry (WaterGeometry) has no field of its own.
+        var field = !tile.liquid().present() ? bank : walls.isEmpty() ? null : new BoardRoadBank(scene, tile, relief);
         if (field != null && natural()) { walls = field.conform(walls, floor); }
         var grades = grades(false);
         if (grades.isEmpty()) { return walls; }

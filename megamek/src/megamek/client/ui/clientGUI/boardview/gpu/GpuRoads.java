@@ -1260,7 +1260,7 @@ final class GpuRoads {
     private static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
         var liquid = surface.tile.liquid();
         if (!liquid.present() || liquid.molten()) { return coat; }
-        float levels = surface.relief.inBay(x, y) ? 0 : (surface.waterHeight(x, y) - z) / BoardGeometry.level();
+        float levels = !surface.columns() && surface.relief.inBay(x, y) ? 0 : (surface.waterHeight(x, y) - z) / BoardGeometry.level();
         int alpha = 2 * (31 * Math.round(GpuWaterShader.palette(liquid)) + Math.round(Math.clamp(levels, 0, 3) * 10));
         return NumberUtils.intToFloatColor(NumberUtils.floatToIntColor(coat) & 0x00ffffff | alpha << 24);
     }
