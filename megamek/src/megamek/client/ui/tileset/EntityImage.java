@@ -468,7 +468,10 @@ public class EntityImage {
         return applyColor(image, facing, IMG_WIDTH, IMG_HEIGHT);
     }
 
-    /** {@link #applyColor(Image, int)} on an image of the given size, the camouflage repeating from hex to hex. */
+    /**
+     * {@link #applyColor(Image, int)} on an image of the given size: the camouflage keeps its size, repeating mirrored
+     * ({@link #mirroredIndex}) across a larger image without a seam.
+     */
     private Image applyColor(Image image, int facing, int width, int height) {
         if (image == null) {
             return null;
@@ -507,9 +510,8 @@ public class EntityImage {
                 // Apply the camo only on the icon pixels, not on transparent pixels
                 if (alpha != 0) {
                     int pixel1 = colourCamouflage ? colour
-                          : rotatedAndScaledColor((i / width % IMG_HEIGHT) * IMG_WIDTH + i % width % IMG_WIDTH,
-                          getCamouflage().getRotationRadians(),
-                          getCamouflage().getScaleFactor(), pCamo);
+                          : rotatedAndScaledColor(i % width - (width - 1) / 2.0, i / width - (height - 1) / 2.0,
+                          getCamouflage().getRotationRadians(), getCamouflage().getScaleFactor(), pCamo);
                     int red1 = (pixel1 >> 16) & 0xff;
                     int green1 = (pixel1 >> 8) & 0xff;
                     int blue1 = (pixel1) & 0xff;
@@ -638,30 +640,25 @@ public class EntityImage {
     }
 
     /**
-     * Returns a color from the given camoImage lookup array where the given lookup index is rotated by the given angle
-     * and scaled by the given scale.
+     * Returns a color from the given camoImage lookup array for a pixel of the image being colored, rotated around the
+     * center by the given angle and scaled by the given scale.
      *
-     * @param originalIndex The original lookup index (0 ... 84 x 72 - 1)
-     * @param angle         The rotation angle in radians (0 = no change)
-     * @param scale         The scale factor (1 = no change)
-     * @param camoImage     The image pixel grabber lookup array
+     * @param cx        The pixel's horizontal distance from the center of the image being colored
+     * @param cy        The pixel's vertical distance from the center of the image being colored
+     * @param angle     The rotation angle in radians (0 = no change)
+     * @param scale     The scale factor (1 = no change)
+     * @param camoImage The image pixel grabber lookup array
      *
      * @return The rotated and scaled image pixel color as an int value (as from the image lookup array)
      */
-    private int rotatedAndScaledColor(int originalIndex, double angle, double scale, int[] camoImage) {
-        // get the pixel coordinates
-        int y = originalIndex / 84;
-        int x = originalIndex - y * 84;
-        // center coordinates to rotate around the image center
-        double cy = y - 35.5;
-        double cx = x - 41.5;
+    private int rotatedAndScaledColor(double cx, double cy, double angle, double scale, int[] camoImage) {
         // rotate, scale and remove centering
         double ry = (Math.sin(angle) * cx + Math.cos(angle) * cy) / scale + 35.5;
         double rx = (Math.cos(angle) * cx - Math.sin(angle) * cy) / scale + 41.5;
         // interpolate between the four surrounding actual image pixels
-        int rx1 = (int) rx;
+        int rx1 = (int) Math.floor(rx);
         int rx2 = rx1 + 1;
-        int ry1 = (int) ry;
+        int ry1 = (int) Math.floor(ry);
         int ry2 = ry1 + 1;
         double dx = rx - rx1;
         double dy = ry - ry1;

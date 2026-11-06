@@ -253,7 +253,7 @@ public class MekTileset {
     public MekEntry entryFor(Entity entity, int secondaryPos) {
         // Some entities (QuadVees, LAMs) use different sprites depending on mode.
         String mode = entity.getTilesetModeString().toUpperCase(Locale.ROOT);
-        String addendum = (secondaryPos == -1) ? "" : (secondaryPos == WHOLE) ? "_whole" : "_" + secondaryPos;
+        String addendum = (secondaryPos == -1) ? "" : (secondaryPos == WHOLE) ? "_WHOLE" : "_" + secondaryPos;
 
         // first, check for exact matches
         if (exact.containsKey(entity.getShortNameRaw().toUpperCase(Locale.ROOT) + mode + addendum)) {

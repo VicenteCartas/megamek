@@ -100,6 +100,8 @@ final class GpuBoardOverlay implements Disposable {
     private static final float DRIFT_DASH_HEXES = .16f;
     private static final float DRIFT_GAP_HEXES = .1f;
     private static final float DRIFT_HEAD_HEXES = .24f;
+    /** The sides of a multi-hex unit's oval mark. */
+    private static final int OVAL_STEPS = 96;
 
     private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Route markers", GpuUnitShader::unlitProvider),
           (camera, renderables) -> { });
@@ -316,9 +318,17 @@ final class GpuBoardOverlay implements Disposable {
             if (pose == null) {
                 continue;
             }
-            for (Coords occupied : pose.unit().footprint()) {
+            List<Coords> marked = UnitFootprint.markedHexes(scene, pose.unit());
+            if (marked.size() > 1) {
+                var oval = UnitFootprint.oval(pose.unit(), marked);
                 for (Band band : bands) {
-                    band((corner, inset) -> pose.outlinePoint(occupied, corner, inset), band, opacity);
+                    band((step, inset) -> pose.ovalPoint(oval, MathUtils.PI2 * step / OVAL_STEPS, inset), OVAL_STEPS, band, opacity);
+                }
+            } else {
+                for (Coords occupied : marked) {
+                    for (Band band : bands) {
+                        band((corner, inset) -> pose.outlinePoint(occupied, corner, inset), 6, band, opacity);
+                    }
                 }
             }
         }
@@ -328,7 +338,7 @@ final class GpuBoardOverlay implements Disposable {
             float z = BoardTacticalGeometry.floatingZ(scene, hex);
             for (Band band : entry.getValue()) {
                 band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
-                      .add(0, 0, z), band, opacity);
+                      .add(0, 0, z), 6, band, opacity);
             }
         }
         List<Band> incoming = incomingBands();
@@ -337,7 +347,7 @@ final class GpuBoardOverlay implements Disposable {
             float planeHeight = BoardTacticalGeometry.floatingZ(scene, hex);
             for (Band band : incoming) {
                 band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
-                      .add(0, 0, planeHeight), band, opacity);
+                      .add(0, 0, planeHeight), 6, band, opacity);
             }
         }
         // The Tactical View draws its own drift arrows, with the rest of the flat board's art.
@@ -430,24 +440,24 @@ final class GpuBoardOverlay implements Disposable {
               new Band(.74f, .26f, alpha(INCOMING_RED, .35f + .45f * pulse)));
     }
 
-    /** A point of a mark's outline: the hex corner {@code corner} moved {@code inset} hex radii toward the centre. */
+    /** A point of a mark's outline: its corner {@code corner} moved {@code inset} hex radii toward the centre. */
     private interface Outline {
         Vector3 point(int corner, float inset);
     }
 
-    /** A band as two triangles a side; one that reaches the centre as one. */
-    private void band(Outline outline, Band band, float opacity) {
+    /** A band round an outline of {@code corners} points, as two triangles a side; one that reaches the centre as one. */
+    private void band(Outline outline, int corners, Band band, float opacity) {
         Color color = band.color();
         float bits = Color.toFloatBits(color.r, color.g, color.b, color.a * opacity);
         float reach = Math.min(1, band.inset() + band.width());
-        Vector3[] outer = new Vector3[6];
-        Vector3[] inner = new Vector3[6];
-        for (int corner = 0; corner < 6; corner++) {
+        Vector3[] outer = new Vector3[corners];
+        Vector3[] inner = new Vector3[corners];
+        for (int corner = 0; corner < corners; corner++) {
             outer[corner] = outline.point(corner, band.inset());
             inner[corner] = outline.point(corner, reach);
         }
-        for (int corner = 0; corner < 6; corner++) {
-            int next = (corner + 1) % 6;
+        for (int corner = 0; corner < corners; corner++) {
+            int next = (corner + 1) % corners;
             triangle(outer[corner], outer[next], inner[next], bits);
             if (reach < 1) {
                 triangle(outer[corner], inner[next], inner[corner], bits);

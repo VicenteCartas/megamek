@@ -99,7 +99,7 @@ final class MeepleAnimator {
         if (whole) {
             // Its image covers the footprint: a DropShip's stitched sections each lie on their hex.
             var layout = UnitFootprint.layout(unit.location().coords(), unit.footprint(), unit.location().facing() * 60);
-            horizontal = Math.min(layout.width() / unit.image().width(), layout.depth() / unit.image().height()) * BoardGeometry.multiHexUnitScale();
+            horizontal = UnitFootprint.imageScale(layout, unit.image());
             position.add(new Vector3(layout.offsetX(), layout.offsetY(), 0).rotate(Vector3.Z, unit.location().facing() * 60 - facing));
         }
         var family = unit.model() == null || unit.model().state() == null ? UnitFamilyScale.DEFAULT

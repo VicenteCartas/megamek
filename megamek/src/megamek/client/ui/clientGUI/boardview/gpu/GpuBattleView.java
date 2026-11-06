@@ -1431,8 +1431,7 @@ class GpuBattleView extends ApplicationAdapter {
         Map<Integer, Vector2> positions = new HashMap<>();
         float hexPixels = UnitScreenScale.hexPixels(boardCamera.camera.zoom, layoutScale);
         boolean based = boardCamera.tactical();
-        float width = hexPixels * (based ? GpuUnitBases.RING * BoardGeometry.HEIGHT / BoardGeometry.WIDTH
-              : UNIT_RECT_WIDTH);
+        float width = hexPixels * UNIT_RECT_WIDTH;
         // Stage units per viewport pixel: the HUD's stage spans the board camera's viewport.
         float stage = ui.stage().getWidth() / boardCamera.camera.viewportWidth;
         for (Map.Entry<BoardScene.Unit, Vector3> entry : unitAnchors.entrySet()) {
@@ -1450,9 +1449,20 @@ class GpuBattleView extends ApplicationAdapter {
             }
             heads.put(id, head.scl(stage));
             ground.scl(stage);
-            rects.put(id, based ? new Rectangle(ground.x - width / 2, ground.y - width / 2, width, width)
-                  : new Rectangle(Math.min(ground.x, head.x) - width / 2, Math.min(ground.y, head.y),
-                        Math.abs(head.x - ground.x) + width, Math.abs(head.y - ground.y)));
+            if (based) {
+                // The square around the base's oval, whose centre lies off a unit's position when its hexes do.
+                var oval = GpuUnitBases.oval(scene, entry.getKey());
+                Vector2 center = GpuNameplates.project(boardCamera.camera, pose.position().cpy().add(oval.x(), oval.y(), 0));
+                if (center == null) { continue; }
+                float pixels = hexPixels / BoardGeometry.width();
+                float across = 2 * oval.halfWidth() * pixels;
+                float up = 2 * oval.halfHeight() * pixels;
+                center.scl(stage);
+                rects.put(id, new Rectangle(center.x - across / 2, center.y - up / 2, across, up));
+            } else {
+                rects.put(id, new Rectangle(Math.min(ground.x, head.x) - width / 2, Math.min(ground.y, head.y),
+                      Math.abs(head.x - ground.x) + width, Math.abs(head.y - ground.y)));
+            }
         }
         Map<TargetKey, Vector2> targets = new HashMap<>();
         fire.hexes().forEach((target, hex) -> {
@@ -1568,9 +1578,9 @@ class GpuBattleView extends ApplicationAdapter {
      * every zoom, instead of from its model's head.
      */
     private void anchorOnBases() {
-        float north = GpuUnitBases.RING * BoardGeometry.height() / 2;
         for (Map.Entry<BoardScene.Unit, UnitFootprint.Pose> entry : unitFootprints.entrySet()) {
-            unitAnchors.put(entry.getKey(), entry.getValue().position().cpy().add(0, north, 0));
+            Vector2 north = GpuUnitBases.oval(scene, entry.getKey()).rim(0);
+            unitAnchors.put(entry.getKey(), entry.getValue().position().cpy().add(north.x, north.y, 0));
         }
     }
 
