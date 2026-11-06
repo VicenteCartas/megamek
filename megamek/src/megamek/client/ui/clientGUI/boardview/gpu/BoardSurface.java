@@ -2029,7 +2029,7 @@ final class BoardSurface {
             // A separated side keeps no bank of its own: its land is the strip in the shore field, which stops short of a free end.
             BoardScene.Tile across = neighbor(scene, k);
             if (inset[k] > 0 && (across == null || !across.liquid().connects(tile.liquid()))) {
-                float width = relief.slope(k) || rise[k] != 0 ? inset[k] : SHORE_BANK * scale;
+                float width = relief.slope(k) || rise[k] != 0 ? inset[k] : relief.reach(k) + SHORE_BANK * scale;
                 Vector3 inward = new Vector3(b).sub(a).crs(Vector3.Z).nor().scl(-1);
                 banks.add(new Bank(a.x, a.y, inward.x, inward.y, width));
             }

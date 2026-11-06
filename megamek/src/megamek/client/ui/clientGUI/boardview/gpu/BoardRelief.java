@@ -503,13 +503,15 @@ final class BoardRelief {
     }
 
     /**
-     * How far the steps through corner k move its line at this hex's level, in world units. Water hexes that share an
-     * open mouth both compute it from the corner's three hexes, so they place the mouth's ends alike.
+     * How far the steps through corner k, or a bay's move of it ({@link #bayCorner}), move its line at this hex's level, in
+     * world units. Water hexes that share an open mouth both compute it from the corner's three hexes, so they place the
+     * mouth's ends alike.
      */
     float cornerReach(int k) {
-        float[] band = new float[2];
-        bandOffset(corner(self, k), self.level() * BoardGeometry.level(), band);
-        return (float) Math.hypot(band[0], band[1]);
+        Corner corner = corner(self, k);
+        float[] band = new float[2], bay = bayCorner(corner);
+        bandOffset(corner, self.level() * BoardGeometry.level(), band);
+        return Math.max((float) Math.hypot(band[0], band[1]), (float) Math.hypot(bay[0], bay[1]));
     }
 
     /**
@@ -1883,7 +1885,8 @@ final class BoardRelief {
 
     /**
      * A corner of a bay's edge, {x, y, top}: it recedes along the water's next edge where land lies below the water there
-     * too, so the slope round that corner stands clear of the road. Water, higher ground or an outline that stays beside it
+     * or the water runs on through a mouth, so the slope round that corner stands clear of the road. Between two bays of
+     * one deck it recedes toward the hex's centre, as far across both. Higher ground or an outline that stays beside it
      * holds it in place. {@link #NO_PUSH} for every other corner.
      */
     private float[] bayCorner(Corner corner) {
@@ -1894,18 +1897,29 @@ final class BoardRelief {
                     float bay = road == null || road == water ? 0 : deckBay(water, road);
                     if (bay <= 0) { continue; }
                     for (Site land : key.around) {
-                        if (land == null || land == water || land == road || !land.sculpted() || land.fixedOutline()
-                              || land.level() >= water.level()) { continue; }
+                        if (land == null || land == water || land == road || !recedes(water, land)) { continue; }
                         Edge side = edge(water, edgeTo(water, land));
                         Corner next = side.a == key ? side.b : side.a;
-                        float scale = bay / side.length;
-                        return new float[] { (next.x - key.x) * scale, (next.y - key.y) * scale,
-                              (water.level() + BoardRoadGrade.CLEARANCE) * BoardGeometry.level() };
+                        boolean between = deckBay(water, land) > 0;
+                        float x = between ? water.x() - key.x : next.x - key.x, y = between ? water.y() - key.y : next.y - key.y;
+                        float scale = (between ? bay / COS_30 : bay) / (float) Math.hypot(x, y);
+                        return new float[] { x * scale, y * scale, (water.level() + BoardRoadGrade.CLEARANCE) * BoardGeometry.level() };
                     }
                 }
             }
             return NO_PUSH;
         });
+    }
+
+    private static final float COS_30 = .8660254f;
+
+    /** Whether a bay's corner may recede beside this hex: land below the water, or the same water through an open mouth. */
+    private boolean recedes(Site water, Site beside) {
+        if (beside.liquid()) {
+            return beside.level() == water.level() && scene.tile(water.coords()).joins(scene.tile(beside.coords()),
+                  water.coords().direction(beside.coords()));
+        }
+        return beside.sculpted() && !beside.fixedOutline() && beside.level() < water.level();
     }
 
     /** The edge index of {@code site} facing its neighbour {@code other}. */
@@ -1926,12 +1940,12 @@ final class BoardRelief {
 
     /**
      * How far past the bank a bay moved on this hex's edge e a point lies, towards the water; {@code NaN} where the edge's
-     * bank stays. Only a water hex with a bay of its own has one to keep clear of.
+     * bank stays. Only a water hex with a bay or a bay's corner has one to keep clear of.
      */
     float bayInset(int e, float x, float y) {
         if (hasBay == null) {
             hasBay = false;
-            for (int k = 0; k < 6; k++) { hasBay |= edge(k).bay > 0; }
+            for (int k = 0; k < 6; k++) { hasBay |= edge(k).bay > 0 || bayCorner(corner(self, k)) != NO_PUSH; }
         }
         if (!hasBay) { return Float.NaN; }
         Edge edge = edge(e);
@@ -1939,7 +1953,7 @@ final class BoardRelief {
         float dx = x - edge.a.x, dy = y - edge.a.y;
         float t = (dx * (edge.b.x - edge.a.x) + dy * (edge.b.y - edge.a.y)) / (edge.length * edge.length);
         float[] push = roadPush(edge, Math.clamp(t, .001f, .999f));
-        return (push[0] - dx) * edge.bandNormal.x + (push[1] - dy) * edge.bandNormal.y;
+        return (push[0] - dx) * edge.bandNormal.x + (push[1] - dy) * edge.bandNormal.y - reach(e);
     }
 
     /**
@@ -2677,7 +2691,7 @@ final class BoardRelief {
      * the edge. Where a wall of three levels or more stands above water, or water three levels above land, the water
      * keeps its outline on the edge, so the land takes a step half as wide, all on its own side; so does land above
      * paving. Water up to two levels above land keeps its outline too, and the land takes an ordinary slope's whole width;
-     * half of it on a road's hex, as more would run into the road's verge.
+     * on a road's hex, where more would run into the road's verge, half of it, and the water's bank the other half.
      */
     private static float band(Site upper, Site lower, float z, float x, float y) {
         float room = room(upper, lower);
@@ -2701,7 +2715,8 @@ final class BoardRelief {
             t = 1 - 2 * (height + bench * (float) Math.sin(4 * Math.PI * height) / (4 * (float) Math.PI));
         }
         return wall && lower.liquid() || !lower.liquid() && kept(lower) ? room / 2 * (t - 1)
-              : upper.liquid() ? (wall || lower.road() ? room / 2 : room) * (t + 1) : room * t;
+              : upper.liquid() && wall ? room / 2 * (t + 1)
+              : upper.liquid() && !lower.road() ? room * (t + 1) : room * t;
     }
 
     /**
