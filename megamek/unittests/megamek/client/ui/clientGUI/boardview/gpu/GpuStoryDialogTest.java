@@ -6,7 +6,6 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.awaitDi
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -113,7 +112,7 @@ class GpuStoryDialogTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientGUI gui = onSwing(GpuStoryDialogTest::client);
             try {
-                set(present(gui, fixture.view, fixture.source), "presented", false);
+                GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
                 AtomicBoolean swing = new AtomicBoolean();
                 AtomicBoolean asked = new AtomicBoolean();
                 onSwing(() -> {

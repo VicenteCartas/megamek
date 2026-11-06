@@ -582,12 +582,9 @@ class GpuSwingDialogGateTest {
                   + "window: javax.swing.JDialog \"Load by Crane\"", "A Swing dialog outside the allowlist opened over "
                   + "the battle window: javax.swing.JDialog \"null\""), gate.errors);
 
-            // While the window cannot ask the client's prompts (it starts or closes), they fall back to Swing, raised
+            // While the window closes, the client's prompts fall back to Swing, raised. While it starts they wait for
+            // it (GpuDialogRoutingTest).
             gate.errors.clear();
-            GpuDialogFixture.set(gate.window, "source", null);
-            assertTrue(gate.raised(() -> declaring.gui.confirm("Flee?", "Confirm", JOptionPane.YES_NO_OPTION,
-                  JOptionPane.QUESTION_MESSAGE), MESSAGE_BOX), "A prompt before the board source is ready");
-            GpuDialogFixture.set(gate.window, "source", declaring.fixture.source);
             GpuDialogFixture.set(gate.window, "closing", true);
             assertTrue(gate.raised(() -> {
                 declaring.gui.doAlertDialog("Disconnected", "The server closed the connection.");

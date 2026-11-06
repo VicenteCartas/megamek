@@ -667,6 +667,14 @@ final class BoardScenes {
         return installedScene.get();
     }
 
+    /** The ground's blended triangles as drawn: the plan's groups and its tops, which the material cache can hold. */
+    static List<GpuSurfaceBlend.Triangle> blendedTriangles(GpuTerrain.SculptPlan plan) {
+        List<GpuSurfaceBlend.Triangle> triangles = new ArrayList<>();
+        plan.blended().values().forEach(triangles::addAll);
+        plan.blendedTops().values().forEach(triangles::addAll);
+        return triangles;
+    }
+
     static BoardScene minesScene() throws Exception {
         return BoardScenes.installedScene("Deserts/16x17 Mines 1.board");
     }

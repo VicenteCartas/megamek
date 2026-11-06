@@ -41,7 +41,7 @@ class GpuWaterBedMeshTest {
             assertTrue(highest > BoardGeometry.waterZ(tile) + .01f, "Keep the existing exposed bar: " + path);
             var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());
             int dry = 0, wet = 0;
-            for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+            for (var triangle : BoardScenes.blendedTriangles(plan)) {
                 var a = triangle.a().vertex().position;
                 var b = triangle.b().vertex().position;
                 var c = triangle.c().vertex().position;
@@ -116,7 +116,7 @@ class GpuWaterBedMeshTest {
             var surface = new BoardSurface(scene, tile, lod);
             var bed = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.BED).toList();
             var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());
-            var drawn = plan.blended().values().stream().flatMap(List::stream).toList();
+            var drawn = BoardScenes.blendedTriangles(plan);
             System.out.printf("WATER BED lod=%s varyingDepth=%s source=%d rendered=%d%n", lod, varyingDepth,
                   bed.size(), drawn.size());
             assertEquals(bed.size(), drawn.size(), "Water's internal diagonals must not subdivide the bed");

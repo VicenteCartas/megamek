@@ -199,6 +199,7 @@ class GpuVictoryHexFormTest {
                 assertEquals(before, Properties.of(marker));
 
                 set(window, "presented", false);
+                set(window, "closing", true);
                 assertEquals(Result.SAVED, onSwing(() -> swingEdit(frame, marker, OKAY,
                       pane -> pane.victoryPoints().setValue(4))));
                 assertNull(fixture.source.dialog(), "no native form without a presented window");

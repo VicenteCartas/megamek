@@ -8,21 +8,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class GpuBuildingInteriorTest {
+    @BeforeAll
+    static void loadNatives() {
+        GdxNativesLoader.load();
+    }
+
     @Test
-    void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
+    void lightBuildingFloorsAndRoofCoverItsCentre() {
         var kit = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00");
-        // Alone, its storeys' walls close round its centre and its roof covers it; connected, its walls stay open
-        // towards its neighbours (GpuBuilding#volume then takes the roof) and its roof still covers the centre.
+        // Its floor caps hold the occupied area (GpuBuilding#volumes), as its closed panels are wall strips, not rooms.
+        // Alone, every storey's cap and its roof cover its centre; connected, its roof still does.
         for (int[] reach : List.of(new int[6], new int[] { 2, 0, 0, 2, 0, 0 }, new int[] { 2, 0, 2, 0, 2, 0 })) {
             boolean alone = java.util.Arrays.stream(reach).allMatch(levels -> levels == 0);
             for (var entry : storeys(kit, reach).entrySet()) {
                 if (!alone && !entry.getKey().startsWith("roof")) { continue; }
-                var area = entry.getKey().startsWith("roof") ? GpuBuildingInterior.area(entry.getValue())
-                      : GpuBuildingInterior.walls(entry.getValue(), entry.getKey().endsWith("@0") ? 9 : 27);
-                assertTrue(area.contains(0, 0), entry.getKey() + " " + java.util.Arrays.toString(reach));
+                assertTrue(GpuBuildingInterior.area(entry.getValue()).contains(0, 0),
+                      entry.getKey() + " " + java.util.Arrays.toString(reach));
             }
         }
     }

@@ -77,12 +77,10 @@ class BoardLegacyArtRenderTest {
         var tileset = new HexTileset(game);
         try {
             tileset.loadFromFile("saxarba.tileset");
-            // Batch-10 answer 1: a building model's art beside it and the quay art have selector designs too. A container
+            // The quay art has selector designs too; building art has none (BoardSceneryLayouts.takenTokens). A container
             // yard look draws the first token of its rotation: each rotation group's first token draws itself.
-            List<String> terrains = new java.util.ArrayList<>(List.of("building:2;bldg_elev:1;bldg_cf:30;bldg_fluff:29",
-                  "ground_fluff:1:3", "woods:1;fluff:12", "rough:1;fluff:2", "road:1:09;road_fluff:1",
-                  "building:1;bldg_elev:2;bldg_cf:15;fluff:11:7", "building:1;bldg_elev:3;bldg_cf:15;fluff:1",
-                  "water:2:63;fluff:100:6", "water:3;fluff:100:1", "pavement:1;fluff:100:2"));
+            List<String> terrains = new java.util.ArrayList<>(List.of("ground_fluff:1:3", "woods:1;fluff:12",
+                  "rough:1;fluff:2", "road:1:09;road_fluff:1", "water:2:63;fluff:100:6", "water:3;fluff:100:1", "pavement:1;fluff:100:2"));
             for (String yard : List.of("80:01", "80:08", "80:16", "80:23", "81:01", "81:04", "81:07", "81:10", "81:13", "81:16",
                   "81:19", "81:22", "81:25", "81:28", "81:31", "81:34")) {
                 terrains.add("pavement:1;woods:1;foliage_elev:2;fluff:" + yard);

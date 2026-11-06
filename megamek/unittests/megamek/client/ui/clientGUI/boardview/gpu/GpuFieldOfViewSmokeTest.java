@@ -95,16 +95,16 @@ class GpuFieldOfViewSmokeTest {
                                     assertEquals(1, probe.uploads());
                                 } else if (tick == 12) {
                                     capture("top");
-                                    results.put(style, appearance(fixture.source.takeFrame().scene()));
+                                    results.put(style, appearance((BoardScene) field("scene")));
                                     darknessSlider("FoV").setValue(0);
                                     probe.configure(style, 0, sensorStyle, GpuFieldOfView.SENSOR_DARKNESS);
                                 } else if (tick == 16) {
-                                    noDarkening = appearance(fixture.source.takeFrame().scene());
+                                    noDarkening = appearance((BoardScene) field("scene"));
                                     capture("no-darkening");
                                     darknessSlider("FoV").setValue(100);
                                     probe.configure(style, 1, sensorStyle, GpuFieldOfView.SENSOR_DARKNESS);
                                 } else if (tick == 20) {
-                                    Appearance darkened = appearance(fixture.source.takeFrame().scene());
+                                    Appearance darkened = appearance((BoardScene) field("scene"));
                                     assertTrue(darkened.blocked() < noDarkening.blocked() * 0.9f,
                                           "The darkness slider must darken blocked content in " + style);
                                     assertEquals(noDarkening.visible(), darkened.visible(), 0.01f,
@@ -194,7 +194,8 @@ class GpuFieldOfViewSmokeTest {
                                         blocked += value;
                                         blockedChroma += chroma;
                                         blockedCount++;
-                                        if (style == GpuFieldOfView.Style.GRAYSCALE) {
+                                        if (style == GpuFieldOfView.Style.GRAYSCALE
+                                              && !besideVisible(scene, tile.coords())) {
                                             assertTrue(chroma <= 1 / 255f,
                                                   "Blocked hex content must be grayscale at " + tile.coords()
                                                         + "; pixel " + x + "," + y + "; RGB " + red + "," + green + "," + blue);
@@ -509,6 +510,18 @@ class GpuFieldOfViewSmokeTest {
         int y = Math.round(point.y * pixels.getHeight() / Gdx.graphics.getHeight());
         assertTrue(x >= 0 && y >= 0 && x < pixels.getWidth() && y < pixels.getHeight());
         return pixels.getPixel(x, y);
+    }
+
+    /** Whether a neighbour of the hex is in clear view: a tree on it may stand in front of the hex, in its own colours. */
+    private static boolean besideVisible(BoardScene scene, Coords at) {
+        for (int direction = 0; direction < 6; direction++) {
+            Coords next = at.translated(direction);
+            if (scene.tile(next) != null && GpuFieldOfViewTest.at(scene.fieldOfView(), next).visibility()
+                  == BoardFieldOfView.Visibility.VISIBLE) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static float brightness(int rgb) {

@@ -39,7 +39,9 @@ class GpuSurfaceBlendTest {
         var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), TerrainLod.FULL,
               new java.util.HashMap<>());
         int pinned = 0, curved = 0;
-        for (var group : plan.blended().entrySet()) {
+        var groups = new ArrayList<>(plan.blended().entrySet());
+        groups.addAll(plan.blendedTops().entrySet());
+        for (var group : groups) {
             var plain = new MeshBuilder();
             var tessellated = new MeshBuilder();
             var attributes = blended ? GpuSurfaceBlend.VERTICES : MeshBuilder.createAttributes(
@@ -88,7 +90,7 @@ class GpuSurfaceBlendTest {
         var plan = GpuTerrain.prepareSculpt(scene, water, surface, -BoardGeometry.level(), TerrainLod.FULL,
               new java.util.HashMap<>());
         int checked = 0;
-        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+        for (var triangle : BoardScenes.blendedTriangles(plan)) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
                 assertEquals(1, point.cover().lunar(), .00001f,
                       "The land's geology must continue across its banks and bed below the waterline");
@@ -118,7 +120,7 @@ class GpuSurfaceBlendTest {
               new java.util.HashMap<>());
         assertTrue(plan.bed().isEmpty(), "Every natural bed sector must use the shared field, including water-to-water edges");
         int checked = 0;
-        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+        for (var triangle : BoardScenes.blendedTriangles(plan)) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
                 if (point.vertex().color.b >= .125f) { continue; }
                 var p = point.vertex().position;

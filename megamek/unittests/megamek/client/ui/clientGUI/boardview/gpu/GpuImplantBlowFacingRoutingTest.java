@@ -82,7 +82,7 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             Entity platoon = platoon();
             Entity squad = unit("Elemental BA [Laser] (Sqd5).blk");
             try {
@@ -144,7 +144,7 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = previewingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             try {
                 List<String> blows = new ArrayList<>();
                 assertEquals(List.of(DialogResult.CONFIRMED, 2), onSwing(() -> blow(

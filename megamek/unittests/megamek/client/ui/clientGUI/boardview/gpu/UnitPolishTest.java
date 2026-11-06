@@ -78,7 +78,7 @@ class UnitPolishTest {
             attack.seconds = attack.contactSeconds;
             assertEquals(1, attack.approachWeight());
             assertEquals(1, attack.contactWeight());
-            attack.seconds = attack.contactSeconds + UnitAttack.RECOVERY_SECONDS + UnitAttack.MELEE_RUN_SECONDS * .5f;
+            attack.seconds = attack.contactSeconds + attack.recoverySeconds + UnitAttack.MELEE_RUN_SECONDS * .5f;
             assertTrue(attack.returning());
             assertEquals(.5f, attack.approachWeight(), .00001f);
             assertEquals(0, attack.contactWeight());

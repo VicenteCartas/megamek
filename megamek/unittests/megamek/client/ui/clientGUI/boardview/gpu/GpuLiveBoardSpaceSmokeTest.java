@@ -855,6 +855,7 @@ class GpuLiveBoardSpaceSmokeTest {
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> frame.get());
+            when(source.scenarioAtmosphere()).thenReturn(BoardAtmosphere.DEFAULTS);
             when(source.reserveUnits()).thenAnswer(invocation -> real.reserveUnits());
             when(source.moves()).thenReturn(mock(GpuMovePlan.class));
             when(source.fire()).thenReturn(mock(GpuFireOrders.class));

@@ -211,7 +211,7 @@ class GpuFiringCharacterizationTest {
                 return lines;
             });
             // In range and arc; then the same laser once fired; then a torso laser after twisting away from the Archer
-            assertEquals(List.of("true Range: 3 To Hit: 4 (92%) = 4 (gunnery skill)", "false Range: 3 Already fired",
+            assertEquals(List.of("true Range: 3 To Hit: 4 (91.6%) = 4 (gunnery skill)", "false Range: 3 Already fired",
                   "false Range: 3 To Hit: (0%) Target not in arc."), observed);
         }
     }

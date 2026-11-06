@@ -76,7 +76,7 @@ class GpuBombMineDialogRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             try {
                 // A fighter bombing the ground drops at most two bombs; rockets cannot be dropped on the ground
                 List<List<String>> offered = new ArrayList<>();
@@ -147,7 +147,7 @@ class GpuBombMineDialogRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogFixture.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             Entity tank = minelayer();
             try {
                 List<List<String>> mines = new ArrayList<>();

@@ -138,6 +138,16 @@ final class GpuDialogFixture {
         return window;
     }
 
+    /**
+     * Registers a native window of {@code gui} that is closing before it was presented. It draws no dialogs and the
+     * client's prompts show in Swing at once, where those of a window still starting wait for it (GpuBoardWindow.route).
+     */
+    static void closingWindow(ClientGUI gui, BoardClientState view, GpuBoardSource source) throws Exception {
+        GpuBoardWindow window = present(gui, view, source);
+        set(window, "presented", false);
+        set(window, "closing", true);
+    }
+
     /** EDT: clicks the button inside {@code root} with this text, as the player does. */
     static void press(Container root, String text) {
         GpuDialogFixture.button(root, text).doClick();
