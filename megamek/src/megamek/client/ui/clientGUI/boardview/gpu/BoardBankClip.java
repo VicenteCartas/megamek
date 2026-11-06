@@ -268,7 +268,7 @@ final class BoardBankClip {
     private static boolean levelBank(BoardScene scene, BoardScene.Tile tile) {
         for (int d = 0; d < 6; d++) {
             var next = scene.tile(tile.coords().translated(d));
-            if (BoardBridge.abutment(tile, next, d) && next.elevation() == deck(tile)) { return true; }
+            if (BoardBridge.abutment(tile, next, d) && BoardRoadGrade.ground(next) == deck(tile)) { return true; }
         }
         return false;
     }

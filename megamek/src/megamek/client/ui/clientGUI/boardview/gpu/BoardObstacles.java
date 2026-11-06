@@ -448,7 +448,7 @@ final class BoardObstacles {
             float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
             passage(centre, edge, across, Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ));
             if (BoardBridge.family(tile) != BoardBridge.Family.NATURAL && !BoardBridge.guideway(tile)
-                  && BoardBridge.bank(tile, next, d) && next.elevation() < tile.elevation() + bridge.elevation()) {
+                  && BoardBridge.bank(tile, next, d) && BoardRoadGrade.ground(next) < tile.elevation() + bridge.elevation()) {
                 // The solid ramp begins at the bridge inset and ends with a wider authored landing block.
                 // Reserve that whole passage, leaving the level centre of the span height-aware above.
                 float lane = (tile.deckCorridor().sides() & 1 << d) != 0

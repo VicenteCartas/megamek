@@ -139,7 +139,8 @@ final class GpuTilesetTerrain {
         if (deck == null || !deck.natural()) { return null; }
         for (int d = 0; d < 6; d++) {
             var bank = scene.neighbor(tile, d);
-            if (BoardBridge.abutment(tile, bank, d) && bank.surface() == deck.surface() && bank.tileset() != null) {
+            if (BoardBridge.abutment(tile, bank, d) && !bank.liquid().present() && bank.surface() == deck.surface()
+                  && bank.tileset() != null) {
                 return bank.tileset();
             }
         }

@@ -788,20 +788,18 @@ final class BoardSurface {
      * carriageway's grade ({@link BoardRoadGrade#edgeLevel}).
      */
     static float roadEdgeElevation(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
-        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel() || tile.liquid().present()) {
-            return tile.elevation();
-        }
+        if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel()) { return BoardRoadGrade.ground(tile); }
         var bridge = connectingBridge(tile, neighbor, direction);
         if (bridge == null) { return BoardRoadGrade.edgeLevel(tile, neighbor, direction); }
         // A raised bridge owns its solid approach, leaving the bank and its shoreline intact underneath.
-        if (neighbor.elevation() + bridge.elevation() > tile.elevation()) { return tile.elevation(); }
+        if (neighbor.elevation() + bridge.elevation() > BoardRoadGrade.ground(tile)) { return BoardRoadGrade.ground(tile); }
         return BoardBridge.edgeElevation(neighbor, tile, (direction + 3) % 6);
     }
 
     /** Presentation only: a road end can meet unpaved ground across at most two levels. */
     static boolean hasRoadApproach(BoardScene.Tile tile, BoardScene.Tile neighbor, int direction) {
         if (neighbor == null || tile.ultraSublevel() || neighbor.ultraSublevel()
-              || tile.liquid().present() || neighbor.liquid().present()) {
+              || !BoardRoad.groundShown(tile) || !BoardRoad.groundShown(neighbor)) {
             return false;
         }
         boolean exit = (tile.wayExits() & (1 << direction)) != 0;
@@ -812,18 +810,18 @@ final class BoardSurface {
               || connectingBridge(neighbor, tile, reverse) != null) {
             return false;
         }
-        return HexTile.roadApproach(exit, continuation, Math.abs(tile.elevation() - neighbor.elevation()));
+        return HexTile.roadApproach(exit, continuation, Math.abs(tile.floor() - neighbor.floor()));
     }
 
     static BoardScene.Feature connectingBridge(BoardScene.Tile road, BoardScene.Tile bridge, int direction) {
-        if (road.liquid().present() || (road.wayExits() & (1 << direction)) == 0) {
+        if (!BoardRoad.groundShown(road) || (road.wayExits() & (1 << direction)) == 0) {
             return null;
         }
         int reverse = (direction + 3) % 6;
         boolean continuation = !bridge.liquid().present() && (bridge.wayExits() & (1 << reverse)) != 0;
         // A level deck wins over a sloped ground road; a sloped deck is the last connected-road fallback.
         return bridge.features().stream().filter(feature -> feature.asset().equals("bridge")
-              && HexTile.bridgeApproach(road.elevation(), bridge.elevation(), bridge.elevation() + feature.elevation(),
+              && HexTile.bridgeApproach(road.floor(), bridge.elevation(), bridge.elevation() + feature.elevation(),
                     continuation)
               && (feature.bridgeExits() & (1 << reverse)) != 0).findFirst().orElse(null);
     }
@@ -2410,7 +2408,7 @@ final class BoardSurface {
             if (next == null) { continue; }
             int arms = corners ? 1 << (d + 2) % 6 | 1 << (d + 4) % 6 : 63;
             if ((next.wayExits() & arms) == 0 && (corners
-                  || next.elevation() == tile.elevation() && !BoardRoadGrade.apron(tile, next, d))) { continue; }
+                  || next.floor() == tile.floor() && !BoardRoadGrade.apron(tile, next, d))) { continue; }
             var grade = BoardRoadGrade.of(scene, next, eased);
             if (grade != null) { grades.add(grade); }
         }
@@ -2457,10 +2455,11 @@ final class BoardSurface {
             faces.clear();
             faces.addAll(eased);
         }
-        if (tile.liquid().present()) {
-            bank = null;
-            // Its shore can reach into a road's reserved ground beside it, and gives way there as any natural top does;
-            // its bed and water stay as they are.
+        boolean wet = tile.liquid().present();
+        if (wet) { bank = null; }
+        if (wet && !BoardRoad.groundShown(tile)) {
+            // Ice, lava or a deck keeps roads off this hex's ground, but its shore can reach into a road's reserved ground
+            // beside it, and gives way there as any natural top does; its bed and water stay as they are.
             var grades = grades(false);
             if (!grades.isEmpty() && natural()) {
                 var cut = new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), center.z, grades, boardEdges(scene, tile));
@@ -2477,9 +2476,14 @@ final class BoardSurface {
         BoardRoadCut.WallBuilder wall = cutFaces(retainingWalls);
         List<Face> road = new ArrayList<>();
         cut.mesh(road, wall);
+        if (wet) {
+            // Water is a layer over the same road ground, which only takes the bed's material under it.
+            road.replaceAll(face -> new Face(face.a(), face.b(), face.c(), Finish.BED, face.landEdge()));
+            renderBed = null;
+        }
         reservedRoad = List.copyOf(road);
         reservedFaces.addAll(road);
-        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, natural(), false);
+        List<Face> kept = cut.clip(faces, relief, wall, cutFaces(pouredWalls), roadAround(), bank, wet || natural(), false);
         pouredTop = pouredWalls.size();
         faces.clear();
         faces.addAll(kept);
@@ -2491,21 +2495,21 @@ final class BoardSurface {
     }
 
     /**
-     * The cut reserving a dry Enhanced hex's road ground (#reserveRoads); null where none leaves the top's level, which
-     * level roads on level ground keep.
+     * The cut reserving an Enhanced hex's road ground (#reserveRoads); null where none leaves the top's level, which level
+     * roads on level ground keep. A bed is no level top, whatever its neighbours' levels.
      */
     private static BoardRoadCut roadCut(BoardScene scene, BoardScene.Tile tile) {
-        if (tile.liquid().present() || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
+        if (!BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return null; }
         var grades = grades(scene, tile, false, true);
         if (grades.isEmpty()) { return null; }
-        boolean level = grades.stream().noneMatch(grade -> grade.graded()
-              || grade.tile().elevation() != tile.elevation());
+        boolean level = !tile.liquid().present() && grades.stream().noneMatch(grade -> grade.graded()
+              || grade.tile().floor() != tile.floor());
         for (int d = 0; level && d < 6; d++) {
             var next = scene.neighbor(tile, d);
-            level = next == null || next.elevation() == tile.elevation() && !next.liquid().present();
+            level = next == null || next.floor() == tile.floor() && !next.liquid().present();
         }
         if (level) { return null; }
-        return new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), BoardGeometry.center(tile.coords(), tile.groundLevel()).z,
+        return new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), BoardRoadGrade.ground(tile) * BoardGeometry.level(),
               grades, boardEdges(scene, tile));
     }
 
@@ -2716,7 +2720,7 @@ final class BoardSurface {
         int direction = BoardGeometry.edgeDirection(edge);
         var next = scene.tile(tile.coords().translated(direction));
         if (next == null || connectingBridge(tile, next, direction) == null) { return false; }
-        float rise = roadEdgeElevation(tile, next, direction) - tile.elevation();
+        float rise = roadEdgeElevation(tile, next, direction) - BoardRoadGrade.ground(tile);
         return rise > 0 && high > ground + epsilon;
     }
 

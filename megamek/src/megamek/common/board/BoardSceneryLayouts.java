@@ -573,10 +573,15 @@ public final class BoardSceneryLayouts {
               && (HexTile.liquid(bridge) || !bridge.containsTerrainExit(Terrains.ROAD, direction));
     }
 
-    /** Ground a road leads along to a deck: dry, or a ford's depth-0 water, whose road lies on its bed in 3D. */
+    /** Ground a road leads along to a deck for the game's exits: dry, or a ford's depth-0 water. */
     private static boolean roadGround(Hex hex) {
+        return wayGround(hex) && (!HexTile.liquid(hex) || hex.terrainLevel(Terrains.WATER) == 0);
+    }
+
+    /** Ground the 3D board lays a way on: dry, or under water at any depth, on its bed. */
+    private static boolean wayGround(Hex hex) {
         return !HexTile.liquid(hex) || hex.terrainLevel(Terrains.MAGMA) != 2
-              && !hex.containsTerrain(Terrains.HAZARDOUS_LIQUID) && hex.terrainLevel(Terrains.WATER) == 0;
+              && !hex.containsTerrain(Terrains.HAZARDOUS_LIQUID);
     }
 
     /**
@@ -1002,16 +1007,16 @@ public final class BoardSceneryLayouts {
 
     /**
      * Whether a road or ground rail of {@code way} leaves by {@code direction} onto the deck of the bridge hex
-     * {@code bridge}, as the 3D board joins a way to a deck: on road ground ({@link #roadGround}), the deck exiting
-     * back within a level, and the bridge hex not continuing the way on its own ground at the same level.
+     * {@code bridge}, as the 3D board joins a way to a deck: on its ground ({@link #wayGround}), the deck exiting back
+     * within a level of that ground, and the bridge hex not continuing the way on its own ground at the same level.
      */
     private static boolean meets(Hex way, Hex bridge, int direction) {
-        if (!roadGround(way) || (ways(way) & (1 << direction)) == 0) { return false; }
+        if (!wayGround(way) || (ways(way) & (1 << direction)) == 0) { return false; }
         int back = (direction + 3) % 6;
         boolean continued = !HexTile.liquid(bridge) && (ways(bridge) & (1 << back)) != 0;
         int deck = BridgeSpan.deck(bridge);
-        return !(continued && way.getLevel() == bridge.getLevel()) && Math.abs(deck - way.getLevel()) <= 1
-              && (!continued || deck == way.getLevel()) && (RailRoute.bridgeExits(bridge) & (1 << back)) != 0;
+        return !(continued && way.floor() == bridge.getLevel()) && Math.abs(deck - way.floor()) <= 1
+              && (!continued || deck == way.floor()) && (RailRoute.bridgeExits(bridge) & (1 << back)) != 0;
     }
 
     /** The sides of a hex's road and of its rails on the ground ({@link RailRoute#groundSides}). */

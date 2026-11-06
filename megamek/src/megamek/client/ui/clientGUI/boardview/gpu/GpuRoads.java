@@ -859,9 +859,13 @@ final class GpuRoads {
         var bounds = patch.shape().getBounds2D();
         // A neighbour's ground road at another level paints only the road surface it reserves here; a bridge's deck
         // carries its apron onto the bank on purpose.
-        boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
-        // A road through water lies on its bed (BoardRoad#bed); a bridge's apron keeps to the dry bank.
-        boolean bed = surface.tile.liquid().present() && BoardBridge.feature(tile) == null;
+        boolean wet = surface.tile.liquid().present();
+        // Water standing higher than a dry road beside it, over ground at the road's level, keeps its rim from that road.
+        boolean apart = (tile.floor() != surface.tile.floor()
+              || wet != tile.liquid().present() && tile.elevation() != surface.tile.elevation())
+              && BoardBridge.feature(tile) == null;
+        // Under water the ground a road lies on is the bed.
+        boolean bed = wet;
         boolean reached = tile.coords().equals(surface.tile.coords());
         float[] outline = null;
         for (var face : surface.coatingFaces()) {

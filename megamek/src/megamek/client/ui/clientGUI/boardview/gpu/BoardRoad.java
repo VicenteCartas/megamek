@@ -122,16 +122,16 @@ final class BoardRoad {
             if (tile == null) { return null; }
             boolean plain = rendered(tile) && tile.corridor().sides() == 0
                   && tile.features().stream().noneMatch(feature -> feature.asset().equals("bridge"));
-            return new Node(tile.roadExits() & 63, tile.elevation(), plain,
+            return new Node(tile.roadExits() & 63, tile.floor(), plain,
                   plain && tile.road() == Kind.PAVED && tile.railExits() == 0);
         }
 
         static Node of(Hex hex) {
             if (hex == null) { return null; }
             int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
-            boolean plain = capture(hex) != Kind.NONE && !HexTile.liquid(hex) && !hex.containsTerrain(Terrains.BRIDGE)
+            boolean plain = rendered(hex) && !hex.containsTerrain(Terrains.BRIDGE)
                   && !hex.containsTerrain(Terrains.ULTRA_SUBLEVEL);
-            return new Node(exits, hex.getLevel(), plain,
+            return new Node(exits, hex.floor(), plain,
                   plain && capture(hex) == Kind.PAVED && RailRoute.groundSides(hex) == 0);
         }
 
@@ -182,35 +182,34 @@ final class BoardRoad {
         };
     }
 
+    /**
+     * Whether what lies on this hex's ground shows: water is a layer over the same ground as any other, at any depth (a
+     * ford, a submerged city's street). A bridge carries the road over water instead, and molten liquid and ice hide it.
+     */
+    static boolean groundShown(BoardScene.Tile tile) {
+        return !tile.liquid().present() || !tile.liquid().molten() && !tile.frozen() && BoardBridge.feature(tile) == null;
+    }
+
     /** Unsupported road decoration and coexisting terrain retain their original artwork. */
     static boolean rendered(BoardScene.Tile tile) {
-        return tile.road() != Kind.NONE && !tile.liquid().present();
+        return tile.road() != Kind.NONE && groundShown(tile);
     }
 
     /**
-     * A road under a liquid at any depth, a ford or a submerged city's street, which Enhanced lays on the bed
-     * ({@link #bed}). A bridge carries its road over the water instead, and molten liquid and ice hide its bed.
+     * {@link #rendered(BoardScene.Tile)} before the capture, for the road's furniture. An airless board's ice is the
+     * scene's to decide, as it freezes its water there (BoardFeatures#fittedControls).
      */
-    static boolean submerged(BoardScene.Tile tile) {
-        return tile.road() != Kind.NONE && tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()
-              && BoardBridge.feature(tile) == null;
-    }
-
-    /**
-     * {@link #submerged(BoardScene.Tile)} before the capture, for the road's furniture on its bed. Ice is the scene's to
-     * decide, as an airless board freezes its water (BoardFeatures#fittedControls).
-     */
-    static boolean submerged(Hex hex) {
-        return capture(hex) != Kind.NONE && HexTile.liquid(hex) && !BoardLiquid.capture(hex).molten()
-              && !hex.containsTerrain(Terrains.BRIDGE);
+    static boolean rendered(Hex hex) {
+        return capture(hex) != Kind.NONE && (!HexTile.liquid(hex) || !BoardLiquid.capture(hex).molten()
+              && !hex.containsTerrain(Terrains.ICE) && !hex.containsTerrain(Terrains.BRIDGE));
     }
 
     /**
      * A carriageway the ground is shaped and cleared for ({@link BoardScene.Tile#wayExits}): a rendered road, or rails on
-     * the tile's detailed, dry ground.
+     * the tile's detailed ground.
      */
     static boolean carriageway(BoardScene.Tile tile) {
-        return rendered(tile) || tile.railExits() != 0 && !tile.liquid().present();
+        return rendered(tile) || tile.railExits() != 0 && groundShown(tile);
     }
 
     /**
@@ -221,9 +220,14 @@ final class BoardRoad {
         return tile.railExits() == 0 ? of(scene, tile) : clearance(tile.coords(), tile.wayExits(), tile.corridor()).solidHub();
     }
 
-    /** Roads painting this dry, level ground, including their shoulders across neighbouring hex edges. */
+    /** Roads painting this level ground, including their shoulders across neighbouring hex edges. */
     static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile) {
         return nearby(scene, tile, false, false);
+    }
+
+    /** {@link #nearby} for Classic, whose water column shows its liquid only: no road comes from under water. */
+    static List<BoardRoad> nearbyDry(BoardScene scene, BoardScene.Tile tile) {
+        return nearby(scene, tile, false, true);
     }
 
     /** The same neighbouring courses for placement clearance, including ground rails without a road. */
@@ -236,19 +240,14 @@ final class BoardRoad {
         return nearbyWays(scene, tile).stream().filter(way -> rendered(scene.tile(way.owner()))).toList();
     }
 
-    /** Roads painting the bed of a {@link #submerged} road's hex: its own and those meeting it at its level. */
-    static List<BoardRoad> bed(BoardScene scene, BoardScene.Tile tile) {
-        return submerged(tile) ? nearby(scene, tile, false, true) : List.of();
-    }
-
-    private static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile, boolean clearance, boolean bed) {
-        if (tile == null || tile.liquid().present() != bed) { return List.of(); }
+    private static List<BoardRoad> nearby(BoardScene scene, BoardScene.Tile tile, boolean clearance, boolean dry) {
+        if (tile == null || !groundShown(tile)) { return List.of(); }
         List<BoardRoad> result = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             var source = direction < 0 ? tile : scene.neighbor(tile, direction);
             // A graded road's ramp and corridor reach a neighbour of another level too; drawn roads keep to their level.
-            if (source == null || !clearance && source.elevation() != tile.elevation()
-                  || !(clearance ? carriageway(source) : rendered(source) || bed && submerged(source))) { continue; }
+            if (source == null || !clearance && source.floor() != tile.floor() || dry && source.liquid().present()
+                  || !(clearance ? carriageway(source) : rendered(source))) { continue; }
             // Only an actual apron entrance ends at concrete. Through-roads and roundabouts keep their full width
             // where their sides cross a fitted concrete edge, including concrete carrying another road.
             if (!clearance && direction >= 0 && tile.surface() == BoardScene.Surface.CONCRETE
@@ -309,7 +308,7 @@ final class BoardRoad {
             if ((tile.roadExits() & 1 << d) == 0 || next == null) { continue; }
             if (BoardSurface.connectingBridge(tile, next, d) != null
                   || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null) { continue; }
-            if (next.elevation() != tile.elevation() || !rendered(next) || (next.roadExits() & 1 << (d + 3) % 6) == 0) {
+            if (next.floor() != tile.floor() || !rendered(next) || (next.roadExits() & 1 << (d + 3) % 6) == 0) {
                 continue;
             }
             if (loose && !paved(next.road())) { tracked |= 1 << d; }
@@ -764,11 +763,12 @@ final class BoardRoad {
         int ramps = 0;
         for (int d = 0; d < 6; d++) {
             Hex next = board.apply(coords.translated(d));
-            if (next == null || HexTile.liquid(next) || next.getLevel() == hex.getLevel()) { continue; }
+            // Dry ground keeps its level beside water (BoardRoadGrade#edgeLevel).
+            if (next == null || next.floor() == hex.floor() || HexTile.liquid(next) && !HexTile.liquid(hex)) { continue; }
             int back = 1 << (d + 3) % 6;
             boolean way = next.containsTerrain(Terrains.ROAD) && (next.getTerrain(Terrains.ROAD).getExits() & back) != 0
                   || (RailRoute.groundSides(next) & back) != 0;
-            if (way || Math.abs(next.getLevel() - hex.getLevel()) <= 2) { ramps |= 1 << d; }
+            if (way || Math.abs(next.floor() - hex.floor()) <= 2) { ramps |= 1 << d; }
         }
         return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED, bends(coords, nodes), true,
               climbingTurn(exits, ramps)).circulate(nodes);
@@ -1538,7 +1538,7 @@ final class BoardRoad {
                   || BoardSurface.connectingBridge(next, tile, (d + 3) % 6) != null
                   || BoardRoadGrade.apron(tile, next, d)
                   || next.road() != tile.road() && (next.roadExits() & 1 << (d + 3) % 6) != 0
-                        && (next.elevation() != tile.elevation() || !rendered(next))) {
+                        && (next.floor() != tile.floor() || !rendered(next))) {
                 return false;
             }
         }

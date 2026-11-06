@@ -3767,12 +3767,12 @@ final class GpuTerrain implements Disposable {
      * neighbour's at another level whose carriageway reserves part of this hex.
      */
     private static List<BoardRoad> painting(BoardScene scene, BoardScene.Tile tile, boolean columns) {
-        // Enhanced lays a road through water on its bed; Classic's water column shows its liquid only.
-        if (tile.liquid().present()) { return columns ? List.of() : BoardRoad.bed(scene, tile); }
-        var result = new ArrayList<>(BoardRoad.nearby(scene, tile));
+        // Classic's water column shows its liquid only.
+        if (columns && tile.liquid().present()) { return List.of(); }
+        var result = new ArrayList<>(columns ? BoardRoad.nearbyDry(scene, tile) : BoardRoad.nearby(scene, tile));
         for (int d = 0; d < 6 && !columns; d++) {
             var source = scene.neighbor(tile, d);
-            if (source != null && source.elevation() != tile.elevation() && BoardRoad.rendered(source)
+            if (source != null && source.floor() != tile.floor() && BoardRoad.rendered(source)
                   && BoardRoadGrade.reaches(scene, source, tile)) { result.add(BoardRoad.of(scene, source)); }
         }
         return result;
@@ -7479,7 +7479,7 @@ final class GpuTerrain implements Disposable {
         if (tile.features().stream().anyMatch(feature -> routeFeature(tile, feature))) { return true; }
         for (int direction = -1; direction < 6; direction++) {
             var source = direction < 0 ? tile : scene.neighbor(tile, direction);
-            if (source != null && (BoardRoad.rendered(source) || BoardRoad.submerged(source))) { return true; }
+            if (source != null && BoardRoad.rendered(source)) { return true; }
         }
         return false;
     }

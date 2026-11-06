@@ -106,7 +106,8 @@ final class BoardRoadBank {
         grades.sort(Comparator.comparingInt((BoardRoadGrade grade) -> grade.tile().coords().getX())
               .thenComparingInt(grade -> grade.tile().coords().getY()));
         for (var grade : grades) {
-            if (grade.bridgeRamp() || grade.poured()) { continue; }
+            // Natural ground does not ease down to a road under water: it would lie below the water beside it, dry.
+            if (grade.bridgeRamp() || grade.poured() || grade.tile().liquid().present()) { continue; }
             // A road above shallow drops only fills them up as an embankment (BoardRoadGrade#FILL); beside a deeper
             // drop its fill stays at its own level, so the cliff below keeps its face.
             float floor = grade.low();

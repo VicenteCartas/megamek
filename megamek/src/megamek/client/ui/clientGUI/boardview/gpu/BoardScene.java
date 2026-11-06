@@ -691,6 +691,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         /** Visual cap below an ultra-sublevel's mouth, including pits beside ground at the same authored level. */
         int groundLevel() { return elevation - (ultraSublevel ? 1 : 0); }
 
+        /** The level of the ground under this hex's liquid (Hex#floor): roads and bridges meet it, water being a layer over it. */
+        int floor() { return elevation - (liquid.present() ? Math.max(0, waterDepth) : 0); }
+
         /**
          * Whether a side the author separated parts this hex's water from {@code other}'s, the neighbour in
          * {@code direction}. It holds between water at one level; across a step the water still falls.

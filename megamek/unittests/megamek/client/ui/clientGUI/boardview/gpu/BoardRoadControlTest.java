@@ -487,12 +487,12 @@ class BoardRoadControlTest {
     void iceHidesASubmergedRoadAndClassicLeavesOutItsFurniture() {
         var scene = waterRoad("road:1:27;water:1");
         var tile = scene.tile(AT);
-        assertTrue(BoardRoad.submerged(tile));
+        assertTrue(BoardRoad.rendered(tile));
         var furniture = BoardFeatures.fittedControls(scene, tile).stream()
               .filter(feature -> BoardFeatures.submergedControl(tile, feature)).toList();
         assertFalse(furniture.isEmpty(), "Under open water the road keeps its furniture; Classic filters it by this test");
         var iced = waterRoad("road:1:27;water:1;ice:1");
-        assertFalse(BoardRoad.submerged(iced.tile(AT)));
+        assertFalse(BoardRoad.rendered(iced.tile(AT)));
         assertTrue(BoardFeatures.fittedControls(iced, iced.tile(AT)).stream()
               .noneMatch(feature -> BoardFeatures.submergedControl(iced.tile(AT), feature)));
     }

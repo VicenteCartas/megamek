@@ -346,8 +346,8 @@ final class BoardRelief {
               && (liquid || road || tile.wayExits() == 0 && tile.road() == BoardRoad.Kind.NONE);
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
         return new Site(tile.coords(), tile.groundLevel(), shaped, shaped && tile.detailedGround(), family.ordinal(),
-              tile.ultraSublevel(), liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road, ramps,
-              tile.cliffTopExits(), centerIx(tile.coords()), centerIy(tile.coords()));
+              tile.ultraSublevel(), liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road,
+              liquid ? 0 : ramps, tile.cliffTopExits(), centerIx(tile.coords()), centerIy(tile.coords()));
     }
 
     /**

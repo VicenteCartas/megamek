@@ -37,11 +37,11 @@ class BoardRoadSpillTest {
               roads.stream().map(BoardRoad::coords).toList(), "A Classic-artwork neighbor still contributes its native road");
         var ways = BoardRoad.nearbyWays(scene, scene.tile(AT));
         // A graded road's ramp reaches a neighbour of another level (BoardRoad.nearby); a rail clears plants too.
-        assertEquals(List.of(AT, AT.translated(0), AT.translated(1), AT.translated(3), AT.translated(4), AT.translated(5)),
-              ways.stream().map(BoardRoad::coords).toList(), "Clearance reaches every dry neighbour's way");
-        assertTrue(BoardRoad.nearby(scene, scene.tile(AT.translated(2))).isEmpty(), "Water cannot support spilled road paint");
-        assertTrue(BoardRoad.bed(scene, scene.tile(AT.translated(2))).stream()
-              .anyMatch(road -> road.coords().equals(AT.translated(2))), "A road a level under water lies on its bed");
+        assertEquals(List.of(AT, AT.translated(0), AT.translated(1), AT.translated(2), AT.translated(3), AT.translated(4),
+                    AT.translated(5)),
+              ways.stream().map(BoardRoad::coords).toList(), "Clearance reaches every neighbour's way, under water too");
+        assertEquals(List.of(AT.translated(2)), BoardRoad.nearby(scene, scene.tile(AT.translated(2))).stream().map(BoardRoad::coords).toList(),
+              "A road a level under water lies on its bed, a level below the roads around it");
     }
 
     @Test

@@ -126,7 +126,7 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN ->
                       structureModels.containsKey(Terrains.FUEL_TANK);
                 case Terrains.INDUSTRIAL -> structureModels.containsKey(Terrains.INDUSTRIAL);
-                // A road through water lies on its bed (BoardRoad#submerged).
+                // A road through water lies on its bed (BoardRoad#groundShown).
                 case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 // Fluff 1 selects the standard road bend, already represented by the captured road exits.
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
@@ -622,17 +622,12 @@ final class BoardFeatures {
 
     /** Captured counterparts of BoardRoad.nearbyWays; no game connection is added for visual overhang. */
     private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board) {
-        return nearbyWays(hex, coords, board, false);
-    }
-
-    /** With {@code submerged}, the roads under liquid count too: what stands on a bed keeps clear of the roads on it. */
-    private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board, boolean submerged) {
         List<BoardRoad> roads = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             Coords at = direction < 0 ? coords : coords.translated(direction);
             Hex source = direction < 0 ? hex : board.apply(at);
             // A graded road's ramp and corridor reach a neighbour of another level too.
-            if (source == null || HexTile.liquid(source) && !(submerged && BoardRoad.submerged(source))) { continue; }
+            if (source == null || HexTile.liquid(source) && !BoardRoad.rendered(source)) { continue; }
             int rails = RailRoute.groundSides(source);
             if (BoardRoad.capture(source) == BoardRoad.Kind.NONE && rails == 0) { continue; }
             BoardRoad road = BoardRoad.clearance(at, source, board, rails);
@@ -647,7 +642,7 @@ final class BoardFeatures {
         List<BoardScene.Feature> result = new ArrayList<>();
         for (boolean deck : new boolean[] { false, true }) {
             if (deck ? !hex.containsTerrain(Terrains.BRIDGE)
-                  : !groundVisible || HexTile.liquid(hex) && !BoardRoad.submerged(hex)
+                  : !groundVisible || HexTile.liquid(hex) && !BoardRoad.rendered(hex)
                         || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
             BoardRoad.Kind kind = deck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
             if (kind != BoardRoad.Kind.PAVED) { continue; }
@@ -685,7 +680,7 @@ final class BoardFeatures {
             var approaches = road.stopApproaches(exits, crossing);
             crossingControls(hex, coords, board, deck, road, corridor, marker, crossing, approaches, junction, result);
             if (junction.isEmpty()) { continue; }
-            List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board, HexTile.liquid(hex));
+            List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board);
             for (var approach : approaches) {
                 if (junction.stream().noneMatch(arm -> arm.direction() == approach.direction())) { continue; }
                 // Other turning envelopes can widen this approach beyond its own lane. Follow the whole asphalt
@@ -880,8 +875,7 @@ final class BoardFeatures {
                   BoardGeometry.TILE_HEIGHT)) { continue; }
             Hex support = direction < 0 ? hex : board.apply(at);
             if (support == null || support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
-            if (HexTile.liquid(hex) ? support.floor() == hex.floor() && !BoardLiquid.capture(support).molten()
-                  : support.getLevel() == hex.getLevel() && !HexTile.liquid(support)) { return true; }
+            if (support.floor() == hex.floor() && !BoardLiquid.capture(support).molten()) { return true; }
         }
         return false;
     }
@@ -906,10 +900,10 @@ final class BoardFeatures {
     /** The road and deck must expose matching sides before their shared layer-choice predicate applies. */
     private static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
         int reverse = (direction + 3) % 6;
-        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
+        if (HexTile.liquid(road) && !BoardRoad.rendered(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
               || (groundWays(road) & (1 << direction)) == 0) { return false; }
         boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
-        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+        return HexTile.bridgeApproach(road.floor(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
     }
 
     private static int groundWays(Hex hex) {
