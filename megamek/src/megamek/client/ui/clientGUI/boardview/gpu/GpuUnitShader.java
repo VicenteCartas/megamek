@@ -193,7 +193,8 @@ final class GpuUnitShader extends DefaultShader {
         source = replaceOnce(source, MAIN, GpuShaderSource.read("model-colour-slots.glsl") + "\n" + MAIN, "vertex");
         String color = "v_color = a_color;";
         return replaceOnce(source, color, color
-              + "\n#ifdef colourSlotsFlag\nv_color.rgb = slotColour(a_color.rgb, a_colourSlot, u_slotColours);\n#endif\n"
+              + "\n#ifdef colourSlotsFlag\nv_color.rgb = slotColour(a_color.rgb, a_colourSlot, u_slotColours);\n"
+              + "v_slotGlow = v_color.rgb / max(a_color.rgb, vec3(1e-4));\n#endif\n"
               + "#if (defined(lightingFlag) || defined(sceneUnlitFlag) || defined(linearTextureFlag))"
               + " && !defined(linearColorsFlag) && !defined(vertexDataFlag)\n"
               + "v_color.rgb = toLinear(v_color.rgb);\n#endif\n", "vertex");

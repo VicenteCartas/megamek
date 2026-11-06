@@ -776,6 +776,68 @@ class GpuSceneryColourSmokeTest {
         throw new AssertionError("No car on " + coords);
     }
 
+    /** A replaced slot colour tints its vertices' own glow: by night a generator ring's core shows its Glow slot's colour. */
+    @Test
+    void aReplacedGlowSlotColoursTheGlow() throws Exception {
+        Files.createDirectories(OUTPUT.toPath());
+        File shot = new File(OUTPUT, "glow-slot.png");
+        Coords own = new Coords(3, 3), red = new Coords(4, 3);
+        var board = Board.createEmptyBoard(8, 8);
+        for (var coords : List.of(own, red)) {
+            var hex = board.getHex(coords).duplicate();
+            hex.setDecorations(List.of(new BoardDecoration("ring-" + coords.getBoardNum(), "prop", "scenery/roofs/generator-ring", null,
+                  0, 0, 0, false, 1, BoardDecoration.Placement.ground(), 0, false)
+                  .withColours(coords.equals(red) ? BoardDecoration.Colours.NONE.with(1, "#8a241c") : BoardDecoration.Colours.NONE)));
+            board.setHex(coords, hex);
+        }
+        var capture = new java.util.concurrent.FutureTask<BoardScene>(() -> {
+            var editor = new megamek.client.ui.boardeditor.BoardEditorSession();
+            editor.open(board, null);
+            try (var source = new GpuMapSource(editor.game(), null, editor)) { return source.takeFrame().scene(); }
+        });
+        SwingUtilities.invokeAndWait(capture);
+        BoardScene scene = capture.get();
+        var failure = new AtomicReference<Throwable>();
+        var config = GpuBoardWindow.configuration(false);
+        config.setWindowedMode(800, 500);
+        config.setInitialVisible(false);
+        new Lwjgl3Application(new ApplicationAdapter() {
+            @Override public void create() {
+                var terrain = new GpuTerrain();
+                var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(22, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
+                try {
+                    var camera = new BoardCamera();
+                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                    terrain.update(scene);
+                    terrain.animate(.5f, List.of());
+                    camera.setIsometric(false);
+                    camera.camera.zoom = .2f;
+                    camera.center(BoardGeometry.center(own, 0));
+                    frame.render(terrain, camera, scene);
+                    GpuReviewFrame.save(shot);
+                } catch (Throwable error) {
+                    failure.set(error);
+                } finally {
+                    frame.dispose();
+                    terrain.dispose();
+                    Gdx.app.exit();
+                }
+            }
+        }, config);
+        if (failure.get() != null) { throw new AssertionError("Glow slot capture", failure.get()); }
+        var image = javax.imageio.ImageIO.read(shot);
+        int blue = 0, reddish = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int rgb = image.getRGB(x, y), r = rgb >> 16 & 255, b = rgb & 255;
+                if (b > r + 60) { blue++; }
+                if (r > b + 60) { reddish++; }
+            }
+        }
+        assertTrue(blue > 20, "The ring in its own colours glows blue: " + blue);
+        assertTrue(reddish > 20, "The ring with a red Glow slot glows red: " + reddish);
+    }
+
     /** Pixels that differ at all, pixels whose largest channel difference exceeds 1/255, and the largest one. */
     static int[] parity(File first, File second) throws java.io.IOException {
         var a = javax.imageio.ImageIO.read(first);

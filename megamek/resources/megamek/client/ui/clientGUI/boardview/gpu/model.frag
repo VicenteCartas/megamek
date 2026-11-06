@@ -33,6 +33,9 @@ uniform vec4 u_emissiveColor;
 #ifdef normalTextureFlag
 uniform sampler2D u_normalTexture;
 #endif
+#ifdef colourSlotsFlag
+in vec3 v_slotGlow;
+#endif
 // Enabled, emission multiplier, diffuse multiplier. Zero leaves authored materials unchanged, including in renderers
 // that do not register this control. Light timing and intensity belong to the material's draw setter.
 uniform vec3 u_modelLight;
@@ -74,6 +77,9 @@ void main() {
     vec4 emissive = u_emissiveColor;
 #else
     vec4 emissive = vec4(0.0);
+#endif
+#ifdef colourSlotsFlag
+    emissive.rgb *= v_slotGlow;
 #endif
 #if defined(blendedFlag) && defined(modelSurfaceFlag)
     // Godot's premultiplied alpha (a .tres's blend_mode 4): the albedo fades with the opacity before lighting, so the
