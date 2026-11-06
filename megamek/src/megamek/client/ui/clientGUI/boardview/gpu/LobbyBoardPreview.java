@@ -267,6 +267,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
         }
 
         private void hover(float x, float y) {
+            // A held drag's hidden cursor points at nothing.
+            if (UiCursorCapture.active()) { return; }
             hovering = true;
             hoverX = x; hoverY = y;
             Pick hit = pick(x, y);

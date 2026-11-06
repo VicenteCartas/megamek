@@ -16,12 +16,16 @@ import org.lwjgl.glfw.GLFW;
  * The drag's owner reads its pointer through {@link #trusted}. For a real press that reads the live cursor and makes any
  * jump in the same step, so a jump never reaches the drag, whenever its event arrives; once the button is up the pointer
  * stops, so nothing after the release moves the drag. A synthetic drag moves no real cursor and is read as it comes.
+ * <p>
+ * Wayland does not let a program move the cursor, so it cannot wrap or return there. It stays visible and the drag stops
+ * at the screen's edge.
  */
 public final class UiCursorCapture {
     /** The one pointer has one capture at a time, across all windows. */
     private static UiCursorCapture holder;
-    /** A far reading that lasts this long is taken as real, so a lost jump cannot freeze the drag. */
+    /** A far reading that lasts this long and this many frames is taken as real, so a lost jump cannot freeze the drag. */
     private static final long SETTLE_NANOS = 50_000_000;
+    private static final int SETTLE_FRAMES = 2;
     /** The wrapping border's distance inside the window, as a share of its size. */
     private static final double BORDER = .1;
 
@@ -32,8 +36,10 @@ public final class UiCursorCapture {
     private long window;
     /** Whether a button was really down at the capture, so the live cursor is the drag's pointer. */
     private boolean live;
+    /** Whether the cursor can be moved, so it hides, wraps and returns on release. */
+    private boolean wraps;
     private double startX, startY, lastCursorX, lastCursorY;
-    private long settleUntil;
+    private long settleUntil, settleFrame;
     private float unitsPerPixelX, unitsPerPixelY;
 
     /** Whether a drag holds the pointer now. */
@@ -66,8 +72,10 @@ public final class UiCursorCapture {
             startX = lastCursorX = cursorX[0];
             startY = lastCursorY = cursorY[0];
             settleUntil = System.nanoTime() + SETTLE_NANOS;
+            settleFrame = Gdx.graphics.getFrameId() + SETTLE_FRAMES;
             live = Gdx.input.isTouched();
-            GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, GLFW.GLFW_CURSOR_HIDDEN);
+            wraps = GLFW.glfwGetPlatform() != GLFW.GLFW_PLATFORM_WAYLAND;
+            if (wraps) { GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, GLFW.GLFW_CURSOR_HIDDEN); }
         }
     }
 
@@ -86,25 +94,28 @@ public final class UiCursorCapture {
         GLFW.glfwGetCursorPos(window, cursorX, cursorY);
         GLFW.glfwGetWindowSize(window, width, height);
         double dx = cursorX[0] - lastCursorX, dy = cursorY[0] - lastCursorY;
-        // Windows applies a jump a moment later and can read from before it even after showing it. No real move
-        // crosses half the wrap between two reads, so such a reading is the jump's, and leaves the drag.
-        long now = System.nanoTime();
-        if ((Math.abs(dx) > width[0] * (.5 - BORDER) || Math.abs(dy) > height[0] * (.5 - BORDER)) && now < settleUntil) {
+        // Without this rule jumps leaked into the drag under simulated input on Windows: the cursor can still read from
+        // before a jump. No real move crosses half the wrap between two reads, so such a reading leaves the drag.
+        long now = System.nanoTime(), frame = Gdx.graphics.getFrameId();
+        if ((Math.abs(dx) > width[0] * (.5 - BORDER) || Math.abs(dy) > height[0] * (.5 - BORDER))
+              && (now < settleUntil || frame < settleFrame)) {
             return point;
         }
         settleUntil = now + SETTLE_NANOS;
+        settleFrame = frame + SETTLE_FRAMES;
         point.add((float) dx * unitsPerPixelX, (float) dy * unitsPerPixelY);
-        lastCursorX = wrapped(cursorX[0], width[0]);
-        lastCursorY = wrapped(cursorY[0], height[0]);
+        lastCursorX = wraps ? wrapped(cursorX[0], width[0]) : cursorX[0];
+        lastCursorY = wraps ? wrapped(cursorY[0], height[0]) : cursorY[0];
         if (lastCursorX != cursorX[0] || lastCursorY != cursorY[0]) { GLFW.glfwSetCursorPos(window, lastCursorX, lastCursorY); }
         return point;
     }
 
-    /** Where the cursor goes from {@code at}: past one border it comes in at the other by as much. */
+    /** Where the cursor goes from {@code at}: past one border it comes in at the other by as much, however far past. */
     static double wrapped(double at, int size) {
         double border = size * BORDER, span = size - 2 * border;
-        if (at < border) { return at + span; }
-        return at > size - border ? at - span : at;
+        if (at >= border && at <= size - border) { return at; }
+        double within = (at - border) % span;
+        return border + (within < 0 ? within + span : within);
     }
 
     /** Shows the cursor again where the capture began; every exit of the gesture may call it. */
@@ -112,8 +123,10 @@ public final class UiCursorCapture {
         if (holder != this) { return; }
         holder = null;
         if (window != 0) {
-            GLFW.glfwSetCursorPos(window, startX, startY);
-            GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, GLFW.GLFW_CURSOR_NORMAL);
+            if (wraps) {
+                GLFW.glfwSetCursorPos(window, startX, startY);
+                GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, GLFW.GLFW_CURSOR_NORMAL);
+            }
             window = 0;
             live = false;
         }

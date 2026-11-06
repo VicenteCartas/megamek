@@ -879,7 +879,8 @@ class GpuBattleView extends ApplicationAdapter {
         if (changedTiles || hoverCameraRevision != boardCamera.revision()) {
             source.setVisibleArea(boardCamera.visibleArea(scene));
         }
-        if (hoverCameraRevision != boardCamera.revision() || hoverHeld != (playback.movement() != null)) {
+        // A held drag's hidden cursor points at nothing; the first frame after its release catches up.
+        if (!UiCursorCapture.active() && (hoverCameraRevision != boardCamera.revision() || hoverHeld != (playback.movement() != null))) {
             hoverCameraRevision = boardCamera.revision();
             hoverHeld = playback.movement() != null;
             boardInput.mouseMoved(Gdx.input.getX(), Gdx.input.getY());

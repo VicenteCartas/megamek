@@ -4,23 +4,35 @@ package megamek.client.ui.gdx;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Graphics;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /** The wrap keeps the cursor inside the window, and one drag holds the pointer at a time. */
 class UiCursorCaptureTest {
+    private final Graphics originalGraphics = Gdx.graphics;
     private final UiCursorCapture cursor = new UiCursorCapture();
+
+    /** Without this, a window an earlier test left behind would get the GLFW calls. */
+    @BeforeEach
+    void setUp() {
+        Gdx.graphics = mock(Graphics.class);
+    }
 
     @AfterEach
     void tearDown() {
         cursor.release();
+        Gdx.graphics = originalGraphics;
     }
 
     @ParameterizedTest
-    @CsvSource({ "400, 400", "80, 80", "720, 720", "79, 719", "721, 81", "-50, 590", "850, 210" })
+    @CsvSource({ "400, 400", "80, 80", "720, 720", "79, 719", "721, 81", "-50, 590", "850, 210", "2000, 80", "-1000, 280" })
     void pastOneBorderTheCursorComesInAtTheOtherOfAnEightHundredPixelWindow(double at, double expected) {
         assertEquals(expected, UiCursorCapture.wrapped(at, 800));
     }
