@@ -104,7 +104,7 @@ class BoardComponentsTest {
                 assertEquals(object.path("asset").asText(), BoardModelIds.path(object.path("uid").asText(), null));
             }
         }
-        assertEquals(98, buildings); assertEquals(115, objects);
+        assertEquals(98, buildings); assertEquals(137, objects);
         assertEquals(encode(board), encode(BoardFile.readNative(encode(board))));
     }
 

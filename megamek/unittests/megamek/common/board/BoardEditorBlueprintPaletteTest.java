@@ -225,7 +225,7 @@ class BoardEditorBlueprintPaletteTest {
         }
         assertEquals(List.of("Lunar habitat", "Glass dome", "Biodome"), section("buildings/looks").cards().stream()
               .map(BoardEditorBlueprint.Card::label).toList());
-        assertEquals(4, BLUEPRINT.variants("building").size(), "Only current looks, including the authored example");
+        assertEquals(3, BLUEPRINT.variants("building").size(), "Only current looks");
     }
 
     @Test

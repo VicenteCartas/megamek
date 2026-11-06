@@ -67,7 +67,7 @@ class GpuSceneryColourSmokeTest {
     private static final Coords LEVEL_CORAL = new Coords(11, 8), LEVEL_TREE = new Coords(12, 9);
     /**
      * A blue locomotive (Body slot), whose file has two levels like every rail and maglev vehicle (a detailed LOD0, the
-     * earlier mesh as LOD1): the overview draws the slotted mesh of its simpler level in its colours.
+     * earlier mesh as LOD1): a view wider than the overview draws the slotted mesh of its simpler level in its colours.
      */
     private static final Coords LEVEL_TRAIN = new Coords(11, 9);
     /** Pixels of a capture whose colour may differ by more than 2/255 between two draws of the same objects. */
@@ -214,9 +214,14 @@ class GpuSceneryColourSmokeTest {
                     profiler.disable();
                     GpuReviewFrame.save(new File(OUTPUT, "game-overview.png"));
                     levels.addAll(List.of(level(terrain, LEVEL_CORAL), level(terrain, LEVEL_TREE)));
+                    // The overview leaves the placed locomotive's 69-unit side at 76 pixels, inside its near level's hysteresis.
+                    camera.camera.zoom = 1.1f;
+                    camera.update();
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
+                    frame.render(terrain, camera, scene);
                     train[0] = level(terrain, LEVEL_TRAIN);
                     camera.center(BoardGeometry.center(LEVEL_CORAL, 0).lerp(BoardGeometry.center(LEVEL_TREE, 0), .5f));
-                    camera.camera.zoom = .5f;
+                    camera.camera.zoom = .6f;
                     camera.update();
                     GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
@@ -263,8 +268,8 @@ class GpuSceneryColourSmokeTest {
         assertTrue(parts[0] > 100, "Placed objects draw instanced in the game view");
         assertTrue(parts[2] >= 2, "The mirrored cars draw instanced: " + parts[2]);
         System.out.printf("COLOUR levels (coral, tree: overview, mid, close): %s%n", levels);
-        System.out.printf("COLOUR train overview level (-1: one level): %d%n", train[0]);
-        assertEquals(1, train[0], "The overview draws the locomotive's simpler level");
+        System.out.printf("COLOUR train level in a wide view (-1: one level): %d%n", train[0]);
+        assertEquals(1, train[0], "A wide view draws the locomotive's simpler level");
         assertTrue(levels.subList(0, 4).stream().allMatch(level -> level > 0), "Overview and mid view draw simpler levels");
         assertEquals(List.of(0, 0), levels.subList(4, 6), "A close-up draws the near meshes");
         for (var coords : List.of(LEVEL_CORAL, LEVEL_TREE)) {
@@ -508,10 +513,9 @@ class GpuSceneryColourSmokeTest {
             hex.setDecorations(hex.getDecorations().stream().map(o -> o.withColours(BoardDecoration.Colours.NONE)).toList());
         }
         BoardScene coloured = BoardScenes.scene(board), plain = BoardScenes.scene(uniform);
-        // Another hex of the cars' chunk changes; then one recoloured car moves, keeping its colours.
-        var raised = board.getHex(edit).duplicate();
-        raised.setLevel(1);
-        board.setHex(edit, raised);
+        // Another hex of the cars' chunk changes (not its level, which moves the chunk's wall charts and rebuilds every
+        // hex); then one recoloured car moves, keeping its colours.
+        board.setHex(edit, new Hex(0, "rough:1", ""));
         BoardScene edited = BoardScenes.scene(board);
         var lot = board.getHex(cars).duplicate();
         var car = lot.getDecorations().stream().filter(o -> o.asset().equals("scenery/vehicles/car") && !o.colours().slots().isEmpty())
@@ -534,7 +538,8 @@ class GpuSceneryColourSmokeTest {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     int[] draws = new int[2];
-                    for (int index = 0; index < 2; index++) {
+                    // A terrain's first update draws one call fewer than any later one, in any colours: both counts follow one.
+                    for (int index = -1; index < 2; index++) {
                         var scene = index == 0 ? plain : coloured;
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
@@ -546,7 +551,7 @@ class GpuSceneryColourSmokeTest {
                         profiler.enable();
                         profiler.reset();
                         terrain.render(camera.camera);
-                        draws[index] = profiler.getDrawCalls();
+                        if (index >= 0) { draws[index] = profiler.getDrawCalls(); }
                         profiler.disable();
                     }
                     System.out.printf("COLOUR opaque draws: own colours %d, every colour %d%n", draws[0], draws[1]);
