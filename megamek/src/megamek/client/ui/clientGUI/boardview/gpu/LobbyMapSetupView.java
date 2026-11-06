@@ -34,6 +34,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Stack;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton.TextButtonStyle;
 import com.badlogic.gdx.scenes.scene2d.ui.TextTooltip;
+import com.badlogic.gdx.scenes.scene2d.ui.Value;
 import com.badlogic.gdx.scenes.scene2d.ui.WidgetGroup;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
@@ -108,6 +109,10 @@ final class LobbyMapSetupView {
     private static final float HEX_HEIGHT = (float) (Math.sqrt(3) / 2);
     /** The tallest a filter checklist's rows get before they scroll, in stage units. */
     private static final float CHECKLIST_HEIGHT = 320;
+    /** The narrowest a thumbnail tile gets before the grid drops a column. */
+    private static final float TILE_MIN = 150;
+    /** The board drawer's share of the map setup's width, beside the war table; it is never under dialog.sm. */
+    private static final float DRAWER_SHARE = 0.45f;
 
     private final UiKit kit;
     private final Host host;
@@ -137,6 +142,14 @@ final class LobbyMapSetupView {
     private final Label boardCount;
     private final UiKit.TokenSearch search;
     private final Table list = new Table() {
+        @Override
+        public void layout() {
+            if (thumbnails && gridColumns != gridColumns(getWidth())) {
+                arrangeList();
+            }
+            super.layout();
+        }
+
         @Override
         public void draw(Batch batch, float parentAlpha) {
             // ScrollPane has now installed this frame's culling area, including a scroll-bar jump.
@@ -188,6 +201,8 @@ final class LobbyMapSetupView {
     private @Nullable Picture shown;
     private boolean syncing;
     private boolean thumbnails = true;
+    private int gridColumns = 2;
+    private Value drawerWidth;
 
     LobbyMapSetupView(UiKit kit, Host host) {
         this.kit = kit;
@@ -395,7 +410,13 @@ final class LobbyMapSetupView {
         drawerScroll = kit.scrollList(drawer, true, false);
         drawerScroll.setScrollingDisabled(true, false);
         drawerScroll.setName("map-drawer-scroll");
-        drawerCell = main.add(drawerScroll).width(size("dialog.sm")).growY().minHeight(0).padLeft(space("md"));
+        drawerWidth = new Value() {
+            @Override
+            public float get(@Nullable Actor context) {
+                return Math.max(size("dialog.sm"), main.getWidth() * DRAWER_SHARE);
+            }
+        };
+        drawerCell = main.add(drawerScroll).width(drawerWidth).growY().minHeight(0).padLeft(space("md"));
         body.add(main).grow().minHeight(0).padTop(space("md")).row();
 
         load = footButton("button-quiet", null, "Lobby.battlefield.loadMapSetup", "map-load", Action.LOAD);
@@ -533,7 +554,7 @@ final class LobbyMapSetupView {
             }
         }
         drawerScroll.setVisible(!space);
-        drawerCell.width(space ? 0 : size("dialog.sm")).padLeft(space ? 0 : space("md"));
+        drawerCell.width(space ? Value.zero : drawerWidth).padLeft(space ? 0 : space("md"));
         drawerScroll.invalidateHierarchy();
         spaceHint.setVisible(space);
         table.show(picture);
@@ -753,7 +774,7 @@ final class LobbyMapSetupView {
                 allTags = null;
             }
             rows.top().left();
-            rows.defaults().left().growX().minWidth(0);
+            rows.defaults().left().expandX().minWidth(0);
             scroll = kit.scrollList(rows, true);
             scroll.setName(prefix + "list");
             content.top().left();
@@ -939,13 +960,34 @@ final class LobbyMapSetupView {
                 }
             });
             rows.put(entry.name(), row);
+        }
+        arrangeList();
+    }
+
+    /** How many thumbnail tiles fit across {@code width}: two at least, each {@link #TILE_MIN} wide or more. */
+    private static int gridColumns(float width) {
+        float gap = space("sm");
+        return Math.max(2, (int) ((width + gap) / (TILE_MIN + gap)));
+    }
+
+    /** Lays the board entries out: rows, or as many thumbnail columns as the drawer's width fits. */
+    private void arrangeList() {
+        list.clearChildren();
+        gridColumns = gridColumns(list.getWidth());
+        int index = 0;
+        for (Entry entry : listed) {
+            BoardEntry row = rows.get(entry.name());
+            if (row == null) {
+                continue;
+            }
             Cell<BoardEntry> cell = list.add(row).growX().minWidth(0);
             if (thumbnails) {
                 cell.uniformX().space(space("sm"));
             }
-            if (!thumbnails || index % 2 == 1) {
+            if (!thumbnails || index % gridColumns == gridColumns - 1) {
                 list.row();
             }
+            index++;
         }
         if (listed.isEmpty()) {
             kit.empty(list, Messages.getString(listedReading ? "Lobby.map.filter.reading" : "Lobby.map.noBoards"),
