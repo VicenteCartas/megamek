@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -250,7 +251,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         public void dispose() { batch.dispose(); }
     }
 
-    private static final FloatArray NO_TREES = new FloatArray(0);
     private final BiFunction<String, Integer, Model> models;
     private final Map<String, Species[]> species = new HashMap<>();
     private final List<Species> stands = new ArrayList<>();
@@ -293,15 +293,6 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 levels[lod].add(entry.getValue(), visible && lod == level);
             }
         }
-        // Species this chunk lacks keep their board-order places too.
-        for (Map.Entry<String, Species[]> entry : species.entrySet()) {
-            if (stand.trees.containsKey(entry.getKey())) { continue; }
-            for (Species other : entry.getValue()) {
-                if (other == null) { continue; }
-                gather(other);
-                other.add(NO_TREES, false);
-            }
-        }
     }
 
     private void gather(Species level) {
@@ -316,14 +307,62 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         for (Renderable source : parts) { add(source); }
     }
 
-    /** One part's placement; a part that gathers no placement in a pass costs no draw. */
-    void add(Renderable source) {
-        Batch[] passes = sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
+    /**
+     * A chunk's parts with their instance data, by batch: what {@link #add(Renderable)} finds for each part every pass,
+     * ready until the chunk snapshots its parts again.
+     */
+    static final class Placements {
+        private final List<Renderable> samples = new ArrayList<>();
+        private final List<Batch[]> batches = new ArrayList<>();
+        private final List<FloatArray> data = new ArrayList<>();
+    }
+
+    Placements placements(Array<Renderable> parts) {
+        Placements result = new Placements();
+        Map<Batch[], FloatArray> data = new IdentityHashMap<>();
+        for (Renderable source : parts) {
+            Batch[] passes = batches(source);
+            FloatArray instances = data.get(passes);
+            if (instances == null) {
+                data.put(passes, instances = new FloatArray());
+                result.samples.add(source);
+                result.batches.add(passes);
+                result.data.add(instances);
+            }
+            append(instances, source.worldTransform);
+            if (RigidGlb.colourSlotted(source.meshPart.mesh.getVertexAttributes())) {
+                instances.addAll(RigidGlb.slotColours(source.userData));
+            }
+        }
+        return result;
+    }
+
+    /** These placements, in this pass. */
+    void add(Placements placed) {
+        for (int i = 0; i < placed.batches.size(); i++) {
+            Batch batch = batch(placed.batches.get(i), placed.samples.get(i));
+            if (batch.data.isEmpty()) { gathered.add(batch); }
+            batch.data.addAll(placed.data.get(i));
+        }
+    }
+
+    private Batch[] batches(Renderable source) {
+        return sharedLookups.computeIfAbsent(source, value -> sharedParts.computeIfAbsent(
               new Part(value.meshPart.mesh, value.meshPart.offset, value.meshPart.size, value.material,
                     mirrored(value.worldTransform)),
               ignored -> new Batch[Pass.values().length]));
+    }
+
+    /** This pass's batch among a part's. */
+    private Batch batch(Batch[] passes, Renderable source) {
         Batch batch = passes[pass.ordinal()];
         if (batch == null) { passes[pass.ordinal()] = batch = new Batch(source, mirrored(source.worldTransform)); }
+        return batch;
+    }
+
+    /** One part's placement; a part that gathers no placement in a pass costs no draw. */
+    void add(Renderable source) {
+        Batch batch = batch(batches(source), source);
         if (batch.data.isEmpty()) { gathered.add(batch); }
         append(batch.data, source.worldTransform);
         // Every colouring of a recolourable model shares this batch: each placement adds its colours.

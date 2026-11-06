@@ -148,7 +148,7 @@ final class GpuTerrain implements Disposable {
     /** Authored paint of nearby chunks in shared draws: each chunk numbers its paint draws in painter order. */
     private final GpuTerrainPages paintPages = new GpuTerrainPages(part -> true);
     private final GpuWaterPages waterPages = new GpuWaterPages();
-    private final GatheringBatch batch = new GatheringBatch(GpuShaderManager.provider("Terrain",
+    private final GatheringBatch batch = new GatheringBatch(GpuShaderManager.exclusiveProvider("Terrain",
           () -> new TerrainShaders(false)), terrainBatch);
     /**
      * Ground cover's own batch, flushed between the depth pre-pass and the colour batch's flush (renderCover): grass in
@@ -1179,9 +1179,13 @@ final class GpuTerrain implements Disposable {
     private Map<DecalSlot, BoardScene.Pixels> decalPixels = Map.of();
     private final GpuGroundCover groundCover = new GpuGroundCover();
     private final GpuBiomeVegetation biomeVegetation = new GpuBiomeVegetation();
-    // The scene fields() last looked at, and whether it has fields.
-    private BoardScene fieldsScene;
-    private boolean fields;
+    /** The chunks whose hexes ground cover may draw (renderCover), and the hexes of those it last listed. */
+    private final java.util.BitSet coverChunks = new java.util.BitSet(), coverShown = new java.util.BitSet();
+    private final BoundingBox coverGuard = new BoundingBox();
+    private List<BoardScene.Tile> coverCandidates = List.of(), coverTiles;
+    /** The lists last asked about fields, crystals and biomes, and the answers: a list changes only with the board. */
+    private List<BoardScene.Tile> fieldsTiles, crystalTiles, biomeTiles;
+    private boolean fields, biomesActive, crystals;
     private final GpuBiomeSurface biomes = new GpuBiomeSurface();
     private final GpuGroundDamage groundDamage = new GpuGroundDamage();
     private final GpuSurfaceScars surfaceScars = new GpuSurfaceScars(groundDamage);
@@ -2010,6 +2014,8 @@ final class GpuTerrain implements Disposable {
         Array<Renderable> scatterRenderables = new Array<>();
         final Array<Renderable> shadowPropRenderables = new Array<>();
         final Array<Renderable> sharedProps = new Array<>();
+        /** {@link #sharedProps} ready for the colour pass; null until it next draws them. */
+        GpuTreeInstances.Placements sharedPlacements;
         final Array<Renderable> sharedShadows = new Array<>();
         /** Placed object parts drawn with instancing, like shared building modules (mirror images too). */
         final Array<Renderable> decorationRenderables = new Array<>();
@@ -2097,6 +2103,7 @@ final class GpuTerrain implements Disposable {
                       && interiorFloorVisible(prop) && !faded.contains(prop)) { shared.add(prop.instance); }
             }
             sharedProps.clear();
+            sharedPlacements = null;
             sharedProps.addAll(GpuTerrainDepth.snapshot(shared));
             // Stable, opaque material keys for the instancing cache; live cutaway materials can mutate independently.
             opaqueMaterials(sharedProps);
@@ -2266,8 +2273,12 @@ final class GpuTerrain implements Disposable {
 
     /** Request only the latest rendering snapshot. Game state and commands remain owned by the source. */
     void update(BoardScene scene, Camera camera) {
-        environmentLighting.crystals = scene.tiles().stream().flatMap(tile -> tile.features().stream())
-              .anyMatch(feature -> feature.asset().startsWith("crystal/")) ? crystalTransmission : null;
+        if (crystalTiles != scene.tiles()) {
+            crystalTiles = scene.tiles();
+            crystals = scene.tiles().stream().flatMap(tile -> tile.features().stream())
+                  .anyMatch(feature -> feature.asset().startsWith("crystal/"));
+        }
+        environmentLighting.crystals = crystals ? crystalTransmission : null;
         if (lifts != null && !lifts.ending) { scene = scene.withTiles(lifts.lowered(scene)); }
         boolean weightless = gravity == 0;
         if (vacuum || weightless) {
@@ -2319,18 +2330,27 @@ final class GpuTerrain implements Disposable {
             }
             requested = new Request(meshGeneration, scene, settings, columns, tessellation);
             // Before anything prepares for it: whether its programs compile the biome stage.
-            GpuBiomeSurface.mark(environment, editable || GpuBiomeSurface.active(scene));
+            GpuBiomeSurface.mark(environment, editable || biomesActive(scene));
             retiredChunks.addAll(detailCache.values());
             detailCache.clear();
         } else if (requested == null) {
             try (TerrainSettings.Scope ignored = TerrainSettings.use(settings)) {
                 tiles = scene.tiles();
                 coverScene = scene;
-                GpuBiomeSurface.mark(environment, editable || GpuBiomeSurface.active(scene));
+                GpuBiomeSurface.mark(environment, editable || biomesActive(scene));
                 installedSettings = settings;
                 if (!Objects.equals(light, scene.light())) { updateLight(scene.light()); }
             }
         }
+    }
+
+    /** GpuBiomeSurface.active for these tiles, asked every frame of a list that changes only with the scene. */
+    private boolean biomesActive(BoardScene scene) {
+        if (biomeTiles != scene.tiles()) {
+            biomeTiles = scene.tiles();
+            biomesActive = GpuBiomeSurface.active(scene);
+        }
+        return biomesActive;
     }
 
     /**
@@ -8420,7 +8440,10 @@ final class GpuTerrain implements Disposable {
             }
             // Shared building modules are buildings: the Tactical View hides them.
             if (packed) {
-                if (fluff) { trees.add(chunk.sharedProps); }
+                if (fluff) {
+                    if (chunk.sharedPlacements == null) { chunk.sharedPlacements = trees.placements(chunk.sharedProps); }
+                    trees.add(chunk.sharedPlacements);
+                }
                 addDecorations(chunk, batch, environment, false, false);
             }
         }
@@ -8524,10 +8547,11 @@ final class GpuTerrain implements Disposable {
 
     /** Whether the installed scene has fields: their plants stand with or without grass, and further out than it. */
     private boolean fields() {
-        if (fieldsScene != coverScene) {
-            fieldsScene = coverScene;
-            fields = coverScene != null
-                  && coverScene.tiles().stream().anyMatch(tile -> BoardBiome.kind(tile) == BoardScene.Biome.FIELD);
+        // Every frame presents a new scene over the same tiles.
+        List<BoardScene.Tile> tiles = coverScene == null ? null : coverScene.tiles();
+        if (fieldsTiles != tiles) {
+            fieldsTiles = tiles;
+            fields = tiles != null && tiles.stream().anyMatch(tile -> BoardBiome.kind(tile) == BoardScene.Biome.FIELD);
         }
         return fields;
     }
@@ -8541,18 +8565,28 @@ final class GpuTerrain implements Disposable {
         boolean grassShown = grass && BoardQuality.current.meadowShare > 0;
         boolean coverVisible = GpuGroundCover.visibleAtScale(camera, grassShown, fields());
         // At a scale where no cover draws, no hexes are gathered; the empty list still releases the plants' buffers.
-        List<BoardScene.Tile> candidates = new ArrayList<>();
+        coverChunks.clear();
         if (coverVisible || GpuBiomeVegetation.visibleAtScale(camera)) {
-            BoundingBox guard = new BoundingBox();
             float margin = BoardGeometry.width() * 2;
             for (int index = 0; index < chunks.size(); index++) {
-                guard.set(chunks.get(index).bounds);
-                guard.min.add(-margin, -margin, 0);
-                guard.max.add(margin, margin, 0);
-                guard.update();
-                if (camera.frustum.boundsInFrustum(guard)) { chunkTiles(coverScene, index, candidates); }
+                coverGuard.set(chunks.get(index).bounds);
+                coverGuard.min.add(-margin, -margin, 0);
+                coverGuard.max.add(margin, margin, 0);
+                coverGuard.update();
+                if (camera.frustum.boundsInFrustum(coverGuard)) { coverChunks.set(index); }
             }
         }
+        if (coverTiles != coverScene.tiles() || !coverChunks.equals(coverShown)) {
+            coverTiles = coverScene.tiles();
+            coverShown.clear();
+            coverShown.or(coverChunks);
+            List<BoardScene.Tile> tiles = new ArrayList<>();
+            for (int index = coverChunks.nextSetBit(0); index >= 0; index = coverChunks.nextSetBit(index + 1)) {
+                chunkTiles(coverScene, index, tiles);
+            }
+            coverCandidates = List.copyOf(tiles);
+        }
+        List<BoardScene.Tile> candidates = coverCandidates;
         coverBatch.begin(camera);
         if (coverVisible) {
             groundCover.showGrass(grassShown);
@@ -8885,7 +8919,7 @@ final class GpuTerrain implements Disposable {
         int startY = (index % chunkRows) * CHUNK_SIZE;
         for (int x = startX; x < Math.min(startX + CHUNK_SIZE, scene.width()); x++) {
             for (int y = startY; y < Math.min(startY + CHUNK_SIZE, scene.height()); y++) {
-                destination.add(scene.tile(new Coords(x, y)));
+                destination.add(scene.tile(x, y));
             }
         }
     }
