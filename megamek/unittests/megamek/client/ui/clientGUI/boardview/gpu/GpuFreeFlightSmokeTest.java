@@ -9,7 +9,6 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +21,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
+import megamek.client.ui.gdx.UiCursorCapture;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -153,13 +153,13 @@ class GpuFreeFlightSmokeTest {
                         // A gesture keeps the Shift state from its press even when the modifier changes mid-drag.
                         when(input.isKeyPressed(Input.Keys.SHIFT_LEFT)).thenReturn(!shift);
                         processor.touchDragged(360, 340, 0);
+                        // Only a look or an orbit holds the cursor, and its release shows it again; a pan never does.
+                        assertEquals(!pan, UiCursorCapture.active());
                         processor.touchUp(360, 340, 0, button);
+                        assertFalse(UiCursorCapture.active());
                     } finally {
                         Gdx.input = original;
                     }
-                    // Only a look or an orbit holds the cursor, and its release shows it again; a pan never does.
-                    verify(input, pan ? never() : times(1)).setCursorCatched(true);
-                    verify(input, pan ? never() : times(1)).setCursorCatched(false);
                     String gesture = "Button " + button + ", Shift " + shift;
                     if (pan) {
                         assertTrue(position.dst(boardCamera.camera.position) > .01f, gesture + " must pan the eye");

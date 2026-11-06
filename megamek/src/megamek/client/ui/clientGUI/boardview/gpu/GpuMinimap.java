@@ -154,7 +154,7 @@ final class GpuMinimap implements GpuHud.Component {
                 private boolean orbiting;
                 private float lastX;
                 private float lastY;
-                /** An orbit holds the cursor still, as the board's does; a left drag follows the pointer. */
+                /** An orbit wraps the hidden cursor, as the board's does; a left drag follows the pointer. */
                 private final UiCursorCapture cursor = new UiCursorCapture();
 
                 @Override
@@ -163,7 +163,7 @@ final class GpuMinimap implements GpuHud.Component {
                     if (orbiting) {
                         lastX = x;
                         lastY = y;
-                        cursor.capture(x, y);
+                        cursor.capture(x, y, event.getStage());
                     } else if (button == Input.Buttons.LEFT) {
                         centre(x, y);
                     } else {

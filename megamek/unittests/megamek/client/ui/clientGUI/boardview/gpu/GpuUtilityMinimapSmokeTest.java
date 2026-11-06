@@ -19,7 +19,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Rectangle;
@@ -33,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -366,10 +366,10 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(azimuth, board.camera.azimuth(), "The drag pans only");
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
-            assertFalse(Gdx.input.isCursorCatched(), "The left drag follows the visible pointer");
+            assertFalse(UiCursorCapture.active(), "The left drag follows the visible pointer");
             // A middle drag rotates both views, with inclination only in 3D, as the board's does.
             assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the middle press");
-            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+            assertTrue(UiCursorCapture.active(), "An orbit holds the cursor");
             assertTrue(hud.stage.touchDragged(x + 40, y + 20, 0), "The canvas consumes the orbit drag");
             assertNotEquals(azimuth, board.camera.azimuth(), "A middle drag rotates in both views");
             if (tactical) {
@@ -379,7 +379,7 @@ class GpuUtilityMinimapSmokeTest {
             }
             assertEquals(tactical, board.camera.tactical(), "Orbiting keeps the renderer mode");
             hud.stage.touchUp(x + 40, y + 20, 0, Input.Buttons.MIDDLE);
-            assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
+            assertFalse(UiCursorCapture.active(), "Releasing the orbit shows the cursor again");
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
             // decision of 2026-10-03); off the map the wheel is not the map's.
             // The stage fires enter and exit in act, as each frame does.

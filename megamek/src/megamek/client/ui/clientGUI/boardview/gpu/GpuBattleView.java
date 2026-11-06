@@ -3095,11 +3095,13 @@ class GpuBattleView extends ApplicationAdapter {
                 return true;
             }
             // Past the threshold a gesture is a drag: a left one does nothing more and cancels its click (C.4). An orbit
-            // holds the cursor still, so it never stops at the screen's edge; a pan keeps the board under the pointer.
-            if (!dragged && orbiting) { cursorCapture.capture(x, y); }
+            // wraps the hidden cursor, so it never stops at the screen's edge; a pan keeps the board under the pointer.
+            if (!dragged && orbiting) {
+                cursorCapture.capture(x, y, 1, 1);
+                cursorCapture.beganAt(startX, startY);
+            }
             dragged = true;
             if (orbiting) {
-                // The first motion after capture can report a stale jump, even after idle frames (UiCursorCapture).
                 Vector2 at = cursorCapture.trusted(x, y);
                 x = (int) at.x;
                 y = (int) at.y;

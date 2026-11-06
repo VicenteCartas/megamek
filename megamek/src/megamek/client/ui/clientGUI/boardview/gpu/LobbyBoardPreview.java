@@ -215,7 +215,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
             if (!interactive() || button == -1) { return; }
             hover(x, y);
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD) { return; }
-            if (!dragged && orbiting) { cursor.capture(x, y); }
+            if (!dragged && orbiting) {
+                cursor.capture(x, y, event.getStage());
+                cursor.beganAt(startX, startY);
+            }
             dragged = true;
             if (orbiting) {
                 Vector2 at = cursor.trusted(x, y);

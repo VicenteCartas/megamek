@@ -51,7 +51,7 @@ public final class UiAngleDial extends Widget {
                 aim = Math.hypot(dx, dy) < HUB / 2 ? Double.NaN : UP - Math.toDegrees(Math.atan2(dy, dx));
                 dragged = false;
                 begin(event.getStageX(), event.getStageY(), value);
-                cursor.capture(event.getStageX(), event.getStageY());
+                cursor.capture(event.getStageX(), event.getStageY(), event.getStage());
                 return true;
             }
             @Override public void touchDragged(InputEvent event, float x, float y, int pointer) {
