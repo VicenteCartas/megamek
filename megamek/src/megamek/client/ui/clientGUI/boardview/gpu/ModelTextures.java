@@ -140,6 +140,11 @@ final class ModelTextures {
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));
+            glb.fades.forEach(id -> {
+                var material = model.getMaterial(id);
+                var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                if (surface != null) { material.set(surface.fading()); }
+            });
             // Godot's alpha blending: the colour map's alpha is the opacity; nothing behind is hidden by depth. Its
             // premultiplied mode fades only the diffuse share (model.frag), so glass keeps its whole reflection.
             glb.blends.forEach((id, mode) -> {

@@ -131,6 +131,7 @@ class GpuTreeLodSmokeTest {
                         int nearDepthCount = 0;
                         int shadowLevel = 0;
                         float shadowZoom = 0;
+                        int[] fadeCounts = new int[PIXELS.length];
                         for (int level : new int[] { 0, 1, 2, 3, 0, 3, 2, 1, 0 }) {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
@@ -166,8 +167,10 @@ class GpuTreeLodSmokeTest {
                             shadowZoom = camera.camera.zoom;
                             assertEquals(nearHit, terrain.hit(scene, new Ray(new Vector3(center).add(0, 0, 1000),
                                   new Vector3(0, 0, -1))), "Picking remains stable across detail levels");
+                            // The transparent pass holds the crowns' faded texels (GpuCutoutFade), the same before and after.
+                            fadeCounts[level] = count(profiler, () -> terrain.renderTransparent(camera.camera));
                             terrain.animate(0, List.of(unit), 0);
-                            assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)),
+                            assertEquals(fadeCounts[level], count(profiler, () -> terrain.renderTransparent(camera.camera)),
                                   "Trees must stay in the opaque pass when a unit enters");
                             assertEquals(colorCount, colour(profiler, terrain, camera));
                             assertEquals(depthCount,
@@ -181,7 +184,7 @@ class GpuTreeLodSmokeTest {
                             terrain.refreshShadows();
                             assertTrue(drawnLevel(nearShadowCount
                                   - count(profiler, () -> terrain.renderShadows(camera.camera, List.of())), triangles) >= 0);
-                            assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)));
+                            assertEquals(fadeCounts[level], count(profiler, () -> terrain.renderTransparent(camera.camera)));
                             assertEquals(nearDepthCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth)));
                             assertEquals(0, count(profiler, () -> terrain.renderShadows(camera.camera, List.of())),

@@ -110,6 +110,8 @@ final class GpuTerrain implements Disposable {
     private final GpuWaterExposure waterExposure = new GpuWaterExposure();
     /** The nearest wave of this frame; the scene's depth keeps the beds and units beneath it. */
     private final GpuWaterDepth waterDepth = new GpuWaterDepth();
+    private final GpuCutoutFade cutoutFade = new GpuCutoutFade();
+    private final BoundingBox fadeBounds = new BoundingBox();
     /** The shared FFT engine with a viscous lava spectrum, independent of wind. */
     private final GpuOcean lavaOcean = new GpuOcean(true);
     /** Units standing partly in open water, which the water laps against. */
@@ -1496,6 +1498,8 @@ final class GpuTerrain implements Disposable {
         private final String treeAsset;
         /** Authored translucency, independent of temporary building fades. */
         private final boolean translucent;
+        /** Whether a material of its model fades (GpuCutoutFade#fades). */
+        private final boolean fades;
         /** What picking and placement hit: the near level (LOD0) whatever level draws. */
         private Model pickingModel;
         /** The triangles picked instead of {@link #pickingModel}'s, for an instance of only some of its nodes; or null. */
@@ -1578,11 +1582,13 @@ final class GpuTerrain implements Disposable {
             this.instance = instance;
             this.bounds = bounds;
             this.treeAsset = treeAsset;
-            boolean hasBlend = false;
+            boolean hasBlend = false, hasFade = false;
             for (Material material : instance.model.materials) {
                 hasBlend |= blended(material) || GpuCrystalTransmission.ruby(material);
+                hasFade |= GpuCutoutFade.fades(material);
             }
             translucent = hasBlend;
+            fades = hasFade;
             this.hardSurface = hardSurface;
             pickingModel = building == null ? instance.model : null;
             treeDiameter = treeAsset == null ? 0 : bounds.getDimensions(new Vector3()).len();
@@ -2025,6 +2031,9 @@ final class GpuTerrain implements Disposable {
         /** Individual translucent primitives sort with glass and faded buildings, never with species instances. */
         final Array<Renderable> translucentParts = new Array<>(), translucentShadows = new Array<>();
         final Array<Prop> translucentOwners = new Array<>();
+        /** The faded texels of its props that stand in no tree stand, as fences, and whose prop each is. */
+        final Array<Renderable> fadeParts = new Array<>();
+        final Array<Prop> fadeOwners = new Array<>();
         final Array<Renderable> routeRenderables = new Array<>();
         List<BoardScene.Tile> editorTiles;
         /** Placed objects' props by object id, so an editor preview reads only the objects that changed. */
@@ -2160,6 +2169,8 @@ final class GpuTerrain implements Disposable {
             translucentParts.clear();
             translucentShadows.clear();
             translucentOwners.clear();
+            fadeParts.clear();
+            fadeOwners.clear();
             decorationRenderables.clear();
             looseDecorations.clear();
             decorationOwners.clear();
@@ -2174,6 +2185,17 @@ final class GpuTerrain implements Disposable {
                 opaqueMaterials(routeRenderables);
             }
             for (Prop prop : props) {
+                if (prop.fades && !prop.standing() && !prop.route()) {
+                    for (Renderable part : GpuTerrainDepth.snapshot(List.of(prop.instance()))) {
+                        if (!GpuCutoutFade.fades(part.material)) { continue; }
+                        part.material = GpuCutoutFade.fadeMaterial(part.material);
+                        if (GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material)) {
+                            culling(prop.instance().model, part.material, false, false);
+                        }
+                        fadeParts.add(part);
+                        fadeOwners.add(prop);
+                    }
+                }
                 if (prop.decorationFeature == null && !prop.translucent || prop.standing() || prop.route()) { continue; }
                 // One snapshot per object: each part keeps its object, whose size class and pin every pass tests.
                 Array<Renderable> parts = GpuTerrainDepth.snapshot(List.of(prop.instance()));
@@ -7895,6 +7917,7 @@ final class GpuTerrain implements Disposable {
             // This camera also renders stand-alone palette samples, before any main-board pass. Classic's ice reads the
             // per-hex texture too.
             biomes.update(coverScene);
+            List<ModelInstance> objects = new ArrayList<>();
             batch.begin(camera);
             try {
                 batch.render((out, pool) -> {
@@ -7913,9 +7936,12 @@ final class GpuTerrain implements Disposable {
                     if (!Float.isNaN(prop.floorZ) || !isolate.isEmpty() && !isolate.equals(prop.decorationId)) { continue; }
                     // A close-up: a building or object with mesh levels draws its near one, whatever the board's zoom.
                     batch.render(prop.near(), environment);
+                    objects.add(prop.near());
                 }
-                if (isolate.isEmpty()) { for (ModelInstance pane : tile.glass) { batch.render(pane, environment); } }
             } finally { batch.end(); }
+            BoundingBox bounds = chunks.get(coords.getX() / CHUNK_SIZE * chunkRows + coords.getY() / CHUNK_SIZE).bounds;
+            cutoutFade.renderWithGlass(batch, camera, environment, isolate.isEmpty() ? tile.glass : List.of(),
+                  () -> cutoutFade.render(batch, camera, environment, objects, bounds));
             return null;
         });
     }
@@ -8624,6 +8650,7 @@ final class GpuTerrain implements Disposable {
                 }
             }
             batch.end();
+            renderFades(camera);
             return;
         }
         updateDetail(camera);
@@ -8654,7 +8681,6 @@ final class GpuTerrain implements Disposable {
             if (visible) {
                 translucent(chunk);
                 for (Prop prop : chunk.faded) { if (drawn(prop, false)) { batch.render(prop.instance(), environment); } }
-                for (ModelInstance pane : chunk.glass) { batch.render(pane, environment); }
             }
         }
         batch.end();
@@ -8667,7 +8693,7 @@ final class GpuTerrain implements Disposable {
             waterPages.render(batch, environment, false);
             batch.end();
             waterPages.dispose();
-            renderSceneryEffects(camera);
+            renderOverWater(camera);
             return;
         }
         waterPages.prepare();
@@ -8684,7 +8710,53 @@ final class GpuTerrain implements Disposable {
         batch.begin(camera);
         waterPages.render(batch, environment, false);
         batch.end();
+        renderOverWater(camera);
+    }
+
+    /**
+     * What lies over the water, which no view ray above the ground reaches before them: cutouts' faded texels and the
+     * glass, each in its true order, then the scenery's effects.
+     */
+    private void renderOverWater(Camera camera) {
+        List<ModelInstance> panes = new ArrayList<>();
+        for (Chunk chunk : chunks) {
+            if (!chunk.glass.isEmpty() && camera.frustum.boundsInFrustum(chunk.bounds)) { panes.addAll(chunk.glass); }
+        }
+        cutoutFade.renderWithGlass(batch, camera, environment, panes, () -> renderFades(camera));
         renderSceneryEffects(camera);
+    }
+
+    /** The faded texels of cutouts, plants and fences alike, over the finished scene (GpuCutoutFade); in every view, as #render draws the solid ones. */
+    private void renderFades(Camera camera) {
+        boolean terrain = !installedColumns, fluff = !fluffHidden;
+        batch.begin(camera);
+        trees.begin(GpuTreeInstances.Pass.FADE);
+        fadeBounds.inf();
+        for (Chunk chunk : chunks) {
+            boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
+            boolean scatterVisible = terrain && fluff && visible && chunk.scatterVisible;
+            if (terrain) {
+                trees.add(chunk.trees(fluff), chunk.treeLod, visible);
+                trees.add(chunk.scatterStand, chunk.treeLod, scatterVisible);
+            }
+            if (!visible) { continue; }
+            fadeBounds.ext(chunk.bounds);
+            for (int i = 0; i < chunk.fadeParts.size; i++) {
+                Prop owner = chunk.fadeOwners.get(i);
+                if (!drawn(owner, false) || chunk.faded.contains(owner) || !fluff && !owner.tactical || owner.scatter && !scatterVisible) { continue; }
+                Renderable part = chunk.fadeParts.get(i);
+                if (GpuTreeInstances.instanceable(part.worldTransform) && instancedShader(part.material)) {
+                    trees.add(part);
+                } else {
+                    part.shader = null;
+                    part.environment = environment;
+                    batch.render(part);
+                }
+            }
+        }
+        batch.render(trees, environment);
+        if (batch.gathered().isEmpty()) { batch.end(); }
+        else { cutoutFade.flush(batch, camera, fadeBounds); }
     }
 
     private void renderSceneryEffects(Camera camera) {
@@ -9212,6 +9284,7 @@ final class GpuTerrain implements Disposable {
         rainNoise.dispose();
         waterDetail.dispose();
         waterDepth.dispose();
+        cutoutFade.dispose();
         ocean.dispose();
         waterExposure.dispose();
         lavaOcean.dispose();

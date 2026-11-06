@@ -58,7 +58,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /** The draw passes that gather building parts; each keeps its own part buffers, as its parts differ. */
-    enum Pass { COLOUR, DEPTH, SHADOW }
+    enum Pass { COLOUR, DEPTH, SHADOW, FADE }
 
     /**
      * Floats per tree: x, y, z and the horizontal scale; the cosine and sine of its turn, its vertical scale, and 1 for
@@ -71,6 +71,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     private final class Batch implements Disposable {
         final GpuInstancedMesh mesh;
         final List<Renderable> parts = new ArrayList<>();
+        /** A tree model's parts that fade, as Pass.FADE draws them. */
+        final List<Renderable> fades = new ArrayList<>();
         final FloatArray data = new FloatArray();
         /** What the instance buffer holds. */
         final FloatArray uploaded = new FloatArray();
@@ -88,6 +90,12 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 renderable.meshPart.mesh = mesh;
                 renderable.material = instancedMaterial(part.material);
                 parts.add(renderable);
+                if (GpuCutoutFade.fades(renderable.material)) {
+                    Renderable fade = new Renderable();
+                    fade.meshPart.set(renderable.meshPart);
+                    fade.material = GpuCutoutFade.fadeMaterial(renderable.material);
+                    fades.add(fade);
+                }
             });
         }
 
@@ -434,16 +442,17 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     @Override
     public void getRenderables(Array<Renderable> renderables, Pool<Renderable> pool) {
         for (Species stand : stands) {
-            if (stand.upload()) { parts(stand.batch, renderables); }
+            if (pass == Pass.FADE && stand.batch.fades.isEmpty()) { continue; }
+            if (stand.upload()) { parts(pass == Pass.FADE ? stand.batch.fades : stand.batch.parts, renderables); }
         }
         for (Batch batch : gathered) {
             batch.upload();
-            parts(batch, renderables);
+            parts(batch.parts, renderables);
         }
     }
 
-    private static void parts(Batch batch, Array<Renderable> renderables) {
-        for (Renderable part : batch.parts) {
+    private static void parts(List<Renderable> parts, Array<Renderable> renderables) {
+        for (Renderable part : parts) {
             // Each pass picks its own shader; a depth shader must never be suggested to the colour pass.
             part.shader = null;
             part.environment = null;

@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -50,6 +51,7 @@ final class GpuEditorModelPreviews implements Disposable {
     private Model model;
     private final Map<String, Texture> textures = new HashMap<>();
     private ModelBatch batch;
+    private GpuCutoutFade cutoutFade;
     private GpuSceneDisplay display;
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
 
@@ -151,7 +153,10 @@ final class GpuEditorModelPreviews implements Disposable {
             float exposure = lighting.adaptation();
             float backdropScale = GpuSceneRadiance.SCALE / exposure;
             Environment light = lighting();
-            if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+            if (batch == null) {
+                batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider));
+                cutoutFade = new GpuCutoutFade();
+            }
             scene = GpuHeatGlow.buffer(128, 96, true);
             image = GpuAtmosphere.buffer(128, 96, true);
             int skipped = GpuShaderProvider.unlinkedDraws();
@@ -163,6 +168,7 @@ final class GpuEditorModelPreviews implements Disposable {
                       GpuColor.linear(.065f) * backdropScale, 1, true);
                 batch.begin(camera);
                 try { batch.render(instance, light); } finally { batch.end(); }
+                cutoutFade.render(batch, camera, light, List.of(instance), bounds);
             } finally { scene.end(); }
             if (GpuShaderProvider.unlinkedDraws() != skipped) { return false; }
             try { display.render(scene, image, exposure); } finally { image.end(); }
@@ -190,7 +196,7 @@ final class GpuEditorModelPreviews implements Disposable {
     }
     @Override public void dispose() {
         clear(); worker.shutdownNow();
-        if (batch != null) { batch.dispose(); }
+        if (batch != null) { batch.dispose(); cutoutFade.dispose(); }
         if (display != null) { display.dispose(); }
         environmentLighting.dispose();
     }

@@ -67,6 +67,8 @@ const float CROWN_NORMAL_VARIANCE = 1.0;
 in float v_impostorAspect;
 #endif
 
+// CUTOUT_FADE
+
 void main() {
     vec3 baseNormal = normalize(v_normal);
     vec3 face = baseNormal;
@@ -123,7 +125,9 @@ void main() {
 #endif
     // Alpha-tested texels own no color or depth. Keep texture/receiver derivatives above this cutoff;
     // normal detail uses the captured gradients, and single-level shadow/cloud reads use explicit LOD.
-#if defined(blendedFlag) && defined(alphaTestFlag)
+#ifdef cutoutFadeFlag
+    if (opacity <= cutoutFadeCut(v_alphaTest, v_diffuseUV)) discard;
+#elif defined(blendedFlag) && defined(alphaTestFlag)
     if (opacity <= v_alphaTest) discard;
 #endif
 #ifdef depthPrepassFlag
@@ -284,4 +288,7 @@ void main() {
     albedo += emission;
 #endif
     fragColor = vec4(albedo, opacity);
+#ifdef cutoutFadeFlag
+    cutoutFadeWrite(fragColor);
+#endif
 }

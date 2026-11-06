@@ -178,6 +178,8 @@ final class RigidGlb {
          * A GLB's own alpha mode decides its materials: a plant's MASK foliage stays a cutout on such a board material.
          */
         final Map<String, Integer> blends = new HashMap<>();
+        /** Cutouts whose .tres uses the albedo's alpha ({@link GodotMaterial#blended}): their faded texels blend. */
+        final Set<String> fades = new HashSet<>();
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
         byte[] slots = new byte[0];
         List<ColourSlot> colourSlots = List.of();
@@ -193,6 +195,7 @@ final class RigidGlb {
             labels.addAll(source.labels);
             boardUVs.putAll(source.boardUVs);
             blends.putAll(source.blends);
+            fades.addAll(source.fades);
         }
     }
 
@@ -907,6 +910,7 @@ final class RigidGlb {
                       : GpuMaterialMaps.boardMaterial(new File(base.file()), GpuMaterialMaps.boardTextures());
                 result.surfaces.put(target.id, board == null ? new Surface(roughness, metallic, surfaceMap)
                       : boardSurface(board, base, target, result));
+                if (board != null && board.blended() && material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) { result.fades.add(target.id); }
                 // A board material's own metadata says whether its alpha is a paint mask.
                 if (board == null && material.getExtras() instanceof Map<?, ?> extras && Boolean.TRUE.equals(extras.get("mmPaintMask"))) {
                     result.paintMasks.add(target.id);

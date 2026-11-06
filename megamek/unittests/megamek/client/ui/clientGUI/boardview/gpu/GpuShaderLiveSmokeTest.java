@@ -328,9 +328,9 @@ class GpuShaderLiveSmokeTest {
                         assertTrue(type.message().contains("uniform type"), type.message());
                         var link = manager.apply(Map.of("atmosphere.vert", """
                               #version 330 core
-                              in vec2 a_position;
+                              in vec3 a_position;
                               out vec3 v_uv;
-                              void main() { v_uv = vec3(a_position, 0.0); gl_Position = vec4(a_position, 0.0, 1.0); }
+                              void main() { v_uv = a_position; gl_Position = vec4(a_position, 1.0); }
                               """, "atmosphere-composite.frag", composite));
                         assertFalse(link.success());
                         assertTrue(link.message().contains("link"), link.message());

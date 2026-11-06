@@ -38,6 +38,7 @@ uniform sampler2D u_normalTexture;
 uniform vec3 u_modelLight;
 // The heightmap parallax's shift of every map read (model-surface.glsl), zero without one.
 vec2 modelShift = vec2(0.0);
+// CUTOUT_FADE
 
 void main() {
 #ifdef lightingFlag
@@ -94,7 +95,9 @@ void main() {
 #endif
 #ifdef blendedFlag
     fragColor.a = diffuse.a * v_opacity;
-#ifdef alphaTestFlag
+#ifdef cutoutFadeFlag
+    if (fragColor.a <= cutoutFadeCut(v_alphaTest, v_diffuseUV + modelShift)) discard;
+#elif defined(alphaTestFlag)
     if (fragColor.a <= v_alphaTest) discard;
 #endif
 #else
@@ -104,5 +107,8 @@ void main() {
     // and factors are linear too, but their destination is already display encoded.
 #if defined(displayOutputFlag) || (!defined(lightingFlag) && !defined(sceneUnlitFlag) && (defined(linearTextureFlag) || defined(linearColorsFlag)))
     fragColor.rgb = toDisplay(fragColor.rgb);
+#endif
+#ifdef cutoutFadeFlag
+    cutoutFadeWrite(fragColor);
 #endif
 }
