@@ -1255,12 +1255,12 @@ final class GpuRoads {
      * A coat's colour at a point of a water hex's ground: its alpha packs the water's palette and the levels over the
      * point, which tint the coat as they tint the bed (terrain-road.frag). A packed colour keeps only even alpha bytes,
      * so each palette has 31 steps: tenths of a level up to three, past which the tint hardly changes. They stay linear,
-     * as the mesh interpolates them.
+     * as the mesh interpolates them. A deck's ramp can leave the water it crosses: none lies over it there.
      */
     private static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
         var liquid = surface.tile.liquid();
         if (!liquid.present() || liquid.molten()) { return coat; }
-        float levels = (surface.waterHeight(x, y) - z) / BoardGeometry.level();
+        float levels = surface.relief.inBay(x, y) ? 0 : (surface.waterHeight(x, y) - z) / BoardGeometry.level();
         int alpha = 2 * (31 * Math.round(GpuWaterShader.palette(liquid)) + Math.round(Math.clamp(levels, 0, 3) * 10));
         return NumberUtils.intToFloatColor(NumberUtils.floatToIntColor(coat) & 0x00ffffff | alpha << 24);
     }

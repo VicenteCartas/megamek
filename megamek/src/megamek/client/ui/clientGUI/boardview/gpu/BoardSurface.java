@@ -393,6 +393,8 @@ final class BoardSurface {
     private int waterSeamEdges;
     /** The roads around and, on natural ground, its easing into them (Enhanced); null where none reaches. */
     private BoardRoadBank bank;
+    /** A water hex's own: its walls down to lower land stand past its cell, on ground that field eases. */
+    private BoardRoadBank shoreBank;
 
     final BoardRelief relief;
     /**
@@ -2319,6 +2321,10 @@ final class BoardSurface {
         for (Bank bank : banks) {
             value = BoardRelief.smoothMin(value, bank.clearance(x, y), SHORE_ROUND * scale);
         }
+        for (int edge = 0; edge < 6; edge++) {
+            float past = relief.bayInset(edge, x, y);
+            if (!Float.isNaN(past)) { value = BoardRelief.smoothMin(value, past - SHORE_BANK * scale, SHORE_ROUND * scale); }
+        }
         return value;
     }
 
@@ -2449,6 +2455,7 @@ final class BoardSurface {
             faces.clear();
             faces.addAll(split);
             bank.move(faces);
+            shoreBank = bank;
         } else if (natural()) {
             // A copy: with no bank to shape, conform hands back the list itself.
             List<Face> eased = new ArrayList<>(bank.conform(faces, Float.NEGATIVE_INFINITY));
@@ -2622,7 +2629,8 @@ final class BoardSurface {
 
     /** Slopes ease into the roads around, as the top does, and give way to the carriageways that reserve their ground. */
     private List<Face> reserveWalls(List<Face> walls, float floor) {
-        if (bank != null && natural()) { walls = bank.conform(walls, floor); }
+        var field = tile.liquid().present() ? shoreBank : bank;
+        if (field != null && natural()) { walls = field.conform(walls, floor); }
         var grades = grades(false);
         if (grades.isEmpty()) { return walls; }
         var cut = new BoardRoadCut(new Area(), cell(scene, tile.coords(), true), center.z, grades, boardEdges(scene, tile));

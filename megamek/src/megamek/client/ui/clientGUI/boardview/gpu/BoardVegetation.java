@@ -113,8 +113,10 @@ final class BoardVegetation {
               || GpuGroundCover.shallowShore(owner) && BoardSurfaceBlend.natural(neighbor);
     }
 
+    /** A higher natural hex, or water standing above this hex, whose slope down to it is this land's own. */
     private static boolean higherNatural(BoardScene.Tile owner, BoardScene.Tile neighbor) {
-        return BoardSurfaceBlend.natural(neighbor) && neighbor.elevation() > owner.elevation();
+        return neighbor != null && neighbor.elevation() > owner.elevation() && (BoardSurfaceBlend.natural(neighbor)
+              || !owner.liquid().present() && neighbor.liquid().present() && !neighbor.liquid().volcanic() && !neighbor.frozen());
     }
 
     private static void add(BoardScene scene, BoardSurface source, BoardSurface.Face face,

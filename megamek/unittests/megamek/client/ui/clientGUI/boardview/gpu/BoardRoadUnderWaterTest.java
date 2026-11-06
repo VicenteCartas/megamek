@@ -75,6 +75,33 @@ class BoardRoadUnderWaterTest {
     }
 
     @Test
+    void waterAboveARoadLeavingItsDeckRecedesBehindTheRamp() {
+        var board = Board.createEmptyBoard(7, 7);
+        for (int x = 0; x < 7; x++) {
+            for (int y = 3; y < 7; y++) { board.setHex(new Coords(x, y), new Hex(-1, "", "")); }
+        }
+        board.setHex(AT, new Hex(-1, ROAD, ""));
+        board.setHex(AT.translated(NORTH), deckAtTheSurface());
+        var scene = new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
+              List.of(), List.of(), -1, "", List.of());
+        var water = new BoardSurface(scene, scene.tile(AT.translated(NORTH)));
+        var road = new BoardSurface(scene, scene.tile(AT));
+        var from = BoardGeometry.center(AT, 0);
+        var to = BoardGeometry.center(AT.translated(NORTH), 0);
+        var direction = to.cpy().sub(from).nor();
+        var edge = from.cpy().lerp(to, .5f);
+        for (float in : new float[] { 4, 12 }) {
+            float x = edge.x + direction.x * in, y = edge.y + direction.y * in;
+            assertTrue(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, x, y, Float.NaN)),
+                  "No water under the ramp, " + in + " in from the edge");
+        }
+        assertEquals(-BoardGeometry.level(), BoardSurface.sampleHeight(road.groundFaces(), edge.x + direction.x * 4,
+              edge.y + direction.y * 4, Float.NaN), .1f * BoardGeometry.level(), "The low ground runs on past the edge");
+        assertFalse(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, to.x, to.y, Float.NaN)), "Water at the hex's centre");
+        BoardRoadSlopeTest.assertClosed(scene, AT, TerrainLod.FULL);
+    }
+
+    @Test
     void aRoadLiesOnItsOwnFlatSurfaceWhereBanksTiltTheBedBesideIt() {
         var board = Board.createEmptyBoard(7, 7);
         for (Coords at : List.of(AT, AT.translated(NORTH), AT.translated(SOUTH))) {
