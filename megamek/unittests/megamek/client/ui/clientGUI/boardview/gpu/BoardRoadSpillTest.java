@@ -40,6 +40,8 @@ class BoardRoadSpillTest {
         assertEquals(List.of(AT, AT.translated(0), AT.translated(1), AT.translated(3), AT.translated(4), AT.translated(5)),
               ways.stream().map(BoardRoad::coords).toList(), "Clearance reaches every dry neighbour's way");
         assertTrue(BoardRoad.nearby(scene, scene.tile(AT.translated(2))).isEmpty(), "Water cannot support spilled road paint");
+        assertTrue(BoardRoad.bed(scene, scene.tile(AT.translated(2))).stream()
+              .anyMatch(road -> road.coords().equals(AT.translated(2))), "A road a level under water lies on its bed");
     }
 
     @Test

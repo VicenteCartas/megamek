@@ -460,11 +460,48 @@ class BoardRoadControlTest {
     @Test
     void unmarkedRoadsRoundaboutsAndUnsupportedGroundDoNotGrowStopFurniture() {
         for (String terrain : List.of("road:2:27", "road:3:27", "road:4:27", "road:1:9", "road:1:63",
-              "road:1:27;water:1", "road:1:27;hazardous_liquid:1", "road:1:27;magma:2")) {
+              "road:1:27;magma:2")) {
             assertTrue(controls(new Hex(0, terrain, "")).isEmpty(), terrain);
         }
         Hex hex = new Hex(0, "road:1:27", "");
         assertTrue(BoardFeatures.roadControls(hex, AT, at -> null, false).isEmpty());
+    }
+
+    @Test
+    void aSubmergedRoadKeepsTheFurnitureOfADryOneOnItsBed() {
+        var dry = controls(new Hex(0, "road:1:27", "")).stream().map(feature -> feature.decoration().id()).toList();
+        assertFalse(dry.isEmpty());
+        for (String liquid : List.of("water:0", "water:1", "water:4", "hazardous_liquid:1")) {
+            Hex hex = new Hex(0, "road:1:27;" + liquid, "");
+            var submerged = BoardFeatures.roadControls(hex, AT, at -> at.equals(AT) ? hex : new Hex(0, liquid, ""), true);
+            assertEquals(dry, submerged.stream().map(feature -> feature.decoration().id()).toList(), liquid);
+            assertTrue(submerged.stream().allMatch(feature -> feature.decoration().placement().receiver().terrain()
+                  .equals("ground")), liquid);
+            // A neighbouring street under the same water keeps its poles out of its own lanes.
+            assertFalse(BoardFeatures.roadControls(hex, AT, at -> new Hex(0, "road:1:27;" + liquid, ""), true).isEmpty(),
+                  liquid);
+        }
+    }
+
+    @Test
+    void iceHidesASubmergedRoadAndClassicLeavesOutItsFurniture() {
+        var scene = waterRoad("road:1:27;water:1");
+        var tile = scene.tile(AT);
+        assertTrue(BoardRoad.submerged(tile));
+        var furniture = BoardFeatures.fittedControls(scene, tile).stream()
+              .filter(feature -> BoardFeatures.submergedControl(tile, feature)).toList();
+        assertFalse(furniture.isEmpty(), "Under open water the road keeps its furniture; Classic filters it by this test");
+        var iced = waterRoad("road:1:27;water:1;ice:1");
+        assertFalse(BoardRoad.submerged(iced.tile(AT)));
+        assertTrue(BoardFeatures.fittedControls(iced, iced.tile(AT)).stream()
+              .noneMatch(feature -> BoardFeatures.submergedControl(iced.tile(AT), feature)));
+    }
+
+    private static BoardScene waterRoad(String terrain) {
+        var board = Board.createEmptyBoard(7, 7);
+        board.setHex(AT, new Hex(0, terrain, ""));
+        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
+              List.of(), List.of(), -1, "", List.of());
     }
 
     @Test

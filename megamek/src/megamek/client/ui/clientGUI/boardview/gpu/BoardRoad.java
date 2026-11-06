@@ -188,13 +188,21 @@ final class BoardRoad {
     }
 
     /**
-     * A road through shallow water, a ford or a flooded street, which Enhanced lays on the bed ({@link #bed}). Under a
-     * level or more of water a road is out of sight, as in real water; a bridge carries its road over the water
-     * instead, and molten liquid hides its bed.
+     * A road under a liquid at any depth, a ford or a submerged city's street, which Enhanced lays on the bed
+     * ({@link #bed}). A bridge carries its road over the water instead, and molten liquid and ice hide its bed.
      */
     static boolean submerged(BoardScene.Tile tile) {
-        return tile.road() != Kind.NONE && tile.liquid().present() && !tile.liquid().molten() && tile.waterDepth() == 0
+        return tile.road() != Kind.NONE && tile.liquid().present() && !tile.liquid().molten() && !tile.frozen()
               && BoardBridge.feature(tile) == null;
+    }
+
+    /**
+     * {@link #submerged(BoardScene.Tile)} before the capture, for the road's furniture on its bed. Ice is the scene's to
+     * decide, as an airless board freezes its water (BoardFeatures#fittedControls).
+     */
+    static boolean submerged(Hex hex) {
+        return capture(hex) != Kind.NONE && HexTile.liquid(hex) && !BoardLiquid.capture(hex).molten()
+              && !hex.containsTerrain(Terrains.BRIDGE);
     }
 
     /**

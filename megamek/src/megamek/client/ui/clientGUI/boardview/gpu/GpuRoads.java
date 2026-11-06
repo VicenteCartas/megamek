@@ -35,6 +35,7 @@ import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.NumberUtils;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -1193,8 +1194,8 @@ final class GpuRoads {
     private static short side(MeshPartBuilder mesh, Vector3 p, Vector3 sample, Vector3 normal, float repeat, Mask mask,
           BoardSurface surface, float coat, boolean tessellated) {
         var tile = surface.tile;
-        float[] vertex = { p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat,
-              maskU(tile.coords(), mask.data, sample), maskV(tile.coords(), mask.data, sample),
+        float[] vertex = { p.x, p.y, p.z, normal.x, normal.y, normal.z, underWater(coat, p.x, p.y, p.z, surface),
+              p.x / repeat, -p.y / repeat, maskU(tile.coords(), mask.data, sample), maskV(tile.coords(), mask.data, sample),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV };
         if (tessellated) {
             // Flat (no support): it keeps its own positions.
@@ -1226,8 +1227,9 @@ final class GpuRoads {
         // its control points first changes the screen-space split and can expose the ground between the two meshes.
         var tile = surface.tile;
         if (ground != null) { normal = ground.normal; }
-        float[] vertex = { p.x, p.y, ground == null ? p.z : ground.position.z, normal.x, normal.y, normal.z,
-              coat, p.x / repeat, -p.y / repeat,
+        float z = ground == null ? p.z : ground.position.z;
+        float[] vertex = { p.x, p.y, z, normal.x, normal.y, normal.z,
+              underWater(coat, p.x, p.y, z, surface), p.x / repeat, -p.y / repeat,
               maskU(tile.coords(), mask.data, p), maskV(tile.coords(), mask.data, p),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV };
         if (tessellated) {
@@ -1243,6 +1245,20 @@ final class GpuRoads {
             }
         }
         return mesh.vertex(vertex);
+    }
+
+    /**
+     * A coat's colour at a point of a water hex's ground: its alpha packs the water's palette and the levels over the
+     * point, which tint the coat as they tint the bed (terrain-road.frag). A packed colour keeps only even alpha bytes,
+     * so each palette has 31 steps: tenths of a level up to three, past which the tint hardly changes. They stay linear,
+     * as the mesh interpolates them.
+     */
+    private static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
+        var liquid = surface.tile.liquid();
+        if (!liquid.present() || liquid.molten()) { return coat; }
+        float levels = (surface.waterHeight(x, y) - z) / BoardGeometry.level();
+        int alpha = 2 * (31 * Math.round(GpuWaterShader.palette(liquid)) + Math.round(Math.clamp(levels, 0, 3) * 10));
+        return NumberUtils.intToFloatColor(NumberUtils.floatToIntColor(coat) & 0x00ffffff | alpha << 24);
     }
 
     /** Where the point {@code p} of the hex at {@code at} lies across {@code mask}: 0 at its left edge, 1 at its right. */

@@ -231,6 +231,7 @@ vec3 slabNormal(RoadMaps m, vec2 uv, mat2 g, vec2 along, vec2 onward, float stre
 // wheel paths at WHEEL_PATH). World-anchored fields place every feature and the heading only orients them,
 // symmetrically, so neighbouring hexes agree whichever way their paths run. Sizes are metres.
 uniform float u_metre;       // world units per metre
+uniform float u_gravity;     // scenario acceleration; without it there is no water (GpuTerrain.waterVisible)
 
 const float WHEEL_PATH = .4;  // BoardRoad.WHEEL_OFFSET over half of Kind.PAVED.halfWidth
 const float LANE_METRES = 2.7; // half of Kind.PAVED.halfWidth, in metres: B's full range
@@ -784,6 +785,15 @@ void main() {
 #endif
     // Roads share their ground's step down into a recession; the uphill lift stays the ground's alone.
     albedo = levelGrade(materialReflectance(albedo), min(v_cloudPosition.z / u_levelHeight, 0.0));
+#ifdef roadMaskFlag
+    // A coat on a water hex's ground keeps the hue its column of water passes, as the bed does. Its alpha packs the
+    // water's palette and the levels over it (GpuRoads#underWater); a dry coat's is opaque.
+    if (v_color.a < .98 && u_gravity > 0.0) {
+        float waterTag = v_color.a * 127.5;
+        float palette = floor(waterTag / 31.0 + .001);
+        albedo *= waterBedTint(palette, (waterTag - 31.0 * palette) * .1);
+    }
+#endif
 #if defined(roadMaskFlag) && __VERSION__ < 450
     // Without the quad vote, a hidden lane skips the lighting; the vote keeps whole quads, whose lanes all light so
     // that the shadow receiver's derivatives (sculptShadow) read live neighbours. The hidden ones go at the end.

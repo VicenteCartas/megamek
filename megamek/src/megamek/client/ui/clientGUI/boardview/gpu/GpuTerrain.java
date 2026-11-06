@@ -4337,7 +4337,9 @@ final class GpuTerrain implements Disposable {
         for (BoardScene.Feature feature : features) {
             if (build.preview != null && !routeFeature(tile, feature)) { continue; }
             if (feature.decoration() != null && feature.decoration().kind().equals("decal")) { continue; }
-            if (build.chunk.columns && !columnFeature(feature)) { continue; }
+            if (build.chunk.columns && (!columnFeature(feature) || BoardFeatures.submergedControl(tile, feature))) {
+                continue;
+            }
             // Rough boulders are already part of the shared terrain mesh, shading and picking geometry.
             if (feature.kind() == BoardScene.FeatureKind.BOULDER || feature.kind() == BoardScene.FeatureKind.ROUGH
                   || feature.kind() == BoardScene.FeatureKind.SHAFT) { continue; }
@@ -7512,6 +7514,8 @@ final class GpuTerrain implements Disposable {
         if (!oldFeatures.equals(features) || !features.isEmpty() && before.elevation() != after.elevation()
               || !Objects.equals(was.infrastructure().bridges().get(at), shown.infrastructure().bridges().get(at))
               || oldCoats.size() != coats.size()
+              // A coat on a water hex carries its water's palette (GpuRoads#underWater).
+              || !coats.isEmpty() && !before.liquid().equals(after.liquid())
               || IntStream.range(0, coats.size()).anyMatch(i -> !sameCoat(at, oldCoats.get(i), coats.get(i)))
               || !sameBridge(was.infrastructure().bridgeShapes().get(at), shown.infrastructure().bridgeShapes().get(at))) {
             return false;

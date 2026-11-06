@@ -126,7 +126,7 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN ->
                       structureModels.containsKey(Terrains.FUEL_TANK);
                 case Terrains.INDUSTRIAL -> structureModels.containsKey(Terrains.INDUSTRIAL);
-                // A road through water lies on its bed, or out of sight under deeper water (BoardRoad#submerged).
+                // A road through water lies on its bed (BoardRoad#submerged).
                 case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 // Fluff 1 selects the standard road bend, already represented by the captured road exits.
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
@@ -622,12 +622,17 @@ final class BoardFeatures {
 
     /** Captured counterparts of BoardRoad.nearbyWays; no game connection is added for visual overhang. */
     private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board) {
+        return nearbyWays(hex, coords, board, false);
+    }
+
+    /** With {@code submerged}, the roads under liquid count too: what stands on a bed keeps clear of the roads on it. */
+    private static List<BoardRoad> nearbyWays(Hex hex, Coords coords, Function<Coords, Hex> board, boolean submerged) {
         List<BoardRoad> roads = new ArrayList<>();
         for (int direction = -1; direction < 6; direction++) {
             Coords at = direction < 0 ? coords : coords.translated(direction);
             Hex source = direction < 0 ? hex : board.apply(at);
             // A graded road's ramp and corridor reach a neighbour of another level too.
-            if (source == null || HexTile.liquid(source)) { continue; }
+            if (source == null || HexTile.liquid(source) && !(submerged && BoardRoad.submerged(source))) { continue; }
             int rails = RailRoute.groundSides(source);
             if (BoardRoad.capture(source) == BoardRoad.Kind.NONE && rails == 0) { continue; }
             BoardRoad road = BoardRoad.clearance(at, source, board, rails);
@@ -642,7 +647,8 @@ final class BoardFeatures {
         List<BoardScene.Feature> result = new ArrayList<>();
         for (boolean deck : new boolean[] { false, true }) {
             if (deck ? !hex.containsTerrain(Terrains.BRIDGE)
-                  : !groundVisible || HexTile.liquid(hex) || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
+                  : !groundVisible || HexTile.liquid(hex) && !BoardRoad.submerged(hex)
+                        || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
             BoardRoad.Kind kind = deck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
             if (kind != BoardRoad.Kind.PAVED) { continue; }
             int exits = hex.getTerrain(deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits() & 63;
@@ -679,7 +685,7 @@ final class BoardFeatures {
             var approaches = road.stopApproaches(exits, crossing);
             crossingControls(hex, coords, board, deck, road, corridor, marker, crossing, approaches, junction, result);
             if (junction.isEmpty()) { continue; }
-            List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board);
+            List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board, HexTile.liquid(hex));
             for (var approach : approaches) {
                 if (junction.stream().noneMatch(arm -> arm.direction() == approach.direction())) { continue; }
                 // Other turning envelopes can widen this approach beyond its own lane. Follow the whole asphalt
@@ -744,10 +750,17 @@ final class BoardFeatures {
         if (tile.features().stream().noneMatch(feature -> groundControl(feature) >= 0)) { return tile.features(); }
         var road = BoardRoad.of(scene, tile);
         var approaches = road.stopApproaches(tile.roadExits(), road.crossing(tile, false));
+        // Ice hides the road under it, whose furniture would stand through the sheet.
+        boolean iced = tile.liquid().present() && tile.frozen();
         return tile.features().stream().filter(feature -> {
             int direction = groundControl(feature);
-            return direction < 0 || approaches.stream().anyMatch(approach -> approach.direction() == direction);
+            return direction < 0 || !iced && approaches.stream().anyMatch(approach -> approach.direction() == direction);
         }).toList();
+    }
+
+    /** A ground road's furniture on a liquid hex, which Classic leaves out with the road's paint. */
+    static boolean submergedControl(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return tile.liquid().present() && groundControl(feature) >= 0;
     }
 
     private static int groundControl(BoardScene.Feature feature) {
@@ -852,7 +865,10 @@ final class BoardFeatures {
         return null;
     }
 
-    /** A shoulder can overhang the grid; ground furniture still needs dry ground at the road's height. */
+    /**
+     * A shoulder can overhang the grid; ground furniture still needs ground at the road's height: dry ground for a dry
+     * road, and for a submerged road any ground as low as its bed.
+     */
     private static boolean controlSupported(Hex hex, Coords coords, Function<Coords, Hex> board,
           boolean deck, float x, float y) {
         if (deck) { return true; }
@@ -863,8 +879,9 @@ final class BoardFeatures {
             if (!HexTile.contains(at.getX(), at.getY(), worldX, worldY, BoardGeometry.TILE_WIDTH,
                   BoardGeometry.TILE_HEIGHT)) { continue; }
             Hex support = direction < 0 ? hex : board.apply(at);
-            if (support != null && support.getLevel() == hex.getLevel() && !HexTile.liquid(support)
-                  && !support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return true; }
+            if (support == null || support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
+            if (HexTile.liquid(hex) ? support.floor() == hex.floor() && !BoardLiquid.capture(support).molten()
+                  : support.getLevel() == hex.getLevel() && !HexTile.liquid(support)) { return true; }
         }
         return false;
     }
