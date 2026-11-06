@@ -899,18 +899,18 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
                 return isHoverTerrainProhibited(hex);
             case NAVAL:
             case HYDROFOIL:
-                // Can only deploy under a bridge if there is sufficient clearance.
-                if (hex.containsTerrain(Terrains.BRIDGE) &&
-                      (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.getLevel())) {
+                // Can only pass under a bridge with sufficient clearance over the surface (TW p.62). BRIDGE_ELEV already
+                // counts from the surface; getHeight() is one less than the rules' height, hence >=.
+                if (hex.containsTerrain(Terrains.BRIDGE) && (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV))) {
                     return true;
                 }
                 // Naval vessels never enter a TacOps rail hex (TO:AR p.32).
                 return (hex.terrainLevel(Terrains.WATER) <= 0) || hex.containsTerrain(Terrains.ICE)
                       || (RailRoute.rules(game) && RailRoute.intact(hex));
             case SUBMARINE:
-                // Submarines get extra clearance equal to the depth of water.
-                if (hex.containsTerrain(Terrains.BRIDGE) &&
-                      (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.floor())) {
+                // A submarine's clearance counts from its current depth (TW p.62).
+                if (hex.containsTerrain(Terrains.BRIDGE)
+                      && (currElevation + getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV))) {
                     return true;
                 }
                 return (hex.terrainLevel(Terrains.WATER) <= 0) || (RailRoute.rules(game) && RailRoute.intact(hex));

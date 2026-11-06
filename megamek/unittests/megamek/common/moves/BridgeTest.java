@@ -164,6 +164,29 @@ public class BridgeTest extends GameBoardTestCase {
               end"""
         );
 
+        // Water away from level 0: BRIDGE_ELEV still counts from the surface. Middle hex (0, 1).
+        initializeBoard("BOARD_BRIDGE_OVER_HIGH_WATER", """
+              size 1 3
+              hex 0101 3 "water:2" ""
+              hex 0102 3 "water:2;bridge:1;bridge_cf:100;bridge_elev:1" ""
+              hex 0103 3 "water:2" ""
+              end"""
+        );
+        initializeBoard("BOARD_DECK_ON_HIGH_WATER", """
+              size 1 3
+              hex 0101 3 "water:2" ""
+              hex 0102 3 "water:2;bridge:1;bridge_cf:100;bridge_elev:0" ""
+              hex 0103 3 "water:2" ""
+              end"""
+        );
+        initializeBoard("BOARD_DECK_ON_LOW_WATER", """
+              size 1 3
+              hex 0101 -2 "water:2" ""
+              hex 0102 -2 "water:2;bridge:1;bridge_cf:100;bridge_elev:0" ""
+              hex 0103 -2 "water:2" ""
+              end"""
+        );
+
         // Bank roads beside decks (b13 ways): a deck within a level that exits back links; one two levels up, a deck
         // without that exit and a road beneath a deck do not; a road with specified exits keeps them.
         initializeBoard("BOARD_BANK_ROAD_ONTO_DECK", """
@@ -790,5 +813,31 @@ public class BridgeTest extends GameBoardTestCase {
               MoveStepType.FORWARDS);
         // Submarines travel underwater, bridges are above water
         assertTrue(movePath.isMoveLegal());
+    }
+
+    /** Whether a plain vessel at this elevation may not be in the middle hex of the set board. */
+    private boolean underBridgeProhibited(EntityMovementMode mode, int elevation) {
+        Tank vessel = new Tank();
+        vessel.setMovementMode(mode);
+        vessel.setGame(getGame());
+        return vessel.isLocationProhibited(new Coords(0, 1), getGame().getBoard().getBoardId(), elevation);
+    }
+
+    /** TW p.62: a surface vessel's clearance counts from the surface, at whatever level the water stands. */
+    @Test
+    void testNaval_ClearanceCountsFromTheSurfaceAtAnyLevel() {
+        setBoard("BOARD_BRIDGE_OVER_HIGH_WATER");
+        assertFalse(underBridgeProhibited(EntityMovementMode.NAVAL, 0), "A deck one level over the surface clears a vessel");
+        setBoard("BOARD_DECK_ON_LOW_WATER");
+        assertTrue(underBridgeProhibited(EntityMovementMode.NAVAL, 0), "A deck on the surface does not");
+        assertTrue(underBridgeProhibited(EntityMovementMode.HYDROFOIL, 0));
+    }
+
+    /** TW p.62: a submarine's clearance counts from its current depth, at whatever level the water stands. */
+    @Test
+    void testSubmarine_ClearanceCountsFromItsDepthAtAnyLevel() {
+        setBoard("BOARD_DECK_ON_HIGH_WATER");
+        assertFalse(underBridgeProhibited(EntityMovementMode.SUBMARINE, -1), "Dived a level, it passes under a deck on the surface");
+        assertTrue(underBridgeProhibited(EntityMovementMode.SUBMARINE, 0), "Surfaced, it does not");
     }
 }
