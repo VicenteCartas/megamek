@@ -1103,7 +1103,7 @@ final class GpuLobbyScreen extends ApplicationAdapter {
             return;
         }
         if (mapSetupView == null) {
-            mapSetupView = new LobbyMapSetupView(kit, window.mapSetupHost(), !preferences.getReduceMotion());
+            mapSetupView = new LobbyMapSetupView(kit, window.mapSetupHost());
         }
         closeMenus();
         if (!LobbyMapSetupView.KEY.equals(centre.showing())) {

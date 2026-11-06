@@ -1455,12 +1455,15 @@ work for Swing, and item 11 is under investigation.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
          only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.
-       - Done: the advanced map search is folded into the map setup's board drawer. Filters beside the Boards
-         heading slides open a panel: the board size (this size, or any size on a one-board map off space, with
-         width and height ranges), the tags (any or all of them) and the top folders, with a count on the button and
-         Clear. Any size lists the whole board library (`BoardClassifier`, read once off the Swing thread when the
-         filters first open) with each board's size; Place makes such a board the whole map at its own size, as the
-         Swing dialog's OK did, and Add to stack refuses it. The lobby window's Swing branch is gone; the Swing
+       - Done: the advanced map search is folded into the map setup's board drawer. A compact filter bar under the
+         search holds Tags and Folders drop-down checklists (popovers that scroll on their own, with a find field
+         for a long list and Match all tags) and the board size (this size, or any size on a one-board map off
+         space, with width and height ranges on a second row). Active tags and folders show as removable chips with
+         Clear, and the faces count them, so the drawer never needs a second scrollbar. Automatic tags read as words
+         ("Light forest", not "LightForest (Auto)") and merge with a manual twin. Any size lists the whole board
+         library (`BoardClassifier`, read once off the Swing thread when Tags first opens) with each board's size;
+         Place makes such a board the whole map at its own size, as the Swing dialog's OK did, and Add to stack
+         refuses it. The lobby window's Swing branch is gone; the Swing
          `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
          and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above

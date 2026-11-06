@@ -117,6 +117,15 @@ class MapSetupFormTest {
     }
 
     @Test
+    void tagLabelsSpellAutomaticTagsAsWordsAndKeepManualOnes() {
+        assertEquals("Light forest", MapSetupForm.tagLabel("LightForest (Auto)"));
+        assertEquals("Under water bridge", MapSetupForm.tagLabel("UnderWaterBridge (Auto)"));
+        assertEquals("Woods", MapSetupForm.tagLabel("Woods (Auto)"));
+        assertEquals("Arena", MapSetupForm.tagLabel("Arena"));
+        assertEquals("CityCenter", MapSetupForm.tagLabel("CityCenter"));
+    }
+
+    @Test
     void picturesTheSlotsAndSizes() {
         Picture picture = form.picture();
         assertEquals(2, picture.mapWidth());

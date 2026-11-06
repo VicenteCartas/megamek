@@ -654,12 +654,12 @@ public final class MapSetupForm {
         Map<String, List<String>> tagsByPath = new HashMap<>();
         for (Map.Entry<BoardsTagger.Tags, List<String>> tagged : classifier.getBoardsByTag().entrySet()) {
             for (String path : tagged.getValue()) {
-                tagsByPath.computeIfAbsent(path, k -> new ArrayList<>()).add(tagged.getKey().getName());
+                addTag(tagsByPath, path, tagged.getKey().getName());
             }
         }
         for (Map.Entry<String, List<String>> tagged : classifier.getBoardsByManualTag().entrySet()) {
             for (String path : tagged.getValue()) {
-                tagsByPath.computeIfAbsent(path, k -> new ArrayList<>()).add(tagged.getKey());
+                addTag(tagsByPath, path, tagged.getKey());
             }
         }
         List<LibraryBoard> result = new ArrayList<>();
@@ -674,6 +674,28 @@ public final class MapSetupForm {
         }
         result.sort(Comparator.comparing(LibraryBoard::name));
         return result;
+    }
+
+    /** Adds a board's tag as {@link #tagLabel} spells it, once, so a manual tag and its automatic twin merge. */
+    private static void addTag(Map<String, List<String>> tagsByPath, String path, String tag) {
+        List<String> tags = tagsByPath.computeIfAbsent(path, k -> new ArrayList<>());
+        String label = tagLabel(tag);
+        if (tags.stream().noneMatch(label::equalsIgnoreCase)) {
+            tags.add(label);
+        }
+    }
+
+    /**
+     * A board tag as a player reads it: an automatic tag, such as "LightForest (Auto)", loses its suffix and becomes
+     * words, "Light forest"; a manual tag stays as written.
+     */
+    public static String tagLabel(String tag) {
+        String suffix = " (Auto)";
+        if (!tag.endsWith(suffix)) {
+            return tag;
+        }
+        String words = tag.substring(0, tag.length() - suffix.length()).replaceAll("(?<=[a-z])(?=[A-Z])", " ");
+        return words.isEmpty() ? words : words.charAt(0) + words.substring(1).toLowerCase(Locale.ROOT);
     }
 
     /** The size a board of the list is drawn at: its own while browsing any size, else the current board size. */

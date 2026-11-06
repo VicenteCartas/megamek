@@ -19,8 +19,8 @@ import java.util.function.Consumer;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.ui.Button;
-import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
@@ -34,6 +34,7 @@ import megamek.client.lobby.RandomMapForm.Param;
 import megamek.client.ui.Messages;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiDialog;
+import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.board.BoardDimensions;
@@ -652,13 +653,14 @@ class LobbyMapSetupSmokeTest {
         UiTestStage.run(ui -> {
             Fixture fixture = new Fixture(ui);
             Table body = fixture.body;
-            assertNull(body.<Container<?>>findActor("map-filter-holder").getActor(),
-                  "the filters start shut");
-            click(ui, body.findActor("map-filters"));
-            assertNotNull(body.findActor("map-filter-panel"), "Filters opens the panel");
+            Group root = ui.stage.getRoot();
+            assertNotNull(body.findActor("map-filter-bar"), "the filter bar sits under the search");
+            assertNull(body.findActor("map-filter-chips"), "no chips row without an active filter");
+            click(ui, body.findActor("map-filter-tags"));
             assertEquals(MapSetupForm.Library.READING, fixture.form.libraryState(),
-                  "opening the filters asks for the library");
-            assertNotNull(body.findActor("map-filter-tags-reading"));
+                  "opening the tags asks for the library");
+            assertTrue(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(), "Tags opens its checklist");
+            assertNotNull(root.findActor("map-filter-tag-reading"));
             assertTrue(body.<Button>findActor("map-filter-scope-any").isDisabled(),
                   "a map of two boards cannot browse any size");
 
@@ -669,17 +671,33 @@ class LobbyMapSetupSmokeTest {
                   new MapSetupForm.LibraryBoard("32x34/Big City.board2", 32, 34, List.of("Urban"))));
             fixture.show();
             ui.draw();
-            click(ui, body.findActor("map-filter-tag-Urban"));
+            assertTrue(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(),
+                  "the checklist stays open as the library arrives");
+            click(ui, root.findActor("map-filter-tag-Urban"));
             assertEquals(List.of("16x17/City Hills.board2"),
                   fixture.view.shown().boards().stream().map(Entry::name).toList(),
                   "a tag keeps the boards of this size that have it, without Generated");
-            assertEquals(1, fixture.view.shown().filterCount(),
-                  "the button counts the filters at work");
-            click(ui, body.findActor("map-filter-clear"));
-            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter());
-            click(ui, body.findActor("map-filter-folder-16x17"));
+            assertTrue(root.<Button>findActor("map-filter-tag-Urban").isChecked());
+            assertEquals("Tags \u00b7 1", body.<UiButton>findActor("map-filter-tags").getText().toString(),
+                  "the face counts its checked tags");
+            ui.draw();
+            assertNotNull(body.findActor("map-filter-chip-tag-Urban"), "an active tag shows as a chip");
+            click(ui, body.findActor("map-filter-tags"));
+            assertFalse(root.<UiPopover>findActor("map-filter-tag-popover").isVisible(), "the face closes it again");
+            click(ui, body.findActor("map-filter-chip-tag-Urban"));
+            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter(), "the chip removes its filter");
+            ui.draw();
+            assertNull(body.findActor("map-filter-chips"), "the chips row leaves with the last filter");
+
+            click(ui, body.findActor("map-filter-folders"));
+            click(ui, root.findActor("map-filter-folder-16x17"));
             assertEquals(3, fixture.view.shown().boards().size(), "the folder keeps its three boards");
-            click(ui, body.findActor("map-filter-folder-16x17"));
+            ui.draw();
+            click(ui, body.findActor("map-filter-clear"));
+            assertEquals(MapSetupForm.Filter.NONE, fixture.form.filter(), "Clear drops every filter");
+            assertFalse(root.<Button>findActor("map-filter-folder-16x17").isChecked(),
+                  "the checklist follows the cleared filter");
+            root.<UiPopover>findActor("map-filter-folder-popover").cancel();
 
             fixture.form.mapWidth(1);
             fixture.show();
@@ -754,7 +772,7 @@ class LobbyMapSetupSmokeTest {
             server();
             form = new MapSetupForm(() -> server, () -> Set.of(new BoardDimensions(16, 17)), new Commands(),
                   board -> "", () -> List.of("", "snow"));
-            view = new LobbyMapSetupView(ui.kit, this, false);
+            view = new LobbyMapSetupView(ui.kit, this);
             body = view.body();
             ui.window.addActor(body);
             body.setBounds(20, 20, 1500, 1000);
