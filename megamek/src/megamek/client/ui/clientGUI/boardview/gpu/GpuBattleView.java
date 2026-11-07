@@ -332,6 +332,16 @@ class GpuBattleView extends ApplicationAdapter {
         Gdx.input.setInputProcessor(inputBlocked ? null : input);
     }
 
+    /** Whether the pointer is over the HUD; the hidden cursor of a held drag is over nothing. */
+    private boolean hudUnderPointer() {
+        return !UiCursorCapture.pointerHidden() && ui.hit(Gdx.input.getX(), Gdx.input.getY());
+    }
+
+    /** The editor's cliff edge under the pointer, negative for none. */
+    private int cliffEdgeUnderPointer() {
+        return UiCursorCapture.pointerHidden() ? -1 : ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY());
+    }
+
     /**
      * GPU thread: ignores the mouse and keyboard while a modal Swing dialog is open, as a disabled window would; the
      * window itself stays enabled so it takes the activation back when the dialog closes.
@@ -429,6 +439,8 @@ class GpuBattleView extends ApplicationAdapter {
             // HUD first (C.4), so no key reaches the Stage twice.
             @Override
             public boolean scrolled(float amountX, float amountY) {
+                // The hidden cursor of a held drag is over nothing on the HUD, so nothing there sees it.
+                if (UiCursorCapture.pointerHidden()) { return boardInput.scrolled(amountX, amountY); }
                 int x = Gdx.input.getX(), y = Gdx.input.getY();
                 megamek.client.ui.gdx.UiKit.focusScrollAt(ui.stage(), x, y);
                 // A board wheel gesture leaves the edited field, just as a board press does.
@@ -437,7 +449,14 @@ class GpuBattleView extends ApplicationAdapter {
             }
 
             @Override
+            public boolean touchDragged(int x, int y, int pointer) {
+                return UiCursorCapture.pointerHidden() && boardInput.boardGesture
+                      ? boardInput.touchDragged(x, y, pointer) : super.touchDragged(x, y, pointer);
+            }
+
+            @Override
             public boolean touchDown(int x, int y, int pointer, int button) {
+                if (UiCursorCapture.pointerHidden()) { return true; }
                 // Finish wheel edits before a toolbar or menu action can consume the click.
                 boardInput.finishElevationScroll();
                 return super.touchDown(x, y, pointer, button);
@@ -879,8 +898,10 @@ class GpuBattleView extends ApplicationAdapter {
         if (changedTiles || hoverCameraRevision != boardCamera.revision()) {
             source.setVisibleArea(boardCamera.visibleArea(scene));
         }
-        // A held drag's hidden cursor points at nothing; the first frame after its release catches up.
-        if (!UiCursorCapture.active() && (hoverCameraRevision != boardCamera.revision() || hoverHeld != (playback.movement() != null))) {
+        if (UiCursorCapture.pointerHidden()) {
+            // The hidden cursor points at nothing; its return move after the release refreshes the hover.
+            hoverCameraRevision = boardCamera.revision();
+        } else if (hoverCameraRevision != boardCamera.revision() || hoverHeld != (playback.movement() != null)) {
             hoverCameraRevision = boardCamera.revision();
             hoverHeld = playback.movement() != null;
             boardInput.mouseMoved(Gdx.input.getX(), Gdx.input.getY());
@@ -981,7 +1002,7 @@ class GpuBattleView extends ApplicationAdapter {
         // An occupied or hovered building fades. In the Tactical View, whose ground layer marks its roof, an occupied one
         // goes altogether, so no token is covered, and hovering opens none.
         terrain.animate(Gdx.graphics.getDeltaTime(), occupants, boardCamera.tactical() ? 0 : tuning.buildingOpacity(),
-              boardCamera.tactical() || ui.hit(Gdx.input.getX(), Gdx.input.getY()) ? null : hovered, hoverFloorZ());
+              boardCamera.tactical() || hudUnderPointer() ? null : hovered, hoverFloorZ());
         editorPreview.prepare(scene, terrain, ghosts());
         renderStage("geometry shadows");
         // The Tactical View's icons cast nothing.
@@ -1215,14 +1236,14 @@ class GpuBattleView extends ApplicationAdapter {
     private void renderHoverRings() {
         float top = hoverTop();
         if (!source.isEditor()) {
-            if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+            if (!hudUnderPointer()) {
                 GpuHexHover.render(lines, boardCamera.camera, scene, hovered, top);
             }
             return;
         }
-        if ((hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY()))
+        if ((hovered == null || scene.tile(hovered) == null || hudUnderPointer())
               && (!source.isEditor() || source.editorState() == null || source.editorState().selection().isEmpty())
-              && ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY()) < 0) {
+              && cliffEdgeUnderPointer() < 0) {
             return;
         }
         Gdx.gl.glEnable(GL20.GL_DEPTH_TEST);
@@ -1309,7 +1330,7 @@ class GpuBattleView extends ApplicationAdapter {
         }
         lines.end();
         drawCliffEdgeHover(alpha);
-        if (hovered == null || scene.tile(hovered) == null || ui.hit(Gdx.input.getX(), Gdx.input.getY())) { return; }
+        if (hovered == null || scene.tile(hovered) == null || hudUnderPointer()) { return; }
         lines.begin(ShapeRenderer.ShapeType.Line);
         lines.setColor(1, 1, 1, alpha);
         if (source.isEditor() && (modifiers() == InputEvent.CTRL_DOWN_MASK
@@ -1401,7 +1422,7 @@ class GpuBattleView extends ApplicationAdapter {
 
     /** A filled ribbon keeps the hovered side visible without depending on native wide-line support. */
     private void drawCliffEdgeHover(float alpha) {
-        int direction = ui.cliffEdgeAt(Gdx.input.getX(), Gdx.input.getY());
+        int direction = cliffEdgeUnderPointer();
         var state = source.editorState();
         if (direction < 0 || state == null || state.selected() == null || scene.tile(state.selected()) == null) { return; }
         Coords coords = state.selected();
@@ -3317,7 +3338,7 @@ class GpuBattleView extends ApplicationAdapter {
         @Override
         public boolean scrolled(float amountX, float amountY) {
             if (reloadingAssets || assetReloadFailed) { return true; }
-            if (!ui.hit(Gdx.input.getX(), Gdx.input.getY())) {
+            if (!hudUnderPointer()) {
                 if (source.isEditor() && modifiers() == InputEvent.CTRL_DOWN_MASK) {
                     if (!boardGesture && !ui.isTextEditing()) {
                         Coords coords = pick(Gdx.input.getX(), Gdx.input.getY());

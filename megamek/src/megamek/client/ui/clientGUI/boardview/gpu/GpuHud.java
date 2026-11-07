@@ -623,6 +623,8 @@ final class GpuHud implements GpuBoardHud {
         }
         consumedKeys.clear();
         losPanel.dismiss();
+        // A modal Swing dialog blocks the input, so a press held now never sees its release.
+        stage.cancelTouchFocus();
     }
 
     /** The nameplate key toggles every nameplate instead of showing them while it is held. */

@@ -38,6 +38,7 @@ final class GpuMinimap implements GpuHud.Component {
     private static final Color FRUSTUM = new Color(1, 1, 1, .85f);
     private static final Color DESTROYED = Color.valueOf("555555");
     /** The map's height: the panel keeps the prototype's 210 units (#minimap, y 90-300) with its 2-unit rails. */
+    private static final int NO_GESTURE = -1;
     private static final float CANVAS_HEIGHT = 206;
     /** The map's height when the window is 800 or less tall: the prototype's 180-unit panel. */
     private static final float LOW_CANVAS_HEIGHT = 176;
@@ -150,8 +151,9 @@ final class GpuMinimap implements GpuHud.Component {
         Canvas() {
             setName("minimap-canvas");
             addListener(new InputListener() {
-                /** Whether the press is a middle one that orbits; and its last point. */
-                private boolean orbiting;
+                /** The button of the one gesture at a time, none between them: left centres the camera, middle orbits it. */
+                private int gesture = NO_GESTURE;
+                /** The orbit's last point. */
                 private float lastX;
                 private float lastY;
                 /** An orbit wraps the hidden cursor, as the board's does; a left drag follows the pointer. */
@@ -159,22 +161,23 @@ final class GpuMinimap implements GpuHud.Component {
 
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-                    orbiting = button == Input.Buttons.MIDDLE;
-                    if (orbiting) {
+                    if (gesture != NO_GESTURE || button != Input.Buttons.LEFT && button != Input.Buttons.MIDDLE) {
+                        return false;
+                    }
+                    gesture = button;
+                    if (button == Input.Buttons.LEFT) {
+                        centre(x, y);
+                    } else {
                         lastX = x;
                         lastY = y;
                         cursor.capture(x, y, event.getStage());
-                    } else if (button == Input.Buttons.LEFT) {
-                        centre(x, y);
-                    } else {
-                        return false;
                     }
                     return true;
                 }
 
                 @Override
                 public void touchDragged(InputEvent event, float x, float y, int pointer) {
-                    if (!orbiting) {
+                    if (gesture == Input.Buttons.LEFT) {
                         centre(x, y);
                         return;
                     }
@@ -188,6 +191,7 @@ final class GpuMinimap implements GpuHud.Component {
                 /** Also a cancelled touch focus, so every end of the press shows the cursor again. */
                 @Override
                 public void touchUp(InputEvent event, float x, float y, int pointer, int button) {
+                    gesture = NO_GESTURE;
                     cursor.release();
                 }
 

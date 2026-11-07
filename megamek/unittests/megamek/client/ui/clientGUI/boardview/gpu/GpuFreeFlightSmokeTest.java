@@ -38,6 +38,7 @@ class GpuFreeFlightSmokeTest {
             when(source.uiPreferences()).thenAnswer(invocation -> fixture.source.uiPreferences());
             when(source.phaseStatus()).thenAnswer(invocation -> fixture.source.phaseStatus());
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
+            when(source.scenarioAtmosphere()).thenAnswer(invocation -> fixture.source.scenarioAtmosphere());
             new Lwjgl3Application(new GpuBattleView(source) {
                 private Vector3 eye;
 

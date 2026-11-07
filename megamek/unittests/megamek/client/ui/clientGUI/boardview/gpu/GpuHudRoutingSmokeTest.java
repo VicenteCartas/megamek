@@ -1339,6 +1339,7 @@ class GpuHudRoutingSmokeTest {
         Routing(GpuBoardSource.Frame board, GpuBoardFixture fixture) throws Exception {
             this.board = board;
             this.fixture = fixture;
+            when(source.scenarioAtmosphere()).thenAnswer(invocation -> fixture.source.scenarioAtmosphere());
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
             source.uiPreferences = GpuHudFixtures.preferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()));

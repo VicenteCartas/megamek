@@ -380,6 +380,22 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(tactical, board.camera.tactical(), "Orbiting keeps the renderer mode");
             hud.stage.touchUp(x + 40, y + 20, 0, Input.Buttons.MIDDLE);
             assertFalse(UiCursorCapture.active(), "Releasing the orbit shows the cursor again");
+            // One gesture at a time: a second button neither starts an orbit nor outlives the first.
+            float orbited = board.camera.azimuth();
+            hud.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE);
+            assertFalse(UiCursorCapture.active(), "A middle press during a left drag does not orbit");
+            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            hud.stage.touchDragged(x + 40, y, 0);
+            assertEquals(orbited, board.camera.azimuth(), "The left drag stays a pan");
+            hud.stage.touchUp(x + 40, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            assertFalse(UiCursorCapture.active(), "Releasing the middle button ends the orbit");
+            hud.stage.touchDragged(x + 40, y, 0);
+            assertEquals(orbited, board.camera.azimuth(), "Nothing orbits after the release");
+            hud.stage.touchUp(x + 40, y, 0, Input.Buttons.LEFT);
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
             // decision of 2026-10-03); off the map the wheel is not the map's.
             // The stage fires enter and exit in act, as each frame does.

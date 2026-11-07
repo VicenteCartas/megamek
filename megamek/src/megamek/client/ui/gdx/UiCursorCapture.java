@@ -23,7 +23,7 @@ import org.lwjgl.glfw.GLFW;
 public final class UiCursorCapture {
     /** The one pointer has one capture at a time, across all windows. */
     private static UiCursorCapture holder;
-    /** A far reading that lasts this long and this many frames is taken as real, so a lost jump cannot freeze the drag. */
+    /** How long after a jump a far reading may still be from before it. */
     private static final long SETTLE_NANOS = 50_000_000;
     private static final int SETTLE_FRAMES = 2;
     /** The wrapping border's distance inside the window, as a share of its size. */
@@ -38,13 +38,20 @@ public final class UiCursorCapture {
     private boolean live;
     /** Whether the cursor can be moved, so it hides, wraps and returns on release. */
     private boolean wraps;
+    /** Whether the cursor just jumped, or may have, and its readings are not yet to be believed. */
+    private boolean jumped;
     private double startX, startY, lastCursorX, lastCursorY;
-    private long settleUntil, settleFrame;
+    private long captureFrame, settleUntil, settleFrame;
     private float unitsPerPixelX, unitsPerPixelY;
 
     /** Whether a drag holds the pointer now. */
     public static boolean active() {
         return holder != null;
+    }
+
+    /** Whether a drag has hidden the cursor, whose position then points at nothing the user sees. */
+    public static boolean pointerHidden() {
+        return holder != null && holder.wraps;
     }
 
     /** {@link #capture(float, float, float, float)} for coordinates in the stage's units, y up. */
@@ -71,19 +78,25 @@ public final class UiCursorCapture {
             GLFW.glfwGetCursorPos(window, cursorX, cursorY);
             startX = lastCursorX = cursorX[0];
             startY = lastCursorY = cursorY[0];
-            settleUntil = System.nanoTime() + SETTLE_NANOS;
-            settleFrame = Gdx.graphics.getFrameId() + SETTLE_FRAMES;
             live = Gdx.input.isTouched();
             wraps = GLFW.glfwGetPlatform() != GLFW.GLFW_PLATFORM_WAYLAND;
+            captureFrame = Gdx.graphics.getFrameId();
+            // The return jump of a drag that has just ended may not have landed yet.
+            settle(captureFrame);
             if (wraps) { GLFW.glfwSetInputMode(window, GLFW.GLFW_CURSOR, GLFW.GLFW_CURSOR_HIDDEN); }
         }
     }
 
-    /** The press that became this drag at (x, y) of its capture: release returns the cursor there, not to the capture. */
+    /**
+     * The press that became this drag, for a capture past a drag threshold: the drag counts from here, and release
+     * returns the cursor here. The motion up to the capture stays out of the drag.
+     */
     public void beganAt(float x, float y) {
         if (holder != this || window == 0) { return; }
         startX += (x - point.x) / unitsPerPixelX;
         startY += (y - point.y) / unitsPerPixelY;
+        point.set(x, y);
+        captureFrame = -1;
     }
 
     /** The pointer in the caller's coordinates, unbounded by the window; (x, y) is the event's own position. */
@@ -91,23 +104,43 @@ public final class UiCursorCapture {
         if (holder != this || !live) { return point.set(x, y); }
         // The release event may still be queued behind this one, but the drag is over.
         if (!Gdx.input.isTouched()) { return point; }
+        long frame = Gdx.graphics.getFrameId();
+        // Polled before the capture read the cursor: real motion, from a press that lies behind that reading by as much.
+        if (frame == captureFrame) {
+            startX -= (x - point.x) / unitsPerPixelX;
+            startY -= (y - point.y) / unitsPerPixelY;
+            return point.set(x, y);
+        }
         GLFW.glfwGetCursorPos(window, cursorX, cursorY);
         GLFW.glfwGetWindowSize(window, width, height);
         double dx = cursorX[0] - lastCursorX, dy = cursorY[0] - lastCursorY;
-        // Without this rule jumps leaked into the drag under simulated input on Windows: the cursor can still read from
-        // before a jump. No real move crosses half the wrap between two reads, so such a reading leaves the drag.
-        long now = System.nanoTime(), frame = Gdx.graphics.getFrameId();
-        if ((Math.abs(dx) > width[0] * (.5 - BORDER) || Math.abs(dy) > height[0] * (.5 - BORDER))
-              && (now < settleUntil || frame < settleFrame)) {
-            return point;
+        if (jumped) {
+            // Without this rule jumps leaked into the drag under simulated input on Windows: the cursor can still read
+            // from before a jump. A reading that stays far is a lost jump or an extreme flick; the drag loses that
+            // motion rather than take a step that may not be real.
+            long now = System.nanoTime();
+            boolean settling = now < settleUntil || frame < settleFrame;
+            if (Math.abs(dx) > width[0] * (.5 - BORDER) || Math.abs(dy) > height[0] * (.5 - BORDER)) {
+                if (settling) { return point; }
+                dx = 0;
+                dy = 0;
+            }
+            jumped = settling;
         }
-        settleUntil = now + SETTLE_NANOS;
-        settleFrame = frame + SETTLE_FRAMES;
         point.add((float) dx * unitsPerPixelX, (float) dy * unitsPerPixelY);
         lastCursorX = wraps ? wrapped(cursorX[0], width[0]) : cursorX[0];
         lastCursorY = wraps ? wrapped(cursorY[0], height[0]) : cursorY[0];
-        if (lastCursorX != cursorX[0] || lastCursorY != cursorY[0]) { GLFW.glfwSetCursorPos(window, lastCursorX, lastCursorY); }
+        if (lastCursorX != cursorX[0] || lastCursorY != cursorY[0]) {
+            GLFW.glfwSetCursorPos(window, lastCursorX, lastCursorY);
+            settle(frame);
+        }
         return point;
+    }
+
+    private void settle(long frame) {
+        jumped = wraps;
+        settleUntil = System.nanoTime() + SETTLE_NANOS;
+        settleFrame = frame + SETTLE_FRAMES;
     }
 
     /** Where the cursor goes from {@code at}: past one border it comes in at the other by as much, however far past. */
@@ -129,6 +162,7 @@ public final class UiCursorCapture {
             }
             window = 0;
             live = false;
+            wraps = false;
         }
     }
 }
