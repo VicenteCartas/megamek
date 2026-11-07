@@ -127,6 +127,24 @@ class SingleLaneEditorTest {
         assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(J).getAppearance(), "road"));
     }
 
+    @Test void aCarParkBesideTheJunctionIsNoRoadOfIt() {
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "pavement", "1");
+        stroke(session, J.translated(1));
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J.translated(0), J, J.translated(3));
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, S1, S2, S3);
+        inspect(session, J);
+        send(session, Action.TRAFFIC_CONTROL, "road", "signals");
+        var snapshot = session.snapshot();
+        int exits = snapshot.property("road").exits() & 63;
+        assertEquals(1 << 1, exits & 1 << 1, "The road runs into the pavement north-east, as roads do");
+        assertEquals(1 << 1, snapshot.apronSides(), "An apron");
+        assertTrue(SingleLane.exitsOnly(exits & ~snapshot.apronSides(), snapshot.rampSides(), snapshot.entranceSides()),
+              "Only the exit leaves J: the inspector shows no controls, as the board draws none");
+    }
+
     @Test void reversingFromAnyHexOfTheRunTurnsItAndItsJoin() {
         var session = ramp();
         inspect(session, S2);

@@ -419,6 +419,45 @@ class BoardRoadSingleLaneTest {
               "An exit and an entrance: the entrance and the road stop at the lights, the exit waits for nothing");
     }
 
+    /** {@code board} with roadless pavement beside J across {@code sides}, which J's road runs into: its aprons. */
+    private static Board paved(Board board, int sides) {
+        Hex junction = board.getHex(J).duplicate();
+        int exits = junction.getTerrain(Terrains.ROAD).getExits() | sides;
+        junction.addTerrain(new megamek.common.units.Terrain(Terrains.ROAD, junction.terrainLevel(Terrains.ROAD), true, exits));
+        board.setHex(J, junction);
+        for (int d = 0; d < 6; d++) {
+            if ((sides & 1 << d) != 0) { board.setHex(J.translated(d), new Hex(0, "pavement:1", "")); }
+        }
+        return board;
+    }
+
+    @Test
+    void anApronIsNoRoadOfTheJunctionForTheEditorAsForTheBoard() {
+        // A road north to south, its exit south-east, and a car park's pavement north-east it runs into.
+        Board board = paved(ramps(9, 4, 0, HexAppearance.TrafficControl.SIGNALS), 2);
+        Hex hex = board.getHex(J);
+        int exits = hex.getTerrain(Terrains.ROAD).getExits() & 63;
+        assertEquals(1 | 2 | 4 | 8, exits);
+        int aprons = SingleLane.aprons(hex, J, board::getHex, exits), ramps = SingleLane.arms(hex, J, board::getHex, exits);
+        assertEquals(2, aprons, "The pavement is an apron");
+        assertEquals(4, ramps);
+        assertTrue(SingleLane.exitsOnly(exits & ~aprons, ramps, 0), "What the editor reads: only the exit leaves");
+        var road = of(scene(board), J);
+        assertEquals(aprons, road.aprons(), "The board finds the same apron");
+        assertTrue(road.exitsOnly(exits), "And the same junction");
+        assertTrue(BoardFeatures.roadControls(hex, J, board::getHex, true).stream()
+              .allMatch(feature -> feature.asset().equals("scenery/road/one-way-sign")), "No lights");
+        // Two aprons beside a road and its entrance are still no four roads: stop signs, the entrance giving way.
+        Board entrance = paved(ramps(9, 0, 4, null), 2 | 32);
+        Hex join = entrance.getHex(J);
+        int all = join.getTerrain(Terrains.ROAD).getExits() & 63;
+        assertEquals(HexAppearance.TrafficControl.STOPS, SingleLane.control(join.getAppearance(), all,
+              SingleLane.arms(join, J, entrance::getHex, all), SingleLane.aprons(join, J, entrance::getHex, all)));
+        var merge = of(scene(entrance), J);
+        assertEquals(HexAppearance.TrafficControl.STOPS, merge.trafficControl(all));
+        assertTrue(merge.stopApproaches(all).stream().allMatch(approach -> approach.direction() == 2 && approach.yields()));
+    }
+
     @Test
     void rampsAreNoRoadsWhenTheJunctionChoosesItsDefaultControls() {
         // A road and its two ramps once counted four roads, which default to overhead lights.
@@ -432,6 +471,25 @@ class BoardRoadSingleLaneTest {
         assertEquals(List.of(4), tee.stopApproaches(29).stream().map(BoardRoad.StopApproach::direction).toList(), "Its stem stops");
         var crossroads = of(scene(ramps(1 | 2 | 8 | 16, 4, 0, null)), J);
         assertEquals(HexAppearance.TrafficControl.GANTRY, crossroads.trafficControl(31), "Four two-lane roads: overhead lights");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "STOPS", "SIGNALS" })
+    void anEntranceBesideTheRoadsOwnArmStillGetsItsSign(String name) {
+        // The south-west entrance's mouth lies in the corner of the road's south arm: its sign stands out along its lane.
+        Board board = ramps(9, 4, 16, HexAppearance.TrafficControl.valueOf(name));
+        var road = of(scene(board), J);
+        var approach = road.stopApproaches(29).stream().filter(arm -> arm.direction() == 4).findFirst().orElseThrow();
+        String asset = name.equals("STOPS") ? "give-way-sign" : "traffic-signal";
+        var signs = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true).stream()
+              .filter(feature -> feature.decoration().id().equals("terrain:4_4:road:stop:4")).toList();
+        assertEquals(1, signs.size(), "The entrance has its " + asset);
+        var sign = signs.getFirst();
+        assertEquals("scenery/road/" + asset, sign.asset());
+        assertEquals(1, facing(sign).dot(approach.nx(), approach.ny()), .0001f, "Facing the entrance's traffic");
+        float side = -approach.ny() * (sign.x() - approach.x()) + approach.nx() * (sign.y() - approach.y());
+        assertTrue(side > approach.outer(), "On its right");
+        assertFalse(road.footprint(0).contains(sign.x(), sign.y()), "Off the asphalt");
     }
 
     @Test

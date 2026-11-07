@@ -37,6 +37,7 @@ import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
+import megamek.common.board.SingleLane;
 
 /** Road material masks on terrain or bridge decks; the supporting surfaces own their physical shape. */
 final class GpuRoads {
@@ -372,7 +373,7 @@ final class GpuRoads {
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
         // A junction that only exits leave has no controls whatever is chosen (BoardRoad#exitsOnly).
         var control = road.exitsOnly(tile.roadExits()) ? HexAppearance.TrafficControl.STOPS
-              : HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits(), road.single());
+              : SingleLane.control(tile.appearance(), tile.roadExits(), road.single(), road.aprons());
         return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false), control,
               road.crossing(tile, false));
     }

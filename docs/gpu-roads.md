@@ -81,15 +81,17 @@ heads and a lower roadside repeater. All modes keep the stop bars, except where 
 two-lane road (below), which has no controls at all.
 The choice belongs to the `road` or `bridgeRoad` appearance. With no stored choice,
 three-arm junctions use STOP signs and larger junctions use overhead traffic lights; single-lane ramps are no roads
-of their own there, so where they join, STOP signs serve until four two-lane roads meet
-(`HexAppearance.trafficControl` with the ramp sides). An explicitly signalled T controls every approach. Explicit choices store
+of their own there, nor are aprons, so where ramps join, STOP signs serve until four two-lane roads meet
+(`SingleLane.control`, from the ramp and apron sides `SingleLane.arms` and `SingleLane.aprons` give the board, the
+3D features and the editor alike). An explicitly signalled T controls every approach. Explicit choices store
 `trafficControl: stops`, `signals`, or `gantry`, including a gantry override at a T. Material
 changes, copy/paste, layer moves, save/load and undo preserve that choice.
 
 A single-lane entrance (on-ramp, below) gives way instead of stopping: under **Stops** it has a broken give-way line
 across its whole lane with the outlined triangle upstream, as a roundabout entry, and a give-way sign
 (`scenery/road/give-way-sign.glb`) on the merging traffic's right; under traffic lights it has a solid bar and lights
-like any approach. Nothing waits on an exit (off-ramp). Where every two-lane arm stops (an all-way stop at a Y or a
+like any approach; where its mouth lies in the corner of the road's arm beside it, the sign or light stands further
+out along its own lane, on its traffic's right. Nothing waits on an exit (off-ramp). Where every two-lane arm stops (an all-way stop at a Y or a
 crossroads) an entrance stops as they do, having no priority road to give way to. A junction that only exits leave,
 with no entrance and at most two two-lane arms, has nothing to control: nothing joins its road's traffic, so it gets
 no bars, signs, lights or keep-clear box under any choice, and its centre line runs through as under Stops

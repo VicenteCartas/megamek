@@ -302,8 +302,9 @@ final class BoardRoad {
                 road = road.meetConcrete(scene, scene.tile(member));
             }
         } else { road = road.meetConcrete(scene, tile); }
+        // Its aprons, which the concrete it meets gives, are no roads of its junction (SingleLane#control).
         return road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
-              .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits(), single)).meet(scene, tile);
+              .control(SingleLane.control(tile.appearance(), tile.roadExits(), single, road.apronExits)).meet(scene, tile);
     }
 
     static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
@@ -587,6 +588,9 @@ final class BoardRoad {
     }
 
     BoardRoad aprons(int exits) { apronExits = exits & 63; return this; }
+
+    /** The sides where this road runs into roadless concrete, an apron rather than a road of its junction. */
+    int aprons() { return apronExits; }
 
     /** Snapshot the connected ground/deck course for paint; a bend is preceded by one road-width of solid divider. */
     BoardRoad approachMarkings(BoardScene scene, BoardScene.Tile tile, boolean deck) {

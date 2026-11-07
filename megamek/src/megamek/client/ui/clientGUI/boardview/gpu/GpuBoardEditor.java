@@ -1842,13 +1842,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
           Consumer<String> choose) {
-        return trafficControlChoice(appearance, owner, exits, 0, choose);
+        return trafficControlChoice(appearance, owner, exits, 0, 0, choose);
     }
 
-    /** As above, where single-lane ramps join the road across {@code ramps}, which the default does not count as roads. */
+    /**
+     * As above, where single-lane ramps join the ground road across {@code ramps}: the default counts neither them nor its
+     * {@code aprons} as roads (SingleLane#control), as the 3D board does.
+     */
     private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
-          int ramps, Consumer<String> choose) {
-        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits, ramps);
+          int ramps, int aprons, Consumer<String> choose) {
+        var current = ramps == 0 ? megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits)
+              : megamek.common.board.SingleLane.control(appearance, exits, ramps, aprons);
         List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
               new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
               new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
@@ -1868,7 +1872,9 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         var bridge = snapshot.property("bridge");
         if (owner.equals("bridgeRoad") && bridge != null) { exits &= bridge.exits(); }
         boolean ground = owner.equals("road") && way != null && pavedRoad(way.value());
-        if (ground && megamek.common.board.SingleLane.exitsOnly(exits & 63, snapshot.rampSides(), snapshot.entranceSides())) {
+        // Its aprons, roadless concrete it runs into, are no roads of its junction, as on the 3D board.
+        int arms = exits & ~snapshot.apronSides() & 63;
+        if (ground && megamek.common.board.SingleLane.exitsOnly(arms, snapshot.rampSides(), snapshot.entranceSides())) {
             // Only exits leave this junction: nothing joins its road's traffic, so no choice adds controls. A stored one
             // is kept for when an entrance or another two-lane road joins.
             Table row = new Table();
@@ -1881,7 +1887,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             detail.add(row).growX().row();
         } else {
             detail.add(trafficControlChoice(snapshot.appearance(), owner, exits, ground ? snapshot.rampSides() : 0,
-                  chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+                  ground ? snapshot.apronSides() : 0, chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
         }
         if (owner.equals("road") && way != null && pavedRoad(way.value())) { lanes(); }
     }

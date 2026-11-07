@@ -235,7 +235,9 @@ public final class BoardEditorSession {
      * {@code entranceSides} are its entrances (on-ramps) and the rest its exits (off-ramps); {@code laneRun}: the selected
      * hex is on a single-lane run whose direction {@link Action#LANE_DIRECTION} reverses; {@code exitFrom}, side by side,
      * the selected two-lane road's approaches that may take the exit leaving it there ({@link SingleLane#feeds}), 0 where
-     * no exit leaves.
+     * no exit leaves; {@code apronSides}, the sides where its ground road runs into roadless concrete, no roads of its
+     * junction ({@link SingleLane#aprons}). The ramp sides leave out a neighbour's bridge deck, as the 3D board does
+     * ({@link SingleLane#arms}).
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -244,7 +246,8 @@ public final class BoardEditorSession {
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
-          boolean buildingProfileAvailable, int rampSides, int entranceSides, boolean laneRun, List<Integer> exitFrom) {
+          boolean buildingProfileAvailable, int rampSides, int entranceSides, boolean laneRun, List<Integer> exitFrom,
+          int apronSides) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -501,9 +504,15 @@ public final class BoardEditorSession {
               TilesetScenery.buildingConnected(hex, selected, board()::getHex), hex == null ? null : hex.getBuildingReference(),
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
               TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex),
-              hex == null || SingleLane.single(hex) ? 0 : SingleLane.joined(hex, selected, this::hexAt),
+              hex == null || SingleLane.single(hex) ? 0
+                    : SingleLane.joined(hex, selected, this::hexAt) & SingleLane.arms(hex, selected, this::hexAt, roadExits(hex)),
               hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
-              exitFrom(hex));
+              exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)));
+    }
+
+    /** The sides a hex's ground road leaves by; 0 without one. */
+    private static int roadExits(Hex hex) {
+        return hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
     }
 
     /** Side by side, the selected hex's approaches that may take the exit leaving it there; 0 where none leaves. */

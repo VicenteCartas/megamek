@@ -299,6 +299,20 @@ class SingleLaneTest {
     }
 
     @Test
+    void aSingleLaneBelowABridgeDeckIsNoRampOfTheRoadMeetingTheDeck() {
+        // J at level 1 meets B's deck, level with it; B's ground road below, a single lane, also leaves towards J.
+        Map<Coords, Hex> board = new HashMap<>();
+        board.put(J, new Hex(1, "road:1:13", ""));
+        Coords b = J.translated(2);
+        Hex bridge = new Hex(0, "road:1:36;bridge:1:36;bridge_cf:40;bridge_elev:1;bridge_road:1:36", "");
+        bridge.setAppearance(Map.of("road", HexAppearance.withLanes(null, true, 32)));
+        board.put(b, bridge);
+        assertEquals(4, SingleLane.joined(board.get(J), J, board::get), "The ground roads link up");
+        assertEquals(0, SingleLane.arms(board.get(J), J, board::get, 13), "But J's road meets the deck, a two-lane road");
+        assertTrue(SingleLane.bridgeApproach(board.get(J), bridge, 2));
+    }
+
+    @Test
     void aJunctionsChoiceNeverReachesAnotherJunctionItsSingleLaneJoins() {
         // Two parallel two-lane roads, Ja and Jb, linked by a one-hex single lane K; and, below it, both feeding a merge M.
         Coords ja = new Coords(2, 4), k = ja.translated(2), jb = k.translated(1);

@@ -206,6 +206,73 @@ public final class SingleLane {
         return closedTurns(view(hex, at, board), at);
     }
 
+    /** Whether a hex's ground road is marked as a paved road is (not a dirt or gravel one), alleys included. */
+    private static boolean marked(Hex hex) {
+        if (hex == null || !HexTile.road(hex)) { return false; }
+        int level = hex.terrainLevel(Terrains.ROAD);
+        return level != Terrains.ROAD_LVL_DIRT && level != Terrains.ROAD_LVL_GRAVEL;
+    }
+
+    /**
+     * The sides of a hex's ground road at a single lane's width, as the 3D board draws them: all of a single-lane road's
+     * but those meeting a bridge deck or a dirt or gravel road, which keep their two lanes' width, and a paved two-lane
+     * road's where a single-lane road joins it, not across a neighbour's bridge deck. Of a two-lane road, its ramps.
+     */
+    public static int arms(Hex hex, Coords at, Function<Coords, Hex> board, int exits) {
+        if (!marked(hex)) { return 0; }
+        boolean narrow = single(hex);
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) == 0) { continue; }
+            Hex next = board.apply(at.translated(d));
+            if (next != null && bridgeApproach(hex, next, d)) { continue; }
+            boolean joined = next != null && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6);
+            if (narrow && joined && !marked(next)) { continue; }
+            if (narrow || single(next) && joined) { result |= 1 << d; }
+        }
+        return result;
+    }
+
+    /**
+     * The sides of a hex's ground road that run into roadless concrete (pavement it paves up to, an apron): no roads of a
+     * junction there, neither for its markings nor for its controls.
+     */
+    public static int aprons(Hex hex, Coords at, Function<Coords, Hex> board, int exits) {
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            Hex next = board.apply(at.translated(d));
+            if ((exits & 1 << d) != 0 && next != null && HexTile.concrete(next) && !HexTile.liquid(next) && !HexTile.road(next)
+                  && !bridgeApproach(hex, next, d)) {
+                result |= 1 << d;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Whether a road across {@code direction} approaches the neighbouring {@code bridge}'s deck rather than its ground:
+     * both expose the side, and the deck is the layer the road meets (HexTile#bridgeApproach).
+     */
+    public static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
+        int reverse = (direction + 3) % 6;
+        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
+              || (groundWays(road) & (1 << direction)) == 0) { return false; }
+        boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
+        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+    }
+
+    private static int groundWays(Hex hex) {
+        return (hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0) | RailRoute.groundSides(hex);
+    }
+
+    /**
+     * A ground road's stored junction controls, else its default ({@link HexAppearance#trafficControl}): where single-lane
+     * {@code ramps} join it, neither they nor its {@code aprons} count as roads of the junction.
+     */
+    public static HexAppearance.TrafficControl control(Map<String, HexAppearance> appearance, int exits, int ramps, int aprons) {
+        return HexAppearance.trafficControl(appearance, OWNER, (exits & ramps & 63) != 0 ? exits & ~aprons : exits, ramps);
+    }
+
     /**
      * Whether only exits (off-ramps) leave a two-lane road's junction: of its {@code arms}, some are {@code single} lanes,
      * none of them an entrance ({@code entrances}, the sides traffic comes in by), and at most two are two-lane. Nothing

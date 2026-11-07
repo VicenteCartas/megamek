@@ -640,7 +640,9 @@ final class BoardFeatures {
             if (deck) { exits &= hex.getTerrain(Terrains.BRIDGE).getExits(); }
             String owner = deck ? "bridgeRoad" : "road";
             int single = deck ? 0 : singleArms(hex, coords, board, exits);
-            var control = HexAppearance.trafficControl(hex.getAppearance(), owner, exits, single);
+            int aprons = deck ? 0 : SingleLane.aprons(hex, coords, board, exits);
+            var control = deck ? HexAppearance.trafficControl(hex.getAppearance(), owner, exits)
+                  : SingleLane.control(hex.getAppearance(), exits, single, aprons);
             boolean narrow = !deck && SingleLane.single(hex);
             long closed = single == 0 || narrow ? 0 : SingleLane.closedTurns(hex, coords, board);
             var road = BoardRoad.layout(coords, exits, kind,
@@ -650,18 +652,7 @@ final class BoardFeatures {
             if (deck ? RailRoute.deckRail(hex) : RailRoute.groundSides(hex) != 0) { road = road.solidHub(); }
             var corridor = RailRoute.corridor(hex, coords, board, deck);
             road = road.corridor(corridor);
-            if (!deck) {
-                int aprons = 0;
-                for (int direction = 0; direction < 6; direction++) {
-                    Hex next = board.apply(coords.translated(direction));
-                    if ((exits & 1 << direction) != 0 && next != null && HexTile.concrete(next)
-                          && !HexTile.liquid(next) && BoardRoad.capture(next) == BoardRoad.Kind.NONE
-                          && !bridgeApproach(hex, next, direction)) {
-                        aprons |= 1 << direction;
-                    }
-                }
-                road.aprons(aprons);
-            }
+            if (!deck) { road.aprons(aprons); }
             double level = deck ? BridgeSpan.deck(hex) : hex.getLevel();
             // Native rail terrain derives at most one marker on each layer.
             var marker = RailRoute.markers(hex, RailRoute.Kind.RAIL).stream()
@@ -726,12 +717,19 @@ final class BoardFeatures {
                             break;
                         }
                     }
-                    if (!found) { continue; }
                     asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
+                    if (!found) {
+                        // A ramp's mouth can lie in the corner of the road's arm beside it: its sign then stands further
+                        // out along its own lane, on its traffic's right, as the ramp signs do.
+                        if (!deck && (single & 1 << approach.direction()) != 0) {
+                            place(hex, coords, board, road, clearance, approach, 2, true, asset, stopId(coords, owner, approach), result);
+                        }
+                        continue;
+                    }
                     stretch = BoardDecoration.Stretch.NONE;
                 }
                 double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));
-                String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + owner + ":stop:" + approach.direction();
+                String id = stopId(coords, owner, approach);
                 result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
                       x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
                       BoardDecoration.Placement.on(deck ? "bridge" : "ground", 0), 0, false, 0, 0, null, false, 0, stretch)));
@@ -742,23 +740,16 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
+    private static String stopId(Coords coords, String owner, BoardRoad.StopApproach approach) {
+        return TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":" + owner + ":stop:" + approach.direction();
+    }
+
     /**
      * The arms of a hex's ground road at a single lane's width, as BoardRoad#singleArms gives a scene tile's: all of a
      * single-lane road's but those meeting a bridge deck, and a paved two-lane road's where a single-lane road joins it.
      */
     static int singleArms(Hex hex, Coords coords, Function<Coords, Hex> board, int exits) {
-        if (!BoardRoad.paved(BoardRoad.capture(hex))) { return 0; }
-        boolean narrow = SingleLane.single(hex);
-        int result = 0;
-        for (int d = 0; d < 6; d++) {
-            if ((exits & 1 << d) == 0) { continue; }
-            Hex next = board.apply(coords.translated(d));
-            if (next != null && bridgeApproach(hex, next, d)) { continue; }
-            boolean joined = next != null && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6);
-            if (narrow && joined && !BoardRoad.paved(BoardRoad.capture(next))) { continue; }
-            if (narrow || SingleLane.single(next) && joined) { result |= 1 << d; }
-        }
-        return result;
+        return SingleLane.arms(hex, coords, board, exits);
     }
 
     /** Of a hex's {@link #singleArms}, those by which traffic enters it: a single lane's way in, a two-lane road's entrances. */
@@ -1007,15 +998,7 @@ final class BoardFeatures {
 
     /** The road and deck must expose matching sides before their shared layer-choice predicate applies. */
     private static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
-        int reverse = (direction + 3) % 6;
-        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
-              || (groundWays(road) & (1 << direction)) == 0) { return false; }
-        boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
-        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
-    }
-
-    private static int groundWays(Hex hex) {
-        return (hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() : 0) | RailRoute.groundSides(hex);
+        return SingleLane.bridgeApproach(road, bridge, direction);
     }
 
     /**
