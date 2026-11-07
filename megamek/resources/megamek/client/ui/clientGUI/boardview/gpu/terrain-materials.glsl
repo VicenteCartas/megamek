@@ -146,6 +146,7 @@ struct MaterialProjection {
     mat2 topGradient, xGradient, yGradient;
     float side, lying;
     vec2 facing; // the side projections' signs along X and Y
+    float topTexels; // the top projection's texels a pixel at a one-unit repeat (enlargedShare)
 };
 
 // Cut walls keep one texture frame across their facets; zero leaves natural landforms unchanged.
@@ -158,6 +159,7 @@ MaterialProjection materialProjection(vec3 world, vec3 face) {
     p.x = vec2(world.y * sign(basis.x), -world.z);
     p.y = vec2(-world.x * sign(basis.y), -world.z);
     p.topGradient = mat2(dFdx(p.top), dFdy(p.top));
+    p.topTexels = max(length(p.topGradient[0]), length(p.topGradient[1])) * float(textureSize(u_terrainLayers, 0).x);
     p.xGradient = mat2(dFdx(p.x), dFdy(p.x));
     p.yGradient = mat2(dFdx(p.y), dFdy(p.y));
     vec2 axes = pow(abs(basis.xy), vec2(4.0));
@@ -244,6 +246,13 @@ vec4 mixedTexel(sampler2DArray maps, float layer, vec2 a, mat2 gradientA, vec2 b
 vec4 mixedTexel(sampler2DArray maps, float layer, vec2 a, mat2 gradientA, vec2 b, mat2 gradientB, float t) {
     float spread;
     return mixedTexel(maps, layer, a, gradientA, b, gradientB, t, spread);
+}
+
+// The enlarged repeat (2.37 times larger, turned) hides the first repeat's tiling from afar. Up close it only magnifies
+// its texels: its share fades out as the first repeat's texels pass one screen pixel, from 2.37 a pixel to one, where a
+// view spans about two repeats and no tiling shows.
+float enlargedShare(float variation, MaterialProjection p, float tile) {
+    return variation * smoothstep(1.0, 2.37, p.topTexels / max(tile, 1e-4));
 }
 
 // Overlapping translated samples break the fungal source's recognisable repeats. Use identical offsets for
@@ -337,7 +346,7 @@ vec4 sampleMaterialMap(sampler2DArray maps, float layer, float tile, MaterialPro
               : singleScale
               ? translatedTexel(maps, layer, p.top / tile, p.topGradient / tile, variation)
               : mixedTexel(maps, layer, p.top / tile, p.topGradient / tile,
-                    TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37), variation);
+                    TURN * p.top / (tile * 2.37) + .31, TURN * p.topGradient / (tile * 2.37), enlargedShare(variation, p, tile));
     }
     if (p.lying < 1.0) {
         vec4 steep = fungus ? mix(fungusTexel(maps, layer, p.y / tile + .37, p.yGradient / tile),
@@ -358,7 +367,7 @@ float sampledHeight(float layer, float tile, MaterialProjection p, float variati
         height = fungus ? fungusHeight(layer, uv, gradient)
               : singleScale ? translatedHeight(layer, uv, gradient, variation)
               : mixedHeight(layer, uv, gradient, TURN * p.top / (tile * 2.37) + .31,
-                    TURN * p.topGradient / (tile * 2.37), variation);
+                    TURN * p.topGradient / (tile * 2.37), enlargedShare(variation, p, tile));
     }
     if (p.lying < 1.0) {
         vec2 y = p.y / tile + .37, x = p.x / tile;
@@ -481,13 +490,14 @@ vec4 materialNormal(float normalMap, float tile, float weight, MaterialProjectio
             detail = near.rgb * 2.0 - 1.0;
             cavity = near.a;
         } else {
-            vec4 far = variation <= 0.0 ? near : materialTexel(u_terrainData, layer, TURN * p.top / (tile * 2.37) + .31,
+            float enlarged = enlargedShare(variation, p, tile);
+            vec4 far = enlarged <= 0.0 ? near : materialTexel(u_terrainData, layer, TURN * p.top / (tile * 2.37) + .31,
                   TURN * p.topGradient / (tile * 2.37));
-            detail = planarNormal(near, far, variation).rgb;
-            cavity = mix(near.a, far.a, variation);
+            detail = planarNormal(near, far, enlarged).rgb;
+            cavity = mix(near.a, far.a, enlarged);
             // The enlarged repeat's slopes are 2.37 times shallower (planarNormal): its spread 2.37^2 times smaller.
-            spread = (1.0 - variation) * (1.0 - variation) * normalSpread(near)
-                  + variation * variation * .178 * normalSpread(far);
+            spread = (1.0 - enlarged) * (1.0 - enlarged) * normalSpread(near)
+                  + enlarged * enlarged * .178 * normalSpread(far);
         }
         normal = upNormal(detail, face);
     }
@@ -1159,7 +1169,7 @@ void topCoordinates(MaterialProjection p, float tile, float variation, bool tran
         a = uv;
         b = TURN * uv / 2.37 + .31;
         gradientB = TURN * p.topGradient / (tile * 2.37);
-        t = oneRepeat ? 0.0 : variation;
+        t = oneRepeat ? 0.0 : enlargedShare(variation, p, tile);
     }
 }
 
