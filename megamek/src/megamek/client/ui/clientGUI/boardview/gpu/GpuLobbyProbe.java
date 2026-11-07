@@ -44,7 +44,7 @@ import megamek.client.lobby.LobbyCommands;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.buttonDialogs.AbstractNagDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.force.Force;
@@ -367,7 +367,7 @@ record GpuLobbyProbe(Set<String> options, List<File> units, int bots, File shot,
                 if (starts) {
                     LOGGER.info("The lobby probe presses Ready");
                     answerNo();
-                    SwingLobbyServices.of(gui).ready();
+                    LobbyServices.of(gui).ready();
                 } else {
                     LOGGER.info("The lobby probe readies the player");
                     client.sendDone(true);

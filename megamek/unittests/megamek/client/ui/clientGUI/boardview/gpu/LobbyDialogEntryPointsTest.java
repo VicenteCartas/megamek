@@ -121,14 +121,14 @@ class LobbyDialogEntryPointsTest {
     @Test
     void theServicesAndUnitActionsDialogsUseTheClientFrame() throws IOException {
         List<String> offenders = new ArrayList<>();
-        for (String name : List.of("SwingLobbyServices.java", "SwingLobbyUnitActions.java")) {
+        for (String name : List.of("LobbyServices.java", "SwingLobbyUnitActions.java")) {
             String source = Files.readString(SWING_LOBBY.resolve(name));
             owners(name, FOLDER_CHOOSER.matcher(source).replaceAll("new FolderChooser(frame(), "), DIALOG, 2,
                   PROMPT_OWNERS, offenders);
             owners(name, source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
         }
         // The lobby scene's failure shows after the window is gone, so its message stands on its own
-        assertEquals(List.of("SwingLobbyServices.java: JOptionPane.showMessageDialog(null"), offenders);
+        assertEquals(List.of("LobbyServices.java: JOptionPane.showMessageDialog(null"), offenders);
     }
 
     private static boolean lobbySource(Path file) {

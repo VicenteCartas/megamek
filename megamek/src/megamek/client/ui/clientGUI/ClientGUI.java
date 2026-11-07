@@ -140,10 +140,10 @@ import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.TilesetManager;
@@ -1525,13 +1525,13 @@ public class ClientGUI extends AbstractClientGUI
             case GAME_ALL_MG_BURST_ON:
             case GAME_ALL_MG_BURST_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
+                    LobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
                 }
                 break;
             case GAME_ALL_HOT_LOAD_ON:
             case GAME_ALL_HOT_LOAD_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
+                    LobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
                 }
                 break;
             case VIEW_NETWORK_INFORMATION:
@@ -1813,7 +1813,7 @@ public class ClientGUI extends AbstractClientGUI
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
-        SwingLobbyServices.forget(this);
+        LobbyServices.forget(this);
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -2062,7 +2062,7 @@ public class ClientGUI extends AbstractClientGUI
                 panMain.add(component, main);
                 break;
             case EXCHANGE:
-                MapSetupDialog.closePreviews(this);
+                LobbyBoardPreviews.closePreviews(this);
                 component = new ReceivingGameDataPanel();
                 main = CG_EXCHANGE;
                 component.setName(main);
@@ -4489,7 +4489,7 @@ public class ClientGUI extends AbstractClientGUI
      * the map settings take the saved board, as the map setup's own Edit Board does.
      */
     public void boardEditorClosed(@Nullable Path savedFile, boolean savedAssembledPreview) {
-        MapSetupDialog.boardEditorClosed(this, savedFile, savedAssembledPreview);
+        LobbyBoardPreviews.boardEditorClosed(this, savedFile, savedAssembledPreview);
     }
     @Override
     public JComponent turnTimerComponent() {

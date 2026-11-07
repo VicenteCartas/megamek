@@ -36,13 +36,13 @@ import megamek.common.units.Entity;
  * question; the auto-resolve settings; the unit order. It outlives a lobby window, so a lobby that opens again finds
  * its settings as it left them.
  */
-public final class SwingLobbyServices {
+public final class LobbyServices {
 
     public static final int DEFAULT_RUNS = 10;
     public static final int MAX_RUNS = 1000;
 
     private static final GUIPreferences GUIP = GUIPreferences.getInstance();
-    private static final Map<ClientGUI, SwingLobbyServices> SERVICES = new HashMap<>();
+    private static final Map<ClientGUI, LobbyServices> SERVICES = new HashMap<>();
 
     private final ClientGUI clientGUI;
     private final LobbyUnitOrder unitOrder;
@@ -70,34 +70,34 @@ public final class SwingLobbyServices {
         public void gameSettingsChange(GameSettingsChangeEvent e) {
             SwingUtilities.invokeLater(() -> {
                 unitOrder.settingsChanged();
-                MapSetupDialog.refreshClosedPreview(clientGUI);
+                LobbyBoardPreviews.refreshPreview(clientGUI);
             });
         }
 
         @Override
         public void gameBoardNew(GameBoardNewEvent e) {
-            SwingUtilities.invokeLater(() -> MapSetupDialog.refreshClosedPreview(clientGUI));
+            SwingUtilities.invokeLater(() -> LobbyBoardPreviews.refreshPreview(clientGUI));
         }
     };
 
-    private SwingLobbyServices(ClientGUI clientGUI) {
+    private LobbyServices(ClientGUI clientGUI) {
         this.clientGUI = clientGUI;
         this.unitOrder = new LobbyUnitOrder(clientGUI.getClient());
         game().addGameListener(gameListener);
     }
 
     /** EDT: the lobby services of this client, made on first use. */
-    public static SwingLobbyServices of(ClientGUI clientGUI) {
-        return SERVICES.computeIfAbsent(clientGUI, SwingLobbyServices::new);
+    public static LobbyServices of(ClientGUI clientGUI) {
+        return SERVICES.computeIfAbsent(clientGUI, LobbyServices::new);
     }
 
-    /** EDT: the client ends; its lobby services stop listening and its map setup closes. */
+    /** EDT: the client ends; its lobby services stop listening and its 3D preview closes. */
     public static void forget(ClientGUI clientGUI) {
-        SwingLobbyServices services = SERVICES.remove(clientGUI);
+        LobbyServices services = SERVICES.remove(clientGUI);
         if (services != null) {
             services.game().removeGameListener(services.gameListener);
         }
-        MapSetupDialog.closePreviews(clientGUI);
+        LobbyBoardPreviews.closePreviews(clientGUI);
     }
 
     /**
@@ -153,7 +153,7 @@ public final class SwingLobbyServices {
         if (done && !commands().checkReady()) {
             return;
         }
-        MapSetupDialog.closePreviews(clientGUI);
+        LobbyBoardPreviews.closePreviews(clientGUI);
         if (done) {
             // Ask up front (once) whether to record the combat-summary GIF, so recording never interrupts play
             MinimapPanel.promptForGifRecordingConsent(game(), clientGUI.getFrame());

@@ -25,12 +25,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** The lobby services' ready flow, auto-resolve bounds and menu bar shortcuts, which ChatLounge held before. */
-class SwingLobbyServicesTest {
+class LobbyServicesTest {
     private final Game game = new Game();
     private final Player local = new Player(0, "Local");
     private ClientGUI gui;
     private LobbyCommands commands;
-    private SwingLobbyServices services;
+    private LobbyServices services;
 
     @BeforeEach
     void setUp() {
@@ -42,25 +42,25 @@ class SwingLobbyServicesTest {
         when(gui.getClient()).thenReturn(client);
         commands = mock(LobbyCommands.class);
         when(gui.lobbyCommands()).thenReturn(commands);
-        services = SwingLobbyServices.of(gui);
+        services = LobbyServices.of(gui);
     }
 
     @AfterEach
     void tearDown() {
-        SwingLobbyServices.forget(gui);
+        LobbyServices.forget(gui);
     }
 
     @Test
     void oneClientKeepsItsServicesUntilItIsForgotten() {
-        assertSame(services, SwingLobbyServices.of(gui));
-        SwingLobbyServices.forget(gui);
-        assertNotSame(services, SwingLobbyServices.of(gui));
+        assertSame(services, LobbyServices.of(gui));
+        LobbyServices.forget(gui);
+        assertNotSame(services, LobbyServices.of(gui));
     }
 
     @Test
     void autoResolveSettingsStayWithinBounds() {
         var defaults = services.autoResolveSettings();
-        assertEquals(SwingLobbyServices.DEFAULT_RUNS, defaults.runs());
+        assertEquals(LobbyServices.DEFAULT_RUNS, defaults.runs());
         assertFalse(defaults.chances());
 
         services.setAutoResolveSettings(true, 0, 0);
@@ -70,7 +70,7 @@ class SwingLobbyServicesTest {
 
         services.setAutoResolveSettings(true, 5000, Integer.MAX_VALUE);
         var high = services.autoResolveSettings();
-        assertEquals(SwingLobbyServices.MAX_RUNS, high.runs());
+        assertEquals(LobbyServices.MAX_RUNS, high.runs());
         assertEquals(high.maxThreads(), high.threads());
         assertEquals(Math.max(2, Runtime.getRuntime().availableProcessors() * 2), high.maxThreads());
     }

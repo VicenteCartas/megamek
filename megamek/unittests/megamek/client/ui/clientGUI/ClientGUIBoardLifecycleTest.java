@@ -4,9 +4,7 @@ package megamek.client.ui.clientGUI;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-import java.awt.Container;
 import java.awt.Window;
-import java.awt.event.WindowEvent;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
@@ -17,13 +15,10 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.swing.AbstractButton;
-import javax.swing.JDialog;
 import javax.swing.SwingUtilities;
 
 import megamek.client.Client;
 import megamek.client.CloseClientListener;
-import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.audio.SoundManager;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.BoardView;
@@ -37,8 +32,8 @@ import megamek.client.ui.clientGUI.boardview.sprite.isometric.IsometricSprite;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
 import megamek.client.ui.dialogs.unitDisplay.WeaponPanel;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
-import megamek.client.ui.util.MegaMekController;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -46,7 +41,6 @@ import megamek.common.enums.GamePhase;
 import megamek.common.event.GameListener;
 import megamek.common.game.Game;
 import megamek.common.loaders.MapSettings;
-import megamek.common.loaders.MekSummaryCache;
 import megamek.server.ServerBoardHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -123,86 +117,22 @@ class ClientGUIBoardLifecycleTest {
         });
     }
 
-    @Test
-    void lobbyCreatesLegacy2DPreviewOnlyWhenOpenedAndReleasesItsListeners() throws Exception {
-        onClient(() -> {
-            try (var display = mockConstruction(UnitDisplayPanel.class);
-                  var sound = mockConstruction(SoundManager.class);
-                  var cache = mockStatic(MekSummaryCache.class);
-                  var application = mockStatic(MegaMekGUI.class);
-                  var session = Session.create()) {
-                cache.when(MekSummaryCache::getInstance).thenReturn(mock(MekSummaryCache.class));
-                application.when(MegaMekGUI::getKeyDispatcher).thenReturn(new MegaMekController());
-                ClientGUI gui = session.gui();
-                MapSettings settings = MapSettings.getInstance();
-                settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
-                when(gui.getClient().getMapSettings()).thenReturn(settings);
-                MapSetupDialog lounge;
-                try (var views = mockConstruction(BoardView.class);
-                      var panels = mockConstruction(BoardViewPanel.class)) {
-                    lounge = openMapSetup(gui);
-                    assertTrue(views.constructed().isEmpty(), "An unopened lobby preview must not create a renderer");
-                    assertTrue(panels.constructed().isEmpty());
-                }
-                try {
-                    session.game().receiveBoard(0, Board.createEmptyBoard(8, 8));
-                    lounge.previewGameBoard();
-                    var previewField = MapSetupDialog.class.getDeclaredField("previewBV");
-                    previewField.setAccessible(true);
-                    BoardView preview = (BoardView) previewField.get(lounge);
-                    assertNotNull(preview);
-                    BoardClientState state = preview.getClientState();
-                    Board previous = state.getBoard();
-                    session.game().receiveBoard(0, Board.createEmptyBoard(6, 6));
-                    lounge.previewGameBoard();
-                    assertSame(state, ((BoardView) previewField.get(lounge)).getClientState());
-                    assertEquals(List.of(), boardListeners(previous), "Both gameplay and preview must detach the old map");
-                    var windowField = MapSetupDialog.class.getDeclaredField("boardPreviewW");
-                    windowField.setAccessible(true);
-                    var window = (JDialog) windowField.get(lounge);
-                    window.dispatchEvent(new WindowEvent(window, WindowEvent.WINDOW_CLOSING));
-                    assertTrue(state.isClosed());
-                    assertTrue(state.getGame().getGameListeners().isEmpty());
-                    assertNull(previewField.get(lounge));
-                    lounge.previewGameBoard();
-                    BoardClientState reopened = ((BoardView) previewField.get(lounge)).getClientState();
-                    window = (JDialog) windowField.get(lounge);
-                    window.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
-                    assertTrue(reopened.isClosed(), "Escape must release the preview, rather than leaving a hidden renderer");
-                    assertTrue(reopened.getGame().getGameListeners().isEmpty());
-                    assertNull(previewField.get(lounge));
-                } finally {
-                    MapSetupDialog.closePreviews(gui);
-                }
-            }
-            return null;
-        });
-    }
-
     /**
-     * The lobby's 2D and 3D previews stay open together for an A/B comparison: both show one board, both 3D buttons
-     * open the one 3D preview of the lobby window, a 2D preview opened beside the 3D preview shows its board, a new roll
-     * or a map change updates whichever is open without bringing the 3D preview to the front, the 2D preview closes on
-     * its own and the lobby's end closes both. The native window is stubbed: its state is the board it was last given.
+     * The lobby's 3D preview shows the lobby's board: a roll of the map settings without a server-built battlefield,
+     * else that battlefield. A new lobby board shows in the open preview without bringing it to the front, and the
+     * lobby's end closes it. The native window is stubbed: its state is the board it was last given.
      */
     @Test
-    void lobbyPreviewsShowOneBoardAndCloseOnTheirOwn() throws Exception {
+    void lobby3DPreviewFollowsTheLobbyBoardAndClosesWithTheLobby() throws Exception {
         Deque<AutoCloseable> resources = new ArrayDeque<>();
         AtomicReference<Board> shown3D = new AtomicReference<>();
         AtomicInteger raised3D = new AtomicInteger();
-        AtomicReference<MapSetupDialog> lounge = new AtomicReference<>();
         AtomicReference<ClientGUI> client = new AtomicReference<>();
         Board server = Board.createEmptyBoard(6, 6);
         try {
             onClient(() -> {
                 resources.push(mockConstruction(UnitDisplayPanel.class));
                 resources.push(mockConstruction(SoundManager.class));
-                var cache = mockStatic(MekSummaryCache.class);
-                resources.push(cache);
-                cache.when(MekSummaryCache::getInstance).thenReturn(mock(MekSummaryCache.class));
-                var application = mockStatic(MegaMekGUI.class);
-                resources.push(application);
-                application.when(MegaMekGUI::getKeyDispatcher).thenReturn(new MegaMekController());
                 // Without a server-built battlefield every preview request rolls a new board from the map settings.
                 var rolls = mockStatic(ServerBoardHelper.class);
                 resources.push(rolls);
@@ -214,12 +144,13 @@ class ClientGUIBoardLifecycleTest {
                 Window frame = gui.getFrame();
                 var gpu = mockStatic(GpuBoardWindow.class);
                 resources.push(gpu);
-                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class))).thenAnswer(call -> {
-                    assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby, not the 2D preview");
-                    shown3D.set(call.getArgument(1));
-                    raised3D.incrementAndGet();
-                    return null;
-                });
+                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class), any()))
+                      .thenAnswer(call -> {
+                          assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby");
+                          shown3D.set(call.getArgument(1));
+                          raised3D.incrementAndGet();
+                          return null;
+                      });
                 gpu.when(() -> GpuBoardWindow.updatePreview(any(Window.class), any(Board.class))).thenAnswer(call -> {
                     if (shown3D.get() != null && call.getArgument(0) == frame) {
                         shown3D.set(call.getArgument(1));
@@ -236,54 +167,32 @@ class ClientGUIBoardLifecycleTest {
                 settings.setBoardsSelectedVector(List.of(MapSettings.BOARD_GENERATED));
                 when(gui.getClient().getMapSettings()).thenReturn(settings);
                 client.set(gui);
-                MapSetupDialog mapSetup = openMapSetup(gui);
-                lounge.set(mapSetup);
+                LobbyServices.of(gui);
 
-                mapSetup.previewGameBoard();
-                Board first = shown2D(mapSetup);
-                assertNotNull(first);
-                assertNull(shown3D.get(), "The 2D preview opens no 3D preview");
-                button(field(mapSetup, "boardPreviewW"), Messages.getString("GpuBoard.preview")).doClick();
-                assertSame(first, shown3D.get(), "The 2D preview's 3D button shows the 2D preview's board");
-                ((AbstractButton) field(mapSetup, "butBoardPreview3D")).doClick();
-                assertSame(first, shown3D.get(), "The lobby's 3D button shows the open 2D preview's board too");
+                LobbyBoardPreviews.preview3D(gui);
+                Board first = shown3D.get();
+                assertNotNull(first, "Without a server board the 3D preview shows a roll of the map settings");
+                assertEquals(1, raised3D.get());
 
-                mapSetup.previewGameBoard();
-                Board second = shown2D(mapSetup);
-                assertNotSame(first, second, "The 2D button rolls the map settings again");
-                assertSame(second, shown3D.get(), "The open 3D preview shows the new roll too");
-                assertEquals(2, raised3D.get(), "The new roll does not bring the 3D preview to the front");
-
-                JDialog window = field(mapSetup, "boardPreviewW");
-                window.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
-                assertNull(field(mapSetup, "previewBV"));
-                assertSame(second, shown3D.get(), "Closing the 2D preview leaves the 3D preview open");
-
-                mapSetup.previewGameBoard();
-                assertSame(second, shown2D(mapSetup), "Opened beside the 3D preview, the 2D shows its board");
-                assertSame(second, shown3D.get(), "Opening the 2D preview rolls no new board for the 3D preview");
-                JDialog reopened = field(mapSetup, "boardPreviewW");
-                reopened.getRootPane().getActionMap().get("closeAction").actionPerformed(null);
-
-                // A server-built battlefield arrives (on the EDT later) while only the 3D preview is open.
+                // A server-built battlefield arrives (on the EDT later) while the 3D preview is open.
                 session.game().receiveBoard(0, server);
                 return null;
             });
             onClient(() -> {
                 assertSame(server, shown3D.get(), "A new lobby board shows in the open 3D preview");
-                assertEquals(2, raised3D.get(), "A new lobby board does not bring the 3D preview to the front");
-                assertNull(field(lounge.get(), "boardPreviewW"), "Updating the 3D preview opens no 2D preview");
-                lounge.get().previewGameBoard();
-                assertSame(server, shown2D(lounge.get()));
-                MapSetupDialog.closePreviews(client.get());
+                assertEquals(1, raised3D.get(), "A new lobby board does not bring the 3D preview to the front");
+                LobbyBoardPreviews.preview3D(client.get());
+                assertSame(server, shown3D.get(), "The 3D button shows the server-built battlefield");
+                LobbyBoardPreviews.closePreviews(client.get());
                 assertNull(shown3D.get(), "The lobby's end closes its 3D preview");
-                assertNull(field(lounge.get(), "previewBV"), "The lobby's end closes its 2D preview");
+                LobbyBoardPreviews.refreshPreview(client.get());
+                assertNull(shown3D.get(), "A closed 3D preview stays closed");
                 return null;
             });
         } finally {
             onClient(() -> {
                 if (client.get() != null) {
-                    MapSetupDialog.closePreviews(client.get());
+                    LobbyServices.forget(client.get());
                 }
                 while (!resources.isEmpty()) {
                     resources.pop().close();
@@ -291,48 +200,6 @@ class ClientGUIBoardLifecycleTest {
                 return null;
             });
         }
-    }
-
-    /** Opens the client's map setup, as the lobby's Map setup button does, and returns it. */
-    @SuppressWarnings("unchecked")
-    private static MapSetupDialog openMapSetup(ClientGUI gui) {
-        MapSetupDialog.open(gui);
-        try {
-            var open = MapSetupDialog.class.getDeclaredField("OPEN");
-            open.setAccessible(true);
-            return ((java.util.Map<ClientGUI, MapSetupDialog>) open.get(null)).get(gui);
-        } catch (ReflectiveOperationException failure) {
-            throw new AssertionError(failure);
-        }
-    }
-
-    private static Board shown2D(MapSetupDialog lounge) {
-        BoardView view = field(lounge, "previewBV");
-        return view.getClientState().getBoard();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> T field(MapSetupDialog lounge, String name) {
-        try {
-            var field = MapSetupDialog.class.getDeclaredField(name);
-            field.setAccessible(true);
-            return (T) field.get(lounge);
-        } catch (ReflectiveOperationException failure) {
-            throw new AssertionError(failure);
-        }
-    }
-
-    private static AbstractButton button(Container parent, String text) {
-        for (var component : parent.getComponents()) {
-            if (component instanceof AbstractButton button && text.equals(button.getText())) {
-                return button;
-            }
-            AbstractButton found = component instanceof Container child ? button(child, text) : null;
-            if (found != null) {
-                return found;
-            }
-        }
-        return null;
     }
 
     @Test
