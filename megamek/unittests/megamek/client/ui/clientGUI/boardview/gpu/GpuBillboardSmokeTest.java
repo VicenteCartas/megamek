@@ -218,10 +218,15 @@ class GpuBillboardSmokeTest {
                                     SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.ratio", "2_3"), null));
                                 }
                                 case 4 -> {
-                                    assertEquals(List.of(TALL), object.billboard().decals(), "A new ratio picks from its own folder");
+                                    String picked = object.billboard().decals().getFirst();
+                                    assertTrue(picked.startsWith("decal/billboards/2_3/") && object.billboard().art().contains(picked),
+                                          "A new ratio picks from its own folder: " + picked);
                                     assertEquals(2.0 / 3, object.billboard().width() / object.billboard().height(), 1e-9);
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-portrait.png"));
-                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.scale", "2"), null));
+                                    SwingUtilities.invokeAndWait(() -> {
+                                        editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.decal0", TALL), null);
+                                        editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.scale", "2"), null);
+                                    });
                                 }
                                 case 5 -> {
                                     assertEquals(2 * BoardBillboard.BASE_HEIGHT, object.billboard().height(), 1e-9);
