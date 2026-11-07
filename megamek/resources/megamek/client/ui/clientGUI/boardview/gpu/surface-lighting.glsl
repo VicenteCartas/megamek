@@ -154,7 +154,7 @@ vec3 hiddenSky(vec3 direction, vec3 ground, vec3 groundAlbedo, vec3 open) {
     return min((1.0 - upper) * ground + upper * groundAlbedo * surfaceAmbient(vec3(0.0, 0.0, 1.0)), open);
 }
 
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
 vec3 faceSky = vec3(0.0); // The sky on this face (skyLight), which rough surfaces reflect in its stead (shadeSurface).
 #endif
 
@@ -162,7 +162,7 @@ vec3 skyLight(vec3 normal, vec3 groundAlbedo) {
     // At roughness one the normalized GGX prefilter is the cosine convolution: irradiance divided by pi.
     vec3 ground = environmentGround(groundAlbedo);
     vec3 open = environmentRadiance(normal, 1.0, ground, surfaceAmbient(vec3(0.0, 0.0, 1.0)));
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     faceSky = open;
 #endif
     return mix(hiddenSky(normal, ground, groundAlbedo, open), open, skyVisibility(v_cloudPosition, normal));
@@ -246,7 +246,7 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, 
     // drift in full, the plane's clamp bounding the rest), the centre and its four edges lit: lit, the corners, a fifth
     // of the widest tent's weight, unseen. Against the lowest, all nine shadowed: every texel any tent reads is
     // shadowed, the umbra, exactly.
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     // One bilinear comparison, without looking for what casts the shadow.
     return shadowVisibility(textureLod(u_shadowTexture, shadowUv, 0.0));
 #else

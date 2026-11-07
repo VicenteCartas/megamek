@@ -9,7 +9,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 enum BoardQuality {
     //      label     shading options detail anisotropy                     meadow crops  half-rate waves
     LOW(    "Low",    true,   false,  3,     2,                             0,     .75f,  true),
-    NORMAL( "Normal", true,   false,  3,     2,                             .6f,   1,     true),
+    MEDIUM( "Medium", true,   false,  3,     2,                             .6f,   1,     true),
     HIGH(   "High",   false,  true,   1,     GpuAssets.MATERIAL_ANISOTROPY, 1,     1,     false);
 
     /**
@@ -20,7 +20,7 @@ enum BoardQuality {
 
     private final String label;
     /**
-     * Cheaper light and materials compiled in as normalQualityFlag, with the relief depth pre-pass they rely on. A switch
+     * Cheaper light and materials compiled in as mediumQualityFlag, with the relief depth pre-pass they rely on. A switch
      * that changes this is a lighting change, behind the loading stage. Levels that agree here share their programs, so
      * they must also agree on {@link #detailScale} (terrain-crops.glsl); their other columns need no new program.
      */
@@ -53,12 +53,12 @@ enum BoardQuality {
         this.halfRateWaves = halfRateWaves;
     }
 
-    /** The level a saved preference names; an unknown or missing one is Normal, the game's default. */
+    /** The level a saved preference names; an unknown or missing one is Medium, the game's default. */
     static BoardQuality parse(String saved) {
         for (BoardQuality level : values()) {
             if (level.name().equalsIgnoreCase(saved)) { return level; }
         }
-        return NORMAL;
+        return MEDIUM;
     }
 
     /** As the Quality choice lists it. */

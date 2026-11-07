@@ -119,7 +119,7 @@ final class GpuBiomeVegetation implements Disposable {
     static String cropSource() {
         return "#define CROP_HEIGHT " + CROP_HEIGHT + "\n#define CROP_HEX_METRES "
               + BoardGeometry.width() / BoardRelief.metres(1) + "\n#define CROP_KEEP " + pair(CROP_KEEP)
-              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n#define CROP_NORMAL_SCALE " + BoardQuality.NORMAL.detailScale
+              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n#define CROP_MEDIUM_SCALE " + BoardQuality.MEDIUM.detailScale
               + "\n" + GpuShaderSource.read("terrain-crops.glsl");
     }
 

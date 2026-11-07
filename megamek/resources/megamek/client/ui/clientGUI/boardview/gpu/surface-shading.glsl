@@ -129,7 +129,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     // Sky from above; from below, light reflected by the sunlit ground: warm in the desert, white on snow.
     vec3 sky = skyLight(normal, s.bounce) * s.front;
     bool tissue = s.back != vec3(0.0);
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     // Thin tissue's far side faces the ground.
     if (tissue) sky += environmentGround(s.bounce) * s.back;
 #else
@@ -177,7 +177,7 @@ vec3 shadeSurface(Surface s, float caustic, float submerged) {
     albedo += sheen;
     // The hot share is matte, matching the dedicated crust and lava programs.
     albedo += localSpecular * multiscatter * s.cavity * (1.0 - s.heat);
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     vec3 reflectedSky = s.film > .01 || s.metallic > .01 ? skyReflection(normal, view, roughness, f0, s.bounce,
           environmentGround(s.bounce), surfaceAmbient(vec3(0.0, 0.0, 1.0)))
           : faceSky * specularAlbedo(max(0.0, dot(normal, view)), roughness, f0);

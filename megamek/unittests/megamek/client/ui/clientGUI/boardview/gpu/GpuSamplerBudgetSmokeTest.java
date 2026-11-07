@@ -80,7 +80,7 @@ class GpuSamplerBudgetSmokeTest {
         var separable = new AtomicBoolean();
         boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
         String savedQuality = GUIPreferences.getInstance().getBoardQuality();
-        // High uses the most samplers: Normal only leaves reads out, and has no ambient occlusion.
+        // High uses the most samplers: Medium only leaves reads out, and has no ambient occlusion.
         GUIPreferences.getInstance().setBoardQuality("HIGH");
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override

@@ -63,7 +63,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
     boolean biomes;
     /** Specular anti-aliasing as last applied (applyAntialiasing): specularAntialiasingFlag. */
     boolean antialiasing;
-    /** {@link BoardQuality#cheaperShading} as last applied (applyAntialiasing): normalQualityFlag. */
+    /** {@link BoardQuality#cheaperShading} as last applied (applyAntialiasing): mediumQualityFlag. */
     boolean cheaperShading;
 
     GpuEnvironmentLighting() { super(TYPE); }
@@ -130,7 +130,7 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
 
     /**
      * Brings the lit programs of an environment with this lighting in line with the settings
-     * (specularAntialiasingFlag and normalQualityFlag, GpuCloudShadow.prefix). They are a program key's features
+     * (specularAntialiasingFlag and mediumQualityFlag, GpuCloudShadow.prefix). They are a program key's features
      * (flags), so a switch is a lighting change: shader selection, the terrain's material readiness and its family
      * programs follow it, and the terrain rebuilds behind its loading stage.
      */

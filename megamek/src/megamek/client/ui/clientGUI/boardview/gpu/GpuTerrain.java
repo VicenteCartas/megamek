@@ -1026,7 +1026,7 @@ final class GpuTerrain implements Disposable {
     /**
      * Whether the depth pre-pass draws a category: those of depthPrepass, and all relief while ambient occlusion reads
      * the pre-pass depth (GpuAmbientOcclusion in the environment's lighting, so its switch prepares the twins as a
-     * lighting change) or Normal quality saves shading the relief's hidden faces.
+     * lighting change) or Medium quality saves shading the relief's hidden faces.
      */
     private boolean prepasses(Prepass category) {
         return category != null && (depthPrepass.contains(category)
@@ -1319,7 +1319,7 @@ final class GpuTerrain implements Disposable {
      */
     private boolean objectsFar;
     /**
-     * Whether a hex is under TreeLod.PREPASS_RELIEF pixels on screen (updateDetail): Normal quality's relief then draws
+     * Whether a hex is under TreeLod.PREPASS_RELIEF pixels on screen (updateDetail): Medium quality's relief then draws
      * its twin, whose depth spares the shading of what lies hidden; closer, little does.
      */
     private boolean reliefFar;

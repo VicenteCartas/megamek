@@ -276,10 +276,10 @@ class GpuBoardPerformanceSmokeTest {
         int scenarioFrames = warmupFrames + sampleFrames;
         boolean comparePages = Boolean.getBoolean("megamek.gpu.performanceComparePages");
         boolean compareCache = Boolean.getBoolean("megamek.gpu.performanceCompareMaterialCache");
-        // High, Normal, Normal, High in one GL context, so other work on the machine weighs on both alike.
+        // High, Medium, Medium, High in one GL context, so other work on the machine weighs on both alike.
         boolean compareQuality = Boolean.getBoolean("megamek.gpu.performanceCompareQuality");
         // Each comparison runs High, this level, this level, High.
-        BoardQuality comparedQuality = BoardQuality.parse(System.getProperty("megamek.gpu.performanceComparedQuality", "NORMAL"));
+        BoardQuality comparedQuality = BoardQuality.parse(System.getProperty("megamek.gpu.performanceComparedQuality", "MEDIUM"));
         Map<String, String> shaderBaseline = shaderSources(System.getProperty("megamek.gpu.performanceCompareShaders"));
         boolean compareShaders = !shaderBaseline.isEmpty();
         boolean waitForCache = compareCache || compareShaders || Boolean.getBoolean("megamek.gpu.performanceMaterialCache");

@@ -124,14 +124,14 @@ void iceOptics(vec3 normal, vec3 geometric, float roughness, vec3 f0, out vec3 l
     normal = shadingNormal(normal, geometric, view);
     roughness = antialiasedRoughness(roughness, surfaceVariance);
 #ifdef lightingFlag
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     ambient = skyLight(normal, GROUND_ALBEDO);
 #else
     ambient = skyLight(normal, GROUND_ALBEDO) + lavaIrradiance(v_cloudPosition, normal);
 #endif
 #if numDirectionalLights > 0
-#if defined(normalQualityFlag) && defined(shadowMapFlag)
-    // One bilinear comparison, as Normal's ground.
+#if defined(mediumQualityFlag) && defined(shadowMapFlag)
+    // One bilinear comparison, as Medium's ground.
     float visibility = shadowVisibility(textureLod(u_shadowTexture, v_shadowMapUv, 0.0));
 #else
     float visibility = surfaceVisibility();
@@ -150,7 +150,7 @@ void iceOptics(vec3 normal, vec3 geometric, float roughness, vec3 f0, out vec3 l
     lit = ambient + direct;
     vec3 albedo = specularAlbedo(max(0.0, dot(view, normal)), roughness, f0);
     fresnel = albedo.r;
-#if defined(lightingFlag) && defined(normalQualityFlag)
+#if defined(lightingFlag) && defined(mediumQualityFlag)
     // Snow reflects its face's sky; polished ice the sky along its reflection, whatever may hide it.
     reflection = roughness > .5 ? faceSky * albedo : environmentRadiance(reflect(-view, normal), clamp(roughness, MIN_ROUGHNESS, 1.0),
           environmentGround(GROUND_ALBEDO), ambient) * albedo;

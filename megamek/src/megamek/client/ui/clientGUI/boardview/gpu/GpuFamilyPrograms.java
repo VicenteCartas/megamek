@@ -62,7 +62,7 @@ final class GpuFamilyPrograms {
      * the most-drawn first; programs the program cache holds load beside them at no such cost. The other variants keep
      * the generic program until a later load, which takes these from the cache and compiles the next ones; without a
      * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one links on Iris Xe in
-     * 1.1 to 4 s at Normal, 1.6 to 5.6 s at High. The link helper's links aren't counted: they hold nothing.
+     * 1.1 to 4 s at Medium, 1.6 to 5.6 s at High. The link helper's links aren't counted: they hold nothing.
      */
     static final int FRESH = 4;
 

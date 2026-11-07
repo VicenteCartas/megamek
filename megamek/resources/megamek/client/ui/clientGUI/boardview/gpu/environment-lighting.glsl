@@ -36,8 +36,8 @@ float shadowVisibility(float visibility) {
 }
 
 vec2 integratedBrdf(float nv, float roughness) {
-#ifdef normalQualityFlag
-    // Karis 2014, the split sum's analytic fit. Normal quality's light reads no table: only without any does it pay.
+#ifdef mediumQualityFlag
+    // Karis 2014, the split sum's analytic fit. Medium quality's light reads no table: only without any does it pay.
     vec4 r = clamp(roughness, MIN_ROUGHNESS, 1.0) * vec4(-1.0, -.0275, -.572, .022) + vec4(1.0, .0425, 1.04, -.04);
     float a = min(r.x * r.x, pow(2.0, -9.28 * clamp(nv, 0.0, 1.0))) * r.x + r.y;
     return vec2(-1.04, 1.04) * a + r.zw;
@@ -75,7 +75,7 @@ vec3 directionalNormalization(float nv, float roughness, vec3 f0) {
 #endif
 
 vec3 averageSpecularAlbedo(float roughness, vec3 f0) {
-#if defined(environmentLightingFlag) && !defined(normalQualityFlag)
+#if defined(environmentLightingFlag) && !defined(mediumQualityFlag)
     vec2 brdf = environmentTable(vec2(clamp(roughness, MIN_ROUGHNESS, 1.0) * 127.0, 128.0)).rg;
     return clamp(f0 * brdf.x + brdf.y, 0.0, 1.0);
 #else
@@ -101,7 +101,7 @@ vec2 environmentWeights(vec3 direction, float roughness) {
 
 // Radiance of a GGX-filtered analytic sky/ground environment. N=V=R is the usual split-sum approximation.
 vec3 environmentRadiance(vec3 direction, float roughness, vec3 ground, vec3 fallbackSky) {
-#if defined(environmentLightingFlag) && !defined(normalQualityFlag)
+#if defined(environmentLightingFlag) && !defined(mediumQualityFlag)
     if (u_environmentImage.x > .5) {
         vec3 image = imageEnvironment(direction, roughness);
         // Generated skies contain no lower hemisphere: retain the receiving surface's existing ground bounce.
@@ -112,7 +112,7 @@ vec3 environmentRadiance(vec3 direction, float roughness, vec3 ground, vec3 fall
     return u_environmentHorizon * basis.x + (u_environmentSky - u_environmentHorizon) * basis.y
           + ground * (1.0 - basis.x);
 #else
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     fallbackSky *= .9; // Level with the prefiltered sky's mean over a board's lit ground.
 #endif
     return mix(ground, fallbackSky, clamp(direction.z * .5 + .5, 0.0, 1.0));

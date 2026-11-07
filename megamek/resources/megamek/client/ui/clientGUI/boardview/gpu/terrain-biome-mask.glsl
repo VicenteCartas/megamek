@@ -3,7 +3,7 @@
 // Same five noise evaluations as BoardBiome.wetness, with the domain warp's Jacobian carried through each octave.
 // This can stay inside a spatial wetland branch; no quad derivatives or extra neighbouring field evaluations.
 vec3 biomeWetnessGradient(vec2 p) {
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     // Two octaves without the domain warp: the same broad pools.
     vec3 broad = biomeNoiseGradient(p / 5.7), middle = biomeNoiseGradient(p / 2.0 + vec2(19.0, -7.0));
     return vec3(.55 * broad.x + .30 * middle.x + .075, .55 / 5.7 * broad.yz + .30 / 2.0 * middle.yz);

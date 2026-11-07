@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Quality choice through the real view: Normal's programs link and draw a real board, it takes the costly options out,
+ * The Quality choice through the real view: Medium's programs link and draw a real board, it takes the costly options out,
  * High brings back the player's own choices, and neither touches the render resolution.
  */
 @Tag("on-demand")
@@ -53,22 +53,22 @@ class GpuQualitySmokeTest {
                         CheckBox occlusion = GpuBoardTestUi.tuning(view, "tuning-ambient-occlusion");
                         CheckBox grass = GpuBoardTestUi.tuning(view, "tuning-grass");
                         var tuning = GpuBoardTestUi.tuning(view);
-                        assertEquals(BoardQuality.NORMAL, quality.getSelected(), "A new player starts in Normal");
+                        assertEquals(BoardQuality.MEDIUM, quality.getSelected(), "A new player starts in Medium");
                         assertEquals(100, resolution.getValue(), "at the full render resolution");
                         assertEquals(1, BoardCamera.renderScale);
                         assertTrue(occlusion.isDisabled(), "with what it leaves out disabled");
                         assertFalse(grass.isDisabled());
                         GpuCamouflageReview.renderReady(view);
-                        assertEquals(BoardQuality.NORMAL, BoardQuality.current);
+                        assertEquals(BoardQuality.MEDIUM, BoardQuality.current);
 
-                        // Low keeps Normal's programs: its switch links nothing and needs no loading stage.
+                        // Low keeps Medium's programs: its switch links nothing and needs no loading stage.
                         int links = GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading();
                         quality.setSelected(BoardQuality.LOW);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Low draws the board");
-                            assertFalse(GpuBoardTestUi.loading(view), "Low shares Normal's programs");
+                            assertFalse(GpuBoardTestUi.loading(view), "Low shares Medium's programs");
                         }
                         assertEquals(BoardQuality.LOW, BoardQuality.current);
                         assertEquals(links, GpuGlsl.compilesAfterLoading() + GpuGlsl.deferredAfterLoading());
@@ -81,16 +81,16 @@ class GpuQualitySmokeTest {
                         view.render();
                         assertTrue(tuning.displaySettings().ambientOcclusion(), "High takes the player's choice");
 
-                        quality.setSelected(BoardQuality.NORMAL);
+                        quality.setSelected(BoardQuality.MEDIUM);
                         for (int frame = 0; frame < 30; frame++) {
                             GpuBoardTestUi.present(view);
                             view.render();
-                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Normal's programs draw the board");
+                            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), "Medium's programs draw the board");
                         }
-                        assertEquals(BoardQuality.NORMAL, BoardQuality.current);
+                        assertEquals(BoardQuality.MEDIUM, BoardQuality.current);
                         assertEquals(70, resolution.getValue(), "Quality leaves the render resolution alone");
                         assertEquals(.7f, BoardCamera.renderScale, .001f);
-                        assertFalse(tuning.displaySettings().ambientOcclusion(), "Normal leaves it out");
+                        assertFalse(tuning.displaySettings().ambientOcclusion(), "Medium leaves it out");
                         assertTrue(occlusion.isChecked() && occlusion.isDisabled(), "keeping the choice, disabled");
 
                         quality.setSelected(BoardQuality.HIGH);

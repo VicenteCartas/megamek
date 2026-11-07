@@ -97,7 +97,7 @@ vec3 pointReflectance(vec3 normal, vec3 light, vec3 view, float roughness, vec3 
     // The cancellation form can give swapped light/view calls different lobes after float reassociation.
     vec3 across = cross(normal, halfVector);
     float denominator = dot(across, across) + a2 * nh * nh;
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     // Karis 2015, mobile GGX: visibility and Fresnel folded into one term of LoH.
     float lh = max(dot(light, halfVector), .1);
     return f0 * a2 * incidence / max(4.0 * denominator * denominator * lh * lh * (r + .5), 1e-6);
@@ -119,7 +119,7 @@ vec3 directionalNormalization(float nv, float roughness, vec3 f0);
 // tangent-plane approximation approaches the horizon. This is a single-lobe approximation, not disk quadrature.
 // Matching Smith visibility and preintegrated energy normalization keep the material's diffuse budget intact.
 vec3 surfaceReflectance(vec3 normal, vec3 light, vec3 view, float roughness, vec3 f0) {
-#ifdef normalQualityFlag
+#ifdef mediumQualityFlag
     return pointReflectance(normal, light, view, roughness, f0);
 #elif defined(environmentLightingFlag)
     float nv = dot(normal, view), nl = dot(normal, light);

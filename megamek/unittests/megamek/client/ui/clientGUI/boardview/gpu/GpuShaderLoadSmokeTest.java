@@ -55,7 +55,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
  * off. The Tactical View, the thermal (wireframe) view, SMAA and a render resolution below 100% are optional: they
  * link their own programs when they first show; their links are not counted, but no loading stage may come back. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
- * paints lava, water, ice, a car, scorch and the board's first building. It also switches Quality from Normal to High, waits for that lighting change's loading stage, and renders
+ * paints lava, water, ice, a car, scorch and the board's first building. It also switches Quality from Medium to High, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
  * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
@@ -70,7 +70,7 @@ class GpuShaderLoadSmokeTest {
     private static final File UNITS = new File("testresources/megamek/common/units");
 
     @ParameterizedTest
-    @ValueSource(strings = { "NORMAL", "HIGH" })
+    @ValueSource(strings = { "MEDIUM", "HIGH" })
     void gameCompilesNothingAfterItsLoadingStage(String quality) throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<List<BoardScene.Animation>> pending = new AtomicReference<>(List.of());
@@ -306,7 +306,7 @@ class GpuShaderLoadSmokeTest {
         AtomicReference<Watch> relight = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         String savedQuality = preferences.getBoardQuality();
-        preferences.setBoardQuality("NORMAL");
+        preferences.setBoardQuality("MEDIUM");
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             editor.game().setBoard(BoardFile.loadSheet(GRASSLAND, false, true));

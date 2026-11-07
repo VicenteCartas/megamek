@@ -251,7 +251,7 @@ final class GpuBoardTuning {
         syncing = true;
         quality.setSelected(BoardQuality.parse(GUIPreferences.getInstance().getBoardQuality()));
         syncing = false;
-        quality.addListener(new TextTooltip("Normal shades the board with cheaper light and materials, coarser distant "
+        quality.addListener(new TextTooltip("Medium shades the board with cheaper light and materials, coarser distant "
               + "terrain and fewer grass blades, for a higher frame rate on a similar look. Low does the same with no "
               + "grass blades at all and a quarter fewer plants in fields. Both leave out high shadows, specular "
               + "anti-aliasing, terrain parallax, tessellation and ambient occlusion; High brings your choices back. "
