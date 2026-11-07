@@ -20,5 +20,7 @@ class UiFormRowTest {
         assertTrue(UiKit.fillsFormColumn(new Actor()), "a select, field or pick list fills");
         assertTrue(UiKit.fillsFormColumn(new WidgetGroup()), "a row built of them fills");
         assertFalse(UiKit.fillsFormColumn(new HorizontalGroup()), "a flow of chips keeps its width");
+        assertTrue(UiKit.fillsFormColumn(new HorizontalGroup().wrap(true)),
+              "a wrapping flow fills, or it would stack its chips one per row");
     }
 }

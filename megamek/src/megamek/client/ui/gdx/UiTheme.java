@@ -189,6 +189,10 @@ public final class UiTheme implements Disposable {
           Map.entry("open-in-new", 0xE89E), Map.entry("book", 0xEA19), Map.entry("forum", 0xE0BF),
           // The random army's table browser: folder and casino (a die, a table to roll on)
           Map.entry("folder", 0xE2C7), Map.entry("die", 0xEB40),
+          // The random army's generators: military_tech (Battle Value), balance, flag (a faction's table),
+          // account_tree (a formation) and filter_alt (the unit filter)
+          Map.entry("military-tech", 0xEA3F), Map.entry("balance", 0xEAF6), Map.entry("flag", 0xE153),
+          Map.entry("account-tree", 0xE97A), Map.entry("filter", 0xEF4F),
           // shield_person: the Game Master's toast (Token v0) and seat; cancel: a no in the seat's vote
           Map.entry("shield-person", 0xF650), Map.entry("cancel", 0xE5C9),
           // The lobby's player cards: more_vert, add, check_circle, radio_button_unchecked, hourglass_empty,

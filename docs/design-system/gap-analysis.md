@@ -711,7 +711,9 @@ work for Swing, and item 11 is under investigation.
        need the full centre: the view has its title, the live count of matching units, Clear (the tab's criteria)
        and Done over compact `UiTabs` (Total Warfare, Alpha Strike, Battlefield Support), then the tab's titled
        blocks laid out in as many columns as fit (`control.lg` × 8 each, at most three: two at 2560x1400, one narrow),
-       in a vertical scroll. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
+       in a vertical scroll. With three columns a block can name its column, so Total Warfare balances as movement
+       and construction, unit types and equipment, quirks and unit flags; fewer columns fill the shortest first.
+       Filter chips wrap into a grid across the column. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
        segmented flags, filter chips for short choices, `UiPickList` for long ones (quirks, specials, engines,
        cockpits), All/Any segmented where the filter supports both, steppers, and the equipment editor (a search over
        the weapons and equipment with their groups, ≥ or <, a count, Add, AND, OR, brackets, Undo and Clear; the
@@ -1041,9 +1043,9 @@ work for Swing, and item 11 is under investigation.
          the server password) and saves them as the last used ones, as `VictoryConditionsDialog` did.
        - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
          the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
-         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. Advanced opens the Swing dialog for
-         its other tabs (BV- and force-generator armies). The tables load on a thread of their own; the lobby waits
-         for them.
+         them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. The generators beside the tables
+         are native too (see "Random army generators" below); only the Force Generator still opens the Swing
+         dialog. The tables load on a thread of their own; the lobby waits for them.
        - Random skills and random names are small cards over the lobby with the Swing dialogs' choices (client,
          method, type, level, force close; faction, female share, ethnicity), Save and Randomize.
        - Load list opens the system file dialog through L16's `SystemFileDialog`, and
@@ -1434,6 +1436,38 @@ work for Swing, and item 11 is under investigation.
        clicked, a bar dragged and a hit box, the chevrons, a roll lighting its tile, the rear armour and structure
        dolls clicked, Restore Unit, and OK writing the armour to the
        unit; a squad's location list and a platoon's troopers clicked through the stage).
+     - ~~Random army generators~~ (phase 1). The Swing random army dialog's generator tabs are native. A strip of
+       mode tiles over the random army's left pane picks where the hand comes from: Tables (the browser above),
+       Battle Value, Balanced, Faction and Formation. The hand, Roll, the totals and Add stay the same on the right;
+       a generator is a `RandomArmyForm.Dealer` in `megamek.client.lobby`, toolkit-free:
+       - Battle Value (`BattleValueArmy`, the Swing BV tab): steppers per kind (Meks, vehicles, battle armour,
+         infantry) with the available count or a warning when there are none, a line on how the budget is split
+         (by count × average BV per kind, infantry last), the BV budget and design years as ranges, canon units
+         only and padding spare BV with infantry. It deals through `RandomArmyCreator.generateArmy`, whose kept cards
+         count toward their kind. The count field hides, since the kinds set the size.
+       - Balanced (`BalancedArmy`, the simple lance): balance by BV or tonnage, a target and a tolerance, dealt
+         through `SimpleRandomLanceCreator.buildForce` against what the kept cards leave.
+       - Faction (`RatGeneratorForm` over `FactionChoice`): year, faction (minor ones on a switch), command and
+         rating (segments for short codes, a select for named ratings), then the options (unit type, weight
+         classes, roles, role strictness, network, motive) and under them a table preview, shown on demand, which
+         lists the generated table's units with their share and BV and takes one into the hand.
+       - Formation (`FormationForm`): the same faction block, unit type, a formation of those the type can head or
+         join, extra units (a select) and their type, and network. It deals a whole hand, so its cards are not kept or
+         rerolled alone.
+       - The Battle Value and Balanced generators share the Requisition's advanced search
+         (`LobbyAdvancedSearchView`) as a filter, which swaps into the dialog's body with a match count.
+       - The RAT Generator loads in the background; the Faction and Formation panes show it loading and Roll waits.
+         A generator's faction, year and rating are noted with the dealt units (`GenerationContext`) and the last
+         faction and unit type are remembered for the next opening, as is the mode, kept as the Swing random
+         army's last tab so either opens on the same generator.
+       - Every card and every unit row of the Faction table preview opens the unit's readout (summary, TRO, BV,
+         cost) over the random army, as the Swing tables' View, View BV and View Cost did.
+       - Still Swing: the Force Generator, behind "Force generator…" in the footer, for a second phase.
+       Checks: `ArmyGeneratorsTest`, `RandomArmyFormTest` (a dealer, a whole hand, counts of its own, the context)
+       and the on-demand `LobbyDialogsL17SmokeTest.theRandomArmyGeneratorsDealByTheirChoices` (the remembered
+       mode, Battle Value's stepper and roll, the filter opened and closed, Balanced's roll, Faction's loading
+       state) and `theRandomArmyRollsKeepsAndAdds` (a card's readout, shown over the army).
+       Live: `lobby+randomarmy+click=army-mode-battleValue`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
@@ -1441,7 +1475,8 @@ work for Swing, and item 11 is under investigation.
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
        - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the random army's Advanced Search, which still opens the Swing random army dialog.
+         - the random army's Force Generator, which still opens the Swing random army dialog (phase 2 of the
+           generators above).
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:

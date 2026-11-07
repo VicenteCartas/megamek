@@ -25,7 +25,11 @@ import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
 import megamek.client.generator.RandomUnitGenerator;
 import megamek.client.lobby.AssetForm;
+import megamek.client.lobby.BalancedArmy;
+import megamek.client.lobby.BattleValueArmy;
+import megamek.client.lobby.FactionChoice;
 import megamek.client.lobby.ForceNameRequest;
+import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.LobbyAsks;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
@@ -36,30 +40,42 @@ import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
+import megamek.client.lobby.RatGeneratorForm;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
+import megamek.client.ratgenerator.FormationType;
+import megamek.client.ratgenerator.GenerationContext;
+import megamek.client.ratgenerator.RATGenerator;
+import megamek.client.ratgenerator.UnitTable;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
+import megamek.common.Team;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.enums.Gender;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.icons.Camouflage;
 import megamek.common.loaders.EntityLoadingException;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.loaders.MekSummary;
+import megamek.common.loaders.MekSummaryCache;
 import megamek.common.options.GameOptions;
+import megamek.common.options.OptionsConstants;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
+import megamek.common.units.UnitType;
 import megamek.logging.MMLogger;
 
 /**
@@ -81,6 +97,7 @@ final class GpuLobbyTools {
     private static final Pattern LAYOUT_TABLE = Pattern.compile("<table[^>]*class=\"config-table\"[^>]*>(.*?)</table>",
           Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private @Nullable Timer ratWait;
+    private @Nullable Timer ratGeneratorWait;
     private @Nullable Timer namesWait;
     private static final int PROBE_TRIES = 20;
     private int probeTries;
@@ -324,6 +341,12 @@ final class GpuLobbyTools {
                   return generator.generate(count, table);
               });
         RatBrowser browser = new RatBrowser(RatBrowser.of(generator.getRatTree()));
+        int year = client().getGame().getOptions().intOption(OptionsConstants.ALLOWED_YEAR);
+        int lastTab = MathUtility.parseInt(
+              GUIPreferences.getInstance().getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_TAB), -1);
+        LobbyRandomArmyView.Generators generators = new LobbyRandomArmyView.Generators(
+              new BattleValueArmy(MekSummaryCache.getInstance()::getAllMeks, year),
+              new BalancedArmy(MekSummaryCache.getInstance()::getAllMeks));
         LobbyRandomArmyView.Host host = new LobbyRandomArmyView.Host() {
             @Override
             public void edt(Runnable work, Runnable then) {
@@ -349,11 +372,110 @@ final class GpuLobbyTools {
             public void sprites(List<MekSummary> units) {
                 window.requisitionSprites(units);
             }
+
+            @Override
+            public void factions(Consumer<LobbyRandomArmyView.Factions> ready) {
+                SwingUtilities.invokeLater(() -> whenRatGeneratorReady(() -> {
+                    LobbyRandomArmyView.Factions[] built = new LobbyRandomArmyView.Factions[1];
+                    edt(() -> built[0] = factionGenerators(year), () -> ready.accept(built[0]));
+                }));
+            }
+
+            @Override
+            public void remember(FactionChoice factions, int unitType) {
+                rememberFaction(factions, unitType);
+            }
+
+            @Override
+            public int lastTab() {
+                return lastTab;
+            }
+
+            @Override
+            public void lastTab(int tab) {
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance()
+                      .setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_TAB, String.valueOf(tab)));
+            }
+
+            @Override
+            public void readout(MekSummary unit) {
+                SwingUtilities.invokeLater(() -> armyReadout(unit));
+            }
         };
-        open(dialogs -> dialogs.randomArmy(form, browser, key -> {
+        open(dialogs -> dialogs.randomArmy(form, browser, generators, key -> {
             GpuLobbyScreen screen = window.screen();
             return screen == null ? null : screen.requisitionSprite(key);
         }, host));
+    }
+
+    /** Runs {@code then} once the RAT Generator has read its data, started here if it is not yet. */
+    private void whenRatGeneratorReady(Runnable then) {
+        RATGenerator generator = RATGenerator.getInstance();
+        if (generator.isInitialized()) {
+            then.run();
+            return;
+        }
+        if (ratGeneratorWait != null) {
+            ratGeneratorWait.stop();
+        }
+        ratGeneratorWait = new Timer(RAT_POLL_MS, event -> {
+            if (window.closing() || generator.isInitialized()) {
+                ratGeneratorWait.stop();
+                ratGeneratorWait = null;
+                if (!window.closing()) {
+                    then.run();
+                }
+            }
+        });
+        ratGeneratorWait.start();
+    }
+
+    /** The faction table and formation generators for {@code year}, on the choices the Swing generator remembers. */
+    private static LobbyRandomArmyView.Factions factionGenerators(int year) {
+        RATGenerator generator = RATGenerator.getInstance();
+        generator.loadYear(year);
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        FactionChoice choice = new FactionChoice(new ArrayList<>(generator.getFactionList()), year);
+        String faction = preferences.getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_FACTION);
+        if (!faction.isBlank()) {
+            choice.faction(faction);
+        }
+        String command = preferences.getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_SUB_FACTION);
+        if (!command.isBlank()) {
+            choice.command(command);
+        }
+        String rating = preferences.getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_RATING);
+        if (!rating.isBlank()) {
+            choice.rating(rating);
+        }
+        RatGeneratorForm table = new RatGeneratorForm(choice,
+              (record, unitType, at, level, weights, network, motives, roles, strictness) -> {
+                  RATGenerator.getInstance().loadYear(at);
+                  return UnitTable.findTable(record, unitType, at, level, weights, network, motives, roles,
+                        strictness);
+              });
+        String unitType = preferences.getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_UNIT_TYPE);
+        for (int type : RatGeneratorForm.UNIT_TYPES) {
+            if (UnitType.getTypeName(type).equals(unitType)) {
+                table.unitType(type);
+            }
+        }
+        FormationForm formation = new FormationForm(choice, new ArrayList<>(FormationType.getAllFormations()),
+              RATGenerator.getInstance()::loadYear);
+        formation.unitType(table.unitType());
+        return new LobbyRandomArmyView.Factions(table, formation);
+    }
+
+    /** Remembers the faction, command, rating and unit type for the next time, as the Swing generator does. */
+    private static void rememberFaction(FactionChoice factions, int unitType) {
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        preferences.setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_FACTION,
+              factions.faction() == null ? "" : factions.faction().getKey());
+        preferences.setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_SUB_FACTION,
+              factions.command() == null ? "" : factions.command().getKey());
+        preferences.setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_RATING,
+              factions.rating() == null ? "" : factions.rating());
+        preferences.setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_UNIT_TYPE, UnitType.getTypeName(unitType));
     }
 
     /**
@@ -394,7 +516,31 @@ final class GpuLobbyTools {
         client.sendAddEntity(entities);
         client.sendServerChat(Player.PLAYER_NONE, Messages.getString("RandomArmyDialog.loadedUnitsChat",
               local, owner.getName(), entities.size()));
+        recordContext(army.context(), owner);
         army.clear();
+    }
+
+    /**
+     * Records what a generator that asked for a faction dealt the units for, as the Swing random army does: against
+     * the owner, as their team's faction, and in the chat.
+     */
+    private void recordContext(@Nullable GenerationContext context, Player owner) {
+        if (context == null || context.source() == GenerationContext.Source.UNSPECIFIED) {
+            return;
+        }
+        gui().setGenerationContext(owner.getId(), context);
+        Team team = client().getGame().getTeamForPlayer(owner);
+        if (team != null) {
+            team.setFaction(context.faction());
+        }
+        // The year goes in as text: message formatting would group its digits
+        String year = String.valueOf(context.year());
+        String local = client().getLocalPlayer().getName();
+        client().sendServerChat(Player.PLAYER_NONE, context.rating() == null
+              ? Messages.getString("RandomArmyDialog.generatedFor", local, owner.getName(),
+                    context.factionDisplayName(), year)
+              : Messages.getString("RandomArmyDialog.generatedForRated", local, owner.getName(),
+                    context.factionDisplayName(), year, context.rating()));
     }
 
     private static void skillsAndName(Entity entity, Client skillsClient, @Nullable String chosenName) {
@@ -507,11 +653,31 @@ final class GpuLobbyTools {
         open(dialogs -> dialogs.readout(dossiers).page(page));
     }
 
+    /** Swing thread: reads a random army unit's file and opens its dossier over the random army. */
+    private void armyReadout(MekSummary unit) {
+        Entity entity;
+        try {
+            entity = new MekFileParser(unit.getSourceFile(), unit.getEntryName()).getEntity();
+        } catch (EntityLoadingException failure) {
+            LOGGER.error(failure, "Unable to load the unit {}: {}", unit.getSourceFile(), unit.getEntryName());
+            message(Messages.getString("Lobby.randomArmy.title"), Messages.getString("ClientGUI.errorLoadingFile"));
+            return;
+        }
+        LobbyReadoutView.Dossier dossier = dossier(entity, client().getLocalPlayer().getCamouflage());
+        open(dialogs -> dialogs.readoutOver(List.of(dossier)));
+    }
+
     private LobbyReadoutView.Dossier dossier(Entity unit) {
-        BufferedImage sprite = GpuLobbyWindow.sprite(unit, unit.getCamouflageOrElseOwners());
+        return dossier(unit, unit.getCamouflageOrElseOwners());
+    }
+
+    private LobbyReadoutView.Dossier dossier(Entity unit, Camouflage camouflage) {
+        BufferedImage sprite = GpuLobbyWindow.sprite(unit, camouflage);
         Player owner = unit.getOwner();
-        String line = Messages.getString("Lobby.readout.line", unit.calculateBattleValue(),
-              format(unit.getWeight()), owner == null ? "" : owner.getName());
+        String line = owner == null
+              ? Messages.getString("Lobby.readout.lineUnowned", unit.calculateBattleValue(), format(unit.getWeight()))
+              : Messages.getString("Lobby.readout.line", unit.calculateBattleValue(), format(unit.getWeight()),
+                    owner.getName());
         List<List<EntityReadout.Row>> pages = List.of(RequisitionReadout.summary(unit), RequisitionReadout.tro(unit),
               rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)));
         return new LobbyReadoutView.Dossier(unit.getShortName(), line, sprite, pages);

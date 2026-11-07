@@ -79,7 +79,24 @@ class LobbyAdvancedSearchSmokeTest {
             click(ui, view.tabs().option(2));
             Actor bfType = view.control(Field.BF_TYPE);
             assertNotNull(bfType, "the Battlefield Support tab shows its controls");
+            click(ui, view.tabs().option(1));
+            run(ui, .05f);
+            Group asTypes = assertInstanceOf(Group.class, view.control(Field.AS_TYPE));
+            Actor first = asTypes.getChildren().get(0);
+            Actor second = asTypes.getChildren().get(1);
+            assertEquals(first.getY(), second.getY(), 0.5f, "the unit type chips flow side by side, not one per row");
             click(ui, view.tabs().option(0));
+            run(ui, .05f);
+            if (view.columns() == 3) {
+                Actor movement = view.control(Field.WALK);
+                Actor gyro = view.control(Field.GYRO);
+                Actor quirks = view.control(Field.QUIRKS);
+                Actor omni = view.control(Field.OMNI);
+                assertEquals(movement.localToStageCoordinates(new Vector2()).x,
+                      gyro.localToStageCoordinates(new Vector2()).x, 1f, "construction sits under movement");
+                assertEquals(quirks.localToStageCoordinates(new Vector2()).x,
+                      omni.localToStageCoordinates(new Vector2()).x, 1f, "the unit flags sit under the quirks");
+            }
             UiPickList pickList = find(view.control(Field.QUIRKS), UiPickList.class);
             assertNotNull(pickList, "the quirks are a pick list");
             view.reveal(pickList.select());

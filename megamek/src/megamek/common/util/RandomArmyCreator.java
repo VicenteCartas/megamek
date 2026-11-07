@@ -38,7 +38,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Predicate;
 
+import jakarta.annotation.Nullable;
 import megamek.client.ui.dialogs.advancedsearch.ASAdvancedSearchPanel;
 import megamek.client.ui.dialogs.advancedsearch.MekSearchFilter;
 import megamek.common.TechConstants;
@@ -112,6 +114,12 @@ public class RandomArmyCreator {
          */
         public MekSearchFilter advancedSearchFilter = null;
         public ASAdvancedSearchPanel asPanel = null;
+
+        /**
+         * A filter of a view without the Swing search panels, applied as the advanced search filters are: not to
+         * infantry, battle armor or ProtoMeks
+         */
+        public @Nullable Predicate<MekSummary> filter = null;
     }
 
     /**
@@ -206,8 +214,12 @@ public class RandomArmyCreator {
     }
 
     public static List<MekSummary> generateArmy(Parameters p) {
+        return generateArmy(p, MekSummaryCache.getInstance().getAllMeks());
+    }
+
+    /** Generates the army from {@code all} rather than from the whole unit cache. */
+    public static List<MekSummary> generateArmy(Parameters p, MekSummary[] all) {
         int allowedVariance = java.lang.Math.abs(p.maxBV - p.minBV);
-        MekSummary[] all = MekSummaryCache.getInstance().getAllMeks();
         List<MekSummary> allMeks = new ArrayList<>();
         List<MekSummary> allTanks = new ArrayList<>();
         List<MekSummary> allInfantry = new ArrayList<>();
@@ -279,6 +291,13 @@ public class RandomArmyCreator {
                   && !m.getUnitType().equals(UnitType.getTypeName(UnitType.PROTOMEK))
                   && !m.getUnitType().equals(UnitType.getTypeName(UnitType.BATTLE_ARMOR))
                   && (p.asPanel != null && !p.asPanel.matches(m))) {
+                continue;
+            }
+
+            if (!m.getUnitType().equals(UnitType.getTypeName(UnitType.INFANTRY))
+                  && !m.getUnitType().equals(UnitType.getTypeName(UnitType.PROTOMEK))
+                  && !m.getUnitType().equals(UnitType.getTypeName(UnitType.BATTLE_ARMOR))
+                  && (p.filter != null && !p.filter.test(m))) {
                 continue;
             }
 
