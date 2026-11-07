@@ -2898,17 +2898,18 @@ final class GpuTerrain implements Disposable {
             if (terrainMaterialPreparation == null && requested != null) { updateLight(requested.scene().light()); }
             prepareTerrainMaterials();
         }
-        // Family programs build only behind the loading stage, after the generic ones: on Iris Xe a link built beside
-        // interactive frames once held one frame for 9 s (GpuFamilyPrograms).
+        // Family programs start behind the loading stage, after the generic ones: on Iris Xe a link in this process beside
+        // interactive frames once held one frame for 9 s. The link helper's hold none, so those go on (GpuFamilyPrograms).
         if (familyPrograms.configure(environment)) {
             terrainBatch.clear();
             startFamilySession();
         }
-        if (buildingFamilies()) {
+        boolean session = buildingFamilies();
+        if (session || familyPrograms.adopting()) {
             if (familyPrograms.prepare(terrainMaterialPreparation, batch.getShaderProvider(), environment)) {
                 terrainBatch.clear();
             }
-            familySession = familyPrograms.pending() > 0;
+            if (session) { familySession = familyPrograms.pending() > 0; }
         }
         // Once geometry and programs are ready, give the material cache a bounded head start. Interactive frames
         // continue baking it; complete direct terrain can already display the map.

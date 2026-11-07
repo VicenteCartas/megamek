@@ -32,7 +32,9 @@ import megamek.logging.MMLogger;
  * live material of its variant
  * gains the {@link Constants} marker, and the shader provider, through the shader manager's handles, resolves those
  * draws to it; a chunk installed later is marked as it is installed. Variants that appear after the load keep the
- * generic program until the next load. A terrain builds at most {@link #CAPACITY} family programs for each lighting
+ * generic program until the next load. With the link helper (GpuLinkHelper) a fresh link holds no frame, so the loading
+ * stage waits only for what the program cache holds, every variant asks once behind it, and the links go on beside the
+ * frames, each adopted when it is ready, one a frame: a generic program draws the same pixels meanwhile. A terrain builds at most {@link #CAPACITY} family programs for each lighting
  * configuration and twice that in all; once it holds that many, a configuration without programs stays generic. The
  * provider keeps every program it built, and returning to a configuration finds its programs there.
  * <p>
@@ -60,7 +62,7 @@ final class GpuFamilyPrograms {
      * the most-drawn first; programs the program cache holds load beside them at no such cost. The other variants keep
      * the generic program until a later load, which takes these from the cache and compiles the next ones; without a
      * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one links on Iris Xe in
-     * 1.1 to 4 s at Normal, 1.6 to 5.6 s at High.
+     * 1.1 to 4 s at Normal, 1.6 to 5.6 s at High. The link helper's links aren't counted: they hold nothing.
      */
     static final int FRESH = 4;
 
@@ -97,6 +99,8 @@ final class GpuFamilyPrograms {
         List<Object> sampleConfiguration;
         /** Deferred: no cached program, and this configuration compiled its {@link #FRESH} share already. */
         boolean ready, failed, deferred;
+        /** Its program's cache key, while the link helper links it. */
+        String linkKey;
 
         Variant(Key key, float[] families) {
             this.key = key;
@@ -151,6 +155,9 @@ final class GpuFamilyPrograms {
     private boolean waiting;
     /** Links this configuration started from source. */
     private int freshLinks;
+    /** The preparation of the last step, and whether its links run in the link helper. */
+    private GpuGlsl.Preparation links;
+    private boolean background;
     private long environmentMask = -1;
     private int environmentFlags;
     private boolean shadows;
@@ -201,6 +208,10 @@ final class GpuFamilyPrograms {
             variant.mark(false);
             variant.ready = variant.failed = variant.deferred = false;
         }
+        if (background) {
+            links.dropOptional();
+            forgetLinks();
+        }
         // A link still running finishes into the provider for its own configuration; nothing marks it (prepare).
         waiting = true;
         freshLinks = 0;
@@ -215,6 +226,16 @@ final class GpuFamilyPrograms {
      */
     boolean prepare(GpuGlsl.Preparation preparation, ShaderProvider provider, Environment environment) {
         if (!enabled || preparation == null) { return false; }
+        links = preparation;
+        boolean elsewhere = preparation.background();
+        if (background && !elsewhere) {
+            // The helper ended: nothing links in this process beside the frames. Until the next load, these stay generic.
+            forgetLinks();
+            background = false;
+            return false;
+        }
+        background = elsewhere;
+        if (elsewhere) { return prepareElsewhere(preparation, provider, environment); }
         int limit = preparation.parallel() ? IN_FLIGHT : 1;
         if (limit == 1 && preparation.linking()) { return false; }
         boolean changed = false;
@@ -235,6 +256,46 @@ final class GpuFamilyPrograms {
     }
 
     /**
+     * With the link helper. Behind the loading stage every variant asks once, which assembles its sources, and those the
+     * cache holds are adopted at once. Then a finished link is adopted when its binary is there: while the board shows,
+     * one a frame within the frame's budget for links, and asking only then, since asking assembles the sources again.
+     */
+    private boolean prepareElsewhere(GpuGlsl.Preparation preparation, ShaderProvider provider, Environment environment) {
+        boolean changed = false, showing = GpuGlsl.presenting();
+        while (!showing && waiting) {
+            Variant variant = next(environment);
+            waiting = variant != null;
+            if (variant == null) { break; }
+            Boolean marked = finish(variant, preparation, provider);
+            if (marked == null) { compiling.add(variant); } else { changed |= marked; }
+        }
+        for (var unfinished = compiling.iterator(); unfinished.hasNext(); ) {
+            Variant variant = unfinished.next();
+            if (!preparation.over(variant.linkKey)) { continue; }
+            if (showing && GpuGlsl.overBudget()) { break; }
+            long start = System.nanoTime();
+            Boolean marked = finish(variant, preparation, provider);
+            GpuGlsl.spent(System.nanoTime() - start);
+            if (marked == null) { continue; }
+            unfinished.remove();
+            changed |= marked;
+            if (showing) { break; }
+        }
+        return changed;
+    }
+
+    /** The helper's links are no one's any more: their variants may ask again, and their binaries still fill the cache. */
+    private void forgetLinks() {
+        for (Variant variant : compiling) {
+            List<Object> program = new ArrayList<>(List.of(variant.key));
+            program.addAll(variant.sampleConfiguration);
+            built.remove(program);
+            variant.release();
+        }
+        compiling.clear();
+    }
+
+    /**
      * Requests the variant's program: null while its link runs; otherwise the variant is released, and the result is
      * whether any material changed program.
      */
@@ -242,7 +303,9 @@ final class GpuFamilyPrograms {
         boolean current = variant.sampleConfiguration.equals(configuration()), changed = false;
         int started = preparation.freshLinks();
         try {
-            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample), freshLinks < FRESH)) {
+            Runnable ask = () -> variant.sample.shader = provider.getShader(variant.sample);
+            if (!(background ? preparation.runOptional(ask) : preparation.run(ask, freshLinks < FRESH))) {
+                variant.linkKey = preparation.lastKey();
                 return null;
             }
             // A program of an earlier configuration stays in the provider for a return to it; it marks nothing.
@@ -317,8 +380,13 @@ final class GpuFamilyPrograms {
             if (built.contains(List.of(variant.key, environmentMask, environmentFlags, shadows))) { free++; }
             else { others++; }
         }
-        return compiling.size() + free + Math.min(others, Math.max(0, room()));
+        // The loading stage doesn't wait for the helper's links, only to adopt the finished ones.
+        long linking = background ? compiling.stream().filter(variant -> links.over(variant.linkKey)).count() : compiling.size();
+        return (int) linking + free + Math.min(others, Math.max(0, room()));
     }
+
+    /** Whether links in the helper go on: the terrain keeps taking steps while the board shows. */
+    boolean adopting() { return background && !compiling.isEmpty(); }
 
     /** Programs this configuration may still build: its own capacity, within twice the capacity over all of them. */
     private int room() {
