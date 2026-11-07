@@ -1854,7 +1854,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
           int ramps, int aprons, megamek.common.board.LaneJunction junction, Consumer<String> choose) {
         var current = ramps == 0 ? megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits)
               : megamek.common.board.SingleLane.control(appearance, exits, ramps, aprons, junction);
-        String stops = junction != null && junction.waiting() == 0 ? "BoardEditor.trafficPriorityRight" : "BoardEditor.trafficStops";
+        String stops = junction != null && junction.state() == megamek.common.board.LaneJunction.State.PRIORITY_RIGHT
+              ? "BoardEditor.trafficPriorityRight" : "BoardEditor.trafficStops";
         List<Option> options = List.of(new Option(UiKit.text(stops), "stops"),
               new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
               new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
@@ -1876,7 +1877,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         boolean ground = owner.equals("road") && way != null && pavedRoad(way.value());
         // The junction single lanes form here, its aprons (roadless concrete it runs into) no roads of it, as on the 3D board.
         var junction = ground ? snapshot.junction() : null;
-        if (junction != null && Integer.bitCount(junction.arms()) >= 3 && (!junction.controlled() || junction.hub())) {
+        if (junction != null && (!junction.controlled() || junction.hub())) {
             // Nothing here needs controls, or only single lanes meet, which are never signalled: no choice changes what
             // is drawn. A stored choice is kept for when that changes.
             boolean merge = junction.controlled() && junction.waiting() != 0;
@@ -1888,7 +1889,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             none.setWrap(true);
             row.add(none).growX().minWidth(0);
             row.setName("editor-traffic-control-" + owner);
-            ui.tip(row).getActor().setText(UiKit.text(merge ? "BoardEditor.trafficMerge.tooltip" : "BoardEditor.trafficNone.tooltip"));
+            ui.tip(row).getActor().setText(UiKit.text(merge ? "BoardEditor.trafficMerge.tooltip"
+                  : junction.controlled() ? "BoardEditor.trafficPriorityRight.tooltip" : "BoardEditor.trafficNone.tooltip"));
             detail.add(row).growX().row();
         } else {
             int ramps = junction == null || junction.hub() ? 0 : exits & ~junction.twoWay() & ~snapshot.apronSides() & 63;

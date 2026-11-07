@@ -328,4 +328,39 @@ class SingleLaneEditorTest {
         assertEquals(megamek.common.board.LaneJunction.State.NONE, junction.state(), "Nothing to control: no row to choose");
         assertEquals(6, junction.nose(), "A keep-right sign on its nose");
     }
+    @Test void reversingARunBeyondAForkReChecksTheJunctionOnItsFarSide() {
+        // J: a two-lane road north, an entrance from the south-west, and a single-lane fork F south-east of it whose
+        // branch north-east runs in and whose branch south runs out, so F's traffic enters J: J's south-east is an entrance.
+        var session = new BoardEditorSession();
+        Coords fork = J.translated(2);
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J.translated(0), J);
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J.translated(4).translated(4), J.translated(4), J);
+        stroke(session, J, fork, fork.translated(3), fork.translated(3).translated(3));
+        stroke(session, fork.translated(1).translated(1), fork.translated(1), fork);
+        assertTrue(reported(session, J, "DEAD_END_ROAD", "N"), issuesAt(session, J).toString());
+        // Reversing the north-east branch turns F's side towards J round: J's south-east becomes an exit, a Y split
+        // running on the left. J lies beyond the fork, two hexes from any hex the edit changed.
+        inspect(session, fork.translated(1));
+        send(session, Action.LANE_DIRECTION, "road", "reverse");
+        assertFalse(reported(session, J, "DEAD_END_ROAD", "N"), issuesAt(session, J).toString());
+        assertTrue(reported(session, J, "REVERSED_SPLIT", "SE", "SW"), issuesAt(session, J).toString());
+    }
+
+    @Test void aCarParkMouthWithOneWayLanesIsNoStrandedJunction() {
+        // A two-lane hex at a car park's edge, its traffic leaving by one single lane and arriving by another.
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "pavement", "1");
+        stroke(session, J.translated(0));
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J);
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, J.translated(2), J.translated(2).translated(2));
+        stroke(session, J, J.translated(4), J.translated(4).translated(4));
+        inspect(session, J);
+        send(session, Action.RAMP, "road:2", "entrance");
+        assertTrue(issuesAt(session, J).isEmpty(), "The car park feeds the exit and takes the entrance's traffic: "
+              + issuesAt(session, J));
+    }
 }

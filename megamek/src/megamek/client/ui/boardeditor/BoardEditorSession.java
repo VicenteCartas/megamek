@@ -2879,16 +2879,32 @@ public final class BoardEditorSession {
             runs.add(run);
             var first = run.steps().getFirst();
             var last = run.steps().getLast();
-            if (first.back() >= 0) { result.add(first.at().translated(first.back())); }
-            if (last.ahead() >= 0) { result.add(last.at().translated(last.ahead())); }
+            if (first.back() >= 0) { addRunEnd(result, first.at().translated(first.back())); }
+            if (last.ahead() >= 0) { addRunEnd(result, last.at().translated(last.ahead())); }
         }
         return result;
     }
 
     /**
+     * The hex beyond a run's end, and where it is a single-lane fork or merge, which stores no direction, its neighbours:
+     * its arms towards them run as this run does, so the junctions across them change with it.
+     */
+    private void addRunEnd(java.util.Set<Coords> result, Coords end) {
+        result.add(end);
+        Hex hex = hexAt(end);
+        if (hex == null || !SingleLane.single(hex)) { return; }
+        int exits = roadExits(hex);
+        if (Integer.bitCount(exits) <= 2) { return; }
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) != 0) { result.add(end.translated(d)); }
+        }
+    }
+
+    /**
      * The single-lane layouts at {@code at} that no road authority would build or that strand traffic (LaneJunction#issues),
-     * traffic lights chosen where nothing needs them, and a one-way lane ending, or starting, in a dead end. Each with its
-     * fix; the editor never refuses them.
+     * and a one-way lane ending, or starting, in a dead end. Each with its fix; the editor never refuses them. Beside
+     * roadless concrete (an apron, a car park), whose traffic may come and go by any of the junction's lanes, only lanes
+     * running on the left are reported.
      */
     private List<String> laneIssues(Hex hex, Coords at) {
         if (!hex.containsTerrain(Terrains.ROAD)) { return List.of(); }
@@ -2903,22 +2919,23 @@ public final class BoardEditorSession {
         LaneJunction junction = SingleLane.junction(hex, at, this::hexAt);
         if (junction == null || Integer.bitCount(junction.arms()) < 2) { return result; }
         String[] sides = Messages.getString("BoardEditor.sides").split(",");
+        boolean aprons = !narrow && SingleLane.aprons(hex, at, this::hexAt, exits) != 0;
         for (var issue : junction.issues()) {
-            result.add(laneIssue(issue.kind().name(), issue.side() < 0 ? "" : sides[issue.side()],
+            var kind = issue.kind();
+            if (aprons && kind != LaneJunction.Kind.REVERSED_SPLIT && kind != LaneJunction.Kind.REVERSED_PAIR) { continue; }
+            // At a hub no two-lane road's directions choose an exit (Taken by).
+            String fix = kind == LaneJunction.Kind.UNFED_EXIT && junction.hub() ? "UNFED_EXIT.hub" : kind.name();
+            result.add(laneIssue(kind.name(), fix, issue.side() < 0 ? "" : sides[issue.side()],
                   issue.other() < 0 ? "" : sides[issue.other()]));
-        }
-        HexAppearance road = hex.getAppearance().get(SingleLane.OWNER);
-        boolean lights = road != null && road.trafficControl() != null
-              && road.trafficControl() != HexAppearance.TrafficControl.STOPS;
-        if (lights && Integer.bitCount(junction.arms()) >= 3 && junction.signalled() == 0) {
-            result.add(laneIssue("SIGNALS_IGNORED"));
         }
         return result;
     }
 
-    private static String laneIssue(String kind, Object... sides) {
+    private static String laneIssue(String kind) { return laneIssue(kind, kind); }
+
+    private static String laneIssue(String kind, String fix, Object... sides) {
         return Messages.getString("BoardEditor.issueLane", Messages.getString("BoardEditor.issueLane." + kind, sides),
-              Messages.getString("BoardEditor.issueLane." + kind + ".fix"));
+              Messages.getString("BoardEditor.issueLane." + fix + ".fix"));
     }
 
     /**

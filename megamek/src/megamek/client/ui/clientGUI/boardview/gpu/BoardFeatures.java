@@ -724,8 +724,8 @@ final class BoardFeatures {
                     asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                     if (!found) {
                         // An arm's mouth can lie in the corner of the arm beside it: its control then stands further out
-                        // along its own lane on its traffic's right, else on its left, never left out while its line is
-                        // painted.
+                        // along its own lane on its traffic's right, else on its left; left out, its line remaining, only
+                        // where neither side has a clear, dry, level spot.
                         if (!deck && !place(hex, coords, board, road, clearance, approach, 2, true, false, asset,
                               stopId(coords, owner, approach), result)) {
                             place(hex, coords, board, road, clearance, approach, 2, true, true, asset,
@@ -782,6 +782,8 @@ final class BoardFeatures {
     private static void rampSigns(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, int exits,
           LaneJunction lanes, List<BoardScene.Feature> result) {
         int mouths = lanes.noEntry() | lanes.oneWay(), turns = 0;
+        // Traffic coming out of roadless concrete beside a two-lane junction (an apron) may turn into any of its single lanes.
+        if (!road.narrow() && (exits & road.aprons()) != 0) { mouths |= lanes.entrances() | lanes.exits(); }
         for (int from = 0; from < 6; from++) {
             if (lanes.turnSign(from) != LaneJunction.TurnSign.NONE) { turns |= 1 << from; }
         }

@@ -285,7 +285,7 @@ final class BoardRoad {
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
         Function<Coords, Node> nodes = at -> Node.of(scene.tile(at));
         int single = singleArms(scene, tile);
-        long closed = single == 0 || singleLane(tile) ? 0 : SingleLane.closedTurns(lanes(scene), tile.coords());
+        long closed = single == 0 || singleLane(tile) ? 0 : SingleLane.closedTurns(lanes(scene), tile.coords(), aprons(scene, tile));
         var road = layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
             // A road meeting a deck joins the deck's road where it has that side; a clean side keeps the road's own kind.
@@ -628,6 +628,23 @@ final class BoardRoad {
 
     static boolean turning(int exits) {
         return Integer.bitCount(exits & 63) == 2 && (exits & (exits >> 3)) == 0;
+    }
+
+    /**
+     * The sides where a tile's ground road runs into roadless concrete, its aprons, as #meetConcrete finds them and
+     * SingleLane#aprons finds a hex's.
+     */
+    static int aprons(BoardScene scene, BoardScene.Tile tile) {
+        int result = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.roadExits() & 1 << direction) == 0) { continue; }
+            var neighbor = scene.tile(tile.coords().translated(direction));
+            if (neighbor != null && neighbor.surface() == BoardScene.Surface.CONCRETE && !neighbor.liquid().present()
+                  && BoardSurface.connectingBridge(tile, neighbor, direction) == null && neighbor.road() == Kind.NONE) {
+                result |= 1 << direction;
+            }
+        }
+        return result;
     }
 
     /** Carry the whole approach to a fitted concrete edge; the supporting ground clips its diagonal join. */

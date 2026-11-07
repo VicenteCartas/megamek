@@ -24,8 +24,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <li>The priority road is the best pair of arms a movement joins, never a 120 degree hairpin: two two-way arms first,
  * straight before a 60 degree bend. Where at most one two-way road meets it: straight before bent, then the pair more
  * traffic arrives along, then an entrance's road before an exit's. A tie leaves none, as do two-way roads meeting only in
- * a hairpin. A bend whose own traffic conflicts in ways only signs on
- * the bend could settle, with nothing else to sign, is none either.</li>
+ * a hairpin, unless a one-way road runs straight on through the junction past them. A bend that entrances join, whose
+ * own traffic conflicts in ways only signs on the bend could settle, with nothing else to sign, is none either; where
+ * only exits leave a two-way road, bent or not, its own course settles every conflict, and nothing needs controls.</li>
  * <li>Under priority signs, an arm off the priority road whose traffic conflicts with the priority road's waits: an
  * entrance or a hub's branch gives way, a two-way arm stops, as at any junction. Without a priority road, entrances give
  * way and two-way arms keep priority to the right; at a hub the branch with the other on its right gives way. Never
@@ -135,13 +136,16 @@ public final class LaneJunction {
         }
         conflicting = involved;
         int road = rank();
-        if (road != 0 && gap(road) == 2 && unsettledBend(road) && waitsFor(road) == 0) { road = 0; }
+        // Where only exits leave a two-way road, round a bend or a hairpin too, its own course settles every conflict:
+        // traffic turning off it gives way to oncoming traffic.
+        boolean exitsOnly = in == 0 && Integer.bitCount(two) == 2;
+        if (!exitsOnly && road != 0 && gap(road) == 2 && unsettledBend(road) && waitsFor(road) == 0) { road = 0; }
         priority = road;
         int wait = road != 0 ? waitsFor(road) : two != 0 ? in & involved : hubYields();
         // Someone keeps priority: an approach without a sign.
         if (road == 0 && wait == involved) { wait = 0; }
         waiting = wait;
-        state = involved == 0 ? State.NONE : wait != 0 ? State.CONTROLLED
+        state = involved == 0 || exitsOnly ? State.NONE : wait != 0 ? State.CONTROLLED
               : road != 0 && (involved & ~road) == 0 ? State.NONE : State.PRIORITY_RIGHT;
     }
 
@@ -341,10 +345,12 @@ public final class LaneJunction {
         boolean split = Integer.bitCount(two) == 1 && Integer.bitCount(arms) == 3;
         for (int p = 0; p < 6; p++) {
             int q = (p + 1) % 6;
-            // An exit with the entrance on its left: unless one of them only carries on a two-way road opposite it as a
-            // one-way street, with the other a side street off it.
-            if ((out & 1 << p) == 0 || (in & 1 << q) == 0 || (two & (1 << (p + 3) % 6 | 1 << (q + 3) % 6)) != 0) { continue; }
-            result.add(new Issue(split ? Kind.REVERSED_SPLIT : Kind.REVERSED_PAIR, p, q));
+            // An exit with the entrance on its left. Where one of them lies opposite a two-way road, it may just carry that
+            // road on as a one-way street, the other a side street off it: only a warning at a split, else nothing.
+            if ((out & 1 << p) == 0 || (in & 1 << q) == 0) { continue; }
+            boolean opposite = (two & (1 << (p + 3) % 6 | 1 << (q + 3) % 6)) != 0;
+            if (opposite && !split) { continue; }
+            result.add(new Issue(split && !opposite ? Kind.REVERSED_SPLIT : Kind.REVERSED_PAIR, p, q));
         }
         if (split) {
             int w = Integer.numberOfTrailingZeros(two);
@@ -414,9 +420,15 @@ public final class LaneJunction {
                     if (key > best) { best = key; result = pair; tie = false; } else if (key == best) { tie = true; }
                 }
             }
-            // Two-way roads meeting only in a hairpin keep priority to the right between them; a one-way road never
-            // takes priority over them.
-            if (pass == 0 && !paired && Integer.bitCount(two) >= 2) { return 0; }
+            // Two-way roads meeting only in a hairpin keep priority to the right between them, and no one-way road takes
+            // priority over them but one running straight on through the junction, as a road through does over side roads.
+            if (pass == 0 && !paired && Integer.bitCount(two) >= 2) {
+                for (int p = 0; p < 6; p++) {
+                    int q = (p + 3) % 6;
+                    if ((in & 1 << p) != 0 && (out & 1 << q) != 0 && move(p, q)) { return 1 << p | 1 << q; }
+                }
+                return 0;
+            }
         }
         return tie ? 0 : result;
     }

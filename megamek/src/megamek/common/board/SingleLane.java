@@ -189,9 +189,10 @@ public final class SingleLane {
      * The turns a two-lane hex closes, as bit {@code 6 * a + b} for the pair of sides {@code a, b}, both ways round: for
      * each exit (off-ramp) leaving it, the turns into it from its approaches that may not take it ({@link #feeds}); and,
      * where a two-way road meets it, the U-turn from an entrance into the exit on its left, round the nose between two
-     * carriageways: beside it, or across the side between them where it and a lone two-way road opposite form a Y.
+     * carriageways: beside it, or across the side between them where it and a lone two-way road opposite form a Y. Its
+     * {@code aprons} (roadless concrete it runs into, {@link #aprons}) are no roads of that junction.
      */
-    public static long closedTurns(View board, Coords at) {
+    public static long closedTurns(View board, Coords at, int aprons) {
         long result = 0;
         int exits = board.exits(at), joined = joined(board, at), approaches = exits & ~joined;
         for (int exit = 0; exit < 6; exit++) {
@@ -205,11 +206,12 @@ public final class SingleLane {
         for (int side = 0; side < 6; side++) {
             if ((joined & 1 << side) != 0 && entrance(board, at, side)) { entrances |= 1 << side; }
         }
-        return result | LaneJunction.noseTurns(exits, approaches, entrances, joined & ~entrances);
+        return result | LaneJunction.noseTurns(exits & ~aprons, approaches & ~aprons, entrances, joined & ~entrances);
     }
 
     public static long closedTurns(Hex hex, Coords at, Function<Coords, Hex> board) {
-        return closedTurns(view(hex, at, board), at);
+        int exits = hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
+        return closedTurns(view(hex, at, board), at, aprons(hex, at, board, exits));
     }
 
     /** Whether a hex's ground road is marked as a paved road is (not a dirt or gravel one), alleys included. */

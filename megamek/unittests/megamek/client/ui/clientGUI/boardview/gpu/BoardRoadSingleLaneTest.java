@@ -376,6 +376,8 @@ class BoardRoadSingleLaneTest {
         var layouts = List.of(new Layout("an exit south-east", ramps(9, 4, 0, control), ramps(9, 4, 0, stops)),
               new Layout("an exit north-west", ramps(9, 32, 0, control), ramps(9, 32, 0, stops)),
               new Layout("exits on both sides", ramps(9, 4 | 16, 0, control), ramps(9, 4 | 16, 0, stops)),
+              new Layout("a bend and an exit", ramps(1 | 4, 8, 0, control), ramps(1 | 4, 8, 0, stops)),
+              new Layout("a hairpin and an exit", ramps(1 | 32, 16, 0, control), ramps(1 | 32, 16, 0, stops)),
               new Layout("one two-lane arm forking into exits", ramps(1, 4 | 16, 0, control), ramps(1, 4 | 16, 0, stops)),
               new Layout("an exit taken from the north", exitTakenFrom(0, control), exitTakenFrom(0, stops)),
               new Layout("an exit straight on", straightExit(1 << 1, control), straightExit(1 << 1, stops)));
@@ -762,7 +764,8 @@ class BoardRoadSingleLaneTest {
                     assertEquals(BoardRoad.singleArms(scene, scene.tile(at)), single, at.toString());
                     assertEquals(BoardRoad.inbound(scene, scene.tile(at), single), BoardFeatures.inbound(hex, at, board::getHex, single),
                           at.toString());
-                    assertEquals(SingleLane.closedTurns(BoardRoad.lanes(scene), at), SingleLane.closedTurns(hex, at, board::getHex),
+                    assertEquals(SingleLane.closedTurns(BoardRoad.lanes(scene), at, BoardRoad.aprons(scene, scene.tile(at))),
+                          SingleLane.closedTurns(hex, at, board::getHex),
                           at.toString());
                 }
             }
@@ -924,5 +927,23 @@ class BoardRoadSingleLaneTest {
         assertEquals(HexAppearance.TrafficControl.STOPS, road.trafficControl(1 | 8 | 16, HexAppearance.TrafficControl.SIGNALS),
               "Never signalled");
         assertTrue(of(scene(hub(1 | 2 | 8, 8)), J).stopApproaches(1 | 2 | 8).isEmpty(), "A fork: nothing waits");
+    }
+    @Test
+    void aCarParkBesideAJunctionNeitherOpensNorClosesItsLanes() {
+        // A Y split (north two-lane, entrance south-east, exit south-west) beside a car park's pavement north-east: the
+        // pavement is no road of the junction, so the U-turn round the nose is still closed and the keep-right sign stands.
+        Board split = paved(ramps(1, 16, 4, null), 2);
+        Hex hex = split.getHex(J);
+        var junction = SingleLane.junction(hex, J, split::getHex);
+        assertEquals(megamek.common.board.LaneJunction.State.NONE, junction.state());
+        assertEquals(6, junction.nose());
+        assertTrue(of(scene(split), J).closed(2, 4), "No U-turn round the nose, on the board as for the editor");
+        assertEquals(1, BoardFeatures.roadControls(hex, J, split::getHex, true).stream()
+              .filter(feature -> feature.asset().endsWith("keep-right-sign")).count());
+        // A two-lane mouth joining only an entrance and an exit to a car park: the car park's traffic may turn into
+        // either lane, so both keep their no-entry and one-way signs.
+        Board mouth = paved(ramps(0, 16, 4, null), 1);
+        var signs = BoardFeatures.roadControls(mouth.getHex(J), J, mouth::getHex, true).stream().map(BoardScene.Feature::asset).toList();
+        assertTrue(signs.contains("scenery/road/no-entry-sign") && signs.contains("scenery/road/one-way-sign"), signs.toString());
     }
 }
