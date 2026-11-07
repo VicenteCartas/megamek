@@ -2866,14 +2866,18 @@ public final class BoardEditorSession {
 
     /**
      * {@code cells} and the hexes just beyond both ends of every single-lane run through them: the junctions a run's
-     * direction decides, however far along it they lie.
+     * direction decides, however far along it they lie; and across every single-lane fork or merge among them or at
+     * those ends.
      */
     private java.util.Collection<Coords> withRunEnds(java.util.Collection<Coords> cells) {
         java.util.Set<Coords> result = new java.util.LinkedHashSet<>(cells);
         List<SingleLane.Run> runs = new ArrayList<>();
         for (Coords at : cells) {
             Hex hex = hexAt(at);
-            if (hex == null || !SingleLane.single(hex) || runs.stream().anyMatch(run -> run.contains(at))) { continue; }
+            if (hex == null || !SingleLane.single(hex)) { continue; }
+            // A fork or merge the edit reached: its open sides follow which of its neighbours are single lanes.
+            addRunEnd(result, at);
+            if (runs.stream().anyMatch(run -> run.contains(at))) { continue; }
             SingleLane.Run run = SingleLane.run(this::hexAt, at, -1);
             if (run == null || run.loop()) { continue; }
             runs.add(run);
@@ -2919,7 +2923,7 @@ public final class BoardEditorSession {
         LaneJunction junction = SingleLane.junction(hex, at, this::hexAt);
         if (junction == null || Integer.bitCount(junction.arms()) < 2) { return result; }
         String[] sides = Messages.getString("BoardEditor.sides").split(",");
-        boolean aprons = !narrow && SingleLane.aprons(hex, at, this::hexAt, exits) != 0;
+        boolean aprons = SingleLane.aprons(hex, at, this::hexAt, exits) != 0;
         for (var issue : junction.issues()) {
             var kind = issue.kind();
             if (aprons && kind != LaneJunction.Kind.REVERSED_SPLIT && kind != LaneJunction.Kind.REVERSED_PAIR) { continue; }

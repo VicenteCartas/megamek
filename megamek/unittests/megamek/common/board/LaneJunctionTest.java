@@ -302,6 +302,8 @@ class LaneJunctionTest {
             assertNotEquals(0, junction.conflicting() & 1 << side, name + ": nothing waits that conflicts with nothing");
         }
         if (waiting != 0) { assertNotEquals(0, junction.conflicting() & ~waiting, name + ": somebody keeps priority"); }
+        if (!junction.controlled()) { assertEquals(0, waiting | junction.signalled(), name + ": nothing to control, nothing waits"); }
+        if (junction.hub()) { assertEquals(0, junction.signalled(), name + ": a hub is never signalled"); }
         if (junction.nose() >= 0) { assertFalse(junction.controlled(), name + ": a split needs no controls"); }
         if (in == 0 && Integer.bitCount(two) == 2) { assertFalse(junction.controlled(), name + ": only exits leave a two-way road"); }
         // A stranded arm is exactly one traffic arrives along and cannot leave.

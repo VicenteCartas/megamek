@@ -726,7 +726,9 @@ final class BoardFeatures {
                         // An arm's mouth can lie in the corner of the arm beside it: its control then stands further out
                         // along its own lane on its traffic's right, else on its left; left out, its line remaining, only
                         // where neither side has a clear, dry, level spot.
-                        if (!deck && !place(hex, coords, board, road, clearance, approach, 2, true, false, asset,
+                        // A junction of two-lane roads alone keeps its convention: the pole is omitted.
+                        boolean lane = lanes != null || (single & 1 << approach.direction()) != 0;
+                        if (!deck && lane && !place(hex, coords, board, road, clearance, approach, 2, true, false, asset,
                               stopId(coords, owner, approach), result)) {
                             place(hex, coords, board, road, clearance, approach, 2, true, true, asset,
                                   stopId(coords, owner, approach), result);

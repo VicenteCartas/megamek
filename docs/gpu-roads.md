@@ -303,9 +303,9 @@ running on the left there.
   junction (`LaneJunction.nose`).
 - **Placement.** A stop or give-way sign, or a pole of lights, stands at its stop plane on the right; where the next
   arm's mouth fills that corner, further out along its own lane on its right, else on its left. It is left out, its
-  line remaining, only where neither side has a clear, dry, level spot (props placed in the hex, other poles, or nearby
-  road and rail courses crowding both). Every sign keeps four pixels clear of the junction's other poles and of props
-  placed in the hex.
+  line remaining, only where neither its stop plane nor either side further out has a clear, dry, level spot. The ramp,
+  turn and keep-right signs, and a control moved out along its arm, keep four pixels clear of the junction's other
+  poles and of props placed in the hex; at its stop plane a control checks only road clearance and dry, level ground.
 
 The signs are derived from `stop-sign.glb` by mm-data's `tools/build_road_signs.py`, without Blender: each keeps the
 STOP sign's post, base plate and collar unchanged in both levels, and its plate is built as the STOP plate is
@@ -326,7 +326,7 @@ single lane on colony slabs is narrowed but, like any slab road, unpainted. `Lan
 on the layouts an audit of every combination against the Vienna Conventions found wrong, and their invariants on all
 4096 arm layouts (never a hairpin priority road, never every arm waiting, never lights at a hub, nothing to control at
 a split), with every choice of which approaches may take each exit (each turn sign forbids only closed turns and shows
-exactly the open ones). `BoardRoadSingleLaneTest` covers widths and border agreement, arrows, markings, give-way and
+exactly the open ones, where at most three two-way roads and two exits meet). `BoardRoadSingleLaneTest` covers widths and border agreement, arrows, markings, give-way and
 priority, a sign for every line it paints on every shape of junction that one to three single lanes join, on open
 ground, under the default controls, traffic lights and overhead lights, the broken line round a crossed bend, the
 keep-right sign, hub merges, car parks beside a junction, the signs' assets, sides and facing, their clearance from signal poles, hex and scene

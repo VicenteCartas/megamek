@@ -346,6 +346,27 @@ class SingleLaneEditorTest {
         send(session, Action.LANE_DIRECTION, "road", "reverse");
         assertFalse(reported(session, J, "DEAD_END_ROAD", "N"), issuesAt(session, J).toString());
         assertTrue(reported(session, J, "REVERSED_SPLIT", "SE", "SW"), issuesAt(session, J).toString());
+        // Undone, and the branch next to the fork widened to two lanes instead: F's side towards J turns round again.
+        send(session, Action.UNDO, "", "");
+        assertTrue(reported(session, J, "DEAD_END_ROAD", "N"), issuesAt(session, J).toString());
+        send(session, Action.LANES, "road", "two");
+        assertTrue(reported(session, J, "REVERSED_SPLIT", "SE", "SW"), "Widened: " + issuesAt(session, J));
+    }
+
+    @Test void aSingleLaneHubAtACarParkIsNoStrandedJunction() {
+        // A single-lane hex at a car park's edge, both its other lanes leading away: the car park feeds them.
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "pavement", "1");
+        stroke(session, J.translated(0));
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J);
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, J.translated(2), J.translated(2).translated(2));
+        stroke(session, J, J.translated(4), J.translated(4).translated(4));
+        inspect(session, J);
+        send(session, Action.LANES, "road", "single");
+        assertTrue(single(session, J));
+        assertTrue(issuesAt(session, J).isEmpty(), issuesAt(session, J).toString());
     }
 
     @Test void aCarParkMouthWithOneWayLanesIsNoStrandedJunction() {
