@@ -8,11 +8,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
-import javax.swing.JButton;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
-import jakarta.annotation.Nullable;
 import megamek.MMConstants;
 import megamek.MegaMek;
 import megamek.SuiteConstants;
@@ -24,11 +22,9 @@ import megamek.client.lobby.LobbyUnitOrder;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
-import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuStartWindow;
 import megamek.client.ui.dialogs.abstractDialogs.AutoResolveChanceDialog;
 import megamek.client.ui.dialogs.abstractDialogs.AutoResolveProgressDialog;
-import megamek.client.ui.dialogs.buttonDialogs.SkillGenerationDialog;
 import megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog;
 import megamek.client.ui.dialogs.helpDialogs.AutoResolveSimulationLogDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
@@ -50,15 +46,10 @@ import megamek.common.units.Entity;
 
 /**
  * What the lobby does beyond its commands, for one client: readying with its checks, the lobby save and the GIF
- * question; the forces and battlefield buttons that open a Swing dialog; auto-resolve; the unit order. It outlives a
+ * question; the battlefield buttons that open a Swing dialog; auto-resolve; the unit order. It outlives a
  * lobby window, so a lobby that opens again finds its settings as it left them.
  */
 public final class SwingLobbyServices {
-
-    /** The forces column's commands that open a dialog or act on a unit list. */
-    public enum ForcesCommand {
-        ADD_UNIT, RANDOM_ARMY, SKILLS, NAMES, C3, LOAD_LIST, SAVE_LIST, PRINT_LIST
-    }
 
     /** The battlefield column's commands that open a dialog or ask the server. */
     public enum BattlefieldCommand {
@@ -193,60 +184,6 @@ public final class SwingLobbyServices {
             lobbySavePerformed = true;
         }
         commands().sendDone(done);
-    }
-
-    /**
-     * EDT: runs one of the forces column's commands; the unit list commands act for {@code player}, when the local
-     * player may act for them.
-     */
-    public void forcesCommand(ForcesCommand command, @Nullable Player player) {
-        switch (command) {
-            case ADD_UNIT -> {
-                clientGUI.getMekSelectorDialog().updateOptionValues();
-                clientGUI.getMekSelectorDialog().setPlayerFrom(null);
-                clientGUI.getMekSelectorDialog().setVisible(true);
-            }
-            case RANDOM_ARMY -> {
-                clientGUI.getRandomArmyDialog().setPlayerFrom(null);
-                clientGUI.getRandomArmyDialog().setVisible(true);
-            }
-            case SKILLS -> new SkillGenerationDialog(clientGUI.getFrame(), clientGUI, game().getEntitiesVector())
-                  .showDialog();
-            case NAMES -> clientGUI.getRandomNameDialog().showDialog(game().getEntitiesVector());
-            case C3 -> new C3NetworkManagerDialog(clientGUI).setVisible(true);
-            case LOAD_LIST, SAVE_LIST, PRINT_LIST -> unitList(command, player);
-        }
-    }
-
-    private void unitList(ForcesCommand command, @Nullable Player player) {
-        if ((player == null)
-              || !UnitRecipients.mayAddUnitsTo(client().getLocalPlayer(), player, clientGUI.getLocalBots().keySet())) {
-            clientGUI.doAlertDialog(Messages.getString("ChatLounge.ImproperCommand"),
-                  Messages.getString("ChatLounge.SelectBotOrPlayer"));
-            return;
-        }
-        if (command == ForcesCommand.LOAD_LIST) {
-            clientGUI.loadListFile(player);
-            return;
-        }
-        // In force tree order, so a saved list reloads with its forces and units as they were arranged
-        ArrayList<Entity> entities = new ArrayList<>(game().getForces()
-              .sortedInTreeOrder(game().getPlayerEntities(player, false)));
-        for (Entity entity : entities) {
-            entity.setForceString(game().getForces().forceStringFor(entity));
-        }
-        try {
-            if (command == ForcesCommand.SAVE_LIST) {
-                clientGUI.saveListFile(entities, player.getName());
-            } else {
-                clientGUI.printList(entities, new JButton());
-            }
-        } finally {
-            // A stamp left behind would outrank the live force tree the next time the unit is written
-            for (Entity entity : entities) {
-                entity.setForceString("");
-            }
-        }
     }
 
     /** EDT: runs one of the battlefield column's commands. */

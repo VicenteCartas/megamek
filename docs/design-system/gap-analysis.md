@@ -1497,10 +1497,11 @@ work for Swing, and item 11 is under investigation.
          player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
-       - The last Swing dialogs the lobby opens, to move into libGDX: none from the random army, whose Force
-         Generator is native now.
-         Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
-         go.
+       - The last Swing dialogs the lobby opens, to move into libGDX: none from the forces column. The random
+         army's Force Generator is native now, Add unit opens the native requisition, and the Swing forces
+         commands the lobby once fell back to (`SwingLobbyServices.forcesCommand`) are gone. The Swing random army
+         stays for the start screen, a battle's reinforcements, the Game Master's player setup, MegaMekLab and
+         MekHQ.
        - The unit dialogs still in Swing, from the lobby and the board:
          - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;

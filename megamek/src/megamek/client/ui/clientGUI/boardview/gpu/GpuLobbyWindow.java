@@ -901,15 +901,14 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: runs one of the forces column's commands, most of which open a Swing dialog. */
+    /** Any thread: runs one of the forces column's commands; Add unit opens the Requisition on the screen instead. */
     void forcesCommand(LobbyForcesPanel.Command command) {
         SwingUtilities.invokeLater(() -> {
             if (closing) {
                 return;
             }
-            SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT -> services.forcesCommand(SwingLobbyServices.ForcesCommand.ADD_UNIT, null);
+                case ADD_UNIT -> { }
                 case RANDOM_ARMY -> tools.randomArmy();
                 case SKILLS -> tools.skills();
                 case NAMES -> tools.names();
