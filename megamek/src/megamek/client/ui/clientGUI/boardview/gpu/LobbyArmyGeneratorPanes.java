@@ -97,6 +97,7 @@ final class LobbyArmyGeneratorPanes {
 
     private final UiKit kit;
     private final Owner owner;
+    private boolean forceLoading;
     private boolean showTable;
     private @Nullable List<Row> rows;
     private boolean reading;
@@ -599,13 +600,18 @@ final class LobbyArmyGeneratorPanes {
         year.setName("army-force-year");
         year.setMaxLength(4);
         year.setTextFieldFilter(new TextField.TextFieldFilter.DigitsOnlyFilter());
+        List<Runnable> waits = new ArrayList<>();
+        Container<Label> loading = new Container<>();
+        loading.left();
+        waits.add(() -> loading.setActor(kit.typeLabel(Messages.getString("Lobby.randomArmy.force.loading"), "small",
+              "text.muted")));
+        waits.add(() -> year.setDisabled(true));
         UiKit.onChange(year, () -> {
             Integer typed = UiRangeInput.parse(year.getText());
             if (typed != null && typed >= ForceGeneratorForm.earliestYear()
                   && typed <= ForceGeneratorForm.latestYear() && typed != form.year()) {
-                form.year(typed);
                 focusYear = true;
-                owner.changed(true);
+                loadForce(waits, () -> form.year(typed));
             }
         });
         keepTyping(year);
@@ -615,6 +621,11 @@ final class LobbyArmyGeneratorPanes {
         yearRow.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.yearRange", ForceGeneratorForm.earliestYear(),
               ForceGeneratorForm.latestYear()), "small", "text.muted")).padLeft(space("sm"));
         pane.add(kit.formField(Messages.getString("Lobby.randomArmy.year"), yearRow)).padTop(space("md")).row();
+        pane.add(loading).padTop(space("xs")).row();
+        if (forceLoading) {
+            waits.forEach(Runnable::run);
+            return pane;
+        }
 
         List<FactionRecord> factions = form.factions();
         if (factions.isEmpty()) {
@@ -629,10 +640,9 @@ final class LobbyArmyGeneratorPanes {
         UiSelect faction = kit.tokenSelect(true, factionNames);
         faction.setName("army-force-faction");
         faction.select(Math.max(0, factions.indexOf(form.faction())));
-        UiKit.onChange(faction, () -> {
-            form.faction(factions.get(faction.getSelectedIndex()).getKey());
-            owner.changed(true);
-        });
+        waits.add(() -> faction.setDisabled(true));
+        UiKit.onChange(faction, () -> loadForce(waits,
+              () -> form.faction(factions.get(faction.getSelectedIndex()).getKey())));
         pane.add(kit.formField(Messages.getString("Lobby.randomArmy.faction"), faction)).growX().padTop(space("md"))
               .row();
 
@@ -646,10 +656,10 @@ final class LobbyArmyGeneratorPanes {
             UiSelect command = kit.tokenSelect(true, names);
             command.setName("army-force-command");
             command.select(form.command() == null ? 0 : commands.indexOf(form.command()) + 1);
+            waits.add(() -> command.setDisabled(true));
             UiKit.onChange(command, () -> {
                 int index = command.getSelectedIndex();
-                form.command(index <= 0 ? null : commands.get(index - 1).getKey());
-                owner.changed(true);
+                loadForce(waits, () -> form.command(index <= 0 ? null : commands.get(index - 1).getKey()));
             });
             pane.add(kit.formField(Messages.getString("Lobby.randomArmy.command"), command)).growX()
                   .padTop(space("md")).row();
@@ -663,6 +673,7 @@ final class LobbyArmyGeneratorPanes {
         UiSelect unitType = kit.tokenSelect(true, typeNames);
         unitType.setName("army-force-unit-type");
         unitType.select(Math.max(0, unitTypes.indexOf(form.unitType())));
+        waits.add(() -> unitType.setDisabled(true));
         UiKit.onChange(unitType, () -> {
             form.unitType(unitTypes.get(unitType.getSelectedIndex()));
             owner.changed(true);
@@ -679,6 +690,7 @@ final class LobbyArmyGeneratorPanes {
             UiSelect formation = kit.tokenSelect(true, names);
             formation.setName("army-force-formation");
             formation.select(Math.max(0, formations.indexOf(form.formation())));
+            waits.add(() -> formation.setDisabled(true));
             UiKit.onChange(formation, () -> {
                 form.formation(formations.get(formation.getSelectedIndex()));
                 owner.changed(true);
@@ -698,6 +710,7 @@ final class LobbyArmyGeneratorPanes {
             if (fitsSegments(ratings.toArray(String[]::new))) {
                 UiSegmented segments = kit.tokenSegmented(true, ratings.toArray(String[]::new));
                 segments.select(chosen);
+                waits.add(() -> segments.setDisabled(true));
                 UiKit.onChange(segments, () -> {
                     form.rating(ratings.get(segments.getSelectedIndex()));
                     owner.changed(true);
@@ -706,6 +719,7 @@ final class LobbyArmyGeneratorPanes {
             } else {
                 UiSelect select = kit.tokenSelect(true, names);
                 select.select(chosen);
+                waits.add(() -> select.setDisabled(true));
                 UiKit.onChange(select, () -> {
                     form.rating(ratings.get(select.getSelectedIndex()));
                     owner.changed(true);
@@ -727,6 +741,7 @@ final class LobbyArmyGeneratorPanes {
             UiSelect flag = kit.tokenSelect(true, names);
             flag.setName("army-force-option");
             flag.select(form.flag() == null ? 0 : flags.indexOf(form.flag()) + 1);
+            waits.add(() -> flag.setDisabled(true));
             UiKit.onChange(flag, () -> {
                 int index = flag.getSelectedIndex();
                 form.flag(index <= 0 ? null : flags.get(index - 1));
@@ -844,6 +859,22 @@ final class LobbyArmyGeneratorPanes {
         UiKit.onChange(fighters, () -> form.fighterComplement(fighters.isChecked()));
         pane.add(fighters).fill(0f, 0f).padTop(space("md")).row();
         return pane;
+    }
+
+    /**
+     * Changes the force's year, faction or command on the Swing thread, which loads the year and builds tables to
+     * see what the choices stock; {@code waits} grey the choices meanwhile, and the pane is built anew when done.
+     */
+    private void loadForce(List<Runnable> waits, Runnable change) {
+        if (forceLoading) {
+            return;
+        }
+        forceLoading = true;
+        waits.forEach(Runnable::run);
+        owner.edt(change, () -> {
+            forceLoading = false;
+            owner.changed(true);
+        });
     }
 
     /** A share in percent, picked from steps as a game's sliders are: the nearest step to {@code value} lit. */
