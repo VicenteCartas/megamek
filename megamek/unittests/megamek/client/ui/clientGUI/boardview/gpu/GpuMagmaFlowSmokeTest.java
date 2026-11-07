@@ -71,12 +71,13 @@ class GpuMagmaFlowSmokeTest {
               }
               """);
         try {
-            var maps = assets.magma(true);
+            var maps = assets.fullSizeMaps();
             assertNotNull(maps, "Use the shipped lava maps");
             maps.data().bind(0); maps.color().bind(2);
             shader.bind();
-            shader.setUniformi("u_magmaMaps", 0);
-            shader.setUniformi("u_magmaColor", 2);
+            shader.setUniformi("u_fullSizeData", 0);
+            shader.setUniformi("u_fullSizeColor", 2);
+            shader.setUniformf("u_magmaLayers", GpuAssets.LAVA_COLOR, GpuAssets.LAVA_DATA);
             shader.setUniformi("u_magmaOcean", 1);
             shader.setUniformf("u_magmaOceanScale", 0);
             shader.setUniformf("u_magmaCoverage", assets.coverage(GpuAssets.magmaName(true)));

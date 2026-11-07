@@ -53,8 +53,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     if (rim && rimCode >= 2048) {
         // The middle shoulder grows only the broken turf its ground draws (terrain-materials.glsl, cliffMaterial).
         vec3 metres = root / u_metre;
-        float pockets = textureLod(u_rainNoise, (metres.xy + metres.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
-        float fine = textureLod(u_rainNoise, metres.xy / 160.0 + .41, 0.0).b;
+        float pockets = textureLod(u_surfaceNoise, rainNoiseAt((metres.xy + metres.z * vec2(.43, .27)) / 92.0 + .57), 0.0).g;
+        float fine = textureLod(u_surfaceNoise, rainNoiseAt(metres.xy / 160.0 + .41), 0.0).b;
         if (smoothstep(.22, .55, pockets * .7 + fine * .3) < grassRandom(seed + 97u)) { return false; }
     }
     // A rim's blades fan out within some 40 degrees of their heading down the bank.

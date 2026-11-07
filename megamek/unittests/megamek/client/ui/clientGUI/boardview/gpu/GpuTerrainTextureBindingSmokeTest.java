@@ -14,7 +14,10 @@ import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
+import com.badlogic.gdx.graphics.GLTexture;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
@@ -155,13 +158,13 @@ class GpuTerrainTextureBindingSmokeTest {
                         // The bindings belong to the final drawn program, not previously used opaque shaders.
                         if (program.getHandle() != current.get(0)) { continue; }
                         assertTrue(program.getUniformLocation("u_waterField") >= 0, "The last draw must be water");
-                        assertTexture(program, "u_rainNoise", (Texture) GpuTestSupport.field(terrain, "rainNoise"));
-                        Texture detail = (Texture) GpuTestSupport.field(terrain, "waterDetail");
-                        assertTexture(program, "u_waterDetail", detail);
+                        assertTexture(program, "u_surfaceNoise", (TextureArray) GpuTestSupport.field(terrain, "surfaceNoise"),
+                              GL30.GL_TEXTURE_BINDING_2D_ARRAY);
+                        Texture fallback = (Texture) GpuTestSupport.field(terrain, "rainNoise");
                         var ocean = (GpuOcean) GpuTestSupport.field(terrain, "ocean");
                         for (int cascade = 0; cascade < GpuOcean.PATCHES.length; cascade++) {
                             Texture waves = ocean.waves(cascade);
-                            assertTexture(program, "u_waterOcean" + cascade, waves == null ? detail : waves);
+                            assertTexture(program, "u_waterOcean" + cascade, waves == null ? fallback : waves);
                         }
                         checked++;
                     }
@@ -209,6 +212,10 @@ class GpuTerrainTextureBindingSmokeTest {
     }
 
     private static void assertTexture(ShaderProgram program, String name, Texture expected) {
+        assertTexture(program, name, expected, GL20.GL_TEXTURE_BINDING_2D);
+    }
+
+    private static void assertTexture(ShaderProgram program, String name, GLTexture expected, int binding) {
         assertTrue(program.getUniformLocation(name) >= 0, "Active water sampler: " + name);
         var value = BufferUtils.newIntBuffer(1);
         Gdx.gl.glGetUniformiv(program.getHandle(), program.getUniformLocation(name), value);
@@ -217,7 +224,7 @@ class GpuTerrainTextureBindingSmokeTest {
         int active = value.get(0);
         try {
             Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0 + unit);
-            Gdx.gl.glGetIntegerv(GL20.GL_TEXTURE_BINDING_2D, value);
+            Gdx.gl.glGetIntegerv(binding, value);
             assertEquals(expected.getTextureObjectHandle(), value.get(0), name + " must not sample another chunk's field");
         } finally { Gdx.gl.glActiveTexture(active); }
     }

@@ -106,7 +106,7 @@ final class GpuIceShader extends FloatAttribute {
         });
         shader.register("u_iceCoverage", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().coverage());
+                target.set(id, assets.iceCoverage());
             }
         });
         shader.register("u_iceLevel", new BaseShader.LocalSetter() {
@@ -118,17 +118,6 @@ final class GpuIceShader extends FloatAttribute {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 // BoardGeometry.waterZ: open water lies one tile pixel below its hex's level.
                 target.set(id, BoardGeometry.hexScale());
-            }
-        });
-        shader.register("u_iceColor", new BaseShader.LocalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().color());
-            }
-        });
-        // Normal and surface share one array, so ice leaves a texture unit for macOS's 16 (GpuSamplerBudgetSmokeTest).
-        shader.register("u_iceMaps", new BaseShader.LocalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().maps());
             }
         });
     }

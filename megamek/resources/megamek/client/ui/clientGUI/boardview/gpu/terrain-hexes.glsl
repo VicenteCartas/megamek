@@ -1,10 +1,15 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// One nearest-filtered texel per board hex (GpuBiomeSurface) and the world fields every lit surface can share with it.
+// One texel per board hex (GpuBiomeSurface) and the world fields every lit surface can share with it.
 // R biome/stencil quarters, low G aqueous palette + 1 (bit 4 uniform biome), B ice, A elevation + 64.
-// Unused samplers cost nothing: programs drop them.
 // BOARD_HEX
-uniform sampler2D u_biomeHexes;
 uniform vec2 u_biomeBoard;
+// The table's first row in the local lights' texture (GpuLavaLighting), which it shares so that ground and water keep
+// within their texture units, and the board's width.
+uniform ivec2 u_hexTable;
+vec4 boardHex(ivec2 hex) {
+    int index = hex.y * u_hexTable.y + hex.x;
+    return texelFetch(u_lavaLights, ivec2(index & 1023, u_hexTable.x + (index >> 10)), 0);
+}
 
 // BoardRelief.hash/noise in GLSL: roots and wetland material evaluate the same world field.
 float biomeHash(ivec2 p) {

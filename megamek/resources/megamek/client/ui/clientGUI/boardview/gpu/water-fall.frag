@@ -18,7 +18,11 @@ void main() {
     waterHabitat(habitat, mixture);
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
+#ifdef authoredWaterFlag
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
+#else
+    vec3 authored = vec3(0.0);
+#endif
     WaterLighting illumination = waterLighting(false);
     float palette = u_waterMaterial.x, effects = u_waterEffects;
     vec2 position = v_cloudPosition.xy * u_rainScale;
@@ -36,15 +40,15 @@ void main() {
     float fallen = drop * metres;
     float flow = 2.0 * fallen / (sqrt(2.25 + 2.0 * u_gravity * fallen) + 1.5) - u_rainTime;
     // The streaks wander slowly across the sheet as they fall, by where they are, so neighbouring sheets agree.
-    float wander = texture(u_rainNoise, position * 1.4 + vec2(0.13, flow * 0.05)).r - 0.5;
+    float wander = texture(u_surfaceNoise, rainNoiseAt(position * 1.4 + vec2(0.13, flow * 0.05))).r - 0.5;
     float x = uv.x + wander * 0.36;
     // Long ribbons and fine threads, stretched far along the flow so the white spreads as streaks rather than
     // blobs, and the clumps tumbling inside them, each at its own scale.
-    float ribbons = texture(u_waterDetail, vec2(x, flow * 0.07)).b;
-    float threads = texture(u_waterDetail, vec2(x * 3.0 + 0.71, flow * 0.22)).b;
-    float clumps = texture(u_waterDetail, vec2(x + 0.37, flow * 0.9)).b;
+    float ribbons = texture(u_surfaceNoise, vec3(vec2(x, flow * 0.07), WATER_DETAIL)).b;
+    float threads = texture(u_surfaceNoise, vec3(vec2(x * 3.0 + 0.71, flow * 0.22), WATER_DETAIL)).b;
+    float clumps = texture(u_surfaceNoise, vec3(vec2(x + 0.37, flow * 0.9), WATER_DETAIL)).b;
     // Toward the foot the sheet breaks up into tumbling, rounded billows.
-    float billows = texture(u_waterDetail, vec2(x + 0.19, flow * 1.8 + drop * 2.0)).b;
+    float billows = texture(u_surfaceNoise, vec3(vec2(x + 0.19, flow * 1.8 + drop * 2.0), WATER_DETAIL)).b;
     float foot = smoothstep(0.55, 0.95, drop);
     float foamy = mix(ribbons * 0.52 + threads * 0.36 + clumps * 0.12, billows * 0.6 + clumps * 0.4, foot);
     // Water leaves the crest clear and blue and gathers air all the way down: the white spreads from a few

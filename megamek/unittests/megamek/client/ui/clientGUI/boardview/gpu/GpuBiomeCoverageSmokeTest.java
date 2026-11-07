@@ -44,7 +44,7 @@ class GpuBiomeCoverageSmokeTest {
     }
 
     private static void checkCoverage() throws ReflectiveOperationException {
-        var mask = new GpuBiomeSurface();
+        var mask = new GpuBiomeSurface(new GpuLavaLighting(null));
         var target = GpuHeatGlow.buffer(SIZE, SIZE);
         var mesh = new Mesh(true, 4, 0, VertexAttribute.Position());
         mesh.setVertices(new float[] { -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0 });
@@ -56,7 +56,7 @@ class GpuBiomeCoverageSmokeTest {
               uniform float u_metre, u_levelHeight, u_height, u_water;
               uniform vec4 u_bounds;
               uniform int u_result;
-              """ + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
+              """ + "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
               void main() {
                   vec3 world = vec3(u_bounds.xy + gl_FragCoord.xy / 128.0 * u_bounds.zw, u_height);
                   vec4 cover, fringe, liquids;
@@ -80,17 +80,12 @@ class GpuBiomeCoverageSmokeTest {
                     member.setAccessible(true);
                     int[] packed = ((int[]) member.get(mask)).clone();
                     assertMetadata(scene, packed, fixture);
-                    var original = new Pixmap(scene.width(), scene.height(), Pixmap.Format.RGBA8888);
-                    original.setBlending(Pixmap.Blending.None);
-                    for (int y = 0; y < scene.height(); y++) {
-                        for (int x = 0; x < scene.width(); x++) {
-                            // Clearing only the optimization bit restores the full production stencil, retaining
-                            // identical biome, palette, ice, elevation and reached-quarter inputs.
-                            original.drawPixel(x, y, packed[y * scene.width() + x] & ~UNIFORM_BIT);
-                        }
-                    }
-                    var fullStencil = new Texture(original);
-                    original.dispose();
+                    // Clearing only the optimization bit restores the full production stencil, retaining
+                    // identical biome, palette, ice, elevation and reached-quarter inputs.
+                    int[] stripped = packed.clone();
+                    for (int i = 0; i < stripped.length; i++) { stripped[i] &= ~UNIFORM_BIT; }
+                    var fullStencil = new GpuLavaLighting(null);
+                    fullStencil.setHexes(stripped, scene.width());
                     try {
                         for (float height : new float[] { -.151f, -.15f, 0, .15f, .151f, 1.3f }) {
                             // Whole board includes both column parities, all stencil-cell corners and the edge.
@@ -102,7 +97,8 @@ class GpuBiomeCoverageSmokeTest {
                                     float water = result == 3 ? 0 : -10000;
                                     target.begin();
                                     shader.bind();
-                                    shader.setUniformi("u_biomeHexes", 0);
+                                    shader.setUniformi("u_lavaLights", 0);
+                                    shader.setUniformi("u_hexTable", mask.lights().hexRow(), mask.lights().hexWidth());
                                     shader.setUniformf("u_biomeBoard", (float) scene.width(), (float) scene.height());
                                     shader.setUniformf("u_metre", BoardRelief.metres(1));
                                     shader.setUniformf("u_levelHeight", BoardGeometry.level());
@@ -111,8 +107,8 @@ class GpuBiomeCoverageSmokeTest {
                                     shader.setUniformi("u_result", result);
                                     shader.setUniformf("u_bounds", close ? 82 : -4, close ? -119 : -244,
                                           close ? 12 : 220, close ? 12 : 248);
-                                    float[] expected = sample(shader, mesh, fullStencil);
-                                    float[] actual = sample(shader, mesh, mask.texture());
+                                    float[] expected = sample(shader, mesh, fullStencil.texture());
+                                    float[] actual = sample(shader, mesh, mask.lights().texture());
                                     target.end();
                                     float maximum = 0;
                                     for (int i = 0; i < expected.length; i++) {
@@ -128,7 +124,7 @@ class GpuBiomeCoverageSmokeTest {
                 }
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-        } finally { shader.dispose(); mesh.dispose(); target.dispose(); mask.dispose(); }
+        } finally { shader.dispose(); mesh.dispose(); target.dispose(); mask.lights().dispose(); }
     }
 
     private static float[] sample(ShaderProgram shader, Mesh mesh, Texture map) {
@@ -151,7 +147,7 @@ class GpuBiomeCoverageSmokeTest {
               """, """
               layout(location = 0) out vec4 fragColor;
               uniform float u_metre, u_levelHeight;
-              """ + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
+              """ + "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
               void main() {
                   vec2 world = (gl_FragCoord.xy - 64.0) * .5;
                   fragColor = vec4(biomeWetnessGradient(world), 1.0);

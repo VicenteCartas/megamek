@@ -367,7 +367,7 @@ void main() {
     mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
           vec2(-worldDy.x * sign(projection.y), -worldDy.z));
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
-    vec3 fields = groundFields(u_rainNoise, world);
+    vec3 fields = groundFields(world);
     float broad = fields.x, fine = fields.y, region = fields.z;
     // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
     // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
@@ -563,7 +563,7 @@ void main() {
     } else if (plant) {
         // The bush GLB supplies distinct woody stems and leaves; UV/alpha carry its linear RGB.
         // Live shader reload can still encounter .25-kind meshes from the earlier height-based format.
-        float leaf = texture(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
+        float leaf = texture(u_surfaceNoise, rainNoiseAt(world.xy / 7.0 + world.z * .13)).r;
         vec3 pigment = kind > .275 ? vec3(surfaceUV, v_color.a)
               : family(0.0) ? toLinear(vec3(.27, .35, .12)) : toLinear(vec3(.40, .42, .26));
         albedo = pigment * mix(.92, 1.06, leaf);
@@ -894,7 +894,7 @@ void main() {
     // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
     // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer.
     vec2 tufts = world.xy + world.z * vec2(.6, -.4);
-    vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
+    vec2 fray = (texture(u_surfaceNoise, rainNoiseAt(tufts / 19.2 + .31)).gb - .5 + .5 * (texture(u_surfaceNoise, rainNoiseAt(tufts / 6.4 + .67)).rg - .5))
           * (2.0 * FRAY_METRES / 1.5);
     // shadeSurface has no directional lobe on this hemisphere unless it transmits or scatters light.
     bool receivesSun = leaf || volcanic > 0.0 || finish.scatter > 0.0

@@ -34,7 +34,7 @@ int opaqueWetBiome(vec3 world, vec3 face) {
     float rows = -world.y / height - mod(float(column), 2.0) * .5;
     ivec2 cell = ivec2(column, int(floor(rows)));
     if (any(lessThan(cell, ivec2(0))) || any(greaterThanEqual(cell, ivec2(u_biomeBoard)))) return 0;
-    vec4 tile = texelFetch(u_biomeHexes, cell, 0);
+    vec4 tile = boardHex(cell);
     int flags = int(tile.r * 255.0 + .5), kind = flags & 15;
     int quarter = (fract(world.x / (width * .75)) < .5 ? 4 : 5) + (fract(rows) < .5 ? 0 : 2);
     return kind >= 2 && kind <= 4 && ((flags >> quarter) & 1) != 0 && biomePlateau(tile, world.z) ? kind : 0;
@@ -57,7 +57,7 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, ou
     ivec2 hex = clamp(ivec2(column, home), ivec2(0), ivec2(u_biomeBoard) - 1);
     int quarter = (fract(world.x / (width * .75)) < .5 ? 4 : 5) + (fract(rows) < .5 ? 0 : 2);
     if (hex == ivec2(column, home)) {
-        vec4 tile = texelFetch(u_biomeHexes, hex, 0);
+        vec4 tile = boardHex(hex);
         int flags = int(tile.r * 255.0 + .5);
         if (((flags >> quarter) & 1) == 0) return;
         // The CPU proves all stencil candidates are dry and share this biome/elevation. On their supported
@@ -109,7 +109,7 @@ void terrainCoverage(vec3 world, float edge, float waterLevel, float fineMix, ou
             fieldTotal += fw;
             fringeTotal += bw;
             if ((w > 0.0 || lw > 0.0) && x >= 0 && y >= 0 && float(x) < u_biomeBoard.x && float(y) < u_biomeBoard.y) {
-                vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
+                vec4 tile = boardHex(ivec2(x, y));
                 float level = tile.a * 255.0 - 64.0;
                 float z = level * u_levelHeight / u_metre;
                 int kind = int(tile.r * 255.0 + .5) & 15;

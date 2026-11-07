@@ -100,6 +100,8 @@ final class GpuShaderSource {
             case "SCENE_RADIANCE" -> "scene-radiance.glsl";
             case "OVERLAY_CONTRAST" -> "overlay-contrast.glsl";
             case "LIGHT_MODEL" -> "light-model.glsl";
+            case "FULL_SIZE_MAPS" -> "full-size-maps.glsl";
+            case "SURFACE_NOISE" -> "surface-noise.glsl";
             case "ENVIRONMENT_LIGHTING" -> "environment-lighting.glsl";
             case "TERRAIN_PATTERNS" -> "terrain-patterns.glsl";
             case "CLOUD_SHADOW" -> "cloud-shadow.glsl";
@@ -124,6 +126,9 @@ final class GpuShaderSource {
                   + read("particles-fire.glsl", choices, path) + "\n" + read("particles-jet.glsl", choices, path);
             case "terrain-projection-functions" -> read("terrain-projection.glsl", choices, path);
             case "BOARD_HEX" -> BOARD_HEX;
+            case "FULL_SIZE_LAYERS" -> GpuAssets.carpetLayers();
+            case "FULL_SIZE_ICE_LAYERS" -> GpuAssets.iceLayers(false);
+            case "ROAD_ICE_LAYERS" -> GpuAssets.iceLayers(true);
             // Selection comments and structural insertion points are not file includes.
             default -> null;
         };

@@ -47,7 +47,7 @@ class GpuLiquidBlendSmokeTest {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
-                var mask = new GpuBiomeSurface();
+                var mask = new GpuBiomeSurface(new GpuLavaLighting(null));
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try (var probe = new Probe(mask)) {
@@ -123,7 +123,7 @@ class GpuLiquidBlendSmokeTest {
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally {
-                    terrain.dispose(); mask.dispose(); frame.dispose();
+                    terrain.dispose(); mask.lights().dispose(); frame.dispose();
                     BoardGeometry.tune(tuning);
                     TerrainLod.tune(lodTuning);
                     Gdx.app.exit();
@@ -168,7 +168,7 @@ class GpuLiquidBlendSmokeTest {
             shader = GpuGlsl.compile("liquid coverage probe", "in vec3 a_position; void main(){gl_Position=vec4(a_position,1);}",
                   "#define biomeMaskFlag\nuniform float u_metre, u_levelHeight; uniform vec3 u_point;\n"
                         + "layout(location = 0) out vec4 result;\n"
-                        + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl")
+                        + "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl")
                         + "\nvoid main(){result=liquidCoverage(u_point,0.0);}");
             assertTrue(shader.isCompiled(), shader.getLog());
             mesh.setVertices(new float[] { -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0 });
@@ -179,8 +179,9 @@ class GpuLiquidBlendSmokeTest {
             Gdx.gl.glDisable(GL20.GL_BLEND);
             Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
             shader.bind();
-            mask.texture().bind(0);
-            shader.setUniformi("u_biomeHexes", 0);
+            mask.lights().texture().bind(0);
+            shader.setUniformi("u_lavaLights", 0);
+            shader.setUniformi("u_hexTable", mask.lights().hexRow(), mask.lights().hexWidth());
             shader.setUniformf("u_biomeBoard", (float) mask.width(), (float) mask.height());
             // Biome height uniforms can be optimized out of this liquid-only diagnostic.
             if (shader.hasUniform("u_metre")) { shader.setUniformf("u_metre", BoardRelief.metres(1)); }

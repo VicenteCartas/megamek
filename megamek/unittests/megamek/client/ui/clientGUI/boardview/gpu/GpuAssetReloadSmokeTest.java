@@ -123,7 +123,7 @@ class GpuAssetReloadSmokeTest {
                             originalTexture = assets().material("terrain/classic/rock");
                             sculptLayers = sculptLayers();
                             originalSculpt = assets().sculptArray(sculptLayers);
-                            originalMagma = assets().magma(true);
+                            originalMagma = assets().fullSizeMaps();
                             originalEmission = assets().lavaEmission();
                             originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
                             sculptTile = assets().sculptTile("grassland-ground");
@@ -253,10 +253,10 @@ class GpuAssetReloadSmokeTest {
                                   "The new raw surface data must reach GPU memory after the actual Reload assets action");
                             assertEquals(0, originalMagma.color().getTextureObjectHandle());
                             assertEquals(0, originalMagma.data().getTextureObjectHandle());
-                            var magma = assets().magma(true);
+                            var magma = assets().fullSizeMaps();
                             assertNotSame(originalMagma, magma);
                             assertArrayEquals(new float[] { 32f / 255, 64f / 255, 128f / 255, 64f / 255 },
-                                  arrayPixel(magma.data(), 2), .0006f, "Emitted RGB and coverage remain raw numeric data");
+                                  arrayPixel(magma.data(), (int) GpuAssets.LAVA_DATA + 2), .0006f, "Emitted RGB and coverage remain raw numeric data");
                             var emission = assets().lavaEmission();
                             assertNotSame(originalEmission, emission);
                             assertEquals(4, emission.scale());
@@ -332,7 +332,7 @@ class GpuAssetReloadSmokeTest {
                                 originalTerrain = terrain();
                                 originalSculpt = assets().sculptArray(sculptLayers);
                                 originalRoughness = assets().finishArrays(surfaces(sculptLayers), sculptLayers.size()).maps();
-                                originalMagma = assets().magma(true);
+                                originalMagma = assets().fullSizeMaps();
                                 originalEmission = assets().lavaEmission();
                                 copyNativeBatch(Path.of(nativePlan), authoring);
                                 Files.delete(shaders.resolve("atmosphere-composite.frag"));
@@ -483,10 +483,10 @@ class GpuAssetReloadSmokeTest {
         var heat = GpuMaterialMaps.pack(molten, GpuMaterialMaps.Layout.MOLTEN_HEAT);
         var emission = assets.lavaEmission();
         try {
-            var lava = assets.magma(true);
+            var lava = assets.fullSizeMaps();
             int packed = heat.getPixel(0, 0);
             assertArrayEquals(new float[] { (packed >>> 24) / 255f, (packed >>> 16 & 255) / 255f,
-                  (packed >>> 8 & 255) / 255f, (packed & 255) / 255f }, arrayPixel(lava.data(), 2), .0006f,
+                  (packed >>> 8 & 255) / 255f, (packed & 255) / 255f }, arrayPixel(lava.data(), (int) GpuAssets.LAVA_DATA + 2), .0006f,
                   "Reload restores authored emission and coverage in the actual lava array");
             assertEquals(5f, emission.scale(), "The current official lava definition restores energy 5");
             long red = 0, green = 0, blue = 0;

@@ -45,14 +45,14 @@ uniform vec2 u_floorMaterials[FLOOR_FAMILIES];
 
 // How far the family's floor replaces its ground cover at a point (world in metres): none above level -.3, all from
 // about -.72 down, along a contour that 6 m and 2 m patches break by up to .28 of a level (level 0 never, level -1
-// always); level ground and gentle lower slopes only, so banks and walls keep their own materials. u_rainNoise is 64
+// always); level ground and gentle lower slopes only, so banks and walls keep their own materials. The rain noise is 64
 // texels of white noise: a field of features F metres wide reads it at world / (64 F).
 float floorShare(vec3 world, vec3 face, float familyId, out vec2 floorMaterial) {
     int family = int(familyId + .5);
     floorMaterial = family >= 0 && family < FLOOR_FAMILIES ? u_floorMaterials[family] : vec2(-1.0);
     if (floorMaterial.x < 0.0) return 0.0;
-    float contour = .36 * (textureLod(u_rainNoise, world.xy / 384.0 + .63, 0.0).b - .5)
-          + .2 * (textureLod(u_rainNoise, world.xy / 128.0 + .29, 0.0).g - .5);
+    float contour = .36 * (textureLod(u_surfaceNoise, rainNoiseAt(world.xy / 384.0 + .63), 0.0).b - .5)
+          + .2 * (textureLod(u_surfaceNoise, rainNoiseAt(world.xy / 128.0 + .29), 0.0).g - .5);
     return smoothstep(.3, .72, contour - world.z * u_metre / u_levelHeight) * smoothstep(.55, .85, face.z);
 }
 
@@ -523,11 +523,11 @@ TerrainMaterial volcanicMaterial(Volcanic material, float familyId, float bankHe
 
 // Shared world fields are sampled before varying palette coverage branches. The family test is draw-uniform.
 vec2 materialNoise(vec3 world, vec4 families) {
-    float pockets = texture(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57).g;
+    float pockets = texture(u_surfaceNoise, rainNoiseAt((world.xy + world.z * vec2(.43, .27)) / 92.0 + .57)).g;
     float fray = 0.0;
     if (any(lessThan(abs(families), vec4(.5)))
           || any(lessThan(abs(families - TROPICAL_FAMILY), vec4(.5)))) {
-        fray = texture(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217).r;
+        fray = texture(u_surfaceNoise, rainNoiseAt((world.xy + world.z * vec2(.29, .41)) / 28.0 + .217)).r;
     }
     return vec2(pockets, fray);
 }
@@ -790,7 +790,7 @@ float coverPatch(vec3 world, float familyId) {
     if (familyId >= VOLCANIC_CRUST_FAMILY) familyId = 11.0 + familyId - VOLCANIC_CRUST_FAMILY;
     vec2 offset = familyId * vec2(.17, .31);
     vec2 contact = world.xy + world.z * vec2(.47, .29);
-    return .5 + (texture(u_rainNoise, contact / 21.0 + offset).r - .5) * .8;
+    return .5 + (texture(u_surfaceNoise, rainNoiseAt(contact / 21.0 + offset)).r - .5) * .8;
 }
 
 // How far the covers' plain proportions replace their height-blended patches: fully in an authored transition
@@ -1403,7 +1403,7 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
     oneRepeat = !isFamily(familyId, DESERT_FAMILY);
 #endif
     float up = clamp(face.z, 0.0, 1.0);
-    float pockets = textureLod(u_rainNoise, (world.xy + world.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
+    float pockets = textureLod(u_surfaceNoise, rainNoiseAt((world.xy + world.z * vec2(.43, .27)) / 92.0 + .57), 0.0).g;
     float variation = broad * .4 + fine * .25 + pockets * .35;
     float foot = exp(-max(aboveFoot, 0.0) / (1.5 + 6.0 * variation));
     float deposit = foot * smoothstep(.28, .64, variation) * smoothstep(.1, .6, up);
@@ -1438,7 +1438,7 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
         float levelMetres = u_levelHeight / u_metre;
         float twoLevels = 1.0 - smoothstep(.05, .3, abs((aboveFoot + belowRim) / levelMetres - 2.0));
         IF_NORMAL(twoLevels > 0.0) {
-            float fray = textureLod(u_rainNoise, (world.xy + world.z * vec2(.29, .41)) / 28.0 + .217, 0.0).r;
+            float fray = textureLod(u_surfaceNoise, rainNoiseAt((world.xy + world.z * vec2(.29, .41)) / 28.0 + .217), 0.0).r;
             float lipDepth = levelMetres * (mix(.2, .65, fine * .45 + pockets * .55) + .14 * (fray - .5));
             float lip = 1.0 - smoothstep(.05, lipDepth, belowRim);
             float middle = abs(aboveFoot / levelMetres - 1.0 - (pockets - .5) * .18);
@@ -1633,8 +1633,8 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
             // rock's own maps are (p.side), with explicit gradients: they hold still on curved faces and fade with distance.
             vec2 stretch = vec2(1.0 / 40.0, 1.0 / 400.0);
             float streak = mix(
-                  textureGrad(u_rainNoise, p.y * stretch + .41, p.yGradient[0] * stretch, p.yGradient[1] * stretch).r,
-                  textureGrad(u_rainNoise, p.x * stretch + .41, p.xGradient[0] * stretch, p.xGradient[1] * stretch).r,
+                  textureGrad(u_surfaceNoise, rainNoiseAt(p.y * stretch + .41), (p.yGradient[0] * stretch) * RAIN_NOISE_SCALE, (p.yGradient[1] * stretch) * RAIN_NOISE_SCALE).r,
+                  textureGrad(u_surfaceNoise, rainNoiseAt(p.x * stretch + .41), (p.xGradient[0] * stretch) * RAIN_NOISE_SCALE, (p.xGradient[1] * stretch) * RAIN_NOISE_SCALE).r,
                   p.side);
             // Upright faces only: a sloping shoulder would stretch them sideways.
             float streaks = smoothstep(.5, .8, streak) * (1.0 - smoothstep(0.0, .6 * faceHeight + 4.0, max(belowRim, 0.0)))
@@ -1728,7 +1728,7 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     TerrainMaterial b = cliffMaterial(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
           sediment, coverFamilies, second, coverTilesAt(second), coverLayersAt(second), true, false);
 #endif
-    float patches = textureLod(u_rainNoise, (world.xy + world.z * vec2(.47, .29)) / 9.5, 0.0).b;
+    float patches = textureLod(u_surfaceNoise, rainNoiseAt((world.xy + world.z * vec2(.47, .29)) / 9.5), 0.0).b;
     // Neighbouring families interlock, the one standing higher in its own relief showing: snow and dust fill the
     // hollows of a bank's soil. They soften as on level ground (coverGradient), so a bank and the ground at its foot
     // and crest meet in the same faded contact; an authored mixture mixes in proportion.

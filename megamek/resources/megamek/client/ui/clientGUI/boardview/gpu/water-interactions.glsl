@@ -82,8 +82,8 @@ WaterImpact waterFallImpacts(vec2 position, float shore, float noise, float phas
         vec2 drift = push * (0.06 / max(length(push), 1.0));
         vec2 bubbleA = position - drift * ((phase - 0.5) * FLOW_CYCLE);
         vec2 bubbleB = position - drift * ((fract(phase + 0.5) - 0.5) * FLOW_CYCLE) + 0.37;
-        bubbles = 0.5 + ((texture(u_waterDetail, bubbleA * 3.4 + 0.61).b - 0.5) * weights.x
-              + (texture(u_waterDetail, bubbleB * 3.4 + 0.61).b - 0.5) * weights.y)
+        bubbles = 0.5 + ((texture(u_surfaceNoise, vec3(bubbleA * 3.4 + 0.61, WATER_DETAIL)).b - 0.5) * weights.x
+              + (texture(u_surfaceNoise, vec3(bubbleB * 3.4 + 0.61, WATER_DETAIL)).b - 0.5) * weights.y)
               * inversesqrt(weights.x * weights.x + weights.y * weights.y);
         // Solid white right below the fall, breaking into patches and then lace as the foam spreads.
         float settle = 1.0 - boil;

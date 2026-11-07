@@ -250,7 +250,7 @@ class GpuMarshSlopeSmokeTest {
 
     /** Sample the real GLSL mask, independently of lighting and vegetation hiding the bank. */
     private static void coverageChecks() {
-        String code = GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl");
+        String code = "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl");
         var shader = GpuGlsl.compile("marsh coverage probe", """
               in vec3 a_position;
               out vec3 world;
@@ -269,7 +269,7 @@ class GpuMarshSlopeSmokeTest {
               """);
         var mesh = new Mesh(true, 32, 0, VertexAttribute.Position());
         var target = new FrameBuffer(Pixmap.Format.RGBA8888, 32, 1, false);
-        var mask = new GpuBiomeSurface();
+        var mask = new GpuBiomeSurface(new GpuLavaLighting(null));
         try {
             assertTrue(shader.isCompiled(), shader.getLog());
             float metre = BoardRelief.metres(1), level = BoardGeometry.level() / metre;
@@ -289,8 +289,9 @@ class GpuMarshSlopeSmokeTest {
                 Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
                 Gdx.gl.glDisable(GL20.GL_BLEND);
                 shader.bind();
-                mask.texture().bind(0);
-                shader.setUniformi("u_biomeHexes", 0);
+                mask.lights().texture().bind(0);
+                shader.setUniformi("u_lavaLights", 0);
+                shader.setUniformi("u_hexTable", mask.lights().hexRow(), mask.lights().hexWidth());
                 shader.setUniformf("u_biomeBoard", (float) scene.width(), (float) scene.height());
                 shader.setUniformf("u_levelHeight", BoardGeometry.level());
                 shader.setUniformf("u_metre", metre);
@@ -314,6 +315,6 @@ class GpuMarshSlopeSmokeTest {
                     }
                 } finally { pixels.dispose(); }
             }
-        } finally { mask.dispose(); target.dispose(); mesh.dispose(); shader.dispose(); }
+        } finally { mask.lights().dispose(); target.dispose(); mesh.dispose(); shader.dispose(); }
     }
 }

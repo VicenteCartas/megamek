@@ -289,7 +289,7 @@ class GpuBiomeSmokeTest {
                     metrics.append("sedge cutout upload: ").append(texture.getWidth()).append('x').append(texture.getHeight())
                           .append(" RGBA8 plus mipmaps\n");
                     Files.writeString(new File(output, "metrics.txt").toPath(), metrics.toString());
-                    maskHandle = mask.texture().getTextureObjectHandle();
+                    maskHandle = mask.lights().texture().getTextureObjectHandle();
                     sedgeHandle = texture.getTextureObjectHandle();
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
@@ -403,10 +403,8 @@ class GpuBiomeSmokeTest {
         }
         frame.render(terrain, camera, scene);
         var before = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
-        var blank = new Pixmap(scene.width(), scene.height(), Pixmap.Format.RGBA8888);
         try {
-            blank.setColor(0); blank.fill();
-            mask.texture().draw(blank, 0, 0);
+            mask.lights().setHexes(new int[scene.width() * scene.height()], scene.width());
             frame.render(terrain, camera, scene);
             var after = Pixmap.createFromFrameBuffer(0, 0, 1280, 960);
             try {
@@ -437,8 +435,8 @@ class GpuBiomeSmokeTest {
                 assertTrue(changed.size() > 12, "Biome soil must blend onto bank faces: " + changed.size());
             } finally { after.dispose(); }
         } finally {
-            before.dispose(); blank.dispose();
-            mask.dispose(); mask.update(scene);
+            before.dispose();
+            mask.lights().setHexes((int[]) GpuTestSupport.field(mask, "pixels"), scene.width());
             for (var cull : hidden) { cull.value = GL20.GL_NONE; }
         }
     }

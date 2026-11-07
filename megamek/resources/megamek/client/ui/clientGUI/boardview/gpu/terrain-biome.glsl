@@ -289,7 +289,7 @@ void biomeSurface(vec3 world, vec3 face, bool shore, float above, float foot, fl
                 vec2 drift = u_waterDrift * .015;
                 float windStrength = u_waterWind.z * mix(.35, 1.0, bare);
                 vec2 axis = vec2(.8, .6);
-                ripple = (textureGrad(u_waterDetail, world.xy * .20 - drift, rippleDx, rippleDy).rg - .5)
+                ripple = (textureGrad(u_surfaceNoise, vec3(world.xy * .20 - drift, WATER_DETAIL), rippleDx, rippleDy).rg - .5)
                       * (.012 + windStrength * .035)
                       + axis * sin(dot(world.xy, axis) * 5.0 - u_rainTime * 1.6) * windStrength * .012
                       + rainRipples(world.xy * .03) * .035;

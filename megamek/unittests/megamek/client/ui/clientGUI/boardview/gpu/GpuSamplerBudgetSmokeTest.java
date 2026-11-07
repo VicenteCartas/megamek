@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.File;
 import java.nio.ByteBuffer;
@@ -15,6 +16,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
 
@@ -25,6 +27,7 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ObjectMap;
+import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -37,17 +40,22 @@ import megamek.common.planetaryConditions.Light;
 import megamek.common.planetaryConditions.Weather;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.lwjgl.opengl.GL;
+import org.lwjgl.opengl.GL20C;
+import org.lwjgl.opengl.GL41C;
 
 /**
  * macOS's OpenGL gives each shader stage only 16 texture units, and a program that uses more fails to link there, so
  * the board would not draw at all. Windows and Linux drivers allow 32, so nothing else catches an overrun before a Mac
- * user does. Render the battle view over boards and conditions that reach every terrain, liquid and weather variant,
- * and count the samplers each compiled program actually uses.
+ * user does. Render the battle view over boards and conditions that reach every terrain, liquid and weather variant, and
+ * an editor, whose palette reaches the rest, and count the samplers each compiled program actually uses.
  */
 @Tag("on-demand")
 class GpuSamplerBudgetSmokeTest {
     /** Apple's OpenGL 4.1 limit per stage; counting a whole program against it is conservative. */
     private static final int MAC_TEXTURE_UNITS = 16;
+    /** What a fragment stage may use: that limit, less the headroom a new feature takes (docs/gpu-shaders.md). */
+    private static final int FRAGMENT_BUDGET = 13;
     private static final Set<Integer> SAMPLERS = Set.of(0x8B5E, 0x8B5F, 0x8B60, 0x8B62, 0x8B63, 0x8DC1, 0x8DC2, 0x8DC4,
           0x8DC5, 0x8DCA, 0x8DCB, 0x8DCC, 0x8DCF, 0x8DD0, 0x8DD2, 0x8DD3, 0x8DD4, 0x8DD7, 0x8DD8, 0x9108, 0x9109,
           0x910A, 0x910B, 0x910C, 0x910D);
@@ -69,6 +77,7 @@ class GpuSamplerBudgetSmokeTest {
         var used = new TreeMap<String, Integer>();
         BoardScene ice = GpuIceSmokeTest.scene(2), volcanicIce = volcanicIceScene();
         var failure = new AtomicReference<Throwable>();
+        var separable = new AtomicBoolean();
         boolean savedOcclusion = GUIPreferences.getInstance().getBoardAmbientOcclusion();
         String savedQuality = GUIPreferences.getInstance().getBoardQuality();
         // High uses the most samplers: Normal only leaves reads out, and has no ambient occlusion.
@@ -79,6 +88,10 @@ class GpuSamplerBudgetSmokeTest {
                 try {
                     System.out.println("Sampler audit GL_RENDERER=" + Gdx.gl.glGetString(GL20.GL_RENDERER)
                           + "; GL_VERSION=" + Gdx.gl.glGetString(GL20.GL_VERSION));
+                    // A fragment stage is counted alone, linked as a separable program (fragmentSamplers).
+                    var capabilities = GL.getCapabilities();
+                    separable.set(capabilities.OpenGL41 || capabilities.GL_ARB_separate_shader_objects);
+                    if (!separable.get()) { return; }
                     var limit = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
                     for (int name : new int[] {GL20.GL_MAX_TEXTURE_IMAGE_UNITS,
                           GL20.GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, GL20.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS}) {
@@ -93,6 +106,8 @@ class GpuSamplerBudgetSmokeTest {
                         reviewTerrain(ice, "GpuIceSmokeTest.scene(2)", occlusion, used, over);
                         reviewTerrain(volcanicIce, "cooled crust / rock / frozen land", occlusion, used, over);
                     }
+                    GUIPreferences.getInstance().setBoardAmbientOcclusion(true);
+                    reviewEditor(used, over);
                 } catch (Throwable error) {
                     failure.set(error);
                 } finally {
@@ -103,6 +118,7 @@ class GpuSamplerBudgetSmokeTest {
             }
         }, GpuBoardWindow.configuration(false));
         if (failure.get() != null) { throw new AssertionError("Sampler budget review", failure.get()); }
+        assumeTrue(separable.get(), "Counting a fragment stage alone needs OpenGL 4.1 or ARB_separate_shader_objects");
         // The headroom left for new maps: every variant with the units it uses, the fullest first.
         used.entrySet().stream().sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
               .forEach(program -> System.out.println(program.getValue() + " " + program.getKey()));
@@ -110,7 +126,7 @@ class GpuSamplerBudgetSmokeTest {
               "Reach the volcanic terrain programs: " + used.keySet());
         assertTrue(used.keySet().stream().anyMatch(program -> program.contains("ambientOcclusionFlag")),
               "Reach the programs with ambient occlusion: " + used.keySet());
-        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_surfaceLayers", "u_magmaMaps", "u_terrainData", "u_roadData", "u_environmentLut")) {
+        for (String feature : List.of("iceFlag", "roadCoatFlag", "u_surfaceLayers", "u_fullSizeData", "u_terrainData", "u_roadData", "u_environmentLut")) {
             assertTrue(used.keySet().stream().anyMatch(program -> program.contains(feature)),
                   "Reach the material-array consumer: " + feature);
         }
@@ -119,12 +135,13 @@ class GpuSamplerBudgetSmokeTest {
               && program.getKey().contains("volcanicFlag") && program.getKey().contains("u_terrainData")).toList();
         assertTrue(!combined.isEmpty(), "Reach the combined sculpt ice/volcanic material: " + used.keySet());
         for (var program : combined) {
-            for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_magmaColor", "u_magmaMaps",
-                  "u_iceColor", "u_iceMaps", "u_environmentLut")) {
+            for (String sampler : List.of("u_terrainLayers", "u_terrainData", "u_fullSizeColor", "u_fullSizeData",
+                  "u_environmentLut")) {
                 assertTrue(program.getKey().contains(sampler), "Combined program must sample " + sampler + ": " + program);
             }
         }
-        assertTrue(over.isEmpty(), "Programs over macOS's " + MAC_TEXTURE_UNITS + " texture units: " + over);
+        assertTrue(over.isEmpty(), "Programs over " + FRAGMENT_BUDGET + " fragment samplers or macOS's " + MAC_TEXTURE_UNITS
+              + " texture units: " + over);
     }
 
     private static void review(Scene scene, Map<String, Integer> used, Map<String, Integer> over) throws Exception {
@@ -151,6 +168,30 @@ class GpuSamplerBudgetSmokeTest {
         } catch (Throwable error) {
             throw new AssertionError(scene.toString(), error);
         }
+    }
+
+    /** An editor's programs, each kind of its palette's among them, linked behind its loading stage. */
+    private static void reviewEditor(Map<String, Integer> used, Map<String, Integer> over) throws Exception {
+        var setup = new FutureTask<GpuMapSource>(() -> {
+            var editor = new BoardEditorSession();
+            editor.open(Board.createEmptyBoard(16, 17), null);
+            return new GpuMapSource(editor.game(), null, editor);
+        });
+        SwingUtilities.invokeAndWait(setup);
+        var source = setup.get();
+        try {
+            var view = new GpuBattleView(source);
+            try {
+                view.create();
+                // A cold cache takes minutes over the palette's programs; this checks what they read, not how fast.
+                long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(20);
+                do {
+                    assertTrue(System.nanoTime() < deadline, "The editor must finish loading");
+                    view.render();
+                } while (GpuBoardTestUi.loading(view) || GpuBoardTestUi.busy(view));
+                scan(new Scene("the editor", Weather.CLEAR, Light.DAY, Fog.FOG_NONE), used, over);
+            } finally { view.dispose(); }
+        } finally { SwingUtilities.invokeAndWait(source::close); }
     }
 
     /** A natural rock strip blends toward crust on one edge and carries its frozen neighbour's ice fringe. */
@@ -226,8 +267,40 @@ class GpuSamplerBudgetSmokeTest {
             }
             String label = (program instanceof GpuShaderUniforms named ? named.name : "libGDX") + " " + flags(program)
                   + " " + names;
-            used.merge(label, units, Math::max);
-            if (units > MAC_TEXTURE_UNITS) { over.merge(label + " in " + scene, units, Math::max); }
+            // A sampler only the vertex stage reads takes no unit of the fragment stage.
+            int fragment = units > FRAGMENT_BUDGET ? fragmentSamplers(program) : units;
+            used.merge(label, fragment, Math::max);
+            // Road ground reads two array pairs, its own 1024-texel and the sculpt 512-texel maps, and cached ground on a
+            // biome board its pages' three arrays, which one array would limit to half the pages: with the crystal stage,
+            // in an editor or on a board with crystals, at High quality with ambient occlusion, each is one over.
+            boolean atCrystalLimit = label.contains("crystalTransmissionFlag") && label.contains("ambientOcclusionFlag")
+                  && (label.contains("roadCoatFlag") || label.contains("materialCachedFlag") && label.contains("biomeMaskFlag"));
+            int budget = FRAGMENT_BUDGET + (atCrystalLimit ? 1 : 0);
+            if (fragment > budget || units > MAC_TEXTURE_UNITS) { over.merge(label + " in " + scene, fragment, Math::max); }
+        }
+    }
+
+    /** The texture units a program's fragment stage uses, linked as a program of its own. */
+    private static int fragmentSamplers(ShaderProgram program) {
+        int shader = GL20C.glCreateShader(GL20C.GL_FRAGMENT_SHADER), alone = GL20C.glCreateProgram();
+        try {
+            GL20C.glShaderSource(shader, program.getFragmentShaderSource());
+            GL20C.glCompileShader(shader);
+            GL41C.glProgramParameteri(alone, GL41C.GL_PROGRAM_SEPARABLE, GL20C.GL_TRUE);
+            GL20C.glAttachShader(alone, shader);
+            GL20C.glLinkProgram(alone);
+            assertTrue(GL20C.glGetProgrami(alone, GL20C.GL_LINK_STATUS) != 0, GL20C.glGetProgramInfoLog(alone));
+            int units = 0;
+            IntBuffer size = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
+            IntBuffer type = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
+            for (int i = 0; i < GL20C.glGetProgrami(alone, GL20C.GL_ACTIVE_UNIFORMS); i++) {
+                GL20C.glGetActiveUniform(alone, i, size, type);
+                if (SAMPLERS.contains(type.get(0))) { units += size.get(0); }
+            }
+            return units;
+        } finally {
+            GL20C.glDeleteProgram(alone);
+            GL20C.glDeleteShader(shader);
         }
     }
 

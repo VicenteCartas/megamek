@@ -87,14 +87,12 @@ final class GpuAssets implements Disposable {
     private final Map<BoardRail.Layout, Model> routes = new HashMap<>();
     private final Map<String, Texture> materials = new HashMap<>();
     private final Map<String, Cliff> cliffs = new HashMap<>();
-    private final Map<Boolean, MaterialArrays> magmas = new HashMap<>();
     private LavaEmission lavaEmission;
     private final Map<String, Sculpt> sculpts = new HashMap<>();
     private TerrainArrays terrainArrays;
-    private MaterialArrays tundraCarpets;
+    private MaterialArrays fullSizeMaps;
     private float[] roadRelief;
     private MaterialArrays roadArray;
-    private Ice ice;
     private final Map<BoardLiquid.Textures, Animation<Texture>> liquids = new HashMap<>();
     private BoardScene.Pixels incline;
     private BoardScene.Pixels highIncline;
@@ -103,12 +101,6 @@ final class GpuAssets implements Disposable {
 
     /** Three aligned, repeating maps. Surface channels are height, roughness, occlusion and relief range. */
     record Cliff(Texture color, Texture normal, Texture surface) { }
-
-    /**
-     * The ice sheet's colour, and its aligned normal and surface maps as layers 0 and 1 of one array; {@code coverage}
-     * multiplies its repeat (GpuMaterialCatalog).
-     */
-    record Ice(Texture color, TextureArray maps, float coverage) { }
 
     /** A board material's Godot 4 Standard definition, read once per asset owner (asset reload makes a fresh owner). */
     GodotMaterial definition(String name) {
@@ -169,26 +161,38 @@ final class GpuAssets implements Disposable {
         return GpuMaterialMaps.size(GpuMaterialMaps.primary(definition(name), layout));
     }
 
+    private static final String ICE = "terrain/ice/ice-sheet";
+
     /**
-     * Molten lava's or solid crust's aligned maps in separate colour and numerical arrays:
-     * colour; normal; surface (height, roughness, occlusion, relief range); heat. Molten heat is normalized linear
-     * emission RGB with original heat coverage in A; crust retains R heat and A crack glow. Both require complete sets.
+     * The maps that repeat over several hexes, at their full size ({@link #FULL_SIZE_PLAN}): one sRGB colour array and one
+     * raw data array, so ground that reads several of these materials takes two texture units for them. Requires
+     * complete sets.
      */
-    MaterialArrays magma(boolean molten) {
-        if (magmas.containsKey(molten)) { return magmas.get(molten); }
-        String name = magmaName(molten);
-        var layers = new ArrayList<Layer>();
-        for (var layout : List.of(GpuMaterialMaps.Layout.COLOR, GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.RELIEF,
-              molten ? GpuMaterialMaps.Layout.MOLTEN_HEAT : GpuMaterialMaps.Layout.CRUST_HEAT)) {
-            layers.add(layer(name, layout));
+    MaterialArrays fullSizeMaps() {
+        if (fullSizeMaps == null) {
+            var spreads = new ArrayList<Spread>();
+            for (boolean molten : new boolean[] { false, true }) {
+                String name = magmaName(molten);
+                // The surface's roughness (G) widens by its normal's spread in the mips. One repeat spans
+                // magmaRepeatMetres() (magma-flow.glsl, magma-solid.glsl) times the texture's coverage.
+                spreads.add(new Spread(layerOf(FULL_SIZE_PLAN, name, GpuMaterialMaps.Layout.NORMAL),
+                      layerOf(FULL_SIZE_PLAN, name, GpuMaterialMaps.Layout.RELIEF), 1, (molten ? 24 : 12) * coverage(name)));
+            }
+            fullSizeMaps = planned(FULL_SIZE_PLAN, spreads);
         }
-        // The surface's roughness (G) widens by its normal's spread in the mips. One repeat spans magmaRepeatMetres()
-        // (magma-flow.glsl, magma-solid.glsl) times the texture's coverage.
-        MaterialArrays maps = repeatingArray(layers, 4, List.of(),
-              List.of(new Spread(0, 1, 1, (molten ? 24 : 12) * coverage(name))));
-        magmas.put(molten, maps);
-        return maps;
+        return fullSizeMaps;
     }
+
+    /** A plan's pair of arrays, its maps in order. */
+    private MaterialArrays planned(List<MapLayer> plan, List<Spread> spreads) {
+        var colors = new ArrayList<Layer>();
+        var data = new ArrayList<Layer>();
+        for (var map : plan) { (map.color() ? colors : data).add(layer(map.material(), map.layout())); }
+        return arrays(startedArrays(colors, data, spreads));
+    }
+
+    /** {@code coverage} multiplies the ice sheet's repeat (GpuMaterialCatalog). */
+    float iceCoverage() { return coverage(ICE); }
 
     static String magmaName(boolean molten) { return molten ? "terrain/lava/lava-flow" : "terrain/lava/lava-crust"; }
 
@@ -275,24 +279,88 @@ final class GpuAssets implements Disposable {
     private static String sculptName(String name) { return "terrain/surfaces/" + name; }
 
     /**
-     * The earth-tundra carpets, dry then wet: exported larger than the sculpt grid for their long repeat, they have their
-     * own full-size arrays ({@link #tundraCarpets}). The sculpt arrays keep a copy at their grid, for the carpets'
-     * finish and means, which never widens it.
+     * The earth-tundra carpets, dry then wet: exported larger than the sculpt grid for their long repeat, they are in
+     * {@link #fullSizeMaps}. The sculpt arrays keep a copy at their grid, for the carpets' finish and means, which never
+     * widens it.
      */
     static final List<String> TUNDRA_CARPETS = List.of("tundra-ground", "tundra-ground-variant");
 
-    /** The earth-tundra carpets' colour/height and normal/AO layers at their exported size, dry then wet. */
-    MaterialArrays tundraCarpets() {
-        if (tundraCarpets == null) {
-            var layers = new ArrayList<Layer>();
-            for (String name : TUNDRA_CARPETS) {
-                String material = sculptName(name);
-                layers.add(layer(material, GpuMaterialMaps.colorLayout(material)));
-                layers.add(layer(material, GpuMaterialMaps.normalLayout(material)));
-            }
-            tundraCarpets = repeatingArray(layers, 2);
+    /** A material's map in a pair of arrays, in the colour array or the data array, at its place in its plan. */
+    private record MapLayer(String material, GpuMaterialMaps.Layout layout, boolean color) { }
+
+    /**
+     * {@link #fullSizeMaps}' layers in order. The earth-tundra carpets, dry then wet: colour/height and normal/AO. The ice
+     * sheet: colour, normal and surface, its floes last. Crust and molten lava: colour; normal; surface (height, roughness,
+     * occlusion, relief range); heat, where molten heat is normalized linear emission RGB with original heat coverage in A
+     * and crust retains R heat and A crack glow.
+     */
+    private static final List<MapLayer> FULL_SIZE_PLAN = fullSizePlan();
+    /** {@link #roadArray}'s layers in order: every road material's colour, normal and surface, then the ice sheet's. */
+    private static final List<MapLayer> ROAD_PLAN = roadPlan();
+    /** The first colour and data layers of each lava in {@link #fullSizeMaps}, which GpuMagmaShader passes on. */
+    static final float CRUST_COLOR = layerOf(FULL_SIZE_PLAN, magmaName(false), GpuMaterialMaps.Layout.COLOR),
+          LAVA_COLOR = layerOf(FULL_SIZE_PLAN, magmaName(true), GpuMaterialMaps.Layout.COLOR),
+          CRUST_DATA = layerOf(FULL_SIZE_PLAN, magmaName(false), GpuMaterialMaps.Layout.NORMAL),
+          LAVA_DATA = layerOf(FULL_SIZE_PLAN, magmaName(true), GpuMaterialMaps.Layout.NORMAL);
+
+    private static List<MapLayer> fullSizePlan() {
+        var plan = new ArrayList<MapLayer>();
+        for (String name : TUNDRA_CARPETS) {
+            String material = sculptName(name);
+            plan.add(new MapLayer(material, GpuMaterialMaps.colorLayout(material), true));
+            plan.add(new MapLayer(material, GpuMaterialMaps.normalLayout(material), false));
         }
-        return tundraCarpets;
+        addSet(plan, ICE, GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.ICE);
+        addSet(plan, magmaName(false), GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.RELIEF,
+              GpuMaterialMaps.Layout.CRUST_HEAT);
+        addSet(plan, magmaName(true), GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.RELIEF,
+              GpuMaterialMaps.Layout.MOLTEN_HEAT);
+        plan.add(new MapLayer(ICE, GpuMaterialMaps.Layout.FLOES, false));
+        return List.copyOf(plan);
+    }
+
+    private static List<MapLayer> roadPlan() {
+        var plan = new ArrayList<MapLayer>();
+        for (String name : GpuRoads.MATERIALS) {
+            addSet(plan, "roads/" + name, GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.RELIEF);
+        }
+        addSet(plan, ICE, GpuMaterialMaps.Layout.NORMAL, GpuMaterialMaps.Layout.ICE);
+        plan.add(new MapLayer(ICE, GpuMaterialMaps.Layout.FLOES, false));
+        return List.copyOf(plan);
+    }
+
+    /** A material's colour, then its {@code data} maps. */
+    private static void addSet(List<MapLayer> plan, String material, GpuMaterialMaps.Layout... data) {
+        plan.add(new MapLayer(material, GpuMaterialMaps.Layout.COLOR, true));
+        for (var layout : data) { plan.add(new MapLayer(material, layout, false)); }
+    }
+
+    /** A map's layer in its array of {@code plan}. */
+    private static int layerOf(List<MapLayer> plan, String material, GpuMaterialMaps.Layout layout) {
+        int colors = 0, data = 0;
+        for (var map : plan) {
+            if (map.material().equals(material) && map.layout() == layout) { return map.color() ? colors : data; }
+            if (map.color()) { colors++; } else { data++; }
+        }
+        throw new IllegalArgumentException("No " + layout + " of " + material + " in the arrays");
+    }
+
+    /** The carpets' layers, dry then wet, in the full-size colour and data arrays (FULL_SIZE_LAYERS, full-size-maps.glsl). */
+    static String carpetLayers() {
+        String dry = sculptName(TUNDRA_CARPETS.get(0)), wet = sculptName(TUNDRA_CARPETS.get(1));
+        return "const vec2 FULL_SIZE_CARPET_COLOR = vec2(" + layerOf(FULL_SIZE_PLAN, dry, GpuMaterialMaps.colorLayout(dry))
+              + ".0, " + layerOf(FULL_SIZE_PLAN, wet, GpuMaterialMaps.colorLayout(wet)) + ".0);\n"
+              + "const vec2 FULL_SIZE_CARPET_DATA = vec2(" + layerOf(FULL_SIZE_PLAN, dry, GpuMaterialMaps.normalLayout(dry))
+              + ".0, " + layerOf(FULL_SIZE_PLAN, wet, GpuMaterialMaps.normalLayout(wet)) + ".0);";
+    }
+
+    /** The ice sheet's colour, normal, surface and floe layers in the road or the full-size arrays (terrain-ice.glsl). */
+    static String iceLayers(boolean road) {
+        var plan = road ? ROAD_PLAN : FULL_SIZE_PLAN;
+        return "const float ICE_COLOR = " + layerOf(plan, ICE, GpuMaterialMaps.Layout.COLOR) + ".0, ICE_NORMAL = "
+              + layerOf(plan, ICE, GpuMaterialMaps.Layout.NORMAL) + ".0, ICE_SURFACE = "
+              + layerOf(plan, ICE, GpuMaterialMaps.Layout.ICE) + ".0, ICE_FLOES = "
+              + layerOf(plan, ICE, GpuMaterialMaps.Layout.FLOES) + ".0;";
     }
 
     /** A layer resampled to the array's grid, whatever its own size. */
@@ -561,20 +629,11 @@ final class GpuAssets implements Disposable {
     }
 
     /**
-     * Colour, normal and surface maps of every road material, three layers each in {@link GpuRoads#MATERIALS} order,
-     * so that one draw holds all of a chunk's road coats. All maps are required.
+     * Every road material's maps ({@link #ROAD_PLAN}), so that one draw holds all of a chunk's road coats, and the ice
+     * sheet's, which ice on a road reads here and takes no other texture unit (terrain-ice.glsl). All maps are required.
      */
     MaterialArrays roadArray() {
-        if (roadArray == null) {
-            var layers = new ArrayList<Layer>();
-            for (String name : GpuRoads.MATERIALS) {
-                for (var layout : List.of(GpuMaterialMaps.Layout.COLOR, GpuMaterialMaps.Layout.NORMAL,
-                      GpuMaterialMaps.Layout.RELIEF)) {
-                    layers.add(layer("roads/" + name, layout));
-                }
-            }
-            roadArray = repeatingArray(layers, 3);
-        }
+        if (roadArray == null) { roadArray = planned(ROAD_PLAN, List.of()); }
         return roadArray;
     }
 
@@ -608,49 +667,42 @@ final class GpuAssets implements Disposable {
         return new Layer(size[0], size[1], packed(name, layout));
     }
 
-    /**
-     * Sets of aligned maps; their first map is colour and all remaining maps carry numerical data. Both arrays share the
-     * largest layer's grid, so a material exported larger keeps its detail; smaller layers are resampled to it.
-     */
-    private static MaterialArrays repeatingArray(List<Layer> layers, int maps) {
-        return repeatingArray(layers, maps, List.of(), List.of());
-    }
-
-    /**
-     * As {@link #repeatingArray(List, int)}, with {@code extra} data layers after the sets' own and the roughness the
-     * data array's normals widen in its mips ({@code spreads}, by data layer).
-     */
-    private static MaterialArrays repeatingArray(List<Layer> layers, int maps, List<Layer> extra, List<Spread> spreads) {
-        return arrays(startedArrays(layers, maps, extra, spreads));
-    }
-
     /** A colour and a data array's layers, being prepared on the common pool ({@link MaterialArrayData#start}). */
     private record StartedArrays(MaterialArrayData color, MaterialArrayData data) {
         /** Releases the prepared layers that will not be uploaded. */
         void discard() { color.discard(); data.discard(); }
     }
 
-    /** {@link #repeatingArray(List, int, List, List)}'s arrays, without GL: both start preparing their layers. */
+    /**
+     * Sets of aligned maps, without GL: their first map is colour and all remaining maps carry numerical data; {@code extra}
+     * data layers follow the sets' own, and the data array's normals widen the roughness named by {@code spreads} in its
+     * mips. Both arrays start preparing their layers.
+     */
     private static StartedArrays startedArrays(List<Layer> layers, int maps, List<Layer> extra, List<Spread> spreads) {
         if (layers.isEmpty() || maps < 2 || layers.size() % maps != 0) {
             throw new IllegalArgumentException("Incomplete repeating material arrays");
         }
-        var colors = new ArrayList<Supplier<Pixmap>>();
-        var data = new ArrayList<Supplier<Pixmap>>();
+        var colors = new ArrayList<Layer>();
+        var data = new ArrayList<Layer>();
+        for (int index = 0; index < layers.size(); index++) { (index % maps == 0 ? colors : data).add(layers.get(index)); }
+        data.addAll(extra);
+        return startedArrays(colors, data, spreads);
+    }
+
+    /**
+     * Both arrays at the largest layer's grid, so a material exported larger keeps its detail; smaller layers are
+     * resampled to it. Their layers started.
+     */
+    private static StartedArrays startedArrays(List<Layer> colors, List<Layer> data, List<Spread> spreads) {
         int width = 0, height = 0;
-        for (int index = 0; index < layers.size(); index++) {
-            Layer layer = layers.get(index);
-            (index % maps == 0 ? colors : data).add(layer.pixels());
-            width = Math.max(width, layer.width());
-            height = Math.max(height, layer.height());
+        for (List<Layer> layers : List.of(colors, data)) {
+            for (Layer layer : layers) {
+                width = Math.max(width, layer.width());
+                height = Math.max(height, layer.height());
+            }
         }
-        for (Layer layer : extra) {
-            data.add(layer.pixels());
-            width = Math.max(width, layer.width());
-            height = Math.max(height, layer.height());
-        }
-        var started = new StartedArrays(new MaterialArrayData(colors, width, height, true),
-              new MaterialArrayData(data, width, height, false, spreads));
+        var started = new StartedArrays(new MaterialArrayData(colors.stream().map(Layer::pixels).toList(), width, height, true),
+              new MaterialArrayData(data.stream().map(Layer::pixels).toList(), width, height, false, spreads));
         started.color().start();
         started.data().start();
         return started;
@@ -1755,20 +1807,6 @@ final class GpuAssets implements Disposable {
         return relief;
     }
 
-    Ice ice() {
-        if (ice == null) {
-            String name = "terrain/ice/ice-sheet";
-            Texture color = texture(name, GpuMaterialMaps.Layout.COLOR, true);
-            var maps = List.of(layer(name, GpuMaterialMaps.Layout.NORMAL), layer(name, GpuMaterialMaps.Layout.ICE),
-                  layer(name, GpuMaterialMaps.Layout.FLOES));
-            int width = Math.max(maps.get(0).width(), maps.get(1).width());
-            int height = Math.max(maps.get(0).height(), maps.get(1).height());
-            ice = new Ice(color, repeatingArray(new MaterialArrayData(maps.stream().map(Layer::pixels).toList(), width, height,
-                  false)), coverage(name));
-        }
-        return ice;
-    }
-
     /** One complete sculpt material and its repeat scale. */
     Sculpt sculpt(String name) {
         return sculpts.computeIfAbsent(name, key -> new Sculpt(material(sculptName(key)), materialNormal(sculptName(key)),
@@ -2056,8 +2094,6 @@ final class GpuAssets implements Disposable {
         decoding.clear();
         materials.clear();
         cliffs.clear();
-        magmas.values().forEach(MaterialArrays::dispose);
-        magmas.clear();
         lavaEmission = null;
         sculpts.clear();
         definitions.clear();
@@ -2066,10 +2102,9 @@ final class GpuAssets implements Disposable {
         if (terrainArrays != null) { terrainArrays.arrays().dispose(); terrainArrays = null; }
         if (preparing != null) { preparing.discard(); preparing = null; }
         if (scatterPixels != null) { scatterPixels.thenAccept(Pixmap::dispose); scatterPixels = null; }
-        if (tundraCarpets != null) { tundraCarpets.dispose(); tundraCarpets = null; }
+        if (fullSizeMaps != null) { fullSizeMaps.dispose(); fullSizeMaps = null; }
         roadRelief = null;
         if (roadArray != null) { roadArray.dispose(); roadArray = null; }
-        if (ice != null) { ice.maps().dispose(); ice = null; }
         liquids.clear();
         users.clear();
         incline = null;

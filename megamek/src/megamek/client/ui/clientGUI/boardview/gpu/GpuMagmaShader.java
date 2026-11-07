@@ -17,26 +17,22 @@ final class GpuMagmaShader extends Attribute {
     static final int CRUST = 0, LAVA = 1, FALL = 2, BANK = 3;
 
     private final int mode;
-    /** The set's colour array plus normal/surface/heat numerical array, owned by GpuAssets. */
-    private final GpuAssets.MaterialArrays maps;
     private final float emissionScale;
     /** GpuAssets.coverage of the set's maps: a wider texture repeats less often at the same texel density. */
     private final float coverage;
     /** The lava's field: its currents and bank distance for the melt, and how close a cooled bank is to it. */
     private final GpuWaterShader.Field field;
 
-    private GpuMagmaShader(int mode, GpuAssets.MaterialArrays maps, GpuWaterShader.Field field, float emissionScale,
-          float coverage) {
+    private GpuMagmaShader(int mode, GpuWaterShader.Field field, float emissionScale, float coverage) {
         super(TYPE);
         this.mode = mode;
-        this.maps = maps;
         this.emissionScale = emissionScale;
         this.coverage = coverage;
         this.field = mode == CRUST ? null : field;
     }
 
     GpuMagmaShader withField(GpuWaterShader.Field field) {
-        return new GpuMagmaShader(mode, maps, field, emissionScale, coverage);
+        return new GpuMagmaShader(mode, field, emissionScale, coverage);
     }
 
     boolean flowing() { return mode == LAVA || mode == FALL; }
@@ -46,7 +42,7 @@ final class GpuMagmaShader extends Attribute {
 
     @Override
     public int hashCode() {
-        return 31 * (31 * (31 * super.hashCode() + mode) + System.identityHashCode(maps)) + System.identityHashCode(field);
+        return 31 * (31 * super.hashCode() + mode) + System.identityHashCode(field);
     }
 
     @Override
@@ -54,29 +50,27 @@ final class GpuMagmaShader extends Attribute {
         if (type != other.type) { return Long.compare(type, other.type); }
         GpuMagmaShader magma = (GpuMagmaShader) other;
         int order = Integer.compare(mode, magma.mode);
-        if (order == 0) { order = Integer.compare(System.identityHashCode(maps), System.identityHashCode(magma.maps)); }
         return order != 0 ? order : Integer.compare(System.identityHashCode(field), System.identityHashCode(magma.field));
     }
 
     static Material material(GpuAssets assets, int mode, GpuWaterShader.Field field) {
         boolean molten = mode == LAVA || mode == FALL;
-        var maps = assets.magma(molten);
-        if (maps == null) { return null; }
         float emissionScale = molten ? assets.lavaEmission().scale() : 0;
-        return new Material("magma:" + mode, new GpuMagmaShader(mode, maps, field, emissionScale,
+        return new Material("magma:" + mode, new GpuMagmaShader(mode, field, emissionScale,
               assets.coverage(GpuAssets.magmaName(molten))), IntAttribute.createCullFace(GL20.GL_NONE));
     }
 
     static void register(DefaultShader shader, Texture fallback) {
-        for (boolean color : new boolean[] { true, false }) {
-            shader.register(color ? "u_magmaColor" : "u_magmaMaps", new BaseShader.LocalSetter() {
-                @Override
-                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                    var magma = attributes.get(GpuMagmaShader.class, TYPE);
-                    if (magma != null) { target.set(id, color ? magma.maps.color() : magma.maps.data()); }
+        shader.register("u_magmaLayers", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var magma = attributes.get(GpuMagmaShader.class, TYPE);
+                if (magma != null) {
+                    target.set(id, magma.flowing() ? GpuAssets.LAVA_COLOR : GpuAssets.CRUST_COLOR,
+                          magma.flowing() ? GpuAssets.LAVA_DATA : GpuAssets.CRUST_DATA);
                 }
-            });
-        }
+            }
+        });
         shader.register("u_magmaEmissionScale", new BaseShader.LocalSetter() {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {

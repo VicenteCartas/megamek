@@ -706,11 +706,11 @@ void main() {
         properties.g = .95;
     } else if (slabs) {
         // Settled dust, anchored to the ground, varies the repeating slabs.
-        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
+        wearPatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 18.0)).g;
         albedo *= mix(.92, 1.06, wearPatches);
     } else if (m.mapped && abs(m.transition) > .5) {
-        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
-        loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
+        wearPatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 18.0)).g;
+        loosePatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 5.0 + .37)).b;
         albedo *= mix(.95, 1.05, wearPatches);
     }
     if (m.mapped && m.transition > .5) {
@@ -750,8 +750,8 @@ void main() {
     float soilBasins = 0.0, soilMud = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
-        soilBasins = texture(u_rainNoise, groundUV / 22.0).r * .7
-              + texture(u_rainNoise, groundUV / 7.0 + .37).g * .3;
+        soilBasins = texture(u_surfaceNoise, rainNoiseAt(groundUV / 22.0)).r * .7
+              + texture(u_surfaceNoise, rainNoiseAt(groundUV / 7.0 + .37)).g * .3;
         // A track's puddles lie in its wheel tracks.
         if (track) soilBasins += .3 * wearWater - .15;
         float mud = wet * smoothstep(.24, .68, soilBasins);
@@ -844,7 +844,7 @@ void main() {
     } else if (m.mapped && abs(m.transition) > .5 && !paved) {
         // The wide loose margin has no opaque shoulder underneath it. Clumps give way to isolated grains
         // and exposed ground; the compacted core remains continuous and at the authored road width.
-        float clumps = texture(u_rainNoise, groundUV / 32.0 + .19).r;
+        float clumps = texture(u_surfaceNoise, rainNoiseAt(groundUV / 32.0 + .19)).r;
         float threshold = .05 + .8 * clumps + .12 * loosePatches;
         float broken = smoothstep(threshold - .12, threshold + .12, roadColor.a + (grain - .5) * .32);
         alpha = mix(roadColor.a, broken, 4.0 * roadColor.a * (1.0 - roadColor.a));
@@ -861,5 +861,5 @@ void main() {
 
 // The shared noise over cells of `size` metres, filtered for the pixel: explicitly, as its reads sit in varying branches.
 vec4 wearNoise(vec2 m, float size, float offset, float pixel) {
-    return textureLod(u_rainNoise, m / size + offset, log2(max(pixel * 64.0 / size, 1.0)));
+    return textureLod(u_surfaceNoise, rainNoiseAt(m / size + offset), log2(max(pixel * 64.0 / size, 1.0)));
 }

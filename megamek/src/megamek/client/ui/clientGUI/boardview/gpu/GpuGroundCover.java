@@ -635,8 +635,7 @@ final class GpuGroundCover implements Disposable {
     private final Map<Coords, Long> arrivals = new HashMap<>();
 
     static String vertex(String source) {
-        String meadow = "uniform sampler2D u_rainNoise;\n"
-              + GpuShaderSource.read("terrain-meadow.glsl");
+        String meadow = GpuShaderSource.read("surface-noise.glsl") + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
               + "\n#define GRASS_RIM_START " + RIM_START_PIXELS + "\n#define GRASS_RIM_STAND " + RIM_STAND_PIXELS

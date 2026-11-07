@@ -61,7 +61,7 @@ final class GpuUnitShader extends DefaultShader {
             // Upload before render-time setters bind any material textures.
             if (environment != null) { environment.texture(); }
         }
-        GpuLavaLighting.register(this);
+        GpuLavaLighting.register(this, null);
         GpuAmbientOcclusion.register(this);
         GpuModelMaterial.register(this);
         GpuModelLight.register(this, () -> 0);

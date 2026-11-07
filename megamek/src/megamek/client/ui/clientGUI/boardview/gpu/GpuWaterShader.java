@@ -12,8 +12,13 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.TextureArray;
+import com.badlogic.gdx.graphics.TextureArrayData;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Attributes;
 import com.badlogic.gdx.graphics.g3d.Renderable;
@@ -21,6 +26,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.BufferUtils;
 import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.Coords;
 
@@ -49,7 +55,7 @@ final class GpuWaterShader extends Attribute {
     private static final float BLEND_RADIUS = 0.9f;
     /** A river's surface disturbance fades through connected still water over this many hexes. */
     private static final int RIPPLE_REACH = 4;
-    private static final int DETAIL_SIZE = 256;
+    private static final int DETAIL_SIZE = 256, RAIN_NOISE_SIZE = 64;
 
     /**
      * A stretch of the line where a fall lands, the water it spreads into lying to the right of {@code from} to
@@ -266,25 +272,60 @@ final class GpuWaterShader extends Attribute {
         return comparison;
     }
 
-    /**
-     * Shared tiling detail maps, built once: RG ripple slope, B foam noise, A caustic network. Every channel repeats
-     * seamlessly, and mipmaps average the slopes, so distant water calms into a clean reflection instead of aliasing.
-     */
-    static Texture detailTexture() {
-        byte[] rgba = GpuAssets.joined(prepareDetail());
-        Pixmap pixels = new Pixmap(DETAIL_SIZE, DETAIL_SIZE, Pixmap.Format.RGBA8888);
-        try {
-            pixels.getPixels().put(0, rgba);
-            Texture texture = new Texture(pixels, true);
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
-            return texture;
-        } finally {
-            pixels.dispose();
+    /** The rain noise: the red channel is the puddle field; water borrows the independent green and blue noise. */
+    static Pixmap rainNoisePixels() {
+        Pixmap pixels = new Pixmap(RAIN_NOISE_SIZE, RAIN_NOISE_SIZE, Pixmap.Format.RGBA8888);
+        Random random = new Random(0x7261696eL);
+        Random waterRandom = new Random(0x7761746572L);
+        for (int y = 0; y < RAIN_NOISE_SIZE; y++) {
+            for (int x = 0; x < RAIN_NOISE_SIZE; x++) {
+                int value = random.nextInt(256);
+                pixels.drawPixel(x, y, (value << 24) | (waterRandom.nextInt(256) << 16) | (waterRandom.nextInt(256) << 8) | 255);
+            }
         }
+        return pixels;
     }
 
-    /** {@link #detailTexture}'s RGBA bytes, the same for every terrain: computed once per process, on the common pool. */
+    /**
+     * The detail maps and the rain noise as the layers of one array (surface-noise.glsl), so a surface that reads both
+     * keeps within its texture units. The detail maps: RG ripple slope, B foam noise, A caustic network; every channel
+     * repeats seamlessly, and mipmaps average the slopes, so distant water calms into a clean reflection instead of
+     * aliasing. The noise repeats four times across its layer: read at a quarter of the coordinates, its texels and its mip
+     * levels are those of a 64-texel texture.
+     */
+    static TextureArray surfaceNoise() {
+        ByteBuffer layers = BufferUtils.newByteBuffer(DETAIL_SIZE * DETAIL_SIZE * 4 * 2);
+        layers.put(GpuAssets.joined(prepareDetail()));
+        Pixmap noise = rainNoisePixels();
+        for (int y = 0; y < DETAIL_SIZE; y++) {
+            for (int x = 0; x < DETAIL_SIZE; x++) {
+                int at = (y % RAIN_NOISE_SIZE * RAIN_NOISE_SIZE + x % RAIN_NOISE_SIZE) * 4;
+                for (int channel = 0; channel < 4; channel++) { layers.put(noise.getPixels().get(at + channel)); }
+            }
+        }
+        noise.dispose();
+        layers.flip();
+        var array = new TextureArray(new TextureArrayData() {
+            @Override public boolean isPrepared() { return true; }
+            @Override public void prepare() { }
+            @Override public int getWidth() { return DETAIL_SIZE; }
+            @Override public int getHeight() { return DETAIL_SIZE; }
+            @Override public int getDepth() { return 2; }
+            @Override public boolean isManaged() { return false; }
+            @Override public int getInternalFormat() { return GL20.GL_RGBA; }
+            @Override public int getGLType() { return GL20.GL_UNSIGNED_BYTE; }
+            @Override public void consumeTextureArrayData() {
+                Gdx.gl30.glTexImage3D(GL30.GL_TEXTURE_2D_ARRAY, 0, GL30.GL_RGBA8, DETAIL_SIZE, DETAIL_SIZE, 2, 0, GL20.GL_RGBA,
+                      GL20.GL_UNSIGNED_BYTE, layers);
+                org.lwjgl.opengl.GL30C.glGenerateMipmap(GL30.GL_TEXTURE_2D_ARRAY);
+            }
+        });
+        array.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        array.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
+        return array;
+    }
+
+    /** The detail maps' RGBA bytes, the same for every terrain: computed once per process, on the common pool. */
     private static CompletableFuture<byte[]> detailPixels;
 
     /**

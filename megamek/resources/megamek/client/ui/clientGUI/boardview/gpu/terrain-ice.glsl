@@ -4,11 +4,20 @@
 // After terrain-hexes.glsl: land ice meets dry ground along a jagged, shattered border that straddles their shared
 // hex edge; the dry side draws its part of it.
 #ifdef iceFlag
-uniform sampler2D u_iceColor;
-// Layer 0 normal; layer 1 R surface height, G roughness, B cracks and bubbles, A cloudy ice; layer 2 the floes baked for
-// ICE_FLOE_REPEAT metres: R joints, G where snow settles first; for a broken border, B the cracks between its shards and A each
-// shard's value, flat up to its edge.
-uniform sampler2DArray u_iceMaps;
+// ICE_SURFACE: R surface height, G roughness, B cracks and bubbles, A cloudy ice. ICE_FLOES, baked for ICE_FLOE_REPEAT metres:
+// R joints, G where snow settles first; for a broken border, B the cracks between its shards and A each shard's value, flat up to
+// its edge.
+#ifdef roadCoatFlag
+// Ice on a road coat takes no other texture unit: the road arrays hold its maps after the road materials'.
+#define ICE_COLORS u_roadColors
+#define ICE_MAPS u_roadData
+// ROAD_ICE_LAYERS
+#else
+// FULL_SIZE_MAPS
+#define ICE_COLORS u_fullSizeColor
+#define ICE_MAPS u_fullSizeData
+// FULL_SIZE_ICE_LAYERS
+#endif
 const float ICE_FLOE_REPEAT = 102.0;
 const float ICE_SNOW_LINE = .435;
 // Turned so that neither the wind's streaks nor the repeat run along the board's axes.
@@ -42,7 +51,7 @@ const vec3 ICE_JOINT = vec3(.46, .54, .59);
 // The normal map is baked for the unturned 24 m field. A transformed sample needs the inverse basis change and
 // the matching gradient scale, including the anisotropic wind stretch. Offsets only change the sampled position.
 vec3 iceMappedNormal(vec2 uv, mat2 transform, vec2 dx, vec2 dy) {
-    vec3 normal = (textureGrad(u_iceMaps, vec3(uv, 0.0), dx, dy).xyz * 255.0 - 128.0) / 127.0;
+    vec3 normal = (textureGrad(ICE_MAPS, vec3(uv, ICE_NORMAL), dx, dy).xyz * 255.0 - 128.0) / 127.0;
     return normalize(vec3(transpose(transform) * normal.xy, normal.z));
 }
 
@@ -50,7 +59,7 @@ vec3 iceMappedNormal(vec2 uv, mat2 transform, vec2 dx, vec2 dy) {
 // selection jumps at the cell borders; the fields are broad enough not to alias.
 vec3 iceNoise(vec2 metres, float spacing, vec2 offset) {
     vec2 texel = metres / spacing + offset, cell = floor(texel), f = fract(texel);
-    return textureLod(u_rainNoise, (cell + f * f * (3.0 - 2.0 * f) + .5) / 64.0, 0.0).rgb;
+    return textureLod(u_surfaceNoise, rainNoiseAt((cell + f * f * (3.0 - 2.0 * f) + .5) / 64.0), 0.0).rgb;
 }
 
 // The border of the iced area, from the per-hex texture, in metres: x is signed to the border shared with dry
@@ -65,7 +74,7 @@ vec3 iceBorder(vec2 world, float z, bool fringe, bool glazed) {
     // B bit 7 of a cell's texel: the CPU proved all it can reach frozen land at one level (GpuBiomeSurface): no border near.
     ivec2 iceCell = ivec2(column, int(floor(-world.y / height - mod(float(column), 2.0) * .5)));
     if (all(greaterThanEqual(iceCell, ivec2(0))) && all(lessThan(iceCell, ivec2(u_iceBoard)))
-          && (int(texelFetch(u_biomeHexes, iceCell, 0).b * 255.0 + .5) & 128) != 0) {
+          && (int(boardHex(iceCell).b * 255.0 + .5) & 128) != 0) {
         return vec3(1e4, 1e4, 0.0);
     }
     float ownDistance = 1e4;
@@ -78,20 +87,21 @@ vec3 iceBorder(vec2 world, float z, bool fringe, bool glazed) {
         float distance = biomeHexDistance(world - boardHexCenter(x, y));
         if (distance < ownDistance) { ownDistance = distance; owner = ivec2(x, y); }
     }
-    vec4 support = owner.x >= 0 ? texelFetch(u_biomeHexes, owner, 0) : vec4(0.0);
+    vec4 support = owner.x >= 0 ? boardHex(owner) : vec4(0.0);
     float own = owner.x >= 0 ? support.a * 255.0 - 64.0 : 1e4;
-    bool ownWet = support.g > .002 || (int(support.b * 255.0 + .5) & 3) == 2;
+    // Low G alone is the aqueous palette: higher bits are coverage metadata.
+    bool ownWet = (int(support.g * 255.0 + .5) & 15) != 0 || (int(support.b * 255.0 + .5) & 3) == 2;
     if (ownWet && z < own * u_iceLevel - u_iceWaterline) return vec3(-1e4, -1e4, 0.0);
     float ice = 1e4, soft = 1e4, hard = 1e4, glaze = 0.0;
     for (int i = 0; i < 9; i++) {
         int x = column + i / 3 - 1;
         int y = int(floor(-world.y / height - mod(float(x), 2.0) * .5)) + i % 3 - 1;
         if (x < 0 || y < 0 || float(x) >= u_iceBoard.x || float(y) >= u_iceBoard.y) continue;
-        vec4 tile = texelFetch(u_biomeHexes, ivec2(x, y), 0);
+        vec4 tile = boardHex(ivec2(x, y));
         int kind = int(tile.b * 255.0 + .5) & 3;
         float level = tile.a * 255.0 - 64.0;
         float distance = biomeHexDistance(world - boardHexCenter(x, y));
-        bool wet = tile.g > .002 || kind == 2;
+        bool wet = (int(tile.g * 255.0 + .5) & 15) != 0 || kind == 2;
         bool iced = fringe ? (kind == 1 || glazed && kind == 3) && level == own : kind != 0;
         if (iced) {
             if (distance < ice) { ice = distance; glaze = kind == 3 ? 1.0 : 0.0; }
@@ -163,7 +173,7 @@ vec3 iceCascade(vec3 worldDx, vec3 worldDy) {
     vec2 uv = v_diffuseUV / u_iceCoverage, uvDx = dFdx(v_diffuseUV) / u_iceCoverage, uvDy = dFdy(v_diffuseUV) / u_iceCoverage;
     // Deliberately retain the broad, world-anchored frost field across the separate closed-surface charts.
     vec2 along = vec2(.79, .61);
-    vec4 properties = textureGrad(u_iceMaps, vec3(uv, 1.0), uvDx, uvDy);
+    vec4 properties = textureGrad(ICE_MAPS, vec3(uv, ICE_SURFACE), uvDx, uvDy);
     vec3 veins = iceNoise(vec2(dot(world.xy, along), world.z * .09), .65, vec2(18.7, 6.3));
     // The fade follows the texel footprint, which a wider texture keeps at the same density.
     float detail = 1.0 - smoothstep(.008, .08, max(length(uvDx), length(uvDy)) * u_iceCoverage);
@@ -230,7 +240,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy, vec3 border, bool me
     // Snow and ice cover ground up to steep banks; a slab's own cut edges are ice as well.
     float coverage = max(slab, smoothstep(.2, .45, face.z));
     if (coverage <= 0.0) { return underlying; }
-    vec4 floes = textureGrad(u_iceMaps, vec3(ICE_FLOE_TURN * metres / ICE_FLOE_REPEAT, 2.0),
+    vec4 floes = textureGrad(ICE_MAPS, vec3(ICE_FLOE_TURN * metres / ICE_FLOE_REPEAT, ICE_FLOES),
           ICE_FLOE_TURN * metresDx / ICE_FLOE_REPEAT, ICE_FLOE_TURN * metresDy / ICE_FLOE_REPEAT);
     // How far inside the ice a point on land lies, the ice's thickness there, and its broken edge.
     float inside = 1e4, thickness = 1.0, rim = 0.0, shattered = 0.0;
@@ -265,7 +275,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy, vec3 border, bool me
     vec2 footprint = max(abs(uvDx), abs(uvDy));
     // Shading LOD follows projected texel footprint; mipmaps filter every map with the same derivatives.
     float detail = 1.0 - smoothstep(.006, .07, max(footprint.x, footprint.y) * u_iceCoverage);
-    vec4 properties = textureGrad(u_iceMaps, vec3(uv, 1.0), uvDx, uvDy);
+    vec4 properties = textureGrad(ICE_MAPS, vec3(uv, ICE_SURFACE), uvDx, uvDy);
     if (lead) {
         // Leads use only cloudy slush and the unperturbed face.
         vec3 lit, reflection, sheen;
@@ -317,7 +327,7 @@ vec3 iceFinish(vec3 underlying, vec3 worldDx, vec3 worldDy, vec3 border, bool me
     vec3 lit, reflection, sheen;
     float fresnel;
     iceOptics(normal, geometric, roughness, vec3(.018), lit, reflection, sheen, fresnel);
-    vec3 tint = textureGrad(u_iceColor, uv, uvDx, uvDy).rgb;
+    vec3 tint = textureGrad(ICE_COLORS, vec3(uv, ICE_COLOR), uvDx, uvDy).rgb;
     tint /= max(dot(tint, vec3(.333)), .05);
     vec3 bare = materialReflectance(ICE_BARE * mix(vec3(1.0), tint, .35) * (1.0 + cloudy * .35)
           + vec3(.55) * cracks);
