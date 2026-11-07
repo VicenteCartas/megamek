@@ -103,8 +103,19 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** Priority three-arm junctions use stop signs; larger junctions use signals unless explicitly overridden. */
     public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner, int exits) {
+        return trafficControl(appearance, owner, exits, 0);
+    }
+
+    /**
+     * As {@link #trafficControl(Map, String, int)}, where single-lane ramps join the road across {@code ramps}: they are no
+     * roads of their own, so stop signs serve the junction until four two-lane roads meet there.
+     */
+    public static TrafficControl trafficControl(Map<String, HexAppearance> appearance, String owner, int exits, int ramps) {
         HexAppearance stored = appearance.get(owner);
         if (stored != null && stored.trafficControl() != null) { return stored.trafficControl(); }
+        if ((exits & ramps & 63) != 0) {
+            return Integer.bitCount(exits & ~ramps & 63) >= 4 ? TrafficControl.GANTRY : TrafficControl.STOPS;
+        }
         return Integer.bitCount(exits & 63) == 3 ? TrafficControl.STOPS : TrafficControl.GANTRY;
     }
 

@@ -111,6 +111,22 @@ class SingleLaneEditorTest {
               "Reversed and back, and the road through J painted again: still J's own choice");
     }
 
+    @Test void aJunctionThatOnlyAnExitLeavesKeepsItsChosenControlsForLater() {
+        var session = ramp();
+        inspect(session, J);
+        send(session, Action.TRAFFIC_CONTROL, "road", "gantry");
+        var snapshot = session.snapshot();
+        assertTrue(SingleLane.exitsOnly(snapshot.property("road").exits() & 63, snapshot.rampSides(), snapshot.entranceSides()),
+              "Only the exit leaves J: the inspector shows no controls");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(J).getAppearance(), "road"),
+              "But the choice is stored");
+        send(session, Action.RAMP, "road:2", "entrance");
+        snapshot = session.snapshot();
+        assertFalse(SingleLane.exitsOnly(snapshot.property("road").exits() & 63, snapshot.rampSides(), snapshot.entranceSides()),
+              "An entrance joins: the choice applies again");
+        assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(J).getAppearance(), "road"));
+    }
+
     @Test void reversingFromAnyHexOfTheRunTurnsItAndItsJoin() {
         var session = ramp();
         inspect(session, S2);

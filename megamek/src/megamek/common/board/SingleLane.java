@@ -206,6 +206,15 @@ public final class SingleLane {
         return closedTurns(view(hex, at, board), at);
     }
 
+    /**
+     * Whether only exits (off-ramps) leave a two-lane road's junction: of its {@code arms}, some are {@code single} lanes,
+     * none of them an entrance ({@code entrances}, the sides traffic comes in by), and at most two are two-lane. Nothing
+     * joins the road's traffic there, so nothing waits for anything: the junction has no controls, whatever is chosen.
+     */
+    public static boolean exitsOnly(int arms, int single, int entrances) {
+        return (arms & single) != 0 && (arms & single & entrances) == 0 && Integer.bitCount(arms & ~single & 63) <= 2;
+    }
+
     /** The sides of this hex where a single-lane road joins it, connected both ways. */
     public static int joined(View board, Coords at) {
         int links = links(board, at), result = 0;

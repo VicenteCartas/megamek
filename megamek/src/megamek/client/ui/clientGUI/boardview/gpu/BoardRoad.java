@@ -303,7 +303,7 @@ final class BoardRoad {
             }
         } else { road = road.meetConcrete(scene, tile); }
         return road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
-              .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits())).meet(scene, tile);
+              .control(HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits(), single)).meet(scene, tile);
     }
 
     static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
@@ -572,6 +572,19 @@ final class BoardRoad {
     }
 
     BoardRoad control(HexAppearance.TrafficControl value) { control = value; return this; }
+
+    /**
+     * Whether only single-lane exits leave this two-lane junction (SingleLane#exitsOnly): nothing joins its road's
+     * traffic, so it has no junction controls whatever is chosen, and its road keeps priority as under stop controls.
+     */
+    boolean exitsOnly(int exits) {
+        return circle == null && !narrow && SingleLane.exitsOnly(exits & ~apronExits & 63, single, inbound);
+    }
+
+    /** The controls this junction actually has: the chosen ones, or stop controls where only exits leave it (#exitsOnly). */
+    HexAppearance.TrafficControl trafficControl(int exits) {
+        return exitsOnly(exits) ? HexAppearance.TrafficControl.STOPS : control;
+    }
 
     BoardRoad aprons(int exits) { apronExits = exits & 63; return this; }
 
@@ -2579,15 +2592,16 @@ final class BoardRoad {
      * Paved approaches that yield at a crossing; an opposite pair carries the through road of a T. Where single-lane roads
      * join a two-lane one, an exit (off-ramp) only carries traffic away and waits for nothing; under stop controls an
      * entrance (on-ramp) gives way ({@link StopApproach#yields}) to the two-lane road, which keeps its priority through
-     * the junction when it has at most two arms there. A single-lane fork or merge has no controls.
+     * the junction when it has at most two arms there, and stops where every two-lane arm stops. A junction that only
+     * exits leave has no controls under any choice ({@link #exitsOnly}), nor has a single-lane fork or merge.
      */
     List<StopApproach> stopApproaches(int exits) {
         int arms = exits & ~apronExits & 63;
-        if (circle != null || narrow || Integer.bitCount(arms) < 3) { return List.of(); }
+        if (circle != null || narrow || Integer.bitCount(arms) < 3 || exitsOnly(exits)) { return List.of(); }
         int stopped = arms & ~(single & ~inbound);
-        boolean stops = control == HexAppearance.TrafficControl.STOPS;
+        boolean stops = trafficControl(exits) == HexAppearance.TrafficControl.STOPS;
+        int wide = arms & ~single;
         if (stops) {
-            int wide = arms & ~single;
             if ((arms & single) != 0 && Integer.bitCount(wide) <= 2) { stopped &= ~wide; }
             else if (Integer.bitCount(wide) == 3) {
                 for (int direction = 0; direction < 3; direction++) {
@@ -2597,8 +2611,11 @@ final class BoardRoad {
             }
         }
         int controlled = stopped;
+        // An entrance gives way to a two-lane road that keeps its priority; where every two-lane arm stops (an all-way
+        // stop) it stops as they do.
+        boolean yields = stops && (wide == 0 || (wide & ~stopped) != 0);
         return conflictApproaches(exits).stream().filter(arm -> (controlled & 1 << arm.direction()) != 0)
-              .map(arm -> stops && (single & 1 << arm.direction()) != 0 ? arm.yielding() : arm)
+              .map(arm -> yields && (single & 1 << arm.direction()) != 0 ? arm.yielding() : arm)
               .filter(this::clearOfConcrete).toList();
     }
 
@@ -2634,7 +2651,7 @@ final class BoardRoad {
         if (circle != null || Integer.bitCount(exits & 63) < 3) { return List.of(); }
         List<StopApproach> result = new ArrayList<>();
         var arms = paintPaths();
-        boolean boxed = Integer.bitCount(exits & 63) == 4 && control != HexAppearance.TrafficControl.STOPS;
+        boolean boxed = Integer.bitCount(exits & 63) == 4 && trafficControl(exits) != HexAppearance.TrafficControl.STOPS;
         int remaining = exits & 63;
         for (var path : arms) {
             int side = Integer.lowestOneBit(remaining);
@@ -3064,12 +3081,13 @@ final class BoardRoad {
 
     /**
      * The two arms of the two-lane road that keeps its priority through this junction (#stopApproaches): under stop
-     * controls, where only single-lane ramps join it and it has just these two two-lane arms; 0 otherwise, as at a
-     * junction of two-lane roads or under traffic lights, whose dividers stop short of the junction.
+     * controls, or any choice where only exits leave it (#exitsOnly), where only single-lane ramps join it and it has just
+     * these two two-lane arms; 0 otherwise, as at a junction of two-lane roads or under traffic lights an entrance joins,
+     * whose dividers stop short of the junction.
      */
     int priorityRoad(int exits) {
         int arms = exits & ~apronExits & 63, wide = arms & ~single;
-        if (circle != null || narrow || control != HexAppearance.TrafficControl.STOPS || (arms & single) == 0
+        if (circle != null || narrow || trafficControl(exits) != HexAppearance.TrafficControl.STOPS || (arms & single) == 0
               || Integer.bitCount(wide) != 2 || corridor.sides() != 0) { return 0; }
         return wide;
     }

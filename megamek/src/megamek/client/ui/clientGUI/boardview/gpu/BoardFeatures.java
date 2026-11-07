@@ -639,8 +639,8 @@ final class BoardFeatures {
             int exits = hex.getTerrain(deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits() & 63;
             if (deck) { exits &= hex.getTerrain(Terrains.BRIDGE).getExits(); }
             String owner = deck ? "bridgeRoad" : "road";
-            var control = HexAppearance.trafficControl(hex.getAppearance(), owner, exits);
             int single = deck ? 0 : singleArms(hex, coords, board, exits);
+            var control = HexAppearance.trafficControl(hex.getAppearance(), owner, exits, single);
             boolean narrow = !deck && SingleLane.single(hex);
             long closed = single == 0 || narrow ? 0 : SingleLane.closedTurns(hex, coords, board);
             var road = BoardRoad.layout(coords, exits, kind,
@@ -679,6 +679,8 @@ final class BoardFeatures {
                 continue;
             }
             List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board);
+            // The controls the junction actually has: none where only exits leave it (BoardRoad#exitsOnly).
+            var effective = road.trafficControl(exits);
             for (var approach : approaches) {
                 if (junction.stream().noneMatch(arm -> arm.direction() == approach.direction())) { continue; }
                 // Other turning envelopes can widen this approach beyond its own lane. Follow the whole asphalt
@@ -688,10 +690,10 @@ final class BoardFeatures {
                 while (road.distance(approach.x() - approach.ny() * offset,
                       approach.y() + approach.nx() * offset) < .5f) { offset += .25f; }
                 String sign = approach.yields() ? "scenery/road/give-way-sign" : "scenery/road/stop-sign";
-                String asset = control == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
+                String asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                 BoardDecoration.Stretch stretch = BoardDecoration.Stretch.NONE;
                 float setback = 0;
-                if (control == HexAppearance.TrafficControl.GANTRY) {
+                if (effective == HexAppearance.TrafficControl.GANTRY) {
                     var gantry = gantry(road, clearance, approach, offset, hex, coords, board, deck);
                     // Walking sideways can cross another branch and skip a small island beside this lane.
                     // Keep existing supported masts; retry that island from the original lane edge.
@@ -725,7 +727,7 @@ final class BoardFeatures {
                         }
                     }
                     if (!found) { continue; }
-                    asset = control == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
+                    asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                     stretch = BoardDecoration.Stretch.NONE;
                 }
                 double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));

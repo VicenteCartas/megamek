@@ -370,8 +370,11 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false),
-              HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits()), road.crossing(tile, false));
+        // A junction that only exits leave has no controls whatever is chosen (BoardRoad#exitsOnly).
+        var control = road.exitsOnly(tile.roadExits()) ? HexAppearance.TrafficControl.STOPS
+              : HexAppearance.trafficControl(tile.appearance(), "road", tile.roadExits(), road.single());
+        return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false), control,
+              road.crossing(tile, false));
     }
 
     /**

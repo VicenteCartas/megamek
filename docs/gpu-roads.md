@@ -77,17 +77,25 @@ The road brush and the ground/deck road inspector offer **Junction controls: Sto
 **Stops + traffic lights**, or **Stops + overhead traffic lights**. Stops uses an
 octagonal roadside STOP sign; traffic lights replace the sign with a three-aspect
 signal. The overhead option uses a curved metal mast arm carrying two overhead
-heads and a lower roadside repeater. All modes keep the stop bars.
+heads and a lower roadside repeater. All modes keep the stop bars, except where only single-lane exits leave a
+two-lane road (below), which has no controls at all.
 The choice belongs to the `road` or `bridgeRoad` appearance. With no stored choice,
-three-arm junctions use STOP signs and larger junctions use overhead traffic lights.
-An explicitly signalled T controls every approach. Explicit choices store
+three-arm junctions use STOP signs and larger junctions use overhead traffic lights; single-lane ramps are no roads
+of their own there, so where they join, STOP signs serve until four two-lane roads meet
+(`HexAppearance.trafficControl` with the ramp sides). An explicitly signalled T controls every approach. Explicit choices store
 `trafficControl: stops`, `signals`, or `gantry`, including a gantry override at a T. Material
 changes, copy/paste, layer moves, save/load and undo preserve that choice.
 
 A single-lane entrance (on-ramp, below) gives way instead of stopping: under **Stops** it has a broken give-way line
 across its whole lane with the outlined triangle upstream, as a roundabout entry, and a give-way sign
 (`scenery/road/give-way-sign.glb`) on the merging traffic's right; under traffic lights it has a solid bar and lights
-like any approach. Nothing waits on an exit (off-ramp).
+like any approach. Nothing waits on an exit (off-ramp). Where every two-lane arm stops (an all-way stop at a Y or a
+crossroads) an entrance stops as they do, having no priority road to give way to. A junction that only exits leave,
+with no entrance and at most two two-lane arms, has nothing to control: nothing joins its road's traffic, so it gets
+no bars, signs, lights or keep-clear box under any choice, and its centre line runs through as under Stops
+(`SingleLane.exitsOnly`, `BoardRoad.exitsOnly` and `trafficControl`, which every control, paint and sign reads). Only
+the exit's own one-way and no-turn signs stand. A stored choice is kept, and applies again once an entrance or a third
+two-lane road joins; the inspector shows **Junction controls: None** meanwhile.
 
 Legacy `.board` X crossings use the same gantry default. Native boards retain explicit
 authored choices; roads without one inherit the default. Controls are derived from the same
@@ -242,8 +250,8 @@ At a two-lane junction the road keeps its priority: under Stops its two-lane arm
 bent) have no stop, an entrance gives way and an exit has nothing; with three two-lane arms the opposite pair keeps
 priority as at a T. Where only ramps join it under Stops, the priority road's centre line runs on through the junction
 exactly as through a hex of its own, dashed (or solid round a bend), with no solid lead-in and no break at the ramp's
-mouth (`BoardRoad.priorityRoad`); under traffic lights, and at junctions of two-lane roads, dividers stop short of the
-junction as above. An exit may be taken by every approach of the two-lane road (the default) or only by some (`exitFrom`,
+mouth (`BoardRoad.priorityRoad`), and so does it under any choice where only exits leave it; under traffic lights an
+entrance joins, and at junctions of two-lane roads, dividers stop short of the junction as above. An exit may be taken by every approach of the two-lane road (the default) or only by some (`exitFrom`,
 stored on the two-lane hex itself, per exit, so a single lane joining two junctions never carries one's choice to the
 other; `SingleLane.feeds`). The junction then closes the other turns (`SingleLane.closedTurns`): it reserves no
 turning envelope between those approaches and the exit, so the exit leaves the road with the allowed approaches' bend

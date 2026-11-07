@@ -289,6 +289,16 @@ class SingleLaneTest {
     }
 
     @Test
+    void aJunctionThatOnlyExitsLeaveHasNothingToControl() {
+        assertTrue(SingleLane.exitsOnly(13, 4, 0), "A road north to south and an exit south-east");
+        assertTrue(SingleLane.exitsOnly(21, 20, 0), "One two-lane arm forking into two exits");
+        assertTrue(SingleLane.exitsOnly(9, 8, 0), "A road narrowing into an exit");
+        assertFalse(SingleLane.exitsOnly(13, 4, 4), "An entrance joins its traffic");
+        assertFalse(SingleLane.exitsOnly(29, 4, 0), "A third two-lane road joins");
+        assertFalse(SingleLane.exitsOnly(13, 0, 0), "No ramp: an ordinary junction");
+    }
+
+    @Test
     void aJunctionsChoiceNeverReachesAnotherJunctionItsSingleLaneJoins() {
         // Two parallel two-lane roads, Ja and Jb, linked by a one-hex single lane K; and, below it, both feeding a merge M.
         Coords ja = new Coords(2, 4), k = ja.translated(2), jb = k.translated(1);

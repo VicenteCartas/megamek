@@ -1842,7 +1842,13 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
 
     private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
           Consumer<String> choose) {
-        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits);
+        return trafficControlChoice(appearance, owner, exits, 0, choose);
+    }
+
+    /** As above, where single-lane ramps join the road across {@code ramps}, which the default does not count as roads. */
+    private Table trafficControlChoice(Map<String, megamek.common.board.HexAppearance> appearance, String owner, int exits,
+          int ramps, Consumer<String> choose) {
+        var current = megamek.common.board.HexAppearance.trafficControl(appearance, owner, exits, ramps);
         List<Option> options = List.of(new Option(UiKit.text("BoardEditor.trafficStops"), "stops"),
               new Option(UiKit.text("BoardEditor.trafficSignals"), "signals"),
               new Option(UiKit.text("BoardEditor.trafficGantry"), "gantry"));
@@ -1861,8 +1867,22 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         int exits = way == null ? 0 : way.exits();
         var bridge = snapshot.property("bridge");
         if (owner.equals("bridgeRoad") && bridge != null) { exits &= bridge.exits(); }
-        detail.add(trafficControlChoice(snapshot.appearance(), owner, exits,
-              chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+        boolean ground = owner.equals("road") && way != null && pavedRoad(way.value());
+        if (ground && megamek.common.board.SingleLane.exitsOnly(exits & 63, snapshot.rampSides(), snapshot.entranceSides())) {
+            // Only exits leave this junction: nothing joins its road's traffic, so no choice adds controls. A stored one
+            // is kept for when an entrance or another two-lane road joins.
+            Table row = new Table();
+            row.add(ui.label(UiKit.text("BoardEditor.trafficControl"), "hud-small", 12, UiTheme.MUTED)).left().padRight(8);
+            Label none = ui.label(UiKit.text("BoardEditor.trafficNone"), "hud-small", 12, UiTheme.MUTED);
+            none.setWrap(true);
+            row.add(none).growX().minWidth(0);
+            row.setName("editor-traffic-control-" + owner);
+            ui.tip(row).getActor().setText(UiKit.text("BoardEditor.trafficNone.tooltip"));
+            detail.add(row).growX().row();
+        } else {
+            detail.add(trafficControlChoice(snapshot.appearance(), owner, exits, ground ? snapshot.rampSides() : 0,
+                  chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+        }
         if (owner.equals("road") && way != null && pavedRoad(way.value())) { lanes(); }
     }
 
