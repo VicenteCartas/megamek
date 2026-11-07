@@ -1,14 +1,21 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Font;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.JComponent;
 
 import jakarta.annotation.Nullable;
+import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.calculationReport.CalculationReport;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.entityreadout.EntityReadout.Row;
+import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.alphaStrike.cardDrawer.ASCard;
+import megamek.common.alphaStrike.conversion.ASConverter;
+import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.units.Entity;
 
 /**
@@ -32,6 +39,29 @@ final class ReadoutCalculationReport implements CalculationReport {
         ReadoutCalculationReport report = new ReadoutCalculationReport();
         entity.getCost(report, false);
         return report.rows();
+    }
+
+    /**
+     * {@code entity}'s Alpha Strike card, {@code width} pixels wide in the card font the player chose, and the rows of
+     * its conversion; no card and no rows when it cannot be converted, as a Battlefield Support Asset. Java2D, so any
+     * thread.
+     */
+    static AlphaStrike alphaStrike(Entity entity, int width) {
+        if ((entity instanceof BattlefieldSupportAsset) || !ASConverter.canConvert(entity)) {
+            return new AlphaStrike(null, List.of());
+        }
+        ReadoutCalculationReport report = new ReadoutCalculationReport();
+        AlphaStrikeElement element = ASConverter.convert(entity, true, report);
+        ASCard card = ASCard.createCard(element);
+        String font = GUIPreferences.getInstance().getAsCardFont();
+        if ((font != null) && !font.isBlank()) {
+            card.setFont(Font.decode(font));
+        }
+        return new AlphaStrike(card.getCardImage(width), report.rows());
+    }
+
+    /** A unit's Alpha Strike card, or null, and the rows of its conversion. */
+    record AlphaStrike(@Nullable BufferedImage card, List<Row> rows) {
     }
 
     List<Row> rows() {

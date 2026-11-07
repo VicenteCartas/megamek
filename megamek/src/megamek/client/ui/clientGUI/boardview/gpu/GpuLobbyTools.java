@@ -104,6 +104,10 @@ final class GpuLobbyTools {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyTools.class);
     /** The most units the readout shows at once, as the Swing readouts refuse more. */
     static final int MAX_READOUTS = 10;
+    /** The width of a readout's Alpha Strike card, which fits a dialog.lg dossier. */
+    private static final int AS_CARD_WIDTH = 640;
+    /** How long the lobby must stay still before an open readout reads its units again. */
+    private static final int READOUT_REFRESH_MS = 400;
 
     private final GpuLobbyWindow window;
     private final LobbyAsks asks = new NativeAsks();
@@ -116,6 +120,10 @@ final class GpuLobbyTools {
     private static final int PROBE_ODDS_RUNS = 20;
     private int probeTries;
     private volatile boolean printing;
+    /** The readout of the lobby's units that shows, as the GPU thread made it, and its units' ids; null when none. */
+    private volatile @Nullable LobbyReadoutView liveReadout;
+    private volatile @Nullable List<Integer> liveIds;
+    private @Nullable Timer readoutRefresh;
 
     GpuLobbyTools(GpuLobbyWindow window) {
         this.window = window;
@@ -786,7 +794,68 @@ final class GpuLobbyTools {
         for (Entity unit : units) {
             dossiers.add(dossier(unit));
         }
-        open(dialogs -> dialogs.readout(dossiers).page(page));
+        List<Integer> ids = units.stream().map(Entity::getId).toList();
+        open(dialogs -> {
+            LobbyReadoutView view = dialogs.readout(dossiers).page(page);
+            liveReadout = view;
+            liveIds = ids;
+        });
+    }
+
+    /**
+     * Reads the open readout's units again once the lobby has settled, if a readout of the lobby's units shows, and
+     * hands their fresh dossiers to it.
+     */
+    void refreshReadout() {
+        if (liveIds == null) {
+            return;
+        }
+        if (readoutRefresh == null) {
+            readoutRefresh = new Timer(READOUT_REFRESH_MS, event -> GpuHost.post(this::checkReadout));
+            readoutRefresh.setRepeats(false);
+        }
+        readoutRefresh.restart();
+    }
+
+    /** GPU thread: reads the readout's units again on the Swing thread if it still shows, or forgets it. */
+    private void checkReadout() {
+        LobbyReadoutView view = liveReadout;
+        if (view == null || showingReadout() != view) {
+            liveReadout = null;
+            liveIds = null;
+            return;
+        }
+        SwingUtilities.invokeLater(() -> updateReadout(view));
+    }
+
+    /** GPU thread: the readout that shows, if any. */
+    private @Nullable LobbyReadoutView showingReadout() {
+        GpuLobbyScreen screen = window.screen();
+        LobbyNativeDialogs dialogs = (screen == null) ? null : screen.nativeDialogs();
+        return (dialogs == null) ? null : dialogs.readoutView();
+    }
+
+    private void updateReadout(LobbyReadoutView view) {
+        List<Integer> ids = liveIds;
+        if (ids == null || window.closing()) {
+            return;
+        }
+        Game game = client().getGame();
+        List<LobbyReadoutView.Dossier> dossiers = new ArrayList<>();
+        for (int id : ids) {
+            Entity unit = game.getEntity(id);
+            if (unit != null && gui().lobbyCommands().canSeeAll(List.of(unit))) {
+                dossiers.add(dossier(unit));
+            }
+        }
+        if (dossiers.isEmpty()) {
+            return;
+        }
+        GpuHost.post(() -> {
+            if (showingReadout() == view) {
+                view.update(dossiers);
+            }
+        });
     }
 
     /** Swing thread: reads a random army unit's file and opens its dossier over the random army. */
@@ -814,9 +883,18 @@ final class GpuLobbyTools {
               ? Messages.getString("Lobby.readout.lineUnowned", unit.calculateBattleValue(), format(unit.getWeight()))
               : Messages.getString("Lobby.readout.line", unit.calculateBattleValue(), format(unit.getWeight()),
                     owner.getName());
+        ReadoutCalculationReport.AlphaStrike alphaStrike;
+        try {
+            alphaStrike = ReadoutCalculationReport.alphaStrike(unit, AS_CARD_WIDTH);
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The Alpha Strike card could not be made");
+            alphaStrike = new ReadoutCalculationReport.AlphaStrike(null, List.of());
+        }
         List<List<EntityReadout.Row>> pages = List.of(RequisitionReadout.summary(unit), RequisitionReadout.tro(unit),
-              rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)));
-        return new LobbyReadoutView.Dossier(unit.getShortName(), line, sprite, pages);
+              rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)),
+              alphaStrike.rows(), rows(() -> ReadoutAvailability.of(unit)));
+        return new LobbyReadoutView.Dossier(unit.getId(), unit.getShortName(), line, sprite, pages,
+              alphaStrike.card());
     }
 
     private static List<EntityReadout.Row> rows(java.util.function.Supplier<List<EntityReadout.Row>> report) {

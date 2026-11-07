@@ -691,6 +691,7 @@ public final class GpuLobbyWindow {
         if (mapSetup != null) {
             mapSetup.refresh();
         }
+        tools.refreshReadout();
         GpuHost.post(() -> {
             GpuLobbyScreen shown = screen;
             if (shown != null) {
