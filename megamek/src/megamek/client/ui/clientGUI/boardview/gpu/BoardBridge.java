@@ -262,6 +262,12 @@ final class BoardBridge {
                     }
                 }
             }
+            // Two of this deck's own approaches meet here and no other deck: the corner lies on both their edges, at
+            // their heights, so the turn between them has no crease down towards the ground's lower mean.
+            if (!bankHeight && joined[1] && joined[2] && feature(neighbors[1]) == null && feature(neighbors[2]) == null) {
+                result.add((edgeElevation(tile, neighbors[1], first) + edgeElevation(tile, neighbors[2], second)) / 2 - level);
+                continue;
+            }
             float height = 0;
             int count = 0;
             float banks = 0;
