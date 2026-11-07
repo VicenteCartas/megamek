@@ -1256,6 +1256,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             return true;
         }
 
+        /** How many values this keeps in memory: a compacted image's runs, else its texels. */
+        int stored() { return argb.length + (runEnds == null ? 0 : runEnds.length); }
+
         public int width() {
             return width;
         }

@@ -2562,7 +2562,7 @@ final class GpuTerrain implements Disposable {
         Map<DecalSlot, BoardScene.Pixels> decalPixels = new ConcurrentHashMap<>(scene.tiles().size() * 2);
         float nextFloor = BoardGeometry.floor(scene);
         boolean rebuildAll = changedTuning || beforeScene == null || !sameBoard(beforeScene, scene);
-        // The recent road masks' keys hold their roads' tiles, not the settings a full rebuild may bring.
+        // The recent road masks' keys tell them apart within one set of settings, not the settings a full rebuild may bring.
         if (rebuildAll) { roadMaskData.forget(); }
         boolean changedFlow = rebuildAll;
         Map<Coords, BoardFlow.Current> nextCurrents = previousCurrents;
@@ -2570,11 +2570,6 @@ final class GpuTerrain implements Disposable {
         // of them keeps the previous fit, and the corner comparison below then has nothing to find.
         boolean refit = rebuildAll || previousCoast == null || concreteInputsChanged(beforeScene, scene);
         BoardConcrete nextCoast = refit ? BoardConcrete.of(scene) : BoardConcrete.adopt(scene, previousCoast);
-        // A road entering concrete reads its fitted corners, which hexes farther out than its mask's key can move.
-        if (refit && previousCoast != null
-              && scene.tiles().stream().anyMatch(tile -> !nextCoast.sameCorners(previousCoast, tile.coords()))) {
-            roadMaskData.forget();
-        }
         progress.advance();
         progress.begin("changes", scene.tiles().size());
         Set<Coords> changedTiles = new HashSet<>();
@@ -3783,30 +3778,32 @@ final class GpuTerrain implements Disposable {
         return result;
     }
 
-    /**
-     * What a road's paint mask depends on (GpuRoads.Masks#mask): its hex, the tiles its road and paint read
-     * ({@link #roadInputs}), the graphics and its place among the hex's patches.
-     */
-    private record RoadMaskKey(Coords source, List<BoardScene.Tile> inputs, boolean columns, int patch, int density) { }
-
-    /**
-     * The tiles a road's paint can read: its own hex's and those within three hexes, which take in its neighbours' roads,
-     * a shared roundabout's members and a bridge's banks.
-     */
-    private static List<BoardScene.Tile> roadInputs(BoardScene scene, Coords at) {
-        List<BoardScene.Tile> result = new ArrayList<>();
-        for (int dx = -3; dx <= 3; dx++) {
-            for (int dy = -3; dy <= 3; dy++) {
-                Coords coords = new Coords(at.getX() + dx, at.getY() + dy);
-                if (coords.distance(at) <= 3) { result.add(scene.tile(coords)); }
-            }
-        }
-        return result;
-    }
-
     /** Shared carriageways, paint and rail supports; Classic natural decks use a full hex cap. */
     private record Infrastructure(Map<Coords, List<RoadPatch>> roads, Map<Coords, BoardBridge.Deck> bridges,
           Map<Coords, BoardBridge.Shape> bridgeShapes, Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Prepared> authored) { }
+
+    /**
+     * A road's paint where it lies on its ground, with the key of each coat's mask: the same for every hex it reaches, so a
+     * chunk builds it once. Those hexes' workers then only read it.
+     */
+    private record RoadPaint(BoardRoad road, List<RoadCoat> coats) { }
+
+    private record RoadCoat(GpuRoads.Patch patch, int density, Object maskKey) { }
+
+    private static RoadPaint roadPaint(BoardScene scene, BoardScene.Tile source, BoardRoad shared, TerrainLod lod, boolean columns) {
+        // A road ending on a cliff's top wears out to gravel at the rim (Enhanced).
+        BoardRoad road = columns ? shared : GpuRoads.painted(scene, source, shared);
+        List<RoadCoat> coats = new ArrayList<>();
+        for (var patch : GpuRoads.patches(scene, source, road, shared)) {
+            road.clipPaint(patch.shape());
+            // An Area caches its bounds when first asked: settled here, before other workers read it.
+            patch.shape().getBounds2D();
+            // Distant wear fields need fewer samples; paint and closer levels retain their original density.
+            int density = columns ? 4 : GpuRoads.maskDensity(patch, lod);
+            coats.add(new RoadCoat(patch, density, GpuRoads.maskKey(road, patch, density)));
+        }
+        return new RoadPaint(road, coats);
+    }
 
     private static Infrastructure prepareInfrastructure(BoardScene scene, List<BoardScene.Tile> chunkTiles,
           TerrainLod lod, TerrainSettings settings, Map<Coords, BoardSurface> surfaces, Runnable check,
@@ -3814,6 +3811,7 @@ final class GpuTerrain implements Disposable {
         Map<Coords, List<RoadPatch>> roads = new java.util.concurrent.ConcurrentHashMap<>();
         Map<Coords, BoardBridge.Deck> bridges = new java.util.concurrent.ConcurrentHashMap<>();
         Map<Coords, BoardBridge.Shape> bridgeShapes = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<Coords, RoadPaint> paints = new java.util.concurrent.ConcurrentHashMap<>(2 * chunkTiles.size());
         progress.begin("roads", chunkTiles.size());
         chunkTiles.parallelStream().forEach(tile -> settings.run(() -> {
             check.run();
@@ -3826,19 +3824,13 @@ final class GpuTerrain implements Disposable {
             }
             for (BoardRoad shared : surface == null ? List.<BoardRoad>of() : painting(scene, surface.tile, columns)) {
                 var source = scene.tile(shared.coords());
-                // A road ending on a cliff's top wears out to gravel at the rim (Enhanced).
-                BoardRoad road = columns ? shared : GpuRoads.painted(scene, source, shared);
-                List<BoardScene.Tile> inputs = roadInputs(scene, source.coords());
-                int index = 0;
-                for (var patch : GpuRoads.patches(scene, source, road, shared)) {
+                var paint = paints.computeIfAbsent(source.coords(), at -> roadPaint(scene, source, shared, lod, columns));
+                for (var coat : paint.coats()) {
                     check.run();
-                    road.clipPaint(patch.shape());
+                    var patch = coat.patch();
                     var triangles = GpuRoads.drape(source, surface, patch);
-                    // Distant wear fields need fewer samples; paint and closer levels retain their original density.
-                    int maskDensity = columns ? 4 : GpuRoads.maskDensity(patch, lod);
-                    var key = new RoadMaskKey(source.coords(), inputs, columns, index++, maskDensity);
                     if (!triangles.isEmpty() && !patch.shape().isEmpty()) {
-                        var mask = masks.mask(key, () -> GpuRoads.mask(road, patch, maskDensity), check);
+                        var mask = masks.mask(coat.maskKey(), () -> GpuRoads.mask(paint.road(), patch, coat.density()), check);
                         float scale = BoardGeometry.hexScale();
                         mask = new GpuRoads.MaskData(mask.pixels(),
                               mask.x() + (BoardGeometry.centerX(source.coords()) - BoardGeometry.centerX(tile.coords())) / scale,

@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.badlogic.gdx.graphics.Color;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class GpuRoadMasksTest {
@@ -46,6 +48,32 @@ class GpuRoadMasksTest {
             }
         }
         assertTrue(reduced > 0, "The fixtures exercise distant wear fields as well as preserved markings");
+    }
+
+    @Test
+    void equalRoadsAnywhereShareOneMaskUnlessItReadsTheirPlace() {
+        var far = new Coords(BoardScenes.CENTER.getX() + 7, BoardScenes.CENTER.getY() + 5);
+        for (int exits : new int[] { 9, 21, 63 }) {
+            var here = BoardRoad.clearance(BoardScenes.CENTER, exits);
+            var there = BoardRoad.clearance(far, exits);
+            var patches = GpuRoads.patches(BoardScenes.tile(BoardScenes.CENTER, BoardRoad.Kind.PAVED, exits, 0, BoardScene.Surface.GRASS), here);
+            var others = GpuRoads.patches(BoardScenes.tile(far, BoardRoad.Kind.PAVED, exits, 0, BoardScene.Surface.GRASS), there);
+            assertEquals(patches.size(), others.size());
+            for (int i = 0; i < patches.size(); i++) {
+                if (patches.get(i).shape().isEmpty()) { continue; }
+                assertEquals(GpuRoads.maskKey(here, patches.get(i), 4), GpuRoads.maskKey(there, others.get(i), 4));
+                assertEquals(GpuRoads.mask(here, patches.get(i), 4), GpuRoads.mask(there, others.get(i), 4),
+                      "One key means one mask, wherever its road lies");
+            }
+        }
+        // A dead end's wear reads the world's noise (BoardRoad#endCoverage): it stays its own where it lies.
+        var here = BoardRoad.layout(BoardScenes.CENTER, 1, BoardRoad.Kind.DIRT, direction -> BoardRoad.Kind.DIRT);
+        var there = BoardRoad.layout(far, 1, BoardRoad.Kind.DIRT, direction -> BoardRoad.Kind.DIRT);
+        var worn = GpuRoads.patches(BoardScenes.tile(BoardScenes.CENTER, BoardRoad.Kind.DIRT, 1, 0, BoardScene.Surface.GRASS), here).getFirst();
+        var other = GpuRoads.patches(BoardScenes.tile(far, BoardRoad.Kind.DIRT, 1, 0, BoardScene.Surface.GRASS), there).getFirst();
+        assertTrue(worn.fade().end() > 0);
+        assertNotEquals(GpuRoads.maskKey(here, worn, 4), GpuRoads.maskKey(there, other, 4));
+        assertNotEquals(GpuRoads.mask(here, worn, 4), GpuRoads.mask(there, other, 4));
     }
 
     private static double coverage(GpuRoads.MaskData mask) {

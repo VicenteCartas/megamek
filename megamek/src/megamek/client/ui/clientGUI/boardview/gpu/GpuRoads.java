@@ -66,21 +66,21 @@ final class GpuRoads {
     static final class Masks {
         private final Map<MaskData, WeakReference<MaskData>> masks = new WeakHashMap<>();
         /**
-         * Recently built masks by everything they depend on ({@link #mask}): a road's mask is wanted by every hex it
-         * drapes over, and an edit rebuilds a whole chunk, most of whose roads it did not touch. Least recently used go
-         * first, past {@link #RECENT_TEXELS} or {@link #RECENT_MASKS} (each key holds its scene's tiles).
+         * Recently built masks by what tells them apart ({@link #mask}): roads alike across a board want the same masks,
+         * and an edit rebuilds a whole chunk, most of whose roads it did not touch. Least recently used go first, past
+         * {@link #RECENT_STORED} values in memory (most masks are compacted) or {@link #RECENT_MASKS}.
          */
         private final LinkedHashMap<Object, MaskData> recent = new LinkedHashMap<>(64, .75f, true);
         private final Map<Object, CompletableFuture<MaskData>> pending = new HashMap<>();
-        private long recentTexels;
-        private static final long RECENT_TEXELS = 16L << 20;
+        private long recentStored;
+        private static final long RECENT_STORED = 16L << 20;
         private static final int RECENT_MASKS = 1024;
         /** Counts {@link #forget}s: a mask built across one is never kept. */
         private int epoch;
 
         /**
          * The mask {@code key} names, built once even when neighbouring terrain workers request it together. Waiters
-         * join outside the lock; the fork-join pool can keep working. The key holds all inputs, so a completed mask is
+         * join outside the lock; the fork-join pool can keep working. The key tells masks apart, so a completed mask is
          * reusable even if its first requester became stale. Each requester still checks its own job before using it.
          */
         MaskData mask(Object key, Supplier<MaskData> build, Runnable check) {
@@ -100,10 +100,10 @@ final class GpuRoads {
                 try {
                     MaskData built = share(build.get());
                     synchronized (this) {
-                        if (epoch == started && recent.putIfAbsent(key, built) == null) { recentTexels += texels(built); }
-                        for (var masks = recent.values().iterator(); (recentTexels > RECENT_TEXELS || recent.size() > RECENT_MASKS)
+                        if (epoch == started && recent.putIfAbsent(key, built) == null) { recentStored += stored(built); }
+                        for (var masks = recent.values().iterator(); (recentStored > RECENT_STORED || recent.size() > RECENT_MASKS)
                               && masks.hasNext(); ) {
-                            recentTexels -= texels(masks.next());
+                            recentStored -= stored(masks.next());
                             masks.remove();
                         }
                     }
@@ -124,11 +124,11 @@ final class GpuRoads {
         synchronized void forget() {
             recent.clear();
             pending.clear();
-            recentTexels = 0;
+            recentStored = 0;
             epoch++;
         }
 
-        private static long texels(MaskData mask) { return (long) mask.pixels().width() * mask.pixels().height(); }
+        private static long stored(MaskData mask) { return mask.pixels().stored(); }
 
         synchronized MaskData share(MaskData mask) {
             WeakReference<MaskData> reference = masks.get(mask);
@@ -933,6 +933,60 @@ final class GpuRoads {
     private static BoardTacticalGeometry.Triangle lifted(BoardSurface.Face face, float lift) {
         return new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, lift),
               new Vector3(face.b()).add(0, 0, lift), new Vector3(face.c()).add(0, 0, lift), -1);
+    }
+
+    /** How many points across and down {@link #maskKey} samples a mask at: a constant cost per mask, whatever its size. */
+    private static final int MASK_SAMPLES = 10;
+
+    /**
+     * What tells a patch's mask from every other before it is rendered: its outline, and exactly what {@link #color} gives
+     * over a sparse grid of it. Nothing has to keep track of what a mask reads: roads alike anywhere on the board sample
+     * alike and share one mask (Masks#mask), rendered once, and anything that shows at a point of the grid, the world's
+     * noise in a worn end included, gives a mask of its own.
+     */
+    static Object maskKey(BoardRoad road, Patch patch, int density) {
+        var bounds = patch.shape().getBounds2D();
+        float[] samples = new float[4 * MASK_SAMPLES * MASK_SAMPLES];
+        Color tint = new Color();
+        int i = 0;
+        for (int row = 0; row < MASK_SAMPLES; row++) {
+            float y = (float) (bounds.getMinY() + bounds.getHeight() * (row + .5f) / MASK_SAMPLES);
+            for (int column = 0; column < MASK_SAMPLES; column++) {
+                color(road, patch, (float) (bounds.getMinX() + bounds.getWidth() * (column + .5f) / MASK_SAMPLES), y, tint);
+                samples[i++] = tint.r;
+                samples[i++] = tint.g;
+                samples[i++] = tint.b;
+                samples[i++] = tint.a;
+            }
+        }
+        return new MaskKey(segments(patch), samples, density);
+    }
+
+    /** A mask's inputs by value, hashed once: terrain workers look it up under the masks' lock. */
+    private record MaskKey(Object[] inputs, int hash) {
+        MaskKey(Object... inputs) { this(inputs, Arrays.deepHashCode(inputs)); }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof MaskKey key && hash == key.hash && Arrays.deepEquals(inputs, key.inputs);
+        }
+
+        @Override
+        public int hashCode() { return hash; }
+    }
+
+    /** A patch's outline as it is rasterised: each segment's type and six coordinates. */
+    private static double[] segments(Patch patch) {
+        double[] result = new double[7 * 32], segment = new double[6];
+        int size = 0;
+        for (var path = patch.shape().getPathIterator(null); !path.isDone(); path.next()) {
+            if (size == result.length) { result = Arrays.copyOf(result, 2 * size); }
+            Arrays.fill(segment, 0);
+            result[size++] = path.currentSegment(segment);
+            System.arraycopy(segment, 0, result, size, 6);
+            size += 6;
+        }
+        return Arrays.copyOf(result, size);
     }
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
