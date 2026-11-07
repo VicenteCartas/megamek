@@ -52,6 +52,7 @@ import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.RailRoute;
+import megamek.common.board.SingleLane;
 import megamek.common.enums.BasementType;
 import megamek.common.equipment.Minefield;
 import megamek.common.rolls.PilotingRollData;
@@ -315,6 +316,13 @@ public class Hex implements Serializable {
             if ((other != null) && roadsAutoExit && (cTerr.getType() == Terrains.ROAD)
                   && other.containsTerrain(Terrains.PAVEMENT)) {
                 cTerr.setExit(direction, true);
+            }
+
+            // A single-lane road joins only the roads it was drawn to: none joins it where it does not join them back.
+            if ((other != null) && (cTerr.getType() == Terrains.ROAD) && SingleLane.single(other)
+                  && other.getTerrain(Terrains.ROAD).hasExitsSpecified()
+                  && !other.containsTerrainExit(Terrains.ROAD, (direction + 3) % 6)) {
+                cTerr.setExit(direction, false);
             }
 
             // A ground road meets a bridge deck that lands on its hex (the deck exits back, within a level); never from

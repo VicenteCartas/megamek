@@ -1610,10 +1610,13 @@ public final class BoardEditorSession {
             hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), deck || old != null && old.hasExitsSpecified(), exits));
             HexAppearance look = colonyFinish(hex, paintTemplate.getAppearance().get("road"));
             if (!deck) {
-                if (end && old != null) { look = HexAppearance.keepLanes(look, was); }
+                // A road already there keeps its lanes at the stroke's ends, and a single lane its way anywhere: Reverse
+                // direction and the ramp choice turn it, not painting over it again.
+                boolean single = was != null && was.lanes() != null && old != null;
+                if (end && old != null || single && look != null && look.lanes() != null) { look = HexAppearance.keepLanes(look, was); }
                 else if (look != null && look.lanes() != null) { look = SingleLane.directed(look, back < 0 ? 0 : 1 << back); }
                 look = roadLanes(hex, "road", look, look);
-                // A single lane joins only the roads it is drawn to, not every road beside it (#oneSidedRoads).
+                // A single lane joins only the roads it is drawn to, not every road beside it (Hex#setExits).
                 if (look != null && look.lanes() != null) { hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), true, exits)); }
             }
             // Shape selectors belong to the ground; a deck keeps the chosen surface and junction controls.
@@ -3155,22 +3158,26 @@ public final class BoardEditorSession {
      * each of its arms runs as the run beyond it does ({@link SingleLane#inbound}).
      */
     private void singleLaneRuns() {
-        oneSidedRoads();
+        // A hex's vote is weighty where it was a single lane before the stroke and keeps the way it ran: an extension
+        // joined to a run does not outvote it, even where the run's end gains an exit.
         Set<Coords> fresh = new HashSet<>();
+        boolean touched = false;
         for (var entry : stroke.entrySet()) {
             Hex before = entry.getValue(), after = board().getHex(entry.getKey());
-            if (!java.util.Objects.equals(before.getAppearance().get(SingleLane.OWNER), after.getAppearance().get(SingleLane.OWNER))
-                  || before.containsTerrain(Terrains.ROAD) != after.containsTerrain(Terrains.ROAD)
+            touched |= !java.util.Objects.equals(before.getAppearance().get(SingleLane.OWNER),
+                  after.getAppearance().get(SingleLane.OWNER)) || before.containsTerrain(Terrains.ROAD) != after.containsTerrain(Terrains.ROAD)
                   || after.containsTerrain(Terrains.ROAD)
-                        && before.getTerrain(Terrains.ROAD).getExits() != after.getTerrain(Terrains.ROAD).getExits()) {
+                        && before.getTerrain(Terrains.ROAD).getExits() != after.getTerrain(Terrains.ROAD).getExits();
+            if (!SingleLane.single(before) || !java.util.Objects.equals(HexAppearance.inbound(before.getAppearance(), SingleLane.OWNER),
+                  HexAppearance.inbound(after.getAppearance(), SingleLane.OWNER))) {
                 fresh.add(entry.getKey());
             }
         }
-        if (fresh.isEmpty()) { return; }
+        if (!touched) { return; }
         List<SingleLane.Run> runs = new ArrayList<>();
         for (Coords at : List.copyOf(stroke.keySet())) {
             Hex hex = board().getHex(at);
-            if (SingleLane.single(hex) && Integer.bitCount(SingleLane.links(hex, at, this::hexAt)) > 2
+            if (SingleLane.single(hex) && Integer.bitCount(hex.getTerrain(Terrains.ROAD).getExits() & 63) > 2
                   && HexAppearance.inbound(hex.getAppearance(), SingleLane.OWNER) != null) {
                 change(at, h -> appearance(h, SingleLane.OWNER, HexAppearance.withLanes(h.getAppearance().get(SingleLane.OWNER), true, null)));
             }
@@ -3179,28 +3186,6 @@ public final class BoardEditorSession {
             }
         }
         for (var run : runs) { direct(run, SingleLane.forward(this::hexAt, run, at -> !fresh.contains(at))); }
-    }
-
-    /**
-     * A road whose exits follow its neighbours' roads gives up its exit towards a single lane that does not join it back:
-     * a single lane joins only the roads it was drawn to, so a ramp leaving a two-lane road beside another of its hexes
-     * is no fork; the road keeps its other exits, now stored.
-     */
-    private void oneSidedRoads() {
-        for (Coords at : List.copyOf(stroke.keySet())) {
-            Hex hex = board().getHex(at);
-            Terrain road = hex.getTerrain(Terrains.ROAD);
-            if (road == null || road.hasExitsSpecified()) { continue; }
-            int dropped = 0;
-            for (int d = 0; d < 6; d++) {
-                Hex next = hexAt(at.translated(d));
-                if ((road.getExits() & 1 << d) != 0 && SingleLane.single(next) && next.getTerrain(Terrains.ROAD).hasExitsSpecified()
-                      && !next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6)) { dropped |= 1 << d; }
-            }
-            if (dropped == 0) { continue; }
-            int exits = road.getExits() & ~dropped;
-            change(at, h -> h.addTerrain(new Terrain(Terrains.ROAD, road.getLevel(), true, exits)));
-        }
     }
 
     /** Arms a card: {@code owner}'s preset or design {@code key}, or for owner "theme" the Theme card of theme {@code key}. */

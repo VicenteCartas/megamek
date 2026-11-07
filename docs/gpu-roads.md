@@ -228,10 +228,12 @@ same width (`BoardRoad.singleArms`, and `BoardFeatures.singleArms` for captured 
 narrows across itself into the single lane, its centre line ending midway. A single lane forms no roundabout, takes
 no part in a shared triangle roundabout, and is never drawn on a deck or beside a railway: there it is two lanes.
 
-Its direction is stored on the single-lane hexes alone (`inbound`, the sides traffic enters by;
-`SingleLane.inbound` derives an absent one from the neighbouring single lanes). A two-lane hex stores nothing: whether
-a single lane joining it is its entrance or exit is read from that neighbour (`SingleLane.entrance`), so both ends of a
-run and its arrows agree. The single lane has no centre line; a white arrow about 4.3 by 1.2 metres in the middle of
+Its direction is stored on the single-lane hexes alone (`inbound`, the sides traffic enters by). Where none is stored,
+`SingleLane.inbound` gives every hex of a run the same one: as its stored hexes say, else from its end with the least
+coordinates; a single-lane fork or merge takes each side's way from the road beyond it, and two forks that store
+nothing settle their shared border by one fixed rule. A two-lane hex stores nothing: whether a single lane joining it
+is its entrance or exit is read from that neighbour (`SingleLane.entrance`), so both ends of a run and its arrows
+agree. The editor and the scene read the rules through one `SingleLane.View` of their hexes or tiles. The single lane has no centre line; a white arrow about 4.3 by 1.2 metres in the middle of
 each hex points the way its traffic runs (`BoardRoad.arrows`), and a single-lane fork or merge has one per arm. Its
 wheel wear runs down the lane's centre; where it widens into two lanes, the axle parts smoothly into the two lanes'
 (`laneCenter`).

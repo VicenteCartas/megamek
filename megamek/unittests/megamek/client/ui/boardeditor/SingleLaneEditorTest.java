@@ -104,6 +104,68 @@ class SingleLaneEditorTest {
         assertEquals(Integer.valueOf(1 << 5), inbound(session, S3));
     }
 
+    @Test void aShortRampKeepsItsWayWhenALongerStrokeIsDrawnOntoIt() {
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J.translated(0), J, J.translated(3));
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, S1);
+        assertEquals(Integer.valueOf(1 << 5), inbound(session, S1), "A one-hex exit");
+        Coords far = S1.translated(1), farther = far.translated(1), farthest = farther.translated(1);
+        stroke(session, farthest, farther, far, S1);
+        assertEquals(Integer.valueOf(1 << 5), inbound(session, S1), "The ramp it already was keeps its way");
+        assertEquals(0, entrances(session, J), "J keeps its exit");
+        assertEquals(Integer.valueOf(1 << 4), inbound(session, far), "The extension runs on the same way, away from J");
+    }
+
+    @Test void clickingASingleLaneWithTheBrushKeepsItsWay() {
+        var session = ramp();
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, S2);
+        assertEquals(Integer.valueOf(1 << 5), inbound(session, S2));
+        assertEquals(Integer.valueOf(1 << 5), inbound(session, S1));
+    }
+
+    @Test void neighboursOfARampDoNotJoinItOrKeepStoredExits() {
+        var session = new BoardEditorSession();
+        Coords south = J.translated(3), further = south.translated(3);
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J.translated(0), J, south, further);
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, S1, S2);
+        Hex beside = session.board().getHex(south);
+        assertFalse(beside.getTerrain(Terrains.ROAD).hasExitsSpecified(), "The two-lane road's exits still follow its neighbours");
+        assertFalse(beside.containsTerrainExit(Terrains.ROAD, south.direction(S1)), "It does not join the ramp it borders");
+        assertEquals(1 << 5 | 1 << 2, session.board().getHex(S1).getTerrain(Terrains.ROAD).getExits(),
+              "The ramp joins J and the next ramp hex alone");
+        inspect(session, further);
+        send(session, Action.REMOVE_COMPONENT, "", "road");
+        assertFalse(session.board().getHex(south).containsTerrainExit(Terrains.ROAD, 3), "Nothing dangles where a road was removed");
+    }
+
+    @Test void anUnstoredRunKeepsTheWayItShowsWhenANeighbourIsEdited() throws Exception {
+        var session = ramp();
+        // A hand-written board: the run's lanes but no stored direction.
+        for (Coords at : List.of(S1, S2, S3)) {
+            Hex hex = session.board().getHex(at).duplicate();
+            hex.setAppearance(java.util.Map.of("road", HexAppearance.withLanes(null, true, null)));
+            session.board().setHex(at, hex);
+        }
+        int shown = SingleLane.inbound(session.board().getHex(S2), S2, session.board()::getHex);
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, S3.translated(1), S3.translated(1).translated(0));
+        assertEquals(Integer.valueOf(shown), inbound(session, S2), "An edit beside it stores the way it already showed");
+    }
+
+    private static int entrances(BoardEditorSession session, Coords at) {
+        int result = 0;
+        for (int side = 0; side < 6; side++) {
+            if (SingleLane.entrance(session.board().getHex(at), at, side, session.board()::getHex)) { result |= 1 << side; }
+        }
+        return result;
+    }
+
     @Test void theInspectorNarrowsOrWidensAHexAndANewSingleLaneFollowsItsNeighbours() {
         var session = ramp();
         inspect(session, S2);

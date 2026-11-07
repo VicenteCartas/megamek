@@ -141,7 +141,8 @@ Other components keep their existing appearance fields (`variant`, `asset`, `uid
 `rotation`, `tracks`, `beside`, `trafficControl`, `lanes`, `inbound`) subject to owner validation. Only the ground `road`
 appearance holds `lanes`: `1` is a single, one-way lane, and two lanes, the default, are stored as none (a saved `2` reads
 as none). Its `inbound` lists the sides traffic enters the hex by, by name (`"inbound": ["nw"]`), and needs a single lane;
-without it the direction follows the neighbouring single lanes. A board flip reflects it with the road's exits. Both are
+without it, every hex of a run derives one direction: as its stored hexes say, else from its end with the least
+coordinates (`SingleLane.inbound`). A board flip reflects it with the road's exits. Both are
 cosmetic: rules and the 2D views ignore them. The internal `footprint` and `kitVariant`
 appearance owners are folded into the building's appearance when saving.
 

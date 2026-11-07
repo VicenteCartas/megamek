@@ -334,30 +334,34 @@ final class BoardRoad {
      * (SingleLane#inbound), a two-lane road's entrances.
      */
     static int inbound(BoardScene scene, BoardScene.Tile tile, int single) {
-        if (single == 0 && !singleLane(tile)) { return 0; }
-        IntFunction<Integer> stored = d -> {
-            var next = scene.tile(tile.coords().translated(d));
-            return singleLane(next) && (next.roadExits() & 1 << (d + 3) % 6) != 0
-                  ? HexAppearance.inbound(next.appearance(), SingleLane.OWNER) : null;
-        };
+        var lanes = lanes(scene);
         // A single lane's every arm runs its way, those at another road's width too.
-        if (singleLane(tile)) {
-            return SingleLane.inbound(tile.roadExits() & 63, HexAppearance.inbound(tile.appearance(), SingleLane.OWNER), stored);
-        }
+        if (singleLane(tile)) { return SingleLane.inbound(lanes, tile.coords()); }
         int result = 0;
         for (int d = 0; d < 6; d++) {
-            if ((single & 1 << d) == 0) { continue; }
-            var next = scene.tile(tile.coords().translated(d));
-            int theirs = SingleLane.inbound(next.roadExits() & 63, HexAppearance.inbound(next.appearance(), SingleLane.OWNER),
-                  e -> {
-                      var beyond = scene.tile(next.coords().translated(e));
-                      return singleLane(beyond) && (beyond.roadExits() & 1 << (e + 3) % 6) != 0
-                            ? HexAppearance.inbound(beyond.appearance(), SingleLane.OWNER) : null;
-                  });
-            // Traffic leaving the single lane through our shared border enters this hex: an entrance.
-            if ((theirs & 1 << (d + 3) % 6) == 0) { result |= 1 << d; }
+            if ((single & 1 << d) != 0 && SingleLane.entrance(lanes, tile.coords(), d)) { result |= 1 << d; }
         }
         return result;
+    }
+
+    /** The scene's tiles as the single-lane rules read them, as BoardFeatures reads the board's hexes (SingleLane#view). */
+    static SingleLane.View lanes(BoardScene scene) {
+        return new SingleLane.View() {
+            @Override
+            public boolean single(Coords at) { return singleLane(scene.tile(at)); }
+
+            @Override
+            public int exits(Coords at) {
+                var tile = scene.tile(at);
+                return tile == null || tile.road() == Kind.NONE ? 0 : tile.roadExits() & 63;
+            }
+
+            @Override
+            public Integer stored(Coords at) {
+                var tile = scene.tile(at);
+                return tile == null ? null : HexAppearance.inbound(tile.appearance(), SingleLane.OWNER);
+            }
+        };
     }
 
     /**

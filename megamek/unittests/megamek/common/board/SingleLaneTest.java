@@ -80,22 +80,65 @@ class SingleLaneTest {
     }
 
     @Test
-    void unstoredDirectionsFollowTheirNeighboursAndElseTheLowestSide() {
+    void unstoredDirectionsRunOneWayAlongTheWholeRun() {
         var board = ramp(null);
         Coords first = J.translated(2), second = first.translated(2), third = second.translated(2);
-        // Nothing stored anywhere: each two-way course enters by its lowest side, as its neighbours do, so they agree.
-        assertEquals(4, SingleLane.inbound(board.get(first), first, board::get));
-        assertEquals(4, SingleLane.inbound(board.get(second), second, board::get));
-        // One stored neighbour decides the others' shared sides.
-        board.put(second, road(4 | 32, true, 32));
-        assertEquals(32, SingleLane.inbound(board.get(first), first, board::get), "Traffic leaving it enters the second hex");
-        assertEquals(32, SingleLane.inbound(board.get(third), third, board::get), "Traffic leaving the second hex enters this one");
-        assertTrue(SingleLane.entrance(board.get(J), J, 2, board::get) == false, "So the ramp is J's exit");
-        // The core rule, as the 3D board's scene reads it.
-        assertEquals(1, SingleLane.inbound(9, null, d -> null));
-        assertEquals(8, SingleLane.inbound(9, null, d -> d == 0 ? 8 : null), "A neighbour entered across our border takes our traffic out");
-        assertEquals(1, SingleLane.inbound(9, null, d -> d == 0 ? 0 : null));
-        assertEquals(1 | 8, SingleLane.inbound(9, 1 | 8, d -> null), "A stored direction is kept as it is");
+        // Nothing stored anywhere: the run runs from its end with the least coordinates, every hex of it alike.
+        for (Coords at : List.of(first, second, third)) {
+            assertEquals(32, SingleLane.inbound(board.get(at), at, board::get), at + " runs away from J");
+        }
+        assertFalse(SingleLane.entrance(board.get(J), J, 2, board::get), "So the ramp is J's exit");
+        // One stored hex turns the rest of its run with it.
+        board.put(second, road(4 | 32, true, 4));
+        for (Coords at : List.of(first, second, third)) {
+            assertEquals(4, SingleLane.inbound(board.get(at), at, board::get), at + " runs towards J");
+        }
+        assertTrue(SingleLane.entrance(board.get(J), J, 2, board::get));
+        assertEquals(1 | 8, SingleLane.inbound(road(9, true, 1 | 8), J, board::get), "A stored direction is kept as it is");
+    }
+
+    @Test
+    void unstoredBendsAgreeAcrossTheirBorders() {
+        Map<Coords, Hex> board = new HashMap<>();
+        Coords a = J, b = J.translated(2);
+        board.put(a, road(1 | 4, true, null));
+        board.put(b, road(32 | 4, true, null));
+        int out = SingleLane.inbound(board.get(a), a, board::get), in = SingleLane.inbound(board.get(b), b, board::get);
+        assertEquals((out & 4) == 0, (in & 32) != 0, "Traffic leaving one by their border enters the other");
+    }
+
+    @Test
+    void adjacentForksThatStoreNothingAgreeAcrossTheirBorder() {
+        Map<Coords, Hex> board = new HashMap<>();
+        Coords f1 = J, f2 = J.translated(2);
+        board.put(f1, road(1 | 4 | 8, true, null));
+        board.put(f2, road(32 | 2 | 8, true, null));
+        board.put(f1.translated(0), road(9, true, 1));
+        board.put(f1.translated(3), road(9, true, 1));
+        board.put(f2.translated(1), road(2 | 16, true, 2));
+        board.put(f2.translated(3), road(9, true, 1));
+        int one = SingleLane.inbound(board.get(f1), f1, board::get), two = SingleLane.inbound(board.get(f2), f2, board::get);
+        assertTrue(((one & 4) != 0) != ((two & 32) != 0), "Exactly one of them sends traffic across: " + one + ", " + two);
+    }
+
+    @Test
+    void aRunEndingOnADeckOrTheBoardsEdgeStillHasAWayIn() {
+        Map<Coords, Hex> board = new HashMap<>();
+        Coords first = J, second = J.translated(3);
+        // North of the first hex is a bridge deck (no ground road), south of the second the two-lane road it joins.
+        board.put(first, road(9, true, null));
+        board.put(second, road(9, true, null));
+        board.put(second.translated(3), road(9, false, null));
+        var run = SingleLane.run(board::get, first, -1);
+        assertEquals(0, run.steps().getFirst().back(), "The run starts by its open north side");
+        assertEquals(1, run.steps().getFirst().inbound(true), "So running forwards, traffic enters there");
+        assertEquals(1, SingleLane.inbound(board.get(first), first, board::get));
+        assertTrue(SingleLane.entrance(board.get(second.translated(3)), second.translated(3), 0, board::get),
+              "Its traffic runs on into the two-lane road: an entrance...");
+        board.put(first, road(9, true, 8));
+        board.put(second, road(9, true, 8));
+        assertEquals(8, SingleLane.inbound(board.get(first), first, board::get), "Stored the other way, it leaves by the deck");
+        assertFalse(SingleLane.entrance(board.get(second.translated(3)), second.translated(3), 0, board::get), "...or an exit");
     }
 
     @Test
@@ -125,7 +168,7 @@ class SingleLaneTest {
         assertNotNull(fromJ);
         assertEquals(List.of(first, second, third), fromJ.steps().stream().map(SingleLane.Step::at).toList());
         assertEquals(5, fromJ.steps().getFirst().back(), "The run starts across J's border");
-        assertEquals(-1, fromJ.steps().getLast().ahead(), "A dead end closes it");
+        assertEquals(2, fromJ.steps().getLast().ahead(), "It ends by its open side, where its road stops");
         for (Coords start : List.of(first, second, third)) {
             var whole = SingleLane.run(board::get, start, -1);
             assertEquals(3, whole.steps().size());
@@ -149,8 +192,8 @@ class SingleLaneTest {
         var board = ramp(true);
         Coords first = J.translated(2), second = first.translated(2), third = second.translated(2);
         var run = SingleLane.run(board::get, first, 5);
-        // Run backwards, the dead end lets no traffic in.
-        board.put(third, road(4 | 32, true, 0));
+        // Run backwards, traffic enters the end by its open side.
+        board.put(third, road(4 | 32, true, 4));
         assertTrue(SingleLane.forward(board::get, run, at -> !at.equals(third)), "Two old hexes outvote a new one");
         assertFalse(SingleLane.forward(board::get, run, at -> at.equals(third)), "One old hex outvotes two new ones");
         board.put(first, road(4 | 32, true, 4));

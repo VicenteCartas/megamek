@@ -2,12 +2,13 @@
 package megamek.common.board;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.IntFunction;
 import java.util.function.Predicate;
 
 import megamek.common.Hex;
@@ -22,13 +23,52 @@ import megamek.common.units.Terrains;
  * <p>
  * Its direction is stored on the single-lane hexes alone ({@link HexAppearance#inbound}): the sides through which traffic
  * enters each. A two-lane hex stores nothing; whether a single-lane road joining it is an entrance or an exit follows from
- * that neighbour ({@link #entrance}), so both ends of a run always agree with its arrows.
+ * that neighbour ({@link #entrance}), so both ends of a run always agree with its arrows. Where no direction is stored,
+ * every hex of a run derives the same one ({@link #inbound}). The rules read a board through a {@link View}, so the
+ * editor's hexes and the 3D board's scene apply them alike.
  */
 public final class SingleLane {
     /** The owner whose appearance stores the lanes: ground roads only, never a bridge deck's. */
     public static final String OWNER = "road";
 
     private SingleLane() { }
+
+    /** What the single-lane rules read of a board, hex by hex; off the board, a hex has no road. */
+    public interface View {
+        /** Whether the hex's ground road is a single lane ({@link SingleLane#single(Hex)}). */
+        boolean single(Coords at);
+
+        /** The sides its ground road leaves by; 0 without one. */
+        int exits(Coords at);
+
+        /** Its single lane's stored direction ({@link HexAppearance#inbound}); null where none is stored. */
+        Integer stored(Coords at);
+    }
+
+    /** A board's hexes as the single-lane rules read them. */
+    public static View view(Function<Coords, Hex> board) {
+        return new View() {
+            @Override
+            public boolean single(Coords at) { return SingleLane.single(board.apply(at)); }
+
+            @Override
+            public int exits(Coords at) {
+                Hex hex = board.apply(at);
+                return hex != null && hex.containsTerrain(Terrains.ROAD) ? hex.getTerrain(Terrains.ROAD).getExits() & 63 : 0;
+            }
+
+            @Override
+            public Integer stored(Coords at) {
+                Hex hex = board.apply(at);
+                return hex == null ? null : HexAppearance.inbound(hex.getAppearance(), OWNER);
+            }
+        };
+    }
+
+    /** The board with {@code hex} at {@code at}, which it may not hold yet. */
+    private static View view(Hex hex, Coords at, Function<Coords, Hex> board) {
+        return view(where -> where.equals(at) ? hex : board.apply(where));
+    }
 
     /** Whether a hex's ground road is the marked, paved kind (not an alley, dirt or gravel) a single lane may narrow. */
     public static boolean paved(Hex hex) {
@@ -46,83 +86,85 @@ public final class SingleLane {
     }
 
     /** The sides by which a hex's ground road connects to a neighbour's: both have the road and the reciprocal exit. */
-    public static int links(Hex hex, Coords at, Function<Coords, Hex> board) {
-        if (hex == null || !hex.containsTerrain(Terrains.ROAD)) { return 0; }
-        int result = 0;
+    public static int links(View board, Coords at) {
+        int exits = board.exits(at), result = 0;
         for (int d = 0; d < 6; d++) {
-            if (!hex.containsTerrainExit(Terrains.ROAD, d)) { continue; }
-            Hex next = board.apply(at.translated(d));
-            if (next != null && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6)) { result |= 1 << d; }
+            if ((exits & 1 << d) != 0 && (board.exits(at.translated(d)) & 1 << (d + 3) % 6) != 0) { result |= 1 << d; }
         }
         return result;
     }
 
-    /**
-     * The sides by which traffic enters a single-lane hex, among its road exits: its stored direction where one is stored;
-     * otherwise each side towards a single-lane neighbour with a stored direction follows that neighbour, and the rest
-     * are settled so that a two-way course has one way in and one way out (its lowest side in, where nothing decides).
-     * Zero for a hex that is not single-lane.
-     */
-    public static int inbound(Hex hex, Coords at, Function<Coords, Hex> board) {
-        if (!single(hex)) { return 0; }
-        return inbound(hex.getTerrain(Terrains.ROAD).getExits() & 63, HexAppearance.inbound(hex.getAppearance(), OWNER), d -> {
-            Hex next = board.apply(at.translated(d));
-            return single(next) && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6)
-                  ? HexAppearance.inbound(next.getAppearance(), OWNER) : null;
-        });
+    public static int links(Hex hex, Coords at, Function<Coords, Hex> board) { return links(view(hex, at, board), at); }
+
+    /** Whether a single-lane hex continues a run: at most two sides, so its traffic has one way through. */
+    private static boolean course(View board, Coords at) {
+        return board.single(at) && Integer.bitCount(board.exits(at)) <= 2;
     }
 
     /**
-     * {@link #inbound(Hex, Coords, Function)} from what it reads, shared by the editor and the 3D board's scene: a single
-     * lane's road {@code exits}, its {@code stored} direction (null where none is stored), and per side the stored
-     * direction of a connected single-lane neighbour ({@code neighbours}; null where there is none or it stores none).
+     * The sides by which traffic enters a single-lane hex, among its road exits; zero for a hex that is not single-lane.
+     * Its stored direction where one is stored. Otherwise a hex of a run runs as the run does ({@link #forward}): as its
+     * stored hexes say, or else from its start to its end, so every hex of it derives the same way. A fork or merge's
+     * single-lane sides run as the roads beyond them do, two forks that store nothing by one fixed rule both read alike
+     * across their border (traffic crosses it into the hex whose side it is numbered 3 to 5 on); its other sides let
+     * traffic in when none of those does, and out otherwise.
      */
-    public static int inbound(int exits, Integer stored, IntFunction<Integer> neighbours) {
-        exits &= 63;
+    public static int inbound(View board, Coords at) {
+        if (!board.single(at)) { return 0; }
+        int exits = board.exits(at);
+        Integer stored = board.stored(at);
         if (stored != null) { return stored & exits; }
+        if (course(board, at)) {
+            Run run = run(board, at, -1);
+            boolean forward = forward(board, run, where -> true);
+            for (Step step : run.steps()) {
+                if (step.at().equals(at)) { return step.inbound(forward) & exits; }
+            }
+            return 0;
+        }
         int known = 0, in = 0;
         for (int d = 0; d < 6; d++) {
-            if ((exits & 1 << d) == 0) { continue; }
-            Integer theirs = neighbours.apply(d);
-            if (theirs == null) { continue; }
+            Coords next = at.translated(d);
+            int back = (d + 3) % 6;
+            if ((exits & 1 << d) == 0 || !board.single(next) || (board.exits(next) & 1 << back) == 0) { continue; }
             known |= 1 << d;
-            // Traffic entering the neighbour through our shared border leaves this hex by it.
-            if ((theirs & 1 << (d + 3) % 6) == 0) { in |= 1 << d; }
+            boolean arrives = board.stored(next) != null || course(board, next)
+                  ? (inbound(board, next) & 1 << back) == 0 : d >= 3;
+            if (arrives) { in |= 1 << d; }
         }
         int open = exits & ~known;
-        if (open == 0) { return in; }
-        if (Integer.bitCount(exits) == 2) {
-            // One way in and one way out: an open side takes whichever role its known partner leaves.
-            if (known != 0) { return in != 0 ? in : open; }
-            return Integer.lowestOneBit(open);
-        }
-        // A fork or merge: where nothing known lets traffic in, it comes in by the open sides; else they let it out.
         if (known == 0) { return Integer.lowestOneBit(open); }
         return in != 0 ? in : open;
     }
+
+    public static int inbound(Hex hex, Coords at, Function<Coords, Hex> board) { return inbound(view(hex, at, board), at); }
 
     /**
      * Whether traffic from the single-lane road across {@code side} enters this hex: an entrance (on-ramp), whose traffic
      * merges and gives way; false for an exit (off-ramp), which traffic leaves this hex by, or when no single-lane road
      * joins there. Read from the neighbour, which alone stores its direction.
      */
-    public static boolean entrance(Hex hex, Coords at, int side, Function<Coords, Hex> board) {
+    public static boolean entrance(View board, Coords at, int side) {
         Coords next = at.translated(side);
-        Hex neighbour = board.apply(next);
-        if (hex == null || !hex.containsTerrainExit(Terrains.ROAD, side) || !single(neighbour)
-              || !neighbour.containsTerrainExit(Terrains.ROAD, (side + 3) % 6)) { return false; }
-        return (inbound(neighbour, next, board) & 1 << (side + 3) % 6) == 0;
+        int back = (side + 3) % 6;
+        if ((board.exits(at) & 1 << side) == 0 || !board.single(next) || (board.exits(next) & 1 << back) == 0) { return false; }
+        return (inbound(board, next) & 1 << back) == 0;
+    }
+
+    public static boolean entrance(Hex hex, Coords at, int side, Function<Coords, Hex> board) {
+        return entrance(view(hex, at, board), at, side);
     }
 
     /** The sides of this hex where a single-lane road joins it, connected both ways. */
-    public static int joined(Hex hex, Coords at, Function<Coords, Hex> board) {
-        int result = 0;
-        int links = links(hex, at, board);
+    public static int joined(View board, Coords at) {
+        int links = links(board, at), result = 0;
         for (int d = 0; d < 6; d++) {
-            if ((links & 1 << d) != 0 && single(board.apply(at.translated(d)))) { result |= 1 << d; }
+            if ((links & 1 << d) != 0 && board.single(at.translated(d))) { result |= 1 << d; }
         }
         return result;
     }
+
+    public static int joined(Hex hex, Coords at, Function<Coords, Hex> board) { return joined(view(hex, at, board), at); }
 
     /**
      * One hex of a {@link Run}: its side towards the previous hex, or the road beyond the run's start ({@code back}), and
@@ -141,65 +183,52 @@ public final class SingleLane {
         public boolean contains(Coords at) { return steps.stream().anyMatch(step -> step.at().equals(at)); }
     }
 
-    /** Whether a single-lane hex continues a run: at most two connected sides, so its traffic has one way through. */
-    private static boolean course(Hex hex, Coords at, Function<Coords, Hex> board) {
-        return single(hex) && Integer.bitCount(links(hex, at, board)) <= 2;
-    }
+    private static final Comparator<Coords> LEAST = Comparator.comparingInt(Coords::getX).thenComparingInt(Coords::getY);
 
     /**
      * The run of single-lane hexes through {@code start}, entered from its side {@code from} (-1 to take the whole run in
-     * the board's own order): it continues through single-lane hexes of one course each and stops before a two-lane road,
-     * a single-lane fork or merge, or a dead end. Null when {@code start} is not such a hex.
+     * its own order, from its end with the least coordinates): it continues through single-lane hexes of one course each,
+     * joined both ways, and stops before a two-lane road, a single-lane fork or merge, a bridge deck, the board's edge or
+     * a dead end, whose side it then leaves by. Null when {@code start} is not such a hex.
      */
-    public static Run run(Function<Coords, Hex> board, Coords start, int from) {
-        Hex hex = board.apply(start);
-        if (!course(hex, start, board)) { return null; }
-        if (from >= 0) { return (links(hex, start, board) & 1 << from) == 0 ? null : walk(board, start, from); }
-        // Walk back to the run's own start, so that every hex of it finds the same run in the same order.
-        int links = links(hex, start, board);
+    public static Run run(View board, Coords start, int from) {
+        if (!course(board, start)) { return null; }
+        int exits = board.exits(start);
+        if (from >= 0) { return (exits & 1 << from) == 0 ? null : walk(board, start, from); }
         Coords at = start;
-        int toward = links == 0 ? -1 : Integer.numberOfTrailingZeros(links);
+        int toward = exits == 0 ? -1 : Integer.numberOfTrailingZeros(exits);
         Set<Coords> seen = new HashSet<>(List.of(start));
         while (toward >= 0) {
             Coords previous = at.translated(toward);
-            Hex prior = board.apply(previous);
-            if (!course(prior, previous, board)) { break; }
-            if (!seen.add(previous)) {
-                // A closed ring has no start: begin it at its least coordinates.
-                return loop(board, seen.stream().min(LEAST).orElseThrow());
-            }
-            int others = links(prior, previous, board) & ~(1 << (toward + 3) % 6);
+            if (!course(board, previous) || (board.exits(previous) & 1 << (toward + 3) % 6) == 0) { break; }
+            if (!seen.add(previous)) { return loop(board, seen.stream().min(LEAST).orElseThrow()); }
+            int others = board.exits(previous) & ~(1 << (toward + 3) % 6);
             at = previous;
             toward = others == 0 ? -1 : Integer.numberOfTrailingZeros(others);
         }
-        // Whichever hex it was found from, a run starts at its end with the least coordinates.
         Run found = walk(board, at, toward);
         var last = found.steps().getLast();
         if (!found.loop() && LEAST.compare(last.at(), at) < 0) { return walk(board, last.at(), last.ahead()); }
         return found;
     }
 
-    private static final java.util.Comparator<Coords> LEAST = java.util.Comparator.comparingInt(Coords::getX)
-          .thenComparingInt(Coords::getY);
+    public static Run run(Function<Coords, Hex> board, Coords start, int from) { return run(view(board), start, from); }
 
     /** The run from {@code start}, entered from its side {@code from} (-1 where the road starts there). */
-    private static Run walk(Function<Coords, Hex> board, Coords start, int from) {
+    private static Run walk(View board, Coords start, int from) {
         List<Step> steps = new ArrayList<>();
         Set<Coords> seen = new HashSet<>();
         Coords at = start;
         int back = from;
         while (true) {
-            Hex hex = board.apply(at);
             seen.add(at);
-            int ahead = links(hex, at, board) & ~(back < 0 ? 0 : 1 << back);
+            int ahead = board.exits(at) & ~(back < 0 ? 0 : 1 << back);
             int side = ahead == 0 ? -1 : Integer.numberOfTrailingZeros(ahead);
             steps.add(new Step(at, back, side));
             if (side < 0) { break; }
             Coords next = at.translated(side);
-            if (seen.contains(next)) {
-                return new Run(List.copyOf(steps), next.equals(start));
-            }
-            if (!course(board.apply(next), next, board)) { break; }
+            if (seen.contains(next)) { return new Run(List.copyOf(steps), next.equals(start)); }
+            if (!course(board, next) || (board.exits(next) & 1 << (side + 3) % 6) == 0) { break; }
             at = next;
             back = (side + 3) % 6;
         }
@@ -207,10 +236,10 @@ public final class SingleLane {
     }
 
     /** A closed ring of single-lane hexes, from {@code start} round in its lowest side's direction. */
-    private static Run loop(Function<Coords, Hex> board, Coords start) {
-        int links = links(board.apply(start), start, board);
-        int ahead = Integer.numberOfTrailingZeros(links);
-        int back = Integer.numberOfTrailingZeros(links & ~(1 << ahead));
+    private static Run loop(View board, Coords start) {
+        int exits = board.exits(start);
+        int ahead = Integer.numberOfTrailingZeros(exits);
+        int back = Integer.numberOfTrailingZeros(exits & ~(1 << ahead));
         return walk(board, start, back);
     }
 
@@ -219,13 +248,12 @@ public final class SingleLane {
      * hex votes, those {@code weighty} carrying ten times the weight (the hexes it already had, against a stroke's new
      * ones); a tie runs forwards.
      */
-    public static boolean forward(Function<Coords, Hex> board, Run run, Predicate<Coords> weighty) {
+    public static boolean forward(View board, Run run, Predicate<Coords> weighty) {
         int votes = 0;
         for (Step step : run.steps()) {
-            Hex hex = board.apply(step.at());
-            Integer stored = hex == null ? null : HexAppearance.inbound(hex.getAppearance(), OWNER);
+            Integer stored = board.stored(step.at());
             if (stored == null) { continue; }
-            int exits = hex.getTerrain(Terrains.ROAD).getExits() & 63;
+            int exits = board.exits(step.at());
             int mask = stored & exits;
             int weight = weighty.test(step.at()) ? 10 : 1;
             if (mask == (step.inbound(true) & exits) && mask != (step.inbound(false) & exits)) { votes += weight; }
@@ -234,22 +262,26 @@ public final class SingleLane {
         return votes >= 0;
     }
 
+    public static boolean forward(Function<Coords, Hex> board, Run run, Predicate<Coords> weighty) {
+        return forward(view(board), run, weighty);
+    }
+
     /** The single-lane road appearance with its direction {@code inbound}, keeping the rest of {@code look}. */
     public static HexAppearance directed(HexAppearance look, int inbound) {
         return HexAppearance.withLanes(look, true, inbound & 63);
     }
 
-    /** The hexes of the runs through {@code at}'s single-lane sides; {@code at}'s own run where it continues one. */
+    /** The runs through {@code at} and its sides: its own where it continues one, and its neighbours'. */
     public static List<Run> runsAround(Function<Coords, Hex> board, Coords at) {
+        View lanes = view(board);
         List<Run> result = new ArrayList<>();
-        Hex hex = board.apply(at);
-        Run own = run(board, at, -1);
+        Run own = run(lanes, at, -1);
         if (own != null) { result.add(own); }
-        int links = links(hex, at, board);
+        int exits = lanes.exits(at);
         for (int d = 0; d < 6; d++) {
             Coords next = at.translated(d);
-            if ((links & 1 << d) == 0 || own != null && own.contains(next)) { continue; }
-            Run beside = run(board, next, -1);
+            if ((exits & 1 << d) == 0 || own != null && own.contains(next)) { continue; }
+            Run beside = run(lanes, next, -1);
             if (beside != null && result.stream().noneMatch(existing -> existing.contains(next))) { result.add(beside); }
         }
         return result;
@@ -270,7 +302,7 @@ public final class SingleLane {
     public static Map<String, HexAppearance> flip(Map<String, HexAppearance> appearance, boolean horizontal, boolean vertical) {
         HexAppearance road = appearance.get(OWNER);
         if (road == null || road.inbound() == null) { return appearance; }
-        var result = new java.util.LinkedHashMap<>(appearance);
+        var result = new LinkedHashMap<>(appearance);
         result.put(OWNER, flip(road, horizontal, vertical));
         return result;
     }
