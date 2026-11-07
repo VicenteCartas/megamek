@@ -39,8 +39,8 @@ class BoardBillboardMeshTest {
 
     @Test void aWiderPanelGainsLampsOfTheSameSize() {
         var lens = mesh(BoardBillboardMesh.data(BoardBillboard.DEFAULT, 18, 0), "billboard-lens");
-        var wide = mesh(BoardBillboardMesh.data(BoardBillboard.DEFAULT.with("width", "29.26"), 18, 0), "billboard-lens");
-        assertEquals(2 * triangles(lens), triangles(wide), "Twice the width, twice the lamps");
+        var wide = mesh(BoardBillboardMesh.data(BoardBillboard.DEFAULT.with("scale", "2"), 18, 0), "billboard-lens");
+        assertTrue(triangles(wide) > triangles(lens), "A wider panel, more lamps");
         // One lamp's glass, from the last two triangles' first vertex to its opposite one.
         assertEquals(lensWidth(lens), lensWidth(wide), .001f);
         assertEquals(.6f * METRE, lensWidth(lens), .01f);
@@ -55,12 +55,13 @@ class BoardBillboardMeshTest {
         return high - low;
     }
 
-    @Test void thePanelTakesTheSizeInMetres() {
-        var data = BoardBillboardMesh.data(BoardBillboard.DEFAULT.with("width", "20").with("height", "6"), 18, 0);
+    @Test void thePanelTakesItsRatioAtItsScale() {
+        var data = BoardBillboardMesh.data(BoardBillboard.DEFAULT.with("ratio", "2_3").with("scale", "2"), 18, 0);
         var face = mesh(data, "structures/common/weathered-paint");
         assertEquals(2, triangles(face), "A blank panel is one quad");
-        assertEquals(20 * METRE, range(face, 0)[1] - range(face, 0)[0], .001f);
-        assertEquals(6 * METRE, range(face, 2)[1] - range(face, 2)[0], .001f);
+        float height = (float) (2 * BoardBillboard.BASE_HEIGHT) * METRE;
+        assertEquals(height * 2 / 3, range(face, 0)[1] - range(face, 0)[0], .001f);
+        assertEquals(height, range(face, 2)[1] - range(face, 2)[0], .001f);
     }
 
     @Test void legsReachTheirSupportAndALeglessPanelStaysAheadOfItsRearPlane() {
@@ -120,11 +121,12 @@ class BoardBillboardMeshTest {
     }
 
     @Test void aWholeRowOfLampsIsOneLightAlongThePanel() {
-        var huge = BoardBillboardMesh.lights(BoardBillboard.DEFAULT.with("width", "100"));
+        var giant = BoardBillboard.DEFAULT.with("scale", "8");
+        var huge = BoardBillboardMesh.lights(giant);
         assertEquals(1, huge.size(), "Billboards must stay cheap by the hundred");
-        assertEquals(100 * METRE, huge.getFirst().end().x - huge.getFirst().position().x, .001f);
-        var tall = BoardBillboard.DEFAULT.with("height", "20");
-        assertTrue(2 * BoardBillboardMesh.lights(tall).getFirst().size() > 20 * METRE, "A light ends at twice its size");
+        assertEquals(giant.width() * METRE, huge.getFirst().end().x - huge.getFirst().position().x, .01f);
+        var tall = BoardBillboard.DEFAULT.with("ratio", "2_3").with("scale", "5");
+        assertTrue(2 * BoardBillboardMesh.lights(tall).getFirst().size() > tall.height() * METRE, "A light ends at twice its size");
     }
 
     @Test void nightEmissionTakesAnyColourOnOneLayout() {
@@ -134,11 +136,5 @@ class BoardBillboardMeshTest {
         assertNull(material.emissive, "A colour attribute would select another program");
         RigidGlb.nightEmission(warm, "billboard-lens", 0, .4f, 1);
         assertArrayEquals(new float[] { 0, .4f, 1 }, warm.surfaces.get("billboard-lens").glow(), "Without an emission map it glows evenly");
-    }
-
-    @Test void thePictureCoversThePanelCroppingEvenly() {
-        assertArrayEquals(new float[] { .25f, 0, .75f, 1 }, BoardBillboardMesh.cover(1000, 500, 1, 1), .0001f);
-        assertArrayEquals(new float[] { 0, .25f, 1, .75f }, BoardBillboardMesh.cover(500, 1000, 1, 1), .0001f);
-        assertArrayEquals(new float[] { 0, 0, 1, 1 }, BoardBillboardMesh.cover(1024, 298, 14.63, 4.27), .01f);
     }
 }

@@ -34,7 +34,6 @@ import megamek.common.IndustrialElevator;
 import megamek.common.board.Board;
 import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardConnectivityCheck;
-import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.BoardFile;
@@ -2259,7 +2258,7 @@ public final class BoardEditorSession {
     private static BoardDecoration pickArt(BoardDecoration object, BoardBillboard shown) {
         var billboard = object.billboard();
         if (!billboard.decals().contains(BoardBillboard.RANDOM)) { return object; }
-        var art = BoardDecalArt.billboards();
+        var art = billboard.art();
         var decals = new ArrayList<>(billboard.decals());
         for (int panel = 0; panel < decals.size(); panel++) {
             if (!decals.get(panel).equals(BoardBillboard.RANDOM)) { continue; }
@@ -2269,7 +2268,7 @@ public final class BoardEditorSession {
             var from = fresh.isEmpty() ? art : fresh;
             decals.set(panel, from.isEmpty() ? "" : from.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(from.size())));
         }
-        return object.withBillboard(new BoardBillboard(decals, billboard.width(), billboard.height(), billboard.legs(), billboard.lights()));
+        return object.withBillboard(billboard.withDecals(decals));
     }
 
     /**

@@ -1,9 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.common.board;
 
-import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -59,19 +57,14 @@ public final class BoardDecalArt {
         return new File(Configuration.dataDir(), "models/board/decals/" + id.substring(id.indexOf('/') + 1) + ".png");
     }
 
-    /** The decal ids of the art a billboard can show: the PNG files of {@code decals/billboards}, in name order. */
-    public static List<String> billboards() {
-        File[] files = image("decal/billboards/-").getParentFile().listFiles((folder, name) -> name.endsWith(".png"));
+    /**
+     * The decal ids of the PNG files in one folder of decal art, in name order; {@code folder} is their id prefix, as
+     * {@code decal/billboards/3_1/}.
+     */
+    public static List<String> folder(String folder) {
+        File[] files = image(folder + "-").getParentFile().listFiles((directory, name) -> name.endsWith(".png"));
         if (files == null) { return List.of(); }
-        return Arrays.stream(files).map(file -> "decal/billboards/" + file.getName().replaceFirst("\\.png$", "")).sorted().toList();
-    }
-
-    /** The pixel width and height in the header of decal {@code id}'s PNG image. */
-    public static int[] imageSize(String id) throws IOException {
-        try (var input = new DataInputStream(new FileInputStream(image(id)))) {
-            input.skipBytes(16);
-            return new int[] { input.readInt(), input.readInt() };
-        }
+        return Arrays.stream(files).map(file -> folder + file.getName().replaceFirst("\\.png$", "")).sorted().toList();
     }
 
     public static Footprint footprint(String id) { return Holder.TABLE.footprints().getOrDefault(id, HEX); }

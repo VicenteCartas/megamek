@@ -54,8 +54,8 @@ public final class BoardFile {
             require(billboard.get("decals").isArray(), "decals must be an array");
             billboard.get("decals").forEach(decal -> decals.add(decal.asText()));
         } else { decals.addAll(fallback.decals()); }
-        return new BoardBillboard(decals, number(billboard, "width", fallback.width()),
-              number(billboard, "height", fallback.height()), bool(billboard, "legs", fallback.legs()),
+        return new BoardBillboard(decals, string(billboard, "ratio", fallback.ratio()),
+              number(billboard, "scale", fallback.scale()), bool(billboard, "legs", fallback.legs()),
               bool(billboard, "lights", fallback.lights()));
     }
 
@@ -512,7 +512,7 @@ public final class BoardFile {
                     var billboard = value.billboard();
                     var settings = object.putObject("billboard");
                     billboard.decals().forEach(settings.putArray("decals")::add);
-                    settings.put("width", billboard.width()).put("height", billboard.height())
+                    settings.put("ratio", billboard.ratio()).put("scale", billboard.scale())
                           .put("legs", billboard.legs()).put("lights", billboard.lights());
                 }
                 if (value.levels() > 0) { object.put("levels", value.levels()); }

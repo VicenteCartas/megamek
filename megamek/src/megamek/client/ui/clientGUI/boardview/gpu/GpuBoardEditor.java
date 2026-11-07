@@ -2326,8 +2326,8 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * A billboard's panel count, one picture card per panel (each opens the picker), the panels' size, its legs and their
-     * height, and its lamps, on the brush or a placed object.
+     * A billboard's aspect ratio, scale and panel count, one picture card per panel (each opens the picker on its ratio's
+     * pictures), its legs and their height, and its lamps, on the brush or a placed object.
      */
     private void billboard(BoardDecoration object, boolean brush) {
         var billboard = object.billboard();
@@ -2341,18 +2341,18 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             Image preview = new Image();
             billboardArt(decal, preview);
             UiButton art = visualCard((panels > 1 ? (i + 1) + " · " : "") + billboardLabel(decal), preview, 64,
-                  () -> openBillboards(decal, panels > 1 ? panel + 1 : 0, action, prefix + "decal" + panel));
+                  () -> openBillboards(billboard, decal, panels > 1 ? panel + 1 : 0, action, prefix + "decal" + panel));
             art.setName("editor-billboard-art-" + i);
             cards.add(art);
         }
-        String count = UiKit.text("BoardEditor.billboard.panels"), widthLabel = UiKit.text("BoardEditor.billboard.width"),
-              heightLabel = UiKit.text("BoardEditor.billboard.height");
+        Table ratio = choice(UiKit.text("BoardEditor.billboard.ratio"), ratioLabel(billboard.ratio()),
+              BoardBillboard.RATIOS.stream().map(value -> new Option(ratioLabel(value), value)).toList(),
+              value -> send(action, prefix + "ratio", value));
+        String count = UiKit.text("BoardEditor.billboard.panels"), scaleLabel = UiKit.text("BoardEditor.billboard.scale");
         UiNumber panelCount = brush ? brushNumber(count, panels, 1, BoardBillboard.MAX_PANELS, 1, action, prefix + "panels")
               : numeric(count, panels, 1, BoardBillboard.MAX_PANELS, 1, action, prefix + "panels");
-        UiNumber width = brush ? brushNumber(widthLabel, billboard.width(), .5, 100, .1, action, prefix + "width")
-              : numeric(widthLabel, billboard.width(), .5, 100, .1, action, prefix + "width");
-        UiNumber height = brush ? brushNumber(heightLabel, billboard.height(), .5, 100, .1, action, prefix + "height")
-              : numeric(heightLabel, billboard.height(), .5, 100, .1, action, prefix + "height");
+        UiNumber scale = brush ? brushNumber(scaleLabel, billboard.scale(), .1, 20, .05, action, prefix + "scale")
+              : numeric(scaleLabel, billboard.scale(), .1, 20, .05, action, prefix + "scale");
         var legs = ui.checkbox(UiKit.text("BoardEditor.billboard.legs"), billboard.legs());
         legs.setName("editor-billboard-legs");
         onChange(legs, () -> send(action, prefix + "legs", Boolean.toString(legs.isTicked())));
@@ -2361,7 +2361,7 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         onChange(lamps, () -> send(action, prefix + "lights", Boolean.toString(lamps.isTicked())));
         UiNumber legHeight = billboard.legs() ? legHeight(object, brush, action) : null;
         if (brush) {
-            brushRow(panelCount, width, height);
+            brushRow(ratio, scale, panelCount);
             if (legHeight != null) { brushRow(legs, legHeight, lamps); } else { brushRow(legs, lamps); }
             brushRow(cards.stream().map(card -> {
                 Table holder = new Table();
@@ -2371,10 +2371,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             return;
         }
         heading(UiKit.text("BoardEditor.billboard"));
+        detail.add(ratio).growX().row();
+        detail.add(scale).row();
         detail.add(panelCount).row();
         cards.forEach(card -> detail.add(card).growX().row());
-        detail.add(width).row();
-        detail.add(height).row();
         detail.add(legs).left().row();
         if (legHeight != null) { detail.add(legHeight).row(); }
         detail.add(lamps).left().row();
@@ -2394,19 +2394,23 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
     }
 
     /**
-     * Opens the gallery on the billboard art for one panel ({@code panel}: its number in a stack, else 0): Random and Blank
-     * first, then every picture of the folder.
+     * Opens the gallery on the billboard's art for one panel ({@code panel}: its number in a stack, else 0): Random and
+     * Blank first, then every picture of its ratio's folder.
      */
-    private void openBillboards(String current, int panel, Action action, String target) {
+    private void openBillboards(BoardBillboard billboard, String current, int panel, Action action, String target) {
         stage.setKeyboardFocus(null); choices.cancel(); numbers.forEach(UiNumber::dismiss);
         List<String> art = new ArrayList<>(List.of(BoardBillboard.RANDOM, ""));
-        art.addAll(BoardDecalArt.billboards());
+        art.addAll(billboard.art());
         billboardCards = art.stream().map(decal -> new GalleryCard(billboardLabel(decal) + (decal.equals(current) ? "  ✓" : ""),
               billboardLabel(decal), image -> billboardArt(decal, image), () -> send(action, target, decal))).toList();
         designOwner = ""; designPage = 0; designQuery = ""; designSearch.field.setText("");
-        designHeading.setText(UiTheme.upper(UiKit.text("BoardEditor.billboard.title") + (panel > 0 ? " " + panel : "")));
+        designHeading.setText(UiTheme.upper(UiKit.text("BoardEditor.billboard.title") + (panel > 0 ? " " + panel : "")
+              + " · " + ratioLabel(billboard.ratio())));
         showDesigns(); designLayer.setVisible(true); designLayer.toFront();
     }
+
+    /** A ratio's folder name as it reads, {@code 3_1} as 3:1. */
+    private static String ratioLabel(String ratio) { return ratio.replace('_', ':'); }
 
     private void billboardArt(String decal, Image image) {
         if (decal.startsWith("decal/")) { thumbnail(BoardDecalArt.image(decal), image); }

@@ -32,14 +32,15 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Billboards in the shared board scene: a bulletin, a square poster, a giant panel, one hung on a building's wall and a
- * plain unlit one, by day and by night; then the editor's art picker. The art is the test's own, removed afterwards, so
- * the shipped folder's contents do not matter.
+ * Billboards in the shared board scene: a bulletin, a 2:1 poster, a 2:3 portrait panel, a giant panel, one hung on a
+ * building's wall and a plain unlit one, by day and by night; then the editor's art picker. The art is the test's own, one
+ * picture per ratio folder, removed afterwards, so the shipped folders' contents do not matter.
  */
 @Tag("on-demand")
 class GpuBillboardSmokeTest {
     private static final File OUTPUT = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "billboards");
-    private static final String WIDE = "decal/billboards/zz-smoke-wide", TALL = "decal/billboards/zz-smoke-tall";
+    private static final String WIDE = "decal/billboards/3_1/zz-smoke-wide", POSTER = "decal/billboards/2_1/zz-smoke-poster",
+          TALL = "decal/billboards/2_3/zz-smoke-tall";
 
     /** Colours mark the corners, a white frame the image's edge: a crop or a flip shows at a glance. */
     private static void art(String decal, int width, int height, Color from, Color to) throws Exception {
@@ -65,11 +66,11 @@ class GpuBillboardSmokeTest {
 
     private static void withArt(Body body) throws Exception {
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
-        art(WIDE, 1024, 512, new Color(30, 90, 170), new Color(240, 120, 40));
-        art(TALL, 512, 1024, new Color(30, 140, 80), new Color(230, 220, 90));
+        art(WIDE, 1536, 512, new Color(30, 90, 170), new Color(240, 120, 40));
+        art(POSTER, 1024, 512, new Color(150, 40, 120), new Color(240, 200, 60));
+        art(TALL, 512, 768, new Color(30, 140, 80), new Color(230, 220, 90));
         try { body.run(); } finally {
-            BoardDecalArt.image(WIDE).delete();
-            BoardDecalArt.image(TALL).delete();
+            for (String decal : List.of(WIDE, POSTER, TALL)) { BoardDecalArt.image(decal).delete(); }
         }
     }
 
@@ -93,18 +94,21 @@ class GpuBillboardSmokeTest {
             for (int x = 0; x < 9; x++) {
                 for (int y = 0; y < 9; y++) { board.setHex(x, y, new Hex(0, "", "grass")); }
             }
-            Coords bulletin = new Coords(3, 4), poster = new Coords(5, 4), giant = new Coords(4, 2), hung = new Coords(6, 6), plain = new Coords(2, 6), stack = new Coords(1, 3);
+            Coords bulletin = new Coords(3, 4), poster = new Coords(5, 4), portrait = new Coords(7, 2), giant = new Coords(4, 2),
+                  hung = new Coords(6, 6), plain = new Coords(2, 6), stack = new Coords(1, 3);
             var defaults = BoardBillboard.DEFAULT;
             board.getHex(bulletin).setDecorations(List.of(billboard("bulletin", 0, 0, 1, defaults.with("decal0", WIDE))));
-            board.getHex(poster).setDecorations(List.of(billboard("poster", 0, 0, 1, defaults.with("decal0", TALL).with("width", "6").with("height", "6"))));
-            board.getHex(giant).setDecorations(List.of(billboard("giant", 0, 0, 1.5, defaults.with("decal0", WIDE).with("width", "36").with("height", "9"))));
+            board.getHex(poster).setDecorations(List.of(billboard("poster", 0, 0, 1, defaults.with("ratio", "2_1").with("decal0", POSTER))));
+            board.getHex(portrait).setDecorations(List.of(billboard("portrait", 0, 0, 1,
+                  defaults.with("ratio", "2_3").with("decal0", TALL).with("scale", "1.5"))));
+            board.getHex(giant).setDecorations(List.of(billboard("giant", 0, 0, 1.5, defaults.with("decal0", WIDE).with("scale", "2.1"))));
             board.setHex(hung.getX(), hung.getY(), new Hex(0, "building:2;bldg_cf:60;bldg_elev:3", "grass"));
             // Its anchor against the building's south wall, its legs off, raised to the wall's middle.
             board.getHex(hung).setDecorations(List.of(billboard("hung", 0, -.5, 1.2, defaults.with("decal0", WIDE).with("legs", "false"))));
             board.getHex(plain).setDecorations(List.of(billboard("plain", 0, 0, 1, defaults.with("lights", "false"))));
             // Three stacked panels with their own pictures, one left blank, on tall legs.
-            board.getHex(stack).setDecorations(List.of(billboard("stack", 0, 0, 3, defaults.with("panels", "3").with("decal0", WIDE)
-                  .with("decal1", TALL).with("decal2", ""))));
+            board.getHex(stack).setDecorations(List.of(billboard("stack", 0, 0, 3, defaults.with("ratio", "2_1").with("panels", "3")
+                  .with("decal0", POSTER).with("decal1", POSTER).with("decal2", ""))));
             var scene = capture(board);
             var failure = new AtomicReference<Throwable>();
             var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1500, 1000); config.setInitialVisible(false);
@@ -121,6 +125,7 @@ class GpuBillboardSmokeTest {
                         Coords middle = new Coords(4, 4);
                         var views = List.of(new View("overview", 0, 0, middle, .55f, 20), new View("front", -45, 25, middle, .55f, 20),
                               new View("bulletin", -45, 25, bulletin, .16f, 24), new View("back", 135, 15, bulletin, .16f, 24),
+                              new View("poster", -45, 25, poster, .16f, 24), new View("portrait", -45, 25, portrait, .16f, 30),
                               new View("hung", -45, 15, hung, .2f, 30), new View("giant", -45, 25, giant, .3f, 36),
                               new View("plain", -45, 25, plain, .16f, 24), new View("stack", -45, 25, stack, .2f, 70),
                               new View("stack-above", 0, 0, stack, .2f, 70));
@@ -146,7 +151,7 @@ class GpuBillboardSmokeTest {
                             }
                         }
                         // One light per billboard with lamps: all but the plain one.
-                        assertEquals(5, lights.size());
+                        assertEquals(6, lights.size());
                     } catch (Throwable error) { failure.set(error); }
                     finally { frame.dispose(); terrain.dispose(); Gdx.app.exit(); }
                 }
@@ -155,7 +160,7 @@ class GpuBillboardSmokeTest {
         });
     }
 
-    @Test void theEditorPicksArtSizesThePanelAndDropsTheLegs() throws Exception {
+    @Test void theEditorPicksArtByRatioScalesThePanelAndDropsTheLegs() throws Exception {
         withArt(() -> {
             var editor = new AtomicReference<BoardEditorSession>();
             Coords at = new Coords(2, 2);
@@ -191,8 +196,9 @@ class GpuBillboardSmokeTest {
                             switch (step) {
                                 case 0 -> { boardCamera.center(BoardGeometry.center(at, 1)); boardCamera.zoom(.5f); }
                                 case 1 -> {
-                                    assertTrue(BoardDecalArt.billboards().containsAll(object.billboard().decals()), "Random picked real art");
+                                    assertTrue(object.billboard().art().containsAll(object.billboard().decals()), "Random picked real art");
                                     assertNotNull(root.findActor("editor-billboard-legs"));
+                                    assertNotNull(root.findActor("editor-choice-Aspect ratio"));
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-inspector.png"));
                                     assertNotNull(root.findActor("editor-billboard-leg-height"));
                                     assertNull(root.findActor("editor-billboard-art-1"), "One panel, one picture");
@@ -201,21 +207,28 @@ class GpuBillboardSmokeTest {
                                 case 2 -> {
                                     assertTrue(root.findActor("editor-design-gallery").isVisible());
                                     assertNotNull(root.findActor("editor-gallery-Random"));
+                                    assertNull(root.findActor("editor-gallery-Zz smoke tall"), "Only the panel's ratio");
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-picker.png"));
-                                    GpuBoardTestUi.click("editor-gallery-Zz smoke tall");
+                                    GpuBoardTestUi.click("editor-gallery-Zz smoke wide");
                                 }
                                 case 3 -> {
                                     assertFalse(root.findActor("editor-design-gallery").isVisible());
-                                    assertEquals(List.of(TALL), object.billboard().decals());
+                                    assertEquals(List.of(WIDE), object.billboard().decals());
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-picked.png"));
-                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.width", "24"), null));
+                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.ratio", "2_3"), null));
                                 }
                                 case 4 -> {
-                                    assertEquals(24, object.billboard().width());
-                                    GpuBoardTestUi.capture(new File(OUTPUT, "editor-wide.png"));
-                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.legs", "false"), null));
+                                    assertEquals(List.of(TALL), object.billboard().decals(), "A new ratio picks from its own folder");
+                                    assertEquals(2.0 / 3, object.billboard().width() / object.billboard().height(), 1e-9);
+                                    GpuBoardTestUi.capture(new File(OUTPUT, "editor-portrait.png"));
+                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.scale", "2"), null));
                                 }
                                 case 5 -> {
+                                    assertEquals(2 * BoardBillboard.BASE_HEIGHT, object.billboard().height(), 1e-9);
+                                    GpuBoardTestUi.capture(new File(OUTPUT, "editor-scaled.png"));
+                                    SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.OBJECT_VALUE, "billboard.legs", "false"), null));
+                                }
+                                case 6 -> {
                                     assertFalse(object.billboard().legs());
                                     assertNull(root.findActor("editor-billboard-leg-height"), "No legs, no leg height");
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-no-legs.png"));
@@ -225,23 +238,23 @@ class GpuBillboardSmokeTest {
                                         editor.get().command(new Command(Action.OBJECT_VALUE, "offset", "2.5"), null);
                                     });
                                 }
-                                case 6 -> {
+                                case 7 -> {
                                     assertEquals(3, object.billboard().panels());
                                     assertNotNull(root.findActor("editor-billboard-art-2"), "A picture card per panel");
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-stack.png"));
                                     GpuBoardTestUi.click("editor-billboard-art-1");
                                 }
-                                case 7 -> {
-                                    assertTrue(root.findActor("editor-design-gallery").isVisible());
-                                    GpuBoardTestUi.click("editor-gallery-Zz smoke wide");
-                                }
                                 case 8 -> {
-                                    assertEquals(WIDE, object.billboard().decals().get(1));
+                                    assertTrue(root.findActor("editor-design-gallery").isVisible());
+                                    GpuBoardTestUi.click("editor-gallery-Blank");
+                                }
+                                case 9 -> {
+                                    assertEquals("", object.billboard().decals().get(1));
                                     assertEquals(TALL, object.billboard().decals().getFirst());
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-stack-picked.png"));
                                     SwingUtilities.invokeAndWait(() -> editor.get().command(new Command(Action.ASSET, "", BoardBillboard.ASSET), null));
                                 }
-                                case 9 -> {
+                                case 10 -> {
                                     assertNotNull(root.findActor("editor-billboard-legs"), "The brush offers the same settings");
                                     GpuBoardTestUi.capture(new File(OUTPUT, "editor-brush.png"));
                                     GpuBoardTestUi.category("transportation");

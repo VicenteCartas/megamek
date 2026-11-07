@@ -1,8 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.List;
 
 import com.badlogic.gdx.math.Matrix4;
@@ -92,13 +90,6 @@ final class BoardBillboardMesh {
         return List.of(new RigidGlb.NightLight(new Vector3(-half, y, z), new Vector3(half, y, z), LIGHT, .6f, height * 1.25f));
     }
 
-    /** The image's rectangle that covers the panel: u, v of its first corner then of its opposite one, the overflow cropped evenly. */
-    static float[] cover(double imageWidth, double imageHeight, double panelWidth, double panelHeight) {
-        double image = imageWidth / imageHeight, panel = panelWidth / panelHeight;
-        float u = (float) Math.min(1, panel / image), v = (float) Math.min(1, image / panel);
-        return new float[] { (1 - u) / 2, (1 - v) / 2, (1 + u) / 2, (1 + v) / 2 };
-    }
-
     private static int repeats(float length, float spacing) { return Math.max(1, Math.round(length / spacing)); }
 
     /** The centre of the {@code index}-th of {@code count} equal bays along a panel of {@code width}. */
@@ -117,18 +108,12 @@ final class BoardBillboardMesh {
         }
     }
 
-    /** One framed panel whose lower edge stands at {@code bottom}, its picture covering it. */
+    /** One framed panel whose lower edge stands at {@code bottom}, its picture (drawn at the panel's ratio) filling it. */
     private static void panel(GeneratedMesh mesh, String decal, float width, float height, float bottom, int lod) {
         float half = width / 2, frame = FRAME * METRE, face = FACE * METRE, sheet = SHEET * METRE, front = FRAME_FRONT * METRE;
         float top = bottom + height;
         boolean art = decal.startsWith("decal/") && BoardDecalArt.image(decal).isFile();
-        float[] uv = { 0, 0, width / 18, height / 18 };
-        if (art) {
-            try {
-                int[] size = BoardDecalArt.imageSize(decal);
-                uv = cover(size[0], size[1], width, height);
-            } catch (IOException failure) { throw new UncheckedIOException(failure); }
-        }
+        float[] uv = art ? new float[] { 0, 0, 1, 1 } : new float[] { 0, 0, width / 18, height / 18 };
         String picture = art ? PICTURE + decal : BLANK;
         // The image's first row is its top: v runs down the panel.
         mesh.quad(picture, vertex(-half, face, bottom, 0, -1, 0, uv[0], uv[3]), vertex(half, face, bottom, 0, -1, 0, uv[2], uv[3]),
