@@ -711,7 +711,9 @@ work for Swing, and item 11 is under investigation.
        need the full centre: the view has its title, the live count of matching units, Clear (the tab's criteria)
        and Done over compact `UiTabs` (Total Warfare, Alpha Strike, Battlefield Support), then the tab's titled
        blocks laid out in as many columns as fit (`control.lg` × 8 each, at most three: two at 2560x1400, one narrow),
-       in a vertical scroll. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
+       in a vertical scroll. With three columns a block can name its column, so Total Warfare balances as movement
+       and construction, unit types and equipment, quirks and unit flags; fewer columns fill the shortest first.
+       Filter chips wrap into a grid across the column. The controls are kit only: `UiRangeInput` for from–to numbers, selects, Any/Yes/No
        segmented flags, filter chips for short choices, `UiPickList` for long ones (quirks, specials, engines,
        cockpits), All/Any segmented where the filter supports both, steppers, and the equipment editor (a search over
        the weapons and equipment with their groups, ≥ or <, a count, Add, AND, OR, brackets, Undo and Clear; the
@@ -1439,16 +1441,18 @@ work for Swing, and item 11 is under investigation.
        Battle Value, Balanced, Faction and Formation. The hand, Roll, the totals and Add stay the same on the right;
        a generator is a `RandomArmyForm.Dealer` in `megamek.client.lobby`, toolkit-free:
        - Battle Value (`BattleValueArmy`, the Swing BV tab): steppers per kind (Meks, vehicles, battle armour,
-         infantry) with the available count or a warning when there are none, the BV budget and design years as
-         ranges, canon units only and padding spare BV with infantry. It deals through `RandomArmyCreator.generateArmy`, whose kept cards
+         infantry) with the available count or a warning when there are none, a line on how the budget is split
+         (by count × average BV per kind, infantry last), the BV budget and design years as ranges, canon units
+         only and padding spare BV with infantry. It deals through `RandomArmyCreator.generateArmy`, whose kept cards
          count toward their kind. The count field hides, since the kinds set the size.
        - Balanced (`BalancedArmy`, the simple lance): balance by BV or tonnage, a target and a tolerance, dealt
          through `SimpleRandomLanceCreator.buildForce` against what the kept cards leave.
        - Faction (`RatGeneratorForm` over `FactionChoice`): year, faction (minor ones on a switch), command and
-         rating, then Options (unit type, weight classes, roles, role strictness, network, motive) or Table, which
+         rating (segments for short codes, a select for named ratings), then the options (unit type, weight
+         classes, roles, role strictness, network, motive) and under them a table preview, shown on demand, which
          lists the generated table's units with their share and BV and takes one into the hand.
        - Formation (`FormationForm`): the same faction block, unit type, a formation of those the type can head or
-         join, extra units and their type, and network. It deals a whole hand, so its cards are not kept or
+         join, extra units (a select) and their type, and network. It deals a whole hand, so its cards are not kept or
          rerolled alone.
        - The Battle Value and Balanced generators share the Requisition's advanced search
          (`LobbyAdvancedSearchView`) as a filter, which swaps into the dialog's body with a match count.

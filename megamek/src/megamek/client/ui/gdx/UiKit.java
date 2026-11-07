@@ -1165,11 +1165,15 @@ public final class UiKit {
     /**
      * Whether {@code input} takes the whole width of its form column, so the right edges of a form's inputs line up:
      * selects, text, search and range inputs, pick lists and rows built of them do; check boxes, radios, switches,
-     * segmented controls, buttons, chips, steppers and number inputs keep their own width.
+     * segmented controls, buttons, chips, steppers and number inputs keep their own width. A wrapping group of chips
+     * fills it too: it has no width of its own and would otherwise stack its chips one per row.
      */
     public static boolean fillsFormColumn(Actor input) {
-        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof HorizontalGroup
-              || input instanceof UiStepper || input instanceof UiNumber);
+        if (input instanceof HorizontalGroup group) {
+            return group.getWrap();
+        }
+        return !(input instanceof Button || input instanceof UiOptionBar || input instanceof UiStepper
+              || input instanceof UiNumber);
     }
 
     /**

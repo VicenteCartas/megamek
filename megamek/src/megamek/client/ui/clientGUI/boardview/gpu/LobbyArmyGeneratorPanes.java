@@ -59,6 +59,8 @@ final class LobbyArmyGeneratorPanes {
     private static final String[] STRICTNESS_ROLES = { "status.success", "status.warning", "status.danger" };
     /** The most rating choices shown as a segmented control rather than a select. */
     private static final int SEGMENTED_RATINGS = 5;
+    /** The longest rating shown in a segmented control: letter grades are, named lines (Front Line) are not. */
+    private static final int SEGMENTED_RATING_LENGTH = 2;
 
     /** What the panes ask of the random army. */
     interface Owner {
@@ -127,6 +129,9 @@ final class LobbyArmyGeneratorPanes {
         Runnable recount = () -> statuses.forEach((kind, status) -> status(status, army, kind));
         recount.run();
         pane.add(counts).growX().padTop(space("md")).row();
+        Label split = kit.typeLabel(Messages.getString("Lobby.randomArmy.bvSplit"), "small", "text.muted");
+        split.setWrap(true);
+        pane.add(split).padTop(space("xs")).row();
 
         UiRangeInput budget = kit.rangeInput(Messages.getString("Lobby.randomArmy.min"),
               Messages.getString("Lobby.randomArmy.max"));
@@ -158,11 +163,11 @@ final class LobbyArmyGeneratorPanes {
             recount.run();
             owner.changed(false);
         });
-        pane.add(canon).padTop(space("md")).row();
+        pane.add(canon).fill(0f, 0f).padTop(space("md")).row();
         var pad = kit.check(Messages.getString("RandomArmyDialog.Pad"), army.pad());
         pad.setName("army-bv-pad");
         UiKit.onChange(pad, () -> army.pad(pad.isChecked()));
-        pane.add(pad).padTop(space("xs")).row();
+        pane.add(pad).fill(0f, 0f).padTop(space("xs")).row();
         pane.add(filterRow()).padTop(space("md")).row();
         return pane;
     }
@@ -268,23 +273,30 @@ final class LobbyArmyGeneratorPanes {
 
     // ---- Faction ----
 
-    /** The faction table's faction and the RAT Generator's choices, or the table they build. */
+    /** The faction table's faction and the RAT Generator's choices, and under them the table they build. */
     Table faction(RatGeneratorForm form) {
         Table pane = page("Lobby.randomArmy.mode.faction", "Lobby.randomArmy.about.faction");
         factionBlock(pane, form.factions());
-        UiSegmented view = kit.tokenSegmented(true, Messages.getString("Lobby.randomArmy.options"),
-              Messages.getString("Lobby.randomArmy.table"));
+        ratOptions(pane, form);
+
+        pane.add(kit.roleTypeLabel("overline", Messages.getString("Lobby.randomArmy.table"), "text.secondary"))
+              .padTop(space("lg")).row();
+        Table head = new Table();
+        head.left();
+        Label about = kit.typeLabel(Messages.getString("Lobby.randomArmy.tableAbout"), "small", "text.muted");
+        about.setWrap(true);
+        head.add(about).growX().minWidth(0);
+        UiButton view = kit.button("button-secondary" + UiTheme.COMPACT, showTable ? "chevron-up" : "chevron-down",
+              Messages.getString(showTable ? "Lobby.randomArmy.hideTable" : "Lobby.randomArmy.showTable"), null);
         view.setName("army-rat-view");
-        view.select(showTable ? 1 : 0);
         UiKit.onChange(view, () -> {
-            showTable = view.getSelectedIndex() == 1;
+            showTable = !showTable;
             owner.changed(true);
         });
-        pane.add(view).growX().padTop(space("lg")).row();
+        head.add(view).padLeft(space("sm"));
+        pane.add(head).padTop(space("xs")).row();
         if (showTable) {
             tableRows(pane, form);
-        } else {
-            ratOptions(pane, form);
         }
         return pane;
     }
@@ -512,17 +524,19 @@ final class LobbyArmyGeneratorPanes {
         }
 
         FormationForm.Extra[] extras = FormationForm.Extra.values();
-        List<String> extraNames = new ArrayList<>();
-        for (FormationForm.Extra extra : extras) {
-            extraNames.add(Messages.getString(extra.key()));
+        String[] extraNames = new String[extras.length];
+        for (int index = 0; index < extras.length; index++) {
+            extraNames[index] = Messages.getString(extras[index].key());
         }
-        UiStepper extra = kit.selector(extraNames, form.extra().ordinal());
+        UiSelect extra = kit.tokenSelect(true, extraNames);
         extra.setName("army-formation-extra");
+        extra.select(form.extra().ordinal());
         UiKit.onChange(extra, () -> {
-            form.extra(extras[extra.value()]);
+            form.extra(extras[extra.getSelectedIndex()]);
             owner.changed(true);
         });
-        pane.add(kit.formField(Messages.getString("Lobby.randomArmy.extras"), extra)).padTop(space("md")).row();
+        pane.add(kit.formField(Messages.getString("Lobby.randomArmy.extras"), extra)).growX().padTop(space("md"))
+              .row();
         if (form.extra() != FormationForm.Extra.SIMPLE) {
             UiStepper count = kit.stepper(form.extraCount(), 0, FormationForm.MAX_EXTRA);
             count.setName("army-formation-extra-count");
@@ -628,7 +642,7 @@ final class LobbyArmyGeneratorPanes {
             factions.showMinor(minor.isChecked());
             tableChanged(true);
         });
-        pane.add(minor).padTop(space("xs")).row();
+        pane.add(minor).fill(0f, 0f).padTop(space("xs")).row();
 
         List<FactionRecord> commands = factions.commands();
         if (!commands.isEmpty()) {
@@ -654,7 +668,7 @@ final class LobbyArmyGeneratorPanes {
             String[] names = ratings.toArray(String[]::new);
             int chosen = Math.max(0, ratings.indexOf(factions.rating()));
             Actor rating;
-            if (names.length <= SEGMENTED_RATINGS) {
+            if (fitsSegments(names)) {
                 UiSegmented segments = kit.tokenSegmented(true, names);
                 segments.select(chosen);
                 UiKit.onChange(segments, () -> {
@@ -675,6 +689,18 @@ final class LobbyArmyGeneratorPanes {
             pane.add(kit.formField(Messages.getString("Lobby.randomArmy.rating"), rating)).growX()
                   .padTop(space("md")).row();
         }
+    }
+
+    private static boolean fitsSegments(String[] ratings) {
+        if (ratings.length > SEGMENTED_RATINGS) {
+            return false;
+        }
+        for (String rating : ratings) {
+            if (rating.length() > SEGMENTED_RATING_LENGTH) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Actor unitTypeField(List<Integer> types, int chosen, IntConsumer choose) {
