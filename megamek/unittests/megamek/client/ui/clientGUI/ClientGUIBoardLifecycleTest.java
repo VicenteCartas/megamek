@@ -144,7 +144,7 @@ class ClientGUIBoardLifecycleTest {
                 Window frame = gui.getFrame();
                 var gpu = mockStatic(GpuBoardWindow.class);
                 resources.push(gpu);
-                gpu.when(() -> GpuBoardWindow.openPreview(any(Window.class), any(Board.class), any()))
+                gpu.when(() -> GpuBoardWindow.openLobbyPreview(any(Window.class), any(Board.class), any()))
                       .thenAnswer(call -> {
                           assertSame(frame, call.getArgument(0), "The 3D preview belongs to the lobby");
                           shown3D.set(call.getArgument(1));

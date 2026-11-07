@@ -969,7 +969,8 @@ Changing maps clears the measurement and rejects commands from an older board ge
 
 The lobby's 3D Preview (`LobbyBoardPreviews`) shows the lobby preview game's board. A roll of the map settings, a map
 change and a server-built battlefield update it without bringing it to the front (`GpuBoardWindow.updatePreview`). It
-belongs to the lobby window, and the lobby's end (Done, the game's start, leaving) closes it. The 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
+belongs to the lobby window, and the lobby's end (Done, the game's start, leaving) closes it. It is 3D only: its View >
+Renderer offers Classic and Enhanced, not Legacy 2D (`GpuBoardWindow.openLobbyPreview`). A file or start-screen 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
 window of the same board, whose Renderer menu returns to 3D.
 
 

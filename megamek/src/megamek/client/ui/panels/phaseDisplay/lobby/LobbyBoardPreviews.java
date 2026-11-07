@@ -37,7 +37,8 @@ public final class LobbyBoardPreviews {
     public static void preview3D(ClientGUI clientGUI) {
         Board board = lobbyBoard(clientGUI);
         PREVIEWED.put(clientGUI, board);
-        GpuBoardWindow.openPreview(clientGUI.getFrame(), board, clientGUI.getClient().getGame().getPlanetaryConditions());
+        GpuBoardWindow.openLobbyPreview(clientGUI.getFrame(), board,
+              clientGUI.getClient().getGame().getPlanetaryConditions());
     }
 
     /** EDT: a new server board or changed map settings; the open 3D preview shows the new board and conditions. */

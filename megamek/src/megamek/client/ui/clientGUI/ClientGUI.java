@@ -3193,22 +3193,6 @@ public class ClientGUI extends AbstractClientGUI
         return Toolkit.getDefaultToolkit().getScreenSize();
     }
 
-    /**
-     * Pops up a dialog box giving the player information on a subject. It also includes a checkbox if they don't want
-     * to be bothered again by it.
-     *
-     * @param title           the <code>String</code> title of the dialog box.
-     * @param message         the <code>String</code> message to display.
-     * @param includeCheckBox if <code>true</code>, a checkbox will be included in the dialog box
-     *
-     * @return {@link InformDialog} containing the player's responses. The dialog will already have been shown
-     */
-    public InformDialog doInformBotherDialog(String title, String message, boolean includeCheckBox) {
-        InformDialog informDialog = new InformDialog(frame, title, message, includeCheckBox);
-        informDialog.setVisible(true);
-        informDialog.dispose();
-        return informDialog;
-    }
 
     /**
      * Pops up a dialog box asking a yes/no question

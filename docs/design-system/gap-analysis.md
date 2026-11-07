@@ -1584,7 +1584,8 @@ work for Swing, and item 11 is under investigation.
        - Done: the Swing map setup is gone. `MapSetupDialog`, `MapListPopup` and `MapPreviewButton` are deleted, with
          the old 2D preview beside the 3D one; what the lobby still used from them (the 3D preview, its refresh and
          close, the board editor's saved-board settings) is in `LobbyBoardPreviews`. `SwingLobbyServices` is
-         `LobbyServices`, so no lobby class is named after Swing. Unused map setup messages are dropped from every
+         `LobbyServices`, so no lobby class is named after Swing. The lobby's 3D preview no longer offers Legacy 2D in its
+         Renderer menu (file and start-screen previews still do), and the map size commands nothing called are gone. Unused map setup messages are dropped from every
          language. Checks: `LobbyBoardPreviewsTest`, `LobbyServicesTest`, `ClientGUIBoardLifecycleTest`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
