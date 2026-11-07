@@ -181,13 +181,10 @@ final class GpuAmbientOcclusion implements Disposable {
 
     /**
      * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while its environment's
-     * lighting carries it. Sculpted ground with volcanic crust beside the board's sky visibility (GpuSkyVisibility) or
-     * ice draws without it and keeps the board-wide sky occlusion, which a crust patch in deep shade would visibly lack.
+     * lighting carries it.
      */
     static String prefix(Renderable renderable) {
         return GpuEnvironmentLighting.ambientOcclusion(renderable.environment) != null
-              && !(renderable.material.has(GpuMagmaShader.TYPE)
-                    && (GpuSkyVisibility.STRENGTH > 0 || GpuIceShader.mode(renderable.material) != 0))
               ? "#define ambientOcclusionFlag\n" : "";
     }
 

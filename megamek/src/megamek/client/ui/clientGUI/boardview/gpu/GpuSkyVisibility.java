@@ -296,8 +296,7 @@ final class GpuSkyVisibility implements Disposable {
     }
 
     /**
-     * The define that compiles the sky occlusion into a lit program with the environment's lighting. Volcanic crust keeps
-     * it and leaves out ambient occlusion instead (GpuAmbientOcclusion.prefix).
+     * The define that compiles the sky occlusion into a lit program with the environment's lighting.
      */
     static String prefix(Renderable renderable) {
         return STRENGTH > 0 && renderable.environment != null && renderable.environment.has(GpuEnvironmentLighting.TYPE)
