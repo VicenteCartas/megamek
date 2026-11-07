@@ -2288,8 +2288,9 @@ final class BoardRelief {
                 // Everything below the road's headroom recedes but a shallow drop below the road, which the road's bank
                 // fills (BoardRoadBank) rather than moving it away. No bank fills a drop to water, which fades out at the
                 // wet hex's outline: its rim comes out under the road's verge as a footing, its foot staying at the waterline.
+                // Where a deck lands it needs none: the deck's abutment or a natural bridge's rock stands on the bank.
                 float surface = headroom - BoardRoadGrade.CLEARANCE * level + .05f * level;
-                boolean toWater = across ? edge.lower != null && edge.lower.liquid() : !dry(ends[0]) && wetBelow(ends[0]);
+                boolean toWater = !landing && (across ? edge.lower != null && edge.lower.liquid() : !dry(ends[0]) && wetBelow(ends[0]));
                 boolean shallow = !toWater && top - bottom <= (BoardRoadGrade.FILL + .01f) * level;
                 // Every half level at least, so the band below a tall cliff's headroom is never missed.
                 int steps = Math.max(6, (int) Math.ceil(2 * (top - bottom) / level)), count = 0;

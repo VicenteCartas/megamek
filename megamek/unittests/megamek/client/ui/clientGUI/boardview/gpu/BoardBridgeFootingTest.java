@@ -411,11 +411,9 @@ class BoardBridgeFootingTest {
                   BoardLiquid.WATER, null, true);
             var bare = BoardScenes.replace(plain, bridgeTile);
             var scene = BoardScenes.replace(bare, withRoad(bare.tile(road), 36));
-            var roadOnly = BoardScenes.replace(scene, plain.tile(bridge));
             var natural = BridgeScenes.typed(scene, HexAppearance.NATURAL_BRIDGE);
             var bank = new BoardSurface(scene, scene.tile(road));
             var bareBank = new BoardSurface(bare, bare.tile(road));
-            var ordinaryBank = new BoardSurface(roadOnly, roadOnly.tile(road));
             var naturalBank = new BoardSurface(natural, natural.tile(road));
             var water = new BoardSurface(scene, scene.tile(bridge));
             int edge = Math.floorMod(1 - road.direction(bridge), 6), opposite = (edge + 3) % 6;
@@ -427,9 +425,10 @@ class BoardBridgeFootingTest {
                           "The built landing leaves the receding natural bank's profile intact");
                     assertTrue(actual.epsilonEquals(water.relief.outlinePoint(opposite, 1 - t, z), .002f),
                           "Both sides retain one shared bank wall without a land/water crack");
-                    assertTrue(ordinaryBank.relief.outlinePoint(edge, t, z)
-                          .epsilonEquals(naturalBank.relief.outlinePoint(edge, t, z), .002f),
-                          "Ordinary road clearance and natural bridge mouths keep their existing profile");
+                    // A road without a bridge has a footing out to its verge over the drop to water instead.
+                    assertTrue(naturalBank.relief.outlinePoint(edge, t, z)
+                          .epsilonEquals(bareBank.relief.outlinePoint(edge, t, z), .002f),
+                          "A natural bridge's mouth keeps its existing profile");
                 }
             }
             for (float t : new float[] { 1f / 3, .5f, 2f / 3 }) {
@@ -438,8 +437,8 @@ class BoardBridgeFootingTest {
                       "The supported bank meets its rim continuously instead of snapping under the deck");
                 float aboveRoad = top + BoardRelief.metres(1);
                 assertTrue(bank.relief.outlinePoint(edge, t, aboveRoad)
-                      .epsilonEquals(ordinaryBank.relief.outlinePoint(edge, t, aboveRoad), .002f),
-                      "Relief above the road retains ordinary clearance around the bridge passage");
+                      .epsilonEquals(bareBank.relief.outlinePoint(edge, t, aboveRoad), .002f),
+                      "Relief above the road keeps the bank's own profile around the bridge passage");
             }
             for (int k = 0; k < 6; k++) {
                 float[] actual = bank.relief.shoreShift(k), expected = bareBank.relief.shoreShift(k);
