@@ -212,7 +212,10 @@ final class GpuLavaLighting implements Disposable {
         // Entries start on an even texel and take whole pairs, so each pair shares a row.
         int start = cells + (cells & 1);
         texels += start;
-        if (texels > MAX_TEXELS) { throw new IllegalStateException("Local light list exceeds " + MAX_TEXELS + " texels"); }
+        // With the hex table's whole rows after it (setHexes).
+        if ((texels + ROW - 1) / ROW * ROW + hexes.length / 4 > MAX_TEXELS) {
+            throw new IllegalStateException("Local light list and hex table exceed " + MAX_TEXELS + " texels");
+        }
         float[] packed = new float[(int) ((texels + ROW - 1) / ROW) * ROW * 4];
         for (int at = 0, first = start; at < cells; at++) {
             int size = next[at];
@@ -383,6 +386,16 @@ final class GpuLavaLighting implements Disposable {
                 // Without the lights nothing is fetched, but a stale unit may now hold another sampler type and
                 // invalidate the draw. Unit 0 is outside ModelBatch's binder.
                 if (field != null) { target.set(id, field.texture()); } else { target.set(id, 0); }
+            }
+        });
+        // After u_lavaLights' setter, as local setters run in registration order: the table's row is that of the texture
+        // the draw just bound, even when this draw's upload grew it.
+        shader.register("u_hexTable", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field != null) { target.set(id, field.hexRow(), field.hexWidth()); }
             }
         });
     }

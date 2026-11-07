@@ -8,7 +8,7 @@ import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import megamek.common.board.Coords;
 
-/** One nearest-filtered texel per board hex. GL ownership and publication stay on the terrain render thread. */
+/** One texel per board hex, in the local lights' texture (GpuLavaLighting.setHexes), which owns its GL copy. */
 final class GpuBiomeSurface {
     /** The biome bits of a texel; R bits 4..7 above them flag the stencil quarters. */
     private static final int BIOME = 0x0f000000;

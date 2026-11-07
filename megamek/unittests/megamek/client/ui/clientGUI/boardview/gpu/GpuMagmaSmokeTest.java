@@ -474,10 +474,11 @@ class GpuMagmaSmokeTest {
     private static void installLava(GpuAssets.MaterialArrays maps, Path root) throws Exception {
         Path textures = root.resolve("models/board/textures");
         var lava = GodotMaterial.read(textures.resolve("terrain/lava/lava-flow.tres").toFile(), textures.toFile());
-        fillLayer(maps.color(), (int) GpuAssets.LAVA_COLOR, lava, GpuMaterialMaps.Layout.COLOR);
-        fillLayer(maps.data(), (int) GpuAssets.LAVA_DATA, lava, GpuMaterialMaps.Layout.NORMAL);
-        fillLayer(maps.data(), (int) GpuAssets.LAVA_DATA + 1, lava, GpuMaterialMaps.Layout.RELIEF);
-        fillLayer(maps.data(), (int) GpuAssets.LAVA_DATA + 2, lava, GpuMaterialMaps.Layout.MOLTEN_HEAT);
+        float[] layers = GpuAssets.magmaLayers(true);
+        fillLayer(maps.color(), (int) layers[0], lava, GpuMaterialMaps.Layout.COLOR);
+        fillLayer(maps.data(), (int) layers[1], lava, GpuMaterialMaps.Layout.NORMAL);
+        fillLayer(maps.data(), (int) layers[2], lava, GpuMaterialMaps.Layout.RELIEF);
+        fillLayer(maps.data(), (int) layers[3], lava, GpuMaterialMaps.Layout.MOLTEN_HEAT);
     }
 
     private static void fillLayer(TextureArray array, int layer, GodotMaterial material, GpuMaterialMaps.Layout layout) {

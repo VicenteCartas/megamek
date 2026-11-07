@@ -15,6 +15,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.DefaultShader;
 final class GpuMagmaShader extends Attribute {
     static final long TYPE = register("boardMagmaSurface");
     static final int CRUST = 0, LAVA = 1, FALL = 2, BANK = 3;
+    private static final float[] CRUST_LAYERS = GpuAssets.magmaLayers(false), LAVA_LAYERS = GpuAssets.magmaLayers(true);
 
     private final int mode;
     private final float emissionScale;
@@ -66,8 +67,8 @@ final class GpuMagmaShader extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var magma = attributes.get(GpuMagmaShader.class, TYPE);
                 if (magma != null) {
-                    target.set(id, magma.flowing() ? GpuAssets.LAVA_COLOR : GpuAssets.CRUST_COLOR,
-                          magma.flowing() ? GpuAssets.LAVA_DATA : GpuAssets.CRUST_DATA);
+                    float[] layers = magma.flowing() ? LAVA_LAYERS : CRUST_LAYERS;
+                    target.set(id, layers[0], layers[1], layers[2], layers[3]);
                 }
             }
         });

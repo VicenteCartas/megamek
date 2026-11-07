@@ -429,7 +429,6 @@ final class GpuTerrain implements Disposable {
                 private final int levelUniform = register("u_levelHeight");
                 private final int sculptMetreUniform = register("u_metre");
                 private final int waterLineUniform = register("u_waterLine");
-                private final int hexTableUniform = register("u_hexTable");
                 private final int biomeBoardUniform = register("u_biomeBoard");
                 private final int iceBoardUniform = register("u_iceBoard");
                 private final int biomeSoilUniform = register("u_biomeSoilLayer");
@@ -447,7 +446,7 @@ final class GpuTerrain implements Disposable {
                 private final int tundraTilesUniform = register("u_tundraTiles");
                 private final int fullSizeColorUniform = register("u_fullSizeColor");
                 private final int fullSizeDataUniform = register("u_fullSizeData");
-                // The tundra carpets' own full-size arrays, uploaded with the program like the finish arrays.
+                // The full-size arrays (tundra carpets, ice, lava), uploaded with the program like the finish arrays.
                 // Before drawing: creating these from a uniform setter would disturb the active texture bindings.
                 private final GpuAssets.MaterialArrays fullSizeMaps = program.hasUniform("u_fullSizeColor")
                       || program.hasUniform("u_fullSizeData") ? assets.fullSizeMaps() : null;
@@ -569,8 +568,7 @@ final class GpuTerrain implements Disposable {
                           * Gdx.graphics.getBackBufferHeight() * BoardCamera.renderScale * .5f);
                     float waveStart = Math.max(8, TerrainLod.tuning().threshold(2) * 1.1f);
                     set(waveFadeUniform, waveStart, Math.max(50, waveStart + 1));
-                    if (has(hexTableUniform)) {
-                        set(hexTableUniform, lavaLighting.hexRow(), lavaLighting.hexWidth());
+                    if (has(biomeBoardUniform) || has(iceBoardUniform)) {
                         set(biomeBoardUniform, (float) biomes.width(), (float) biomes.height());
                         set(iceBoardUniform, (float) biomes.iceWidth(), (float) biomes.iceHeight());
                     }

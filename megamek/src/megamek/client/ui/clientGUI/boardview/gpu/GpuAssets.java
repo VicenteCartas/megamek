@@ -297,11 +297,8 @@ final class GpuAssets implements Disposable {
     private static final List<MapLayer> FULL_SIZE_PLAN = fullSizePlan();
     /** {@link #roadArray}'s layers in order: every road material's colour, normal and surface, then the ice sheet's. */
     private static final List<MapLayer> ROAD_PLAN = roadPlan();
-    /** The first colour and data layers of each lava in {@link #fullSizeMaps}, which GpuMagmaShader passes on. */
-    static final float CRUST_COLOR = layerOf(FULL_SIZE_PLAN, magmaName(false), GpuMaterialMaps.Layout.COLOR),
-          LAVA_COLOR = layerOf(FULL_SIZE_PLAN, magmaName(true), GpuMaterialMaps.Layout.COLOR),
-          CRUST_DATA = layerOf(FULL_SIZE_PLAN, magmaName(false), GpuMaterialMaps.Layout.NORMAL),
-          LAVA_DATA = layerOf(FULL_SIZE_PLAN, magmaName(true), GpuMaterialMaps.Layout.NORMAL);
+    private static final float[] CRUST_LAYERS = magmaLayers(magmaName(false), GpuMaterialMaps.Layout.CRUST_HEAT),
+          LAVA_LAYERS = magmaLayers(magmaName(true), GpuMaterialMaps.Layout.MOLTEN_HEAT);
 
     private static List<MapLayer> fullSizePlan() {
         var plan = new ArrayList<MapLayer>();
@@ -333,6 +330,15 @@ final class GpuAssets implements Disposable {
     private static void addSet(List<MapLayer> plan, String material, GpuMaterialMaps.Layout... data) {
         plan.add(new MapLayer(material, GpuMaterialMaps.Layout.COLOR, true));
         for (var layout : data) { plan.add(new MapLayer(material, layout, false)); }
+    }
+
+    /** Crust's or molten lava's layers in {@link #fullSizeMaps}: colour, then normal, surface and heat (u_magmaLayers). */
+    static float[] magmaLayers(boolean molten) { return (molten ? LAVA_LAYERS : CRUST_LAYERS).clone(); }
+
+    private static float[] magmaLayers(String name, GpuMaterialMaps.Layout heat) {
+        return new float[] { layerOf(FULL_SIZE_PLAN, name, GpuMaterialMaps.Layout.COLOR),
+              layerOf(FULL_SIZE_PLAN, name, GpuMaterialMaps.Layout.NORMAL), layerOf(FULL_SIZE_PLAN, name, GpuMaterialMaps.Layout.RELIEF),
+              layerOf(FULL_SIZE_PLAN, name, heat) };
     }
 
     /** A map's layer in its array of {@code plan}. */

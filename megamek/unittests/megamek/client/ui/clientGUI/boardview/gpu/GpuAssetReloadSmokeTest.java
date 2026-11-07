@@ -256,7 +256,7 @@ class GpuAssetReloadSmokeTest {
                             var magma = assets().fullSizeMaps();
                             assertNotSame(originalMagma, magma);
                             assertArrayEquals(new float[] { 32f / 255, 64f / 255, 128f / 255, 64f / 255 },
-                                  arrayPixel(magma.data(), (int) GpuAssets.LAVA_DATA + 2), .0006f, "Emitted RGB and coverage remain raw numeric data");
+                                  arrayPixel(magma.data(), (int) GpuAssets.magmaLayers(true)[3]), .0006f, "Emitted RGB and coverage remain raw numeric data");
                             var emission = assets().lavaEmission();
                             assertNotSame(originalEmission, emission);
                             assertEquals(4, emission.scale());
@@ -486,7 +486,7 @@ class GpuAssetReloadSmokeTest {
             var lava = assets.fullSizeMaps();
             int packed = heat.getPixel(0, 0);
             assertArrayEquals(new float[] { (packed >>> 24) / 255f, (packed >>> 16 & 255) / 255f,
-                  (packed >>> 8 & 255) / 255f, (packed & 255) / 255f }, arrayPixel(lava.data(), (int) GpuAssets.LAVA_DATA + 2), .0006f,
+                  (packed >>> 8 & 255) / 255f, (packed & 255) / 255f }, arrayPixel(lava.data(), (int) GpuAssets.magmaLayers(true)[3]), .0006f,
                   "Reload restores authored emission and coverage in the actual lava array");
             assertEquals(5f, emission.scale(), "The current official lava definition restores energy 5");
             long red = 0, green = 0, blue = 0;

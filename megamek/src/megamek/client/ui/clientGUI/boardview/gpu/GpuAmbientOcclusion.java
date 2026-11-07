@@ -181,10 +181,8 @@ final class GpuAmbientOcclusion implements Disposable {
 
     /**
      * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while its environment's
-     * lighting carries it. Its sampler would take a 17th texture unit, which macOS does not give a stage
-     * (GpuSamplerBudgetSmokeTest), from sculpted ground with volcanic crust beside the board's sky visibility
-     * (GpuSkyVisibility) or ice: that ground draws without it, keeping the board-wide sky occlusion, which a crust patch
-     * in deep shade would visibly lack.
+     * lighting carries it. Sculpted ground with volcanic crust beside the board's sky visibility (GpuSkyVisibility) or
+     * ice draws without it and keeps the board-wide sky occlusion, which a crust patch in deep shade would visibly lack.
      */
     static String prefix(Renderable renderable) {
         return GpuEnvironmentLighting.ambientOcclusion(renderable.environment) != null

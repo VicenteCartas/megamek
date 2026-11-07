@@ -102,6 +102,7 @@ final class GpuShaderSource {
             case "LIGHT_MODEL" -> "light-model.glsl";
             case "FULL_SIZE_MAPS" -> "full-size-maps.glsl";
             case "SURFACE_NOISE" -> "surface-noise.glsl";
+            case "LAVA_LIGHTS" -> "lava-lights.glsl";
             case "ENVIRONMENT_LIGHTING" -> "environment-lighting.glsl";
             case "TERRAIN_PATTERNS" -> "terrain-patterns.glsl";
             case "CLOUD_SHADOW" -> "cloud-shadow.glsl";

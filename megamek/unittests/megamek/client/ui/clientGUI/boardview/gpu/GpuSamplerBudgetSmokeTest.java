@@ -268,7 +268,7 @@ class GpuSamplerBudgetSmokeTest {
             String label = (program instanceof GpuShaderUniforms named ? named.name : "libGDX") + " " + flags(program)
                   + " " + names;
             // A sampler only the vertex stage reads takes no unit of the fragment stage.
-            int fragment = units > FRAGMENT_BUDGET ? fragmentSamplers(program) : units;
+            int fragment = fragmentSamplers(program);
             used.merge(label, fragment, Math::max);
             // Road ground reads two array pairs, its own 1024-texel and the sculpt 512-texel maps, and cached ground on a
             // biome board its pages' three arrays, which one array would limit to half the pages: with the crystal stage,

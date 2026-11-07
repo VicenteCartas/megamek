@@ -56,7 +56,7 @@ class GpuBiomeCoverageSmokeTest {
               uniform float u_metre, u_levelHeight, u_height, u_water;
               uniform vec4 u_bounds;
               uniform int u_result;
-              """ + "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
+              """ + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
               void main() {
                   vec3 world = vec3(u_bounds.xy + gl_FragCoord.xy / 128.0 * u_bounds.zw, u_height);
                   vec4 cover, fringe, liquids;
@@ -147,7 +147,7 @@ class GpuBiomeCoverageSmokeTest {
               """, """
               layout(location = 0) out vec4 fragColor;
               uniform float u_metre, u_levelHeight;
-              """ + "uniform sampler2D u_lavaLights;\n" + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
+              """ + GpuShaderSource.read("terrain-hexes.glsl") + GpuShaderSource.read("terrain-biome-mask.glsl") + """
               void main() {
                   vec2 world = (gl_FragCoord.xy - 64.0) * .5;
                   fragColor = vec4(biomeWetnessGradient(world), 1.0);
