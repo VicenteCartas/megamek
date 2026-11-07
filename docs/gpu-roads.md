@@ -77,94 +77,21 @@ The road brush and the ground/deck road inspector offer **Junction controls: Sto
 **Stops + traffic lights**, or **Stops + overhead traffic lights**. Stops uses an
 octagonal roadside STOP sign; traffic lights replace the sign with a three-aspect
 signal. The overhead option uses a curved metal mast arm carrying two overhead
-heads and a lower roadside repeater. All modes keep the stop bars, except where only single-lane exits leave a
-two-lane road (below), which has no controls at all.
+heads and a lower roadside repeater. All modes keep the stop bars, except at junctions single lanes join where
+nothing needs controls (below).
 The choice belongs to the `road` or `bridgeRoad` appearance. With no stored choice,
-three-arm junctions use STOP signs and larger junctions use overhead traffic lights; single-lane ramps are no roads
-of their own there, nor are aprons, so where ramps join, STOP signs serve until four two-lane roads meet
-(`SingleLane.control`, from the ramp and apron sides `SingleLane.arms` and `SingleLane.aprons` give the board, the
-3D features and the editor alike). An explicitly signalled T controls every approach. Explicit choices store
+three-arm junctions use STOP signs and larger junctions use overhead traffic lights. Where single lanes join, the
+junction's own rules choose (`LaneJunction.defaultControl` through `SingleLane.control`, from the ramp and apron sides
+`SingleLane.arms` and `SingleLane.aprons` give the board, the 3D features and the editor alike): overhead lights where
+four two-lane roads meet, traffic lights where five approaches arrive (exits bring no traffic) or four with no road
+keeping priority, else priority signs; a junction of single lanes alone is never signalled. An explicitly signalled T controls every approach. Explicit choices store
 `trafficControl: stops`, `signals`, or `gantry`, including a gantry override at a T. Material
 changes, copy/paste, layer moves, save/load and undo preserve that choice.
 
-A single-lane entrance (on-ramp, below) gives way instead of stopping: under **Stops** it has a broken give-way line
-across its whole lane with the outlined triangle upstream, as a roundabout entry, and a give-way sign
-(`scenery/road/give-way-sign.glb`) on the merging traffic's right; under traffic lights it has a solid bar and lights
-like any approach; where its mouth lies in the corner of the road's arm beside it, the sign or light stands further
-out along its own lane, on its traffic's right. Nothing waits on an exit (off-ramp). Where every two-lane arm stops (an all-way stop at a Y or a
-crossroads) an entrance stops as they do, having no priority road to give way to. A junction that only exits leave,
-with no entrance and at most two two-lane arms, has nothing to control: nothing joins its road's traffic, so it gets
-no bars, signs, lights or keep-clear box under any choice, and its centre line runs through as under Stops
-(`SingleLane.exitsOnly`, `BoardRoad.exitsOnly` and `trafficControl`, which every control, paint and sign reads). Only
-the exit's own one-way and no-turn signs stand. A stored choice is kept, and applies again once an entrance or a third
-two-lane road joins; the inspector shows **Junction controls: None** meanwhile.
-
-Legacy `.board` X crossings use the same gantry default. Native boards retain explicit
-authored choices; roads without one inherit the default. Controls are derived from the same
-approach geometry as the paint, use the existing ground/deck support and GLB prop
-pipeline, and disappear when a junction is removed. They are cosmetic terrain
-decorations, not stored or independently selectable objects.
-Controls may extend into a dry, level neighbour when their whole footing is
-supported. Ground poles and gantry footings also clear the neighbouring road and
-rail courses, including overlapping junction pavement. Bridge controls must fit
-the actual deck shoulder. A crowded approach falls back to a roadside signal only
-where that pole also fits; an unsupported pole is omitted while its stop bar remains.
-If a sideways search crosses another branch, placement retries from the incoming
-lane edge to find the small island it skipped. Gantries and single poles may move
-up to two pixels upstream and 1.5 pixels outward there, with the same road clearance
-and ground support checks. Existing valid placements are kept.
-
-The Blender-authored assets are `scenery/road/traffic-signal.glb` and
-`scenery/road/stop-sign.glb` in mm-data. Each contains the existing `-lod0` and
-`-lod1` groups: detailed nearby models (416/96 triangles) and simple distant
-models (36/40 triangles), selected by the normal prop LOD system. Both signal
-levels flash yellow in out-of-service mode, with red and green off. This
-animation is cosmetic and does not change movement rules.
-
-`GpuTrafficSignal` selects the amber materials; `GpuModelLight` supplies reusable
-emission intensity, blink period (zero for steady light), and optional diffuse
-dimming while off. Its immutable attributes survive prop LOD switches and instance
-batching, while draw setters sample the existing terrain clock. `model.frag` only
-scales the material's authored emission and diffuse colour through `u_modelLight`;
-it contains no traffic-specific timing or colours. Ordinary materials retain their
-authored emission. These controls affect the visible material, not illumination of
-neighbouring surfaces.
-
-The overhead option adds `scenery/road/traffic-signal-gantry.glb`, also with native
-`-lod0`/`-lod1` groups (1,800/212 triangles) and the same animated `Amber` material. It is a single-footing
-cantilever: the origin is the supported roadside base, +Y faces waiting traffic,
-and +X reaches over the incoming lane. The near model includes the curved steel
-tube, base fixings, brackets and lamp visors; the far model keeps the arch and
-all three signal heads. The existing prop system owns placement, LOD and blinking.
-Placement keeps the authored proportions wherever both overhead heads fit the
-incoming lane. Limited horizontal fitting preserves the vertical vehicle clearance;
-if the lane or shoulder cannot accommodate the complete assembly, that approach
-uses the ordinary roadside light. The mast may move up to two pixels toward waiting
-traffic to clear an acute junction without moving its stop bar. The four-metre arm
-and both LODs share the same lamp positions and supported roadside origin.
-
-Rails share the carriageway (batch 10, docs/3d-board-editor.md): every shape and
-clearance site reads `wayExits` and `BoardRoad.carriageway` (a drawn road or a ground
-rail on dry ground), so a rail-only hex is shaped exactly as the road hex
-with the same exits (hub, ramps of one or two levels, concrete cuts, containment walls,
-the ramp onto a deck), and the rail's track is draped on the faces road paint lies on.
-Only roads receive carriageway paint and vote a bridge deck's road material.
-Classic, Enhanced and either Tactical View share the infrastructure preparation,
-road paint, rail meshes, built bridge decks, tunnel openings and supported controls.
-Classic natural bridges use a normal full hex cap over the hollow arch; Enhanced
-retains its eroded span outline. Both use the same road and rail courses, and each
-mode draws and picks its installed shell. Classic tileset art omits baked roads
-and flat bridge sprites.
-
-`BoardRoad` is also the clearance source for boulders, trees and vegetation. The
-relief's own rim, talus and field rocks and shrubs may stand beside a road but never
-on its carriageway or shoulder (`BoardRelief.place`).
-Changing width or a junction therefore affects more than its rendered mask.
-Authored roadside tree rows sit near the plain-road verge with canopy clearance.
-Only hexes carrying conventional railway tracks receive the additional rail clearance,
-using their existing rail courses and the chosen trees' model footprints.
-Markings follow the main paved route through unmarked branches. Wheel wear follows
-the lane centres through bends, endings and material changes.
+Where single lanes join a road, or meet at a single lane's own hub, the junction follows the rules of right-hand
+traffic in continental Europe (the 1968 Vienna Conventions), worked out once per junction by `LaneJunction` from its
+arms' side masks, which the board (`BoardRoad.junction`), the 3D features and the editor (`SingleLane.junction`) all
+read; see *Junctions with single lanes* below. Junctions of two-lane roads alone keep the conventions above.
 
 ### Loose roads
 
@@ -248,45 +175,88 @@ each hex points the way its traffic runs (`BoardRoad.arrows`), and a single-lane
 wheel wear runs down the lane's centre; where it widens into two lanes, the axle parts smoothly into the two lanes'
 (`laneCenter`).
 
-At a two-lane junction the road keeps its priority: under Stops its two-lane arms (at most two of them, straight or
-bent) have no stop, an entrance gives way and an exit has nothing; with three two-lane arms the opposite pair keeps
-priority as at a T. Where only ramps join it under Stops, the priority road's centre line runs on through the junction
-exactly as through a hex of its own, dashed (or solid round a bend), with no solid lead-in and no break at the ramp's
-mouth (`BoardRoad.priorityRoad`), and so does it under any choice where only exits leave it; under traffic lights an
-entrance joins, and at junctions of two-lane roads, dividers stop short of the junction as above. An exit may be taken by every approach of the two-lane road (the default) or only by some (`exitFrom`,
-stored on the two-lane hex itself, per exit, so a single lane joining two junctions never carries one's choice to the
-other; `SingleLane.feeds`). The junction then closes the other turns (`SingleLane.closedTurns`): it reserves no
-turning envelope between those approaches and the exit, so the exit leaves the road with the allowed approaches' bend
-and a plain corner on the closed side. It paints an arrow in each approach's lane before the junction, with a branch
-for each way that approach may go on, its road's other arms and the exits it may take: straight on, left or right
+An exit may be taken by every approach of the two-lane road (the default) or only by some (`exitFrom`, stored on the
+two-lane hex itself, per exit, so a single lane joining two junctions never carries one's choice to the other;
+`SingleLane.feeds`). The junction then closes the other turns (`SingleLane.closedTurns`): it reserves no turning
+envelope between those approaches and the exit, so the exit leaves the road with the allowed approaches' bend and a
+plain corner on the closed side. It paints an arrow in each approach's lane before the junction, with a branch for each
+way that approach may go on, its road's other arms and the exits it may take: straight on, left or right
 (`BoardRoad.turn`: the opposite side is straight on, the next two clockwise lie to the left), and no arrowhead straight
-on where it may not go that way (`BoardRoad.approachArrows`; none when every approach may). Where a closed turn would
-cross the oncoming lane (a left turn) the priority road's centre line is solid through the junction, stopping short of
-a dirt or gravel join as the dashed one does. Each closed approach gets a no-left-turn, no-right-turn or no-straight-
-ahead sign before the junction on its right (`no-left-turn-sign.glb`, `no-right-turn-sign.glb`,
-`no-straight-ahead-sign.glb`): the last where the exit runs straight on and the two-lane road bends away.
+on where it may not go that way (`BoardRoad.approachArrows`; none when every approach may).
 
-Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
-mouth facing the junction, on the right of traffic heading out along the ramp: a no-entry sign at an entrance
-(`no-entry-sign.glb`, a red disc with a white bar: the ramp's traffic only comes towards the junction) and a one-way
-sign at an exit (`one-way-sign.glb`, a blue square with a white arrow ahead). It uses the junction's stop plane, or
-partway out along the arm of a narrowing two-exit hex (`BoardRoad.rampFrame`), keeps four pixels clear of the
-junction's own poles and of props placed in the hex, and walks out along the ramp when the mouth is crowded; a sign
-with no dry, level footing is left out. The six signs are derived from `stop-sign.glb` by mm-data's
-`tools/build_road_signs.py`, without Blender: each keeps the STOP sign's post, base plate and collar unchanged in both
-levels, and its plate is built as the STOP plate is (thickness, height, rim material, a textured face mapped the same
-way) with its own outline, sized from the octagon. Their face artwork is flat colour in the STOP face's red and
-resolution, with the same light rim (`tools/board-models/road-*-face.png`).
+### Junctions with single lanes
+
+`LaneJunction` reads a junction as its arms: two-way (a two-lane road), entrances (single lanes whose traffic comes in)
+and exits (single lanes traffic leaves by); at a single lane's own hub every arm is an entrance or an exit. Aprons are
+no arms.
+
+- **Movements** run from a two-way arm or an entrance into another two-way arm or an exit, never back the way they
+  came, and not where the junction closes the turn: an exit some approaches may not take (`exitFrom`), and, where a
+  two-way road meets the junction, the U-turn from an entrance into the exit on its left round the nose between two
+  carriageways, beside it or across the gap of a Y (`LaneJunction.noseTurns`). A closed U-turn leaves no turning
+  envelope, so a gore opens between the two lanes.
+- **Conflicts.** Two movements from different arms conflict where they end in the same arm or cross. Traffic keeps
+  right: a two-way arm's arriving lane lies just anticlockwise of its middle and its departing lane just clockwise of
+  it, a single lane at its middle, and movements cross where their chords across the hex cross.
+- **Priority road**, never a 120 degree hairpin: the two-way pair, straight before a 60 degree bend; where at most one
+  two-way road meets the junction, straight before bent, then the pair more traffic arrives along, then an entrance's
+  road before an exit's (so a one-way street running on past a two-way stub keeps priority, and an exit never decides
+  it). A tie leaves none, as do two-way roads meeting only in a hairpin, and a bend whose own traffic conflicts in a way
+  only signs on the bend could settle, with nothing else to sign.
+- **Who waits.** Under Stops, an arm off the priority road whose traffic conflicts with the priority road's waits: an
+  entrance, or a hub's branch, gives way (a broken line across its whole lane, the triangle upstream, and
+  `give-way-sign.glb` on its right); a two-way arm stops, as at a T of two-lane roads. Without a priority road,
+  entrances give way and two-way arms keep priority to the right, with no signs; at a hub of two equal branches, the one
+  with the other on its right gives way. Never every arm, so no all-way stop. Under traffic lights every arriving arm
+  has a bar and lights, a single lane's on a pole beside it, never under overhead lights. Exits and arms that bring no
+  traffic wait for nothing.
+- **Nothing to control** (`LaneJunction.State.NONE`): where no conflict is left that the road's own course does not
+  settle (turning traffic gives way to oncoming traffic on a straight road): lane drops, forks, a straight road with
+  only exits off it, a road dividing into two carriageways the right way round. It gets no bars, signs, lights or
+  keep-clear box under any choice, and the inspector shows **Junction controls: None**; a stored choice is kept for
+  later. Where movements conflict but nothing waits it is **Priority to the right (no signs)**.
+- **Centre line.** The priority road runs its centre line on through the junction where both its arms are two-lane and
+  it has no third two-lane arm, under Stops or with nothing to control (`BoardRoad.priorityRoad`): broken wherever a
+  movement crosses it, round a bend too; solid round a bend nothing crosses, and on a straight road where only turns
+  the junction closes would cross it. Otherwise dividers stop short of the junction as above.
+- **Signs** (`BoardFeatures.rampSigns`), each at a ramp's mouth facing the junction on the right of traffic heading out
+  along it, from the stop plane or partway out along the arm of a narrowing two-exit hex (`BoardRoad.rampFrame`): a
+  no-entry sign at an entrance some other arm's traffic could turn into, and a one-way sign at an exit two-way traffic
+  turns into (never at a hub, where every road is one-way). Before the junction, on an approach's right and facing it,
+  one sign tells it where it may go on (`LaneJunction.turnSign`): no left turn or no right turn where it may take none of
+  that side's turns, else a blue direction sign whose arrows show the ways it keeps at their true angles, hard left (120
+  degrees), left (60), ahead, right and hard right (`direction-sign-<hl-l-a-r-hr>.glb`, 31 of them). An approach whose
+  only ways on are hard turns, while straight on or a gentle turn leads into a no-entry sign, gets one too. Where a
+  two-way road divides into two carriageways a keep-right sign (`keep-right-sign.glb`) stands on the nose, facing the
+  junction (`LaneJunction.nose`).
+- **Placement never drops a sign whose line is painted.** A stop or give-way sign, or a pole of lights, stands at its
+  stop plane on the right; where the next arm's mouth fills that corner, further out along its own lane on its right,
+  else on its left. Every sign keeps four pixels clear of the junction's other poles and of props placed in the hex,
+  and stands on dry, level ground.
+
+The signs are derived from `stop-sign.glb` by mm-data's `tools/build_road_signs.py`, without Blender: each keeps the
+STOP sign's post, base plate and collar unchanged in both levels, and its plate is built as the STOP plate is
+(thickness, height, rim material, a textured face mapped the same way) with its own outline, sized from the octagon.
+Their face artwork is flat colour in the STOP face's red and resolution, with the same light rim
+(`tools/board-models/road-*-face.png`).
+
+Known limits: a bent priority road gets no priority-road sign with a course plate, so conflicts between its own two
+arms' turns are left to the general rules; signal heads are drawn out of service as everywhere, with no priority signs
+under them; junctions with single lanes never form a roundabout.
 
 A lane count change rebuilds the edited hex's surroundings as a road kind change does (`GpuTerrain`, and the surface
 cache key's `singleLane`); a direction change rebuilds two hexes out, which covers a join's markings and a derived
 direction. The cache key holds each nearby single lane's derived direction, not just its stored one, and a single
 lane's edit recaptures the hexes two out (`BoardTiles.changed`), so reversing a run beyond an unstored fork reaches the
 junction on the fork's far side. The single lane is centred on the two-lane road's course, not offset to its right-hand lane, and a
-single lane on colony slabs is narrowed but, like any slab road, unpainted. `BoardRoadSingleLaneTest` covers widths and
-border agreement, arrows, markings, give-way and priority, the signs' assets, sides and facing, their clearance from
-signal poles, hex and scene agreement, loose roads and rails, the surface cache key and the sign models' two levels;
-`SingleLaneTest` and `SingleLaneEditorTest` cover direction, runs, persistence, flips and the editor.
+single lane on colony slabs is narrowed but, like any slab road, unpainted. `LaneJunctionTest` checks the junction rules
+on the layouts an audit of every combination against the Vienna Conventions found wrong, and their invariants on all
+4096 arm layouts (never a hairpin priority road, never every arm waiting, never lights at a hub, nothing to control at
+a split). `BoardRoadSingleLaneTest` covers widths and border agreement, arrows, markings, give-way and priority, a sign
+for every line it paints on every junction shape under every control, the broken line round a crossed bend, the
+keep-right sign, hub merges, the signs' assets, sides and facing, their clearance from signal poles, hex and scene
+agreement, loose roads and rails, the surface cache key and the sign models' two levels; `SingleLaneTest` and
+`SingleLaneEditorTest` cover direction, runs, persistence, flips and the editor's issues.
 
 ## Road and rail corridors
 

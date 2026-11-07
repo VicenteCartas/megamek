@@ -46,6 +46,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexIssue;
 import megamek.common.board.HexTile;
+import megamek.common.board.LaneJunction;
 import megamek.common.board.RailRoute;
 import megamek.common.board.SingleLane;
 import megamek.common.board.TilesetScenery;
@@ -237,7 +238,8 @@ public final class BoardEditorSession {
      * the selected two-lane road's approaches that may take the exit leaving it there ({@link SingleLane#feeds}), 0 where
      * no exit leaves; {@code apronSides}, the sides where its ground road runs into roadless concrete, no roads of its
      * junction ({@link SingleLane#aprons}). The ramp sides leave out a neighbour's bridge deck, as the 3D board does
-     * ({@link SingleLane#arms}).
+     * ({@link SingleLane#arms}). {@code junction}: the junction the selected hex's ground road forms with the single lanes
+     * joining it, or as a single lane's hub ({@link SingleLane#junction}); null for none.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -247,7 +249,7 @@ public final class BoardEditorSession {
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
           boolean buildingProfileAvailable, int rampSides, int entranceSides, boolean laneRun, List<Integer> exitFrom,
-          int apronSides) {
+          int apronSides, LaneJunction junction) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -507,7 +509,8 @@ public final class BoardEditorSession {
               hex == null || SingleLane.single(hex) ? 0
                     : SingleLane.joined(hex, selected, this::hexAt) & SingleLane.arms(hex, selected, this::hexAt, roadExits(hex)),
               hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
-              exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)));
+              exitFrom(hex), hex == null ? 0 : SingleLane.aprons(hex, selected, this::hexAt, roadExits(hex)),
+              hex == null ? null : SingleLane.junction(hex, selected, this::hexAt));
     }
 
     /** The sides a hex's ground road leaves by; 0 without one. */
@@ -2835,6 +2838,7 @@ public final class BoardEditorSession {
                 found.add(new HexIssue(at, "", Messages.getString("BoardEditor.issueRoadBridge", issue.message(), issue.fix())));
             }
             Hex hex = board().getHex(at);
+            laneIssues(hex, at).forEach(text -> found.add(new HexIssue(at, "", text)));
             for (BoardDecoration object : hex.getDecorations()) {
                 if (!assetExists(object)) { found.add(new HexIssue(at, object.id(), Messages.getString("BoardEditor.issueArtMissing", object.asset()))); }
                 var receiver = object.placement().receiver();
@@ -2858,6 +2862,63 @@ public final class BoardEditorSession {
         issueList = java.util.stream.Stream.concat(issues.values().stream().flatMap(List::stream), imported)
               .sorted(Comparator.comparingInt((HexIssue issue) -> issue.coords().getX()).thenComparingInt(issue -> issue.coords().getY()))
               .toList();
+    }
+
+    /**
+     * {@code cells} and the hexes just beyond both ends of every single-lane run through them: the junctions a run's
+     * direction decides, however far along it they lie.
+     */
+    private java.util.Collection<Coords> withRunEnds(java.util.Collection<Coords> cells) {
+        java.util.Set<Coords> result = new java.util.LinkedHashSet<>(cells);
+        List<SingleLane.Run> runs = new ArrayList<>();
+        for (Coords at : cells) {
+            Hex hex = hexAt(at);
+            if (hex == null || !SingleLane.single(hex) || runs.stream().anyMatch(run -> run.contains(at))) { continue; }
+            SingleLane.Run run = SingleLane.run(this::hexAt, at, -1);
+            if (run == null || run.loop()) { continue; }
+            runs.add(run);
+            var first = run.steps().getFirst();
+            var last = run.steps().getLast();
+            if (first.back() >= 0) { result.add(first.at().translated(first.back())); }
+            if (last.ahead() >= 0) { result.add(last.at().translated(last.ahead())); }
+        }
+        return result;
+    }
+
+    /**
+     * The single-lane layouts at {@code at} that no road authority would build or that strand traffic (LaneJunction#issues),
+     * traffic lights chosen where nothing needs them, and a one-way lane ending, or starting, in a dead end. Each with its
+     * fix; the editor never refuses them.
+     */
+    private List<String> laneIssues(Hex hex, Coords at) {
+        if (!hex.containsTerrain(Terrains.ROAD)) { return List.of(); }
+        boolean narrow = SingleLane.single(hex);
+        int exits = roadExits(hex);
+        List<String> result = new ArrayList<>();
+        if (narrow && Integer.bitCount(exits) == 1) {
+            String kind = (SingleLane.inbound(hex, at, this::hexAt) & exits) != 0 ? "DEAD_END" : "FROM_NOWHERE";
+            result.add(laneIssue(kind));
+        }
+        if (narrow ? Integer.bitCount(exits) < 3 : SingleLane.joined(hex, at, this::hexAt) == 0) { return result; }
+        LaneJunction junction = SingleLane.junction(hex, at, this::hexAt);
+        if (junction == null || Integer.bitCount(junction.arms()) < 2) { return result; }
+        String[] sides = Messages.getString("BoardEditor.sides").split(",");
+        for (var issue : junction.issues()) {
+            result.add(laneIssue(issue.kind().name(), issue.side() < 0 ? "" : sides[issue.side()],
+                  issue.other() < 0 ? "" : sides[issue.other()]));
+        }
+        HexAppearance road = hex.getAppearance().get(SingleLane.OWNER);
+        boolean lights = road != null && road.trafficControl() != null
+              && road.trafficControl() != HexAppearance.TrafficControl.STOPS;
+        if (lights && Integer.bitCount(junction.arms()) >= 3 && junction.signalled() == 0) {
+            result.add(laneIssue("SIGNALS_IGNORED"));
+        }
+        return result;
+    }
+
+    private static String laneIssue(String kind, Object... sides) {
+        return Messages.getString("BoardEditor.issueLane", Messages.getString("BoardEditor.issueLane." + kind, sides),
+              Messages.getString("BoardEditor.issueLane." + kind + ".fix"));
     }
 
     /**
@@ -3599,8 +3660,9 @@ public final class BoardEditorSession {
             // step on Valencia (24,576 hexes) take 2.2 s instead of 0.26 s (one Flood, measured in the unit test JVM).
             undo.push(new Edit(java.util.Collections.unmodifiableMap(new LinkedHashMap<>(stroke)),
                   java.util.Collections.unmodifiableMap(after), currentId, id));
-            // The stroke holds every changed hex and its neighbours: exactly the hexes whose checks can change.
-            validate(stroke.keySet());
+            // The stroke holds every changed hex and its neighbours: the hexes whose checks can change, but for the
+            // junctions at the far ends of the single-lane runs it reaches, whose direction it may turn.
+            validate(withRunEnds(stroke.keySet()));
             currentId = id; redo.clear(); stroke.clear();
             // Bound retained stroke history, not the number of cells a legitimate stroke can edit.
             while (undo.size() > 200) { undo.removeLast(); }
@@ -3959,7 +4021,7 @@ public final class BoardEditorSession {
         (forward ? edit.after() : edit.before()).forEach((at, hex) -> restored.put(
               megamek.common.board.BoardLocation.of(at, board().getBoardId()), hex.duplicate()));
         board().setHexes(restored);
-        validate(edit.before().keySet());
+        validate(withRunEnds(edit.before().keySet()));
         currentId = forward ? edit.afterId() : edit.beforeId(); to.push(edit);
         selection.clear();
         Hex selectedHex = selected == null ? null : board().getHex(selected);

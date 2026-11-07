@@ -371,9 +371,10 @@ final class GpuRoads {
     }
 
     static List<Patch> patches(BoardScene.Tile tile, BoardRoad road) {
-        // A junction that only exits leave has no controls whatever is chosen (BoardRoad#exitsOnly).
-        var control = road.exitsOnly(tile.roadExits()) ? HexAppearance.TrafficControl.STOPS
-              : SingleLane.control(tile.appearance(), tile.roadExits(), road.single(), road.aprons());
+        // A junction where nothing needs controls has none whatever is chosen, and a hub never has lights (BoardRoad#trafficControl).
+        int exits = tile.roadExits();
+        var control = road.trafficControl(exits, SingleLane.control(tile.appearance(), exits, road.single(), road.aprons(),
+              road.junction(exits)));
         return patches(tile.coords(), tile.surface(), tile.road(), tile.roadExits(), road, false, slabs(tile, false), control,
               road.crossing(tile, false));
     }

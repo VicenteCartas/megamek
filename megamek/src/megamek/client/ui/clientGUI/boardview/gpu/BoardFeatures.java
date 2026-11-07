@@ -27,6 +27,7 @@ import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
+import megamek.common.board.LaneJunction;
 import megamek.common.board.RailRoute;
 import megamek.common.board.SingleLane;
 import megamek.common.board.TilesetScenery;
@@ -641,18 +642,20 @@ final class BoardFeatures {
             String owner = deck ? "bridgeRoad" : "road";
             int single = deck ? 0 : singleArms(hex, coords, board, exits);
             int aprons = deck ? 0 : SingleLane.aprons(hex, coords, board, exits);
-            var control = deck ? HexAppearance.trafficControl(hex.getAppearance(), owner, exits)
-                  : SingleLane.control(hex.getAppearance(), exits, single, aprons);
             boolean narrow = !deck && SingleLane.single(hex);
             long closed = single == 0 || narrow ? 0 : SingleLane.closedTurns(hex, coords, board);
             var road = BoardRoad.layout(coords, exits, kind,
                   direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck), single, narrow,
-                  closed).control(control).flow(inbound(hex, coords, board, single));
+                  closed).flow(inbound(hex, coords, board, single));
             if (!deck) { road = road.circulate(at -> BoardRoad.Node.of(at.equals(coords) ? hex : board.apply(at), at, board)); }
             if (deck ? RailRoute.deckRail(hex) : RailRoute.groundSides(hex) != 0) { road = road.solidHub(); }
             var corridor = RailRoute.corridor(hex, coords, board, deck);
             road = road.corridor(corridor);
             if (!deck) { road.aprons(aprons); }
+            // The junction single-lane roads form here, which decides its controls (LaneJunction).
+            var lanes = deck ? null : road.junction(exits);
+            road.control(deck ? HexAppearance.trafficControl(hex.getAppearance(), owner, exits)
+                  : SingleLane.control(hex.getAppearance(), exits, single, aprons, lanes));
             double level = deck ? BridgeSpan.deck(hex) : hex.getLevel();
             // Native rail terrain derives at most one marker on each layer.
             var marker = RailRoute.markers(hex, RailRoute.Kind.RAIL).stream()
@@ -664,13 +667,13 @@ final class BoardFeatures {
             var junction = road.stopApproaches(exits);
             var approaches = road.stopApproaches(exits, crossing);
             crossingControls(hex, coords, board, deck, road, corridor, marker, crossing, approaches, junction, result);
-            boolean ramps = single != 0 && !narrow;
+            boolean ramps = lanes != null && (!narrow || Integer.bitCount(exits & ~aprons) >= 3);
             if (junction.isEmpty()) {
-                if (ramps) { rampSigns(hex, coords, board, road, exits, result); }
+                if (ramps) { rampSigns(hex, coords, board, road, exits, lanes, result); }
                 continue;
             }
             List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board);
-            // The controls the junction actually has: none where only exits leave it (BoardRoad#exitsOnly).
+            // The controls the junction actually has: stop controls where nothing needs any, or at a hub (BoardRoad#trafficControl).
             var effective = road.trafficControl(exits);
             for (var approach : approaches) {
                 if (junction.stream().noneMatch(arm -> arm.direction() == approach.direction())) { continue; }
@@ -684,7 +687,8 @@ final class BoardFeatures {
                 String asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                 BoardDecoration.Stretch stretch = BoardDecoration.Stretch.NONE;
                 float setback = 0;
-                if (effective == HexAppearance.TrafficControl.GANTRY) {
+                // Overhead lights span a two-lane approach; a single lane's stand on a pole beside it.
+                if (effective == HexAppearance.TrafficControl.GANTRY && (single & 1 << approach.direction()) == 0) {
                     var gantry = gantry(road, clearance, approach, offset, hex, coords, board, deck);
                     // Walking sideways can cross another branch and skip a small island beside this lane.
                     // Keep existing supported masts; retry that island from the original lane edge.
@@ -719,10 +723,13 @@ final class BoardFeatures {
                     }
                     asset = effective == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                     if (!found) {
-                        // A ramp's mouth can lie in the corner of the road's arm beside it: its sign then stands further
-                        // out along its own lane, on its traffic's right, as the ramp signs do.
-                        if (!deck && (single & 1 << approach.direction()) != 0) {
-                            place(hex, coords, board, road, clearance, approach, 2, true, asset, stopId(coords, owner, approach), result);
+                        // An arm's mouth can lie in the corner of the arm beside it: its control then stands further out
+                        // along its own lane on its traffic's right, else on its left, never left out while its line is
+                        // painted.
+                        if (!deck && !place(hex, coords, board, road, clearance, approach, 2, true, false, asset,
+                              stopId(coords, owner, approach), result)) {
+                            place(hex, coords, board, road, clearance, approach, 2, true, true, asset,
+                                  stopId(coords, owner, approach), result);
                         }
                         continue;
                     }
@@ -735,7 +742,7 @@ final class BoardFeatures {
                       BoardDecoration.Placement.on(deck ? "bridge" : "ground", 0), 0, false, 0, 0, null, false, 0, stretch)));
             }
             // After the junction's own controls, whose poles the ramp signs keep clear of.
-            if (ramps) { rampSigns(hex, coords, board, road, exits, result); }
+            if (ramps) { rampSigns(hex, coords, board, road, exits, lanes, result); }
         }
         return List.copyOf(result);
     }
@@ -764,40 +771,85 @@ final class BoardFeatures {
     }
 
     /**
-     * The signs where single-lane, one-way roads join a two-lane one, at the ramp's mouth and facing the junction, on the
-     * right of traffic heading out along the ramp (the other side from an entrance's give-way sign): a no-entry sign at
-     * an entrance (on-ramp), whose traffic only comes towards the junction, and a one-way sign at an exit (off-ramp),
-     * which traffic turns into. A sign whose footing finds no dry ground beside the ramp is left out.
+     * The signs where single-lane, one-way roads join a junction ({@link LaneJunction}), at the ramp's mouth and facing the
+     * junction, on the right of traffic heading out along the ramp (the other side from an entrance's give-way sign): a
+     * no-entry sign at an entrance (on-ramp) that some other arm's traffic could turn into, and a one-way sign at an exit
+     * (off-ramp) that two-way traffic turns into. Before the junction, on the right of an approach and facing it, the sign
+     * telling it where it may go on: no left or right turn, or the ways it may take (LaneJunction#turnSign). Where a
+     * two-way road divides into two carriageways, a keep-right sign on the nose between them, facing the junction. A sign
+     * whose footing finds no dry ground is left out.
      */
     private static void rampSigns(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, int exits,
-          List<BoardScene.Feature> result) {
+          LaneJunction lanes, List<BoardScene.Feature> result) {
+        int mouths = lanes.noEntry() | lanes.oneWay(), turns = 0;
+        for (int from = 0; from < 6; from++) {
+            if (lanes.turnSign(from) != LaneJunction.TurnSign.NONE) { turns |= 1 << from; }
+        }
+        if (mouths == 0 && turns == 0 && lanes.nose() < 0) { return; }
         List<BoardRoad> clearance = nearbyWays(hex, coords, board);
         // A two-way hex's course bends through its borders as the scene draws it (BoardRoad#bends); a junction's arms
         // run straight in, as the controls' own layout has them.
         if (Integer.bitCount(exits) == 2) { road = BoardRoad.clearance(coords, hex, board).flow(road.inbound()); }
         String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":road:";
         for (int direction = 0; direction < 6; direction++) {
-            if ((road.single() & 1 << direction) == 0) { continue; }
+            if ((mouths & 1 << direction) == 0) { continue; }
             var frame = road.rampFrame(exits, direction);
             if (frame == null) { continue; }
-            boolean entrance = (road.inbound() & 1 << direction) != 0;
+            boolean entrance = (lanes.entrances() & 1 << direction) != 0;
             // From the mouth out along the ramp, past the junction's own poles where they crowd it; model +Y is the sign's
             // face: towards the junction, against the ramp's outward normal.
-            place(hex, coords, board, road, clearance, frame, 0, false, entrance ? "scenery/road/no-entry-sign"
+            place(hex, coords, board, road, clearance, frame, 0, false, false, entrance ? "scenery/road/no-entry-sign"
                   : "scenery/road/one-way-sign", prefix + "ramp:" + direction, result);
-            if (entrance) { continue; }
-            // An approach that may not take this exit is told so before the junction, on its right, facing it.
-            for (int from = 0; from < 6; from++) {
-                if ((exits & ~road.single() & 1 << from) == 0 || !road.closed(from, direction)) { continue; }
-                var approach = road.armFrame(exits, from);
-                if (approach == null) { continue; }
-                // A little upstream of the junction, clear of the poles at its mouth.
-                String sign = switch (BoardRoad.turn(from, direction)) {
-                    case 1 -> "scenery/road/no-left-turn-sign";
-                    case 0 -> "scenery/road/no-straight-ahead-sign";
-                    default -> "scenery/road/no-right-turn-sign";
-                };
-                place(hex, coords, board, road, clearance, approach, 3, true, sign, prefix + "turn:" + from + "-" + direction, result);
+        }
+        for (int from = 0; from < 6; from++) {
+            if ((turns & 1 << from) == 0) { continue; }
+            var approach = road.armFrame(exits, from);
+            if (approach == null) { continue; }
+            // A little upstream of the junction, clear of the poles at its mouth.
+            String sign = switch (lanes.turnSign(from)) {
+                case NO_LEFT -> "scenery/road/no-left-turn-sign";
+                case NO_RIGHT -> "scenery/road/no-right-turn-sign";
+                default -> directionSign(lanes.directions(from));
+            };
+            place(hex, coords, board, road, clearance, approach, 3, true, false, sign, prefix + "turn:" + from, result);
+        }
+        keepRight(hex, coords, board, road, clearance, lanes.nose(), prefix + "keep-right", result);
+    }
+
+    /**
+     * The direction-to-be-followed sign (D,1) showing the {@code directions} an approach may take
+     * (LaneJunction#directions), its arrows at their true angles: hard left, left, ahead, right and hard right.
+     */
+    static String directionSign(int directions) {
+        String[] codes = { "hl", "l", "a", "r", "hr" };
+        List<String> kept = new ArrayList<>();
+        for (int i = 0; i < codes.length; i++) {
+            if ((directions & 1 << i) != 0) { kept.add(codes[i]); }
+        }
+        return "scenery/road/direction-sign-" + String.join("-", kept);
+    }
+
+    /**
+     * A keep-right sign (D,2) on the nose between two carriageways ({@link LaneJunction#nose}, in half sides): out from the
+     * hex's centre towards it until it stands clear of the roads on dry, level ground, facing the junction.
+     */
+    private static void keepRight(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, List<BoardRoad> clearance,
+          int nose, String id, List<BoardScene.Feature> result) {
+        if (nose < 0) { return; }
+        float[] a = RailRoute.border(nose / 2), b = RailRoute.border((nose / 2 + nose % 2) % 6);
+        float ux = a[0] + b[0], uy = a[1] + b[1], length = (float) Math.hypot(ux, uy);
+        ux /= length;
+        uy /= length;
+        float reach = (float) Math.hypot(a[0], a[1]) * (nose % 2 == 0 ? 1 : 1.12f);
+        for (float out = 4; out <= reach; out += .25f) {
+            float x = ux * out, y = uy * out;
+            if (controlClearance(road, clearance, x, y) >= .5f && clearOfPoles(hex, result, x, y)
+                  && controlSupported(hex, coords, board, false, x, y)) {
+                double rotation = Math.toDegrees(Math.atan2(ux, -uy));
+                result.add(feature(hex, new BoardDecoration(id, "prop", "scenery/road/keep-right-sign", null,
+                      x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
+                      BoardDecoration.Placement.on("ground", 0), 0, false)));
+                return;
             }
         }
     }
@@ -805,16 +857,20 @@ final class BoardFeatures {
     /**
      * Stands a roadside sign by {@code frame}, from its plane out along its arm until it finds dry, level ground clear of
      * the roads, the junction's poles and the hex's props: on the right of the arm's incoming traffic, facing it
-     * ({@code incoming}), or on the right of traffic heading out along it, facing the junction; {@code start} pixels out at
-     * least. Left out where none is.
+     * ({@code incoming}), or on the right of traffic heading out along it, facing the junction; on that traffic's
+     * {@code left} instead; {@code start} pixels out at least. Left out where none is.
+     *
+     * @return whether it stands
      */
-    private static void place(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, List<BoardRoad> clearance,
-          BoardRoad.StopApproach frame, float start, boolean incoming, String asset, String id, List<BoardScene.Feature> result) {
-        float side = incoming ? 1 : -1;
+    private static boolean place(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, List<BoardRoad> clearance,
+          BoardRoad.StopApproach frame, float start, boolean incoming, boolean left, String asset, String id,
+          List<BoardScene.Feature> result) {
+        // A carriageway is as wide either side of its course: its left verge lies past its other lane.
+        float side = (incoming ? 1 : -1) * (left ? -1 : 1), edge = frame.outer() + .7f;
         for (float setback = start; setback <= start + 10; setback += .5f) {
-            float offset = frame.outer() + .7f;
+            float offset = edge;
             while (road.distance(frame.x() + frame.nx() * setback - side * frame.ny() * offset,
-                  frame.y() + frame.ny() * setback + side * frame.nx() * offset) < .5f && offset < frame.outer() + 6) {
+                  frame.y() + frame.ny() * setback + side * frame.nx() * offset) < .5f && offset < edge + 6) {
                 offset += .25f;
             }
             for (int step = 0; step <= 12; step++) {
@@ -828,10 +884,11 @@ final class BoardFeatures {
                     result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
                           x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
                           BoardDecoration.Placement.on("ground", 0), 0, false)));
-                    return;
+                    return true;
                 }
             }
         }
+        return false;
     }
 
     /** How far apart, in tile pixels, two roadside poles stand at least: about a metre and a half. */

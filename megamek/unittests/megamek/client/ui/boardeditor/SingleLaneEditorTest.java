@@ -116,13 +116,13 @@ class SingleLaneEditorTest {
         inspect(session, J);
         send(session, Action.TRAFFIC_CONTROL, "road", "gantry");
         var snapshot = session.snapshot();
-        assertTrue(SingleLane.exitsOnly(snapshot.property("road").exits() & 63, snapshot.rampSides(), snapshot.entranceSides()),
+        assertFalse(snapshot.junction().controlled(),
               "Only the exit leaves J: the inspector shows no controls");
         assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(J).getAppearance(), "road"),
               "But the choice is stored");
         send(session, Action.RAMP, "road:2", "entrance");
         snapshot = session.snapshot();
-        assertFalse(SingleLane.exitsOnly(snapshot.property("road").exits() & 63, snapshot.rampSides(), snapshot.entranceSides()),
+        assertTrue(snapshot.junction().controlled(),
               "An entrance joins: the choice applies again");
         assertEquals(HexAppearance.TrafficControl.GANTRY, HexAppearance.trafficControl(session.board().getHex(J).getAppearance(), "road"));
     }
@@ -141,7 +141,7 @@ class SingleLaneEditorTest {
         int exits = snapshot.property("road").exits() & 63;
         assertEquals(1 << 1, exits & 1 << 1, "The road runs into the pavement north-east, as roads do");
         assertEquals(1 << 1, snapshot.apronSides(), "An apron");
-        assertTrue(SingleLane.exitsOnly(exits & ~snapshot.apronSides(), snapshot.rampSides(), snapshot.entranceSides()),
+        assertFalse(snapshot.junction().controlled(),
               "Only the exit leaves J: the inspector shows no controls, as the board draws none");
     }
 
@@ -285,5 +285,47 @@ class SingleLaneEditorTest {
 
     private static void send(BoardEditorSession session, Action action, String target, String value) {
         session.command(new Command(action, target, value), null);
+    }
+    /** The issues the editor reports at {@code at}. */
+    private static List<String> issuesAt(BoardEditorSession session, Coords at) {
+        return session.snapshot().issues().stream().filter(issue -> issue.coords().equals(at)).map(megamek.common.board.HexIssue::text)
+              .toList();
+    }
+
+    private static boolean reported(BoardEditorSession session, Coords at, String kind, Object... sides) {
+        String text = Messages.getString("BoardEditor.issueLane." + kind, sides);
+        return issuesAt(session, at).stream().anyMatch(issue -> issue.startsWith(text));
+    }
+
+    @Test void aLaneEndingInADeadEndIsReportedUntilItRunsTheOtherWay() {
+        var session = ramp();
+        assertTrue(reported(session, S3, "DEAD_END"), "The exit ends three hexes on: its traffic cannot leave");
+        inspect(session, J);
+        send(session, Action.RAMP, "road:2", "entrance");
+        assertFalse(reported(session, S3, "DEAD_END"), "Re-checked at the run's far end, though the edit was at J");
+        assertTrue(reported(session, S3, "FROM_NOWHERE"));
+        assertTrue(issuesAt(session, J).isEmpty(), "A T with its entrance: nothing wrong at J");
+        send(session, Action.UNDO, "", "");
+        assertTrue(reported(session, S3, "DEAD_END"), "Undone, and reported again");
+    }
+
+    @Test void carriagewaysRunningOnTheLeftAreReportedAndNeverRefused() {
+        var session = new BoardEditorSession();
+        send(session, Action.CHOOSE_BRUSH, "road", "1");
+        stroke(session, J.translated(0), J);
+        send(session, Action.BRUSH_VALUE, "lanes", "single");
+        stroke(session, J, J.translated(2), J.translated(2).translated(2));
+        stroke(session, J, J.translated(4), J.translated(4).translated(4));
+        assertTrue(reported(session, J, "SOURCELESS_ROAD", "N"), "Only exits leave the two-lane road: nothing feeds it");
+        inspect(session, J);
+        send(session, Action.RAMP, "road:4", "entrance");
+        assertEquals("", session.snapshot().message(), "Not refused");
+        assertTrue(reported(session, J, "REVERSED_SPLIT", "SE", "SW"), "Southbound traffic would run on the east carriageway");
+        send(session, Action.RAMP, "road:2", "entrance");
+        send(session, Action.RAMP, "road:4", "exit");
+        assertTrue(issuesAt(session, J).isEmpty(), "Divided the right way round");
+        var junction = session.snapshot().junction();
+        assertEquals(megamek.common.board.LaneJunction.State.NONE, junction.state(), "Nothing to control: no row to choose");
+        assertEquals(6, junction.nose(), "A keep-right sign on its nose");
     }
 }

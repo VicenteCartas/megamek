@@ -19,6 +19,7 @@ import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
+import megamek.common.board.LaneJunction;
 import megamek.common.board.RailRoute;
 import megamek.common.board.SingleLane;
 import megamek.common.units.Terrains;
@@ -120,6 +121,8 @@ final class BoardRoad {
     private long closed;
     /** Of the single arms, those by which traffic enters this hex: a two-lane road's entrances (on-ramps). */
     private int inbound;
+    /** Whether a bend's centre line is broken rather than solid: a junction's priority road that traffic crosses. */
+    private boolean broken;
     /** Sides where this road meets one of the other family at its level, paved against loose (#meet). */
     private int meetings;
     /** Of those, the sides where a paved road ends square on its border: a construction edge (#meet). */
@@ -304,7 +307,8 @@ final class BoardRoad {
         } else { road = road.meetConcrete(scene, tile); }
         // Its aprons, which the concrete it meets gives, are no roads of its junction (SingleLane#control).
         return road.corridor(tile.corridor()).approachMarkings(scene, tile, false)
-              .control(SingleLane.control(tile.appearance(), tile.roadExits(), single, road.apronExits)).meet(scene, tile);
+              .control(SingleLane.control(tile.appearance(), tile.roadExits(), single, road.apronExits,
+                    road.junction(tile.roadExits()))).meet(scene, tile);
     }
 
     static boolean paved(Kind kind) { return kind == Kind.PAVED || kind == Kind.ALLEY; }
@@ -575,17 +579,26 @@ final class BoardRoad {
     BoardRoad control(HexAppearance.TrafficControl value) { control = value; return this; }
 
     /**
-     * Whether only single-lane exits leave this two-lane junction (SingleLane#exitsOnly): nothing joins its road's
-     * traffic, so it has no junction controls whatever is chosen, and its road keeps priority as under stop controls.
+     * The junction this road forms with the single-lane roads joining it, or that its own single lane's hub forms
+     * ({@link LaneJunction}), its aprons left out; null for any other road, and for a roundabout.
      */
-    boolean exitsOnly(int exits) {
-        return circle == null && !narrow && SingleLane.exitsOnly(exits & ~apronExits & 63, single, inbound);
+    LaneJunction junction(int exits) {
+        int arms = exits & ~apronExits & 63;
+        if (circle != null || !narrow && (arms & single) == 0) { return null; }
+        return LaneJunction.of(arms, single, inbound, closed, narrow);
     }
 
-    /** The controls this junction actually has: the chosen ones, or stop controls where only exits leave it (#exitsOnly). */
-    HexAppearance.TrafficControl trafficControl(int exits) {
-        return exitsOnly(exits) ? HexAppearance.TrafficControl.STOPS : control;
+    /**
+     * The controls this junction actually has of {@code chosen}: where single lanes join it, stop controls (which draw
+     * nothing) where nothing needs controls, and at a hub, which is never signalled ({@link LaneJunction#signalled}).
+     */
+    HexAppearance.TrafficControl trafficControl(int exits, HexAppearance.TrafficControl chosen) {
+        var junction = junction(exits);
+        return junction != null && (!junction.controlled() || junction.hub()) ? HexAppearance.TrafficControl.STOPS : chosen;
     }
+
+    /** The controls this junction actually has ({@link #trafficControl(int, HexAppearance.TrafficControl)}). */
+    HexAppearance.TrafficControl trafficControl(int exits) { return trafficControl(exits, control); }
 
     BoardRoad aprons(int exits) { apronExits = exits & 63; return this; }
 
@@ -2594,32 +2607,32 @@ final class BoardRoad {
 
     /**
      * Paved approaches that yield at a crossing; an opposite pair carries the through road of a T. Where single-lane roads
-     * join a two-lane one, an exit (off-ramp) only carries traffic away and waits for nothing; under stop controls an
-     * entrance (on-ramp) gives way ({@link StopApproach#yields}) to the two-lane road, which keeps its priority through
-     * the junction when it has at most two arms there, and stops where every two-lane arm stops. A junction that only
-     * exits leave has no controls under any choice ({@link #exitsOnly}), nor has a single-lane fork or merge.
+     * join a two-lane one, or meet at a single lane's hub, the junction's own rules decide ({@link LaneJunction}): under
+     * stop controls the arms that wait, an entrance or a hub's branch giving way and a two-way arm stopping; under traffic
+     * lights every arriving arm; nothing where nothing needs controls.
      */
     List<StopApproach> stopApproaches(int exits) {
         int arms = exits & ~apronExits & 63;
-        if (circle != null || narrow || Integer.bitCount(arms) < 3 || exitsOnly(exits)) { return List.of(); }
-        int stopped = arms & ~(single & ~inbound);
+        if (circle != null || Integer.bitCount(arms) < 3) { return List.of(); }
+        var junction = junction(exits);
         boolean stops = trafficControl(exits) == HexAppearance.TrafficControl.STOPS;
-        int wide = arms & ~single;
-        if (stops) {
-            if ((arms & single) != 0 && Integer.bitCount(wide) <= 2) { stopped &= ~wide; }
-            else if (Integer.bitCount(wide) == 3) {
-                for (int direction = 0; direction < 3; direction++) {
-                    int through = (1 << direction) | (1 << (direction + 3));
-                    if ((wide & through) == through) { stopped &= ~through; break; }
-                }
+        if (junction != null) {
+            if (!junction.controlled()) { return List.of(); }
+            int controlled = stops ? junction.waiting() : junction.signalled();
+            return conflictApproaches(exits).stream().filter(arm -> (controlled & 1 << arm.direction()) != 0)
+                  .map(arm -> stops && junction.yields(arm.direction()) ? arm.yielding() : arm)
+                  .filter(this::clearOfConcrete).toList();
+        }
+        if (narrow) { return List.of(); }
+        int stopped = arms;
+        if (stops && Integer.bitCount(arms) == 3) {
+            for (int direction = 0; direction < 3; direction++) {
+                int through = (1 << direction) | (1 << (direction + 3));
+                if ((arms & through) == through) { stopped &= ~through; break; }
             }
         }
         int controlled = stopped;
-        // An entrance gives way to a two-lane road that keeps its priority; where every two-lane arm stops (an all-way
-        // stop) it stops as they do.
-        boolean yields = stops && (wide == 0 || (wide & ~stopped) != 0);
         return conflictApproaches(exits).stream().filter(arm -> (controlled & 1 << arm.direction()) != 0)
-              .map(arm -> yields && (single & 1 << arm.direction()) != 0 ? arm.yielding() : arm)
               .filter(this::clearOfConcrete).toList();
     }
 
@@ -2694,7 +2707,7 @@ final class BoardRoad {
      * along it; null for any other arm, and on a single-lane road.
      */
     StopApproach rampFrame(int exits, int direction) {
-        if (narrow || (single & exits & 1 << direction) == 0) { return null; }
+        if (((narrow ? exits : single & exits) & 1 << direction) == 0) { return null; }
         for (var frame : conflictApproaches(exits)) {
             if (frame.direction() == direction) { return frame; }
         }
@@ -2840,7 +2853,12 @@ final class BoardRoad {
     Area approachArrows(int exits) {
         Area result = new Area();
         int arms = exits & 63, outgoing = narrow ? 0 : single & ~inbound & arms;
-        if (circle != null || outgoing == 0 || closed == 0) { return result; }
+        // Only an exit's restriction on a two-way approach, not an entrance's closed U-turn round a nose.
+        boolean restricted = false;
+        for (int from = 0; from < 6; from++) {
+            restricted |= (arms & ~single & 1 << from) != 0 && (closed >>> 6 * from & outgoing) != 0;
+        }
+        if (circle != null || outgoing == 0 || !restricted) { return result; }
         int onward = arms & ~single | outgoing;
         for (int from = 0; from < 6; from++) {
             if ((arms & ~single & 1 << from) == 0) { continue; }
@@ -2999,7 +3017,7 @@ final class BoardRoad {
         // as through any hex of its own: nothing on it stops or turns across a give-way.
         int through = junction ? priorityRoad(exits) : 0;
         if (through != 0) {
-            area.add(priorityLine(coords, through));
+            area.add(priorityLine(coords, exits, through));
             int road = through;
             conflicts = conflicts.stream().filter(stop -> (road & 1 << stop.direction()) == 0).toList();
         }
@@ -3030,10 +3048,11 @@ final class BoardRoad {
             float phase = ((dash + (period - dash) / 2 - anchor) % period + period) % period;
             Area paint = new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND,
                   10, new float[] { dash, period - dash }, phase).createStrokedShape(path));
-            if (turning || solidApproaches != 0) {
+            boolean bend = turning && !broken;
+            if (bend || solidApproaches != 0) {
                 Area solid = new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND)
                       .createStrokedShape(path));
-                if (!turning) {
+                if (!bend) {
                     Area approach = new Area();
                     int sides = exits;
                     for (Point border : borders) {
@@ -3084,35 +3103,37 @@ final class BoardRoad {
     }
 
     /**
-     * The two arms of the two-lane road that keeps its priority through this junction (#stopApproaches): under stop
-     * controls, or any choice where only exits leave it (#exitsOnly), where only single-lane ramps join it and it has just
-     * these two two-lane arms; 0 otherwise, as at a junction of two-lane roads or under traffic lights an entrance joins,
+     * The two arms of the two-lane road whose centre line runs on through this junction ({@link LaneJunction#road}):
+     * where single-lane roads join it and it has just these two two-lane arms, under stop controls or where nothing needs
+     * controls; 0 otherwise, as at a junction of two-lane roads, under traffic lights, or where no road keeps priority,
      * whose dividers stop short of the junction.
      */
     int priorityRoad(int exits) {
         int arms = exits & ~apronExits & 63, wide = arms & ~single;
-        if (circle != null || narrow || trafficControl(exits) != HexAppearance.TrafficControl.STOPS || (arms & single) == 0
+        var junction = junction(exits);
+        if (junction == null || narrow || trafficControl(exits) != HexAppearance.TrafficControl.STOPS
               || Integer.bitCount(wide) != 2 || corridor.sides() != 0) { return 0; }
-        return wide;
+        return junction.road();
     }
 
-    /** The centre line of the priority road's two arms ({@link #priorityRoad}): that of a road with just those two exits. */
-    private Area priorityLine(Coords coords, int through) {
+    /**
+     * The centre line of the priority road's two arms ({@link #priorityRoad}): that of a road with just those two exits,
+     * broken wherever a movement the junction allows crosses it, round a bend too; solid on a bend nothing crosses, and on
+     * a straight road where only turns the junction closes would cross it, to keep traffic from them.
+     */
+    private Area priorityLine(Coords coords, int exits, int through) {
         BoardRoad road = layout(coords, through, Kind.PAVED,
               direction -> joins.stream().filter(join -> join.direction() == direction).map(Join::kind)
                     .findFirst().orElse(Kind.PAVED), direction -> null, false, false);
         road.solidApproaches = solidApproaches & through;
         road.apronExits = apronExits;
         road.concreteEntrances = concreteEntrances;
-        // Where traffic may not cross the oncoming lanes into an exit, a solid line keeps it from turning across them.
-        boolean noCrossing = false;
-        for (int exit = 0; exit < 6; exit++) {
-            if ((single & ~inbound & 1 << exit) == 0) { continue; }
-            for (int from = 0; from < 6; from++) {
-                noCrossing |= (through & 1 << from) != 0 && closed(from, exit) && leftTurn(from, exit);
-            }
+        var junction = junction(exits);
+        if (junction.crossesRoad(through)) {
+            road.broken = true;
+            return road.markings(coords, through);
         }
-        if (!noCrossing) { return road.markings(coords, through); }
+        if (turning(through) || !junction.closedCrossing(through)) { return road.markings(coords, through); }
         Area solid = new Area();
         for (var points : road.paintPaths()) {
             solid.add(new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND).createStrokedShape(linePath(points))));

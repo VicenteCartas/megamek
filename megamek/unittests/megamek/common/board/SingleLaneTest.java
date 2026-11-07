@@ -290,12 +290,12 @@ class SingleLaneTest {
 
     @Test
     void aJunctionThatOnlyExitsLeaveHasNothingToControl() {
-        assertTrue(SingleLane.exitsOnly(13, 4, 0), "A road north to south and an exit south-east");
-        assertTrue(SingleLane.exitsOnly(21, 20, 0), "One two-lane arm forking into two exits");
-        assertTrue(SingleLane.exitsOnly(9, 8, 0), "A road narrowing into an exit");
-        assertFalse(SingleLane.exitsOnly(13, 4, 4), "An entrance joins its traffic");
-        assertFalse(SingleLane.exitsOnly(29, 4, 0), "A third two-lane road joins");
-        assertFalse(SingleLane.exitsOnly(13, 0, 0), "No ramp: an ordinary junction");
+        assertFalse(LaneJunction.of(13, 4, 0, 0, false).controlled(), "A road north to south and an exit south-east");
+        assertFalse(LaneJunction.of(21, 20, 0, 0, false).controlled(), "One two-lane arm forking into two exits");
+        assertFalse(LaneJunction.of(9, 8, 0, 0, false).controlled(), "A road narrowing into an exit");
+        assertTrue(LaneJunction.of(13, 4, 4, 0, false).controlled(), "An entrance joins its traffic");
+        assertTrue(LaneJunction.of(29, 4, 0, 0, false).controlled(), "A third two-lane road joins");
+        assertTrue(LaneJunction.of(13, 0, 0, 0, false).controlled(), "No ramp: an ordinary junction");
     }
 
     @Test

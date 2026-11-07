@@ -376,7 +376,6 @@ class BoardRoadSingleLaneTest {
         var layouts = List.of(new Layout("an exit south-east", ramps(9, 4, 0, control), ramps(9, 4, 0, stops)),
               new Layout("an exit north-west", ramps(9, 32, 0, control), ramps(9, 32, 0, stops)),
               new Layout("exits on both sides", ramps(9, 4 | 16, 0, control), ramps(9, 4 | 16, 0, stops)),
-              new Layout("a bend and an exit", ramps(1 | 4, 8, 0, control), ramps(1 | 4, 8, 0, stops)),
               new Layout("one two-lane arm forking into exits", ramps(1, 4 | 16, 0, control), ramps(1, 4 | 16, 0, stops)),
               new Layout("an exit taken from the north", exitTakenFrom(0, control), exitTakenFrom(0, stops)),
               new Layout("an exit straight on", straightExit(1 << 1, control), straightExit(1 << 1, stops)));
@@ -385,7 +384,7 @@ class BoardRoadSingleLaneTest {
             var reference = scene(layout.reference());
             var road = of(scene, J);
             int exits = scene.tile(J).roadExits();
-            assertTrue(road.exitsOnly(exits), layout.name());
+            assertFalse(road.junction(exits).controlled(), layout.name());
             assertTrue(road.stopApproaches(exits).isEmpty(), layout.name() + ": nothing waits, whatever is chosen");
             assertEquals(of(reference, J).priorityRoad(exits), road.priorityRoad(exits), layout.name());
             // Area compares its geometry with equals(Area) alone.
@@ -395,7 +394,8 @@ class BoardRoadSingleLaneTest {
             var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
             assertEquals(BoardFeatures.roadControls(layout.reference().getHex(J), J, layout.reference()::getHex, true), controls,
                   layout.name() + ": the same signs");
-            assertTrue(controls.stream().allMatch(feature -> feature.asset().matches("scenery/road/(one-way|no-.*-turn|no-straight-ahead)-sign")),
+            assertTrue(controls.stream().allMatch(feature -> feature.asset()
+                        .matches("scenery/road/(one-way-sign|no-(left|right)-turn-sign|direction-sign-[a-z-]+)")),
                   layout.name() + ": only the exit's own signs, " + controls.stream().map(BoardScene.Feature::asset).toList());
             if (control != null) {
                 assertEquals(control, HexAppearance.trafficControl(board.getHex(J).getAppearance(), "road", exits),
@@ -409,7 +409,7 @@ class BoardRoadSingleLaneTest {
         var signals = HexAppearance.TrafficControl.SIGNALS;
         Board entrance = ramps(9, 0, 4, signals);
         var road = of(scene(entrance), J);
-        assertFalse(road.exitsOnly(13));
+        assertTrue(road.junction(13).controlled());
         assertEquals(Set.of(0, 2, 3), road.stopApproaches(13).stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet()));
         var lights = BoardFeatures.roadControls(entrance.getHex(J), J, entrance::getHex, true).stream()
               .filter(feature -> feature.asset().equals("scenery/road/traffic-signal")).map(feature -> feature.decoration().id()).toList();
@@ -441,10 +441,10 @@ class BoardRoadSingleLaneTest {
         int aprons = SingleLane.aprons(hex, J, board::getHex, exits), ramps = SingleLane.arms(hex, J, board::getHex, exits);
         assertEquals(2, aprons, "The pavement is an apron");
         assertEquals(4, ramps);
-        assertTrue(SingleLane.exitsOnly(exits & ~aprons, ramps, 0), "What the editor reads: only the exit leaves");
+        assertFalse(SingleLane.junction(hex, J, board::getHex).controlled(), "What the editor reads: only the exit leaves");
         var road = of(scene(board), J);
         assertEquals(aprons, road.aprons(), "The board finds the same apron");
-        assertTrue(road.exitsOnly(exits), "And the same junction");
+        assertFalse(road.junction(exits).controlled(), "And the same junction");
         assertTrue(BoardFeatures.roadControls(hex, J, board::getHex, true).stream()
               .allMatch(feature -> feature.asset().equals("scenery/road/one-way-sign")), "No lights");
         // Two aprons beside a road and its entrance are still no four roads: stop signs, the entrance giving way.
@@ -493,11 +493,16 @@ class BoardRoadSingleLaneTest {
     }
 
     @Test
-    void anEntranceStopsWhereEveryTwoLaneArmStops() {
-        // A Y of two-lane roads has no road through to keep priority: every arm stops, the entrance as well.
-        var y = of(scene(ramps(1 | 4 | 16, 0, 8, HexAppearance.TrafficControl.STOPS)), J).stopApproaches(29);
-        assertEquals(Set.of(0, 2, 3, 4), y.stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet()));
-        assertTrue(y.stream().noneMatch(BoardRoad.StopApproach::yields), "An all-way stop: the entrance stops too");
+    void anEntranceGivesWayWhereNoTwoLaneRoadKeepsPriority() {
+        // A Y of two-lane roads has no road through to keep priority. No all-way stop, which leaves nobody priority: the
+        // two-lane roads keep priority to the right among themselves, and the entrance gives way to them all.
+        var y = of(scene(ramps(1 | 4 | 16, 0, 8, HexAppearance.TrafficControl.STOPS)), J);
+        assertEquals(0, y.junction(29).priority());
+        assertEquals(Set.of(3), y.stopApproaches(29).stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet()));
+        assertTrue(y.stopApproaches(29).stream().allMatch(BoardRoad.StopApproach::yields));
+        assertEquals(0, y.priorityRoad(29), "No road runs its centre line on through");
+        assertEquals(HexAppearance.TrafficControl.SIGNALS, of(scene(ramps(1 | 4 | 16, 0, 8, null)), J).trafficControl(29),
+              "Four approaches and no road keeping priority: traffic lights by default");
         // At a T the road through keeps priority: its stem stops and the entrance gives way to it.
         var tee = of(scene(ramps(1 | 8 | 16, 0, 4, HexAppearance.TrafficControl.STOPS)), J).stopApproaches(29);
         assertEquals(Set.of(2, 4), tee.stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet()));
@@ -527,8 +532,9 @@ class BoardRoadSingleLaneTest {
         assertEquals(-1, BoardRoad.turn(3, 1), "From the south into the north-east: right");
         Board board = straightExit(1 << 1);
         var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
-        var sign = sign(controls, "no-straight-ahead-sign");
-        assertEquals("terrain:4_4:road:turn:3-0", sign.decoration().id(), "Northbound may not go on into the exit");
+        var sign = sign(controls, "direction-sign-r");
+        assertEquals("terrain:4_4:road:turn:3", sign.decoration().id(),
+              "Northbound may not go on into the exit: it is shown its only way on, right (no sign forbids straight on)");
         assertTrue(controls.stream().noneMatch(feature -> feature.asset().contains("no-left") || feature.asset().contains("no-right")));
         var road = of(scene(board), J);
         var arrows = road.approachArrows(11);
@@ -539,7 +545,7 @@ class BoardRoadSingleLaneTest {
         assertTrue(branches(road, arrows, 11, 1, 1) && branches(road, arrows, 11, 1, -1), "Left on south, or right into the exit");
         board = straightExit(1 << 3);
         controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
-        assertEquals("terrain:4_4:road:turn:1-0", sign(controls, "no-right-turn-sign").decoration().id());
+        assertEquals("terrain:4_4:road:turn:1", sign(controls, "no-right-turn-sign").decoration().id());
         road = of(scene(board), J);
         arrows = road.approachArrows(11);
         assertTrue(branches(road, arrows, 11, 3, 0) && branches(road, arrows, 11, 3, -1), "Northbound: on into the exit, or right");
@@ -574,7 +580,7 @@ class BoardRoadSingleLaneTest {
         int closed = allowed == 0 ? 3 : 0;
         var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
         var sign = sign(controls, allowed == 0 ? "no-right-turn-sign" : "no-left-turn-sign");
-        assertEquals("terrain:4_4:road:turn:" + closed + "-2", sign.decoration().id());
+        assertEquals("terrain:4_4:road:turn:" + closed, sign.decoration().id());
         sign(controls, "one-way-sign");
         var road = of(scene(board), J);
         var frame = road.armFrame(13, closed);
@@ -792,11 +798,131 @@ class BoardRoadSingleLaneTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "give-way-sign", "no-entry-sign", "one-way-sign", "no-left-turn-sign", "no-right-turn-sign",
-          "no-straight-ahead-sign" })
+          "keep-right-sign", "direction-sign-a", "direction-sign-r", "direction-sign-hl-hr", "direction-sign-hl-l-a-r-hr" })
     void signModelsShipANearAndAFarLevel(String asset) {
         var root = Configuration.dataDir().toPath().resolve("models/board");
         var levels = RigidGlb.loadLods(new FileHandle(root.resolve("scenery/road/" + asset + ".glb").toFile()), root)
               .stream().distinct().toList();
         assertEquals(2, levels.size(), "Near and far meshes, as the STOP sign has");
+    }
+    /** A single-lane hub at J, its arms single lanes running in across {@code entrances} and out across the rest of {@code exits}. */
+    private static Board hub(int exits, int entrances) {
+        Board board = Board.createEmptyBoard(9, 9);
+        road(board, J, exits, true, entrances, null);
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) == 0) { continue; }
+            int back = (d + 3) % 6;
+            road(board, J.translated(d), 1 << d | 1 << back, true, (entrances & 1 << d) != 0 ? 1 << d : 1 << back, null);
+        }
+        return board;
+    }
+
+    private static int rotate(int sides, int by) { return (sides << by | sides >> 6 - by) & 63; }
+
+    /** The stop and signal ids J's controls carry, by their approach's side. */
+    private static Set<Integer> signed(List<BoardScene.Feature> controls) {
+        return controls.stream().map(feature -> feature.decoration().id()).filter(id -> id.contains(":road:stop:"))
+              .map(id -> id.charAt(id.length() - 1) - '0').collect(Collectors.toSet());
+    }
+
+    /**
+     * Every two-lane junction that one to three single lanes join, once for each shape: under its default controls and
+     * under traffic lights, each stop or give-way line it paints has its sign or signal, which never stands on a lane
+     * nothing waits in, and no overhead lights span a single lane.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = { "", "SIGNALS", "GANTRY" })
+    void everyLineAJunctionPaintsHasItsSignOrSignal(String name) {
+        var control = control(name);
+        Set<Long> shapes = new java.util.HashSet<>();
+        int layouts = 0;
+        for (int code = 0; code < 4096; code++) {
+            int wide = 0, exits = 0, entrances = 0;
+            for (int d = 0, rest = code; d < 6; d++, rest /= 4) {
+                switch (rest % 4) {
+                    case 1 -> wide |= 1 << d;
+                    case 2 -> entrances |= 1 << d;
+                    case 3 -> exits |= 1 << d;
+                    default -> { }
+                }
+            }
+            int singles = Integer.bitCount(exits | entrances), all = wide | exits | entrances;
+            if (singles == 0 || singles > 3 || Integer.bitCount(wide) > (control == null ? 4 : 3) || Integer.bitCount(all) < 3) {
+                continue;
+            }
+            long shape = Long.MAX_VALUE;
+            for (int by = 0; by < 6; by++) {
+                shape = Math.min(shape, (long) rotate(wide, by) << 12 | rotate(exits, by) << 6 | rotate(entrances, by));
+            }
+            if (!shapes.add(shape)) { continue; }
+            layouts++;
+            Board board = ramps(wide, exits, entrances, control);
+            String layout = "two-lane " + wide + ", exits " + exits + ", entrances " + entrances;
+            var road = of(scene(board), J);
+            var lines = road.stopApproaches(all).stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet());
+            var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
+            assertEquals(lines, signed(controls), layout + ": a line for each sign, a sign for each line");
+            for (var feature : controls) {
+                String id = feature.decoration().id();
+                if (feature.asset().endsWith("traffic-signal-gantry")) {
+                    assertEquals(0, (exits | entrances) & 1 << id.charAt(id.length() - 1) - '0', layout + ": a pole over a single lane");
+                }
+            }
+        }
+        assertTrue(layouts > 150, "Every shape: " + layouts);
+    }
+
+    @Test
+    void aBendThatTurnsCrossKeepsABrokenCentreLine() {
+        // North and south-east two-lane, entrances south and north-west: the bend keeps priority, and turns cross its line.
+        int exits = 1 | 4 | 8 | 32;
+        var road = of(scene(ramps(1 | 4, 0, 8 | 32, null)), J);
+        assertEquals(1 | 4, road.priorityRoad(exits));
+        var bend = BoardRoad.layout(J, 1 | 4, BoardRoad.Kind.PAVED, direction -> BoardRoad.Kind.PAVED);
+        int line = painted(road.markings(J, exits)), solid = painted(bend.markings(J, 1 | 4));
+        assertTrue(line > 0 && line < .8 * solid, "Broken through the junction, not solid as round a plain bend: " + line + " of " + solid);
+    }
+
+    /** The samples of {@code area} within 30 pixels of the hex's centre, half a pixel apart: its arms' paint and its hub's. */
+    private static int painted(java.awt.geom.Area area) {
+        int result = 0;
+        for (float x = -30; x <= 30; x += .5f) {
+            for (float y = -30; y <= 30; y += .5f) {
+                if (x * x + y * y <= 900 && area.contains(x, y)) { result++; }
+            }
+        }
+        return result;
+    }
+
+    @Test
+    void aRoadDividingIntoCarriagewaysHasAKeepRightSignAndNoControls() {
+        // North two-lane, dividing into an entrance south-west and an exit north-west on its right.
+        Board board = ramps(1, 32, 16, null);
+        var road = of(scene(board), J);
+        assertTrue(road.stopApproaches(1 | 16 | 32).isEmpty());
+        assertTrue(road.closed(4, 5), "No U-turn round the nose");
+        var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
+        var keep = sign(controls, "keep-right-sign");
+        assertFalse(road.footprint(0).contains(keep.x(), keep.y()), "On the nose, off the road");
+        Vector2 out = new Vector2(keep.x(), keep.y()).nor();
+        assertTrue(facing(keep).dot(out) < -.9f, "Facing the junction's traffic heading out past it");
+    }
+
+    @Test
+    void singleLanesMergingAtAHubGiveWay() {
+        // A single-lane hub: south runs on north, south-west joins it.
+        Board board = hub(1 | 8 | 16, 8 | 16);
+        var road = of(scene(board), J);
+        var waiting = road.stopApproaches(1 | 8 | 16);
+        assertEquals(Set.of(4), waiting.stream().map(BoardRoad.StopApproach::direction).collect(Collectors.toSet()));
+        assertTrue(waiting.getFirst().yields());
+        var controls = BoardFeatures.roadControls(board.getHex(J), J, board::getHex, true);
+        assertEquals("terrain:4_4:road:stop:4", sign(controls, "give-way-sign").decoration().id());
+        assertEquals(2, controls.stream().filter(feature -> feature.asset().endsWith("no-entry-sign")).count(),
+              "Either branch could be entered from the other");
+        assertTrue(controls.stream().noneMatch(feature -> feature.asset().endsWith("one-way-sign")), "Every road there is one-way");
+        assertEquals(HexAppearance.TrafficControl.STOPS, road.trafficControl(1 | 8 | 16, HexAppearance.TrafficControl.SIGNALS),
+              "Never signalled");
+        assertTrue(of(scene(hub(1 | 2 | 8, 8)), J).stopApproaches(1 | 2 | 8).isEmpty(), "A fork: nothing waits");
     }
 }

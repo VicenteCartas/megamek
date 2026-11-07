@@ -186,12 +186,14 @@ public final class SingleLane {
     }
 
     /**
-     * The turns a two-lane hex closes: for each exit (off-ramp) leaving it, the turns into it from its approaches that may
-     * not take it ({@link #feeds}), both ways round, as bit {@code 6 * a + b} for the pair of sides {@code a, b}.
+     * The turns a two-lane hex closes, as bit {@code 6 * a + b} for the pair of sides {@code a, b}, both ways round: for
+     * each exit (off-ramp) leaving it, the turns into it from its approaches that may not take it ({@link #feeds}); and,
+     * where a two-way road meets it, the U-turn from an entrance into the exit on its left, round the nose between two
+     * carriageways: beside it, or across the side between them where it and a lone two-way road opposite form a Y.
      */
     public static long closedTurns(View board, Coords at) {
         long result = 0;
-        int approaches = board.exits(at) & ~joined(board, at);
+        int exits = board.exits(at), joined = joined(board, at), approaches = exits & ~joined;
         for (int exit = 0; exit < 6; exit++) {
             int fed = feeds(board, at, exit);
             if (fed == 0) { continue; }
@@ -199,7 +201,11 @@ public final class SingleLane {
                 if ((approaches & ~fed & 1 << from) != 0) { result |= 1L << 6 * exit + from | 1L << 6 * from + exit; }
             }
         }
-        return result;
+        int entrances = 0;
+        for (int side = 0; side < 6; side++) {
+            if ((joined & 1 << side) != 0 && entrance(board, at, side)) { entrances |= 1 << side; }
+        }
+        return result | LaneJunction.noseTurns(exits, approaches, entrances, joined & ~entrances);
     }
 
     public static long closedTurns(Hex hex, Coords at, Function<Coords, Hex> board) {
@@ -267,19 +273,41 @@ public final class SingleLane {
 
     /**
      * A ground road's stored junction controls, else its default ({@link HexAppearance#trafficControl}): where single-lane
-     * {@code ramps} join it, neither they nor its {@code aprons} count as roads of the junction.
+     * {@code ramps} join it, neither they nor its {@code aprons} count as roads of the junction, and the junction's own
+     * default applies ({@link LaneJunction#defaultControl}) where it is known.
      */
+    public static HexAppearance.TrafficControl control(Map<String, HexAppearance> appearance, int exits, int ramps, int aprons,
+          LaneJunction junction) {
+        HexAppearance stored = appearance.get(OWNER);
+        if ((exits & ramps & 63) == 0 || junction == null || stored != null && stored.trafficControl() != null) {
+            return control(appearance, exits, ramps, aprons);
+        }
+        return junction.defaultControl();
+    }
+
     public static HexAppearance.TrafficControl control(Map<String, HexAppearance> appearance, int exits, int ramps, int aprons) {
         return HexAppearance.trafficControl(appearance, OWNER, (exits & ramps & 63) != 0 ? exits & ~aprons : exits, ramps);
     }
 
     /**
-     * Whether only exits (off-ramps) leave a two-lane road's junction: of its {@code arms}, some are {@code single} lanes,
-     * none of them an entrance ({@code entrances}, the sides traffic comes in by), and at most two are two-lane. Nothing
-     * joins the road's traffic there, so nothing waits for anything: the junction has no controls, whatever is chosen.
+     * The junction a hex's ground road forms with the single-lane roads joining it ({@link LaneJunction}), its aprons left
+     * out; null where none joins it and it is no single lane itself.
      */
-    public static boolean exitsOnly(int arms, int single, int entrances) {
-        return (arms & single) != 0 && (arms & single & entrances) == 0 && Integer.bitCount(arms & ~single & 63) <= 2;
+    public static LaneJunction junction(Hex hex, Coords at, Function<Coords, Hex> board) {
+        if (hex == null || !hex.containsTerrain(Terrains.ROAD)) { return null; }
+        int exits = hex.getTerrain(Terrains.ROAD).getExits() & 63;
+        int single = arms(hex, at, board, exits);
+        boolean narrow = single(hex);
+        if (single == 0 && !narrow) { return null; }
+        int inbound;
+        if (narrow) { inbound = inbound(hex, at, board); } else {
+            inbound = 0;
+            for (int d = 0; d < 6; d++) {
+                if ((single & 1 << d) != 0 && entrance(hex, at, d, board)) { inbound |= 1 << d; }
+            }
+        }
+        long closed = narrow ? 0 : closedTurns(hex, at, board);
+        return LaneJunction.of(exits & ~aprons(hex, at, board, exits), single, inbound, closed, narrow);
     }
 
     /** The sides of this hex where a single-lane road joins it, connected both ways. */
