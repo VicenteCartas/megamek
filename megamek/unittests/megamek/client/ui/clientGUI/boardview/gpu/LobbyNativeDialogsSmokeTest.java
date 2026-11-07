@@ -44,6 +44,7 @@ import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.IconCatalog;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
@@ -636,6 +637,64 @@ class LobbyNativeDialogsSmokeTest {
             ui.draw();
             assertFalse(dialogs.isOpen(), "Escape closes it");
             assertEquals(2, answers.size(), "Escape answers nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theBotReadmeNagAnswersWithItsBox() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            dialogs.botReadme("Remember", (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("bot-readme-headline"));
+            click(ui, find(ui, "yes-no-check"));
+            click(ui, find(ui, "yes-no-yes"));
+            assertEquals(List.of("true/true"), answers, "Read the guide answers, with the box as ticked");
+            assertFalse(dialogs.isOpen());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theDocumentTurnsItsChaptersFromTheRailAndTheFooter() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            HelpDocument report = HelpDocument.battleReport("""
+                  <h1>Battle</h1><p>Two lances met.</p>
+                  <a name="round-1"><h2>Initiative</h2></a>
+                  <h3>Movement</h3>&ensp;<span style='color:#8686bf'>Lance A</span> moved<br>
+                  &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;Atlas walked 3 hexes<br>
+                  <a name="round-2"><h2>Initiative</h2></a><h3>Firing</h3>&ensp;Lance B fired<br>
+                  <a name="end-of-combat"><h2>End of Combat</h2></a>
+                  <a name="victory"><h2><i>Team 2 is victorious!</i></h2></a>
+                  """, "Summary", round -> "Round " + round);
+            LobbyDocumentView view = dialogs.document("Report", report, false);
+            ui.draw();
+            assertEquals(report.chapters().size(), view.chapterCount());
+            assertEquals(0, view.shown());
+            assertEquals("SUMMARY", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+
+            click(ui, find(ui, "document-chapter-1"));
+            ui.draw();
+            assertEquals(1, view.shown());
+            assertEquals("ROUND 1", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+            assertNotNull(ui.stage.getRoot().findActor("document-event"), "the round's lines read as events");
+
+            click(ui, find(ui, "document-next"));
+            ui.draw();
+            assertEquals(2, view.shown());
+            click(ui, find(ui, "document-previous"));
+            ui.draw();
+            assertEquals(1, view.shown());
+
+            click(ui, find(ui, "document-chapter-" + (view.chapterCount() - 1)));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("document-callout"), "the victory reads as a banner");
+            click(ui, find(ui, "document-close"));
+            assertFalse(dialogs.isOpen());
+            assertNull(dialogs.documentView());
             dialogs.dispose();
         });
     }

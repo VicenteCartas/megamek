@@ -489,9 +489,7 @@ public final class GpuLobbyWindow {
         if (window == null || window.closing) {
             return false;
         }
-        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.yesNo(
-              Messages.getString("BotReadmeNagDialog.title"),
-              List.of(Messages.getString("BotReadmeNagDialog.text").split("\\s*\\n\\s*")),
+        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.botReadme(
               Messages.getString("chkIgnore.text"),
               (read, ignore) -> {
                   SwingUtilities.invokeLater(() -> MegaMek.getMMOptions()

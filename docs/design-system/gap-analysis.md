@@ -1052,8 +1052,8 @@ work for Swing, and item 11 is under investigation.
        - Load list opens the system file dialog through L16's `SystemFileDialog`, and
          `ClientGUI.loadListFile(Player, File)` loads the list as before.
        - The unit readout (unit menu View, BV and Cost) is a dossier: the sprite, name and line, tabs for the summary,
-         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help shows the
-         bot documentation as rows in the same view.
+         the TRO, the BV and the cost calculations, and Prev/Next through several units. The Princess help opens in
+         the chaptered document view (see below).
        - `LobbyCommands` asks through `LobbyAsks`, an asynchronous version of `LobbyPrompts` set with
          `LobbyCommands.asks(...)`, as L15's unit configurator is; with none set, as in MekHQ and MegaMekLab,
          `LobbyAsks.of(prompts)` answers through the blocking prompts and `SwingLobbyPrompts` runs as before. The
@@ -1508,13 +1508,25 @@ work for Swing, and item 11 is under investigation.
          card cycles their chatter and counts the battles fought, then shows the chance of victory as a big colored
          percent with Victories, Defeats and Draws (the Swing chance dialog never counted draws) and Resolve battle.
          The battle resolves on a worker with an asymptotic bar, and the after-action card names Victory, Defeat
-         or Draw, the winner, and opens the ACAR log as a native help document (Battle report). Closing during the
+         or Draw, the winner, and opens the ACAR log as a battle report (see the document view below). Closing
+         during the
          odds cancels the simulation; closing while resolving reopens the card with the result. The dead Swing
          battlefield commands (`SwingLobbyServices.battlefieldCommand`, `runAutoResolve`) and the Swing
          `VictoryConditionsDialog` are removed; the Swing auto-resolve dialogs stay for MekHQ. The lobby now opens
          no Swing dialog except the startup-failure message. Checks: `AutoResolveRunTest`, the smoke test's
          auto-resolve briefing. Live: `lobby+resolve` (with the odds; `+click=autoresolve-proceed,autoresolve-report`
          goes on through the battle and its report) and `lobby+resolve=quick` (without them).
+       - Done: help documents and the battle report read a chapter at a time (`LobbyDocumentView` over the
+         toolkit-free `HelpDocument`). A rail on the left lists the chapters, with Prev/Next and "n of m" in the
+         footer; each chapter opens on its free text, then its topics as cards (two by two for a guide). Lists of
+         short items read as tags, a command as a code chip. A guide's h2s are its chapters; its navigation, "Back to
+         Top" links and layout pictures are dropped. The ACAR report becomes Summary, Starting Scenario Phase, one
+         chapter per round and End of Combat: each phase is a card, each action an event with its team's color at
+         its edge and its rolls and damage as indented details; the victory is a banner. The bot readme nag is a
+         game card ("Know the bot before you fight it": Read the guide / Not now) instead of three plain lines.
+         Fixed on the way: the report's `acar.short_range` key and its `&ensp;` indents. Checks: `HelpDocumentTest`,
+         `MapSetupHelpTest` and the smoke test's document and nag. Live: `lobby+princesshelp` (with
+         `+click=document-chapter-1`), `lobby+maphelp`, the auto-resolve report above.
        - The unit dialogs still in Swing, from the lobby and the board:
          - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
@@ -1534,8 +1546,8 @@ work for Swing, and item 11 is under investigation.
          refuses it. The lobby window's Swing branch is gone; the Swing
          `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
          and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
-       - Done: the map setup's help (the ? in Map setup) opens in the lobby's native help dialog, the readout
-         dialog Princess's help uses (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
+       - Done: the map setup's help (the ? in Map setup) opens in the lobby's native document view, as Princess's
+         help does (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
          written for the libGDX map setup: the map type and size, the slots and the board drawer, stacks and
          surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
          `MapAssemblyHelp.html` stays for the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe

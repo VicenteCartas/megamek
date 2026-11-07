@@ -14,8 +14,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -36,6 +34,7 @@ import megamek.client.lobby.FactionChoice;
 import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.FormationForm;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LobbyAsks;
 import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
@@ -109,8 +108,6 @@ final class GpuLobbyTools {
     private final GpuLobbyWindow window;
     private final LobbyAsks asks = new NativeAsks();
     private static final int RAT_POLL_MS = 250;
-    private static final Pattern LAYOUT_TABLE = Pattern.compile("<table[^>]*class=\"config-table\"[^>]*>(.*?)</table>",
-          Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private @Nullable Timer ratWait;
     private @Nullable Timer ratGeneratorWait;
     private @Nullable Timer namesWait;
@@ -847,33 +844,23 @@ final class GpuLobbyTools {
               new File(Messages.getString("Lobby.help.mapSetupPath")));
     }
 
-    /** Any thread: shows an HTML help document in the native help dialog; an unreadable one shows empty. */
+    /** Any thread: shows an HTML guide a chapter at a time in the native help dialog; an unreadable one shows empty. */
     private void helpDocument(String title, File file) {
-        List<EntityReadout.Row> rows;
-        try {
-            rows = RequisitionReadout.fromHtml(unwrapLayoutTables(Files.readString(file.toPath())));
-        } catch (Exception failure) {
-            LOGGER.error(failure, "The lobby could not read the help {}", file);
-            rows = List.of();
-        }
-        List<EntityReadout.Row> shown = rows;
-        open(dialogs -> dialogs.help(title, shown));
+        showDocument(title, file, true, HelpDocument::guide);
     }
 
-    /**
-     * The help's tables that only lay a picture out beside its text, without the picture and the table, as the rows
-     * would put the text in one cell.
-     */
-    static String unwrapLayoutTables(String html) {
-        Matcher table = LAYOUT_TABLE.matcher(html);
-        StringBuilder unwrapped = new StringBuilder();
-        while (table.find()) {
-            String inner = table.group(1).replaceAll("(?is)<img[^>]*>", "")
-                  .replaceAll("(?is)</?(tbody|tr|td)[^>]*>", "");
-            table.appendReplacement(unwrapped, Matcher.quoteReplacement(inner));
+    /** Any thread: reads {@code file} into a document as {@code read} reads it, and shows it over what shows. */
+    private void showDocument(String title, File file, boolean grid,
+          java.util.function.Function<String, HelpDocument> read) {
+        HelpDocument document;
+        try {
+            document = read.apply(Files.readString(file.toPath()));
+        } catch (Exception failure) {
+            LOGGER.error(failure, "The lobby could not read the document {}", file);
+            document = new HelpDocument(List.of());
         }
-        table.appendTail(unwrapped);
-        return unwrapped.toString();
+        HelpDocument shown = document;
+        open(dialogs -> dialogs.document(title, shown, grid));
     }
 
     // ---- Auto-resolve ----
@@ -1000,7 +987,9 @@ final class GpuLobbyTools {
         public void report() {
             File shown = report;
             if (shown != null) {
-                worker("Auto-resolve report", () -> helpDocument(AutoResolveRun.reportTitle(), shown));
+                worker("Auto-resolve report", () -> showDocument(AutoResolveRun.reportTitle(), shown, false,
+                      html -> HelpDocument.battleReport(html, Messages.getString("Lobby.autoResolve.report.summary"),
+                            round -> Messages.getString("Lobby.autoResolve.report.round", round))));
             }
         }
 

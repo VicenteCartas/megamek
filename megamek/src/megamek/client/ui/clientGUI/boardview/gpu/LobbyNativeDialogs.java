@@ -21,6 +21,7 @@ import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
@@ -34,7 +35,6 @@ import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
-import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
@@ -86,6 +86,7 @@ final class LobbyNativeDialogs {
     private LobbyRandomArmyView randomArmyView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
+    private LobbyDocumentView documentView;
     private LobbyAutoResolveView autoResolveView;
     /** The paperdoll drawings, read once the damage editor first opens. */
     private GpuPaperdolls paperdolls;
@@ -288,16 +289,15 @@ final class LobbyNativeDialogs {
         return readoutView;
     }
 
-    /** Shows a help document's rows over whatever shows, as the bot setup's help. */
-    LobbyReadoutView help(String title, List<EntityReadout.Row> rows) {
-        UiDialog dialog = begin(title, "dialog.lg", true, () -> {
-            readoutView.dispose();
-            readoutView = null;
-        });
-        readoutView = new LobbyReadoutView(kit, dialog,
-              List.of(new LobbyReadoutView.Dossier(title, "", null, List.of(rows))), motion, this::close);
+    /**
+     * Shows a help document or battle report a chapter at a time over whatever shows, as the bot setup's help;
+     * {@code grid} sets its topics two by two, as a guide's.
+     */
+    LobbyDocumentView document(String title, HelpDocument document, boolean grid) {
+        UiDialog dialog = begin(title, "dialog.xl", true, () -> documentView = null);
+        documentView = new LobbyDocumentView(kit, dialog, document, grid, motion, this::close);
         show(dialog);
-        return readoutView;
+        return documentView;
     }
 
     /** Asks for a force designation over whatever shows. */
@@ -425,6 +425,38 @@ final class LobbyNativeDialogs {
             answer.answered(true, box.isChecked());
         }).setName("yes-no-yes");
         dialog.secondary(Messages.getString("No"), () -> {
+            close();
+            answer.answered(false, box.isChecked());
+        }).setName("yes-no-no");
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * Asks, before the first bot joins, whether to read Princess's guide: {@code yes} reads it, and the box stops the
+     * question coming back. Closing it any other way, such as with Esc, answers nothing.
+     */
+    UiDialog botReadme(String check, YesNoAnswer answer) {
+        UiDialog dialog = begin(Messages.getString("Lobby.botReadme.overline"), "dialog.md", true, () -> { });
+        float gap = DesignTokens.shipped().space().get("md");
+        var headline = kit.typeLabel(Messages.getString("Lobby.botReadme.headline"), "headline", "text.primary");
+        headline.setWrap(true);
+        headline.setName("bot-readme-headline");
+        Table pitch = new Table();
+        pitch.add(kit.solid("accent.primary")).width(3).growY().padRight(gap);
+        var text = kit.typeLabel(Messages.getString("Lobby.botReadme.text"), "body", "text.secondary");
+        text.setWrap(true);
+        pitch.add(text).growX().left();
+        dialog.body().add(headline).growX().left().padBottom(gap).row();
+        dialog.body().add(pitch).growX().left().padBottom(gap).row();
+        UiChoice box = kit.check(check, false);
+        box.setName("yes-no-check");
+        dialog.body().add(box).left().padTop(gap);
+        dialog.primary(Messages.getString("Lobby.botReadme.read"), () -> {
+            close();
+            answer.answered(true, box.isChecked());
+        }).setName("yes-no-yes");
+        dialog.secondary(Messages.getString("Lobby.botReadme.later"), () -> {
             close();
             answer.answered(false, box.isChecked());
         }).setName("yes-no-no");
@@ -704,6 +736,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyReadoutView readoutView() {
         return readoutView;
+    }
+
+    @Nullable LobbyDocumentView documentView() {
+        return documentView;
     }
 
     @Nullable LobbyAutoResolveView autoResolveView() {

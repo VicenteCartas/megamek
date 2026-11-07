@@ -144,6 +144,10 @@ final class LobbyToolsProbe {
             return "readout, unit " + view.shown() + ", tab " + (view.tabs() == null ? "-"
                   : view.tabs().getSelectedIndex());
         }
+        if (dialogs.documentView() != null) {
+            LobbyDocumentView view = dialogs.documentView();
+            return "document, chapter " + (view.shown() + 1) + " of " + view.chapterCount();
+        }
         if (dialogs.autoResolveView() != null) {
             return "auto-resolve " + dialogs.autoResolveView().phase();
         }
