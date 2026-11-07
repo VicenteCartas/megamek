@@ -20,7 +20,7 @@ import megamek.common.loaders.MekSummary;
  */
 public final class RandomArmyForm {
 
-    /** The most units one roll deals. */
+    /** The most units a table roll deals or the hand takes one by one; a generator deals all it was asked for. */
     public static final int MAX_UNITS = 24;
 
     /** Rolls units from a table. */
@@ -66,6 +66,8 @@ public final class RandomArmyForm {
     public static final class Card {
         private MekSummary unit;
         private boolean kept;
+        private @Nullable GenerationContext dealtFor;
+        private long dealt;
 
         private Card(MekSummary unit) {
             this.unit = unit;
@@ -88,7 +90,7 @@ public final class RandomArmyForm {
     private int count = 4;
     private int player;
     private @Nullable Dealer dealer;
-    private @Nullable GenerationContext dealtFor;
+    private long dealings;
 
     /**
      * @param tables  the random assignment tables offered
@@ -177,26 +179,31 @@ public final class RandomArmyForm {
         }
         if (dealer != null && dealer.wholeHand()) {
             cards.clear();
-            deal(dealer.deal(count, List.of()));
-            noteContext();
+            List<MekSummary> units = dealer.deal(count, List.of());
+            deal(units);
             return;
         }
         cards.removeIf(card -> !card.kept);
         int missing = count - cards.size();
         if (dealer != null && !dealer.usesCount()) {
-            deal(dealer.deal(Math.max(0, missing), army()));
+            List<MekSummary> units = dealer.deal(Math.max(0, missing), army());
+            deal(units);
         } else if (missing > 0) {
-            deal(dealer == null ? roller.roll(missing, table) : dealer.deal(missing, army()));
+            List<MekSummary> units = dealer == null ? roller.roll(missing, table) : dealer.deal(missing, army());
+            deal(units);
         }
-        noteContext();
     }
 
+    /**
+     * Adds every unit dealt: a generator deals what it was asked for, which may be more than the count a table rolls,
+     * as Swing's do; none is silently left out.
+     */
     private void deal(List<MekSummary> units) {
+        GenerationContext context = dealerContext();
         for (MekSummary unit : units) {
-            if (cards.size() >= MAX_UNITS) {
-                return;
-            }
-            cards.add(new Card(unit));
+            Card card = new Card(unit);
+            note(card, context);
+            cards.add(card);
         }
     }
 
@@ -215,7 +222,9 @@ public final class RandomArmyForm {
             unit = dealer.replace(cards.get(index).unit, rest);
         }
         if (unit != null) {
-            cards.get(index).unit = unit;
+            Card card = cards.get(index);
+            card.unit = unit;
+            note(card, dealerContext());
         }
     }
 
@@ -224,22 +233,33 @@ public final class RandomArmyForm {
         if (cards.size() >= MAX_UNITS) {
             return false;
         }
-        cards.add(new Card(Objects.requireNonNull(unit)));
-        noteContext();
+        Card card = new Card(Objects.requireNonNull(unit));
+        note(card, dealerContext());
+        cards.add(card);
         return true;
     }
 
-    /** What the hand was last dealt for by a generator that knows, or null; cleared with the hand. */
+    /**
+     * What the hand's newest generator-dealt card was dealt for, or null when no card in the hand came from a
+     * generator that knows; a context leaves with the last of its cards, so it never names units it did not deal.
+     */
     public @Nullable GenerationContext context() {
-        return dealtFor;
+        Card newest = null;
+        for (Card card : cards) {
+            if (card.dealtFor != null && (newest == null || card.dealt > newest.dealt)) {
+                newest = card;
+            }
+        }
+        return newest == null ? null : newest.dealtFor;
     }
 
-    /** Notes what the dealer dealt for; a table's roll leaves a generator's note as it is, as Swing's does. */
-    private void noteContext() {
-        GenerationContext context = dealer == null ? null : dealer.context();
-        if (context != null) {
-            dealtFor = context;
-        }
+    private @Nullable GenerationContext dealerContext() {
+        return dealer == null ? null : dealer.context();
+    }
+
+    private void note(Card card, @Nullable GenerationContext context) {
+        card.dealtFor = context;
+        card.dealt = ++dealings;
     }
 
     public void keep(int index, boolean kept) {
@@ -256,7 +276,6 @@ public final class RandomArmyForm {
 
     public void clear() {
         cards.clear();
-        dealtFor = null;
     }
 
     /** @return the dealt units, in order, to add to the game */

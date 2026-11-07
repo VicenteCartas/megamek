@@ -102,6 +102,12 @@ final class LobbyArmyGeneratorPanes {
     private boolean reading;
     private int asked;
     private boolean focusYear;
+    /** Whether the balanced lance's target or tolerance is typed rather than one of the presets. */
+    private boolean customTarget;
+    private boolean customTolerance;
+    /** The faction table's rows as they show, and the form they are read from, refilled as its choices change. */
+    private @Nullable Table rowList;
+    private @Nullable RatGeneratorForm rowForm;
 
     LobbyArmyGeneratorPanes(UiKit kit, Owner owner) {
         this.kit = kit;
@@ -214,6 +220,7 @@ final class LobbyArmyGeneratorPanes {
         balanceBy.setName("army-balance-by");
         UiKit.onChange(balanceBy, () -> {
             army.balanceBy(measures[balanceBy.value()]);
+            customTarget = false;
             owner.changed(true);
         });
         pane.add(kit.formField(Messages.getString("Lobby.randomArmy.balanceBy"), balanceBy)).padTop(space("md"))
@@ -221,38 +228,86 @@ final class LobbyArmyGeneratorPanes {
 
         int[] targets = army.balanceBy().targets();
         List<String> targetNames = new ArrayList<>();
-        int chosen = 0;
+        int chosen = -1;
         for (int index = 0; index < targets.length; index++) {
             targetNames.add(NumberFormat.getIntegerInstance().format(targets[index]));
             if (targets[index] == army.target()) {
                 chosen = index;
             }
         }
+        targetNames.add(Messages.getString("Lobby.randomArmy.custom"));
+        int customTargetIndex = targets.length;
+        if (chosen < 0 || customTarget) {
+            chosen = customTargetIndex;
+        }
         UiStepper target = kit.selector(targetNames, chosen);
         target.setName("army-balance-target");
         UiKit.onChange(target, () -> {
-            army.target(targets[target.value()]);
-            owner.changed(false);
+            customTarget = target.value() == customTargetIndex;
+            if (!customTarget) {
+                army.target(targets[target.value()]);
+            }
+            owner.changed(true);
         });
         pane.add(kit.formField(Messages.getString("Lobby.randomArmy.target"), target)).padTop(space("md")).row();
+        if (chosen == customTargetIndex) {
+            pane.add(customValue("army-balance-target-custom", army.target(), Integer.MAX_VALUE, army::target,
+                  "Lobby.randomArmy.customTarget")).padTop(space("xs")).row();
+        }
 
         List<String> tolerances = new ArrayList<>();
         for (int percent : BalancedArmy.TOLERANCES) {
             tolerances.add(Messages.getString("Lobby.randomArmy.tolerancePercent", percent));
         }
-        UiStepper tolerance = kit.selector(tolerances,
-              Math.max(0, BalancedArmy.TOLERANCES.indexOf(army.tolerance())));
+        tolerances.add(Messages.getString("Lobby.randomArmy.custom"));
+        int customToleranceIndex = BalancedArmy.TOLERANCES.size();
+        int chosenTolerance = BalancedArmy.TOLERANCES.indexOf(army.tolerance());
+        if (chosenTolerance < 0 || customTolerance) {
+            chosenTolerance = customToleranceIndex;
+        }
+        UiStepper tolerance = kit.selector(tolerances, chosenTolerance);
         tolerance.setName("army-balance-tolerance");
         UiKit.onChange(tolerance, () -> {
-            army.tolerance(BalancedArmy.TOLERANCES.get(tolerance.value()));
-            owner.changed(false);
+            customTolerance = tolerance.value() == customToleranceIndex;
+            if (!customTolerance) {
+                army.tolerance(BalancedArmy.TOLERANCES.get(tolerance.value()));
+            }
+            owner.changed(true);
         });
         pane.add(kit.formField(Messages.getString("Lobby.randomArmy.tolerance"), tolerance)).padTop(space("md"))
               .row();
+        if (chosenTolerance == customToleranceIndex) {
+            pane.add(customValue("army-balance-tolerance-custom", army.tolerance(), 100, army::tolerance,
+                  "Lobby.randomArmy.customTolerance")).padTop(space("xs")).row();
+        }
         pane.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.available", army.available()), "small",
               "text.muted")).padTop(space("md")).row();
         pane.add(filterRow()).padTop(space("sm")).row();
         return pane;
+    }
+
+    /**
+     * A number typed in place of the presets, up to {@code max}: each whole number typed is taken as it is typed, so
+     * the field keeps its focus.
+     */
+    private Table customValue(String name, int value, int max, IntConsumer take, String hintKey) {
+        UiTextField field = kit.input(String.valueOf(value), true);
+        field.setName(name);
+        field.setMaxLength(String.valueOf(max).length());
+        field.setTextFieldFilter(new TextField.TextFieldFilter.DigitsOnlyFilter());
+        UiKit.onChange(field, () -> {
+            Integer typed = UiRangeInput.parse(field.getText());
+            if (typed != null) {
+                take.accept(Math.min(typed, max));
+                owner.changed(false);
+            }
+        });
+        Table row = new Table();
+        row.left();
+        row.add(field).width(size("control.lg") * 3);
+        row.add(kit.typeLabel(Messages.getString(hintKey), "small", "text.muted")).padLeft(space("sm")).growX()
+              .minWidth(0);
+        return row;
     }
 
     /** The unit filter's button, what it asks for, and a button to clear it. */
@@ -415,6 +470,17 @@ final class LobbyArmyGeneratorPanes {
         list.setName("army-rat-table");
         list.top().left().defaults().left().growX();
         pane.add(list).growX().padTop(space("sm")).row();
+        rowList = list;
+        rowForm = form;
+        fillRows(list, form);
+    }
+
+    /**
+     * Shows the table's rows in {@code list}, reading them first when the choices changed; a read the choices moved
+     * on from is read again, so the rows and their Take buttons always roll what Roll does.
+     */
+    private void fillRows(Table list, RatGeneratorForm form) {
+        list.clearChildren();
         if (rows == null) {
             kit.empty(list, Messages.getString("Lobby.randomArmy.tableLoading"), true);
             if (!reading) {
@@ -426,7 +492,7 @@ final class LobbyArmyGeneratorPanes {
                     if (request == asked && !read.isEmpty()) {
                         rows = read.get(0);
                     }
-                    owner.changed(true);
+                    refillShownRows();
                 });
             }
             return;
@@ -438,6 +504,13 @@ final class LobbyArmyGeneratorPanes {
         int index = 0;
         for (Row row : rows) {
             list.add(tableRow(row, index++)).growX().row();
+        }
+    }
+
+    /** Refills the faction table's rows where they show; a pane not showing reads them when built. */
+    private void refillShownRows() {
+        if (showTable && rowList != null && rowForm != null && rowList.getStage() != null) {
+            fillRows(rowList, rowForm);
         }
     }
 
@@ -490,10 +563,13 @@ final class LobbyArmyGeneratorPanes {
         return read;
     }
 
-    /** A choice the faction table is built of changed: the table is read again when it shows. */
+    /** A choice the faction table is built of changed: the table is read again, at once where it shows. */
     private void tableChanged(boolean rebuild) {
         rows = null;
         asked++;
+        if (!rebuild) {
+            refillShownRows();
+        }
         owner.changed(rebuild);
     }
 
@@ -905,17 +981,7 @@ final class LobbyArmyGeneratorPanes {
                 tableChanged(true);
             }
         });
-        if (focusYear) {
-            // Built anew while the year is typed: the new field takes over the typing
-            focusYear = false;
-            year.addAction(Actions.run(() -> {
-                Stage stage = year.getStage();
-                if (stage != null) {
-                    stage.setKeyboardFocus(year);
-                    year.setCursorPosition(year.getText().length());
-                }
-            }));
-        }
+        keepTyping(year);
         Table yearRow = new Table();
         yearRow.left();
         yearRow.add(year).width(size("control.lg") * 2);

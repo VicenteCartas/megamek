@@ -1132,10 +1132,13 @@ final class GpuLobbyTools {
             });
         }
 
-        /** Shows how the battle ended, opening the briefing again when it was closed while the battle was resolved. */
+        /**
+         * Shows how the battle ended, opening the briefing again over whatever shows when it was closed while the
+         * battle was resolved.
+         */
         private void ended(LobbyNativeDialogs dialogs, @Nullable AutoResolveConcludedEvent event) {
             if (view == null || !view.isOpen()) {
-                view = dialogs.autoResolve(false, chatter, this, () -> { });
+                view = dialogs.autoResolveOver(chatter, this);
             }
             if (event == null) {
                 view.failed(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());

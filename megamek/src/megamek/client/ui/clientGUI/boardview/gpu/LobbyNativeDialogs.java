@@ -403,7 +403,20 @@ final class LobbyNativeDialogs {
      */
     LobbyAutoResolveView autoResolve(boolean odds, List<String> chatter, LobbyAutoResolveView.Host host,
           Runnable closed) {
-        UiDialog dialog = begin(AutoResolveRun.title(), "dialog.sm", false, () -> {
+        return autoResolve(odds, chatter, host, closed, false);
+    }
+
+    /**
+     * Opens the briefing again over whatever shows, as a battle resolved after its briefing was closed ends: a dialog
+     * opened in the meantime keeps its place and its work, and shows again once the result is closed.
+     */
+    LobbyAutoResolveView autoResolveOver(List<String> chatter, LobbyAutoResolveView.Host host) {
+        return autoResolve(false, chatter, host, () -> { }, true);
+    }
+
+    private LobbyAutoResolveView autoResolve(boolean odds, List<String> chatter, LobbyAutoResolveView.Host host,
+          Runnable closed, boolean over) {
+        UiDialog dialog = begin(AutoResolveRun.title(), "dialog.sm", over, () -> {
             autoResolveView = null;
             closed.run();
         });
