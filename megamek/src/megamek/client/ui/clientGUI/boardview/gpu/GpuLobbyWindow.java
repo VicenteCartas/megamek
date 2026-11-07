@@ -76,8 +76,8 @@ import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.PlayerColour;
@@ -125,8 +125,8 @@ import megamek.server.ServerBoardHelper;
  * ({@link GpuLobbyScreen}) as a {@link LobbySnapshot}, and runs the screen's actions on the Swing thread, where the
  * game is.
  *
- * <p>Ready runs the lobby's ready step ({@link SwingLobbyServices#ready()}), whose questions ask through
- * {@code SwingLobbyPrompts}: Swing dialogs owned by the hidden client frame. While a red warning blocks readying, the
+ * <p>Ready runs the lobby's ready step ({@link LobbyServices#ready()}), whose questions the lobby asks in its own
+ * native dialogs. While a red warning blocks readying, the
  * top bar lights its warnings instead of that step's blocked dialog. This scene owns the dialogs natively, as the board
  * and the start screen own theirs, so they stay in front of the window, and a modal one blocks the screen's input.
  * Leave and the window's close box run the client's own exit ({@link ClientGUI#handleExit}), with its save question.
@@ -668,7 +668,7 @@ public final class GpuLobbyWindow {
         }
         LobbySnapshot read;
         try {
-            SwingLobbyServices services = SwingLobbyServices.of(gui);
+            LobbyServices services = LobbyServices.of(gui);
             services.cleanUnits();
             ChatterBox chat = gui.getChatterBox();
             read = LobbySnapshot.of(gui::getClient, chat == null ? List.of() : chat.lines(LobbySnapshot.CHAT_LINES),
@@ -738,7 +738,7 @@ public final class GpuLobbyWindow {
                       }))));
                 return;
             }
-            SwingLobbyServices.of(gui).ready();
+            LobbyServices.of(gui).ready();
             if (local != null && local.isDone() != readying) {
                 // The server echoes the state a moment later; until then the bar and the card show it at once
                 pendingReady = readying;
@@ -1017,13 +1017,13 @@ public final class GpuLobbyWindow {
             if (closing) {
                 return;
             }
-            action.accept(new LobbyBattlefieldController(gui::getClient, lounge(SwingLobbyServices.of(gui))));
+            action.accept(new LobbyBattlefieldController(gui::getClient, lounge(LobbyServices.of(gui))));
             queueRefresh();
         });
     }
 
     /** The battlefield's actions, the map setup, the board editor as the start screen opens it, and auto-resolve. */
-    private LobbyBattlefieldController.Lounge lounge(SwingLobbyServices lounge) {
+    private LobbyBattlefieldController.Lounge lounge(LobbyServices lounge) {
         return new LobbyBattlefieldController.Lounge() {
             @Override
             public void command(LobbyBattlefieldController.Command command) {
@@ -1035,7 +1035,7 @@ public final class GpuLobbyWindow {
                     case SAVE_MAP_SETUP -> saveMapSetup();
                     case VICTORY -> tools.victory();
                     case GENERATE -> gui.getClient().sendLobbyBoardGenerationRequest();
-                    case PREVIEW_3D -> MapSetupDialog.preview3D(gui);
+                    case PREVIEW_3D -> LobbyBoardPreviews.preview3D(gui);
                     // The map setup, the board editor and auto-resolve come through their own methods below
                     case MAP_SETUP, BOARD_EDITOR, RUN_AUTO_RESOLVE -> { }
                 }
@@ -1177,7 +1177,7 @@ public final class GpuLobbyWindow {
     void sortUnits(int index) {
         SwingUtilities.invokeLater(() -> {
             if (!closing) {
-                SwingLobbyServices.of(gui).unitOrder().select(index);
+                LobbyServices.of(gui).unitOrder().select(index);
                 queueRefresh();
             }
         });
@@ -1751,7 +1751,7 @@ public final class GpuLobbyWindow {
     /** EDT: the order of the units, and the orders offered. */
     private LobbyForces.Order unitOrder() {
         try {
-            LobbyUnitOrder order = SwingLobbyServices.of(gui).unitOrder();
+            LobbyUnitOrder order = LobbyServices.of(gui).unitOrder();
             List<Integer> ids = order.sorted().stream().map(Entity::getId).toList();
             return new LobbyForces.Order(ids, order.names(), order.index());
         } catch (RuntimeException failure) {
@@ -2561,14 +2561,12 @@ public final class GpuLobbyWindow {
         if (failure == null && !replaced && gui.getClient().getGame().getPhase().isLounge()) {
             // Another scene took the window, such as the 3D preview; the lobby comes back when it closes
             displaced = gui;
-        } else {
-            MapSetupDialog.close(gui);
         }
         if (failure != null && !replaced) {
             LOGGER.error(failure, "The native lobby failed; the client leaves the game");
             // MegaMek's own window that never opened can't show the start screen either; MekHQ's game returns to MekHQ
             boolean exit = GpuHost.keepsOpen() && !GpuHost.everOpened();
-            SwingLobbyServices.sceneFailed(gui, failure, exit);
+            LobbyServices.sceneFailed(gui, failure, exit);
         }
     }
 

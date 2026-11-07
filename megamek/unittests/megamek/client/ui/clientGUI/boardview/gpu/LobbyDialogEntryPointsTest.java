@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
  */
 class LobbyDialogEntryPointsTest {
     private static final Path GPU = Path.of("src/megamek/client/ui/clientGUI/boardview/gpu");
-    private static final Path SWING_LOBBY = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby");
+    private static final Path LOBBY_PANELS = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby");
     /** A dialog or chooser made in the source, and its first argument. */
     private static final Pattern DIALOG = Pattern.compile(
           "new (?!HelpDialog\\()(\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
@@ -119,14 +119,14 @@ class LobbyDialogEntryPointsTest {
     @Test
     void theServicesDialogsUseTheClientFrame() throws IOException {
         List<String> offenders = new ArrayList<>();
-        for (String name : List.of("SwingLobbyServices.java")) {
-            String source = Files.readString(SWING_LOBBY.resolve(name));
+        for (String name : List.of("LobbyServices.java")) {
+            String source = Files.readString(LOBBY_PANELS.resolve(name));
             owners(name, FOLDER_CHOOSER.matcher(source).replaceAll("new FolderChooser(frame(), "), DIALOG, 2,
                   PROMPT_OWNERS, offenders);
             owners(name, source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
         }
         // The lobby scene's failure shows after the window is gone, so its message stands on its own
-        assertEquals(List.of("SwingLobbyServices.java: JOptionPane.showMessageDialog(null"), offenders);
+        assertEquals(List.of("LobbyServices.java: JOptionPane.showMessageDialog(null"), offenders);
     }
 
     private static boolean lobbySource(Path file) {

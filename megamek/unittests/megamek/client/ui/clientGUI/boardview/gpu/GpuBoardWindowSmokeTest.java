@@ -80,8 +80,8 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -539,8 +539,8 @@ class GpuBoardWindowSmokeTest {
                 var conditions = new PlanetaryConditions();
                 conditions.setLight(Light.FULL_MOON);
                 game.setPlanetaryConditions(conditions);
-                SwingLobbyServices.of(gui);
-                MapSetupDialog.preview3D(gui);
+                LobbyServices.of(gui);
+                LobbyBoardPreviews.preview3D(gui);
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);
@@ -590,7 +590,7 @@ class GpuBoardWindowSmokeTest {
             });
         } finally {
             onSwing(() -> {
-                SwingLobbyServices.forget(gui);
+                LobbyServices.forget(gui);
                 owner.dispose();
                 return null;
             });

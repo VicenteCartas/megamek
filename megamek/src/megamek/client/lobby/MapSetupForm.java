@@ -39,7 +39,7 @@ import megamek.utilities.BoardClassifier;
 import megamek.utilities.BoardsTagger;
 
 /**
- * The lobby's map setup without a toolkit, the native counterpart of the Swing MapSetupDialog: the map's medium, its
+ * The lobby's map setup without a toolkit: the map's medium, its
  * size in boards, the board size, the board in each slot (fixed, rotated, generated, random or surprise), each
  * slot's theme and level offset, the searchable and filterable list of available boards (on a one-board map, the
  * whole board library at any size, as the Swing advanced map search), Generate and map setup files. Changes
