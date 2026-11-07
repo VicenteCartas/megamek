@@ -600,7 +600,8 @@ public final class BoardSceneryLayouts {
      * draws the rail sprite in 2D; art without sides joins the rails beside it ({@link #railJoins}) or lays nothing. On a
      * legacy (not native) board only, converted maglevs a level up or beside a row of pillar art stand on Pillars
      * ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}), a crane tip that a
-     * converted crane's boom reaches places nothing ({@link #reachedTips}), minor objects step clear of the fitted
+     * converted crane's boom reaches places nothing ({@link #reachedTips}), a building without connections is Square
+     * ({@link #squareIsolatedBuildings}), minor objects step clear of the fitted
      * concrete walls ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
      * board drew on it ({@link #deckRoads}). Road junctions inherit the default overhead traffic lights. A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
@@ -809,6 +810,7 @@ public final class BoardSceneryLayouts {
             clearOfConcreteWalls(board, scanned);
             roadLinks(board);
             legacyBuildingSelectors(board, scanned);
+            squareIsolatedBuildings(board, scanned);
             themedBuildings(board, scanned);
         }
         design(board, scanned);
@@ -843,6 +845,22 @@ public final class BoardSceneryLayouts {
             board.setHexes(changed);
             board.initializeAll(null);
         }
+    }
+
+    /** A legacy board's building hex without connections, its own or a neighbour's, gets the Square footprint. */
+    private static void squareIsolatedBuildings(Board board, List<Coords> hexes) {
+        Map<BoardLocation, Hex> changed = new HashMap<>();
+        for (Coords at : hexes) {
+            Hex hex = board.getHex(at);
+            if (!hex.containsTerrain(Terrains.BUILDING) || hex.getAppearance().containsKey("footprint")
+                  || TilesetScenery.buildingConnected(hex, at, board::getHex)) { continue; }
+            Hex next = replacement(hex);
+            Map<String, HexAppearance> appearance = new HashMap<>(next.getAppearance());
+            appearance.put("footprint", HexAppearance.SQUARE);
+            next.setAppearance(appearance);
+            changed.put(BoardLocation.of(at, board.getBoardId()), next);
+        }
+        if (!changed.isEmpty()) { board.setHexes(changed); }
     }
 
     /** The lunar theme's building designs, generated over whole buildings (the 3D board's BoardMultiHexBuilding). */

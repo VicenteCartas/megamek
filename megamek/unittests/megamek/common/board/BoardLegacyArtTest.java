@@ -143,6 +143,20 @@ class BoardLegacyArtTest {
         assertTrue(art(written(board).getHex(AT)).isEmpty());
     }
 
+    @Test
+    void aLegacyBuildingWithoutConnectionsIsSquare() throws Exception {
+        Board board = Board.createEmptyBoard(5, 5);
+        String building = "building:2;bldg_elev:1;bldg_cf:30";
+        board.setHex(AT, new Hex(0, building, ""));
+        // A pair joined south (0101) to north (0102).
+        board.setHex(new Coords(0, 0), new Hex(0, "building:2:8;bldg_elev:1;bldg_cf:30", ""));
+        board.setHex(new Coords(0, 1), new Hex(0, "building:2:1;bldg_elev:1;bldg_cf:30", ""));
+        BoardSceneryLayouts.convert(board);
+        assertEquals(HexAppearance.Footprint.SQUARE, HexAppearance.footprint(board.getHex(AT).getAppearance()));
+        assertEquals(HexAppearance.Footprint.ANGLED, HexAppearance.footprint(board.getHex(new Coords(0, 0)).getAppearance()));
+        assertEquals(HexAppearance.Footprint.ANGLED, HexAppearance.footprint(board.getHex(new Coords(0, 1)).getAppearance()));
+    }
+
     @ParameterizedTest(name = "{0} is dropped")
     @ValueSource(strings = { "building:2;bldg_elev:1;bldg_cf:30;bldg_fluff:0", "woods:1;fluff:51", "ground_fluff:4",
           "pavement:1;road_fluff:1", "water:1;water_fluff:1" })
@@ -150,7 +164,8 @@ class BoardLegacyArtTest {
         Board board = converted(terrain);
         Hex game = board.getHex(AT);
         assertTrue(game.getDecorations().isEmpty());
-        assertTrue(game.getAppearance().isEmpty(), game.getAppearance().toString());
+        // An isolated building's Square footprint is not art (aLegacyBuildingWithoutConnectionsIsSquare).
+        assertTrue(game.getAppearance().keySet().stream().allMatch("footprint"::equals), game.getAppearance().toString());
         assertTrue(BoardSceneryLayouts.takenTokens(game).values().stream().allMatch(BoardSceneryLayouts.Taken.DROP::equals));
         assertFalse(BoardSceneryLayouts.takenTokens(game).isEmpty());
         assertTrue(art(written(board).getHex(AT)).isEmpty());
