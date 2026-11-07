@@ -168,6 +168,8 @@ class GpuFamilyProgramsSmokeTest {
                     long start = System.nanoTime(), installed = 0;
                     int waiting = -1, frames = 0;
                     double longest = 0;
+                    // What's timed is a wait for programs: the smoke tasks' cache fill at once would take a whole frame of its own.
+                    terrain.setMaterialCache(false);
                     terrain.update(after, camera.camera);
                     do {
                         long frameStart = System.nanoTime();
@@ -345,6 +347,7 @@ class GpuFamilyProgramsSmokeTest {
                   "The edit swaps the terrain's programs");
             Map<Shader, Shader> swapped = new IdentityHashMap<>(groups);
             int family = familyProgramsIn(terrain);
+            Set<Shader> grouped = groupedProgramsIn(terrain);
             Frame afterSwap = capture(terrain, frame, camera, scene, "shader-edits-swapped");
             assertFalse(session.apply(Map.of("water-spray.frag", spray + "\n// rejected\n",
                   "atmosphere-composite.frag", "#version 330 core\nthis does not compile")).success(),
@@ -372,7 +375,7 @@ class GpuFamilyProgramsSmokeTest {
             assertTrue(Collections.disjoint(before.keySet(), swapped.keySet()), "The swap releases the replaced programs");
             assertTrue(identities(providerShaders(terrain)).containsAll(swapped.keySet()),
                   "Every group belongs to an installed program");
-            assertEquals(family, swapped.size(), "one for each family program");
+            assertEquals(grouped, identities(swapped.keySet()), "one for each family and cached-lit program");
             assertEquals(swapped, rejected, "A rejected edit keeps the groups");
             assertFalse(uninitialized, "A program its provider does not keep has no group");
             assertTrue(initialized, "An initialized family program sorts with its generic program");
@@ -484,7 +487,8 @@ class GpuFamilyProgramsSmokeTest {
                         }
                         assertTrue(built <= 2 * 3, "Twice the capacity bounds the programs built");
                         assertEquals(built, provider, "The provider holds exactly the programs built");
-                        assertEquals(provider, groups, "each with its draw-order group");
+                        assertEquals(groupedProgramsIn(terrain), identities(shaderGroups(terrain).keySet()),
+                              "each family and cached-lit program with its draw-order group");
                         assertEquals(0, links, "No link is left behind");
                     }
                 } finally {
@@ -533,6 +537,17 @@ class GpuFamilyProgramsSmokeTest {
         int count = 0;
         for (Shader shader : providerShaders(terrain)) { if (family(shader)) { count++; } }
         return count;
+    }
+
+    /** The programs that sort with a generic program: family programs, and the material cache's cached-lit ones. */
+    private static Set<Shader> groupedProgramsIn(GpuTerrain terrain) throws ReflectiveOperationException {
+        Set<Shader> result = identities(List.of());
+        for (Shader shader : providerShaders(terrain)) {
+            if (family(shader) || shader instanceof BaseShader base && base.program.getFragmentShaderSource().contains("#define materialCachedFlag")) {
+                result.add(shader);
+            }
+        }
+        return result;
     }
 
     private static boolean family(Shader shader) {

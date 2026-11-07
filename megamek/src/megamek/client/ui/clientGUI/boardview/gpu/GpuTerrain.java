@@ -1292,8 +1292,11 @@ final class GpuTerrain implements Disposable {
      * build.
      */
     static float cliffWalls = .45f;
-    /** The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_LEQUAL. */
-    static int prepassDepthFunction = GL20.GL_EQUAL;
+    /**
+     * The colour pass's depth test for a draw the pre-pass drew; native measurements compare GL_EQUAL. At equal, Iris Xe
+     * loses a few isolated pixels of leaves and relief, others each frame, so still frames differ.
+     */
+    static int prepassDepthFunction = GL20.GL_LEQUAL;
     /**
      * Sculpted ground leaves out the biome stage on a board without biomes that the editor does not change
      * (GpuEnvironmentLighting.biomes). Native checks turn it off to compare frames of the complete programs.

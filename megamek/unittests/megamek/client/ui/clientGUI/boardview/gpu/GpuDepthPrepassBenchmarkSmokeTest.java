@@ -57,13 +57,13 @@ class GpuDepthPrepassBenchmarkSmokeTest {
     private static final int ROUNDS = Integer.getInteger("megamek.gpu.prepassRounds", 4), SLOT_FRAMES = 30,
           WARM_FRAMES = 8;
     private static final List<Setting> SETTINGS = chosen("megamek.gpu.prepassSettings", List.of(
-          new Setting("off", NONE, GL20.GL_EQUAL), new Setting("all", ALL, GL20.GL_EQUAL),
-          new Setting("all-lequal", ALL, GL20.GL_LEQUAL),
-          new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+          new Setting("off", NONE, GL20.GL_LEQUAL), new Setting("all", ALL, GL20.GL_LEQUAL),
+          new Setting("all-equal", ALL, GL20.GL_EQUAL),
+          new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_LEQUAL),
           new Setting("trees-cliffs", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_LEQUAL),
           new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
+                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_LEQUAL),
           without(GpuTerrain.Prepass.FOLIAGE), without(GpuTerrain.Prepass.IMPOSTORS)), Setting::name);
 
     /** A measured setting: the categories the pre-pass draws (none: off) and the colour pass's test for their draws. */
@@ -79,7 +79,7 @@ class GpuDepthPrepassBenchmarkSmokeTest {
 
     private static Setting without(GpuTerrain.Prepass category) {
         return new Setting("no-" + category.name().toLowerCase(Locale.ROOT), EnumSet.complementOf(EnumSet.of(category)),
-              GL20.GL_EQUAL);
+              GL20.GL_LEQUAL);
     }
 
     @Test
@@ -139,7 +139,7 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                     failure.set(error);
                 } finally {
                     GpuTerrain.depthPrepass = previous;
-                    GpuTerrain.prepassDepthFunction = GL20.GL_EQUAL;
+                    GpuTerrain.prepassDepthFunction = GL20.GL_LEQUAL;
                     BoardCamera.renderScale = 1;
                     Gdx.app.exit();
                 }
@@ -170,7 +170,7 @@ class GpuDepthPrepassBenchmarkSmokeTest {
             order.addAll(back);
             for (View view : views) {
                 GpuTerrain.depthPrepass = ALL;
-                GpuTerrain.prepassDepthFunction = GL20.GL_EQUAL;
+                GpuTerrain.prepassDepthFunction = GL20.GL_LEQUAL;
                 GpuCalibrationScenes.show(view, scene, camera);
                 GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera));
