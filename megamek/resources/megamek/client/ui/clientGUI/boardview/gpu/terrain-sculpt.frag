@@ -892,10 +892,14 @@ void main() {
     // any sun; shadeSurface shades them by the cavity (micro-shadowing).
     float lift = max(materialHeight - .5, 0.0) * RELIEF_METRES * u_metre;
     // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
-    // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer.
-    vec2 tufts = world.xy + world.z * vec2(.6, -.4);
-    vec2 fray = (texture(u_surfaceNoise, rainNoiseAt(tufts / 19.2 + .31)).gb - .5 + .5 * (texture(u_surfaceNoise, rainNoiseAt(tufts / 6.4 + .67)).rg - .5))
-          * (2.0 * FRAY_METRES / 1.5);
+    // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer. Poured concrete
+    // has none: its shadows keep clean edges.
+    vec2 fray = vec2(0.0);
+    if (!family(4.0)) {
+        vec2 tufts = world.xy + world.z * vec2(.6, -.4);
+        fray = (texture(u_surfaceNoise, rainNoiseAt(tufts / 19.2 + .31)).gb - .5 + .5 * (texture(u_surfaceNoise, rainNoiseAt(tufts / 6.4 + .67)).rg - .5))
+              * (2.0 * FRAY_METRES / 1.5);
+    }
     // shadeSurface has no directional lobe on this hemisphere unless it transmits or scatters light.
     bool receivesSun = leaf || volcanic > 0.0 || finish.scatter > 0.0
           || dot(smoothSupport ? face : geometric, light) > 0.0;
