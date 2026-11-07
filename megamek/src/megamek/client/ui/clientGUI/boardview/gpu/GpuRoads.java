@@ -1311,7 +1311,7 @@ final class GpuRoads {
      * so each palette has 31 steps: tenths of a level up to three, past which the tint hardly changes. They stay linear,
      * as the mesh interpolates them. A deck's ramp can leave the water it crosses: none lies over it there.
      */
-    private static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
+    static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
         var liquid = surface.tile.liquid();
         if (!liquid.present() || liquid.molten()) { return coat; }
         float levels = surface.overBank(x, y) ? 0 : (surface.waterHeight(x, y) - z) / BoardGeometry.level();

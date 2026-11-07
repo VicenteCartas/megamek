@@ -10,10 +10,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.board.HexTile;
 import org.junit.jupiter.api.Test;
 
 /** Water is a layer over the same ground: a road under it behaves as a dry road at the water's floor. */
@@ -112,10 +114,15 @@ class BoardRoadUnderWaterTest {
 
     /** A river along row 3, a level above the land round it, its deck at (3, 3) with these road exits, every road below the water. */
     private static BoardScene raisedRiver(int... exits) {
+        return raisedRiver("", exits);
+    }
+
+    /** {@link #raisedRiver(int...)} with this terrain on the land round the river. */
+    private static BoardScene raisedRiver(String land, int... exits) {
         var board = Board.createEmptyBoard(7, 7);
         for (int x = 0; x < 7; x++) {
             for (int y = 0; y < 7; y++) {
-                board.setHex(new Coords(x, y), y == AT.getY() ? new Hex(0, "water:1", "") : new Hex(-1, "", ""));
+                board.setHex(new Coords(x, y), y == AT.getY() ? new Hex(0, "water:1", "") : new Hex(-1, land, ""));
             }
         }
         int mask = 0;
@@ -193,15 +200,16 @@ class BoardRoadUnderWaterTest {
             var water = new BoardSurface(scene, scene.tile(AT));
             assertOutlineInOrder(water);
             var centre = BoardGeometry.center(AT, 0);
-            // The deck hides what lies toward its exits. On every other bank of its hex and of the river beside it, the
-            // riverside's top stands at the water's level just inside its rim, and carries no water.
+            // On every bank of its hex and of the river beside it, the riverside's top stands at the water's level just inside
+            // its rim, and carries no water.
             for (var at : List.of(AT, AT.translated(1), AT.translated(5))) {
                 var surface = new BoardSurface(scene, scene.tile(at));
                 var middle = BoardGeometry.center(at, 0);
                 for (int e = 0; e < 6; e++) {
                     var next = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
-                    if (next == null || next.liquid().present() || at.equals(AT) && next.wayExits() != 0) { continue; }
-                    for (float t : new float[] { .15f, .5f, .85f }) {
+                    if (next == null || next.liquid().present()) { continue; }
+                    // Under the deck the riverside runs on behind the ramp, between what the deck's own corners keep.
+                    for (float t : at.equals(AT) && next.wayExits() != 0 ? new float[] { .5f } : new float[] { .15f, .5f, .85f }) {
                         var rim = surface.relief.outlinePoint(e, t, 0);
                         var top = rim.cpy().add(middle.cpy().sub(rim).nor().scl(3 * BoardGeometry.hexScale()));
                         assertEquals(0, BoardSurface.sampleHeight(surface.groundFaces(), top.x, top.y, Float.NaN), .25f * BoardGeometry.level(),
@@ -214,6 +222,41 @@ class BoardRoadUnderWaterTest {
             assertFalse(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, centre.x, centre.y, Float.NaN)), "Water under the deck");
             assertNoGaps(scene, AT);
         }
+    }
+
+    /** No ground of the deck's hex stands above the ramp, across this share of the road, from the hex's edge to the ramp's high end. */
+    private static void assertRampClearsTheBank(BoardScene scene, int exit, float road) {
+        var water = new BoardSurface(scene, scene.tile(AT));
+        var centre = BoardGeometry.center(AT, 0);
+        var next = BoardGeometry.center(AT.translated(exit), 0);
+        var inward = centre.cpy().sub(next).nor();
+        var across = new Vector3(-inward.y, inward.x, 0);
+        var edge = next.cpy().lerp(centre, .5f);
+        List<BoardSurface.Face> ground = new ArrayList<>(water.groundFaces());
+        ground.addAll(water.walls(scene, BoardGeometry.floor(scene)));
+        float level = BoardGeometry.level(), ramp = (1 - BoardRoadGrade.BRIDGE_START) * BoardGeometry.height() / 2;
+        float low = BoardBridge.edgeElevation(scene.tile(AT), scene.tile(AT.translated(exit)), exit);
+        for (float lateral : new float[] { -1, -.5f, 0, .5f, 1 }) {
+            for (float in = .1f; in <= 1; in += .1f) {
+                var point = edge.cpy().mulAdd(inward, in * ramp).mulAdd(across, lateral * road * HexTile.ROAD_HALF_WIDTH * BoardGeometry.hexScale());
+                float height = BoardSurface.sampleHeight(ground, point.x, point.y, Float.NEGATIVE_INFINITY);
+                float surface = BoardBridge.deckZ(low * (1 - in));
+                assertTrue(height <= surface + .02f * level, "Ground at " + height + " stands over the ramp at " + surface + ", "
+                      + in + " of the way up and " + lateral + " across, exit " + exit);
+            }
+        }
+    }
+
+    @Test
+    void theBankClearsADecksRampWhateverHoldsItsCorners() {
+        for (var exits : List.of(new int[] { SOUTH, 2 }, new int[] { 2, 4 }, new int[] { NORTH, SOUTH })) {
+            for (int exit : exits) { assertRampClearsTheBank(raisedRiver(exits), exit, 1); }
+        }
+        // Paving beside the road's hex keeps its outline, and with it the bank's corners there. The bay turns in from them
+        // in the road's outer metre or so, over which the bank may stand a little above the ramp.
+        var paved = raisedRiver("pavement:1", SOUTH);
+        assertRampClearsTheBank(paved, SOUTH, .85f);
+        assertOutlineInOrder(new BoardSurface(paved, paved.tile(AT)));
     }
 
     @Test
@@ -262,7 +305,21 @@ class BoardRoadUnderWaterTest {
                       "The road's rim on edge " + e + " at " + t + " stands out past its verge");
             }
         }
+        // Ground stands at the road's level right beside it, down its length: nothing hangs over a gap.
+        var support = new ArrayList<>(surface.groundFaces());
+        support.addAll(surface.walls(scene, BoardGeometry.floor(scene)));
+        float beside = (HexTile.ROAD_HALF_WIDTH + BoardRoad.SHOULDER + .5f) * scale;
+        for (float along = -.4f; along <= .4f; along += .1f) {
+            float y = centre.y + along * BoardGeometry.height();
+            assertEquals(0, BoardSurface.sampleHeight(support, centre.x + beside, y, Float.NEGATIVE_INFINITY), .1f * BoardGeometry.level(),
+                  "Ground beside the road at " + along);
+        }
         BoardRoadSlopeTest.assertClosed(scene, road, TerrainLod.FULL);
+    }
+
+    /** The tint a road's coat takes at this point of the hex: tenths of a level of water over it. */
+    private static int tint(BoardSurface water, Vector3 at, float z) {
+        return (Float.floatToRawIntBits(GpuRoads.underWater(Color.WHITE_FLOAT_BITS, at.x, at.y, z, water)) >>> 24) / 2 % 31;
     }
 
     @Test
@@ -271,10 +328,11 @@ class BoardRoadUnderWaterTest {
         var water = new BoardSurface(scene, scene.tile(AT));
         var centre = BoardGeometry.center(AT, 0);
         var road = BoardGeometry.center(AT.translated(SOUTH), 0);
-        assertFalse(water.overBank(centre.x, centre.y), "Under the deck lies water");
-        assertTrue(water.overBank(road.x, road.y), "The road's hex is no water's");
-        var edge = centre.cpy().lerp(road, .5f);
-        assertTrue(water.overBank(edge.x, edge.y), "Nor is the ramp past the receded bank");
+        float level = BoardGeometry.level(), surface = water.waterHeight(centre.x, centre.y);
+        assertEquals(10, tint(water, centre, surface - level), "A road a level under the deck's water");
+        assertEquals(5, tint(water, centre, surface - level / 2), "A road half a level under it");
+        assertEquals(0, tint(water, centre.cpy().lerp(road, .5f), -level / 2), "The ramp past the receded bank, below the water's level but dry");
+        assertEquals(0, tint(water, road, -level), "The road's own hex");
     }
 
     @Test

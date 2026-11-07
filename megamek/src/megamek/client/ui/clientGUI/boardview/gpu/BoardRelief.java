@@ -1850,10 +1850,12 @@ final class BoardRelief {
             float[] first = cornerPush(edge.a, edge, 0), second = cornerPush(edge.b, edge, 1);
             float ex = (edge.b.x - edge.a.x) / edge.length, ey = (edge.b.y - edge.a.y) / edge.length;
             // Across the edge the bay departs from either corner's move by at most PUSH_SLOPE per run, as it does from
-            // its own stations: where the band turns round a corner a steeper bay would fold it over itself.
+            // its own stations: where the band turns round a corner a steeper bay would fold it over itself. A deck's bay,
+            // under the deck, may turn in at BAY_SLOPE.
             float across = own[0] * -ey + own[1] * ex, acrossA = first[0] * -ey + first[1] * ex;
-            float acrossB = second[0] * -ey + second[1] * ex, runA = t * edge.length * PUSH_SLOPE;
-            float runB = (1 - t) * edge.length * PUSH_SLOPE;
+            float slope = edge.bay > 0 ? BAY_SLOPE : PUSH_SLOPE;
+            float acrossB = second[0] * -ey + second[1] * ex, runA = t * edge.length * slope;
+            float runB = (1 - t) * edge.length * slope;
             float low = Math.max(acrossA - runA, acrossB - runB), high = Math.min(acrossA + runA, acrossB + runB);
             float bay = low > high ? lerp(acrossA, acrossB, t) : Math.clamp(across, low, high);
             // Easing from the nearer corner's move, the band never jumps between its corner and its middle. Along the
@@ -1896,8 +1898,9 @@ final class BoardRelief {
     /**
      * A corner of such a bank, {x, y, top}: as far across the edge as lets the bay fall off to it at {@link #PUSH_SLOPE},
      * along the water's next edge where land lies below the water there or the water runs on through a mouth, or toward
-     * the hex's centre between two bays of one deck, and never so far that two corners of an edge would meet. Higher ground
-     * or an outline that stays holds it in place. {@link #NO_PUSH} for every other corner.
+     * the hex's centre between two bays of one deck, and never so far along an edge that two corners of it would meet. Higher
+     * ground or an outline that stays holds it in place, and the bay turns in more steeply from it ({@link #BAY_SLOPE}).
+     * {@link #NO_PUSH} for every other corner.
      */
     private float[] bayCorner(Corner corner) {
         return bayCorners.computeIfAbsent(corner, key -> {
@@ -1906,7 +1909,7 @@ final class BoardRelief {
                 for (Site road : key.around) {
                     float bay = road == null || road == water ? 0 : deckBay(water, road);
                     if (bay <= 0) { continue; }
-                    float across = bay - PUSH_SLOPE * (BoardGeometry.width() / 4 - deckLane(water, road));
+                    float across = bay - PUSH_SLOPE * Math.max(0, BoardGeometry.width() / 4 - deckLane(water, road));
                     if (across <= 0) { continue; }
                     for (Site land : key.around) {
                         if (land == null || land == water || land == road || !recedes(water, land)) { continue; }
@@ -1914,7 +1917,7 @@ final class BoardRelief {
                         Corner next = side.a == key ? side.b : side.a;
                         boolean between = deckBay(water, land) > 0;
                         float x = between ? water.x() - key.x : next.x - key.x, y = between ? water.y() - key.y : next.y - key.y;
-                        float scale = Math.min(across / COS_30, BAY_CORNER * side.length) / (float) Math.hypot(x, y);
+                        float scale = (between ? across / COS_30 : Math.min(across / COS_30, BAY_CORNER * side.length)) / (float) Math.hypot(x, y);
                         return new float[] { x * scale, y * scale, (water.level() + BoardRoadGrade.CLEARANCE) * BoardGeometry.level() };
                     }
                 }
@@ -1926,6 +1929,8 @@ final class BoardRelief {
     private static final float COS_30 = .8660254f;
     /** The most of an edge's length a bay moves a corner along it. */
     private static final float BAY_CORNER = .45f;
+    /** Most a deck's bay changes per run along its edge: it has to clear the ramp's whole lane even from a held corner. */
+    private static final float BAY_SLOPE = 4;
 
     /** Whether a bay's corner may recede beside this hex: land below the water, or the same water through an open mouth. */
     private boolean recedes(Site water, Site beside) {
