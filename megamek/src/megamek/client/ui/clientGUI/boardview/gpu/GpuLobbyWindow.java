@@ -7,6 +7,7 @@ import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -22,6 +23,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
@@ -40,6 +42,7 @@ import megamek.client.bot.BotFactory;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.BehaviorSettingsFactory;
 import megamek.client.bot.ui.swing.BotGUI;
+import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.C3NetworkBoard;
 import megamek.client.lobby.CamoCatalog;
@@ -47,6 +50,7 @@ import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.IconCatalog;
 import megamek.client.lobby.LobbyBattlefield;
+import megamek.client.lobby.LanceRoleForm;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
@@ -55,6 +59,7 @@ import megamek.client.lobby.LobbyMenuEntry;
 import megamek.client.lobby.LobbyRequisition;
 import megamek.client.lobby.LobbySnapshot;
 import megamek.client.lobby.LobbyUnit;
+import megamek.client.lobby.LobbyUnitActions;
 import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.lobby.LobbyUnitOrder;
 import megamek.client.lobby.MapSetupForm;
@@ -73,7 +78,6 @@ import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.PlayerColour;
@@ -555,7 +559,7 @@ public final class GpuLobbyWindow {
             case "loadlist" -> forcesCommand(LobbyForcesPanel.Command.LOAD_LIST);
             case "sprite" -> gui.getClient().getGame().getEntitiesVector().stream()
                   .filter(unit -> local != null && unit.getOwnerId() == local.getId()).findFirst()
-                  .ifPresent(unit -> new SwingLobbyUnitActions(gui, files).run(LobbyUnitMenu.LMP_SPRITE + '|'
+                  .ifPresent(unit -> unitActions().run(LobbyUnitMenu.LMP_SPRITE + '|'
                         + LobbyUnitMenu.SPRITE_CAMO + '|' + unit.getId()));
             default -> tools.probe(tool);
         }
@@ -1335,8 +1339,43 @@ public final class GpuLobbyWindow {
         if (tools.unitCommand(command)) {
             return;
         }
-        new SwingLobbyUnitActions(gui, files).run(command);
+        unitActions().run(command);
         refreshSoon();
+    }
+
+    /** EDT: the unit menu's remaining actions, asking through the lobby's own dialogs. */
+    private LobbyUnitActions unitActions() {
+        return new LobbyUnitActions(gui.getClient(), gui.lobbyCommands(), files, new LobbyUnitActions.Host() {
+            @Override
+            public void chooseFacing(BotFacingForm form, Runnable confirmed) {
+                onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.facing(form,
+                      (work, then) -> edt("facing", work, then), confirmed)));
+            }
+
+            @Override
+            public void chooseLanceRole(LanceRoleForm form, Runnable confirmed) {
+                onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.lanceRole(form,
+                      (work, then) -> edt("lance role", work, then), confirmed)));
+            }
+
+            @Override
+            public void chooseCamo(Entity unit, Consumer<Camouflage> chosen) {
+                openCamo(unit.getCamouflageOrElseOwners(), false, List.of(unit), chosen);
+            }
+
+            @Override
+            public void writeSprite(Entity unit, Camouflage camouflage, boolean damage, File file) {
+                try {
+                    Image base = MMStaticDirectoryManager.getMekTileset().imageFor(unit);
+                    Image sprite = EntityImage.createLobbyIcon(base, camouflage, unit).loadPreviewImage(damage);
+                    ImageIO.write((BufferedImage) sprite, "png", file);
+                } catch (IOException | RuntimeException failure) {
+                    LOGGER.error(failure, "The lobby could not save the sprite to {}", file);
+                    onScreen(shown -> shown.messageDialog(Messages.getString("ClientGUI.errorSavingFile"),
+                          String.valueOf(failure.getMessage())));
+                }
+            }
+        });
     }
 
     /** Any thread: opens the C3 network manager on one unit, as the unit menu's C3 items do. */

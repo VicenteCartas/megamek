@@ -81,6 +81,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
+import megamek.client.lobby.DecliningLobbyPrompts;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.MegaMekLabPrint;
 import megamek.client.ratgenerator.GenerationContext;
@@ -142,7 +143,6 @@ import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
@@ -4476,10 +4476,10 @@ public class ClientGUI extends AbstractClientGUI
         return client;
     }
 
-    /** @return the lobby's commands for this client, with their Swing dialogs */
+    /** @return the lobby's commands for this client; the lobby attaches its own dialogs while it shows */
     public LobbyCommands lobbyCommands() {
         if (lobbyCommands == null) {
-            lobbyCommands = new LobbyCommands(this::getClient, new SwingLobbyPrompts(this));
+            lobbyCommands = new LobbyCommands(this::getClient, new DecliningLobbyPrompts());
         }
         return lobbyCommands;
     }

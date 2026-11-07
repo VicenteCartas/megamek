@@ -1,7 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Font;
 import java.awt.image.BufferedImage;
+import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -25,6 +28,7 @@ import megamek.client.Client;
 import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
 import megamek.client.generator.RandomUnitGenerator;
+import megamek.client.lobby.AlphaStrikeStatsForm;
 import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.AutoResolveRun.Score;
@@ -49,6 +53,7 @@ import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.RatGeneratorForm;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.lobby.RequisitionReadout;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
@@ -64,8 +69,10 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
+import megamek.client.ui.util.FontHandler;
 import megamek.codeUtilities.MathUtility;
+import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.alphaStrike.cardDrawer.ASCardPrinter;
 import megamek.common.Player;
 import megamek.common.Team;
 import megamek.common.autoResolve.converter.MMSetupForces;
@@ -87,6 +94,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
+import megamek.common.strategicBattleSystems.SBFRecordSheetBook;
 import megamek.common.units.Entity;
 import megamek.common.units.UnitType;
 import megamek.logging.MMLogger;
@@ -161,7 +169,7 @@ final class GpuLobbyTools {
 
     // ---- The prompts ----
 
-    /** The native prompts; Damage and the stats stay Swing's. */
+    /** The native prompts. */
     private final class NativeAsks implements LobbyAsks {
         @Override
         public void error(LobbyError error, Object... args) {
@@ -214,12 +222,91 @@ final class GpuLobbyTools {
 
         @Override
         public void showSbfStats(Collection<Force> forces, Game game) {
-            new SwingLobbyPrompts(gui()).showSbfStats(forces, game);
+            SbfStatsForm form = new SbfStatsForm(forces, game);
+            open(dialogs -> dialogs.sbfStats(form, statsHost));
         }
 
         @Override
         public void showAlphaStrikeStats(Collection<Entity> units) {
-            new SwingLobbyPrompts(gui()).showAlphaStrikeStats(units);
+            AlphaStrikeStatsForm form = new AlphaStrikeStatsForm(units);
+            open(dialogs -> dialogs.alphaStrikeStats(form, statsHost));
+        }
+    }
+
+    // ---- The stats cards ----
+
+    private final LobbyStatsView.Host statsHost = new StatsHost();
+    private final List<String> sheetFonts = new ArrayList<>();
+
+    /** The stats cards' saving and printing, each handed over to the Swing thread. */
+    private final class StatsHost implements LobbyStatsView.Host {
+        @Override
+        public void save(AlphaStrikeStatsForm form) {
+            SwingUtilities.invokeLater(() -> window.files().exportStats(form.fileName(), form::save));
+        }
+
+        @Override
+        public void print(List<AlphaStrikeElement> elements) {
+            List<AlphaStrikeElement> cards = List.copyOf(elements);
+            SwingUtilities.invokeLater(() -> {
+                PrinterJob job = PrinterJob.getPrinterJob();
+                job.setPrintable(new ASCardPrinter(cards, gui().getFrame()));
+                if (job.printDialog()) {
+                    printInBackground(job, "Alpha Strike cards");
+                }
+            });
+        }
+
+        @Override
+        public void save(SbfStatsForm form) {
+            SwingUtilities.invokeLater(() -> window.files().exportStats(form.fileName(), form::save));
+        }
+
+        @Override
+        public List<String> fonts() {
+            synchronized (sheetFonts) {
+                if (sheetFonts.isEmpty()) {
+                    sheetFonts.add("");
+                    sheetFonts.addAll(FontHandler.getAvailableNonSymbolFonts());
+                }
+                return List.copyOf(sheetFonts);
+            }
+        }
+
+        @Override
+        public String[] sheetFonts() {
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            return new String[] { preferences.getSbfSheetHeaderFont(), preferences.getSbfSheetValueFont() };
+        }
+
+        @Override
+        public void print(SbfStatsForm form, String headerFont, String valueFont) {
+            SwingUtilities.invokeLater(() -> {
+                GUIPreferences.getInstance().setSbfSheetHeaderFont(headerFont);
+                GUIPreferences.getInstance().setSbfSheetValueFont(valueFont);
+                PrinterJob job = PrinterJob.getPrinterJob();
+                if (job.printDialog()) {
+                    job.setPrintable(new SBFRecordSheetBook(form.formations(), font(headerFont), font(valueFont)));
+                    printInBackground(job, "SBF record sheets");
+                }
+            });
+        }
+
+        private static @Nullable Font font(String name) {
+            return (name == null || name.isBlank()) ? null : Font.decode(name);
+        }
+
+        private void printInBackground(PrinterJob job, String what) {
+            Thread printer = new Thread(() -> {
+                try {
+                    job.print();
+                } catch (PrinterException failure) {
+                    LOGGER.error(failure, "The lobby could not print the {}", what);
+                    message(Messages.getString("Lobby.prompt.message"), String.valueOf(failure.getMessage()));
+                }
+            }, "Lobby stats printer");
+            printer.setDaemon(true);
+            printer.start();
         }
     }
 

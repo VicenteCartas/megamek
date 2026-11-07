@@ -18,14 +18,13 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Every Swing dialog the native lobby opens goes through {@link LobbyDialogs}: the lobby's own on its
- * {@link LobbyDialogs#parent()}, the lobby prompts', services' and unit actions' on the same client frame, and nothing
+ * {@link LobbyDialogs#parent()}, the lobby services' on the same client frame, and nothing
  * else in the lobby watches the toolkit or opens a dialog of its own. The dialogs the lobby draws itself (a libGDX
  * {@link megamek.client.ui.gdx.UiDialog}) all open through {@link LobbyNativeDialogs}.
  */
 class LobbyDialogEntryPointsTest {
     private static final Path GPU = Path.of("src/megamek/client/ui/clientGUI/boardview/gpu");
     private static final Path SWING_LOBBY = Path.of("src/megamek/client/ui/panels/phaseDisplay/lobby");
-    private static final Path PROMPTS = SWING_LOBBY.resolve("SwingLobbyPrompts.java");
     /** A dialog or chooser made in the source, and its first argument. */
     private static final Pattern DIALOG = Pattern.compile(
           "new (?!HelpDialog\\()(\\w*(?:Dialog|Chooser)\\w*)\\(\\s*([\\w.]*(?:\\(\\))?)");
@@ -97,6 +96,15 @@ class LobbyDialogEntryPointsTest {
         assertTrue(screen.contains("nativeDialogs.conditions("));
         assertTrue(screen.contains("nativeDialogs.gameOptions("));
         assertTrue(screen.contains("nativeDialogs.message("));
+        // The unit menu's facing, lance role, sprite camo and stats are drawn by the lobby too
+        assertFalse(window.contains("SwingLobbyUnitActions"));
+        assertTrue(window.contains("new LobbyUnitActions("));
+        assertTrue(window.contains("dialogs.facing("));
+        assertTrue(window.contains("dialogs.lanceRole("));
+        String tools = Files.readString(GPU.resolve("GpuLobbyTools.java"));
+        assertFalse(tools.contains("SwingLobbyPrompts"));
+        assertTrue(tools.contains("dialogs.alphaStrikeStats("));
+        assertTrue(tools.contains("dialogs.sbfStats("));
     }
 
     @Test
@@ -109,19 +117,9 @@ class LobbyDialogEntryPointsTest {
     }
 
     @Test
-    void thePromptsDialogsUseTheClientFrame() throws IOException {
+    void theServicesDialogsUseTheClientFrame() throws IOException {
         List<String> offenders = new ArrayList<>();
-        String source = Files.readString(PROMPTS);
-        owners("SwingLobbyPrompts.java", source, DIALOG, 2, PROMPT_OWNERS, offenders);
-        owners("SwingLobbyPrompts.java", source, OPTION_PANE, 1, PROMPT_OWNERS, offenders);
-        assertTrue(source.contains("return clientGUI.getFrame();"));
-        assertEquals(List.of(), offenders);
-    }
-
-    @Test
-    void theServicesAndUnitActionsDialogsUseTheClientFrame() throws IOException {
-        List<String> offenders = new ArrayList<>();
-        for (String name : List.of("SwingLobbyServices.java", "SwingLobbyUnitActions.java")) {
+        for (String name : List.of("SwingLobbyServices.java")) {
             String source = Files.readString(SWING_LOBBY.resolve(name));
             owners(name, FOLDER_CHOOSER.matcher(source).replaceAll("new FolderChooser(frame(), "), DIALOG, 2,
                   PROMPT_OWNERS, offenders);

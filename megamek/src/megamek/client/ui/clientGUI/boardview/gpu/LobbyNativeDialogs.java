@@ -14,14 +14,17 @@ import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.AlphaStrikeStatsForm;
 import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HelpDocument;
+import megamek.client.lobby.LanceRoleForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
@@ -30,6 +33,7 @@ import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RandomNamesForm;
 import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
@@ -355,6 +359,40 @@ final class LobbyNativeDialogs {
     UiDialog trainOrder(TrainOrderForm form, LobbyPromptViews.Edt edt, Consumer<List<Entity>> ordered) {
         UiDialog dialog = begin(Messages.getString("TrainOrderDialog.title"), "dialog.sm", true, () -> { });
         LobbyPromptViews.trainOrder(kit, dialog, form, edt, ordered, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Asks for a bot's unit's facings; {@code confirmed} runs on the Swing thread once OK closed it. */
+    UiDialog facing(BotFacingForm form, LobbyPromptViews.Edt edt, Runnable confirmed) {
+        UiDialog dialog = begin(Messages.getString("BotCommandPanel.Orders.facing.dialogTitle"), "dialog.sm", true,
+              () -> { });
+        LobbyBotOrderViews.facing(kit, dialog, form, edt, confirmed, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Asks for a bot's lance's role; {@code confirmed} runs on the Swing thread once OK closed it. */
+    UiDialog lanceRole(LanceRoleForm form, LobbyPromptViews.Edt edt, Runnable confirmed) {
+        UiDialog dialog = begin(Messages.getString("BotCommandPanel.Role.dialogTitleFor", form.lanceName()),
+              "dialog.md", true, () -> { });
+        LobbyBotOrderViews.lanceRole(kit, dialog, form, edt, confirmed, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows the units' Alpha Strike stats as cards. */
+    UiDialog alphaStrikeStats(AlphaStrikeStatsForm form, LobbyStatsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("AlphaStrikeStatsDialog.title"), "dialog.xl", true, () -> { });
+        LobbyStatsView.alphaStrike(kit, dialog, form, host, this::close);
+        show(dialog);
+        return dialog;
+    }
+
+    /** Shows the forces' Strategic BattleForce formations as cards. */
+    UiDialog sbfStats(SbfStatsForm form, LobbyStatsView.Host host) {
+        UiDialog dialog = begin(Messages.getString("SBFStatsDialog.title"), "dialog.xl", true, () -> { });
+        LobbyStatsView.sbf(kit, dialog, form, host, this::close);
         show(dialog);
         return dialog;
     }

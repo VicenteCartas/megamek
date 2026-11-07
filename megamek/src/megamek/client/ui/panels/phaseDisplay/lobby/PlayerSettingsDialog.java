@@ -69,6 +69,7 @@ import megamek.client.bot.BotClient;
 import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.generator.ReconfigurationParameters;
 import megamek.client.generator.TeamLoadOutGenerator;
+import megamek.client.lobby.LobbyUnitActions;
 import megamek.client.ratgenerator.FactionRecord;
 import megamek.client.ratgenerator.RATGenerator;
 import megamek.client.ui.GBC;
@@ -719,7 +720,7 @@ public class PlayerSettingsDialog extends AbstractButtonDialog {
                 rp.friendlyFaction = faction;
                 rp.binFillPercent = (rp.isPirate) ? TeamLoadOutGenerator.UNSET_FILL_RATIO : 1.0f;
                 // Clear any bomb assignments
-                SwingLobbyUnitActions.resetBombChoices(clientgui, client.getGame(), updateEntities);
+                LobbyUnitActions.resetBombChoices(clientgui.lobbyCommands(), client.getGame(), updateEntities);
                 tlg.reconfigureEntities(updateEntities, faction, munitionTree, rp, null);
                 // Use sendUpdate because we want the Game to allow us to change on Bot's
                 // behalf.
