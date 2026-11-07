@@ -38,11 +38,13 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PriorityTargetChoices.Candidate;
 import megamek.client.bot.princess.PriorityTargetChoices.ForceRole;
 import megamek.client.generator.enums.SkillGeneratorMethod;
+import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.IconCatalog;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
@@ -640,6 +642,64 @@ class LobbyNativeDialogsSmokeTest {
     }
 
     @Test
+    void theBotReadmeNagAnswersWithItsBox() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            List<String> answers = new ArrayList<>();
+            dialogs.botReadme("Remember", (yes, checked) -> answers.add(yes + "/" + checked));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("bot-readme-headline"));
+            click(ui, find(ui, "yes-no-check"));
+            click(ui, find(ui, "yes-no-yes"));
+            assertEquals(List.of("true/true"), answers, "Read the guide answers, with the box as ticked");
+            assertFalse(dialogs.isOpen());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theDocumentTurnsItsChaptersFromTheRailAndTheFooter() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            HelpDocument report = HelpDocument.battleReport("""
+                  <h1>Battle</h1><p>Two lances met.</p>
+                  <a name="round-1"><h2>Initiative</h2></a>
+                  <h3>Movement</h3>&ensp;<span style='color:#8686bf'>Lance A</span> moved<br>
+                  &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;Atlas walked 3 hexes<br>
+                  <a name="round-2"><h2>Initiative</h2></a><h3>Firing</h3>&ensp;Lance B fired<br>
+                  <a name="end-of-combat"><h2>End of Combat</h2></a>
+                  <a name="victory"><h2><i>Team 2 is victorious!</i></h2></a>
+                  """, "Summary", round -> "Round " + round);
+            LobbyDocumentView view = dialogs.document("Report", report, false);
+            ui.draw();
+            assertEquals(report.chapters().size(), view.chapterCount());
+            assertEquals(0, view.shown());
+            assertEquals("SUMMARY", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+
+            click(ui, find(ui, "document-chapter-1"));
+            ui.draw();
+            assertEquals(1, view.shown());
+            assertEquals("ROUND 1", ((Label) find(ui, "document-title")).getText().toString().toUpperCase());
+            assertNotNull(ui.stage.getRoot().findActor("document-event"), "the round's lines read as events");
+
+            click(ui, find(ui, "document-next"));
+            ui.draw();
+            assertEquals(2, view.shown());
+            click(ui, find(ui, "document-previous"));
+            ui.draw();
+            assertEquals(1, view.shown());
+
+            click(ui, find(ui, "document-chapter-" + (view.chapterCount() - 1)));
+            ui.draw();
+            assertNotNull(ui.stage.getRoot().findActor("document-callout"), "the victory reads as a banner");
+            click(ui, find(ui, "document-close"));
+            assertFalse(dialogs.isOpen());
+            assertNull(dialogs.documentView());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
     void theSaveQuestionBeforeLeavingSavesLeavesOrStays() {
         UiTestStage.run(ui -> {
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
@@ -727,6 +787,63 @@ class LobbyNativeDialogsSmokeTest {
             reveal(ui, friendlyFire);
             click(ui, friendlyFire);
             assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE), "a locked option keeps its value");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theAutoResolveBriefingMovesFromTheOddsToTheOutcome() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyAutoResolveView view = dialogs.autoResolve(true, List.of("Chatter one", "Chatter two"),
+                  new LobbyAutoResolveView.Host() {
+                      @Override
+                      public void proceed() {
+                          said.add("proceed");
+                      }
+
+                      @Override
+                      public void report() {
+                          said.add("report");
+                      }
+                  }, () -> said.add("closed"));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.ODDS, view.phase());
+            view.odds(3, 10);
+            ui.draw();
+            assertTrue(((Label) find(ui, "autoresolve-count")).getText().toString().startsWith("3"),
+                  "the count says how many simulated battles ended");
+            for (int frame = 0; frame < 3 * 60 * LobbyAutoResolveView.LINE_SECONDS; frame++) {
+                ui.stage.act(1 / 60f);
+            }
+
+            view.choice(new AutoResolveRun.Score(10, 6, 3, 1, 0));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.CHOICE, view.phase());
+            assertEquals("60%", ((Label) find(ui, "autoresolve-chance")).getText().toString());
+            assertNotNull(ui.stage.getRoot().findActor("autoresolve-victories"));
+            assertNull(ui.stage.getRoot().findActor("autoresolve-count"), "the odds' progress is gone");
+            Button proceed = find(ui, "autoresolve-proceed");
+            assertEquals(proceed, ui.stage.getKeyboardFocus(), "Resolve takes the focus");
+            click(ui, proceed);
+            assertEquals(List.of("proceed"), said);
+
+            view.resolving();
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.RESOLVING, view.phase());
+            assertNull(ui.stage.getRoot().findActor("autoresolve-proceed"), "the footer has moved on");
+
+            view.result(AutoResolveRun.Outcome.VICTORY, "Team 1 won the scenario.", true);
+            ui.draw();
+            assertEquals(AutoResolveRun.headline(AutoResolveRun.Outcome.VICTORY),
+                  ((Label) find(ui, "autoresolve-headline")).getText().toString());
+            click(ui, find(ui, "autoresolve-report"));
+            assertEquals(List.of("proceed", "report"), said);
+            click(ui, find(ui, "autoresolve-close"));
+            assertFalse(view.isOpen());
+            assertNull(dialogs.autoResolveView());
+            assertEquals(List.of("proceed", "report", "closed"), said);
             dialogs.dispose();
         });
     }

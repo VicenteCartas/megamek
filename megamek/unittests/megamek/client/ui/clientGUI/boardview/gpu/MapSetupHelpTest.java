@@ -8,27 +8,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import megamek.client.lobby.RequisitionReadout;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.ui.Messages;
-import megamek.client.ui.entityreadout.EntityReadout;
 import org.junit.jupiter.api.Test;
 
-/** The map setup's help, which the lobby shows in its native help dialog, reads as headings and text. */
+/** The map setup's help, which the lobby shows in its native document dialog, reads as chapters of text. */
 class MapSetupHelpTest {
 
     @Test
-    void theHelpReadsAsHeadingsAndText() throws IOException {
+    void theHelpReadsAsChaptersOfText() throws IOException {
         Path help = Path.of(Messages.getString("Lobby.help.mapSetupPath"));
-        List<EntityReadout.Row> rows = RequisitionReadout.fromHtml(
-              GpuLobbyTools.unwrapLayoutTables(Files.readString(help)));
+        HelpDocument document = HelpDocument.guide(Files.readString(help));
 
-        List<String> titles = rows.stream()
-              .filter(row -> row.kind() == EntityReadout.Row.Kind.TITLE)
-              .map(row -> String.join(" ", row.cells()))
-              .toList();
+        List<String> titles = document.titles();
         assertTrue(titles.contains("Stacks and Surprise Boards"), titles::toString);
         assertTrue(titles.contains("Finding Boards"), titles::toString);
-        assertTrue(rows.stream().filter(row -> row.kind() == EntityReadout.Row.Kind.TEXT).count() > 10,
-              "the help's paragraphs and list items read as text");
+        assertTrue(document.chapters().stream().mapToLong(chapter -> chapter.blocks().size()).sum() > 10,
+              "the help's paragraphs and list items read as blocks");
     }
 }

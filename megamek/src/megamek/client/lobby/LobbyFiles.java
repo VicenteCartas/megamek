@@ -50,6 +50,7 @@ public final class LobbyFiles {
         SAVE_UNIT_LIST(true),
         LOAD_UNIT_LIST(false),
         EXPORT_SPRITE(true),
+        EXPORT_FORCE(true),
         SAVE_GAME(true),
         LOAD_GAME(false);
 
@@ -150,6 +151,10 @@ public final class LobbyFiles {
                   null);
             case EXPORT_SPRITE -> new Ask(route, null, Messages.getString("ExportUnitSpriteDialog.title"),
                   Messages.getString("Lobby.files.pngFiles"), List.of("png"), (name == null) ? null : name + ".png");
+            case EXPORT_FORCE -> new Ask(route, folders.saveList,
+                  Messages.getString("ForceGeneratorDialog.exportMUL.title"),
+                  Messages.getString("ClientGUI.descriptionMULFiles"), List.of(MUL),
+                  (name == null) ? null : name + '.' + MUL);
             case SAVE_GAME, LOAD_GAME -> new Ask(route, new File(MMConstants.SAVEGAME_DIR).getAbsoluteFile(),
                   Messages.getString(route.save() ? "Lobby.files.saveGame" : "Lobby.files.loadGame"),
                   Messages.getString("Lobby.files.saveGames"), List.of(SAVE_GZ, SAVE), null);
@@ -351,6 +356,21 @@ public final class LobbyFiles {
         chooser.choose(ask(Route.EXPORT_SPRITE, unitName), file -> {
             if (file != null) {
                 write.accept(file.getPath().endsWith(".png") ? file : new File(file.getPath() + ".png"));
+            }
+        });
+    }
+
+    // ---- The Force Generator
+
+    /**
+     * Asks for a file, suggesting the force's name, in the unit lists' folder, and hands it to {@code write} as a MUL
+     * file; nothing when cancelled.
+     */
+    public void exportForce(String forceName, Consumer<File> write) {
+        chooser.choose(ask(Route.EXPORT_FORCE, forceName), file -> {
+            if (file != null) {
+                folders.saveList = folder(file, folders.saveList);
+                write.accept(withMul(file));
             }
         });
     }

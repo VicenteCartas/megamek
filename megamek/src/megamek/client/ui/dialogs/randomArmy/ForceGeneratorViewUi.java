@@ -148,7 +148,7 @@ public class ForceGeneratorViewUi implements ActionListener {
     // regiment keeps its "regiment" tag rather than dissolving into the campaign's top formation.
     private ForceDescriptor modelRoot;
     // The current top of the accumulated command; new rolls nest under it, replace it, or get a
-    // synthesized parent, all by echelon (see accumulateIntoModel).
+    // synthesized parent, all by echelon (see ForceEdits.accumulate).
     private ForceDescriptor modelTop;
     // Number of generated commands the player has accumulated into the model, regardless of how they
     // nest. Reported in the status line; a plain counter because the model has no flat command list
@@ -708,8 +708,8 @@ public class ForceGeneratorViewUi implements ActionListener {
             }
             // A rolled command carries no name of its own, so its formation would commit under the bare
             // echelon name ("Battalion"); stamp the unit type in so it reads "Battle Armor Battalion".
-            ensureDescriptiveName(fd);
-            modelTop = accumulateIntoModel(modelTop, fd);
+            ForceEdits.ensureDescriptiveName(fd);
+            modelTop = ForceEdits.accumulate(modelTop, fd);
             // Every roll brings its own ships; the command lists them in one place, under its top node.
             TransportBranchMerger.foldInto(modelTop, fd);
             // Keep the wrapper holding exactly the current top command.
@@ -773,110 +773,6 @@ public class ForceGeneratorViewUi implements ActionListener {
         modelRoot = null;
         modelTop = null;
         modelCommandCount = 0;
-    }
-
-    /**
-     * Folds a freshly rolled command into the running model by echelon, so the model reads as one
-     * command structure rather than a flat pile of rolls:
-     *
-     * <ul>
-     *   <li><b>Smaller than the current top</b> (lower echelon) - tucked under the current top command
-     *       (for example a Battle Armor company generated after a regiment nests inside that
-     *       regiment).</li>
-     *   <li><b>Larger than the current top</b> (higher echelon) - becomes the new top and the previous
-     *       top nests inside it.</li>
-     *   <li><b>Same echelon</b> - a synthetic parent one echelon up is created and both peers nest
-     *       inside it (for example two regiments end up under a synthesized brigade).</li>
-     * </ul>
-     *
-     * @param currentTop the current model top, or {@code null} if this is the first roll
-     * @param fd         the newly rolled command
-     *
-     * @return the model top after folding {@code fd} in
-     */
-    private ForceDescriptor accumulateIntoModel(ForceDescriptor currentTop, ForceDescriptor fd) {
-        if (currentTop == null) {
-            return fd;
-        }
-        int topEchelon = echelonOf(currentTop);
-        int newEchelon = echelonOf(fd);
-        if (newEchelon < topEchelon) {
-            currentTop.addSubForce(fd);
-            return currentTop;
-        }
-        if (newEchelon > topEchelon) {
-            fd.addSubForce(currentTop);
-            return fd;
-        }
-        ForceDescriptor parent = synthesizeParentCommand(currentTop, topEchelon + 1);
-        parent.addSubForce(currentTop);
-        parent.addSubForce(fd);
-        return parent;
-    }
-
-    /** The descriptor's echelon, treating a {@code null} echelon as 0 (the smallest) for comparison. */
-    private int echelonOf(ForceDescriptor descriptor) {
-        Integer echelon = descriptor.getEchelon();
-        return (echelon == null) ? 0 : echelon;
-    }
-
-    /**
-     * Builds an empty container command one echelon above two same-sized peers (for example a brigade
-     * over two regiments). The container borrows the child's faction, unit type, and year so the
-     * ruleset can resolve the correct echelon name for the campaign's faction; if the ruleset has no
-     * name for that echelon, a generic "Command" label is used.
-     *
-     * @param child   a command being placed under the new container, used for faction/context
-     * @param echelon the echelon for the new container (one above the peers)
-     *
-     * @return the synthesized parent command
-     */
-    private ForceDescriptor synthesizeParentCommand(ForceDescriptor child, int echelon) {
-        ForceDescriptor parent = new ForceDescriptor();
-        parent.setEchelon(echelon);
-        parent.setFaction(child.getFaction());
-        parent.setUnitType(child.getUnitType());
-        parent.setYear(child.getYear());
-        ensureDescriptiveName(parent);
-        if (parent.getName() == null || parent.getName().isBlank()) {
-            // The ruleset has no echelon name at this level; fall back to a generic label.
-            parent.setName("Command");
-        }
-        return parent;
-    }
-
-    /**
-     * Stamps a unit-type-qualified name onto a command whose displayed name is just the bare echelon,
-     * so the model tree and committed TOE read "Battle Armor Battalion" instead of "Battalion". This
-     * looks at the *resolved* display name ({@link ForceDescriptor#parseName()}), not the raw name,
-     * because a rolled command often carries a template like {@code "{ordinal} Battalion"} that resolves
-     * to just "Battalion"; a name that already includes the unit type (or a descriptor with no unit
-     * type / no echelon name) is left untouched.
-     *
-     * @param descriptor the command to name in place
-     */
-    private void ensureDescriptiveName(ForceDescriptor descriptor) {
-        String echelonName = Ruleset.findRuleset(descriptor).getEschelonName(descriptor);
-        if (echelonName == null || echelonName.isBlank()) {
-            logger.info("[ForceGen] ensureDescriptiveName: no echelon name for id={} echelon={}; leaving name='{}'",
-                  System.identityHashCode(descriptor), descriptor.getEchelon(), descriptor.parseName());
-            return;
-        }
-        Integer unitType = descriptor.getUnitType();
-        if (unitType == null) {
-            // No unit type to prepend; the bare echelon name is the best available.
-            return;
-        }
-        String unitTypeName = UnitType.getTypeDisplayableName(unitType);
-        String displayName = descriptor.parseName();
-        if (displayName != null && displayName.contains(unitTypeName)) {
-            // The resolved name already carries the unit type (or a meaningful name), so keep it.
-            return;
-        }
-        String descriptiveName = unitTypeName + " " + echelonName;
-        logger.info("[ForceGen] ensureDescriptiveName: id={} '{}' -> '{}'",
-              System.identityHashCode(descriptor), displayName, descriptiveName);
-        descriptor.setName(descriptiveName);
     }
 
     /**
@@ -1144,7 +1040,7 @@ public class ForceGeneratorViewUi implements ActionListener {
     private JMenuItem buildAddSubForceMenu(ForceDescriptor parent) {
         String selected = panControls.getSelectedFormation();
         JMenuItem item = new JMenuItem(Messages.getString("ForceGeneratorDialog.addFormation"));
-        ForceDescriptor template = subForceTemplate(parent);
+        ForceDescriptor template = ForceEdits.subForceTemplate(parent);
         logger.debug("[AddFormation] '{}' echelon={} holds {} subforce(s); template={}; palette selection '{}'",
               parent.parseName(), parent.getEchelon(), parent.getSubForces().size(),
               (template == null) ? "none" : template.parseName(), selected);
@@ -1172,25 +1068,6 @@ public class ForceGeneratorViewUi implements ActionListener {
     }
 
     /**
-     * A child of this node whose shape a new one can copy.
-     *
-     * <p>Formation-bearing children only: the units inside a lance are children too, and copying one of those
-     * would add a single unit rather than a formation.</p>
-     *
-     * @param parent the node to add under
-     *
-     * @return a child to copy, or {@code null} when this node holds no formations
-     */
-    private static @Nullable ForceDescriptor subForceTemplate(ForceDescriptor parent) {
-        for (ForceDescriptor child : parent.getSubForces()) {
-            if (!child.getEligibleFormations().isEmpty() || (child.getFormation() != null)) {
-                return child;
-            }
-        }
-        return null;
-    }
-
-    /**
      * Asks before adding a formation, then adds and generates it.
      *
      * @param parent        the node to add under
@@ -1209,46 +1086,10 @@ public class ForceGeneratorViewUi implements ActionListener {
             return;
         }
 
-        ForceDescriptor added = parent.createChild(parent.getSubForces().size());
-        // createChild inherits the parent's weight class, which is the weight of the units the parent already
-        // holds. Keeping it refuses any formation that needs different units - a Heavy Recon lance asked for
-        // inside a medium company came out an ordinary lance. The formation's own requirements decide instead.
-        added.setWeightClass(null);
-        added.setEchelon(template.getEchelon());
-        // The sibling's name pattern, not its parsed name: the pattern is what turns into "C-4 Recon Lance" once
-        // the new formation has a position among its siblings.
-        added.setName(template.getName());
-        added.setEligibleFormations(template.getEligibleFormations());
-        added.setGenerationRule(template.getGenerationRule());
-        added.setBlockGenerationRule(template.getBlockGenerationRule());
-        added.setFormationType(formationType);
-        // As many unit slots as its sibling holds, so a lance comes out a lance and a Clan star a star.
-        for (int slot = 0; slot < template.getSubForces().size(); slot++) {
-            added.addSubForce(added.createChild(slot));
-        }
-        parent.addSubForce(added);
-        // Renumber the siblings so the new formation is given a position and the others still read correctly.
-        parent.assignPositions();
-        logger.info("[AddFormation] added a {} under '{}' with {} unit slot(s)", formationType.getName(),
-              parent.parseName(), template.getSubForces().size());
-
-        added.generateUnits(null, 0);
-        if (!added.hasLineUnits()) {
-            // The unit tables had nothing for any of its slots. Take it back out rather than leave a formation of
-            // named commanders with no units under the parent.
-            parent.getSubForces().remove(added);
-            parent.assignPositions();
-            logger.info("[AddFormation] {} under '{}': no units could be generated; formation not added",
-                  formationType.getName(), parent.parseName());
-            showInsufficientData();
-            refreshTreeAfterEdit();
-            return;
-        }
-        removeSlotsWithoutUnits(added);
-        added.assignCommanders();
-        added.loadEntities(null, 0);
-        warnIfFormationWasDropped(added, formationType);
-        refreshTreeAfterEdit();
+        ForceEdits.Result result = ForceEdits.addSubForce(parent, template, formationType);
+        logger.info("[AddFormation] {} under '{}': {}", formationType.getName(), parent.parseName(), result);
+        reportEdit(result, parent.getSubForces().isEmpty() ? parent
+              : parent.getSubForces().get(parent.getSubForces().size() - 1), formationType);
     }
 
     /**
@@ -1287,47 +1128,18 @@ public class ForceGeneratorViewUi implements ActionListener {
         logger.info("[ForceGen][ChangeFormation] '{}' {} -> {}", formation.parseName(),
               (formation.getFormation() == null) ? "(none)" : formation.getFormation().getName(),
               formationType.getName());
-        FormationType previousType = formation.getFormation();
-        formation.setFormationType(formationType);
-        formation.clearGeneratedUnits();
-        formation.generateUnits(null, 0);
-        if (!formation.hasLineUnits()) {
-            // Nothing could be drawn for the new type, and its old units are already gone. Draw it again as it was
-            // rather than leave an empty formation.
-            logger.info("[ForceGen][ChangeFormation] '{}': no units could be generated as {}; rebuilding as {}",
-                  formation.parseName(), formationType.getName(),
-                  (previousType == null) ? "(none)" : previousType.getName());
-            formation.setFormationType(previousType);
-            formation.clearGeneratedUnits();
-            formation.generateUnits(null, 0);
-            removeSlotsWithoutUnits(formation);
-            formation.assignCommanders();
-            formation.loadEntities(null, 0);
-            showInsufficientData();
-            refreshTreeAfterEdit();
-            return;
-        }
-        removeSlotsWithoutUnits(formation);
-        formation.assignCommanders();
-        formation.loadEntities(null, 0);
-        warnIfFormationWasDropped(formation, formationType);
-
-        refreshTreeAfterEdit();
+        reportEdit(ForceEdits.changeFormation(formation, formationType), formation, formationType);
     }
 
-    /**
-     * Removes the slots of an edited formation that the unit tables could not fill, before commanders are assigned,
-     * as generating a whole force does. Without this a slot left empty kept a named commander with no unit, which
-     * MekHQ's preview showed as a pilot with nothing to crew.
-     *
-     * @param formation the formation just drawn
-     */
-    private static void removeSlotsWithoutUnits(ForceDescriptor formation) {
-        int removed = formation.removeNodesWithoutUnits();
-        if (removed > 0) {
-            logger.info("[ForceGen][EditFormation] '{}': removed {} slot(s) the unit tables could not fill",
-                  formation.parseName(), removed);
+    /** Tells the player how an edit came out, then shows the tree as it now stands. */
+    private void reportEdit(ForceEdits.Result result, ForceDescriptor formation, FormationType requested) {
+        switch (result) {
+            case INSUFFICIENT -> showInsufficientData();
+            case DROPPED -> warnFormationDropped(formation, requested);
+            case CHANGED -> logger.info("[ChangeFormation] '{}' built as {}", formation.parseName(),
+                  requested.getName());
         }
+        refreshTreeAfterEdit();
     }
 
     /** Tells the player that nothing fitting could be generated. */
@@ -1339,23 +1151,14 @@ public class ForceGeneratorViewUi implements ActionListener {
     }
 
     /**
-     * Says so when a formation could not be built and quietly became an ordinary lance.
-     *
-     * <p>A formation whose requirements cannot be met from the units this faction and year can field is dropped by
-     * the generator and the lance is built normally instead. Nothing announced that: the only outward sign was the
-     * name keeping its plain form, which reads as the request having been ignored rather than as the force being
-     * unable to supply it.</p>
+     * Says so when a formation could not be built and quietly became an ordinary lance: its requirements could not
+     * be met from the units this faction and year can field, and the name keeping its plain form read as the request
+     * having been ignored.
      *
      * @param formation the node that was just generated
      * @param requested the formation that was asked for
      */
-    private void warnIfFormationWasDropped(ForceDescriptor formation, FormationType requested) {
-        boolean kept = (formation.getFormation() != null)
-              && formation.getFormation().getName().equals(requested.getName());
-        if (kept) {
-            logger.info("[ChangeFormation] '{}' built as {}", formation.parseName(), requested.getName());
-            return;
-        }
+    private void warnFormationDropped(ForceDescriptor formation, FormationType requested) {
         logger.warn("[ChangeFormation] '{}' could not be built as {} for faction={} year={}; it was generated as"
                     + " an ordinary formation instead", formation.parseName(), requested.getName(),
               formation.getFaction(), formation.getYear());

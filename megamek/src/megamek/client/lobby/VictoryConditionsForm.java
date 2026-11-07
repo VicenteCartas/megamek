@@ -21,7 +21,7 @@ import megamek.common.options.IOptionGroup;
 import megamek.common.options.OptionsConstants;
 
 /**
- * The victory options without a toolkit, as the Swing {@code VictoryConditionsDialog} edits them, laid out as objective
+ * The victory options without a toolkit, as the lobby's victory conditions edit them, laid out as objective
  * cards: one card for each master switch (Battle Value destroyed, Battle Value ratio, turn limit, kill count,
  * objectives) holding the values that only count while it is on, and a General card for the rest. The number bounds
  * and the switch dependencies are {@link VictoryOptionLayout}'s, as in the Swing dialogs. OK sends the
@@ -29,7 +29,7 @@ import megamek.common.options.OptionsConstants;
  */
 public final class VictoryConditionsForm {
 
-    /** The name of the victory option group. */
+    /** The name of the victory option group, which the lobby edits apart from the other game options. */
     public static final String GROUP = "victory";
     /** The General card's id. */
     public static final String GENERAL = "general";

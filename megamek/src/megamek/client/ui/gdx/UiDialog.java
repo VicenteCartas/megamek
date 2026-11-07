@@ -225,6 +225,14 @@ public final class UiDialog {
         return button;
     }
 
+    /** Takes every button and tool off the footer, for a dialog whose next step asks something else. */
+    public void clearFooter() {
+        footerButtons.clear();
+        actions.clearChildren();
+        leading.clearChildren();
+        primary = null;
+    }
+
     /** Adds a footer button; the main one goes first whenever it is added, so every footer reads main, then the rest. */
     private UiButton footerButton(String style, String text, Runnable action, boolean main) {
         UiButton button = kit.button(style, null, text, null);

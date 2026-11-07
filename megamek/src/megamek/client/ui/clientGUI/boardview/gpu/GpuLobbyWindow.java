@@ -64,6 +64,7 @@ import megamek.client.lobby.PortraitCatalog;
 import megamek.client.lobby.RandomMapForm;
 import megamek.client.lobby.RequisitionSkills;
 import megamek.client.lobby.UnitConfigForm;
+import megamek.client.lobby.VictoryConditionsForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ChatterBox;
 import megamek.client.ui.clientGUI.ClientGUI;
@@ -73,7 +74,6 @@ import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyUnitActions;
-import megamek.client.ui.panels.phaseDisplay.lobby.VictoryConditionsDialog;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.util.PlayerColour;
@@ -489,9 +489,7 @@ public final class GpuLobbyWindow {
         if (window == null || window.closing) {
             return false;
         }
-        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.yesNo(
-              Messages.getString("BotReadmeNagDialog.title"),
-              List.of(Messages.getString("BotReadmeNagDialog.text").split("\\s*\\n\\s*")),
+        window.onScreen(shown -> shown.nativeDialog(dialogs -> dialogs.botReadme(
               Messages.getString("chkIgnore.text"),
               (read, ignore) -> {
                   SwingUtilities.invokeLater(() -> MegaMek.getMMOptions()
@@ -901,15 +899,14 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** Any thread: runs one of the forces column's commands, most of which open a Swing dialog. */
+    /** Any thread: runs one of the forces column's commands; Add unit opens the Requisition on the screen instead. */
     void forcesCommand(LobbyForcesPanel.Command command) {
         SwingUtilities.invokeLater(() -> {
             if (closing) {
                 return;
             }
-            SwingLobbyServices services = SwingLobbyServices.of(gui);
             switch (command) {
-                case ADD_UNIT -> services.forcesCommand(SwingLobbyServices.ForcesCommand.ADD_UNIT, null);
+                case ADD_UNIT -> { }
                 case RANDOM_ARMY -> tools.randomArmy();
                 case SKILLS -> tools.skills();
                 case NAMES -> tools.names();
@@ -1020,7 +1017,7 @@ public final class GpuLobbyWindow {
         });
     }
 
-    /** The battlefield's Swing dialogs and the map setup, with the board editor as the start screen opens it. */
+    /** The battlefield's actions, the map setup, the board editor as the start screen opens it, and auto-resolve. */
     private LobbyBattlefieldController.Lounge lounge(SwingLobbyServices lounge) {
         return new LobbyBattlefieldController.Lounge() {
             @Override
@@ -1032,7 +1029,10 @@ public final class GpuLobbyWindow {
                     case LOAD_MAP_SETUP -> loadMapSetup();
                     case SAVE_MAP_SETUP -> saveMapSetup();
                     case VICTORY -> tools.victory();
-                    default -> lounge.battlefieldCommand(SwingLobbyServices.BattlefieldCommand.valueOf(command.name()));
+                    case GENERATE -> gui.getClient().sendLobbyBoardGenerationRequest();
+                    case PREVIEW_3D -> MapSetupDialog.preview3D(gui);
+                    // The map setup, the board editor and auto-resolve come through their own methods below
+                    case MAP_SETUP, BOARD_EDITOR, RUN_AUTO_RESOLVE -> { }
                 }
             }
 
@@ -1058,7 +1058,7 @@ public final class GpuLobbyWindow {
 
             @Override
             public void runAutoResolve() {
-                lounge.runAutoResolve();
+                tools.autoResolve(lounge.autoResolveSettings());
             }
         };
     }
@@ -2383,7 +2383,7 @@ public final class GpuLobbyWindow {
     /** EDT: the game's options as the lobby edits them, its victory options left to the Victory Conditions. */
     private GameOptionsForm gameOptionsForm() {
         return new GameOptionsForm(gui.getClient().getGame().getOptions(),
-              Set.of(VictoryConditionsDialog.VICTORY_OPTIONS_GROUP_NAME), true);
+              Set.of(VictoryConditionsForm.GROUP), true);
     }
 
     /**

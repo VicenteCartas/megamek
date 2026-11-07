@@ -8,11 +8,12 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -25,12 +26,17 @@ import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
 import megamek.client.generator.RandomUnitGenerator;
 import megamek.client.lobby.AssetForm;
+import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.AutoResolveRun.Score;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
 import megamek.client.lobby.FactionChoice;
+import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.FormationForm;
+import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LobbyAsks;
+import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
@@ -46,6 +52,8 @@ import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
+import megamek.client.ratgenerator.ExistingLift;
+import megamek.client.ratgenerator.ForceDescriptor;
 import megamek.client.ratgenerator.FormationType;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ratgenerator.RATGenerator;
@@ -57,11 +65,15 @@ import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.Team;
+import megamek.common.autoResolve.converter.MMSetupForces;
+import megamek.common.autoResolve.converter.SetupForces;
+import megamek.common.autoResolve.event.AutoResolveConcludedEvent;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
+import megamek.common.board.Board;
+import megamek.common.board.postprocess.TWBoardTransformer;
 import megamek.common.enums.Gender;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
@@ -72,11 +84,13 @@ import megamek.common.loaders.MekSummary;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.UnitType;
 import megamek.logging.MMLogger;
+import megamek.server.victory.VictoryResult;
 
 /**
  * The libGDX lobby's tools and prompts on the Swing thread (L17): the native {@link LobbyAsks} that
@@ -94,12 +108,12 @@ final class GpuLobbyTools {
     private final GpuLobbyWindow window;
     private final LobbyAsks asks = new NativeAsks();
     private static final int RAT_POLL_MS = 250;
-    private static final Pattern LAYOUT_TABLE = Pattern.compile("<table[^>]*class=\"config-table\"[^>]*>(.*?)</table>",
-          Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private @Nullable Timer ratWait;
     private @Nullable Timer ratGeneratorWait;
     private @Nullable Timer namesWait;
     private static final int PROBE_TRIES = 20;
+    /** How many battles the developer switch's auto-resolve simulates for its odds. */
+    private static final int PROBE_ODDS_RUNS = 20;
     private int probeTries;
     private volatile boolean printing;
 
@@ -359,12 +373,35 @@ final class GpuLobbyTools {
             }
 
             @Override
-            public void advanced() {
+            public void generate(ForceGeneratorForm force, Consumer<Boolean> done) {
+                generateForce(force, form.playerName(), done);
+            }
+
+            @Override
+            public void addForce(ForceGeneratorForm force, RandomArmyForm army) {
+                GpuLobbyTools.this.addForce(force, army);
+            }
+
+            @Override
+            public void exportForce(ForceGeneratorForm force) {
+                SwingUtilities.invokeLater(() -> GpuLobbyTools.this.exportForce(force));
+            }
+
+            @Override
+            public void confirm(String title, String text, Runnable yes) {
+                open(dialogs -> dialogs.confirm(title, text, yes));
+            }
+
+            @Override
+            public void message(String title, String text) {
+                GpuLobbyTools.this.message(title, text);
+            }
+
+            @Override
+            public void readout(Entity unit) {
                 SwingUtilities.invokeLater(() -> {
-                    if (!window.closing()) {
-                        SwingLobbyServices.of(gui()).forcesCommand(SwingLobbyServices.ForcesCommand.RANDOM_ARMY,
-                              null);
-                    }
+                    LobbyReadoutView.Dossier dossier = dossier(unit, client().getLocalPlayer().getCamouflage());
+                    open(dialogs -> dialogs.readoutOver(List.of(dossier)));
                 });
             }
 
@@ -463,7 +500,11 @@ final class GpuLobbyTools {
         FormationForm formation = new FormationForm(choice, new ArrayList<>(FormationType.getAllFormations()),
               RATGenerator.getInstance()::loadYear);
         formation.unitType(table.unitType());
-        return new LobbyRandomArmyView.Factions(table, formation);
+        ForceGeneratorForm force = new ForceGeneratorForm(year);
+        if (!faction.isBlank()) {
+            force.faction(faction);
+        }
+        return new LobbyRandomArmyView.Factions(table, formation, force);
     }
 
     /** Remembers the faction, command, rating and unit type for the next time, as the Swing generator does. */
@@ -486,11 +527,7 @@ final class GpuLobbyTools {
         Client client = client();
         Player local = client.getLocalPlayer();
         String chosenName = army.playerName();
-        Player owner = client.getGame().getPlayersList().stream()
-              .filter(player -> player.getName().equals(chosenName)).findFirst().orElse(local);
-        if (!UnitRecipients.mayAddUnitsTo(local, owner, gui().getLocalBots().keySet())) {
-            owner = local;
-        }
+        Player owner = armyOwner(chosenName);
         Client skillsClient = (chosenName != null && gui().getLocalBots().get(chosenName) instanceof Client bot)
               ? bot : client;
         ArrayList<Entity> entities = new ArrayList<>();
@@ -518,6 +555,105 @@ final class GpuLobbyTools {
               local, owner.getName(), entities.size()));
         recordContext(army.context(), owner);
         army.clear();
+    }
+
+    /** The player a random army is for: the one chosen, if the local player may add units for them, else themselves. */
+    private Player armyOwner(@Nullable String chosenName) {
+        Player local = client().getLocalPlayer();
+        Player owner = local;
+        for (Player player : client().getGame().getPlayersList()) {
+            if (player.getName().equals(chosenName)) {
+                owner = player;
+                break;
+            }
+        }
+        return UnitRecipients.mayAddUnitsTo(local, owner, gui().getLocalBots().keySet()) ? owner : local;
+    }
+
+    /**
+     * Rolls a force into the force generator's command, as the Swing generator does: described on the Swing thread
+     * from what the chosen player already fields, generated off it, folded in on it; {@code done} hears on the GPU
+     * thread whether it found units.
+     */
+    private void generateForce(ForceGeneratorForm force, @Nullable String chosenName, Consumer<Boolean> done) {
+        ForceDescriptor[] rolled = new ForceDescriptor[1];
+        GameOptions[] options = new GameOptions[1];
+        edt(() -> {
+            Player owner = armyOwner(chosenName);
+            List<Entity> owned = new ArrayList<>();
+            for (Entity entity : client().getGame().getEntitiesVector()) {
+                if (entity.getOwnerId() == owner.getId()) {
+                    owned.add(entity);
+                }
+            }
+            options[0] = client().getGame().getOptions();
+            rolled[0] = force.build(ExistingLift.of(owned));
+        }, () -> {
+            if (rolled[0] == null) {
+                done.accept(false);
+                return;
+            }
+            Thread worker = new Thread(() -> {
+                try {
+                    ForceGeneratorForm.process(rolled[0], options[0], (progress, message) -> { });
+                } catch (RuntimeException failure) {
+                    LOGGER.error(failure, "The force generator failed");
+                    rolled[0] = null;
+                }
+                boolean[] found = new boolean[1];
+                edt(() -> found[0] = rolled[0] != null && force.take(rolled[0]), () -> done.accept(found[0]));
+            }, "Force generator");
+            worker.setDaemon(true);
+            worker.start();
+        });
+    }
+
+    /**
+     * Adds the force generator's command, as far as it is included, for the chosen player, as the Swing generator's
+     * Okay does: its units wired and loaded into their carriers, then sent, then the command cleared.
+     */
+    private void addForce(ForceGeneratorForm force, RandomArmyForm army) {
+        List<Entity> units = force.included();
+        if (units.isEmpty()) {
+            return;
+        }
+        Client client = client();
+        Player owner = armyOwner(army.playerName());
+        force.wire(units);
+        for (Entity unit : units) {
+            unit.setOwner(owner);
+            if (!client.getGame().getPhase().isLounge()) {
+                unit.setDeployRound(client.getGame().getRoundCount() + 1);
+                unit.setGame(client.getGame());
+                unit.setDone(true);
+                unit.setUnloaded(true);
+            }
+        }
+        force.loadCarriers(units);
+        client.sendAddEntity(units);
+        client.sendServerChat(Player.PLAYER_NONE, Messages.getString("RandomArmyDialog.loadedUnitsChat",
+              client.getLocalPlayer(), owner.getName(), units.size()));
+        recordContext(force.context(), owner);
+        // Cleared last, the context being read from the command: left, its units could be sent a second time
+        force.clear();
+    }
+
+    /** Writes the force generator's command to a unit list the player chooses. */
+    private void exportForce(ForceGeneratorForm force) {
+        String title = Messages.getString("ForceGeneratorDialog.exportMUL.title");
+        if (force.included().isEmpty()) {
+            message(title, Messages.getString("ForceGeneratorDialog.exportMUL.empty"));
+            return;
+        }
+        window.files().exportForce(force.exportName(), file -> {
+            try {
+                force.export(file, client().getGame().getOptions());
+            } catch (IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The force generator's command could not be exported");
+                message(title, Messages.getString("ForceGeneratorDialog.exportMUL.error") + "\n"
+                      + failure.getMessage());
+            }
+        });
     }
 
     /**
@@ -708,33 +844,160 @@ final class GpuLobbyTools {
               new File(Messages.getString("Lobby.help.mapSetupPath")));
     }
 
-    /** Any thread: shows an HTML help document in the native help dialog; an unreadable one shows empty. */
+    /** Any thread: shows an HTML guide a chapter at a time in the native help dialog; an unreadable one shows empty. */
     private void helpDocument(String title, File file) {
-        List<EntityReadout.Row> rows;
-        try {
-            rows = RequisitionReadout.fromHtml(unwrapLayoutTables(Files.readString(file.toPath())));
-        } catch (Exception failure) {
-            LOGGER.error(failure, "The lobby could not read the help {}", file);
-            rows = List.of();
-        }
-        List<EntityReadout.Row> shown = rows;
-        open(dialogs -> dialogs.help(title, shown));
+        showDocument(title, file, true, HelpDocument::guide);
     }
 
-    /**
-     * The help's tables that only lay a picture out beside its text, without the picture and the table, as the rows
-     * would put the text in one cell.
-     */
-    static String unwrapLayoutTables(String html) {
-        Matcher table = LAYOUT_TABLE.matcher(html);
-        StringBuilder unwrapped = new StringBuilder();
-        while (table.find()) {
-            String inner = table.group(1).replaceAll("(?is)<img[^>]*>", "")
-                  .replaceAll("(?is)</?(tbody|tr|td)[^>]*>", "");
-            table.appendReplacement(unwrapped, Matcher.quoteReplacement(inner));
+    /** Any thread: reads {@code file} into a document as {@code read} reads it, and shows it over what shows. */
+    private void showDocument(String title, File file, boolean grid,
+          java.util.function.Function<String, HelpDocument> read) {
+        HelpDocument document;
+        try {
+            document = read.apply(Files.readString(file.toPath()));
+        } catch (Exception failure) {
+            LOGGER.error(failure, "The lobby could not read the document {}", file);
+            document = new HelpDocument(List.of());
         }
-        table.appendTail(unwrapped);
-        return unwrapped.toString();
+        HelpDocument shown = document;
+        open(dialogs -> dialogs.document(title, shown, grid));
+    }
+
+    // ---- Auto-resolve ----
+
+    /**
+     * Resolves the battle automatically, natively: the forces, the board and the conditions are read here, the odds
+     * worked out first when {@code settings} asks for them, and the battle resolved on threads of its own, while the
+     * briefing shows how it goes and then how it ended, with its report.
+     */
+    void autoResolve(LobbyBattlefield.AutoResolve settings) {
+        Game game = client().getGame();
+        Player local = client().getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        AutoResolvedBattle run;
+        try {
+            Board board = TWBoardTransformer.instantiateBoard(client().getMapSettings(), game.getPlanetaryConditions(),
+                  game.getOptions());
+            Map<Integer, String> names = new HashMap<>();
+            for (Player player : game.getPlayersList()) {
+                names.put(player.getId(), player.getName());
+            }
+            run = new AutoResolvedBattle(settings, new MMSetupForces(game), board,
+                  new PlanetaryConditions(game.getPlanetaryConditions()), local.getTeam(), local.getId(), names);
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not set up the auto-resolved battle");
+            message(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());
+            return;
+        }
+        open(run::start);
+    }
+
+    /** One auto-resolved battle, from the odds to the report; GPU thread unless a method says otherwise. */
+    private final class AutoResolvedBattle implements LobbyAutoResolveView.Host {
+        private final LobbyBattlefield.AutoResolve settings;
+        private final SetupForces setup;
+        private final Board board;
+        private final PlanetaryConditions conditions;
+        private final int team;
+        private final int playerId;
+        private final Map<Integer, String> names;
+        private final List<String> chatter = AutoResolveRun.flavor(new Random());
+        private volatile boolean cancelled;
+        private @Nullable LobbyAutoResolveView view;
+        private @Nullable File report;
+
+        AutoResolvedBattle(LobbyBattlefield.AutoResolve settings, SetupForces setup, Board board,
+              PlanetaryConditions conditions, int team, int playerId, Map<Integer, String> names) {
+            this.settings = settings;
+            this.setup = setup;
+            this.board = board;
+            this.conditions = conditions;
+            this.team = team;
+            this.playerId = playerId;
+            this.names = names;
+        }
+
+        void start(LobbyNativeDialogs dialogs) {
+            view = dialogs.autoResolve(settings.chances(), chatter, this, this::closed);
+            if (settings.chances()) {
+                odds();
+            } else {
+                resolve();
+            }
+        }
+
+        /** The briefing closed: while the odds run, that stops them; a battle being resolved still ends. */
+        private void closed() {
+            if (view != null && view.phase() == LobbyAutoResolveView.Phase.ODDS) {
+                cancelled = true;
+            }
+        }
+
+        private void odds() {
+            int runs = settings.runs();
+            worker("Auto-resolve odds", () -> {
+                Score score = AutoResolveRun.odds(runs, settings.threads(), team, playerId, setup, board, conditions,
+                      ended -> GpuHost.post(() -> {
+                          if (view != null) {
+                              view.odds(ended, runs);
+                          }
+                      }), () -> cancelled);
+                GpuHost.post(() -> {
+                    if (!cancelled && view != null && view.isOpen()) {
+                        view.choice(score);
+                    }
+                });
+            });
+        }
+
+        @Override
+        public void proceed() {
+            resolve();
+        }
+
+        private void resolve() {
+            if (view != null) {
+                view.resolving();
+            }
+            worker("Auto-resolve", () -> {
+                AutoResolveConcludedEvent event = AutoResolveRun.resolve(setup, board, conditions);
+                open(dialogs -> ended(dialogs, event));
+            });
+        }
+
+        /** Shows how the battle ended, opening the briefing again when it was closed while the battle was resolved. */
+        private void ended(LobbyNativeDialogs dialogs, @Nullable AutoResolveConcludedEvent event) {
+            if (view == null || !view.isOpen()) {
+                view = dialogs.autoResolve(false, chatter, this, () -> { });
+            }
+            if (event == null) {
+                view.failed(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());
+                return;
+            }
+            VictoryResult result = event.getVictoryResult();
+            report = event.getLogFile();
+            view.result(AutoResolveRun.outcome(result, team, playerId),
+                  AutoResolveRun.winner(result, id -> names.getOrDefault(id, String.valueOf(id))),
+                  report != null && report.isFile());
+        }
+
+        @Override
+        public void report() {
+            File shown = report;
+            if (shown != null) {
+                worker("Auto-resolve report", () -> showDocument(AutoResolveRun.reportTitle(), shown, false,
+                      html -> HelpDocument.battleReport(html, Messages.getString("Lobby.autoResolve.report.summary"),
+                            round -> Messages.getString("Lobby.autoResolve.report.round", round))));
+            }
+        }
+
+        private static void worker(String name, Runnable work) {
+            Thread thread = new Thread(work, name);
+            thread.setDaemon(true);
+            thread.start();
+        }
     }
 
     // ---- The developer switch ----
@@ -744,7 +1007,7 @@ final class GpuLobbyTools {
         Player local = client().getLocalPlayer();
         List<Entity> units = client().getGame().getEntitiesVector().stream()
               .filter(unit -> local != null && unit.getOwnerId() == local.getId()).toList();
-        if ((tool.startsWith("readout") || tool.equals("prompt=train")) && units.isEmpty()
+        if ((tool.startsWith("readout") || tool.equals("prompt=train") || tool.startsWith("resolve")) && units.isEmpty()
               && probeTries++ < PROBE_TRIES) {
             // The probe's units arrive a moment after the lobby opens
             Timer later = new Timer(RAT_POLL_MS * 2, event -> {
@@ -763,6 +1026,8 @@ final class GpuLobbyTools {
             case "names" -> names();
             case "princesshelp" -> princessHelp();
             case "maphelp" -> mapSetupHelp();
+            case "resolve" -> autoResolve(new LobbyBattlefield.AutoResolve(true, true, PROBE_ODDS_RUNS, 2, 2));
+            case "resolve=quick" -> autoResolve(new LobbyBattlefield.AutoResolve(true, false, PROBE_ODDS_RUNS, 2, 2));
             case "readout" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.SUMMARY);
             case "readout=tro" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.TRO);
             case "readout=bv" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.BV);
