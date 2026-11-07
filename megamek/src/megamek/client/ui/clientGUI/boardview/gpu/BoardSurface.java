@@ -178,6 +178,11 @@ final class BoardSurface {
     private static final float HUG = 1.5f;
     /** How far, in hex-scale units, a bank keeps the water in from its edge where no slope runs up from the water. */
     private static final float BEACH = 8;
+    /**
+     * A canal's channel in tile pixels: its half-width at the water, the least half-width its floor keeps, and the radius
+     * of a basin with no mouth. Its lining falls {@link #CANAL_BATTER} across per depth.
+     */
+    private static final float CANAL_HALF = 15, CANAL_FLOOR = 4, CANAL_BASIN = 22, CANAL_BATTER = .27f;
     /** Hex-scale units a riverside's width wanders either way along a bank over lower land. */
     private static final float BANK_WANDER = 3;
     /** How far, in hex-scale units, pavement stops short of a separated side: half the ground showing between two slabs. */
@@ -414,6 +419,10 @@ final class BoardSurface {
      * on it starts at the bed rather than at the hex's own top.
      */
     private int openMouths;
+    /** Whether this water is a canal ({@link BoardRelief#canalHex}): a lined channel of one width. */
+    private boolean canal;
+    /** A canal deck's ramps, which cut into its concrete. */
+    private List<RampCut> deckCuts = List.of();
     private boolean gradedWater;
     /** The faces of a sculpted bed that stay clear of the hex outline, as a range of {@link #faces}. */
     private int interiorFrom, interiorTo;
@@ -585,6 +594,11 @@ final class BoardSurface {
             for (int edge = 0; edge < 6; edge++) { falls |= crests[edge] == null ? 0 : 1 << edge; }
             // Banks meet the actual ground rim, including emerged shallow bars, while the water keeps its level.
             relief.top(faces, bedOutline, openMouths, crestLine, falls);
+            if (canal) {
+                List<Face> cuts = cutRamps();
+                relief.lining(faces);
+                relief.castWalls(cuts);
+            }
             // Past a separated side's nose the bank has no width: it would only stand as a sheet in the water.
             if (openEnds) {
                 faces.removeIf(face -> face.finish() != Finish.BED && relief.stripLand(face.a().x, face.a().y) == 0
@@ -853,6 +867,8 @@ final class BoardSurface {
                       && !waterSlope(tile, neighbor);
             }
         }
+        canal = !tile.frozen() && !columns && relief.canalHex();
+        deckCuts = canal ? rampCuts(scene) : List.of();
         waterline = shoreline(scene, shore, rise, plunge, BoardGeometry.waterZ(tile));
         gradeWaterline(scene, shore);
         for (int edge = 0; edge < 6; edge++) {
@@ -1490,6 +1506,10 @@ final class BoardSurface {
      */
     private void basin(BoardScene scene, Vector3[] waterline, Vector3[] outer, Vector3[] liquid, float[] shore, float[] rise,
           boolean[] plunge) {
+        if (canal) {
+            canalBed(outer);
+            return;
+        }
         int count = waterline.length;
         float surface = BoardGeometry.waterZ(tile), full = depth(tile), ledge = LIP_DEPTH * BoardGeometry.hexScale();
         boolean[] spills = new boolean[6];
@@ -1608,6 +1628,51 @@ final class BoardSurface {
         }
         interiorTo = faces.size();
         if (simplify) { simplifyBed(bedRings, bandEnds, anchor); }
+    }
+
+    /**
+     * A canal's lined bed: from its waterline the lining falls to a level floor at the hex's depth, along the same bearings
+     * from the centre as the waterline. Across a mouth the floor runs out to the edge between the linings' feet, which
+     * the next canal's meet. Both are cast concrete, the hex's ground ({@link Finish#BANK}), not a bed's sediment.
+     */
+    private void canalBed(Vector3[] outer) {
+        int count = outer.length;
+        float surface = BoardGeometry.waterZ(tile), floor = surface - depth(tile);
+        float run = CANAL_HALF * BoardGeometry.hexScale() - canalFloor();
+        Vector3[] ring = new Vector3[count], foot = new Vector3[count];
+        for (int i = 0; i < count; i++) {
+            int edge = i / SHORE_SEGMENTS, segment = i % SHORE_SEGMENTS;
+            boolean mouth = (openMouths & 1 << edge) != 0, mouthBefore = (openMouths & 1 << (edge + 5) % 6) != 0;
+            Vector3 w = outer[i];
+            if (mouth && segment > 0) {
+                ring[i] = foot[i] = new Vector3(w.x, w.y, floor);
+                continue;
+            }
+            ring[i] = new Vector3(w);
+            if (segment == 0 && mouth != mouthBefore) {
+                // A mouth's end: its lining runs down along the edge to the floor's end there.
+                int at = mouth ? edge : (edge + 5) % 6;
+                foot[i] = canalMouth(at, edge, canalFloor() / BoardGeometry.hexScale());
+            } else {
+                // Along the bearing from the centre, to where the channel is the lining's run narrower.
+                float low = 0, high = 1;
+                for (int k = 0; k < 24; k++) {
+                    float t = (low + high) / 2;
+                    if (canalField(center.x + (w.x - center.x) * t, center.y + (w.y - center.y) * t) > run) { low = t; } else { high = t; }
+                }
+                foot[i] = new Vector3(center.x + (w.x - center.x) * low, center.y + (w.y - center.y) * low, 0);
+            }
+            foot[i].z = floor;
+        }
+        bedOutline = ring;
+        for (int i = 0; i < count; i++) {
+            int j = (i + 1) % count;
+            quad(ring[i], ring[j], foot[j], foot[i], Finish.BANK, i / SHORE_SEGMENTS);
+        }
+        Vector3 anchor = new Vector3(center.x, center.y, floor);
+        for (int i = 0; i < count; i++) {
+            triangle(anchor, foot[i], foot[(i + 1) % count], Finish.BANK, i / SHORE_SEGMENTS);
+        }
     }
 
     /** A flat floor and, where needed, one sloping bank; curved shore and depth contacts remain exact. */
@@ -2046,7 +2111,12 @@ final class BoardSurface {
         for (int k = 0; k < 6; k++) {
             int before = (k + 5) % 6, next = (k + 1) % 6;
             boolean in = inset[before] == 0, out = inset[k] == 0;
-            if (relief.wetCliffCorner(k) || !in && !out && (relief.wetCliff(before) || relief.wetCliff(k))) {
+            if (canal && in != out) {
+                // A canal's mouth spans its channel's width about the edge's middle.
+                anchors[k] = canalMouth(in ? before : k, k, CANAL_HALF);
+            } else if (canal && !in && !out) {
+                anchors[k] = along(shoreCorners[k], plunge);
+            } else if (relief.wetCliffCorner(k) || !in && !out && (relief.wetCliff(before) || relief.wetCliff(k))) {
                 // A beach ending against a cliff tapers to the shared rock seam, not to a freestanding sand shelf.
                 anchors[k] = relief.seam(k, k, 0);
             } else if (BoardConcrete.concreteBank(scene, tile, before) || BoardConcrete.concreteBank(scene, tile, k)) {
@@ -2073,12 +2143,16 @@ final class BoardSurface {
         Vector3[] result = new Vector3[6 * SHORE_SEGMENTS];
         for (int edge = 0; edge < 6; edge++) {
             int next = (edge + 1) % 6;
-            Vector3[] bank = inset[edge] == 0 || relief.wetCliff(edge) || BoardConcrete.concreteBank(scene, tile, edge)
+            Vector3[] bank = inset[edge] == 0 || !canal && (relief.wetCliff(edge) || BoardConcrete.concreteBank(scene, tile, edge))
                   ? null : bank(anchors[edge], anchors[next], plunge, edge);
+            // Across a canal's mouth its floor runs out to the edge between its linings, which meet the next canal's.
+            boolean lined = canal && bank == null && (anchors[edge].dst2(shoreCorners[edge]) > 1e-6f
+                  || anchors[next].dst2(shoreCorners[next]) > 1e-6f);
             Vector3 cliffA = relief.wetCliff(edge) ? relief.seam(edge, edge, 0) : null;
             Vector3 cliffB = cliffA == null ? null : relief.seam(edge, next, 0);
             for (int segment = 0; segment < SHORE_SEGMENTS; segment++) {
-                Vector3 point = bank == null ? mouthPoint(anchors[edge], anchors[next], segment) : bank[segment];
+                Vector3 point = bank != null ? bank[segment] : !lined || segment == 0 ? mouthPoint(anchors[edge], anchors[next], segment)
+                      : canalMouthPoint(edge, segment);
                 if (cliffA != null) {
                     // Follow the rock's curve, retaining the common mouth ends where a cliff changes into a bank.
                     point.add(relief.seam(edge, edge, segment / (float) SHORE_SEGMENTS)
@@ -2198,6 +2272,15 @@ final class BoardSurface {
      * Point {@code segment} of an open mouth from {@code a} to {@code b}, laid out from the end both hexes of the mouth
      * order first, so they compute the bit-identical point.
      */
+    /** A canal mouth's points past its first end: on the floor, from one lining's foot to the other's. */
+    private Vector3 canalMouthPoint(int edge, int segment) {
+        float floor = canalFloor() / BoardGeometry.hexScale();
+        Vector3 a = canalMouth(edge, edge, floor), b = canalMouth(edge, (edge + 1) % 6, floor);
+        boolean forward = a.x < b.x || a.x == b.x && a.y < b.y;
+        float t = (segment - 1) / (float) (SHORE_SEGMENTS - 2);
+        return forward ? new Vector3(a).lerp(b, t) : new Vector3(b).lerp(a, 1 - t);
+    }
+
     private static Vector3 mouthPoint(Vector3 a, Vector3 b, int segment) {
         boolean forward = a.x < b.x || a.x == b.x && a.y < b.y;
         return forward ? new Vector3(a).lerp(b, segment / (float) SHORE_SEGMENTS)
@@ -2307,6 +2390,7 @@ final class BoardSurface {
      * pours into this hex, and inside the banks it keeps, the corners between them rounded over {@link #SHORE_ROUND}.
      */
     private float wet(float x, float y, boolean[] plunge) {
+        if (canal) { return canalField(x, y); }
         float scale = BoardGeometry.hexScale(), value = shore(x, y);
         for (int edge = 0; edge < 6; edge++) {
             if (!plunge[edge]) { continue; }
@@ -2325,6 +2409,301 @@ final class BoardSurface {
         }
         float bank = bankClearance(x, y);
         return Float.isNaN(bank) ? value : BoardRelief.smoothMin(value, bank, SHORE_ROUND * scale);
+    }
+
+    /**
+     * How far inside a canal's channel (x, y) lies, in world units, negative on its shoulders. Each point belongs to the
+     * spoke from the hex's centre to a mouth's middle nearest it in bearing, and lies in that spoke's straight strip of the
+     * channel's half-width, which stops that far behind the centre: strips meet in mitred corners, and the next canal meets
+     * a mouth at the same width. With no mouth, a hexagonal basin set in from the hex's edges.
+     */
+    private float canalField(float x, float y) {
+        float scale = BoardGeometry.hexScale(), dx = x - center.x, dy = y - center.y, best = Float.NEGATIVE_INFINITY;
+        float along = 0, across = 0;
+        for (int edge = 0; edge < 6; edge++) {
+            Vector3 out = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], .5f).sub(center).nor();
+            float a = dx * out.x + dy * out.y;
+            if (openMouths == 0) {
+                best = Math.max(best, a);
+            } else if ((openMouths & 1 << edge) != 0) {
+                float c = dx * out.y - dy * out.x, bearing = a / Math.max((float) Math.hypot(a, c), 1e-6f);
+                if (bearing > best) {
+                    best = bearing;
+                    along = a;
+                    across = Math.abs(c);
+                }
+            }
+        }
+        if (openMouths == 0) { return CANAL_BASIN * scale - best; }
+        return Math.min(CANAL_HALF * scale - across, along + CANAL_HALF * scale);
+    }
+
+    /**
+     * Where a canal deck's ramp comes down onto the next hex: the solid ramp's footprint here, from the edge to the deck's
+     * level centre and the ramp's half-width either side (BoardBridgeFooting), with the ramp's height at the edge and at its
+     * inner end. {@code a}, {@code b}, {@code c}, {@code d} run round it with its inside on their left.
+     */
+    private record RampCut(int edge, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 gate, Vector3 inward, float length,
+          float low, float high) {
+        /** The ramp's plane at (x, y), sunk under its surface by {@link #RAMP_SINK}. */
+        float floor(float x, float y) {
+            float t = Math.clamp(((x - gate.x) * inward.x + (y - gate.y) * inward.y) / length, 0, 1);
+            return low + (high - low) * t - RAMP_SINK * BoardGeometry.hexScale();
+        }
+
+        List<Vector3> outline() { return List.of(a, b, c, d); }
+    }
+
+    /** Tile pixels a ramp's cut lies under its surface, hidden by the ramp's own block, and inside its rails. */
+    private static final float RAMP_SINK = .5f, CUT_INSET = .25f;
+
+    private List<RampCut> rampCuts(BoardScene scene) {
+        List<RampCut> result = new ArrayList<>();
+        var bridge = BoardBridge.feature(tile);
+        if (bridge == null || BoardBridge.family(tile) == BoardBridge.Family.NATURAL) { return result; }
+        float scale = BoardGeometry.hexScale(), high = BoardBridge.deckZ(tile);
+        for (int edge = 0; edge < 6; edge++) {
+            int d = BoardGeometry.edgeDirection(edge);
+            BoardScene.Tile next = scene.tile(tile.coords().translated(d));
+            if (next == null || !BoardBridge.road(tile, next, d)) { continue; }
+            float low = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
+            if (low >= high - .001f) { continue; }
+            // A hair inside the rails' outer faces, which then stand in the concrete instead of sharing a plane with the cut.
+            float width = (((tile.deckCorridor().sides() & 1 << d) != 0 ? BoardRoad.CORRIDOR_HALF : BoardRoad.Kind.PAVED.halfWidth)
+                  + BoardBridge.SHOULDER - CUT_INSET) * scale;
+            Vector3 gate = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], .5f);
+            gate.z = 0;
+            Vector3 inward = new Vector3(center.x - gate.x, center.y - gate.y, 0);
+            float length = (1 - BoardRoadGrade.BRIDGE_START) * inward.len();
+            inward.nor();
+            Vector3 across = new Vector3(-inward.y, inward.x, 0);
+            Vector3 a = new Vector3(gate).mulAdd(across, -width), b = new Vector3(gate).mulAdd(across, width);
+            Vector3 c = new Vector3(b).mulAdd(inward, length), dd = new Vector3(a).mulAdd(inward, length);
+            // Inside on the left of each side.
+            boolean ccw = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) > 0;
+            result.add(ccw ? new RampCut(edge, a, b, c, dd, gate, inward, length, low, high)
+                  : new RampCut(edge, b, a, dd, c, gate, inward, length, low, high));
+        }
+        return result;
+    }
+
+    /**
+     * Cuts each of a canal deck's ramps straight into the canal's concrete: its ground and water inside the ramp's
+     * footprint give way to a floor under the ramp, and upright faces along the cut join that floor to the ground beside
+     * it, down from a shoulder or up from the channel's lining, where the ramp's block stands in the water.
+     */
+    private List<Face> cutRamps() {
+        List<Face> cutWalls = new ArrayList<>();
+        for (RampCut cut : deckCuts) {
+            List<Vector3> outline = cut.outline();
+            List<Face> kept = carve(faces, outline);
+            faces.clear();
+            faces.addAll(kept);
+            kept = subtract(waterFaces, outline, false);
+            waterFaces.clear();
+            waterFaces.addAll(kept);
+            List<Vector3> floor = new ArrayList<>();
+            for (int i = 0; i < 4; i++) {
+                Vector3 p = outline.get(i), q = outline.get((i + 1) % 4);
+                floor.add(new Vector3(p.x, p.y, cut.floor(p.x, p.y)));
+                // Across the edge the wall opens instead (openRamps).
+                if (i == 0) { continue; }
+                // Each edge of the ground lying on the cut's side, in the side's direction, down (or up) to its floor.
+                float dx = q.x - p.x, dy = q.y - p.y, length2 = dx * dx + dy * dy;
+                List<Vector3[]> rim = new ArrayList<>();
+                for (Face face : faces) {
+                    Vector3[] corners = { face.a(), face.b(), face.c() };
+                    for (int k = 0; k < 3; k++) {
+                        Vector3 u = corners[k], v = corners[(k + 1) % 3];
+                        float tu = ((u.x - p.x) * dx + (u.y - p.y) * dy) / length2, tv = ((v.x - p.x) * dx + (v.y - p.y) * dy) / length2;
+                        if (Math.abs(cross(p, q, u)) < .01f * p.dst(q) && Math.abs(cross(p, q, v)) < .01f * p.dst(q)
+                              && Math.min(tu, tv) > -1e-4f && Math.max(tu, tv) < 1 + 1e-4f && Math.abs(tu - tv) * length2 > 1e-8f) {
+                            rim.add(tu < tv ? new Vector3[] { u, v } : new Vector3[] { v, u });
+                        }
+                    }
+                }
+                int from = faces.size();
+                for (Vector3[] segment : rim) { side(cut, segment[0], segment[1]); }
+                cutWalls.addAll(faces.subList(from, faces.size()));
+            }
+            polygon(floor.toArray(Vector3[]::new), Finish.BANK, faces);
+        }
+        return cutWalls;
+    }
+
+    /**
+     * An upright face of a cut between two of the ground's points on its side and the cut's floor below or above them,
+     * facing whichever way it is seen: into the cut from a shoulder, out of it from the channel. Split where it crosses.
+     */
+    private void side(RampCut cut, Vector3 a, Vector3 b) {
+        Vector3 fa = new Vector3(a.x, a.y, cut.floor(a.x, a.y)), fb = new Vector3(b.x, b.y, cut.floor(b.x, b.y));
+        float da = a.z - fa.z, db = b.z - fb.z;
+        if (da * db < 0) {
+            float t = da / (da - db);
+            Vector3 middle = new Vector3(a).lerp(b, t);
+            middle.z = cut.floor(middle.x, middle.y);
+            side(cut, a, middle);
+            side(cut, middle, b);
+            return;
+        }
+        if (da + db >= 0) {
+            quad(a, b, fb, fa, Finish.BANK, -1);
+        } else {
+            quad(b, a, fa, fb, Finish.BANK, -1);
+        }
+    }
+
+    /**
+     * The ground with what lies inside a convex outline (its inside on the left of each side) taken out: every face split
+     * along each side's whole line first, so faces on either side of a line meet at the same points, then what lies inside
+     * dropped. Points a split puts inside a face take its shading.
+     */
+    private List<Face> carve(List<Face> source, List<Vector3> outline) {
+        List<Face> pieces = new ArrayList<>(source);
+        for (int i = 0; i < outline.size(); i++) {
+            Vector3 p = outline.get(i), q = outline.get((i + 1) % outline.size());
+            List<Face> next = new ArrayList<>(pieces.size() + 16);
+            for (Face face : pieces) {
+                List<Vector3> triangle = List.of(face.a(), face.b(), face.c());
+                List<Vector3> left = BoardTacticalGeometry.clip(triangle, p, q), right = BoardTacticalGeometry.clip(triangle, q, p);
+                if (left.size() < 3 || right.size() < 3 || area(left) < 1e-6f || area(right) < 1e-6f) {
+                    next.add(face);
+                    continue;
+                }
+                for (List<Vector3> part : List.of(left, right)) {
+                    for (Vector3 point : part) { shadeCut(face, point); }
+                    for (int k = 1; k + 1 < part.size(); k++) {
+                        if (area(List.of(part.getFirst(), part.get(k), part.get(k + 1))) > 1e-6f) {
+                            next.add(new Face(part.getFirst(), part.get(k), part.get(k + 1), face.finish(), face.landEdge(), face.scatter()));
+                        }
+                    }
+                }
+            }
+            pieces = next;
+        }
+        pieces.removeIf(face -> {
+            float x = (face.a().x + face.b().x + face.c().x) / 3, y = (face.a().y + face.b().y + face.c().y) / 3;
+            for (int i = 0; i < outline.size(); i++) {
+                if (cross(outline.get(i), outline.get((i + 1) % outline.size()), new Vector3(x, y, 0)) < 0) { return false; }
+            }
+            return true;
+        });
+        return pieces;
+    }
+
+    /** The faces with what lies inside a convex outline (its inside on the left of each side) taken out. */
+    private List<Face> subtract(List<Face> source, List<Vector3> outline, boolean shaded) {
+        List<Face> kept = new ArrayList<>(source.size());
+        for (Face face : source) {
+            List<Vector3> triangle = List.of(face.a(), face.b(), face.c());
+            List<Vector3> inside = BoardTacticalGeometry.clip(triangle, outline);
+            if (inside.size() < 3 || area(inside) < 1e-6f) {
+                kept.add(face);
+                continue;
+            }
+            // What lies outside, side by side: right of each side in turn, the rest on to the next.
+            List<Vector3> rest = triangle;
+            for (int i = 0; i < outline.size() && rest.size() >= 3; i++) {
+                Vector3 p = outline.get(i), q = outline.get((i + 1) % outline.size());
+                List<Vector3> outside = BoardTacticalGeometry.clip(rest, q, p);
+                for (int k = 1; k + 1 < outside.size(); k++) {
+                    Vector3[] points = { outside.getFirst(), outside.get(k), outside.get(k + 1) };
+                    if (shaded) {
+                        for (Vector3 point : points) { shadeCut(face, point); }
+                    }
+                    if (area(List.of(points)) > 1e-6f) {
+                        kept.add(new Face(points[0], points[1], points[2], face.finish(), face.landEdge(), face.scatter()));
+                    }
+                }
+                rest = BoardTacticalGeometry.clip(rest, p, q);
+            }
+        }
+        return kept;
+    }
+
+    /** A canal deck's ramp opens its edge's wall down to the ramp's cut there. */
+    private List<Face> openRamps(List<Face> walls) {
+        List<RampCut> cuts = deckCuts;
+        if (cuts.isEmpty()) { return walls; }
+        List<Face> result = new ArrayList<>(walls.size());
+        for (Face face : walls) {
+            RampCut cut = null;
+            for (RampCut candidate : cuts) {
+                if (candidate.edge() == face.landEdge()) { cut = candidate; }
+            }
+            if (cut == null) {
+                result.add(face);
+                continue;
+            }
+            // The wall across the ramp's width, above its cut, gives way: keep what lies beside the ramp or below the cut.
+            Vector3 across = new Vector3(cut.b()).sub(cut.a()).nor();
+            float s0 = across.dot(cut.a()), s1 = across.dot(cut.b());
+            List<Vector3> rest = List.of(face.a(), face.b(), face.c());
+            List<List<Vector3>> pieces = new ArrayList<>();
+            pieces.add(planeClip(rest, p -> s0 - across.dot(p)));
+            rest = planeClip(rest, p -> across.dot(p) - s0);
+            pieces.add(planeClip(rest, p -> across.dot(p) - s1));
+            rest = planeClip(rest, p -> s1 - across.dot(p));
+            RampCut ramp = cut;
+            pieces.add(planeClip(rest, p -> ramp.floor(p.x, p.y) - p.z));
+            for (List<Vector3> piece : pieces) {
+                for (int k = 1; k + 1 < piece.size(); k++) {
+                    result.add(new Face(piece.getFirst(), piece.get(k), piece.get(k + 1), face.finish(), face.landEdge()));
+                }
+            }
+        }
+        return result;
+    }
+
+    /** The part of a polygon where {@code side} is at least zero, cut along where it is zero. */
+    private static List<Vector3> planeClip(List<Vector3> polygon, java.util.function.ToDoubleFunction<Vector3> side) {
+        List<Vector3> result = new ArrayList<>(polygon.size() + 1);
+        if (polygon.isEmpty()) { return result; }
+        Vector3 previous = polygon.getLast();
+        double before = side.applyAsDouble(previous);
+        for (Vector3 point : polygon) {
+            double after = side.applyAsDouble(point);
+            if ((before >= 0) != (after >= 0)) { result.add(new Vector3(previous).lerp(point, (float) (before / (before - after)))); }
+            if (after >= 0) { result.add(point); }
+            previous = point;
+            before = after;
+        }
+        return result;
+    }
+
+    /** A point a cut puts inside a face takes the face's shading there. */
+    private void shadeCut(Face face, Vector3 p) {
+        Vector3 a = face.a(), b = face.b(), c = face.c();
+        if (p == a || p == b || p == c) { return; }
+        float d = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+        if (Math.abs(d) < 1e-9f) { return; }
+        float wa = ((b.y - c.y) * (p.x - c.x) + (c.x - b.x) * (p.y - c.y)) / d;
+        float wb = ((c.y - a.y) * (p.x - c.x) + (a.x - c.x) * (p.y - c.y)) / d;
+        relief.interpolateShade(a, b, c, wa, wb, 1 - wa - wb, p);
+    }
+
+    private static float cross(Vector3 a, Vector3 b, Vector3 p) {
+        return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    }
+
+    private static float area(List<Vector3> polygon) {
+        float sum = 0;
+        for (int i = 0; i < polygon.size(); i++) {
+            Vector3 p = polygon.get(i), q = polygon.get((i + 1) % polygon.size());
+            sum += p.x * q.y - q.x * p.y;
+        }
+        return Math.abs(sum) / 2;
+    }
+
+    /** Where a canal's mouth on {@code edge} ends towards {@code corner}, {@code half} tile pixels from its middle. */
+    private Vector3 canalMouth(int edge, int corner, float half) {
+        Vector3 middle = new Vector3(corners[edge]).lerp(corners[(edge + 1) % 6], .5f);
+        return middle.mulAdd(new Vector3(corners[corner]).sub(middle).nor(), half * BoardGeometry.hexScale());
+    }
+
+    /** A canal's floor half-width: its lining's batter, steepened where the floor would grow narrower than it keeps. */
+    private float canalFloor() {
+        return Math.max(CANAL_FLOOR * BoardGeometry.hexScale(), CANAL_HALF * BoardGeometry.hexScale() - depth(tile) * CANAL_BATTER);
     }
 
     /**
@@ -3031,6 +3410,7 @@ final class BoardSurface {
             if (columns || BoardFeatures.shaft(tile)) {
                 wallFaces = straightWalls(sides(scene, floor, neighbors));
             } else { wallFaces = reserveWalls(relief.walls(sides(scene, floor, neighbors), neighbors), floor); }
+            if (canal) { wallFaces = openRamps(wallFaces); }
             wallFaces.addAll(retainingWalls);
             for (int d = 0; d < 6; d++) {
                 var lower = scene.tile(tile.coords().translated(d));

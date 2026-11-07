@@ -248,7 +248,7 @@ final class BoardRelief {
      * {@link #waterFamily}).
      */
     record Site(Coords coords, int level, boolean sculpted, boolean detailed, int family, boolean ultraSublevel, boolean liquid, boolean molten,
-          int depth, boolean road, int ramps, int cliffTopExits, int ix, int iy) {
+          int depth, boolean road, int ramps, int cliffTopExits, int deckRoads, int ix, int iy) {
         float x() { return cornerX(ix); }
 
         float y() { return cornerY(iy); }
@@ -348,9 +348,16 @@ final class BoardRelief {
         boolean shaped = !tile.backdrop().present() && !BoardFeatures.shaft(tile)
               && (liquid || road || tile.wayExits() == 0 && tile.road() == BoardRoad.Kind.NONE);
         BoardScene.Surface family = liquid ? waterFamily(scene, tile) : tile.surface();
+        // The directions a built deck on this water carries its road off onto the next hex.
+        int deckRoads = 0;
+        if (liquid && BoardBridge.feature(tile) != null && BoardBridge.family(tile) != BoardBridge.Family.NATURAL) {
+            for (int d = 0; d < 6; d++) {
+                if (BoardBridge.road(tile, scene.tile(tile.coords().translated(d)), d)) { deckRoads |= 1 << d; }
+            }
+        }
         return new Site(tile.coords(), tile.groundLevel(), shaped, shaped && tile.detailedGround(), family.ordinal(),
               tile.ultraSublevel(), liquid, tile.liquid().molten(), liquid ? Math.max(0, tile.waterDepth()) : 0, road,
-              liquid ? 0 : ramps, tile.cliffTopExits(), centerIx(tile.coords()), centerIy(tile.coords()));
+              liquid ? 0 : ramps, tile.cliffTopExits(), deckRoads, centerIx(tile.coords()), centerIy(tile.coords()));
     }
 
     /**
@@ -1880,6 +1887,8 @@ final class BoardRelief {
     private float deckBay(Site upper, Site lower) {
         if (!upper.liquid() || lower.liquid() || lower.level() >= upper.level()) { return 0; }
         var water = scene.tile(upper.coords());
+        // A canal's ramp cuts straight into its concrete instead (BoardSurface#cutRamps).
+        if (canal(water)) { return 0; }
         var bridge = BoardBridge.feature(water);
         boolean crosses = bridge != null && bridge.elevation() >= 0 && BoardBridge.family(water) != BoardBridge.Family.NATURAL
               && BoardBridge.road(water, scene.tile(lower.coords()), upper.coords().direction(lower.coords()));
@@ -1929,6 +1938,8 @@ final class BoardRelief {
     private static final float COS_30 = .8660254f;
     /** The most of an edge's length a bay moves a corner along it. */
     private static final float BAY_CORNER = .45f;
+    /** Tile pixels a canal's lining rises from the water to its shoulder, across. */
+    private static final float LINING_LIP = .3f;
     /** Most a deck's bay changes per run along its edge: it has to clear the ramp's whole lane even from a held corner. */
     private static final float BAY_SLOPE = 4;
 
@@ -2713,13 +2724,93 @@ final class BoardRelief {
               && !upper.fixedRoad() && !(lower.fixedRoad() && (upper.family() == CONCRETE || !upper.road()))
               && !upper.ultraSublevel() && !lower.ultraSublevel()
               && !(upper.family() == CONCRETE && wall(upper, lower))
-              && !wetCliff(upper, lower)
+              && !wetCliff(upper, lower) && !canal(upper, lower)
               ? stepRoom() : 0;
         if (width > 0 && BoardGeometry.tuning().padding() == 0 && !upper.fixedOutline() && !lower.fixedOutline()) {
             // Keep the existing cliff relief and shared corners; reduce only the room spent on its inset and apron.
             width *= lerp(1, .6f, prominence(drop(upper, lower)));
         }
         return width;
+    }
+
+    /**
+     * Whether this hex is a canal: water among paving that stands above some of it. It is lined in concrete round a
+     * channel of one width (BoardSurface#canalField) and walled on its edges down to the lower paving ({@link #canal}).
+     */
+    boolean canalHex() { return canal(tile); }
+
+    /** Whether the water of a hex is a canal (see {@link #canalHex}). */
+    private boolean canal(BoardScene.Tile start) {
+        return canals.computeIfAbsent(start.coords(), key -> {
+            // The whole body of water or none of it: a canal's mouths meet only canals, at its one width.
+            Set<Coords> seen = new HashSet<>(List.of(key));
+            ArrayDeque<BoardScene.Tile> pending = new ArrayDeque<>(List.of(start));
+            while (!pending.isEmpty()) {
+                BoardScene.Tile water = pending.remove();
+                if (!canalWater(water) || seen.size() > CANAL_REACH) { return false; }
+                for (int d = 0; d < 6; d++) {
+                    BoardScene.Tile next = scene.tile(water.coords().translated(d));
+                    if (next != null && water.joins(next, d) && seen.add(next.coords())) { pending.add(next); }
+                }
+            }
+            return true;
+        });
+    }
+
+    /**
+     * Shades a canal's lining and floor (BoardSurface#canalBed) as poured concrete ground under its water: each face keeps
+     * its own normal, and the lining a fixed texture frame facing out of it, as walls have, so the concrete lies across
+     * the slope instead of streaking down it.
+     */
+    void lining(List<BoardSurface.Face> faces) {
+        for (BoardSurface.Face face : faces) {
+            if (face.finish() != BoardSurface.Finish.BANK) { continue; }
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            float projection = normal.z > .99f ? Float.NaN : (float) Math.atan2(normal.y, normal.x);
+            for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                shades.put(p, new Shade(normal, Kind.GROUND, 1, self.level(), 99, 99, 0, projection));
+            }
+        }
+    }
+
+    /** Shades the faces a canal deck's ramp cuts into its concrete (BoardSurface#cutRamps) as poured walls, as its own walls. */
+    void castWalls(List<BoardSurface.Face> faces) {
+        float m = metres(1);
+        for (BoardSurface.Face face : faces) {
+            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+            float projection = (float) Math.atan2(normal.y, normal.x);
+            float bottom = Math.min(face.a().z, Math.min(face.b().z, face.c().z));
+            float top = Math.max(face.a().z, Math.max(face.b().z, face.c().z));
+            for (Vector3 p : List.of(face.a(), face.b(), face.c())) {
+                shades.put(p, new Shade(normal, Kind.CLIFF, 1, 0, (p.z - bottom) / m, (top - p.z) / m, .5f, projection));
+            }
+        }
+    }
+
+    /** Whether a water hex among paving stands above some of it (see {@link #canalHex}). */
+    private boolean canalWater(BoardScene.Tile water) {
+        if (!water.liquid().present() || water.liquid().molten() || water.frozen()
+              || waterFamily(scene, water) != BoardScene.Surface.CONCRETE) { return false; }
+        for (int d = 0; d < 6; d++) {
+            BoardScene.Tile next = scene.tile(water.coords().translated(d));
+            if (next != null && !next.liquid().present() && next.surface() == BoardScene.Surface.CONCRETE
+                  && next.groundLevel() < water.groundLevel()) { return true; }
+        }
+        return false;
+    }
+
+    /** The most hexes a canal's water takes; a larger body is a basin of open water. */
+    private static final int CANAL_REACH = 64;
+    /** Whether each water hex asked about is a canal. */
+    private final Map<Coords, Boolean> canals = new HashMap<>();
+
+    /**
+     * Water standing above paving: a canal's wall on the edge. Where a deck's road comes down onto the paving, its bank
+     * recedes under the deck instead ({@link #deckBay}).
+     */
+    private static boolean canal(Site upper, Site lower) {
+        return upper != null && lower != null && upper.liquid() && !lower.liquid() && lower.family() == CONCRETE
+              && upper.level() > lower.level() && (upper.deckRoads() & 1 << upper.coords().direction(lower.coords())) == 0;
     }
 
     private static boolean wetCliff(Site upper, Site lower) {
@@ -3093,8 +3184,10 @@ final class BoardRelief {
         Vector3 center = new Vector3(BoardGeometry.centerX(tile.coords()), BoardGeometry.centerY(tile.coords()), 0);
         if (waterline != null) {
             bank(destination, boundary, starts, mouths);
-            rocks(destination, center);
-            fallRocks(destination, center, crests, falls, mouths);
+            if (!canalHex()) {
+                rocks(destination, center);
+                fallRocks(destination, center, crests, falls, mouths);
+            }
             return;
         }
         center.z = groundHeight(center.x, center.y);
@@ -3425,6 +3518,7 @@ final class BoardRelief {
             innerParameters.add(first - 1 + from);
         }
         float shore = SHORE_LIP * BoardGeometry.hexScale();
+        boolean canal = canalHex();
         for (int k = mouths ? 1 : 0; k < count * perEdge; k++) {
             int index = (first * perEdge + k) % waterline.length, e = index / perEdge;
             Vector3 w = new Vector3(waterline[index]);
@@ -3446,12 +3540,14 @@ final class BoardRelief {
                 float t = length2 == 0 ? 0 : Math.clamp(((w.x - p.x) * dx + (w.y - p.y) * dy) / length2, 0, 1);
                 room = Math.min(room, .4f * (float) Math.hypot(w.x - p.x - t * dx, w.y - p.y - t * dy));
             }
-            float f = Math.min(.5f, room / Math.max(gap, 1e-4f)), top = separatedWater(e) ? b.z : base;
+            float f = Math.min(.5f, (canal ? LINING_LIP * BoardGeometry.hexScale() : room) / Math.max(gap, 1e-4f));
+            float top = separatedWater(e) ? b.z : base;
             // Grade the existing rows across the available bank instead of leaving a flat shelf and a tiny drop
-            // at the water. This also gives the material room to lose dry cover before reaching the waterline.
+            // at the water. This also gives the material room to lose dry cover before reaching the waterline. A canal's
+            // shoulder stays level out to its lining, just above the water.
             lip.add(lip(boundary, waterline[(index + waterline.length - 1) % waterline.length], w,
                   waterline[(index + 1) % waterline.length], (b.x - w.x) * f, (b.y - w.y) * f,
-                  tile.liquid().molten() ? base : top - (top - w.z) * (1 - f)));
+                  tile.liquid().molten() || canal ? base : top - (top - w.z) * (1 - f)));
             lipParameters.add(first + k / (float) perEdge);
             inner.add(w);
             innerParameters.add(first + k / (float) perEdge);
@@ -3501,6 +3597,8 @@ final class BoardRelief {
         if (!gradedBankMouth(edge)) {
             ramp = Math.min(SHORE_LIP * BoardGeometry.hexScale(), ramp);
         }
+        // A canal's shoulder stays level along the mouth's edge out to its lining (both canals alike).
+        if (canalHex()) { ramp = Math.min(LINING_LIP * BoardGeometry.hexScale(), ramp); }
         for (int i = 1; i < samples; i++) {
             // Where the steps through a corner slide the samples along the mouth, each counts where it lies.
             Vector3 p = new Vector3(boundary.get(starts[edge] + i));
