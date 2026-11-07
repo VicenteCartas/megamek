@@ -1139,6 +1139,12 @@ void cliffFamily(float familyId, out vec4 ramp, out vec4 trim, out vec3 kind) {
 // A top's two reads: two repeats of the map (the second 2.37 times larger and turned) mixed by a world field, or for
 // translated materials (sand, cap plates, fungus) two offsets of one repeat, which keeps their single feature size.
 bool oneRepeat = false; // Medium quality: this role's tops read their first repeat alone (cliffMaterialOf).
+#ifdef mediumQualityFlag
+// The two roles the last cliff material showed (cliffMaterialOf), each one-hot over cover, mantle, deposit and rock, and
+// the second's share: blendCliff gives a bank's second family the same roles.
+vec4 cliffFirstRole = vec4(1.0, 0.0, 0.0, 0.0), cliffSecondRole = vec4(0.0);
+float cliffRoleShare = 0.0;
+#endif
 
 void topCoordinates(MaterialProjection p, float tile, float variation, bool translated,
       out vec2 a, out vec2 b, out mat2 gradientB, out float t) {
@@ -1606,6 +1612,11 @@ TerrainMaterial cliffMaterialOf(MaterialProjection p, vec3 world, vec3 face, flo
     }
 #endif
     vec4 roleShare = isFirst * (1.0 - share) + isSecond * share;
+#ifdef mediumQualityFlag
+    cliffFirstRole = isFirst;
+    cliffSecondRole = isSecond;
+    cliffRoleShare = share;
+#endif
     TerrainMaterial result;
     result.color = vec3(0.0);
     if (!terrainCovered) {
@@ -1705,6 +1716,21 @@ vec4 footCover(vec4 raw, vec3 world, float aboveFoot) {
     return kept / max(dot(kept, vec4(1.0)), .00001);
 }
 
+#ifdef mediumQualityFlag
+// Medium's second family on a bank: its layers in the roles the first family's bank shows there (cliffMaterialOf), so it
+// shows its level cover at the crest and the foot, as the ground beside the bank does. One read, two where the roles meet.
+TerrainMaterial coverRoles(TerrainMaterial strongest, MaterialProjection p, vec4 layers, vec4 tiles) {
+    vec4 l = vec4(layers.x, layers.w, layers.y, layers.z), t = vec4(tiles.x, tiles.w, tiles.y, tiles.z);
+    TerrainMaterial cover = coverLayer(strongest, p, dot(cliffFirstRole, l), dot(cliffFirstRole, t), true);
+    if (cliffRoleShare <= 0.0) return cover;
+    TerrainMaterial other = coverLayer(strongest, p, dot(cliffSecondRole, l), dot(cliffSecondRole, t), true);
+    cover.color = mix(cover.color, other.color, cliffRoleShare);
+    cover.height = mix(cover.height, other.height, cliffRoleShare);
+    cover.finish = mixFinish(cover.finish, other.finish, cliffRoleShare);
+    return cover;
+}
+#endif
+
 // A blended cliff: its two strongest palette slots, each as one cliff material, meeting in broken patches.
 TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float aboveFoot, float belowRim, float rock,
       float hardness, float broad, float fine, float region, float sediment, out vec4 weights) {
@@ -1722,8 +1748,7 @@ TerrainMaterial blendCliff(MaterialProjection p, vec3 world, vec3 face, float ab
     if (share < .02) return a;
 #ifdef mediumQualityFlag
     TerrainMaterial b = riverBank && soilBankFamily(coverFamilies[second]) ? coverLayer(a, p, u_bankMaterials.x, u_bankMaterials.y, true)
-          : rock > .5 ? coverLayer(a, p, coverLayersAt(second).z, coverTilesAt(second).z, true)
-          : coverLayer(a, p, coverLayersAt(second).w, coverTilesAt(second).w, true);
+          : coverRoles(a, p, coverLayersAt(second), coverTilesAt(second));
 #else
     TerrainMaterial b = cliffMaterial(p, world, face, aboveFoot, belowRim, rock, hardness, broad, fine, region,
           sediment, coverFamilies, second, coverTilesAt(second), coverLayersAt(second), true, false);
