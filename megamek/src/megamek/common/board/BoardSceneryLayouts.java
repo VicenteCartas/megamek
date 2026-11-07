@@ -601,8 +601,8 @@ public final class BoardSceneryLayouts {
      * legacy (not native) board only, converted maglevs a level up or beside a row of pillar art stand on Pillars
      * ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}), a crane tip that a
      * converted crane's boom reaches places nothing ({@link #reachedTips}), a building without connections is Square
-     * ({@link #squareIsolatedBuildings}), minor objects step clear of the fitted
-     * concrete walls ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
+     * ({@link #squareIsolatedBuildings}), minor objects step clear of the fitted concrete walls
+     * ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
      * board drew on it ({@link #deckRoads}). Road junctions inherit the default overhead traffic lights. A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
      * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
