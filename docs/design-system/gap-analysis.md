@@ -1003,8 +1003,8 @@ work for Swing, and item 11 is under investigation.
        `lobby+configure` (`+multi`, `+bayrules`, `+bayclick=...`) opens the bay and clicks through it, and an OK after
        Next customizes both units; `lobby+c3+c3plan+c3build` plans a ten-unit force into two lances and builds them
        (two C3 networks, team BV 17,879 to 20,845). MekHQ and MegaMekLab compile.
-     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` and
-       `RandomMapDialog` stay for other callers:
+     - ~~L16 Map setup~~. The map setup and the random map settings are native; the Swing `MapSetupDialog` is
+       deleted (see step 6) and `RandomMapDialog` stays for other callers:
        - Edit Map and the Battlefield menu open a "war table" centre view (with Back) in place of `MapSetupDialog`:
          the map type (ground, low altitude, space) as a segmented choice; boards across and down as steppers; the
          board size picker with a custom size; the board grid as tiles with their previews, where a click selects a
@@ -1545,13 +1545,13 @@ work for Swing, and item 11 is under investigation.
          library (`BoardClassifier`, read once off the Swing thread when Tags first opens) with each board's size;
          Place makes such a board the whole map at its own size, as the Swing dialog's OK did, and Add to stack
          refuses it. The lobby window's Swing branch is gone; the Swing
-         `AdvancedSearchMapDialog` stays for `MapSetupDialog` and the board window. Covered by `MapSetupFormTest`
+         `AdvancedSearchMapDialog` stays for the board window. Covered by `MapSetupFormTest`
          and `LobbyMapSetupSmokeTest`. The library is not re-read after the board editor saves a board.
        - Done: the map setup's help (the ? in Map setup) opens in the lobby's native document view, as Princess's
          help does (`GpuLobbyTools.helpDocument`). Its text is new, in `MapSetupHelp.html`,
          written for the libGDX map setup: the map type and size, the slots and the board drawer, stacks and
          surprise boards, each slot's controls, finding boards with the filter bar, saving and previewing. The old
-         `MapAssemblyHelp.html` stays for the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
+         `MapAssemblyHelp.html` is deleted with the Swing `MapSetupDialog`. Covered by `MapSetupHelpTest`; probe
          `+maphelp`.
        - Done: Print list runs natively (`GpuLobbyTools.printList`). The lobby writes the player's units in force
          tree order (`LobbyFiles.writeUnitList`, shared with Save list) and starts MegaMekLab's print dialog through
@@ -1581,6 +1581,11 @@ work for Swing, and item 11 is under investigation.
          too), and an open readout of the lobby's units reads them again when the lobby changes, on the same unit
          and page. Checks: `LobbyUnitActionsTest`, `LobbyBotOrderFormsTest`, `UnitAvailabilityTest`,
          `ReadoutPagesTest`, and the smoke tests' facing, lance role and stats cards.
+       - Done: the Swing map setup is gone. `MapSetupDialog`, `MapListPopup` and `MapPreviewButton` are deleted, with
+         the old 2D preview beside the 3D one; what the lobby still used from them (the 3D preview, its refresh and
+         close, the board editor's saved-board settings) is in `LobbyBoardPreviews`. `SwingLobbyServices` is
+         `LobbyServices`, so no lobby class is named after Swing. Unused map setup messages are dropped from every
+         language. Checks: `LobbyBoardPreviewsTest`, `LobbyServicesTest`, `ClientGUIBoardLifecycleTest`.
        - A Swing modal that a dead client leaves open could still block the start screen; the routing above
          covers the questions found so far.
        - The settings check across the startup path, step 7 below.
