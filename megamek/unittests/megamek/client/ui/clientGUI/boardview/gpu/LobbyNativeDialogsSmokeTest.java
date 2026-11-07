@@ -38,6 +38,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PriorityTargetChoices.Candidate;
 import megamek.client.bot.princess.PriorityTargetChoices.ForceRole;
 import megamek.client.generator.enums.SkillGeneratorMethod;
+import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
@@ -727,6 +728,63 @@ class LobbyNativeDialogsSmokeTest {
             reveal(ui, friendlyFire);
             click(ui, friendlyFire);
             assertEquals(fire, form.bool(OptionsConstants.BASE_FRIENDLY_FIRE), "a locked option keeps its value");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theAutoResolveBriefingMovesFromTheOddsToTheOutcome() {
+        UiTestStage.run(ui -> {
+            List<String> said = new ArrayList<>();
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyAutoResolveView view = dialogs.autoResolve(true, List.of("Chatter one", "Chatter two"),
+                  new LobbyAutoResolveView.Host() {
+                      @Override
+                      public void proceed() {
+                          said.add("proceed");
+                      }
+
+                      @Override
+                      public void report() {
+                          said.add("report");
+                      }
+                  }, () -> said.add("closed"));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.ODDS, view.phase());
+            view.odds(3, 10);
+            ui.draw();
+            assertTrue(((Label) find(ui, "autoresolve-count")).getText().toString().startsWith("3"),
+                  "the count says how many simulated battles ended");
+            for (int frame = 0; frame < 3 * 60 * LobbyAutoResolveView.LINE_SECONDS; frame++) {
+                ui.stage.act(1 / 60f);
+            }
+
+            view.choice(new AutoResolveRun.Score(10, 6, 3, 1, 0));
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.CHOICE, view.phase());
+            assertEquals("60%", ((Label) find(ui, "autoresolve-chance")).getText().toString());
+            assertNotNull(ui.stage.getRoot().findActor("autoresolve-victories"));
+            assertNull(ui.stage.getRoot().findActor("autoresolve-count"), "the odds' progress is gone");
+            Button proceed = find(ui, "autoresolve-proceed");
+            assertEquals(proceed, ui.stage.getKeyboardFocus(), "Resolve takes the focus");
+            click(ui, proceed);
+            assertEquals(List.of("proceed"), said);
+
+            view.resolving();
+            ui.draw();
+            assertEquals(LobbyAutoResolveView.Phase.RESOLVING, view.phase());
+            assertNull(ui.stage.getRoot().findActor("autoresolve-proceed"), "the footer has moved on");
+
+            view.result(AutoResolveRun.Outcome.VICTORY, "Team 1 won the scenario.", true);
+            ui.draw();
+            assertEquals(AutoResolveRun.headline(AutoResolveRun.Outcome.VICTORY),
+                  ((Label) find(ui, "autoresolve-headline")).getText().toString());
+            click(ui, find(ui, "autoresolve-report"));
+            assertEquals(List.of("proceed", "report"), said);
+            click(ui, find(ui, "autoresolve-close"));
+            assertFalse(view.isOpen());
+            assertNull(dialogs.autoResolveView());
+            assertEquals(List.of("proceed", "report", "closed"), said);
             dialogs.dispose();
         });
     }

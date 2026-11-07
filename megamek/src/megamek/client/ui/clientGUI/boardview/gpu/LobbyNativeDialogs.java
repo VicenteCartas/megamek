@@ -15,6 +15,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.AssetForm;
+import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
@@ -85,6 +86,7 @@ final class LobbyNativeDialogs {
     private LobbyRandomArmyView randomArmyView;
     private LobbyCrewToolsView crewView;
     private LobbyReadoutView readoutView;
+    private LobbyAutoResolveView autoResolveView;
     /** The paperdoll drawings, read once the damage editor first opens. */
     private GpuPaperdolls paperdolls;
 
@@ -355,6 +357,21 @@ final class LobbyNativeDialogs {
         LobbyPromptViews.trainOrder(kit, dialog, form, edt, ordered, this::close);
         show(dialog);
         return dialog;
+    }
+
+    /**
+     * Opens the auto-resolve briefing, on the odds when {@code odds} says so, else on the battle being resolved;
+     * {@code closed} hears when it closes, as a Cancel that stops the odds.
+     */
+    LobbyAutoResolveView autoResolve(boolean odds, List<String> chatter, LobbyAutoResolveView.Host host,
+          Runnable closed) {
+        UiDialog dialog = begin(AutoResolveRun.title(), "dialog.sm", false, () -> {
+            autoResolveView = null;
+            closed.run();
+        });
+        autoResolveView = new LobbyAutoResolveView(kit, dialog, odds, chatter, host, this::close);
+        show(dialog);
+        return autoResolveView;
     }
 
     /** Asks {@code text} over whatever shows; {@code yes} runs once OK closed it, and Cancel only closes it. */
@@ -687,6 +704,10 @@ final class LobbyNativeDialogs {
 
     @Nullable LobbyReadoutView readoutView() {
         return readoutView;
+    }
+
+    @Nullable LobbyAutoResolveView autoResolveView() {
+        return autoResolveView;
     }
 
     /** The top dialog, or null. */

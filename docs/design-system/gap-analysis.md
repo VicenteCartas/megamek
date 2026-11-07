@@ -1040,7 +1040,8 @@ work for Swing, and item 11 is under investigation.
        - Victory Conditions (the Battlefield column's Change) shows objective cards, one per master switch (Battle
          Value destroyed and ratio, turn limit, kill count, objectives) with its values, and a General card; a card's
          switch arms its fields, numbers keep `VictoryOptionLayout`'s bounds, and OK sends the changed options (with
-         the server password) and saves them as the last used ones, as `VictoryConditionsDialog` did.
+         the server password) and saves them as the last used ones, as the Swing victory dialog did (it is gone
+         now).
        - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
          the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
          them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. The generators beside the tables
@@ -1061,7 +1062,7 @@ work for Swing, and item 11 is under investigation.
          order.
        - Still Swing, through `LobbyDialogs` or `SwingLobbyPrompts`: Add Unit (the Requisition supersedes it), the
          unit damage editor (`UnitEditorDialog`), the SBF and Alpha Strike stats, the unit's sprite and camo picker,
-         the bot facing and role, the GIF recording consent and the auto-resolve dialogs; the readout has no Alpha
+         the bot facing and role and the GIF recording consent (auto-resolve is native now, see below); the readout has no Alpha
          Strike card or faction tab and does not update while open.
        Checks: `VictoryConditionsFormTest`, `RandomArmyFormTest`, `RandomSkillsFormTest`, `RandomNamesFormTest`,
        `TrainOrderFormTest`, `AssetFormTest` and `LobbyAsksTest`; the on-demand `LobbyDialogsL17SmokeTest` (victory
@@ -1502,10 +1503,21 @@ work for Swing, and item 11 is under investigation.
          commands the lobby once fell back to (`SwingLobbyServices.forcesCommand`) are gone. The Swing random army
          stays for the start screen, a battle's reinforcements, the Game Master's player setup, MegaMekLab and
          MekHQ.
+       - Done: auto-resolve is native, one briefing card (`LobbyAutoResolveView` over the toolkit-free
+         `AutoResolveRun`). With the odds setting on, the staff simulate the battle in the background while the
+         card cycles their chatter and counts the battles fought, then shows the chance of victory as a big colored
+         percent with Victories, Defeats and Draws (the Swing chance dialog never counted draws) and Resolve battle.
+         The battle resolves on a worker with an asymptotic bar, and the after-action card names Victory, Defeat
+         or Draw, the winner, and opens the ACAR log as a native help document (Battle report). Closing during the
+         odds cancels the simulation; closing while resolving reopens the card with the result. The dead Swing
+         battlefield commands (`SwingLobbyServices.battlefieldCommand`, `runAutoResolve`) and the Swing
+         `VictoryConditionsDialog` are removed; the Swing auto-resolve dialogs stay for MekHQ. The lobby now opens
+         no Swing dialog except the startup-failure message. Checks: `AutoResolveRunTest`, the smoke test's
+         auto-resolve briefing. Live: `lobby+resolve` (with the odds; `+click=autoresolve-proceed,autoresolve-report`
+         goes on through the battle and its report) and `lobby+resolve=quick` (without them).
        - The unit dialogs still in Swing, from the lobby and the board:
          - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
          - the SBF and Alpha Strike stats dialogs, with their export;
-         - the auto-resolve dialogs: the chance of winning, the progress and the log.
        - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
          Settings and About. The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and

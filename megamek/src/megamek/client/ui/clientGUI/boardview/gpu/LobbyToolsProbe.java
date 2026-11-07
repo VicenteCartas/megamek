@@ -16,7 +16,8 @@ import megamek.logging.MMLogger;
 /**
  * The developer switch's run through the L17 tools and prompts: {@code lobby+victory}, {@code +randomarmy},
  * {@code +skills}, {@code +names}, {@code +readout} (or {@code +readout=tro}, {@code bv} or {@code cost} for that
- * page), {@code +princesshelp}, {@code +maphelp} or {@code +prompt=name} ({@code forcename},
+ * page), {@code +princesshelp}, {@code +maphelp}, {@code +resolve} (auto-resolve with its odds, or
+ * {@code +resolve=quick} without, once the player's units arrive) or {@code +prompt=name} ({@code forcename},
  * {@code squadron}, {@code asset}, {@code assetdamage}, {@code train}, {@code confirm} or {@code error}) opens it
  * {@value GpuLobbyScreen#PROBE_CLICK_AT} s in, as its control would; so do the L18 file routes: {@code +gameoptions}
  * and {@code +playersettings} open their dialogs (then {@code +click=options-save}, {@code options-load},
@@ -30,7 +31,7 @@ final class LobbyToolsProbe {
     private static final MMLogger LOGGER = MMLogger.create(LobbyToolsProbe.class);
     /** The tools the probe opens by name. */
     static final Set<String> TOOLS = Set.of("victory", "randomarmy", "skills", "names", "readout", "princesshelp", "maphelp",
-          "gameoptions", "playersettings", "savelist", "loadlist", "sprite");
+          "gameoptions", "playersettings", "savelist", "loadlist", "sprite", "resolve", "resolve=quick");
     private static final String PROMPT_OPTION = "prompt=";
     /** {@code readout=tro}, {@code readout=bv} or {@code readout=cost}: the readout, opened on that page. */
     private static final String READOUT_OPTION = "readout=";
@@ -142,6 +143,9 @@ final class LobbyToolsProbe {
             LobbyReadoutView view = dialogs.readoutView();
             return "readout, unit " + view.shown() + ", tab " + (view.tabs() == null ? "-"
                   : view.tabs().getSelectedIndex());
+        }
+        if (dialogs.autoResolveView() != null) {
+            return "auto-resolve " + dialogs.autoResolveView().phase();
         }
         if (dialogs.crewView() != null) {
             return "crew tool open";

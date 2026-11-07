@@ -8,7 +8,10 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -25,6 +28,8 @@ import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
 import megamek.client.generator.RandomUnitGenerator;
 import megamek.client.lobby.AssetForm;
+import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.AutoResolveRun.Score;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
 import megamek.client.lobby.FactionChoice;
@@ -32,6 +37,7 @@ import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.LobbyAsks;
+import megamek.client.lobby.LobbyBattlefield;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyError;
 import megamek.client.lobby.LobbyFiles;
@@ -63,7 +69,12 @@ import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.Team;
+import megamek.common.autoResolve.converter.MMSetupForces;
+import megamek.common.autoResolve.converter.SetupForces;
+import megamek.common.autoResolve.event.AutoResolveConcludedEvent;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
+import megamek.common.board.Board;
+import megamek.common.board.postprocess.TWBoardTransformer;
 import megamek.common.enums.Gender;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
@@ -74,11 +85,13 @@ import megamek.common.loaders.MekSummary;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.common.options.GameOptions;
 import megamek.common.options.OptionsConstants;
+import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
 import megamek.common.units.Entity;
 import megamek.common.units.UnitType;
 import megamek.logging.MMLogger;
+import megamek.server.victory.VictoryResult;
 
 /**
  * The libGDX lobby's tools and prompts on the Swing thread (L17): the native {@link LobbyAsks} that
@@ -102,6 +115,8 @@ final class GpuLobbyTools {
     private @Nullable Timer ratGeneratorWait;
     private @Nullable Timer namesWait;
     private static final int PROBE_TRIES = 20;
+    /** How many battles the developer switch's auto-resolve simulates for its odds. */
+    private static final int PROBE_ODDS_RUNS = 20;
     private int probeTries;
     private volatile boolean printing;
 
@@ -861,6 +876,141 @@ final class GpuLobbyTools {
         return unwrapped.toString();
     }
 
+    // ---- Auto-resolve ----
+
+    /**
+     * Resolves the battle automatically, natively: the forces, the board and the conditions are read here, the odds
+     * worked out first when {@code settings} asks for them, and the battle resolved on threads of its own, while the
+     * briefing shows how it goes and then how it ended, with its report.
+     */
+    void autoResolve(LobbyBattlefield.AutoResolve settings) {
+        Game game = client().getGame();
+        Player local = client().getLocalPlayer();
+        if (local == null) {
+            return;
+        }
+        AutoResolvedBattle run;
+        try {
+            Board board = TWBoardTransformer.instantiateBoard(client().getMapSettings(), game.getPlanetaryConditions(),
+                  game.getOptions());
+            Map<Integer, String> names = new HashMap<>();
+            for (Player player : game.getPlayersList()) {
+                names.put(player.getId(), player.getName());
+            }
+            run = new AutoResolvedBattle(settings, new MMSetupForces(game), board,
+                  new PlanetaryConditions(game.getPlanetaryConditions()), local.getTeam(), local.getId(), names);
+        } catch (RuntimeException failure) {
+            LOGGER.error(failure, "The lobby could not set up the auto-resolved battle");
+            message(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());
+            return;
+        }
+        open(run::start);
+    }
+
+    /** One auto-resolved battle, from the odds to the report; GPU thread unless a method says otherwise. */
+    private final class AutoResolvedBattle implements LobbyAutoResolveView.Host {
+        private final LobbyBattlefield.AutoResolve settings;
+        private final SetupForces setup;
+        private final Board board;
+        private final PlanetaryConditions conditions;
+        private final int team;
+        private final int playerId;
+        private final Map<Integer, String> names;
+        private final List<String> chatter = AutoResolveRun.flavor(new Random());
+        private volatile boolean cancelled;
+        private @Nullable LobbyAutoResolveView view;
+        private @Nullable File report;
+
+        AutoResolvedBattle(LobbyBattlefield.AutoResolve settings, SetupForces setup, Board board,
+              PlanetaryConditions conditions, int team, int playerId, Map<Integer, String> names) {
+            this.settings = settings;
+            this.setup = setup;
+            this.board = board;
+            this.conditions = conditions;
+            this.team = team;
+            this.playerId = playerId;
+            this.names = names;
+        }
+
+        void start(LobbyNativeDialogs dialogs) {
+            view = dialogs.autoResolve(settings.chances(), chatter, this, this::closed);
+            if (settings.chances()) {
+                odds();
+            } else {
+                resolve();
+            }
+        }
+
+        /** The briefing closed: while the odds run, that stops them; a battle being resolved still ends. */
+        private void closed() {
+            if (view != null && view.phase() == LobbyAutoResolveView.Phase.ODDS) {
+                cancelled = true;
+            }
+        }
+
+        private void odds() {
+            int runs = settings.runs();
+            worker("Auto-resolve odds", () -> {
+                Score score = AutoResolveRun.odds(runs, settings.threads(), team, playerId, setup, board, conditions,
+                      ended -> GpuHost.post(() -> {
+                          if (view != null) {
+                              view.odds(ended, runs);
+                          }
+                      }), () -> cancelled);
+                GpuHost.post(() -> {
+                    if (!cancelled && view != null && view.isOpen()) {
+                        view.choice(score);
+                    }
+                });
+            });
+        }
+
+        @Override
+        public void proceed() {
+            resolve();
+        }
+
+        private void resolve() {
+            if (view != null) {
+                view.resolving();
+            }
+            worker("Auto-resolve", () -> {
+                AutoResolveConcludedEvent event = AutoResolveRun.resolve(setup, board, conditions);
+                open(dialogs -> ended(dialogs, event));
+            });
+        }
+
+        /** Shows how the battle ended, opening the briefing again when it was closed while the battle was resolved. */
+        private void ended(LobbyNativeDialogs dialogs, @Nullable AutoResolveConcludedEvent event) {
+            if (view == null || !view.isOpen()) {
+                view = dialogs.autoResolve(false, chatter, this, () -> { });
+            }
+            if (event == null) {
+                view.failed(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());
+                return;
+            }
+            VictoryResult result = event.getVictoryResult();
+            report = event.getLogFile();
+            view.result(AutoResolveRun.outcome(result, team, playerId),
+                  AutoResolveRun.winner(result, id -> names.getOrDefault(id, String.valueOf(id))),
+                  report != null && report.isFile());
+        }
+
+        @Override
+        public void report() {
+            File shown = report;
+            if (shown != null) {
+                worker("Auto-resolve report", () -> helpDocument(AutoResolveRun.reportTitle(), shown));
+            }
+        }
+
+        private static void worker(String name, Runnable work) {
+            Thread thread = new Thread(work, name);
+            thread.setDaemon(true);
+            thread.start();
+        }
+    }
+
     // ---- The developer switch ----
 
     /** Opens {@code tool} as its control would, with the player's units where it needs some; see {@link LobbyToolsProbe}. */
@@ -868,7 +1018,7 @@ final class GpuLobbyTools {
         Player local = client().getLocalPlayer();
         List<Entity> units = client().getGame().getEntitiesVector().stream()
               .filter(unit -> local != null && unit.getOwnerId() == local.getId()).toList();
-        if ((tool.startsWith("readout") || tool.equals("prompt=train")) && units.isEmpty()
+        if ((tool.startsWith("readout") || tool.equals("prompt=train") || tool.startsWith("resolve")) && units.isEmpty()
               && probeTries++ < PROBE_TRIES) {
             // The probe's units arrive a moment after the lobby opens
             Timer later = new Timer(RAT_POLL_MS * 2, event -> {
@@ -887,6 +1037,8 @@ final class GpuLobbyTools {
             case "names" -> names();
             case "princesshelp" -> princessHelp();
             case "maphelp" -> mapSetupHelp();
+            case "resolve" -> autoResolve(new LobbyBattlefield.AutoResolve(true, true, PROBE_ODDS_RUNS, 2, 2));
+            case "resolve=quick" -> autoResolve(new LobbyBattlefield.AutoResolve(true, false, PROBE_ODDS_RUNS, 2, 2));
             case "readout" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.SUMMARY);
             case "readout=tro" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.TRO);
             case "readout=bv" -> readout(units.subList(0, Math.min(units.size(), 3)), LobbyReadoutView.Page.BV);
