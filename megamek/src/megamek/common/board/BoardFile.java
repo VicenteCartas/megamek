@@ -316,14 +316,19 @@ public final class BoardFile {
                 var colours = colours(style);
                 Integer rotation = style.has("rotation") ? integer(style, "rotation", 0) : null;
                 double padding = style.path("padding").asDouble();
+                // Two lanes are the default and store none; a single lane's direction needs the single lane.
+                Integer lanes = style.has("lanes") ? integer(style, "lanes", 0) : null;
+                if (lanes != null && lanes == 2) { lanes = null; }
+                Integer inbound = lanes != null && style.has("inbound") ? sides(style.get("inbound")) : null;
                 // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
-                if (variant == null && asset == null && material == null && control == null
+                if (variant == null && asset == null && material == null && control == null && lanes == null
                       && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) { return; }
                 HexAppearance value = new HexAppearance(variant, asset,
                       material, style.has("strength") ? number(style, "strength", 0) : null,
                       colours, rotation,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
-                      style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style), padding);
+                      style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style),
+                      padding <= 0 ? null : padding, lanes, inbound);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -470,6 +475,13 @@ public final class BoardFile {
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
                 if (value.beside() != null) { style.put("beside", value.beside()); }
                 if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
+                if (value.lanes() != null) { style.put("lanes", value.lanes()); }
+                if (value.inbound() != null) {
+                    ArrayNode inbound = style.putArray("inbound");
+                    for (int side = 0; side < 6; side++) {
+                        if ((value.inbound() & 1 << side) != 0) { inbound.add(SIDES.get(side)); }
+                    }
+                }
                 putColours(style, value.colours());
             });
         }
@@ -569,6 +581,19 @@ public final class BoardFile {
     private static boolean bool(JsonNode node, String key, boolean fallback) {
         if (!node.has(key)) { return fallback; }
         require(node.get(key).isBoolean(), key + " must be boolean"); return node.get(key).booleanValue();
+    }
+    /** Hex sides by name, in direction order, as a single lane's direction stores them. */
+    private static final List<String> SIDES = List.of("n", "ne", "se", "s", "sw", "nw");
+
+    /** A list of side names as a side mask. */
+    private static int sides(JsonNode value) {
+        require(value != null && value.isArray(), "Expected a list of sides");
+        int result = 0;
+        for (JsonNode side : value) {
+            require(side.isTextual() && SIDES.contains(side.textValue()), "Unknown side: " + side);
+            result |= 1 << SIDES.indexOf(side.textValue());
+        }
+        return result;
     }
     private static Coords coordinate(JsonNode value) {
         require(value != null && value.isArray() && value.size() == 2, "Expected [column,row]");

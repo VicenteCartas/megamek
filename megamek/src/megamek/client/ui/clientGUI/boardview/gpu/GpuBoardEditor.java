@@ -34,7 +34,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
-import megamek.common.board.BoardFlag;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -54,6 +53,7 @@ import megamek.common.Configuration;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BoardFlag;
 import megamek.common.board.BuildingInteriors;
 import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
@@ -1234,6 +1234,10 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (brush.sampledHex() == null && definition.id().equals("road")) {
             controls.add(trafficControlChoice(brush.appearance(), "road", 0,
                   chosen -> send(Action.BRUSH_VALUE, "trafficControl", chosen)));
+            var surface = brush.property("road");
+            if (surface != null && pavedRoad(surface.value())) {
+                controls.add(lanesChoice(brush.appearance(), chosen -> send(Action.BRUSH_VALUE, "lanes", chosen)));
+            }
         }
         var zone = zoneBrush(brush);
         if (zone != null) { controls.add(zoneNumber(zone)); }
@@ -1859,6 +1863,53 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         if (owner.equals("bridgeRoad") && bridge != null) { exits &= bridge.exits(); }
         detail.add(trafficControlChoice(snapshot.appearance(), owner, exits,
               chosen -> send(Action.TRAFFIC_CONTROL, owner, chosen))).growX().row();
+        if (owner.equals("road") && way != null && pavedRoad(way.value())) { lanes(); }
+    }
+
+    /** Paved roads (not an alley, dirt or gravel) may be narrowed to a single, one-way lane (SingleLane#paved). */
+    private static boolean pavedRoad(int level) {
+        return level != 2 && level != megamek.common.units.Terrains.ROAD_LVL_DIRT
+              && level != megamek.common.units.Terrains.ROAD_LVL_GRAVEL;
+    }
+
+    private Table lanesChoice(Map<String, megamek.common.board.HexAppearance> appearance, Consumer<String> choose) {
+        boolean single = megamek.common.board.HexAppearance.singleLane(appearance, "road");
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.lanesTwo"), "two"),
+              new Option(UiKit.text("BoardEditor.lanesSingle"), "single"));
+        Table row = choice(UiKit.text("BoardEditor.lanes"), UiKit.text(single ? "BoardEditor.lanesSingle" : "BoardEditor.lanesTwo"),
+              options, choose);
+        row.setName("editor-lanes-road");
+        ui.tip(row).getActor().setText(UiKit.text("BoardEditor.lanes.tooltip"));
+        return row;
+    }
+
+    /**
+     * The inspected paved road's lanes; on a single-lane run, a button reversing its direction of travel; on a two-lane
+     * road, per side a single-lane road joins it, whether that road is its entrance (an on-ramp) or its exit (off-ramp).
+     */
+    private void lanes() {
+        detail.add(lanesChoice(snapshot.appearance(), chosen -> send(Action.LANES, "road", chosen))).growX().row();
+        if (snapshot.laneRun()) {
+            var reverse = button(UiKit.text("BoardEditor.laneReverse"), () -> send(Action.LANE_DIRECTION, "road", "reverse"));
+            reverse.setName("editor-lane-reverse");
+            ui.tip(reverse).getActor().setText(UiKit.text("BoardEditor.laneReverse.tooltip"));
+            detail.add(reverse).row();
+        }
+        if (snapshot.rampSides() == 0) { return; }
+        heading(UiKit.text("BoardEditor.ramps"));
+        List<Option> options = List.of(new Option(UiKit.text("BoardEditor.rampEntrance"), "entrance"),
+              new Option(UiKit.text("BoardEditor.rampExit"), "exit"));
+        for (int side = 0; side < 6; side++) {
+            if ((snapshot.rampSides() & 1 << side) == 0) { continue; }
+            int d = side;
+            boolean entrance = (snapshot.entranceSides() & 1 << side) != 0;
+            Table row = choice(UiKit.text("BoardEditor.ramp", UiKit.text("BoardEditor.sides").split(",")[side]),
+                  UiKit.text(entrance ? "BoardEditor.rampEntrance" : "BoardEditor.rampExit"), options,
+                  chosen -> send(Action.RAMP, "road:" + d, chosen));
+            row.setName("editor-ramp-" + side);
+            ui.tip(row).getActor().setText(UiKit.text("BoardEditor.ramp.tooltip"));
+            detail.add(row).growX().row();
+        }
     }
 
     private void wayRow(String terrain, boolean deck) {

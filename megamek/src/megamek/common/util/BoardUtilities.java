@@ -56,6 +56,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
+import megamek.common.board.SingleLane;
 import megamek.common.compute.Compute;
 import megamek.common.enums.BuildingType;
 import megamek.common.loaders.MapSettings;
@@ -1774,6 +1775,8 @@ public class BoardUtilities {
                 // A rail's junction layout turns with its exits.
                 appearance.computeIfPresent("rail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
                 appearance.computeIfPresent("bridgeRail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                // So does a single lane's direction of travel.
+                appearance.computeIfPresent(SingleLane.OWNER, (owner, road) -> SingleLane.flip(road, horiz, vert));
                 if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;

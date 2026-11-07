@@ -395,8 +395,9 @@ public final class BoardSceneryLayouts {
                 HexAppearance current = result.get(owner);
                 if (current == null) { result.put(owner, design); }
                 else if (current.variant() == null && current.asset() == null) {
-                    result.put(owner, HexAppearance.withTrafficControl(
-                          new HexAppearance(design.variant(), null, current.material(), design.strength()), current.trafficControl()));
+                    result.put(owner, HexAppearance.keepLanes(HexAppearance.withTrafficControl(
+                          new HexAppearance(design.variant(), null, current.material(), design.strength()), current.trafficControl()),
+                          current));
                 }
             });
         }
@@ -549,8 +550,8 @@ public final class BoardSceneryLayouts {
                     String material = old == null || old.material() == null ? "" : old.material();
                     if (roadFinish(hex, material).equals(material)) { continue; }
                     styles.put(layer.getValue(), old == null ? new HexAppearance(null, null, COLONY_SLABS, null)
-                          : new HexAppearance(old.variant(), old.asset(), COLONY_SLABS, old.strength(), old.colours(),
-                                old.rotation(), old.tracks(), old.beside(), old.trafficControl()));
+                          : HexAppearance.keepLanes(new HexAppearance(old.variant(), old.asset(), COLONY_SLABS, old.strength(),
+                                old.colours(), old.rotation(), old.tracks(), old.beside(), old.trafficControl()), old));
                 }
                 if (styles.equals(hex.getAppearance())) { continue; }
                 Hex result = replacement(hex);
@@ -1588,7 +1589,9 @@ public final class BoardSceneryLayouts {
                 // A road design keeps the road's finish and controls (designed): the design is its variant.
                 if (current == null || !java.util.Objects.equals(current.variant(), design.variant())) { return; }
                 HexAppearance surface = current.material() == null ? null : new HexAppearance(null, null, current.material(), null);
-                HexAppearance retained = HexAppearance.withTrafficControl(surface, current.trafficControl());
+                HexAppearance controlled = HexAppearance.withTrafficControl(surface, current.trafficControl());
+                HexAppearance retained = owner.equals(SingleLane.OWNER) && SingleLane.paved(hex)
+                      ? HexAppearance.keepLanes(controlled, current) : controlled;
                 if (retained == null) { appearance.remove(owner); } else { appearance.put(owner, retained); }
             });
         });

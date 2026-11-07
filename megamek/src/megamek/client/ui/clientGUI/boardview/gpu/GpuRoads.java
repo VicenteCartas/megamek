@@ -706,6 +706,7 @@ final class GpuRoads {
             patches.add(divider);
             Area stops = road.stopLines(approaches);
             stops.add(road.flowMarkings());
+            stops.add(road.arrows(exits));
             stops.subtract(crossing.clearance());
             if (!stops.isEmpty()) {
                 patches.add(new Patch(stops, "concrete-ground", new Color(.96f, .96f, .92f, 1), 1.5f, PAINT_LIFT, null));

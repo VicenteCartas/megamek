@@ -84,6 +84,11 @@ An explicitly signalled T controls every approach. Explicit choices store
 `trafficControl: stops`, `signals`, or `gantry`, including a gantry override at a T. Material
 changes, copy/paste, layer moves, save/load and undo preserve that choice.
 
+A single-lane entrance (on-ramp, below) gives way instead of stopping: under **Stops** it has a broken give-way line
+across its whole lane with the outlined triangle upstream, as a roundabout entry, and a give-way sign
+(`scenery/road/give-way-sign.glb`) on the merging traffic's right; under traffic lights it has a solid bar and lights
+like any approach. Nothing waits on an exit (off-ramp).
+
 Legacy `.board` X crossings use the same gantry default. Native boards retain explicit
 authored choices; roads without one inherit the default. Controls are derived from the same
 approach geometry as the paint, use the existing ground/deck support and GLB prop
@@ -209,6 +214,47 @@ the lane-bound and oriented marks (oil drip, kerb grit, joint and transverse cra
 lowers the roughness, so worn asphalt does not glint in the sun. Features are
 placed per 8 m world cell and use the heading only symmetrically, so neighbouring hexes agree whichever way their paths
 run.
+
+### Single-lane roads
+
+A paved ground road may be a single, one-way lane (`HexAppearance.lanes`, owner `road`; [editor](3d-board-editor.md)):
+a ramp or slip road. Its course is the road's, half as wide (`BoardRoad.SINGLE_HALF`, 7.5 pixels, one lane of the
+two-lane carriageway and as wide as a roundabout's lane), so grading, cuts, verges, wear and every clearance that
+follows the footprint narrow with it. The road keeps `Kind.PAVED`: width is per arm (`BoardRoad.single`), set by
+`layout`'s single mask. A single-lane hex's arms are all a lane wide, but one meeting a bridge deck or a dirt or gravel
+road, which keeps that neighbour's width; a two-lane paved road's arm onto a single lane is a lane wide at their border
+and widens into its two-lane hub with the usual rounded corners and turn reserves. Both hexes of a border derive the
+same width (`BoardRoad.singleArms`, and `BoardFeatures.singleArms` for captured hexes). A two-lane hex with only two exits
+narrows across itself into the single lane, its centre line ending midway. A single lane forms no roundabout, takes
+no part in a shared triangle roundabout, and is never drawn on a deck or beside a railway: there it is two lanes.
+
+Its direction is stored on the single-lane hexes alone (`inbound`, the sides traffic enters by;
+`SingleLane.inbound` derives an absent one from the neighbouring single lanes). A two-lane hex stores nothing: whether
+a single lane joining it is its entrance or exit is read from that neighbour (`SingleLane.entrance`), so both ends of a
+run and its arrows agree. The single lane has no centre line; a white arrow about 4.3 by 1.2 metres in the middle of
+each hex points the way its traffic runs (`BoardRoad.arrows`), and a single-lane fork or merge has one per arm. Its
+wheel wear runs down the lane's centre; where it widens into two lanes, the axle parts smoothly into the two lanes'
+(`laneCenter`).
+
+At a two-lane junction the road keeps its priority: under Stops its two-lane arms (at most two of them, straight or
+bent) have no stop, an entrance gives way and an exit has nothing; with three two-lane arms the opposite pair keeps
+priority as at a T. Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
+mouth facing the junction, on the right of traffic heading out along the ramp: a no-entry sign at an entrance
+(`no-entry-sign.glb`, a red disc with a white bar: the ramp's traffic only comes towards the junction) and a one-way
+sign at an exit (`one-way-sign.glb`, a blue square with a white arrow ahead). It uses the junction's stop plane, or
+partway out along the arm of a narrowing two-exit hex (`BoardRoad.rampFrame`), keeps four pixels clear of the
+junction's own poles and of props placed in the hex, and walks out along the ramp when the mouth is crowded; a sign
+with no dry, level footing is left out. The three signs are built without Blender by mm-data's
+`tools/build_road_signs.py` on the STOP sign's conventions (2.8 units per metre, face +Y, base at Z=0, `-lod0` and
+`-lod1`); their faces are flat-coloured geometry, not artwork.
+
+A lane count change rebuilds the edited hex's surroundings as a road kind change does (`GpuTerrain`, and the surface
+cache key's `singleLane`); a direction change rebuilds two hexes out, which covers a join's markings and a derived
+direction. The single lane is centred on the two-lane road's course, not offset to its right-hand lane, and a
+single lane on colony slabs is narrowed but, like any slab road, unpainted. `BoardRoadSingleLaneTest` covers widths and
+border agreement, arrows, markings, give-way and priority, the signs' assets, sides and facing, their clearance from
+signal poles, hex and scene agreement, loose roads and rails, the surface cache key and the sign models' two levels;
+`SingleLaneTest` and `SingleLaneEditorTest` cover direction, runs, persistence, flips and the editor.
 
 ## Road and rail corridors
 

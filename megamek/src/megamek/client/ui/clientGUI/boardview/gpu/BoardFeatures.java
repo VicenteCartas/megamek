@@ -28,6 +28,7 @@ import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.board.RailRoute;
+import megamek.common.board.SingleLane;
 import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
 
@@ -639,8 +640,11 @@ final class BoardFeatures {
             if (deck) { exits &= hex.getTerrain(Terrains.BRIDGE).getExits(); }
             String owner = deck ? "bridgeRoad" : "road";
             var control = HexAppearance.trafficControl(hex.getAppearance(), owner, exits);
+            int single = deck ? 0 : singleArms(hex, coords, board, exits);
+            boolean narrow = !deck && SingleLane.single(hex);
             var road = BoardRoad.layout(coords, exits, kind,
-                  direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck)).control(control);
+                  direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck), single, narrow)
+                  .control(control).flow(inbound(hex, coords, board, single));
             if (!deck) { road = road.circulate(at -> BoardRoad.Node.of(at.equals(coords) ? hex : board.apply(at), at, board)); }
             if (deck ? RailRoute.deckRail(hex) : RailRoute.groundSides(hex) != 0) { road = road.solidHub(); }
             var corridor = RailRoute.corridor(hex, coords, board, deck);
@@ -668,7 +672,11 @@ final class BoardFeatures {
             var junction = road.stopApproaches(exits);
             var approaches = road.stopApproaches(exits, crossing);
             crossingControls(hex, coords, board, deck, road, corridor, marker, crossing, approaches, junction, result);
-            if (junction.isEmpty()) { continue; }
+            boolean ramps = single != 0 && !narrow;
+            if (junction.isEmpty()) {
+                if (ramps) { rampSigns(hex, coords, board, road, exits, result); }
+                continue;
+            }
             List<BoardRoad> clearance = deck ? List.of(road) : nearbyWays(hex, coords, board);
             for (var approach : approaches) {
                 if (junction.stream().noneMatch(arm -> arm.direction() == approach.direction())) { continue; }
@@ -678,7 +686,8 @@ final class BoardFeatures {
                 float offset = roadside;
                 while (road.distance(approach.x() - approach.ny() * offset,
                       approach.y() + approach.nx() * offset) < .5f) { offset += .25f; }
-                String asset = control == HexAppearance.TrafficControl.STOPS ? "scenery/road/stop-sign" : "scenery/road/traffic-signal";
+                String sign = approach.yields() ? "scenery/road/give-way-sign" : "scenery/road/stop-sign";
+                String asset = control == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                 BoardDecoration.Stretch stretch = BoardDecoration.Stretch.NONE;
                 float setback = 0;
                 if (control == HexAppearance.TrafficControl.GANTRY) {
@@ -715,8 +724,7 @@ final class BoardFeatures {
                         }
                     }
                     if (!found) { continue; }
-                    asset = control == HexAppearance.TrafficControl.STOPS
-                          ? "scenery/road/stop-sign" : "scenery/road/traffic-signal";
+                    asset = control == HexAppearance.TrafficControl.STOPS ? sign : "scenery/road/traffic-signal";
                     stretch = BoardDecoration.Stretch.NONE;
                 }
                 double rotation = Math.toDegrees(Math.atan2(-approach.nx(), approach.ny()));
@@ -725,8 +733,106 @@ final class BoardFeatures {
                       x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
                       BoardDecoration.Placement.on(deck ? "bridge" : "ground", 0), 0, false, 0, 0, null, false, 0, stretch)));
             }
+            // After the junction's own controls, whose poles the ramp signs keep clear of.
+            if (ramps) { rampSigns(hex, coords, board, road, exits, result); }
         }
         return List.copyOf(result);
+    }
+
+    /**
+     * The arms of a hex's ground road at a single lane's width, as BoardRoad#singleArms gives a scene tile's: all of a
+     * single-lane road's but those meeting a bridge deck, and a paved two-lane road's where a single-lane road joins it.
+     */
+    static int singleArms(Hex hex, Coords coords, Function<Coords, Hex> board, int exits) {
+        if (!BoardRoad.paved(BoardRoad.capture(hex))) { return 0; }
+        boolean narrow = SingleLane.single(hex);
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            if ((exits & 1 << d) == 0) { continue; }
+            Hex next = board.apply(coords.translated(d));
+            if (next != null && bridgeApproach(hex, next, d)) { continue; }
+            boolean joined = next != null && next.containsTerrainExit(Terrains.ROAD, (d + 3) % 6);
+            if (narrow && joined && !BoardRoad.paved(BoardRoad.capture(next))) { continue; }
+            if (narrow || SingleLane.single(next) && joined) { result |= 1 << d; }
+        }
+        return result;
+    }
+
+    /** Of a hex's {@link #singleArms}, those by which traffic enters it: a single lane's way in, a two-lane road's entrances. */
+    static int inbound(Hex hex, Coords coords, Function<Coords, Hex> board, int single) {
+        if (SingleLane.single(hex)) { return SingleLane.inbound(hex, coords, board); }
+        if (single == 0) { return 0; }
+        int result = 0;
+        for (int d = 0; d < 6; d++) {
+            if ((single & 1 << d) != 0 && SingleLane.entrance(hex, coords, d, board)) { result |= 1 << d; }
+        }
+        return result;
+    }
+
+    /**
+     * The signs where single-lane, one-way roads join a two-lane one, at the ramp's mouth and facing the junction, on the
+     * right of traffic heading out along the ramp (the other side from an entrance's give-way sign): a no-entry sign at
+     * an entrance (on-ramp), whose traffic only comes towards the junction, and a one-way sign at an exit (off-ramp),
+     * which traffic turns into. A sign whose footing finds no dry ground beside the ramp is left out.
+     */
+    private static void rampSigns(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, int exits,
+          List<BoardScene.Feature> result) {
+        List<BoardRoad> clearance = nearbyWays(hex, coords, board);
+        // A two-way hex's course bends through its borders as the scene draws it (BoardRoad#bends); a junction's arms
+        // run straight in, as the controls' own layout has them.
+        if (Integer.bitCount(exits) == 2) { road = BoardRoad.clearance(coords, hex, board).flow(road.inbound()); }
+        for (int direction = 0; direction < 6; direction++) {
+            if ((road.single() & 1 << direction) == 0) { continue; }
+            var frame = road.rampFrame(exits, direction);
+            if (frame == null) { continue; }
+            boolean entrance = (road.inbound() & 1 << direction) != 0;
+            String asset = entrance ? "scenery/road/no-entry-sign" : "scenery/road/one-way-sign";
+            float x = Float.NaN, y = Float.NaN;
+            search:
+            // From the mouth out along the ramp, past the junction's own poles where they crowd it.
+            for (float setback = 0; setback <= 10; setback += .5f) {
+                float offset = frame.outer() + .7f;
+                float px = frame.x() + frame.nx() * setback + frame.ny() * offset;
+                float py = frame.y() + frame.ny() * setback - frame.nx() * offset;
+                while (road.distance(px, py) < .5f && offset < frame.outer() + 6) {
+                    offset += .25f;
+                    px = frame.x() + frame.nx() * setback + frame.ny() * offset;
+                    py = frame.y() + frame.ny() * setback - frame.nx() * offset;
+                }
+                for (int step = 0; step <= 12; step++) {
+                    float across = offset + step * .125f;
+                    float cx = frame.x() + frame.nx() * setback + frame.ny() * across;
+                    float cy = frame.y() + frame.ny() * setback - frame.nx() * across;
+                    if (controlClearance(road, clearance, cx, cy) >= .5f && clearOfPoles(hex, result, cx, cy)
+                          && controlSupported(hex, coords, board, false, cx, cy)) {
+                        x = cx; y = cy;
+                        break search;
+                    }
+                }
+            }
+            if (Float.isNaN(x)) { continue; }
+            // Model +Y is the sign's face: towards the junction, against the ramp's outward normal.
+            double rotation = Math.toDegrees(Math.atan2(frame.nx(), -frame.ny()));
+            String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":road:ramp:" + direction;
+            result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
+                  x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
+                  BoardDecoration.Placement.on("ground", 0), 0, false)));
+        }
+    }
+
+    /** How far apart, in tile pixels, two roadside poles stand at least: about a metre and a half. */
+    private static final float POLE_SPACING = 4;
+
+    /** Whether a ramp sign at x, y keeps clear of the junction's other controls and of the props placed in its hex. */
+    private static boolean clearOfPoles(Hex hex, List<BoardScene.Feature> placed, float x, float y) {
+        for (var feature : placed) {
+            if (Math.hypot(feature.x() - x, feature.y() - y) < POLE_SPACING) { return false; }
+        }
+        for (var object : hex.getDecorations()) {
+            if (object.kind().equals("prop") && Math.hypot(object.x() * BoardGeometry.TILE_WIDTH - x,
+                  object.y() * BoardGeometry.TILE_HEIGHT - y) < POLE_SPACING) { return false; }
+        }
+        return true;
     }
 
     /** Apply the completed scene's fitted entrance clearance to captured controls, shared by every graphics mode. */

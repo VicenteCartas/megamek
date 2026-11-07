@@ -91,7 +91,7 @@ final class BoardSurface {
           BoardLiquid liquid, boolean detailedGround, List<BoardScene.Feature> features, int ramps,
           List<ConcreteFit.Shift> coast, BoardRoad.Kind road, BoardScene.Biome biome, int cliffTopExits, boolean bare,
           boolean barren, BoardSurfaceBlend.Cover groundCover, boolean ultraSublevel, boolean naturalBridge,
-          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop) { }
+          RailRoute.Corridor corridor, RailRoute.Corridor deckCorridor, BoardBackdrop backdrop, boolean singleLane) { }
 
     /** What of a hex further out can reach a hex's shape: through the water's shore, its level, liquid and ground. */
     record Shape(int elevation, int waterDepth, boolean frozen, BoardLiquid liquid, boolean detailedGround, BoardScene.Surface surface,
@@ -161,7 +161,7 @@ final class BoardSurface {
               BoardConcrete.of(scene).corners(tile.coords()), tile.road(), tile.biome(), tile.cliffTopExits(), tile.bare(),
               tile.barren(), tile.groundCover(), tile.ultraSublevel(),
               BoardBridge.feature(tile) != null && BoardBridge.family(tile) == BoardBridge.Family.NATURAL,
-              tile.corridor(), tile.deckCorridor(), tile.backdrop());
+              tile.corridor(), tile.deckCorridor(), tile.backdrop(), BoardRoad.singleLane(tile));
     }
 
     /** The edges this hex's carriageway ramps down to (see {@link BoardRoadGrade#ramps}). */
