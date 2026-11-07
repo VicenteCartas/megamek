@@ -99,8 +99,6 @@ final class GpuTerrain implements Disposable {
     /** Whether {@link #assets} belong to another terrain ({@link #GpuTerrain(GpuTerrain)}). */
     private final boolean borrowedAssets;
     private final BoardSurface.Cache pickingSurfaces = new BoardSurface.Cache();
-    /** Root support stays at canonical detail, so zooming never rerolls a rigid colony's collision retries. */
-    private final BoardSurface.Cache plantSurfaces = new BoardSurface.Cache();
     private final GpuRoads.Masks roadMaskData = new GpuRoads.Masks();
     private final boolean liquidShaderAnimation;
     private final boolean proceduralWater;
@@ -1136,7 +1134,8 @@ final class GpuTerrain implements Disposable {
           Map<Coords, BoardBridge.Deck> bridges, Map<Coords, BoardBridge.Shape> bridgeShapes,
           Map<Coords, Map<BoardSurface.Side, List<BoardSurface.Face>>> walls, Set<Coords> reused,
           Map<Coords, List<BoardDecals.Stamp>> paint, boolean paintOnly,
-          Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Prepared> authored) { }
+          Map<GpuAuthoredBuilding.Layout, GpuAuthoredBuilding.Prepared> authored,
+          Map<Coords, BoardSurface> plantSupports) { }
     record RoadPatch(GpuRoads.Patch patch, GpuRoads.MaskData mask,
           List<BoardTacticalGeometry.Triangle> triangles, boolean flat, BoardScene.Tile source) { }
     /** {@code columns}: the Classic graphics' build ({@link #setColumns}). */
@@ -3272,7 +3271,8 @@ final class GpuTerrain implements Disposable {
         }
         Infrastructure infrastructure = prepareInfrastructure(scene, chunkTiles, lod, settings, surfaces, check, progress, masks, true);
         return new Prepared(surfaces, null, null, columns, Map.of(), Map.of(), currents, infrastructure.roads(),
-              infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), reused, paint, false, infrastructure.authored());
+              infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), reused, paint, false, infrastructure.authored(),
+              Map.of());
     }
 
     /**
@@ -3313,7 +3313,7 @@ final class GpuTerrain implements Disposable {
             }
         }
         return new Prepared(Map.of(), null, null, support, plants, Map.of(), Map.of(), Map.of(),
-              Map.of(), Map.of(), Map.of(), Set.of(), paint, true, Map.of());
+              Map.of(), Map.of(), Map.of(), Set.of(), paint, true, Map.of(), Map.of());
     }
 
     private void prepareAtlases(BoardScene scene, UpdatePlan plan, TerrainLoadProgress progress) {
@@ -3406,7 +3406,6 @@ final class GpuTerrain implements Disposable {
         decals.publish();
         terrainBatch.clear();
         pickingSurfaces.clear();
-        plantSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
         // The ground material cache refills what a build changed before the new relief draws, the whole board after a
         // load, which also takes the view's storage.
@@ -3648,7 +3647,6 @@ final class GpuTerrain implements Disposable {
         }
         terrainBatch.clear();
         pickingSurfaces.clear();
-        plantSurfaces.clear();
         detailPixelsPerUnit = Float.NaN;
         // A refined chunk casts its terrain at finer detail. The cached shadow serves until refinement settles
         // (GpuTerrainShadows.render): drawing every chunk and tree again for each one cost 3-6 ms a time on an Iris Xe.
@@ -3762,7 +3760,43 @@ final class GpuTerrain implements Disposable {
         progress.advance();
         progress.begin("masks", 3);
         return new Prepared(surfaces, water, lava, topography, plants, sculpts, currents, infrastructure.roads(),
-              infrastructure.bridges(), infrastructure.bridgeShapes(), walls, reused, paint, false, infrastructure.authored());
+              infrastructure.bridges(), infrastructure.bridgeShapes(), walls, reused, paint, false, infrastructure.authored(),
+              plantSupports(scene, chunkTiles, lod, surfaces, reused, settings, check));
+    }
+
+    /**
+     * Natural plants stand on full-detail support whatever the chunk's level, so zooming moves none of them and rerolls
+     * no colony's collision retries. Made here so that the render thread's collection only reads it. A full-detail
+     * chunk's finished surfaces answer those queries identically and are shared.
+     */
+    private static Map<Coords, BoardSurface> plantSupports(BoardScene scene, List<BoardScene.Tile> chunkTiles, TerrainLod lod,
+          Map<Coords, BoardSurface> surfaces, Set<Coords> reused, TerrainSettings settings, Runnable check) {
+        Map<Coords, BoardScene.Tile> needed = new HashMap<>();
+        for (var tile : chunkTiles) {
+            for (var feature : tile.features()) {
+                if (!naturalPlant(feature)) { continue; }
+                needed.put(tile.coords(), tile);
+                // A coral's wide roots rest on the hexes around it as well.
+                if (feature.asset().startsWith("mars/")) {
+                    for (int direction = 0; direction < 6; direction++) {
+                        var next = scene.tile(tile.coords().translated(direction));
+                        if (next != null) { needed.put(next.coords(), next); }
+                    }
+                }
+            }
+        }
+        Map<Coords, BoardSurface> result = new java.util.concurrent.ConcurrentHashMap<>();
+        needed.values().parallelStream().forEach(tile -> settings.run(() -> {
+            check.run();
+            var own = lod == TerrainLod.FULL && !reused.contains(tile.coords()) ? surfaces.get(tile.coords()) : null;
+            result.put(tile.coords(), own != null ? own : new BoardSurface(scene, tile));
+        }));
+        return result;
+    }
+
+    private static boolean naturalPlant(BoardScene.Feature feature) {
+        return feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()
+              || feature.kind() == BoardScene.FeatureKind.SCATTER && BoardFungus.asset(feature.asset());
     }
 
     /**
@@ -4482,10 +4516,9 @@ final class GpuTerrain implements Disposable {
             boolean packedColony = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()
                   && feature.decoration() == null && BoardFeatures.rigid(feature.asset());
             var colony = packedColony ? BoardPlantFootprint.of(feature, colonyShapes) : null;
-            boolean naturalPlant = feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement() || fungusScatter;
-            if (naturalPlant) { plantSurfaces.columns(build.chunk.columns); }
+            boolean naturalPlant = naturalPlant(feature);
             // Plant anchors follow terrain edits, never the camera-dependent tessellation of a rendered chunk.
-            var plantingSurface = naturalPlant ? plantSurfaces.get(scene, tile) : surface;
+            var plantingSurface = naturalPlant ? build.plantSupport(tile) : surface;
             float unit = BoardGeometry.hexScale(), cx = BoardGeometry.centerX(tile.coords()), cy = BoardGeometry.centerY(tile.coords());
             float px = 0, py = 0, base = 0;
             boolean planted = false;
@@ -4528,7 +4561,7 @@ final class GpuTerrain implements Disposable {
                         float x = px + plantingRadius * (float) Math.cos(angle);
                         float y = py + plantingRadius * (float) Math.sin(angle);
                         var receiving = BoardGeometry.tile(scene, x, y);
-                        var support = receiving == null ? plantingSurface : naturalPlant ? plantSurfaces.get(scene, receiving)
+                        var support = receiving == null ? plantingSurface : naturalPlant ? build.plantSupport(receiving)
                               : surfaces.getOrDefault(receiving.coords(), surface);
                         base = Math.min(base, support.height(x, y));
                     }
@@ -5023,6 +5056,7 @@ final class GpuTerrain implements Disposable {
         final Map<Model, Float> coralRootRadii = new IdentityHashMap<>();
         final Map<Model, List<Vector3>> crystalRoots = new IdentityHashMap<>();
         final Map<Model, BoundingBox> modelBounds = new IdentityHashMap<>();
+        final Map<Coords, BoardSurface> plantSupports;
         final Map<String, LiquidSurface> animations = new HashMap<>();
         final Map<Material, Material> reusedMaterials = new java.util.IdentityHashMap<>();
         List<MeshBatch> meshes;
@@ -5038,6 +5072,7 @@ final class GpuTerrain implements Disposable {
             this.y = y;
             this.floor = floor;
             this.prepared = prepared;
+            plantSupports = new HashMap<>(prepared.plantSupports());
             this.progress = progress;
             width = Math.min(CHUNK_SIZE, scene.width() - x);
             height = Math.min(CHUNK_SIZE, scene.height() - y);
@@ -5171,6 +5206,12 @@ final class GpuTerrain implements Disposable {
                       .mapToInt(List::size).sum()).sum());
             }
             return collected == width * height;
+        }
+
+        /** Classic's cheap columns, a biodome's garden and a root past what the workers prepared are built on first use. */
+        BoardSurface plantSupport(BoardScene.Tile tile) {
+            return plantSupports.computeIfAbsent(tile.coords(), at -> chunk.columns
+                  ? BoardSurface.columns(scene, tile, TerrainLod.FULL) : new BoardSurface(scene, tile));
         }
 
         void prepare(Runnable check) {
@@ -7636,7 +7677,8 @@ final class GpuTerrain implements Disposable {
     private Map<Coords, List<ModelInstance>> pieces(EditorRoutes owner, RouteSide side, List<Coords> coords, TerrainLod lod) {
         var infrastructure = side.infrastructure();
         var prepared = new Prepared(side.surfaces(), null, null, Map.of(), Map.of(), Map.of(), Map.of(),
-              infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), Set.of(), Map.of(), false, infrastructure.authored());
+              infrastructure.roads(), infrastructure.bridges(), infrastructure.bridgeShapes(), Map.of(), Set.of(), Map.of(), false, infrastructure.authored(),
+              Map.of());
         var build = new ChunkBuild(side.scene(), 0, 0, floor, lod, columns(), false, prepared, null,
               new TerrainLoadProgress());
         build.preview = owner;
@@ -9208,7 +9250,6 @@ final class GpuTerrain implements Disposable {
         waterPages.dispose();
         trees.dispose();
         pickingSurfaces.clear();
-        plantSurfaces.clear();
         chunks.forEach(Chunk::dispose);
         chunks.clear();
         ground.dispose();

@@ -166,9 +166,11 @@ class GpuPlantPlacementSmokeTest {
         var result = new ArrayList<String>();
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
-                if (!AT.equals(GpuTestSupport.field(prop, "coords")) || !(boolean) GpuTestSupport.field(prop, "cover")) { continue; }
+                // The plant itself: a tree of the stand, not the hex's scatter.
+                if (!AT.equals(GpuTestSupport.field(prop, "coords")) || GpuTestSupport.field(prop, "treeAsset") == null
+                      || (boolean) GpuTestSupport.field(prop, "scatter")) { continue; }
                 result.add(java.util.Arrays.toString(((ModelInstance) GpuTestSupport.field(prop, "instance")).transform.val));
-                lods.add(String.valueOf(GpuTestSupport.field(chunk, "lod")));
+                lods.add(String.valueOf((Object) GpuTestSupport.field(chunk, "lod")));
             }
             for (Object emitter : (List<?>) GpuTestSupport.field(chunk, "spores")) { result.add(emitter.toString()); }
         }
