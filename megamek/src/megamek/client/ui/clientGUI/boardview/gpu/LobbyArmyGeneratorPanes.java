@@ -22,11 +22,13 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
 import megamek.client.lobby.FactionChoice;
+import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.RatGeneratorForm;
 import megamek.client.lobby.RequisitionAdvancedSearch;
 import megamek.client.ratgenerator.FactionRecord;
 import megamek.client.ratgenerator.FormationType;
+import megamek.client.ratgenerator.InfantryClass;
 import megamek.client.ratgenerator.MissionRole;
 import megamek.client.ratgenerator.UnitTable;
 import megamek.client.ui.Messages;
@@ -43,6 +45,7 @@ import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.loaders.MekSummary;
+import megamek.common.units.EntityWeightClass;
 import megamek.common.units.UnitType;
 
 /**
@@ -61,6 +64,9 @@ final class LobbyArmyGeneratorPanes {
     private static final int SEGMENTED_RATINGS = 5;
     /** The longest rating shown in a segmented control: letter grades are, named lines (Front Line) are not. */
     private static final int SEGMENTED_RATING_LENGTH = 2;
+    /** The shares of the force its ships may carry, and the cargo room they bring, as the Force Generator's steps. */
+    private static final int[] SHIP_PERCENTS = { 0, 25, 50, 75, 100 };
+    private static final int[] CARGO_PERCENTS = { 0, 50, 100, 150, 200 };
 
     /** What the panes ask of the random army. */
     interface Owner {
@@ -578,6 +584,298 @@ final class LobbyArmyGeneratorPanes {
             })).padTop(space("md")).row();
         }
         return pane;
+    }
+
+    // ---- The Force Generator ----
+
+    /**
+     * The Force Generator's choices: the year, faction, command, unit type, formation, rating and option; the crews'
+     * experience; the weight or infantry class; the unit type's mission roles; and what comes along - detachments,
+     * ships to carry the force, their cargo and fighters.
+     */
+    Table force(ForceGeneratorForm form) {
+        Table pane = page("Lobby.randomArmy.mode.force", "Lobby.randomArmy.about.force");
+        UiTextField year = kit.input(String.valueOf(form.year()), true);
+        year.setName("army-force-year");
+        year.setMaxLength(4);
+        year.setTextFieldFilter(new TextField.TextFieldFilter.DigitsOnlyFilter());
+        UiKit.onChange(year, () -> {
+            Integer typed = UiRangeInput.parse(year.getText());
+            if (typed != null && typed >= ForceGeneratorForm.earliestYear()
+                  && typed <= ForceGeneratorForm.latestYear() && typed != form.year()) {
+                form.year(typed);
+                focusYear = true;
+                owner.changed(true);
+            }
+        });
+        keepTyping(year);
+        Table yearRow = new Table();
+        yearRow.left();
+        yearRow.add(year).width(size("control.lg") * 2);
+        yearRow.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.yearRange", ForceGeneratorForm.earliestYear(),
+              ForceGeneratorForm.latestYear()), "small", "text.muted")).padLeft(space("sm"));
+        pane.add(kit.formField(Messages.getString("Lobby.randomArmy.year"), yearRow)).padTop(space("md")).row();
+
+        List<FactionRecord> factions = form.factions();
+        if (factions.isEmpty()) {
+            pane.add(kit.typeLabel(Messages.getString("Lobby.randomArmy.cannotDeal.faction"), "small",
+                  "status.warning")).padTop(space("md")).row();
+            return pane;
+        }
+        String[] factionNames = new String[factions.size()];
+        for (int index = 0; index < factionNames.length; index++) {
+            factionNames[index] = form.name(factions.get(index));
+        }
+        UiSelect faction = kit.tokenSelect(true, factionNames);
+        faction.setName("army-force-faction");
+        faction.select(Math.max(0, factions.indexOf(form.faction())));
+        UiKit.onChange(faction, () -> {
+            form.faction(factions.get(faction.getSelectedIndex()).getKey());
+            owner.changed(true);
+        });
+        pane.add(kit.formField(Messages.getString("Lobby.randomArmy.faction"), faction)).growX().padTop(space("md"))
+              .row();
+
+        List<FactionRecord> commands = form.commands();
+        if (!commands.isEmpty()) {
+            String[] names = new String[commands.size() + 1];
+            names[0] = Messages.getString("Lobby.randomArmy.generalCommand");
+            for (int index = 0; index < commands.size(); index++) {
+                names[index + 1] = form.name(commands.get(index));
+            }
+            UiSelect command = kit.tokenSelect(true, names);
+            command.setName("army-force-command");
+            command.select(form.command() == null ? 0 : commands.indexOf(form.command()) + 1);
+            UiKit.onChange(command, () -> {
+                int index = command.getSelectedIndex();
+                form.command(index <= 0 ? null : commands.get(index - 1).getKey());
+                owner.changed(true);
+            });
+            pane.add(kit.formField(Messages.getString("Lobby.randomArmy.command"), command)).growX()
+                  .padTop(space("md")).row();
+        }
+
+        List<Integer> unitTypes = form.unitTypes();
+        String[] typeNames = new String[unitTypes.size()];
+        for (int index = 0; index < typeNames.length; index++) {
+            typeNames[index] = ForceGeneratorForm.unitTypeName(unitTypes.get(index));
+        }
+        UiSelect unitType = kit.tokenSelect(true, typeNames);
+        unitType.setName("army-force-unit-type");
+        unitType.select(Math.max(0, unitTypes.indexOf(form.unitType())));
+        UiKit.onChange(unitType, () -> {
+            form.unitType(unitTypes.get(unitType.getSelectedIndex()));
+            owner.changed(true);
+        });
+        pane.add(kit.formField(Messages.getString("Lobby.randomArmy.unitType"), unitType)).growX()
+              .padTop(space("lg")).row();
+
+        List<String> formations = form.formations();
+        if (!formations.isEmpty()) {
+            String[] names = new String[formations.size()];
+            for (int index = 0; index < names.length; index++) {
+                names[index] = form.formationName(formations.get(index));
+            }
+            UiSelect formation = kit.tokenSelect(true, names);
+            formation.setName("army-force-formation");
+            formation.select(Math.max(0, formations.indexOf(form.formation())));
+            UiKit.onChange(formation, () -> {
+                form.formation(formations.get(formation.getSelectedIndex()));
+                owner.changed(true);
+            });
+            pane.add(kit.formField(Messages.getString("Lobby.randomArmy.force.size"), formation)).growX()
+                  .padTop(space("md")).row();
+        }
+
+        List<String> ratings = form.ratings();
+        if (!ratings.isEmpty()) {
+            String[] names = new String[ratings.size()];
+            for (int index = 0; index < names.length; index++) {
+                names[index] = form.ratingName(ratings.get(index));
+            }
+            int chosen = Math.max(0, ratings.indexOf(form.rating()));
+            Actor rating;
+            if (fitsSegments(ratings.toArray(String[]::new))) {
+                UiSegmented segments = kit.tokenSegmented(true, ratings.toArray(String[]::new));
+                segments.select(chosen);
+                UiKit.onChange(segments, () -> {
+                    form.rating(ratings.get(segments.getSelectedIndex()));
+                    owner.changed(true);
+                });
+                rating = segments;
+            } else {
+                UiSelect select = kit.tokenSelect(true, names);
+                select.select(chosen);
+                UiKit.onChange(select, () -> {
+                    form.rating(ratings.get(select.getSelectedIndex()));
+                    owner.changed(true);
+                });
+                rating = select;
+            }
+            rating.setName("army-force-rating");
+            pane.add(kit.formField(Messages.getString("Lobby.randomArmy.rating"), rating)).growX()
+                  .padTop(space("md")).row();
+        }
+
+        List<String> flags = form.flags();
+        if (!flags.isEmpty()) {
+            String[] names = new String[flags.size() + 1];
+            names[0] = Messages.getString("Lobby.randomArmy.force.noOption");
+            for (int index = 0; index < flags.size(); index++) {
+                names[index + 1] = form.flagName(flags.get(index));
+            }
+            UiSelect flag = kit.tokenSelect(true, names);
+            flag.setName("army-force-option");
+            flag.select(form.flag() == null ? 0 : flags.indexOf(form.flag()) + 1);
+            UiKit.onChange(flag, () -> {
+                int index = flag.getSelectedIndex();
+                form.flag(index <= 0 ? null : flags.get(index - 1));
+                owner.changed(false);
+            });
+            pane.add(kit.formField(strip("ForceGeneratorDialog.other"), flag)).growX().padTop(space("md")).row();
+        }
+
+        List<String> levels = ForceGeneratorForm.experienceNames();
+        UiSegmented experience = kit.tokenSegmented(true, levels.toArray(String[]::new));
+        experience.setName("army-force-experience");
+        experience.select(form.experience() == null ? 0 : form.experience() + 1);
+        UiKit.onChange(experience, () -> {
+            int index = experience.getSelectedIndex();
+            form.experience(index <= 0 ? null : index - 1);
+            owner.changed(true);
+        });
+        pane.add(kit.formField(strip("ForceGeneratorDialog.experience"), experience)).growX().padTop(space("lg"))
+              .row();
+
+        if (form.infantry()) {
+            InfantryClass[] classes = InfantryClass.values();
+            String[] names = new String[classes.length + 1];
+            names[0] = Messages.getString("Lobby.randomArmy.force.anyClass");
+            for (int index = 0; index < classes.length; index++) {
+                names[index + 1] = classes[index].getDisplayName();
+            }
+            UiSelect infantry = kit.tokenSelect(true, names);
+            infantry.setName("army-force-infantry-class");
+            infantry.select(form.infantryClass() == null ? 0 : form.infantryClass().ordinal() + 1);
+            UiKit.onChange(infantry, () -> {
+                int index = infantry.getSelectedIndex();
+                form.infantryClass(index <= 0 ? null : classes[index - 1]);
+                owner.changed(false);
+            });
+            pane.add(kit.formField(strip("ForceGeneratorDialog.infantryClass"), infantry)).growX()
+                  .padTop(space("md")).row();
+        } else {
+            List<Integer> weights = ForceGeneratorForm.weightClasses();
+            String[] names = new String[weights.size() + 1];
+            names[0] = Messages.getString("Lobby.randomArmy.force.anyWeight");
+            for (int index = 0; index < weights.size(); index++) {
+                names[index + 1] = EntityWeightClass.getClassName(weights.get(index));
+            }
+            UiSegmented weight = kit.tokenSegmented(true, names);
+            weight.setName("army-force-weight");
+            weight.select(form.weightClass() == null ? 0 : weights.indexOf(form.weightClass()) + 1);
+            if (form.weightPicksUnits()) {
+                UiKit.onChange(weight, () -> {
+                    int index = weight.getSelectedIndex();
+                    form.weightClass(index <= 0 ? null : weights.get(index - 1));
+                    owner.changed(false);
+                });
+            } else {
+                weight.setDisabled(true);
+                kit.tip(weight, true).getActor().setText(
+                      ForceGeneratorForm.plainText(Messages.getString("ForceGeneratorDialog.weight.ignored.tooltip")));
+            }
+            pane.add(kit.formField(strip("ForceGeneratorDialog.weight"), weight)).growX().padTop(space("md")).row();
+        }
+
+        List<MissionRole> roleChoices = form.roleChoices();
+        if (!roleChoices.isEmpty()) {
+            HorizontalGroup roles = chipGroup();
+            roles.setName("army-force-roles");
+            for (MissionRole role : roleChoices) {
+                UiFilterChip chip = kit.filterChip(ForceGeneratorForm.roleName(role));
+                chip.setName("army-force-role-" + role.name().toLowerCase());
+                chip.setProgrammaticChangeEvents(false);
+                chip.setChecked(form.role(role));
+                kit.tip(chip, true).getActor().setText(ForceGeneratorForm.roleTip(role));
+                UiKit.onChange(chip, () -> {
+                    form.role(role, chip.isChecked());
+                    owner.changed(false);
+                });
+                roles.addActor(chip);
+            }
+            pane.add(kit.formField(strip("ForceGeneratorDialog.missionRoles"), roles)).padTop(space("md")).row();
+        }
+
+        // What comes along: the detachments, the ships that carry the force, their cargo and fighters
+        pane.add(kit.roleTypeLabel("overline", strip("ForceGeneratorDialog.transport"), "text.secondary"))
+              .padTop(space("xl")).row();
+        var detachments = kit.toggleSwitch(Messages.getString("ForceGeneratorDialog.generateDetachments"),
+              form.detachments());
+        detachments.setName("army-force-detachments");
+        kit.tip(detachments, true).getActor().setText(ForceGeneratorForm.plainText(
+              Messages.getString("ForceGeneratorDialog.generateDetachments.tooltip")));
+        UiKit.onChange(detachments, () -> form.detachments(detachments.isChecked()));
+        pane.add(detachments).fill(0f, 0f).padTop(space("sm")).row();
+        pane.add(percentField("dropships", "ForceGeneratorDialog.dropshipPercentage", SHIP_PERCENTS,
+              form.dropshipPercent(), percent -> {
+                  form.dropshipPercent(percent);
+                  owner.changed(true);
+              })).growX().padTop(space("md")).row();
+        pane.add(percentField("jumpships", "ForceGeneratorDialog.jumpshipPercentage", SHIP_PERCENTS,
+              form.jumpshipPercent(), percent -> {
+                  form.jumpshipPercent(percent);
+                  owner.changed(true);
+              })).growX().padTop(space("md")).row();
+        pane.add(percentField("warships", "ForceGeneratorDialog.warshipPercentage", SHIP_PERCENTS,
+              form.warshipPercent(), percent -> {
+                  form.warshipPercent(percent);
+                  owner.changed(true);
+              })).growX().padTop(space("md")).row();
+        pane.add(percentField("cargo", "ForceGeneratorDialog.cargoPct", CARGO_PERCENTS, form.cargoPercent(),
+              form::cargoPercent)).growX().padTop(space("md")).row();
+        var fighters = kit.toggleSwitch(Messages.getString("Lobby.randomArmy.force.fighters"),
+              form.fighterComplement() && form.fighterComplementOffered());
+        fighters.setName("army-force-fighters");
+        fighters.setDisabled(!form.fighterComplementOffered());
+        kit.tip(fighters, true).getActor().setText(ForceGeneratorForm.plainText(Messages.getString(
+              form.fighterComplementOffered() ? "ForceGeneratorDialog.fighterComplement.tooltip"
+                    : "ForceGeneratorDialog.fighterComplement.noShips.tooltip")));
+        UiKit.onChange(fighters, () -> form.fighterComplement(fighters.isChecked()));
+        pane.add(fighters).fill(0f, 0f).padTop(space("md")).row();
+        return pane;
+    }
+
+    /** A share in percent, picked from steps as a game's sliders are: the nearest step to {@code value} lit. */
+    private Actor percentField(String name, String labelKey, int[] steps, int value, IntConsumer choose) {
+        String[] names = new String[steps.length];
+        int chosen = 0;
+        for (int index = 0; index < steps.length; index++) {
+            names[index] = steps[index] + "%";
+            if (Math.abs(steps[index] - value) < Math.abs(steps[chosen] - value)) {
+                chosen = index;
+            }
+        }
+        UiSegmented segments = kit.tokenSegmented(true, names);
+        segments.setName("army-force-" + name);
+        segments.select(chosen);
+        UiKit.onChange(segments, () -> choose.accept(steps[segments.getSelectedIndex()]));
+        String label = strip(labelKey);
+        return kit.formField(label.endsWith("%") ? label.substring(0, label.length() - 1).trim() : label, segments);
+    }
+
+    /** A field built anew while its year is typed takes over the typing. */
+    private void keepTyping(UiTextField year) {
+        if (focusYear) {
+            focusYear = false;
+            year.addAction(Actions.run(() -> {
+                Stage stage = year.getStage();
+                if (stage != null) {
+                    stage.setKeyboardFocus(year);
+                    year.setCursorPosition(year.getText().length());
+                }
+            }));
+        }
     }
 
     // ---- Shared ----

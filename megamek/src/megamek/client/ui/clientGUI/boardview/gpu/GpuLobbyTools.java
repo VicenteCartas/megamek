@@ -28,6 +28,7 @@ import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
 import megamek.client.lobby.FactionChoice;
+import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.ForceNameRequest;
 import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.LobbyAsks;
@@ -46,6 +47,8 @@ import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
+import megamek.client.ratgenerator.ExistingLift;
+import megamek.client.ratgenerator.ForceDescriptor;
 import megamek.client.ratgenerator.FormationType;
 import megamek.client.ratgenerator.GenerationContext;
 import megamek.client.ratgenerator.RATGenerator;
@@ -57,7 +60,6 @@ import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.Team;
@@ -359,12 +361,35 @@ final class GpuLobbyTools {
             }
 
             @Override
-            public void advanced() {
+            public void generate(ForceGeneratorForm force, Consumer<Boolean> done) {
+                generateForce(force, form.playerName(), done);
+            }
+
+            @Override
+            public void addForce(ForceGeneratorForm force, RandomArmyForm army) {
+                GpuLobbyTools.this.addForce(force, army);
+            }
+
+            @Override
+            public void exportForce(ForceGeneratorForm force) {
+                SwingUtilities.invokeLater(() -> GpuLobbyTools.this.exportForce(force));
+            }
+
+            @Override
+            public void confirm(String title, String text, Runnable yes) {
+                open(dialogs -> dialogs.confirm(title, text, yes));
+            }
+
+            @Override
+            public void message(String title, String text) {
+                GpuLobbyTools.this.message(title, text);
+            }
+
+            @Override
+            public void readout(Entity unit) {
                 SwingUtilities.invokeLater(() -> {
-                    if (!window.closing()) {
-                        SwingLobbyServices.of(gui()).forcesCommand(SwingLobbyServices.ForcesCommand.RANDOM_ARMY,
-                              null);
-                    }
+                    LobbyReadoutView.Dossier dossier = dossier(unit, client().getLocalPlayer().getCamouflage());
+                    open(dialogs -> dialogs.readoutOver(List.of(dossier)));
                 });
             }
 
@@ -463,7 +488,11 @@ final class GpuLobbyTools {
         FormationForm formation = new FormationForm(choice, new ArrayList<>(FormationType.getAllFormations()),
               RATGenerator.getInstance()::loadYear);
         formation.unitType(table.unitType());
-        return new LobbyRandomArmyView.Factions(table, formation);
+        ForceGeneratorForm force = new ForceGeneratorForm(year);
+        if (!faction.isBlank()) {
+            force.faction(faction);
+        }
+        return new LobbyRandomArmyView.Factions(table, formation, force);
     }
 
     /** Remembers the faction, command, rating and unit type for the next time, as the Swing generator does. */
@@ -486,11 +515,7 @@ final class GpuLobbyTools {
         Client client = client();
         Player local = client.getLocalPlayer();
         String chosenName = army.playerName();
-        Player owner = client.getGame().getPlayersList().stream()
-              .filter(player -> player.getName().equals(chosenName)).findFirst().orElse(local);
-        if (!UnitRecipients.mayAddUnitsTo(local, owner, gui().getLocalBots().keySet())) {
-            owner = local;
-        }
+        Player owner = armyOwner(chosenName);
         Client skillsClient = (chosenName != null && gui().getLocalBots().get(chosenName) instanceof Client bot)
               ? bot : client;
         ArrayList<Entity> entities = new ArrayList<>();
@@ -518,6 +543,105 @@ final class GpuLobbyTools {
               local, owner.getName(), entities.size()));
         recordContext(army.context(), owner);
         army.clear();
+    }
+
+    /** The player a random army is for: the one chosen, if the local player may add units for them, else themselves. */
+    private Player armyOwner(@Nullable String chosenName) {
+        Player local = client().getLocalPlayer();
+        Player owner = local;
+        for (Player player : client().getGame().getPlayersList()) {
+            if (player.getName().equals(chosenName)) {
+                owner = player;
+                break;
+            }
+        }
+        return UnitRecipients.mayAddUnitsTo(local, owner, gui().getLocalBots().keySet()) ? owner : local;
+    }
+
+    /**
+     * Rolls a force into the force generator's command, as the Swing generator does: described on the Swing thread
+     * from what the chosen player already fields, generated off it, folded in on it; {@code done} hears on the GPU
+     * thread whether it found units.
+     */
+    private void generateForce(ForceGeneratorForm force, @Nullable String chosenName, Consumer<Boolean> done) {
+        ForceDescriptor[] rolled = new ForceDescriptor[1];
+        GameOptions[] options = new GameOptions[1];
+        edt(() -> {
+            Player owner = armyOwner(chosenName);
+            List<Entity> owned = new ArrayList<>();
+            for (Entity entity : client().getGame().getEntitiesVector()) {
+                if (entity.getOwnerId() == owner.getId()) {
+                    owned.add(entity);
+                }
+            }
+            options[0] = client().getGame().getOptions();
+            rolled[0] = force.build(ExistingLift.of(owned));
+        }, () -> {
+            if (rolled[0] == null) {
+                done.accept(false);
+                return;
+            }
+            Thread worker = new Thread(() -> {
+                try {
+                    ForceGeneratorForm.process(rolled[0], options[0], (progress, message) -> { });
+                } catch (RuntimeException failure) {
+                    LOGGER.error(failure, "The force generator failed");
+                    rolled[0] = null;
+                }
+                boolean[] found = new boolean[1];
+                edt(() -> found[0] = rolled[0] != null && force.take(rolled[0]), () -> done.accept(found[0]));
+            }, "Force generator");
+            worker.setDaemon(true);
+            worker.start();
+        });
+    }
+
+    /**
+     * Adds the force generator's command, as far as it is included, for the chosen player, as the Swing generator's
+     * Okay does: its units wired and loaded into their carriers, then sent, then the command cleared.
+     */
+    private void addForce(ForceGeneratorForm force, RandomArmyForm army) {
+        List<Entity> units = force.included();
+        if (units.isEmpty()) {
+            return;
+        }
+        Client client = client();
+        Player owner = armyOwner(army.playerName());
+        force.wire(units);
+        for (Entity unit : units) {
+            unit.setOwner(owner);
+            if (!client.getGame().getPhase().isLounge()) {
+                unit.setDeployRound(client.getGame().getRoundCount() + 1);
+                unit.setGame(client.getGame());
+                unit.setDone(true);
+                unit.setUnloaded(true);
+            }
+        }
+        force.loadCarriers(units);
+        client.sendAddEntity(units);
+        client.sendServerChat(Player.PLAYER_NONE, Messages.getString("RandomArmyDialog.loadedUnitsChat",
+              client.getLocalPlayer(), owner.getName(), units.size()));
+        recordContext(force.context(), owner);
+        // Cleared last, the context being read from the command: left, its units could be sent a second time
+        force.clear();
+    }
+
+    /** Writes the force generator's command to a unit list the player chooses. */
+    private void exportForce(ForceGeneratorForm force) {
+        String title = Messages.getString("ForceGeneratorDialog.exportMUL.title");
+        if (force.included().isEmpty()) {
+            message(title, Messages.getString("ForceGeneratorDialog.exportMUL.empty"));
+            return;
+        }
+        window.files().exportForce(force.exportName(), file -> {
+            try {
+                force.export(file, client().getGame().getOptions());
+            } catch (IOException | RuntimeException failure) {
+                LOGGER.error(failure, "The force generator's command could not be exported");
+                message(title, Messages.getString("ForceGeneratorDialog.exportMUL.error") + "\n"
+                      + failure.getMessage());
+            }
+        });
     }
 
     /**

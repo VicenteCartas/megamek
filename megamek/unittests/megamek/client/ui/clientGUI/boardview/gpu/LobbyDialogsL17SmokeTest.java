@@ -147,11 +147,6 @@ class LobbyDialogsL17SmokeTest {
                 }
 
                 @Override
-                public void advanced() {
-                    said.add("advanced");
-                }
-
-                @Override
                 public void sprites(List<MekSummary> units) {
                 }
 
@@ -256,10 +251,6 @@ class LobbyDialogsL17SmokeTest {
                       }
 
                       @Override
-                      public void advanced() {
-                      }
-
-                      @Override
                       public void sprites(List<MekSummary> units) {
                       }
 
@@ -314,10 +305,16 @@ class LobbyDialogsL17SmokeTest {
             click(ui, find(ui, "army-mode-faction"));
             assertNotNull(find(ui, "army-loading"), "the pane says the factions load");
             assertTrue(((UiButton) find(ui, "army-roll")).isDisabled(), "nothing deals while they load");
+            // The force generator waits for them too, and nothing goes to the game meanwhile
+            click(ui, find(ui, "army-mode-force"));
+            assertEquals(LobbyRandomArmyView.Mode.FORCE, view.mode());
+            assertNotNull(find(ui, "army-loading"), "the force generator's pane says the factions load");
+            assertTrue(((UiButton) find(ui, "army-add")).isDisabled(), "no command, nothing to add");
+            assertNull(view.forcePane(), "the command shows once the generators have arrived");
             click(ui, find(ui, "army-mode-tables"));
             assertEquals(LobbyRandomArmyView.Mode.TABLES, view.mode());
             assertNotNull(find(ui, "army-browser"), "the tables come back");
-            assertEquals(List.of(0, 1, 3, 2), remembered, "each mode chosen is remembered as its Swing tab");
+            assertEquals(List.of(0, 1, 3, 5, 2), remembered, "each mode chosen is remembered as its Swing tab");
             dialogs.dispose();
         });
     }

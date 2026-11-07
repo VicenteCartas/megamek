@@ -37,8 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import java.util.List;
 import java.util.TreeSet;
 
+import megamek.client.ratgenerator.ForceComposition.RowKey;
 import megamek.client.ratgenerator.InfantryClass;
-import megamek.client.ui.dialogs.randomArmy.ForceGeneratorOptionsView.SummaryRowKey;
 import megamek.common.units.UnitType;
 import org.junit.jupiter.api.Test;
 
@@ -49,8 +49,8 @@ class ForceGeneratorSummaryRowKeyTest {
 
     @Test
     void infantryRowsAreLabelledByClass() {
-        SummaryRowKey jump = new SummaryRowKey(UnitType.INFANTRY, InfantryClass.JUMP);
-        SummaryRowKey unclassified = new SummaryRowKey(UnitType.INFANTRY, null);
+        RowKey jump = new RowKey(UnitType.INFANTRY, InfantryClass.JUMP);
+        RowKey unclassified = new RowKey(UnitType.INFANTRY, null);
 
         assertEquals(UnitType.getTypeDisplayableName(UnitType.INFANTRY) + " (" + InfantryClass.JUMP.getDisplayName()
               + ")", jump.label());
@@ -59,17 +59,17 @@ class ForceGeneratorSummaryRowKeyTest {
 
     @Test
     void rowsSortByUnitTypeThenClass() {
-        TreeSet<SummaryRowKey> rows = new TreeSet<>(List.of(
-              new SummaryRowKey(UnitType.INFANTRY, InfantryClass.JUMP),
-              new SummaryRowKey(UnitType.MEK, null),
-              new SummaryRowKey(UnitType.INFANTRY, InfantryClass.LIGHT),
-              new SummaryRowKey(UnitType.INFANTRY, null)));
+        TreeSet<RowKey> rows = new TreeSet<>(List.of(
+              new RowKey(UnitType.INFANTRY, InfantryClass.JUMP),
+              new RowKey(UnitType.MEK, null),
+              new RowKey(UnitType.INFANTRY, InfantryClass.LIGHT),
+              new RowKey(UnitType.INFANTRY, null)));
 
-        List<SummaryRowKey> expected = List.of(
-              new SummaryRowKey(UnitType.MEK, null),
-              new SummaryRowKey(UnitType.INFANTRY, null),
-              new SummaryRowKey(UnitType.INFANTRY, InfantryClass.LIGHT),
-              new SummaryRowKey(UnitType.INFANTRY, InfantryClass.JUMP));
+        List<RowKey> expected = List.of(
+              new RowKey(UnitType.MEK, null),
+              new RowKey(UnitType.INFANTRY, null),
+              new RowKey(UnitType.INFANTRY, InfantryClass.LIGHT),
+              new RowKey(UnitType.INFANTRY, InfantryClass.JUMP));
         assertEquals(expected, List.copyOf(rows));
     }
 }

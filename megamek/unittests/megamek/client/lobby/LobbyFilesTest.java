@@ -268,4 +268,22 @@ class LobbyFilesTest {
         files.exportSprite("Atlas AS7-D", written::add);
         assertEquals(1, written.size());
     }
+
+    @Test
+    void aGeneratedForceExportsAsAUnitListAndRemembersTheFolder() {
+        answer("lance");
+        List<File> written = new ArrayList<>();
+        files.exportForce("Davion Lance", written::add);
+        LobbyFiles.Ask ask = asked.get(0);
+        assertTrue(ask.save());
+        assertEquals(Messages.getString("ForceGeneratorDialog.exportMUL.title"), ask.title());
+        assertEquals("Davion Lance.mul", ask.name());
+        assertEquals(List.of("mul"), ask.extensions());
+        assertEquals(List.of(folder.resolve("lance.mul").toFile()), written, ".mul is added");
+        assertEquals(folder.toFile().getAbsoluteFile(), files.ask(LobbyFiles.Route.SAVE_UNIT_LIST, "Kai").directory(),
+              "the unit lists' folder is where the force went");
+        answer(null);
+        files.exportForce("Davion Lance", written::add);
+        assertEquals(1, written.size(), "a cancel writes nothing");
+    }
 }

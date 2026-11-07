@@ -1044,8 +1044,8 @@ work for Swing, and item 11 is under investigation.
        - The random army deals unit cards with their sprites from a random assignment table: Roll fills the hand to
          the unit count, each card can be kept, rerolled or discarded, the totals show BV and tonnage, and Add sends
          them to the chosen player as `RandomArmyDialog.commitChosenUnits` does. The generators beside the tables
-         are native too (see "Random army generators" below); only the Force Generator still opens the Swing
-         dialog. The tables load on a thread of their own; the lobby waits for them.
+         are native too (see "Random army generators" below), the Force Generator among them. The tables load on a
+         thread of their own; the lobby waits for them.
        - Random skills and random names are small cards over the lobby with the Swing dialogs' choices (client,
          method, type, level, force close; faction, female share, ethnicity), Save and Randomize.
        - Load list opens the system file dialog through L16's `SystemFileDialog`, and
@@ -1462,21 +1462,43 @@ work for Swing, and item 11 is under investigation.
          army's last tab so either opens on the same generator.
        - Every card and every unit row of the Faction table preview opens the unit's readout (summary, TRO, BV,
          cost) over the random army, as the Swing tables' View, View BV and View Cost did.
-       - Still Swing: the Force Generator, behind "Force generator…" in the footer, for a second phase.
+       - ~~Still Swing: the Force Generator~~ (phase 2, below).
        Checks: `ArmyGeneratorsTest`, `RandomArmyFormTest` (a dealer, a whole hand, counts of its own, the context)
        and the on-demand `LobbyDialogsL17SmokeTest.theRandomArmyGeneratorsDealByTheirChoices` (the remembered
-       mode, Battle Value's stepper and roll, the filter opened and closed, Balanced's roll, Faction's loading
-       state) and `theRandomArmyRollsKeepsAndAdds` (a card's readout, shown over the army).
+       mode, Battle Value's stepper and roll, the filter opened and closed, Balanced's roll, Faction's and Force's
+       loading state) and `theRandomArmyRollsKeepsAndAdds` (a card's readout, shown over the army).
        Live: `lobby+randomarmy+click=army-mode-battleValue`.
+     - ~~Random army Force Generator~~ (phase 2). A sixth mode tile, Force, rolls a whole command as its faction
+       would field it; the Swing "Force generator…" footer button is gone. The model is `ForceGeneratorForm` in
+       `megamek.client.lobby`, toolkit-free, and the edits and the summary it shares with the Swing generator are
+       `ForceEdits` and `ForceComposition` in `megamek.client.ratgenerator`, which the Swing generator now calls too:
+       - The left pane has the Swing generator's options: year, faction, command, unit type (or combined arms),
+         size, rating, option, experience, weight class or infantry class, roles, and the transport block
+         (detachments, DropShip, JumpShip, WarShip and cargo shares, carriers' fighters).
+       - In the hand's place (`LobbyForceGeneratorPane`): the command's organisation, faction, rating, units, BV
+         and tons; Generate, which rolls on the Swing thread and processes off it, as `GenerateTask` does, each roll
+         folded into the command by echelon (`ForceEdits.accumulate`); Export, a .mul through `LobbyFiles`'
+         `EXPORT_FORCE` route; the organisation as a searchable tree whose rows' eye leaves a branch out of the game
+         or brings it back.
+       - The chosen node's orders: its readout, Reroll ship, and change the formation to, or add a formation of,
+         the type picked in the formation mix (the Swing mix's sampled palette, used as a brush; each type's tip says
+         what it needs and how often the sample built it). An order that cannot run says why; a change that lands
+         as another type or finds no units says so after.
+       - The composition by unit type and weight class, as the Swing summary.
+       - Add sends the included units for the chosen player as the Swing generator's Okay does: wired (C3, force
+         strings), carried units loaded, the context noted, the command cleared.
+       Checks: `ForceGeneratorFormTest` (folding rolls by echelon, the formation template, the tree's children,
+       leaving out, the markup dropped), `LobbyFilesTest.aGeneratedForceExportsAsAUnitListAndRemembersTheFolder`,
+       `ForceGeneratorSummaryRowKeyTest`, and the smoke test's Force loading state. Live:
+       `lobby+randomarmy+click=army-mode-force`, then `army-force-generate`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:
        - Live checks: a real MekHQ game, a network reconnect, a password-protected game, and a second human
          player in a second MegaMek window. Already checked: saving and loading game options, a loadout and a
          unit list through the real system file dialog (L18), and a second human as the Game Master seat (a
          windowless client). Bot presets have no file to save.
-       - The last Swing dialogs the lobby opens, to move into libGDX:
-         - the random army's Force Generator, which still opens the Swing random army dialog (phase 2 of the
-           generators above).
+       - The last Swing dialogs the lobby opens, to move into libGDX: none from the random army, whose Force
+         Generator is native now.
          Add unit opens the native requisition; the window's Swing `ADD_UNIT` branch is no longer reached and can
          go.
        - The unit dialogs still in Swing, from the lobby and the board:

@@ -123,6 +123,11 @@ final class LobbyToolsProbe {
         }
         if (dialogs.randomArmyView() != null) {
             LobbyRandomArmyView view = dialogs.randomArmyView();
+            LobbyForceGeneratorPane force = view.forcePane();
+            if (view.mode() == LobbyRandomArmyView.Mode.FORCE && force != null) {
+                return "army force " + force.form().organization() + ", units " + force.form().allUnits().size()
+                      + ", included " + force.form().included().size() + (force.busy() ? " (busy)" : "");
+            }
             RandomArmyForm form = view.form();
             List<String> units = form.cards().stream()
                   .map(card -> card.unit().getName() + (card.kept() ? " (kept)" : "")).toList();

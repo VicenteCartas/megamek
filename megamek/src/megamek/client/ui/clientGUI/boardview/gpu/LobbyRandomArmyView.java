@@ -11,6 +11,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.ui.Cell;
 import com.badlogic.gdx.scenes.scene2d.ui.Container;
@@ -26,6 +27,7 @@ import jakarta.annotation.Nullable;
 import megamek.client.lobby.BalancedArmy;
 import megamek.client.lobby.BattleValueArmy;
 import megamek.client.lobby.FactionChoice;
+import megamek.client.lobby.ForceGeneratorForm;
 import megamek.client.lobby.FormationForm;
 import megamek.client.lobby.RandomArmyForm;
 import megamek.client.lobby.RatBrowser;
@@ -43,6 +45,7 @@ import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.common.loaders.MekSummary;
 import megamek.common.loaders.MekSummaryCache;
+import megamek.common.units.Entity;
 import megamek.common.units.UnitType;
 
 /**
@@ -54,7 +57,8 @@ import megamek.common.units.UnitType;
  * the hand, rerolling every card not kept; each card shows its unit's sprite, Battle Value and tonnage and can be kept,
  * rerolled or discarded, unless the generator deals a whole formation; the army's totals over the hand. Add to game
  * sends the hand. The Battle Value army and the balanced lance deal from units the unit filter finds, the Requisition
- * view's advanced search shown in the random army's place. Force generator opens the Swing generator. The rolls are a
+ * view's advanced search shown in the random army's place. The force generator rolls a whole command, organised as
+ * its faction would, into the hand's place ({@link LobbyForceGeneratorPane}). The rolls are a
  * {@link RandomArmyForm}'s, the browsing a {@link RatBrowser}'s.
  * <p>
  * GPU thread. The rolls and the adding run on the Swing thread through {@link Host#edt}.
@@ -64,7 +68,7 @@ final class LobbyRandomArmyView {
     record Generators(BattleValueArmy battleValue, BalancedArmy balanced) { }
 
     /** The generators built of the RAT Generator's data, which loads a while. */
-    record Factions(RatGeneratorForm table, FormationForm formation) { }
+    record Factions(RatGeneratorForm table, FormationForm formation, ForceGeneratorForm force) { }
 
     /** What the hand is dealt by, with the Swing random army's tab for it, whose last choice both remember. */
     enum Mode {
@@ -72,7 +76,8 @@ final class LobbyRandomArmyView {
         BATTLE_VALUE("military-tech", "battleValue", 0),
         BALANCED("balance", "balanced", 1),
         FACTION("flag", "faction", 3),
-        FORMATION("account-tree", "formation", 4);
+        FORMATION("account-tree", "formation", 4),
+        FORCE("layers", "force", 5);
 
         private final String icon;
         private final String key;
@@ -84,7 +89,7 @@ final class LobbyRandomArmyView {
             this.swingTab = swingTab;
         }
 
-        /** The mode the Swing random army's {@code tab} deals by; the tables for the force generator or none. */
+        /** The mode the Swing random army's {@code tab} deals by; the tables for none. */
         static Mode ofSwingTab(int tab) {
             for (Mode each : values()) {
                 if (each.swingTab == tab) {
@@ -108,7 +113,7 @@ final class LobbyRandomArmyView {
 
         /** Whether the generator is built of the RAT Generator's data. */
         boolean needsFactions() {
-            return this == FACTION || this == FORMATION;
+            return this == FACTION || this == FORMATION || this == FORCE;
         }
     }
 
@@ -120,8 +125,28 @@ final class LobbyRandomArmyView {
         /** Swing thread: adds the hand to the game for the chosen player. */
         void add(RandomArmyForm form);
 
-        /** Opens the Swing force generator. */
-        void advanced();
+        /**
+         * Rolls a force into {@code force}'s command: built on the Swing thread, generated off it, folded in on it;
+         * {@code done} hears on the GPU thread whether it found units.
+         */
+        default void generate(ForceGeneratorForm force, Consumer<Boolean> done) {
+            done.accept(false);
+        }
+
+        /** Swing thread: adds the force generator's command, as far as it is included, for the chosen player. */
+        default void addForce(ForceGeneratorForm force, RandomArmyForm form) { }
+
+        /** Writes the force generator's command to a unit list the player chooses. */
+        default void exportForce(ForceGeneratorForm force) { }
+
+        /** Asks {@code text}; {@code yes} runs on the GPU thread once the player agreed. */
+        default void confirm(String title, String text, Runnable yes) { }
+
+        /** Tells the player {@code text}. */
+        default void message(String title, String text) { }
+
+        /** Opens a generated unit's readout over the random army. */
+        default void readout(Entity unit) { }
 
         /** Asks for the sprites of {@code units}, which arrive through {@link #spriteArrived}. */
         void sprites(List<MekSummary> units);
@@ -197,6 +222,11 @@ final class LobbyRandomArmyView {
     private final Cell<Actor> countCell;
     private final Label totals;
     private final UiButton add;
+    private final Table deal;
+    private final Cell<Actor> dealCell;
+    private final float handWidth;
+    private @Nullable LobbyForceGeneratorPane forcePane;
+    private @Nullable ScrollPane forceScroll;
     private final UiButton roll;
     private final UiButton clear;
     private final List<Image> images = new ArrayList<>();
@@ -223,7 +253,7 @@ final class LobbyRandomArmyView {
         float gap = space("md");
         float paneGap = space("xl");
         float browserWidth = size("dialog.sm");
-        float handWidth = Math.max(size("control.lg") * 5, bodyWidth - browserWidth - paneGap);
+        handWidth = Math.max(size("control.lg") * 5, bodyWidth - browserWidth - paneGap);
         columns = Math.max(1, (int) ((handWidth + gap) / (size("control.lg") * 5 + gap)));
         cardWidth = (handWidth - gap * (columns - 1)) / columns;
         Table body = dialog.body();
@@ -306,7 +336,7 @@ final class LobbyRandomArmyView {
         leftPane.setName("army-pane");
         main.add(leftPane).width(browserWidth).height(tablesPanel.getPrefHeight()).top();
 
-        Table deal = new Table();
+        deal = new Table();
         deal.top().left().defaults().left().growX();
         rollingOn = kit.roleTypeLabel("overline", "", "text.secondary");
         rollingOn.setName("army-rolling-on");
@@ -349,7 +379,7 @@ final class LobbyRandomArmyView {
         deal.add(totals).padTop(space("lg")).row();
         hand.top().left();
         deal.add(hand).padTop(space("sm")).row();
-        main.add(deal).width(handWidth).top().padLeft(paneGap);
+        dealCell = main.add((Actor) deal).width(handWidth).top().padLeft(paneGap);
         bodyCell = body.add(main);
         body.row();
 
@@ -395,12 +425,12 @@ final class LobbyRandomArmyView {
             }
         });
 
-        dialog.tool(Messages.getString("Lobby.randomArmy.forceGenerator"), () -> {
-            close.run();
-            host.advanced();
-        }).setName("army-advanced");
         clear = dialog.secondary(Messages.getString("RandomArmyDialog.Clear"), () -> {
             if (busy) {
+                return;
+            }
+            if (mode == Mode.FORCE) {
+                clearForce();
                 return;
             }
             form.clear();
@@ -427,6 +457,7 @@ final class LobbyRandomArmyView {
             mode = next;
             form.dealer(dealer());
             countCell.setActor(form.dealer() == null || form.dealer().usesCount() ? countField : null);
+            showDeal();
             showPane();
             showChosen();
             rebuild();
@@ -441,7 +472,92 @@ final class LobbyRandomArmyView {
             case BALANCED -> generators.balanced();
             case FACTION -> factions == null ? LOADING : factions.table();
             case FORMATION -> factions == null ? LOADING : factions.formation();
+            // The force generator deals no hand: its command shows in the hand's place
+            case FORCE -> LOADING;
         };
+    }
+
+    /** Shows on the right the hand, or the force generator's command in its place, as tall as the left pane. */
+    private void showDeal() {
+        if (mode == Mode.FORCE && factions != null) {
+            if (forcePane == null) {
+                forcePane = forcePane(factions.force());
+                forceScroll = kit.scrollList(forcePane.actor(), true, false);
+                forceScroll.setScrollingDisabled(true, false);
+                forceScroll.setName("army-force-scroll");
+            }
+            dealCell.setActor(forceScroll).height(tablesPanel.getPrefHeight());
+            return;
+        }
+        dealCell.setActor(deal).minHeight(Value.minHeight).prefHeight(Value.prefHeight).maxHeight(Value.zero);
+    }
+
+    private LobbyForceGeneratorPane forcePane(ForceGeneratorForm force) {
+        Actor player = null;
+        if (form.players().size() > 1) {
+            UiSelect select = kit.tokenSelect(true, form.players().toArray(String[]::new));
+            select.setName("army-force-player");
+            select.select(form.player());
+            UiKit.onChange(select, () -> {
+                form.player(select.getSelectedIndex());
+                refresh();
+            });
+            player = kit.formField(strip("RandomArmyDialog.Player"), select);
+        }
+        return new LobbyForceGeneratorPane(kit, force, handWidth - space("lg"), player,
+              new LobbyForceGeneratorPane.Owner() {
+                  @Override
+                  public void edt(Runnable work, Runnable then) {
+                      host.edt(work, then);
+                  }
+
+                  @Override
+                  public void generate(ForceGeneratorForm form, Consumer<Boolean> done) {
+                      host.generate(form, done);
+                  }
+
+                  @Override
+                  public void confirm(String title, String text, Runnable yes) {
+                      host.confirm(title, text, yes);
+                  }
+
+                  @Override
+                  public void message(String title, String text) {
+                      host.message(title, text);
+                  }
+
+                  @Override
+                  public void readout(Entity unit) {
+                      host.readout(unit);
+                  }
+
+                  @Override
+                  public void export(ForceGeneratorForm form) {
+                      host.exportForce(form);
+                  }
+
+                  @Override
+                  public void busy(boolean next) {
+                      busy = next;
+                      leftPane.setTouchable(next ? Touchable.disabled : Touchable.enabled);
+                      refresh();
+                  }
+              });
+    }
+
+    /** Empties the force generator's command, on the Swing thread its edits run on. */
+    private void clearForce() {
+        if (factions == null || forcePane == null || forcePane.busy()) {
+            return;
+        }
+        ForceGeneratorForm force = factions.force();
+        busy = true;
+        refresh();
+        host.edt(force::clear, () -> {
+            busy = false;
+            forcePane.cleared();
+            refresh();
+        });
     }
 
     /** The faction table and formation generators have arrived: their modes deal by them now. */
@@ -468,6 +584,8 @@ final class LobbyRandomArmyView {
                   : panes.faction(factions.table());
             case FORMATION -> factions == null ? panes.loading("Lobby.randomArmy.mode.formation")
                   : panes.formation(factions.formation());
+            case FORCE -> factions == null ? panes.loading("Lobby.randomArmy.mode.force")
+                  : panes.force(factions.force());
             case TABLES -> throw new IllegalStateException();
         };
         Table panel = kit.plainPanel();
@@ -725,6 +843,7 @@ final class LobbyRandomArmyView {
                           UnitType.getTypeDisplayableName(formation.unitType()));
                 }
             }
+            case FORCE -> headline = factions == null ? Messages.getString("Lobby.randomArmy.loadingFactions") : "";
         }
         rollingOn.setText(title);
         chosen.setText(headline);
@@ -887,9 +1006,11 @@ final class LobbyRandomArmyView {
     private void refresh() {
         totals.setText(Messages.getString("Lobby.randomArmy.totals", form.cards().size(), form.battleValue(),
               format(form.tonnage())));
-        add.setDisabled(busy || form.cards().isEmpty() || form.playerName() == null);
+        boolean forcing = mode == Mode.FORCE;
+        boolean hasHand = forcing ? forcePane != null && forcePane.canAdd() : !form.cards().isEmpty();
+        add.setDisabled(busy || !hasHand || form.playerName() == null);
         roll.setDisabled(busy || !form.canRoll());
-        clear.setDisabled(busy);
+        clear.setDisabled(busy || (forcing && (forcePane == null || factions == null || factions.force().empty())));
         for (UiButton control : cardControls) {
             control.setDisabled(busy);
         }
@@ -908,7 +1029,20 @@ final class LobbyRandomArmyView {
     }
 
     private void confirm() {
-        if (busy || form.cards().isEmpty()) {
+        if (busy) {
+            return;
+        }
+        if (mode == Mode.FORCE) {
+            if (factions == null || forcePane == null || !forcePane.canAdd()) {
+                return;
+            }
+            ForceGeneratorForm force = factions.force();
+            busy = true;
+            refresh();
+            host.edt(() -> host.addForce(force, form), close);
+            return;
+        }
+        if (form.cards().isEmpty()) {
             return;
         }
         busy = true;
@@ -933,6 +1067,11 @@ final class LobbyRandomArmyView {
     /** Whether the faction table and formation generators have arrived. */
     boolean factionsReady() {
         return factions != null;
+    }
+
+    /** The force generator's command, once it has been shown. */
+    @Nullable LobbyForceGeneratorPane forcePane() {
+        return forcePane;
     }
 
     /** Whether the unit filter shows in the random army's place. */
