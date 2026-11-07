@@ -79,6 +79,38 @@ class SingleLaneEditorTest {
         assertEquals(Messages.getString("BoardEditor.rampNone"), session.snapshot().message(), "No ramp joins there");
     }
 
+    @Test void theTwoLaneHexChoosesWhichDirectionsMayTakeItsExit() {
+        var session = ramp();
+        inspect(session, J);
+        assertEquals(Integer.valueOf(1 | 8), session.snapshot().exitFrom().get(2), "Both directions by default");
+        send(session, Action.RAMP_FROM, "road:2", "0");
+        assertEquals("", session.snapshot().message());
+        assertEquals(Long.valueOf(1L << 6 * 2), HexAppearance.exitFrom(session.board().getHex(J).getAppearance(), "road"),
+              "Stored on J itself, for its exit across the south-east side");
+        assertNull(session.board().getHex(S1).getAppearance().get("road").exitFrom(), "Nothing on the ramp");
+        assertEquals(Integer.valueOf(1), session.snapshot().exitFrom().get(2));
+        assertEquals(Integer.valueOf(1 << 5), inbound(session, S1), "Its direction stays");
+        send(session, Action.RAMP_FROM, "road:2", "all");
+        assertNull(HexAppearance.exitFrom(session.board().getHex(J).getAppearance(), "road"), "All directions store none");
+        send(session, Action.UNDO, "", "");
+        assertEquals(Long.valueOf(1L << 6 * 2), HexAppearance.exitFrom(session.board().getHex(J).getAppearance(), "road"));
+        send(session, Action.RAMP_FROM, "road:2", "2");
+        assertEquals(Messages.getString("BoardEditor.rampFromApproach"), session.snapshot().message(), "Not one of J's approaches");
+        send(session, Action.RAMP, "road:2", "entrance");
+        send(session, Action.RAMP_FROM, "road:2", "0");
+        assertEquals(Messages.getString("BoardEditor.rampFromNone"), session.snapshot().message(), "An entrance has none");
+        send(session, Action.RAMP, "road:2", "exit");
+        assertEquals(Integer.valueOf(1), session.snapshot().exitFrom().get(2), "Turned back into an exit, it keeps its choice");
+        inspect(session, S2);
+        send(session, Action.LANE_DIRECTION, "road", "reverse");
+        send(session, Action.LANE_DIRECTION, "road", "reverse");
+        send(session, Action.BRUSH_VALUE, "lanes", "two");
+        stroke(session, J.translated(0), J, J.translated(3));
+        inspect(session, J);
+        assertEquals(Integer.valueOf(1), session.snapshot().exitFrom().get(2),
+              "Reversed and back, and the road through J painted again: still J's own choice");
+    }
+
     @Test void reversingFromAnyHexOfTheRunTurnsItAndItsJoin() {
         var session = ramp();
         inspect(session, S2);

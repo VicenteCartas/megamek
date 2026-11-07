@@ -320,15 +320,20 @@ public final class BoardFile {
                 Integer lanes = style.has("lanes") ? integer(style, "lanes", 0) : null;
                 if (lanes != null && lanes == 2) { lanes = null; }
                 Integer inbound = lanes != null && style.has("inbound") ? sides(style.get("inbound")) : null;
+                // A two-lane road's exits list the sides that may take each of them; a single lane has none.
+                Long exitFrom = lanes == null && style.has("exitFrom") ? exitApproaches(style.get("exitFrom")) : null;
+                if (exitFrom != null && exitFrom == 0) { exitFrom = null; }
                 // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
                 if (variant == null && asset == null && material == null && control == null && lanes == null
-                      && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) { return; }
+                      && exitFrom == null && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) {
+                    return;
+                }
                 HexAppearance value = new HexAppearance(variant, asset,
                       material, style.has("strength") ? number(style, "strength", 0) : null,
                       colours, rotation,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
                       style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style),
-                      padding <= 0 ? null : padding, lanes, inbound);
+                      padding <= 0 ? null : padding, lanes, inbound, exitFrom);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -476,11 +481,10 @@ public final class BoardFile {
                 if (value.beside() != null) { style.put("beside", value.beside()); }
                 if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
                 if (value.lanes() != null) { style.put("lanes", value.lanes()); }
-                if (value.inbound() != null) {
-                    ArrayNode inbound = style.putArray("inbound");
-                    for (int side = 0; side < 6; side++) {
-                        if ((value.inbound() & 1 << side) != 0) { inbound.add(SIDES.get(side)); }
-                    }
+                putSides(style, "inbound", value.inbound());
+                if (value.exitFrom() != null) {
+                    ObjectNode exits = style.putObject("exitFrom");
+                    for (int exit = 0; exit < 6; exit++) { putSides(exits, SIDES.get(exit), (int) (value.exitFrom() >>> 6 * exit & 63)); }
                 }
                 putColours(style, value.colours());
             });
@@ -584,6 +588,26 @@ public final class BoardFile {
     }
     /** Hex sides by name, in direction order, as a single lane's direction stores them. */
     private static final List<String> SIDES = List.of("n", "ne", "se", "s", "sw", "nw");
+
+    /** A side mask, when there is one, as a list of side names. */
+    private static void putSides(ObjectNode node, String key, Integer sides) {
+        if (sides == null || sides == 0) { return; }
+        ArrayNode names = node.putArray(key);
+        for (int side = 0; side < 6; side++) {
+            if ((sides & 1 << side) != 0) { names.add(SIDES.get(side)); }
+        }
+    }
+
+    /** Exit approaches by exit side name, each a list of side names, as bits {@code 6 * exit + side}. */
+    private static long exitApproaches(JsonNode value) {
+        require(value != null && value.isObject(), "Expected exit approaches by exit side");
+        long result = 0;
+        for (var exit : (Iterable<Map.Entry<String, JsonNode>>) value::fields) {
+            require(SIDES.contains(exit.getKey()), "Unknown side: " + exit.getKey());
+            result |= (long) sides(exit.getValue()) << 6 * SIDES.indexOf(exit.getKey());
+        }
+        return result;
+    }
 
     /** A list of side names as a side mask. */
     private static int sides(JsonNode value) {

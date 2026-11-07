@@ -1909,7 +1909,36 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
             row.setName("editor-ramp-" + side);
             ui.tip(row).getActor().setText(UiKit.text("BoardEditor.ramp.tooltip"));
             detail.add(row).growX().row();
+            if (!entrance) { exitFrom(side); }
         }
+    }
+
+    /**
+     * Under an exit (off-ramp) leaving the inspected two-lane road across {@code side}, which of the road's approaches may
+     * take it: each on its own, or all of them (both, for a road through).
+     */
+    private void exitFrom(int side) {
+        var road = snapshot.property("road");
+        int approaches = road == null ? 0 : road.exits() & 63 & ~snapshot.rampSides();
+        int fed = snapshot.exitFrom().get(side);
+        if (Integer.bitCount(approaches) < 2 || fed == 0) { return; }
+        String[] sides = UiKit.text("BoardEditor.sides").split(",");
+        String all = UiKit.text(Integer.bitCount(approaches) == 2 ? "BoardEditor.rampFromBoth" : "BoardEditor.rampFromAll");
+        List<Option> options = new ArrayList<>(List.of(new Option(all, "all")));
+        for (int from = 0; from < 6; from++) {
+            if ((approaches & 1 << from) != 0) {
+                options.add(new Option(UiKit.text("BoardEditor.rampFromSide", sides[from]), Integer.toString(from)));
+            }
+        }
+        String current = (fed & approaches) == approaches ? all : Integer.bitCount(fed) == 1
+              ? UiKit.text("BoardEditor.rampFromSide", sides[Integer.numberOfTrailingZeros(fed)])
+              : String.join(", ", java.util.stream.IntStream.range(0, 6).filter(from -> (fed & 1 << from) != 0)
+                    .mapToObj(from -> UiKit.text("BoardEditor.rampFromSide", sides[from])).toList());
+        Table row = choice(UiKit.text("BoardEditor.rampFrom"), current, options,
+              chosen -> send(Action.RAMP_FROM, "road:" + side, chosen));
+        row.setName("editor-ramp-from-" + side);
+        ui.tip(row).getActor().setText(UiKit.text("BoardEditor.rampFrom.tooltip"));
+        detail.add(row).growX().row();
     }
 
     private void wayRow(String terrain, boolean deck) {

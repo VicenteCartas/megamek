@@ -113,6 +113,11 @@ final class BoardRoad {
     private int single;
     /** Whether this hex's own road is a single lane, its hub as narrow as its lane. */
     private boolean narrow;
+    /**
+     * The turns this two-lane road closes, into its exits from the approaches that may not take them, as bit
+     * {@code 6 * a + b} for sides {@code a, b} both ways round (SingleLane#closedTurns): it reserves no turn between them.
+     */
+    private long closed;
     /** Of the single arms, those by which traffic enters this hex: a two-lane road's entrances (on-ramps). */
     private int inbound;
     /** Sides where this road meets one of the other family at its level, paved against loose (#meet). */
@@ -277,6 +282,7 @@ final class BoardRoad {
     static BoardRoad of(BoardScene scene, BoardScene.Tile tile) {
         Function<Coords, Node> nodes = at -> Node.of(scene.tile(at));
         int single = singleArms(scene, tile);
+        long closed = single == 0 || singleLane(tile) ? 0 : SingleLane.closedTurns(lanes(scene), tile.coords());
         var road = layout(tile.coords(), tile.roadExits(), tile.road(), direction -> {
             var neighbor = scene.tile(tile.coords().translated(direction));
             // A road meeting a deck joins the deck's road where it has that side; a clean side keeps the road's own kind.
@@ -286,7 +292,7 @@ final class BoardRoad {
             return neighbor != null && (neighbor.roadExits() & (1 << ((direction + 3) % 6))) != 0
                   ? neighbor.road() : Kind.NONE;
         }, bends(tile.coords(), nodes), true,
-              climbingTurn(tile.roadExits(), BoardRoadGrade.ramps(scene, tile)), single, singleLane(tile))
+              climbingTurn(tile.roadExits(), BoardRoadGrade.ramps(scene, tile)), single, singleLane(tile), closed)
               .flow(inbound(scene, tile, single)).circulate(nodes);
         if (tile.railExits() != 0) { road = road.solidHub(); }
         if (road.circle != null && road.circle.lanes == 2) {
@@ -361,6 +367,12 @@ final class BoardRoad {
                 var tile = scene.tile(at);
                 return tile == null ? null : HexAppearance.inbound(tile.appearance(), SingleLane.OWNER);
             }
+
+            @Override
+            public Long exitFrom(Coords at) {
+                var tile = scene.tile(at);
+                return tile == null ? null : HexAppearance.exitFrom(tile.appearance(), SingleLane.OWNER);
+            }
         };
     }
 
@@ -379,11 +391,31 @@ final class BoardRoad {
     /** Whether this hex's own road is a single lane. */
     boolean narrow() { return narrow; }
 
+    /** Whether traffic may not turn from side {@code from} into side {@code to}, or back (SingleLane#closedTurns). */
+    boolean closed(int from, int to) { return (closed & 1L << 6 * from + to) != 0; }
+
+    /** The turns closed ({@link #closed(int, int)}), as bit {@code 6 * from + to}. */
+    long closed() { return closed; }
+
+    /**
+     * Which way traffic from the approach across side {@code from} goes into the arm across side {@code to}: 1 for a left
+     * turn, across the oncoming lanes of right-hand traffic (sides number clockwise, so the next one or two sides round
+     * from the approach lie to its left), 0 for straight on, into the opposite side, and -1 for a right turn.
+     */
+    static int turn(int from, int to) {
+        int round = Math.floorMod(to - from, 6);
+        return round == 3 ? 0 : round < 3 ? 1 : -1;
+    }
+
+    /** Whether a turn from the approach across side {@code from} into the arm across side {@code to} is a left turn ({@link #turn}). */
+    static boolean leftTurn(int from, int to) { return turn(from, to) > 0; }
+
     /** Copies the single-lane state onto a road derived from this one. */
     private BoardRoad lanes(BoardRoad from) {
         single = from.single;
         narrow = from.narrow;
         inbound = from.inbound;
+        closed = from.closed;
         return this;
     }
 
@@ -738,7 +770,7 @@ final class BoardRoad {
         }
         BoardRoad hub = layout(coords, exits, Kind.PAVED,
               direction -> joins.stream().filter(join -> join.direction() == direction).map(Join::kind)
-                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false, single, narrow);
+                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false, single, narrow, closed);
         hub.inbound = inbound;
         hub.solidApproaches = solidApproaches;
         hub.apronExits = apronExits;
@@ -864,9 +896,10 @@ final class BoardRoad {
             if (way || Math.abs(next.getLevel() - hex.getLevel()) <= 2) { ramps |= 1 << d; }
         }
         // A single lane and a ramp's arm are cleared as wide as they are drawn (BoardFeatures#singleArms).
+        int single = BoardFeatures.singleArms(hex, coords, board, exits);
+        long closed = single == 0 || SingleLane.single(hex) ? 0 : SingleLane.closedTurns(hex, coords, board);
         return layout(coords, exits, Kind.PAVED, direction -> Kind.PAVED, bends(coords, nodes), true,
-              climbingTurn(exits, ramps), BoardFeatures.singleArms(hex, coords, board, exits), SingleLane.single(hex))
-              .circulate(nodes);
+              climbingTurn(exits, ramps), single, SingleLane.single(hex), closed).circulate(nodes);
     }
 
     /** A return turn that climbs runs straight in to the hex centre and out again, keeping both ramps long. */
@@ -966,21 +999,28 @@ final class BoardRoad {
     /** {@code radial} runs every exit straight to the centre, as a junction's arms do. */
     private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors,
           IntFunction<Vector2> bends, boolean circulation, boolean radial) {
-        return layout(coords, exits, kind, neighbors, bends, circulation, radial, 0, false);
+        return layout(coords, exits, kind, neighbors, bends, circulation, radial, 0, false, 0);
     }
 
     /** As {@link #layout(Coords, int, Kind, IntFunction)} with the {@link #single} arms of a road with lanes. */
     static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors, int single, boolean narrow) {
-        return layout(coords, exits, kind, neighbors, direction -> null, true, false, single, narrow);
+        return layout(coords, exits, kind, neighbors, single, narrow, 0);
+    }
+
+    /** As {@link #layout(Coords, int, Kind, IntFunction, int, boolean)}, reserving none of the {@code closed} turns. */
+    static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors, int single, boolean narrow,
+          long closed) {
+        return layout(coords, exits, kind, neighbors, direction -> null, true, false, single, narrow, closed);
     }
 
     /**
      * {@code single} arms are a single lane wide ({@link #SINGLE_HALF}) at their border, where both hexes agree on it; a
      * {@code narrow} (single-lane) road's hub is too, while a two-lane road's widens to its two lanes on the way in.
-     * Neither forms a roundabout.
+     * Neither forms a roundabout. A junction reserves no turn between a pair of its sides that traffic may not take
+     * ({@code closed}, SingleLane#closedTurns): an exit leaves it only towards the approaches that may take it.
      */
     private static BoardRoad layout(Coords coords, int exits, Kind kind, IntFunction<Kind> neighbors,
-          IntFunction<Vector2> bends, boolean circulation, boolean radial, int single, boolean narrow) {
+          IntFunction<Vector2> bends, boolean circulation, boolean radial, int single, boolean narrow, long closed) {
         single &= exits & 63;
         float hub = narrow ? SINGLE_HALF : kind.halfWidth;
         List<Point> ends = new ArrayList<>();
@@ -1109,6 +1149,7 @@ final class BoardRoad {
             // An exit-only bridge must also carry explicit rail layouts, not just the default junction pieces.
             for (int a = 0; a < ends.size(); a++) {
                 for (int b = a + 1; b < ends.size(); b++) {
+                    if ((closed & 1L << 6 * sides.get(a) + sides.get(b)) != 0) { continue; }
                     if (RailRoute.piece(sides.get(a), sides.get(b)) >= 3) {
                         paths.add(course(ends.get(a), ends.get(b)));
                     } else if (Math.floorMod(sides.get(a) - sides.get(b), 6) == 1
@@ -1137,6 +1178,7 @@ final class BoardRoad {
         var result = new BoardRoad(coords, paths, List.copyOf(ends), terminals, joins, circle);
         result.single = single;
         result.narrow = narrow;
+        result.closed = closed;
         return result;
     }
 
@@ -2661,6 +2703,14 @@ final class BoardRoad {
         return null;
     }
 
+    /** The plane where an arm of a junction meets the rest of it ({@link #conflictApproaches}); null for no such arm. */
+    StopApproach armFrame(int exits, int direction) {
+        for (var frame : conflictApproaches(exits)) {
+            if (frame.direction() == direction) { return frame; }
+        }
+        return null;
+    }
+
     /** An approach's actual fitted lane at this distance along the normal of its shared border. */
     private StopApproach approach(List<Point> path, int direction, float along) {
         Vector2 axis = border(direction).nor();
@@ -2758,6 +2808,78 @@ final class BoardRoad {
             }
         }
         result.intersect(footprint(-.4f));
+        return result;
+    }
+
+    /**
+     * Where a two-lane road restricts who may take an exit (SingleLane#feeds), arrows in each of its approaches' lanes
+     * before the junction, one branch for each way its traffic may go on ({@link #turn}): the two-lane road's other arms
+     * and the exits it may take, never an entrance. None where every approach may take its exits, as at any junction.
+     */
+    Area approachArrows(int exits) {
+        Area result = new Area();
+        int arms = exits & 63, outgoing = narrow ? 0 : single & ~inbound & arms;
+        if (circle != null || outgoing == 0 || closed == 0) { return result; }
+        int onward = arms & ~single | outgoing;
+        for (int from = 0; from < 6; from++) {
+            if ((arms & ~single & 1 << from) == 0) { continue; }
+            boolean left = false, ahead = false, right = false;
+            for (int to = 0; to < 6; to++) {
+                if (to == from || (onward & 1 << to) == 0 || closed(from, to)) { continue; }
+                switch (turn(from, to)) {
+                    case 1 -> left = true;
+                    case 0 -> ahead = true;
+                    default -> right = true;
+                }
+            }
+            var frame = armFrame(exits, from);
+            if (frame == null) { continue; }
+            // In the middle of the incoming lane, a little before the junction, pointing the way its traffic runs.
+            float lane = (frame.inner() + frame.outer()) / 2, back = ARROW / 2 + 2;
+            float x = frame.x() + frame.nx() * back - frame.ny() * lane, y = frame.y() + frame.ny() * back + frame.nx() * lane;
+            result.add(laneArrow(x, y, -frame.nx(), -frame.ny(), ahead, left, right));
+        }
+        result.intersect(footprint(-.4f));
+        return result;
+    }
+
+    /**
+     * A lane arrow centred at x, y along tx, ty: pointing on ahead, or its shaft ending at its middle where it may not go
+     * straight on, with a branch from there to the left, the right, or both.
+     */
+    private static Area laneArrow(float x, float y, float tx, float ty, boolean ahead, boolean left, boolean right) {
+        Area result;
+        if (ahead) {
+            result = arrow(List.of(new Point(x - tx * ARROW, y - ty * ARROW, 0), new Point(x + tx * ARROW, y + ty * ARROW, 0)),
+                  .5f, true);
+        } else {
+            Path2D.Float shaft = new Path2D.Float();
+            float lx = -ty, ly = tx, back = -ARROW / 2, end = ARROW_SHAFT;
+            shaft.moveTo(x + tx * back + lx * ARROW_SHAFT, y + ty * back + ly * ARROW_SHAFT);
+            shaft.lineTo(x + tx * end + lx * ARROW_SHAFT, y + ty * end + ly * ARROW_SHAFT);
+            shaft.lineTo(x + tx * end - lx * ARROW_SHAFT, y + ty * end - ly * ARROW_SHAFT);
+            shaft.lineTo(x + tx * back - lx * ARROW_SHAFT, y + ty * back - ly * ARROW_SHAFT);
+            shaft.closePath();
+            result = new Area(shaft);
+        }
+        for (int side : new int[] { 1, -1 }) {
+            if (side == 1 ? !left : !right) { continue; }
+            // Leaving the shaft at its middle at 45 degrees, to the left (anticlockwise) or the right, its head as the main one.
+            float bx = (tx - side * ty) * .7071f, by = (ty + side * tx) * .7071f;
+            float length = ARROW * .55f, head = ARROW_HEAD * .8f, half = ARROW_HALF * .9f;
+            float ex = x + bx * length, ey = y + by * length, lx = -by, ly = bx;
+            float nx = ex - bx * head, ny = ey - by * head;
+            Path2D.Float branch = new Path2D.Float();
+            branch.moveTo(x + lx * ARROW_SHAFT, y + ly * ARROW_SHAFT);
+            branch.lineTo(nx + lx * ARROW_SHAFT, ny + ly * ARROW_SHAFT);
+            branch.lineTo(nx + lx * half, ny + ly * half);
+            branch.lineTo(ex, ey);
+            branch.lineTo(nx - lx * half, ny - ly * half);
+            branch.lineTo(nx - lx * ARROW_SHAFT, ny - ly * ARROW_SHAFT);
+            branch.lineTo(x - lx * ARROW_SHAFT, y - ly * ARROW_SHAFT);
+            branch.closePath();
+            result.add(new Area(branch));
+        }
         return result;
     }
 
@@ -2960,7 +3082,27 @@ final class BoardRoad {
         road.solidApproaches = solidApproaches & through;
         road.apronExits = apronExits;
         road.concreteEntrances = concreteEntrances;
-        return road.markings(coords, through);
+        // Where traffic may not cross the oncoming lanes into an exit, a solid line keeps it from turning across them.
+        boolean noCrossing = false;
+        for (int exit = 0; exit < 6; exit++) {
+            if ((single & ~inbound & 1 << exit) == 0) { continue; }
+            for (int from = 0; from < 6; from++) {
+                noCrossing |= (through & 1 << from) != 0 && closed(from, exit) && leftTurn(from, exit);
+            }
+        }
+        if (!noCrossing) { return road.markings(coords, through); }
+        Area solid = new Area();
+        for (var points : road.paintPaths()) {
+            solid.add(new Area(new BasicStroke(.8f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_ROUND).createStrokedShape(linePath(points))));
+        }
+        // It stops short of a dirt or gravel road it runs on into, as the dashed line does (#markings).
+        for (Join join : road.joins) {
+            if (join.kind() == Kind.PAVED) { continue; }
+            End edge = join.edge();
+            solid.subtract(edge.band(-8, 128, edge.point.width + 1));
+        }
+        road.clipEnds(solid, -3);
+        return solid;
     }
 
     /** Restrained white circulation paint: an island edge, entry give-way markings, and a two-lane divider. */

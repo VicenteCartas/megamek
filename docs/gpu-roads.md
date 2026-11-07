@@ -243,13 +243,26 @@ bent) have no stop, an entrance gives way and an exit has nothing; with three tw
 priority as at a T. Where only ramps join it under Stops, the priority road's centre line runs on through the junction
 exactly as through a hex of its own, dashed (or solid round a bend), with no solid lead-in and no break at the ramp's
 mouth (`BoardRoad.priorityRoad`); under traffic lights, and at junctions of two-lane roads, dividers stop short of the
-junction as above. Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
+junction as above. An exit may be taken by every approach of the two-lane road (the default) or only by some (`exitFrom`,
+stored on the two-lane hex itself, per exit, so a single lane joining two junctions never carries one's choice to the
+other; `SingleLane.feeds`). The junction then closes the other turns (`SingleLane.closedTurns`): it reserves no
+turning envelope between those approaches and the exit, so the exit leaves the road with the allowed approaches' bend
+and a plain corner on the closed side. It paints an arrow in each approach's lane before the junction, with a branch
+for each way that approach may go on, its road's other arms and the exits it may take: straight on, left or right
+(`BoardRoad.turn`: the opposite side is straight on, the next two clockwise lie to the left), and no arrowhead straight
+on where it may not go that way (`BoardRoad.approachArrows`; none when every approach may). Where a closed turn would
+cross the oncoming lane (a left turn) the priority road's centre line is solid through the junction, stopping short of
+a dirt or gravel join as the dashed one does. Each closed approach gets a no-left-turn, no-right-turn or no-straight-
+ahead sign before the junction on its right (`no-left-turn-sign.glb`, `no-right-turn-sign.glb`,
+`no-straight-ahead-sign.glb`): the last where the exit runs straight on and the two-lane road bends away.
+
+Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
 mouth facing the junction, on the right of traffic heading out along the ramp: a no-entry sign at an entrance
 (`no-entry-sign.glb`, a red disc with a white bar: the ramp's traffic only comes towards the junction) and a one-way
 sign at an exit (`one-way-sign.glb`, a blue square with a white arrow ahead). It uses the junction's stop plane, or
 partway out along the arm of a narrowing two-exit hex (`BoardRoad.rampFrame`), keeps four pixels clear of the
 junction's own poles and of props placed in the hex, and walks out along the ramp when the mouth is crowded; a sign
-with no dry, level footing is left out. The three signs are derived from `stop-sign.glb` by mm-data's
+with no dry, level footing is left out. The six signs are derived from `stop-sign.glb` by mm-data's
 `tools/build_road_signs.py`, without Blender: each keeps the STOP sign's post, base plate and collar unchanged in both
 levels, and its plate is built as the STOP plate is (thickness, height, rim material, a textured face mapped the same
 way) with its own outline, sized from the octagon. Their face artwork is flat colour in the STOP face's red and
@@ -257,7 +270,9 @@ resolution, with the same light rim (`tools/board-models/road-*-face.png`).
 
 A lane count change rebuilds the edited hex's surroundings as a road kind change does (`GpuTerrain`, and the surface
 cache key's `singleLane`); a direction change rebuilds two hexes out, which covers a join's markings and a derived
-direction. The single lane is centred on the two-lane road's course, not offset to its right-hand lane, and a
+direction. The cache key holds each nearby single lane's derived direction, not just its stored one, and a single
+lane's edit recaptures the hexes two out (`BoardTiles.changed`), so reversing a run beyond an unstored fork reaches the
+junction on the fork's far side. The single lane is centred on the two-lane road's course, not offset to its right-hand lane, and a
 single lane on colony slabs is narrowed but, like any slab road, unpainted. `BoardRoadSingleLaneTest` covers widths and
 border agreement, arrows, markings, give-way and priority, the signs' assets, sides and facing, their clearance from
 signal poles, hex and scene agreement, loose roads and rails, the surface cache key and the sign models' two levels;

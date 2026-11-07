@@ -67,10 +67,15 @@ final class BoardTiles implements AutoCloseable {
         Rectangle area = new Rectangle(coords.getX() - 1, coords.getY() - 1, 3, 3);
         // A member can be remote from its owner. Losing its last reference changes the owner's prop fallback.
         if (board != null && board.contains(coords)) {
+            // A single lane's way reaches a fork or merge beside it, and through that a two-lane road's ramp signs.
+            int index = coords.getX() * board.getHeight() + coords.getY();
+            if (megamek.common.board.SingleLane.single(board.getHex(coords))
+                  || index < tiles.size() && BoardRoad.singleLane(tiles.get(index))) {
+                area = new Rectangle(coords.getX() - 2, coords.getY() - 2, 5, 5);
+            }
             board.getHex(coords).getDecorations().stream().filter(object -> megamek.common.board.BuildingVolumes.of(object.asset()).present())
                   .forEach(object -> dirtyBuildings.add(object.id()));
             var current = board.getHex(coords).getBuildingReference();
-            int index = coords.getX() * board.getHeight() + coords.getY();
             var previous = index < tiles.size() ? tiles.get(index).cover().reference() : null;
             for (var reference : new megamek.common.board.BuildingVolumes.Reference[] { current, previous }) {
                 if (reference != null) {

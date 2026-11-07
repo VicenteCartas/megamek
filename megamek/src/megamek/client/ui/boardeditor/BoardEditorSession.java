@@ -164,7 +164,13 @@ public final class BoardEditorSession {
          */
         RAMP,
         /** Reverses the direction of travel of the inspected hex's whole single-lane run (target "road"). One undo step. */
-        LANE_DIRECTION
+        LANE_DIRECTION,
+        /**
+         * Which of the inspected two-lane road's approaches may take the exit (off-ramp) leaving it across a side (target
+         * "road:" and the side): value "all", or one approach's side, 0 to 5, stored on that road
+         * ({@link HexAppearance#exitFrom}). One undo step.
+         */
+        RAMP_FROM
     }
     /** Text values are parsed and validated here, never by a view that also owns game state. */
     public record Command(Action action, String target, String value) {
@@ -227,7 +233,9 @@ public final class BoardEditorSession {
      * building's generated kit ({@link TilesetScenery#kitVariants}), empty where it has none. {@code rampSides}: the sides
      * of the selected two-lane road where a single-lane road joins it ({@link SingleLane#joined}), of which
      * {@code entranceSides} are its entrances (on-ramps) and the rest its exits (off-ramps); {@code laneRun}: the selected
-     * hex is on a single-lane run whose direction {@link Action#LANE_DIRECTION} reverses.
+     * hex is on a single-lane run whose direction {@link Action#LANE_DIRECTION} reverses; {@code exitFrom}, side by side,
+     * the selected two-lane road's approaches that may take the exit leaving it there ({@link SingleLane#feeds}), 0 where
+     * no exit leaves.
      */
     public record Snapshot(long revision, String title, boolean dirty, boolean canUndo, boolean canRedo,
           Tool tool, String component, String asset, int brush, Coords selected, int elevation, String theme,
@@ -236,7 +244,7 @@ public final class BoardEditorSession {
           List<Coords> movePreview, List<String> groups, Map<String, Integer> groupSizes, List<HexIssue> issues,
           List<Level> levels, List<String> tags, boolean roadsAutoExit, List<String> boardComponents, boolean drawsRoutes,
           int copies, List<String> kitVariants, boolean buildingConnected, BuildingVolumes.Reference buildingReference, int buildingInteriors,
-          boolean buildingProfileAvailable, int rampSides, int entranceSides, boolean laneRun) {
+          boolean buildingProfileAvailable, int rampSides, int entranceSides, boolean laneRun, List<Integer> exitFrom) {
         /** Whether the board is a Solaris arena: the tag {@link BoardClassifier#ARENA_TAG}. */
         public boolean arena() { return tags.contains(BoardClassifier.ARENA_TAG); }
         public Property property(String name) { return BoardEditorSession.property(properties, name); }
@@ -494,7 +502,15 @@ public final class BoardEditorSession {
               building == null ? 0 : BuildingInteriors.choice(building).ordinal(),
               TilesetScenery.buildingProfileAvailable(hex, selected, board()::getHex),
               hex == null || SingleLane.single(hex) ? 0 : SingleLane.joined(hex, selected, this::hexAt),
-              hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null);
+              hex == null ? 0 : entrances(hex), hex != null && SingleLane.run(this::hexAt, selected, -1) != null,
+              exitFrom(hex));
+    }
+
+    /** Side by side, the selected hex's approaches that may take the exit leaving it there; 0 where none leaves. */
+    private List<Integer> exitFrom(Hex hex) {
+        List<Integer> result = new ArrayList<>();
+        for (int side = 0; side < 6; side++) { result.add(hex == null ? 0 : SingleLane.feeds(hex, selected, side, this::hexAt)); }
+        return List.copyOf(result);
     }
 
     /** The hex at {@code at}, or null off the board, as the single-lane runs read the board. */
@@ -834,6 +850,7 @@ public final class BoardEditorSession {
                 case LANES -> edit(hex -> setLanes(hex, command.target(), command.value()));
                 case RAMP -> ramp(command.target(), command.value());
                 case LANE_DIRECTION -> reverseLane(command.target());
+                case RAMP_FROM -> rampFrom(command.target(), command.value());
                 case ASSET -> {
                     var design = blueprint.asset(command.value()); require(design != null, "Unknown object design");
                     paintTemplate = new Hex(0); sampledHex = null;
@@ -1615,6 +1632,8 @@ public final class BoardEditorSession {
                 boolean single = was != null && was.lanes() != null && old != null;
                 if (end && old != null || single && look != null && look.lanes() != null) { look = HexAppearance.keepLanes(look, was); }
                 else if (look != null && look.lanes() != null) { look = SingleLane.directed(look, back < 0 ? 0 : 1 << back); }
+                // A two-lane road painted on keeps which of its approaches may take its exits.
+                else if (old != null && was != null && was.exitFrom() != null) { look = HexAppearance.withExitFrom(look, was.exitFrom()); }
                 look = roadLanes(hex, "road", look, look);
                 // A single lane joins only the roads it is drawn to, not every road beside it (Hex#setExits).
                 if (look != null && look.lanes() != null) { hex.addTerrain(new Terrain(type, paintTemplate.terrainLevel(Terrains.ROAD), true, exits)); }
@@ -3106,12 +3125,12 @@ public final class BoardEditorSession {
     }
 
     /**
-     * The look a road edit leaves on {@code hex}'s {@code owner}: {@code look}, keeping the lanes and direction of
-     * {@code from} on a paved ground road; any other road, and every other owner, has none.
+     * The look a road edit leaves on {@code hex}'s {@code owner}: {@code look}, keeping the lanes, direction and exit
+     * approaches of {@code from} on a paved ground road; any other road, and every other owner, has none.
      */
     private static HexAppearance roadLanes(Hex hex, String owner, HexAppearance look, HexAppearance from) {
         if (owner.equals(SingleLane.OWNER) && SingleLane.paved(hex)) { return HexAppearance.keepLanes(look, from); }
-        return look == null || look.lanes() == null ? look : HexAppearance.withLanes(look, false, null);
+        return look == null || look.lanes() == null && look.exitFrom() == null ? look : HexAppearance.withLanes(look, false, null, null);
     }
 
     /** One run, one edit: the single-lane road across {@code target}'s side becomes the selected hex's entrance or exit. */
@@ -3127,6 +3146,37 @@ public final class BoardEditorSession {
         require(run != null, Messages.getString("BoardEditor.rampFork"));
         // The run starts across the shared border: traffic running along it leaves the selected hex, an exit.
         direct(run, value.equals("exit"));
+        if (!continuousEdit) { finishStroke(); }
+    }
+
+    /**
+     * One edit: which of the selected two-lane road's approaches may take the exit leaving it across {@code target}'s side
+     * ("all", or one approach's side), stored on that road, which drops what it stored for sides no ramp joins any longer.
+     */
+    private void rampFrom(String target, String value) {
+        require(selected != null, Messages.getString("BoardEditor.selectHexFirst"));
+        require(target.startsWith(SingleLane.OWNER + ":"), "Choose a ground road's side.");
+        int side = Integer.parseInt(target.substring(SingleLane.OWNER.length() + 1));
+        require(side >= 0 && side < 6, "A hex has six sides.");
+        Hex hex = board().getHex(selected);
+        require(SingleLane.feeds(hex, selected, side, this::hexAt) != 0, Messages.getString("BoardEditor.rampFromNone"));
+        int approaches = hex.getTerrain(Terrains.ROAD).getExits() & 63 & ~SingleLane.joined(hex, selected, this::hexAt);
+        int chosen = 0;
+        if (!value.equals("all")) {
+            int from = Integer.parseInt(value);
+            require(from >= 0 && from < 6 && (approaches & 1 << from) != 0, Messages.getString("BoardEditor.rampFromApproach"));
+            chosen = 1 << from;
+        }
+        // A ramp still joining keeps its choice, even while it is an entrance; a side no ramp joins any longer drops it.
+        Long stored = HexAppearance.exitFrom(hex.getAppearance(), SingleLane.OWNER);
+        int ramps = SingleLane.joined(hex, selected, this::hexAt);
+        long kept = 0;
+        for (int exit = 0; exit < 6; exit++) {
+            if (exit != side && stored != null && (ramps & 1 << exit) != 0) { kept |= stored & 63L << 6 * exit; }
+        }
+        long result = kept | (long) chosen << 6 * side;
+        change(selected, junction -> appearance(junction, SingleLane.OWNER,
+              HexAppearance.withExitFrom(junction.getAppearance().get(SingleLane.OWNER), result)));
         if (!continuousEdit) { finishStroke(); }
     }
 

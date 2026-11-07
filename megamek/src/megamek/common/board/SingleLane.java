@@ -43,6 +43,9 @@ public final class SingleLane {
 
         /** Its single lane's stored direction ({@link HexAppearance#inbound}); null where none is stored. */
         Integer stored(Coords at);
+
+        /** Its two-lane road's stored exit approaches ({@link HexAppearance#exitFrom}); null where none are stored. */
+        Long exitFrom(Coords at);
     }
 
     /** A board's hexes as the single-lane rules read them. */
@@ -61,6 +64,12 @@ public final class SingleLane {
             public Integer stored(Coords at) {
                 Hex hex = board.apply(at);
                 return hex == null ? null : HexAppearance.inbound(hex.getAppearance(), OWNER);
+            }
+
+            @Override
+            public Long exitFrom(Coords at) {
+                Hex hex = board.apply(at);
+                return hex == null ? null : HexAppearance.exitFrom(hex.getAppearance(), OWNER);
             }
         };
     }
@@ -153,6 +162,48 @@ public final class SingleLane {
 
     public static boolean entrance(Hex hex, Coords at, int side, Function<Coords, Hex> board) {
         return entrance(view(hex, at, board), at, side);
+    }
+
+    /**
+     * The sides of a two-lane hex whose traffic may take the exit (off-ramp) leaving it across {@code side}: of its
+     * approaches (its road's sides no single lane joins), those it stores for that exit ({@link HexAppearance#exitFrom}),
+     * or all of them where it stores none of them; 0 when no exit leaves there. The choice is the junction's own, so it
+     * never reaches another junction the same single lane joins.
+     */
+    public static int feeds(View board, Coords at, int side) {
+        Coords next = at.translated(side);
+        int back = (side + 3) % 6;
+        if (board.single(at) || (board.exits(at) & 1 << side) == 0 || !board.single(next)
+              || (board.exits(next) & 1 << back) == 0 || (inbound(board, next) & 1 << back) == 0) { return 0; }
+        int approaches = board.exits(at) & ~joined(board, at);
+        Long stored = board.exitFrom(at);
+        int chosen = stored == null ? 0 : (int) (stored >>> 6 * side) & approaches;
+        return chosen == 0 ? approaches : chosen;
+    }
+
+    public static int feeds(Hex hex, Coords at, int side, Function<Coords, Hex> board) {
+        return feeds(view(hex, at, board), at, side);
+    }
+
+    /**
+     * The turns a two-lane hex closes: for each exit (off-ramp) leaving it, the turns into it from its approaches that may
+     * not take it ({@link #feeds}), both ways round, as bit {@code 6 * a + b} for the pair of sides {@code a, b}.
+     */
+    public static long closedTurns(View board, Coords at) {
+        long result = 0;
+        int approaches = board.exits(at) & ~joined(board, at);
+        for (int exit = 0; exit < 6; exit++) {
+            int fed = feeds(board, at, exit);
+            if (fed == 0) { continue; }
+            for (int from = 0; from < 6; from++) {
+                if ((approaches & ~fed & 1 << from) != 0) { result |= 1L << 6 * exit + from | 1L << 6 * from + exit; }
+            }
+        }
+        return result;
+    }
+
+    public static long closedTurns(Hex hex, Coords at, Function<Coords, Hex> board) {
+        return closedTurns(view(hex, at, board), at);
     }
 
     /** The sides of this hex where a single-lane road joins it, connected both ways. */
@@ -292,16 +343,27 @@ public final class SingleLane {
         return BoardDecoration.flipSides(sides & 63, horizontal, vertical);
     }
 
-    /** A road appearance with its single lane's direction reflected as a board flip reflects its exits. */
+    /**
+     * A road appearance with its single lane's direction, or its two-lane road's exit approaches, reflected as a board
+     * flip reflects its exits.
+     */
     public static HexAppearance flip(HexAppearance look, boolean horizontal, boolean vertical) {
-        if (look == null || look.inbound() == null) { return look; }
-        return HexAppearance.withLanes(look, true, flipSides(look.inbound(), horizontal, vertical));
+        if (look == null || look.inbound() == null && look.exitFrom() == null) { return look; }
+        if (look.lanes() != null) { return HexAppearance.withLanes(look, true, flipSides(look.inbound(), horizontal, vertical)); }
+        long flipped = 0;
+        for (int exit = 0; exit < 6; exit++) {
+            int sides = (int) (look.exitFrom() >>> 6 * exit & 63);
+            if (sides == 0) { continue; }
+            int to = Integer.numberOfTrailingZeros(flipSides(1 << exit, horizontal, vertical));
+            flipped |= (long) flipSides(sides, horizontal, vertical) << 6 * to;
+        }
+        return HexAppearance.withExitFrom(look, flipped);
     }
 
     /** The appearance map with its road's single-lane direction flipped ({@link #flip}). */
     public static Map<String, HexAppearance> flip(Map<String, HexAppearance> appearance, boolean horizontal, boolean vertical) {
         HexAppearance road = appearance.get(OWNER);
-        if (road == null || road.inbound() == null) { return appearance; }
+        if (flip(road, horizontal, vertical) == road) { return appearance; }
         var result = new LinkedHashMap<>(appearance);
         result.put(OWNER, flip(road, horizontal, vertical));
         return result;

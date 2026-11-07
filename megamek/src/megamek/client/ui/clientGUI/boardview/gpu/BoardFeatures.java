@@ -642,9 +642,10 @@ final class BoardFeatures {
             var control = HexAppearance.trafficControl(hex.getAppearance(), owner, exits);
             int single = deck ? 0 : singleArms(hex, coords, board, exits);
             boolean narrow = !deck && SingleLane.single(hex);
+            long closed = single == 0 || narrow ? 0 : SingleLane.closedTurns(hex, coords, board);
             var road = BoardRoad.layout(coords, exits, kind,
-                  direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck), single, narrow)
-                  .control(control).flow(inbound(hex, coords, board, single));
+                  direction -> roadNeighbor(hex, board.apply(coords.translated(direction)), direction, deck), single, narrow,
+                  closed).control(control).flow(inbound(hex, coords, board, single));
             if (!deck) { road = road.circulate(at -> BoardRoad.Node.of(at.equals(coords) ? hex : board.apply(at), at, board)); }
             if (deck ? RailRoute.deckRail(hex) : RailRoute.groundSides(hex) != 0) { road = road.solidHub(); }
             var corridor = RailRoute.corridor(hex, coords, board, deck);
@@ -781,42 +782,62 @@ final class BoardFeatures {
         // A two-way hex's course bends through its borders as the scene draws it (BoardRoad#bends); a junction's arms
         // run straight in, as the controls' own layout has them.
         if (Integer.bitCount(exits) == 2) { road = BoardRoad.clearance(coords, hex, board).flow(road.inbound()); }
+        String prefix = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":road:";
         for (int direction = 0; direction < 6; direction++) {
             if ((road.single() & 1 << direction) == 0) { continue; }
             var frame = road.rampFrame(exits, direction);
             if (frame == null) { continue; }
             boolean entrance = (road.inbound() & 1 << direction) != 0;
-            String asset = entrance ? "scenery/road/no-entry-sign" : "scenery/road/one-way-sign";
-            float x = Float.NaN, y = Float.NaN;
-            search:
-            // From the mouth out along the ramp, past the junction's own poles where they crowd it.
-            for (float setback = 0; setback <= 10; setback += .5f) {
-                float offset = frame.outer() + .7f;
-                float px = frame.x() + frame.nx() * setback + frame.ny() * offset;
-                float py = frame.y() + frame.ny() * setback - frame.nx() * offset;
-                while (road.distance(px, py) < .5f && offset < frame.outer() + 6) {
-                    offset += .25f;
-                    px = frame.x() + frame.nx() * setback + frame.ny() * offset;
-                    py = frame.y() + frame.ny() * setback - frame.nx() * offset;
-                }
-                for (int step = 0; step <= 12; step++) {
-                    float across = offset + step * .125f;
-                    float cx = frame.x() + frame.nx() * setback + frame.ny() * across;
-                    float cy = frame.y() + frame.ny() * setback - frame.nx() * across;
-                    if (controlClearance(road, clearance, cx, cy) >= .5f && clearOfPoles(hex, result, cx, cy)
-                          && controlSupported(hex, coords, board, false, cx, cy)) {
-                        x = cx; y = cy;
-                        break search;
-                    }
+            // From the mouth out along the ramp, past the junction's own poles where they crowd it; model +Y is the sign's
+            // face: towards the junction, against the ramp's outward normal.
+            place(hex, coords, board, road, clearance, frame, 0, false, entrance ? "scenery/road/no-entry-sign"
+                  : "scenery/road/one-way-sign", prefix + "ramp:" + direction, result);
+            if (entrance) { continue; }
+            // An approach that may not take this exit is told so before the junction, on its right, facing it.
+            for (int from = 0; from < 6; from++) {
+                if ((exits & ~road.single() & 1 << from) == 0 || !road.closed(from, direction)) { continue; }
+                var approach = road.armFrame(exits, from);
+                if (approach == null) { continue; }
+                // A little upstream of the junction, clear of the poles at its mouth.
+                String sign = switch (BoardRoad.turn(from, direction)) {
+                    case 1 -> "scenery/road/no-left-turn-sign";
+                    case 0 -> "scenery/road/no-straight-ahead-sign";
+                    default -> "scenery/road/no-right-turn-sign";
+                };
+                place(hex, coords, board, road, clearance, approach, 3, true, sign, prefix + "turn:" + from + "-" + direction, result);
+            }
+        }
+    }
+
+    /**
+     * Stands a roadside sign by {@code frame}, from its plane out along its arm until it finds dry, level ground clear of
+     * the roads, the junction's poles and the hex's props: on the right of the arm's incoming traffic, facing it
+     * ({@code incoming}), or on the right of traffic heading out along it, facing the junction; {@code start} pixels out at
+     * least. Left out where none is.
+     */
+    private static void place(Hex hex, Coords coords, Function<Coords, Hex> board, BoardRoad road, List<BoardRoad> clearance,
+          BoardRoad.StopApproach frame, float start, boolean incoming, String asset, String id, List<BoardScene.Feature> result) {
+        float side = incoming ? 1 : -1;
+        for (float setback = start; setback <= start + 10; setback += .5f) {
+            float offset = frame.outer() + .7f;
+            while (road.distance(frame.x() + frame.nx() * setback - side * frame.ny() * offset,
+                  frame.y() + frame.ny() * setback + side * frame.nx() * offset) < .5f && offset < frame.outer() + 6) {
+                offset += .25f;
+            }
+            for (int step = 0; step <= 12; step++) {
+                float across = offset + step * .125f;
+                float x = frame.x() + frame.nx() * setback - side * frame.ny() * across;
+                float y = frame.y() + frame.ny() * setback + side * frame.nx() * across;
+                if (controlClearance(road, clearance, x, y) >= .5f && clearOfPoles(hex, result, x, y)
+                      && controlSupported(hex, coords, board, false, x, y)) {
+                    double rotation = incoming ? Math.toDegrees(Math.atan2(-frame.nx(), frame.ny()))
+                          : Math.toDegrees(Math.atan2(frame.nx(), -frame.ny()));
+                    result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
+                          x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
+                          BoardDecoration.Placement.on("ground", 0), 0, false)));
+                    return;
                 }
             }
-            if (Float.isNaN(x)) { continue; }
-            // Model +Y is the sign's face: towards the junction, against the ramp's outward normal.
-            double rotation = Math.toDegrees(Math.atan2(frame.nx(), -frame.ny()));
-            String id = TERRAIN_OWNED + coords.getX() + "_" + coords.getY() + ":road:ramp:" + direction;
-            result.add(feature(hex, new BoardDecoration(id, "prop", asset, null,
-                  x / BoardGeometry.TILE_WIDTH, y / BoardGeometry.TILE_HEIGHT, rotation, false, 1,
-                  BoardDecoration.Placement.on("ground", 0), 0, false)));
         }
     }
 

@@ -204,9 +204,9 @@ class SingleLaneTest {
     @Test
     void appearanceValidatesAndRoundTripsLanes() {
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, null, null, null, null, null, null,
-              null, null, null, 2, null), "Two lanes are the default, stored as none");
+              null, null, null, 2, null, null), "Two lanes are the default, stored as none");
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
-              null, null, null, null, null, 1), "A direction needs a single lane");
+              null, null, null, null, null, 1, null), "A direction needs a single lane");
         assertThrows(IllegalArgumentException.class, () -> HexAppearance.withLanes(null, true, 64));
         assertThrows(IllegalArgumentException.class, () -> HexAppearance.withLanes(null, true, 1).validateOwner("bridgeRoad"),
               "Bridge decks keep two lanes");
@@ -252,6 +252,78 @@ class SingleLaneTest {
         try (var stream = new java.io.ObjectInputStream(new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
             assertEquals(look, stream.readObject(), "Games send it over the network as it is");
         }
+    }
+
+    /** {@code hex} storing, for each exit leaving it, the approaches that may take it (bit {@code 6 * exit + side}). */
+    private static void takenFrom(Hex hex, long approaches) {
+        hex.setAppearance(Map.of("road", HexAppearance.withExitFrom(hex.getAppearance().get("road"), approaches)));
+    }
+
+    @Test
+    void anExitIsTakenByTheApproachesItsJunctionStoresElseByAll() {
+        var board = ramp(true);
+        assertEquals(1 | 8, SingleLane.feeds(board.get(J), J, 2, board::get), "Both directions of the road through J");
+        assertEquals(0, SingleLane.closedTurns(board.get(J), J, board::get));
+        takenFrom(board.get(J), 1L << 6 * 2);
+        assertEquals(1, SingleLane.feeds(board.get(J), J, 2, board::get), "Only traffic from the north");
+        long closed = SingleLane.closedTurns(board.get(J), J, board::get);
+        assertEquals(1L << 6 * 2 + 3 | 1L << 6 * 3 + 2, closed, "The turn between the south arm and the exit, both ways round");
+        assertEquals(0, SingleLane.feeds(board.get(J), J, 0, board::get), "No exit leaves north");
+        takenFrom(board.get(J), 1L << 6 * 4);
+        assertEquals(1 | 8, SingleLane.feeds(board.get(J), J, 2, board::get), "A choice for another side leaves this exit open");
+        var entrance = ramp(false);
+        takenFrom(entrance.get(J), 1L << 6 * 2);
+        assertEquals(0, SingleLane.feeds(entrance.get(J), J, 2, entrance::get), "An entrance is taken by nobody at J");
+        assertEquals(0, SingleLane.closedTurns(entrance.get(J), J, entrance::get), "Its stored approaches wait unused");
+        var asphalt = new HexAppearance(null, null, "asphalt", null);
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
+              null, null, null, null, 1, null, 1L), "A single lane has no approaches of its own");
+        assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
+              null, null, null, null, null, null, 1L << 36), "Six exits of six sides each");
+        assertNull(HexAppearance.withExitFrom(null, 0L), "None stored is no appearance");
+        assertEquals(Long.valueOf(4), HexAppearance.withExitFrom(null, 4L).exitFrom(), "They alone are an appearance");
+        assertEquals(Long.valueOf(4), HexAppearance.withTrafficControl(HexAppearance.withExitFrom(asphalt, 4L), null).exitFrom(),
+              "The road's other edits keep them");
+        assertNull(HexAppearance.withLanes(HexAppearance.withExitFrom(asphalt, 4L), true, null).exitFrom(), "A single lane drops them");
+        assertEquals(Long.valueOf(4), HexAppearance.keepLanes(asphalt, HexAppearance.withExitFrom(asphalt, 4L)).exitFrom());
+    }
+
+    @Test
+    void aJunctionsChoiceNeverReachesAnotherJunctionItsSingleLaneJoins() {
+        // Two parallel two-lane roads, Ja and Jb, linked by a one-hex single lane K; and, below it, both feeding a merge M.
+        Coords ja = new Coords(2, 4), k = ja.translated(2), jb = k.translated(1);
+        Map<Coords, Hex> board = new HashMap<>();
+        board.put(ja, road(1 | 8 | 4, false, null));
+        board.put(k, road(32 | 2, true, 32));
+        board.put(jb, road(1 | 8 | 16, false, null));
+        takenFrom(board.get(ja), 1L << 6 * 2);
+        assertEquals(1, SingleLane.feeds(board.get(ja), ja, 2, board::get), "K is Ja's exit, taken from the north");
+        assertEquals(0, SingleLane.feeds(board.get(jb), jb, 4, board::get), "And Jb's entrance");
+        board.put(k, road(32 | 2, true, 2));
+        assertEquals(0, SingleLane.feeds(board.get(ja), ja, 2, board::get), "Turned round, K is Ja's entrance");
+        assertEquals(1 | 8, SingleLane.feeds(board.get(jb), jb, 4, board::get), "And Jb's exit, open to both of Jb's directions");
+        assertEquals(0, SingleLane.closedTurns(board.get(jb), jb, board::get));
+        board.put(k, road(32 | 2 | 8, true, 32 | 2));
+        assertEquals(1, SingleLane.feeds(board.get(ja), ja, 2, board::get), "A merge both roads leave by keeps Ja's choice");
+        assertEquals(1 | 8, SingleLane.feeds(board.get(jb), jb, 4, board::get), "And Jb its own");
+    }
+
+    @Test
+    void exitApproachesRoundTripAndFlip() throws Exception {
+        Board board = Board.createEmptyBoard(1, 1);
+        Hex hex = new Hex(0, "road:1:15", "");
+        var look = HexAppearance.withExitFrom(new HexAppearance(null, null, "asphalt", null), 1L << 6 * 2 | 8L << 6 * 1);
+        hex.setAppearance(Map.of("road", look));
+        board.setHex(0, 0, hex);
+        var out = new java.io.ByteArrayOutputStream();
+        BoardFile.write(board, out);
+        String saved = out.toString(java.nio.charset.StandardCharsets.UTF_8).replaceAll("\\s", "");
+        assertTrue(saved.contains("\"exitFrom\":{\"ne\":[\"s\"],\"se\":[\"n\"]}"), saved);
+        assertEquals(hex.getAppearance(), BoardFile.readNative(saved).getHex(0, 0).getAppearance());
+        assertEquals(hex.getAppearance(), BoardFile.fromClipboard(BoardFile.clipboard(hex)).getAppearance());
+        BoardUtilities.flip(board, true, false);
+        assertEquals(Long.valueOf(1L << 6 * 4 | 8L << 6 * 5), HexAppearance.exitFrom(board.getHex(0, 0).getAppearance(), "road"),
+              "The exits north-east and south-east become north-west and south-west, their approaches turning with them");
     }
 
     @Test

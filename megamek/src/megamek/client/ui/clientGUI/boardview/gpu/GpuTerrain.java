@@ -2638,6 +2638,8 @@ final class GpuTerrain implements Disposable {
                           // A single lane's direction turns its own arrows and its neighbours' ramp markings.
                           || !Objects.equals(megamek.common.board.HexAppearance.inbound(before.appearance(), "road"),
                                 megamek.common.board.HexAppearance.inbound(tile.appearance(), "road"))
+                          || !Objects.equals(megamek.common.board.HexAppearance.exitFrom(before.appearance(), "road"),
+                                megamek.common.board.HexAppearance.exitFrom(tile.appearance(), "road"))
                           || !solidFeatures(before).equals(solidFeatures(tile)))) {
                         int reach = shore ? editReach(beforeScene, scene, at) : 2;
                         for (int x = at.getX() - reach; x <= at.getX() + reach; x++) {
