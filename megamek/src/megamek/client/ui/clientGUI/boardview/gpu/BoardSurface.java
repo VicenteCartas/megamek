@@ -2655,15 +2655,23 @@ final class BoardSurface {
         return result;
     }
 
-    /** The part of a polygon where {@code side} is at least zero, cut along where it is zero. */
-    private static List<Vector3> planeClip(List<Vector3> polygon, java.util.function.ToDoubleFunction<Vector3> side) {
+    /**
+     * The part of a polygon where {@code side} is at least zero, cut along where it is zero. A cut point takes the
+     * shading of the wall it was cut from.
+     */
+    private List<Vector3> planeClip(List<Vector3> polygon, java.util.function.ToDoubleFunction<Vector3> side) {
         List<Vector3> result = new ArrayList<>(polygon.size() + 1);
         if (polygon.isEmpty()) { return result; }
         Vector3 previous = polygon.getLast();
         double before = side.applyAsDouble(previous);
         for (Vector3 point : polygon) {
             double after = side.applyAsDouble(point);
-            if ((before >= 0) != (after >= 0)) { result.add(new Vector3(previous).lerp(point, (float) (before / (before - after)))); }
+            if ((before >= 0) != (after >= 0)) {
+                float t = (float) (before / (before - after));
+                Vector3 cut = new Vector3(previous).lerp(point, t);
+                relief.interpolateShade(previous, point, t, cut);
+                result.add(cut);
+            }
             if (after >= 0) { result.add(point); }
             previous = point;
             before = after;
