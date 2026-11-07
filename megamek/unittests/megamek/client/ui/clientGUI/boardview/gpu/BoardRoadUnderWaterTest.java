@@ -5,7 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
@@ -83,23 +86,28 @@ class BoardRoadUnderWaterTest {
         }
         board.setHex(AT, new Hex(-1, ROAD, ""));
         board.setHex(AT.translated(NORTH), deckAtTheSurface());
-        var scene = new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
-              List.of(), List.of(), -1, "", List.of());
-        var water = new BoardSurface(scene, scene.tile(AT.translated(NORTH)));
-        var road = new BoardSurface(scene, scene.tile(AT));
-        var from = BoardGeometry.center(AT, 0);
-        var to = BoardGeometry.center(AT.translated(NORTH), 0);
-        var direction = to.cpy().sub(from).nor();
-        var edge = from.cpy().lerp(to, .5f);
-        for (float in : new float[] { 4, 12 }) {
-            float x = edge.x + direction.x * in, y = edge.y + direction.y * in;
-            assertTrue(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, x, y, Float.NaN)),
-                  "No water under the ramp, " + in + " in from the edge");
+        var scene = scene(board);
+        var deck = AT.translated(NORTH);
+        var water = new BoardSurface(scene, scene.tile(deck));
+        int edge = -1;
+        for (int e = 0; e < 6; e++) {
+            if (deck.translated(BoardGeometry.edgeDirection(e)).equals(AT)) { edge = e; }
         }
-        assertEquals(-BoardGeometry.level(), BoardSurface.sampleHeight(road.groundFaces(), edge.x + direction.x * 4,
-              edge.y + direction.y * 4, Float.NaN), .1f * BoardGeometry.level(), "The low ground runs on past the edge");
-        assertFalse(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, to.x, to.y, Float.NaN)), "Water at the hex's centre");
+        var from = BoardGeometry.center(AT, 0);
+        var direction = BoardGeometry.center(deck, 0).sub(from).nor();
+        var hexEdge = from.cpy().add(direction.cpy().scl(BoardGeometry.height() / 2));
+        var rim = water.relief.outlinePoint(edge, .5f, 0);
+        float behind = new Vector3(rim).sub(hexEdge).dot(direction);
+        assertTrue(behind >= (1 - BoardRoadGrade.BRIDGE_START) * BoardGeometry.height() / 2, "The rim lies behind the ramp's high end: " + behind);
+        var top = rim.cpy().add(direction.cpy().scl(3 * BoardGeometry.hexScale()));
+        assertEquals(0, BoardSurface.sampleHeight(water.groundFaces(), top.x, top.y, Float.NaN), .15f * BoardGeometry.level(), "The riverside's top lies there");
+        assertTrue(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, top.x, top.y, Float.NaN)), "It carries no water");
         BoardRoadSlopeTest.assertClosed(scene, AT, TerrainLod.FULL);
+    }
+
+    private static BoardScene scene(Board board) {
+        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
+              List.of(), List.of(), -1, "", List.of());
     }
 
     /** A river along row 3, a level above the land round it, its deck at (3, 3) with these road exits, every road below the water. */
@@ -116,41 +124,157 @@ class BoardRoadUnderWaterTest {
             board.setHex(AT.translated(exit), new Hex(-1, "road:1:" + (1 << (exit + 3) % 6), ""));
         }
         board.setHex(AT, new Hex(0, "water:1;bridge:1:" + mask + ";bridge_cf:40;bridge_elev:0", ""));
-        return new BoardScene(0, board.getWidth(), board.getHeight(), BoardTiles.captureAll(board),
-              List.of(), List.of(), -1, "", List.of());
+        return scene(board);
     }
 
-    /** The corner three mutually adjacent hexes share. */
-    private static Vector3 corner(Coords a, Coords b, Coords c) {
-        return BoardGeometry.center(a, 0).add(BoardGeometry.center(b, 0)).add(BoardGeometry.center(c, 0)).scl(1 / 3f);
-    }
-
-    @Test
-    void aBankBetweenTwoExitsOfATurningDeckGivesWayAtTheirCorner() {
-        var scene = raisedRiver(SOUTH, 2);
-        var water = new BoardSurface(scene, scene.tile(AT));
-        var point = corner(AT, AT.translated(SOUTH), AT.translated(2)).lerp(BoardGeometry.center(AT, 0), .25f);
-        assertTrue(Float.isNaN(BoardSurface.sampleHeight(water.groundFaces(), point.x, point.y, Float.NaN)),
-              "The water's bank has left the corner between the ramps");
-        assertTrue(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, point.x, point.y, Float.NaN)), "No water there");
-        BoardRoadSlopeTest.assertClosed(scene, AT, TerrainLod.FULL);
-    }
-
-    @Test
-    void aBankBesideWaterOnBothSidesOfTheRoadRecedesThroughItsMouths() {
-        var scene = raisedRiver(NORTH);
-        var water = new BoardSurface(scene, scene.tile(AT));
-        var next = new BoardSurface(scene, scene.tile(AT.translated(1)));
-        var from = corner(AT, AT.translated(NORTH), AT.translated(1));
-        var to = corner(AT, AT.translated(1), AT.translated(2));
-        var dry = from.cpy().lerp(to, .25f);
-        for (var surface : List.of(water, next)) {
-            assertTrue(Float.isNaN(BoardSurface.sampleHeight(surface.waterFaces, dry.x, dry.y, Float.NaN)),
-                  "The mouth ends clear of the receded corner");
+    /** A road along column 3 at level 0: {@code west} columns 0 to 2 and {@code east} columns 4 on, with this terrain at these levels. */
+    private static BoardScene roadBeside(int westLevel, String west, int eastLevel, String east) {
+        var board = Board.createEmptyBoard(7, 7);
+        for (int x = 0; x < 7; x++) {
+            for (int y = 0; y < 7; y++) {
+                board.setHex(new Coords(x, y), x == 3 ? new Hex(0, ROAD, "") : x < 3 ? new Hex(westLevel, west, "") : new Hex(eastLevel, east, ""));
+            }
         }
-        var open = from.cpy().lerp(to, .7f).lerp(BoardGeometry.center(AT, 0), .05f);
-        assertFalse(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, open.x, open.y, Float.NaN)), "The mouth stays open");
-        BoardRoadSlopeTest.assertClosed(scene, AT.translated(NORTH), TerrainLod.FULL);
+        return scene(board);
+    }
+
+    /**
+     * {@link BoardRoadSlopeTest#assertClosed}, but for an edge with another face's edge running within a hundredth of a metre:
+     * two meshes meeting at slightly different points, a join rather than a gap.
+     */
+    private static void assertNoGaps(BoardScene scene, Coords at) {
+        Map<Coords, BoardSurface> surfaces = new HashMap<>();
+        for (var tile : scene.tiles()) {
+            if (at.distance(tile.coords()) <= 2) { surfaces.put(tile.coords(), new BoardSurface(scene, tile, TerrainLod.FULL)); }
+        }
+        List<BoardSurface.Face> faces = new ArrayList<>();
+        for (var surface : surfaces.values()) {
+            faces.addAll(surface.groundFaces());
+            faces.addAll(surface.walls(scene, BoardGeometry.floor(scene), surfaces));
+        }
+        float join = .05f * BoardGeometry.hexScale();
+        float reach = BoardGeometry.width();
+        BoardRoadSlopeTest.assertClosed(scene, at, TerrainLod.FULL, point -> faces.stream()
+              .filter(face -> Math.abs(face.a().x - point.x) < reach && Math.abs(face.a().y - point.y) < reach)
+              .filter(face -> toEdge(point, face.a(), face.b()) < join || toEdge(point, face.b(), face.c()) < join
+                    || toEdge(point, face.c(), face.a()) < join).count() < 2);
+    }
+
+    private static float toEdge(Vector3 point, Vector3 a, Vector3 b) {
+        var along = new Vector3(b).sub(a);
+        float t = along.len2() == 0 ? 0 : Math.clamp(new Vector3(point).sub(a).dot(along) / along.len2(), 0, 1);
+        return new Vector3(a).mulAdd(along, t).dst(point);
+    }
+
+    /** Whether every edge of this hex's outline runs forward along its edge, at its rim, mid-slope and foot: none folded over. */
+    private static void assertOutlineInOrder(BoardSurface surface) {
+        float level = surface.tile.elevation() * BoardGeometry.level(), scale = BoardGeometry.hexScale();
+        for (float z : new float[] { level, level - BoardGeometry.level() / 2, level - BoardGeometry.level() }) {
+            for (int e = 0; e < 6; e++) {
+                var from = surface.relief.outlinePoint(e, 0, z);
+                var along = surface.relief.outlinePoint(e, 1, z).sub(from).nor();
+                assertTrue(along.dot(BoardGeometry.corner(surface.tile.coords(), 0, e + 1).sub(BoardGeometry.corner(surface.tile.coords(), 0, e))) > 0,
+                      "Edge " + e + " has crossed over at " + z);
+                float last = 0;
+                for (float t = .05f; t <= 1; t += .05f) {
+                    float here = surface.relief.outlinePoint(e, t, z).sub(from).dot(along);
+                    assertTrue(here >= last - scale, "Edge " + e + " runs back at " + t + " at height " + z);
+                    last = here;
+                }
+            }
+        }
+    }
+
+    @Test
+    void aBankOverADeckRampRecedesInOrderAndKeepsItsRiverside() {
+        // A sharp turn, a wide turn with land between its exits, and a straight deck with water beside its low road's hex.
+        for (var exits : List.of(new int[] { SOUTH, 2 }, new int[] { 2, 4 }, new int[] { NORTH, SOUTH })) {
+            var scene = raisedRiver(exits);
+            var water = new BoardSurface(scene, scene.tile(AT));
+            assertOutlineInOrder(water);
+            var centre = BoardGeometry.center(AT, 0);
+            // The deck hides what lies toward its exits. On every other bank of its hex and of the river beside it, the
+            // riverside's top stands at the water's level just inside its rim, and carries no water.
+            for (var at : List.of(AT, AT.translated(1), AT.translated(5))) {
+                var surface = new BoardSurface(scene, scene.tile(at));
+                var middle = BoardGeometry.center(at, 0);
+                for (int e = 0; e < 6; e++) {
+                    var next = scene.tile(at.translated(BoardGeometry.edgeDirection(e)));
+                    if (next == null || next.liquid().present() || at.equals(AT) && next.wayExits() != 0) { continue; }
+                    for (float t : new float[] { .15f, .5f, .85f }) {
+                        var rim = surface.relief.outlinePoint(e, t, 0);
+                        var top = rim.cpy().add(middle.cpy().sub(rim).nor().scl(3 * BoardGeometry.hexScale()));
+                        assertEquals(0, BoardSurface.sampleHeight(surface.groundFaces(), top.x, top.y, Float.NaN), .25f * BoardGeometry.level(),
+                              "The riverside's top on edge " + e + " of " + at + " at " + t);
+                        assertTrue(Float.isNaN(BoardSurface.sampleHeight(surface.waterFaces, top.x, top.y, Float.NaN)),
+                              "No water on the bank, edge " + e + " of " + at + " at " + t);
+                    }
+                }
+            }
+            assertFalse(Float.isNaN(BoardSurface.sampleHeight(water.waterFaces, centre.x, centre.y, Float.NaN)), "Water under the deck");
+            assertNoGaps(scene, AT);
+        }
+    }
+
+    @Test
+    void aBankAboveARoadRecedesFromItAsADrySlopeDoes() {
+        var wet = roadBeside(1, "water:1", 0, "");
+        var dry = roadBeside(1, "", 0, "");
+        var at = new Coords(2, 3);
+        int edge = -1;
+        var surface = new BoardSurface(wet, wet.tile(at));
+        var land = new BoardSurface(dry, dry.tile(at));
+        var road = new Coords(3, 3);
+        for (int e = 0; e < 6; e++) {
+            if (at.translated(BoardGeometry.edgeDirection(e)).equals(road)) { edge = e; }
+        }
+        assertTrue(edge >= 0);
+        var from = BoardGeometry.center(road, 0);
+        float z = .25f * BoardGeometry.level();
+        // Near the corner, where the step comes closest to the road: both recede from it, neither is left where it stood.
+        for (float t : new float[] { .1f, .9f }) {
+            var bank = surface.relief.outlinePoint(edge, t, z);
+            var slope = land.relief.outlinePoint(edge, t, z);
+            float clear = (BoardRoad.SHOULDER - 1) * BoardGeometry.hexScale();
+            var way = BoardRoad.way(wet, wet.tile(road));
+            float scale = BoardGeometry.hexScale();
+            assertTrue(way.distance((bank.x - from.x) / scale, (bank.y - from.y) / scale) * scale >= clear,
+                  "The water's bank stands clear of the road at " + t);
+            assertTrue(way.distance((slope.x - from.x) / scale, (slope.y - from.y) / scale) * scale >= clear, "As the dry slope does");
+        }
+        assertOutlineInOrder(surface);
+        BoardRoadSlopeTest.assertClosed(wet, road, TerrainLod.FULL);
+    }
+
+    @Test
+    void aRoadAboveWaterHasAFootingOutToItsVerge() {
+        var scene = roadBeside(0, "", -1, "water:1");
+        var road = new Coords(3, 3);
+        var surface = new BoardSurface(scene, scene.tile(road));
+        var way = BoardRoad.way(scene, scene.tile(road));
+        var centre = BoardGeometry.center(road, 0);
+        float scale = BoardGeometry.hexScale(), verge = (BoardRoad.SHOULDER + BoardRoadBank.VERGE - .5f) * scale;
+        for (int e = 0; e < 6; e++) {
+            if (!scene.tile(road.translated(BoardGeometry.edgeDirection(e))).liquid().present()) { continue; }
+            for (float t = .1f; t < 1; t += .1f) {
+                var rim = surface.relief.outlinePoint(e, t, 0);
+                assertTrue(way.distance((rim.x - centre.x) / scale, (rim.y - centre.y) / scale) * scale >= verge,
+                      "The road's rim on edge " + e + " at " + t + " stands out past its verge");
+            }
+        }
+        BoardRoadSlopeTest.assertClosed(scene, road, TerrainLod.FULL);
+    }
+
+    @Test
+    void aFloodedRoadsTintFollowsTheWaterAndStopsOnABank() {
+        var scene = raisedRiver(SOUTH);
+        var water = new BoardSurface(scene, scene.tile(AT));
+        var centre = BoardGeometry.center(AT, 0);
+        var road = BoardGeometry.center(AT.translated(SOUTH), 0);
+        assertFalse(water.overBank(centre.x, centre.y), "Under the deck lies water");
+        assertTrue(water.overBank(road.x, road.y), "The road's hex is no water's");
+        var edge = centre.cpy().lerp(road, .5f);
+        assertTrue(water.overBank(edge.x, edge.y), "Nor is the ramp past the receded bank");
     }
 
     @Test

@@ -178,6 +178,8 @@ final class BoardSurface {
     private static final float HUG = 1.5f;
     /** How far, in hex-scale units, a bank keeps the water in from its edge where no slope runs up from the water. */
     private static final float BEACH = 8;
+    /** Hex-scale units a riverside's width wanders either way along a bank over lower land. */
+    private static final float BANK_WANDER = 3;
     /** How far, in hex-scale units, pavement stops short of a separated side: half the ground showing between two slabs. */
     private static final float PAVEMENT_GAP = 6;
     /** How far, in hex-scale units, a pool swells out round the foot of a fall that pours into it. */
@@ -2029,7 +2031,7 @@ final class BoardSurface {
             // A separated side keeps no bank of its own: its land is the strip in the shore field, which stops short of a free end.
             BoardScene.Tile across = neighbor(scene, k);
             if (inset[k] > 0 && (across == null || !across.liquid().connects(tile.liquid()))) {
-                float width = relief.slope(k) || rise[k] != 0 ? inset[k] : relief.reach(k) + SHORE_BANK * scale;
+                float width = relief.slope(k) || rise[k] != 0 ? inset[k] : SHORE_BANK * scale;
                 Vector3 inward = new Vector3(b).sub(a).crs(Vector3.Z).nor().scl(-1);
                 banks.add(new Bank(a.x, a.y, inward.x, inward.y, width));
             }
@@ -2256,10 +2258,12 @@ final class BoardSurface {
      */
     private float mouthLimit(int k, boolean plunge) {
         float scale = BoardGeometry.hexScale(), reach = relief.cornerReach(k);
-        if (shoreCorners[k].equals(corners[k])) {
-            return Math.max((BEACH - (plunge ? PLUNGE_OPENING : MOUTH_OPENING)) * scale * 1.1547005f,
-                  reach + HUG * scale);
-        }
+        float opening = (BEACH - (plunge ? PLUNGE_OPENING : MOUTH_OPENING)) * scale * 1.1547005f;
+        // Past a bank a deck has moved, a riverside's width across the corner, so the shore runs out to the mouth's end
+        // without crossing the bank; elsewhere over lower land as at a corner that stays.
+        if (relief.bayAt(k)) { return reach + BEACH * scale * 1.1547005f; }
+        if (relief.overLand(k)) { return reach + opening; }
+        if (shoreCorners[k].equals(corners[k])) { return Math.max(opening, reach + HUG * scale); }
         return reach > 0 ? reach + HUG * scale : (SHORE_BANK + 1) * scale;
     }
 
@@ -2319,11 +2323,22 @@ final class BoardSurface {
         for (Bank bank : banks) {
             value = BoardRelief.smoothMin(value, bank.clearance(x, y), SHORE_ROUND * scale);
         }
-        for (int edge = 0; edge < 6; edge++) {
-            float past = relief.bayInset(edge, x, y);
-            if (!Float.isNaN(past)) { value = BoardRelief.smoothMin(value, past - SHORE_BANK * scale, SHORE_ROUND * scale); }
-        }
-        return value;
+        float bank = bankClearance(x, y);
+        return Float.isNaN(bank) ? value : BoardRelief.smoothMin(value, bank, SHORE_ROUND * scale);
+    }
+
+    /**
+     * How far past a riverside's width inside the rims of this water hex's banks over lower land a point lies, wherever
+     * roads have moved them; negative on the bank, {@code NaN} without such a bank.
+     */
+    private float bankClearance(float x, float y) {
+        float scale = BoardGeometry.hexScale();
+        return relief.insideRim(x, y) - BEACH * scale - BANK_WANDER * scale * BoardRelief.bankWander(x, y);
+    }
+
+    /** Whether a point of this water hex lies on its bank over lower land, where its water keeps away. */
+    boolean overBank(float x, float y) {
+        return !columns && bankClearance(x, y) < 0;
     }
 
     /** The board's shore field of this hex's liquid at (x, y): positive in it (see {@link BoardRelief#shore}). */
@@ -2636,7 +2651,7 @@ final class BoardSurface {
         List<Face> curtains = new ArrayList<>();
         pouredWalls.subList(pouredTop, pouredWalls.size()).clear();
         List<Face> result = new ArrayList<>(cut.clip(walls, relief, cutFaces(curtains), cutFaces(pouredWalls),
-              roadAround(), bank, natural(), false));
+              roadAround(), field, natural(), false));
         result.addAll(curtains);
         containmentWalls.clear();
         if (natural() && BoardRelief.tuning().containmentWalls()) {
