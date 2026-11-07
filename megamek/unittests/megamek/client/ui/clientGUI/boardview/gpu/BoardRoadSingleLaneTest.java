@@ -178,6 +178,23 @@ class BoardRoadSingleLaneTest {
         assertFalse(south, "It ends where the road narrows to one lane");
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = { true, false })
+    void thePriorityRoadKeepsItsDashedCentreLineThroughTheRampsJunction(boolean exit) {
+        var junction = of(scene(ramp(exit, null, 0)), J).markings(J, 13);
+        var straight = BoardRoad.layout(J, 9, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED).markings(J, 9);
+        int painted = 0, gaps = 0;
+        for (float y = -36; y <= 36; y += .1f) {
+            assertEquals(straight.contains(0, y), junction.contains(0, y), "As through any of its own hexes, at " + y);
+            if (junction.contains(0, y)) { painted++; } else { gaps++; }
+        }
+        assertTrue(painted > 0 && gaps > 0, "Dashed, not stopped or solid before the junction");
+        var lights = of(scene(ramp(exit, HexAppearance.TrafficControl.SIGNALS, 0)), J).markings(J, 13);
+        assertFalse(lights.contains(0, 0), "Under traffic lights its divider stops short of the junction, as at any junction");
+        var crossroads = of(scene(ramp(exit, null, 16)), J).markings(J, 13 | 16);
+        assertFalse(crossroads.contains(0, 0), "With a third two-lane arm it is a junction of two-lane roads");
+    }
+
     private static BoardScene.Feature sign(List<BoardScene.Feature> features, String asset) {
         var matches = features.stream().filter(feature -> feature.asset().equals("scenery/road/" + asset)).toList();
         assertEquals(1, matches.size(), asset + " in " + features.stream().map(BoardScene.Feature::asset).toList());

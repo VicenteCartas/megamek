@@ -240,15 +240,20 @@ wheel wear runs down the lane's centre; where it widens into two lanes, the axle
 
 At a two-lane junction the road keeps its priority: under Stops its two-lane arms (at most two of them, straight or
 bent) have no stop, an entrance gives way and an exit has nothing; with three two-lane arms the opposite pair keeps
-priority as at a T. Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
+priority as at a T. Where only ramps join it under Stops, the priority road's centre line runs on through the junction
+exactly as through a hex of its own, dashed (or solid round a bend), with no solid lead-in and no break at the ramp's
+mouth (`BoardRoad.priorityRoad`); under traffic lights, and at junctions of two-lane roads, dividers stop short of the
+junction as above. Where a single lane joins a two-lane road, `BoardFeatures.rampSigns` stands a sign at the ramp's
 mouth facing the junction, on the right of traffic heading out along the ramp: a no-entry sign at an entrance
 (`no-entry-sign.glb`, a red disc with a white bar: the ramp's traffic only comes towards the junction) and a one-way
 sign at an exit (`one-way-sign.glb`, a blue square with a white arrow ahead). It uses the junction's stop plane, or
 partway out along the arm of a narrowing two-exit hex (`BoardRoad.rampFrame`), keeps four pixels clear of the
 junction's own poles and of props placed in the hex, and walks out along the ramp when the mouth is crowded; a sign
-with no dry, level footing is left out. The three signs are built without Blender by mm-data's
-`tools/build_road_signs.py` on the STOP sign's conventions (2.8 units per metre, face +Y, base at Z=0, `-lod0` and
-`-lod1`); their faces are flat-coloured geometry, not artwork.
+with no dry, level footing is left out. The three signs are derived from `stop-sign.glb` by mm-data's
+`tools/build_road_signs.py`, without Blender: each keeps the STOP sign's post, base plate and collar unchanged in both
+levels, and its plate is built as the STOP plate is (thickness, height, rim material, a textured face mapped the same
+way) with its own outline, sized from the octagon. Their face artwork is flat colour in the STOP face's red and
+resolution, with the same light rim (`tools/board-models/road-*-face.png`).
 
 A lane count change rebuilds the edited hex's surroundings as a road kind change does (`GpuTerrain`, and the surface
 cache key's `singleLane`); a direction change rebuilds two hexes out, which covers a join's markings and a derived

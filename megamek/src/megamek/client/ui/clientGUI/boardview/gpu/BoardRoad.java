@@ -2852,11 +2852,19 @@ final class BoardRoad {
             if (join.kind() != Kind.PAVED) { markedExits &= ~(1 << join.direction()); }
         }
         var conflicts = conflictApproaches(exits);
+        // A two-lane road keeping its priority past the ramps that join it runs its centre line on through the junction,
+        // as through any hex of its own: nothing on it stops or turns across a give-way.
+        int through = junction ? priorityRoad(exits) : 0;
+        if (through != 0) {
+            area.add(priorityLine(coords, through));
+            int road = through;
+            conflicts = conflicts.stream().filter(stop -> (road & 1 << stop.direction()) == 0).toList();
+        }
         int remaining = exits;
         for (var points : paintPaths()) {
             int arm = Integer.lowestOneBit(remaining);
             remaining &= ~arm;
-            if (junction && ((markedExits & arm) == 0 || (single & arm) != 0)) { continue; }
+            if (junction && ((markedExits & arm) == 0 || ((single | through) & arm) != 0)) { continue; }
             Path2D.Float path = new Path2D.Float();
             path.moveTo(points.getFirst().x, points.getFirst().y);
             float along = 0;
@@ -2930,6 +2938,29 @@ final class BoardRoad {
         clipEnds(area, -3);
         area.subtract(medianAxis(MEDIAN_HALF + 1));
         return area;
+    }
+
+    /**
+     * The two arms of the two-lane road that keeps its priority through this junction (#stopApproaches): under stop
+     * controls, where only single-lane ramps join it and it has just these two two-lane arms; 0 otherwise, as at a
+     * junction of two-lane roads or under traffic lights, whose dividers stop short of the junction.
+     */
+    int priorityRoad(int exits) {
+        int arms = exits & ~apronExits & 63, wide = arms & ~single;
+        if (circle != null || narrow || control != HexAppearance.TrafficControl.STOPS || (arms & single) == 0
+              || Integer.bitCount(wide) != 2 || corridor.sides() != 0) { return 0; }
+        return wide;
+    }
+
+    /** The centre line of the priority road's two arms ({@link #priorityRoad}): that of a road with just those two exits. */
+    private Area priorityLine(Coords coords, int through) {
+        BoardRoad road = layout(coords, through, Kind.PAVED,
+              direction -> joins.stream().filter(join -> join.direction() == direction).map(Join::kind)
+                    .findFirst().orElse(Kind.PAVED), direction -> null, false, false);
+        road.solidApproaches = solidApproaches & through;
+        road.apronExits = apronExits;
+        road.concreteEntrances = concreteEntrances;
+        return road.markings(coords, through);
     }
 
     /** Restrained white circulation paint: an island edge, entry give-way markings, and a two-lane divider. */
