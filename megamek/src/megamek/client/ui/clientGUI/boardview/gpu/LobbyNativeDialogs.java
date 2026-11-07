@@ -267,8 +267,17 @@ final class LobbyNativeDialogs {
 
     /** Opens the dossiers of one or more units. */
     LobbyReadoutView readout(List<LobbyReadoutView.Dossier> dossiers) {
+        return readout(dossiers, false);
+    }
+
+    /** Opens the dossiers of one or more units over the dialog that shows, as a random army's unit. */
+    LobbyReadoutView readoutOver(List<LobbyReadoutView.Dossier> dossiers) {
+        return readout(dossiers, true);
+    }
+
+    private LobbyReadoutView readout(List<LobbyReadoutView.Dossier> dossiers, boolean over) {
         String title = dossiers.size() == 1 ? dossiers.get(0).name() : Messages.getString("Lobby.readout.title");
-        UiDialog dialog = begin(title, "dialog.lg", false, () -> {
+        UiDialog dialog = begin(title, "dialog.lg", over, () -> {
             readoutView.dispose();
             readoutView = null;
         });

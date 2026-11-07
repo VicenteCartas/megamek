@@ -162,6 +162,11 @@ class LobbyDialogsL17SmokeTest {
                 @Override
                 public void remember(FactionChoice factions, int unitType) {
                 }
+
+                @Override
+                public void readout(MekSummary unit) {
+                    said.add("readout " + unit.getName());
+                }
             });
             ui.draw();
             // The browser: a folder opens, a table is chosen, the back button goes up, a search finds across all
@@ -210,6 +215,18 @@ class LobbyDialogsL17SmokeTest {
             assertEquals(kept, form.cards().get(0).unit());
             click(ui, find(ui, "army-discard-1"));
             assertEquals(1, form.cards().size(), "Discard drops the card");
+            click(ui, find(ui, "army-readout-0"));
+            assertEquals(List.of("readout " + kept.getName()), said, "a card opens its unit's readout");
+            said.clear();
+            dialogs.readoutOver(List.of(new LobbyReadoutView.Dossier(kept.getName(), "", null,
+                  List.of(List.of(), List.of(), List.of(), List.of()))));
+            ui.draw();
+            assertNotNull(dialogs.readoutView(), "the readout shows");
+            assertNotNull(dialogs.randomArmyView(), "the random army stays under its readout");
+            dialogs.cancel();
+            ui.draw();
+            assertNull(dialogs.readoutView(), "closing the readout leaves the random army");
+            assertEquals(1, form.cards().size(), "the hand is still there");
             click(ui, find(ui, "army-add"));
             assertEquals(List.of("add 1"), said);
             dialogs.dispose();
@@ -224,6 +241,7 @@ class LobbyDialogsL17SmokeTest {
             form.count(2);
             RatBrowser browser = new RatBrowser(new RatBrowser.Folder("RATs", List.of(), List.of("Table")));
             int[] asked = {0};
+            List<Integer> remembered = new ArrayList<>();
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
             LobbyRandomArmyView view = dialogs.randomArmy(form, browser, generators(), key -> null,
                   new LobbyRandomArmyView.Host() {
@@ -253,9 +271,21 @@ class LobbyDialogsL17SmokeTest {
                       @Override
                       public void remember(FactionChoice factions, int unitType) {
                       }
+
+                      @Override
+                      public int lastTab() {
+                          return 0;
+                      }
+
+                      @Override
+                      public void lastTab(int tab) {
+                          remembered.add(tab);
+                      }
                   });
             ui.draw();
             assertEquals(1, asked[0], "the faction generators are asked for once");
+            assertEquals(LobbyRandomArmyView.Mode.BATTLE_VALUE, view.mode(),
+                  "the army opens on the generator last dealt by, the Swing random army's tab 0");
 
             // Battle Value: its own counts, so no unit count; the whole army within the budget
             click(ui, find(ui, "army-mode-battleValue"));
@@ -287,6 +317,7 @@ class LobbyDialogsL17SmokeTest {
             click(ui, find(ui, "army-mode-tables"));
             assertEquals(LobbyRandomArmyView.Mode.TABLES, view.mode());
             assertNotNull(find(ui, "army-browser"), "the tables come back");
+            assertEquals(List.of(0, 1, 3, 2), remembered, "each mode chosen is remembered as its Swing tab");
             dialogs.dispose();
         });
     }

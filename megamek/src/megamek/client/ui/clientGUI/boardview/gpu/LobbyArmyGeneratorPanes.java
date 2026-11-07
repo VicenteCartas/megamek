@@ -73,6 +73,9 @@ final class LobbyArmyGeneratorPanes {
         /** Puts a table's unit in the hand. */
         void take(MekSummary unit);
 
+        /** Opens {@code unit}'s readout over the random army. */
+        void readout(MekSummary unit);
+
         /** The unit filter the Battle Value army and the balanced lance deal from. */
         RequisitionAdvancedSearch criteria();
 
@@ -447,12 +450,18 @@ final class LobbyArmyGeneratorPanes {
         bv.setAlignment(Align.right);
         line.add(bv).width(size("control.lg")).padLeft(space("xs"));
         if (row.unit() != null) {
+            UiButton inspect = kit.button("button-quiet" + UiTheme.COMPACT, "info", null, null);
+            inspect.setName("army-rat-readout-" + index);
+            kit.tip(inspect, true).getActor().setText(Messages.getString("Lobby.randomArmy.readout"));
+            UiKit.onChange(inspect, () -> owner.readout(row.unit()));
+            line.add(inspect).padLeft(space("xs"));
             UiButton take = kit.button("button-quiet" + UiTheme.COMPACT, "add", null, null);
             take.setName("army-take-" + index);
             kit.tip(take, true).getActor().setText(Messages.getString("Lobby.randomArmy.take"));
             UiKit.onChange(take, () -> owner.take(row.unit()));
             line.add(take).padLeft(space("xs"));
         } else {
+            line.add().size(size("control.sm")).padLeft(space("xs"));
             line.add().size(size("control.sm")).padLeft(space("xs"));
         }
         return line;

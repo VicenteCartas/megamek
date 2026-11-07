@@ -1458,11 +1458,15 @@ work for Swing, and item 11 is under investigation.
          (`LobbyAdvancedSearchView`) as a filter, which swaps into the dialog's body with a match count.
        - The RAT Generator loads in the background; the Faction and Formation panes show it loading and Roll waits.
          A generator's faction, year and rating are noted with the dealt units (`GenerationContext`) and the last
-         faction and unit type are remembered for the next opening.
+         faction and unit type are remembered for the next opening, as is the mode, kept as the Swing random
+         army's last tab so either opens on the same generator.
+       - Every card and every unit row of the Faction table preview opens the unit's readout (summary, TRO, BV,
+         cost) over the random army, as the Swing tables' View, View BV and View Cost did.
        - Still Swing: the Force Generator, behind "Force generator…" in the footer, for a second phase.
        Checks: `ArmyGeneratorsTest`, `RandomArmyFormTest` (a dealer, a whole hand, counts of its own, the context)
-       and the on-demand `LobbyDialogsL17SmokeTest.theRandomArmyGeneratorsDealByTheirChoices` (Battle Value's
-       stepper and roll, the filter opened and closed, Balanced's roll, Faction's loading state).
+       and the on-demand `LobbyDialogsL17SmokeTest.theRandomArmyGeneratorsDealByTheirChoices` (the remembered
+       mode, Battle Value's stepper and roll, the filter opened and closed, Balanced's roll, Faction's loading
+       state) and `theRandomArmyRollsKeepsAndAdds` (a card's readout, shown over the army).
        Live: `lobby+randomarmy+click=army-mode-battleValue`.
      - The follow-up round after #34 (steps 0 and 0.5, L14–L18, review polish 1–3 and the random army browser
        above) is done. Still open, as the next lobby work:

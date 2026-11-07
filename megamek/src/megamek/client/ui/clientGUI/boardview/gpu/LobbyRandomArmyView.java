@@ -66,20 +66,36 @@ final class LobbyRandomArmyView {
     /** The generators built of the RAT Generator's data, which loads a while. */
     record Factions(RatGeneratorForm table, FormationForm formation) { }
 
-    /** What the hand is dealt by. */
+    /** What the hand is dealt by, with the Swing random army's tab for it, whose last choice both remember. */
     enum Mode {
-        TABLES("die", "tables"),
-        BATTLE_VALUE("military-tech", "battleValue"),
-        BALANCED("balance", "balanced"),
-        FACTION("flag", "faction"),
-        FORMATION("account-tree", "formation");
+        TABLES("die", "tables", 2),
+        BATTLE_VALUE("military-tech", "battleValue", 0),
+        BALANCED("balance", "balanced", 1),
+        FACTION("flag", "faction", 3),
+        FORMATION("account-tree", "formation", 4);
 
         private final String icon;
         private final String key;
+        private final int swingTab;
 
-        Mode(String icon, String key) {
+        Mode(String icon, String key, int swingTab) {
             this.icon = icon;
             this.key = key;
+            this.swingTab = swingTab;
+        }
+
+        /** The mode the Swing random army's {@code tab} deals by; the tables for the force generator or none. */
+        static Mode ofSwingTab(int tab) {
+            for (Mode each : values()) {
+                if (each.swingTab == tab) {
+                    return each;
+                }
+            }
+            return TABLES;
+        }
+
+        int swingTab() {
+            return swingTab;
         }
 
         String title() {
@@ -118,6 +134,17 @@ final class LobbyRandomArmyView {
 
         /** Swing thread: remembers the faction and unit type a hand is dealt for, for the next random army. */
         void remember(FactionChoice factions, int unitType);
+
+        /** The Swing random army's tab last dealt by, as its preference keeps it, or -1. */
+        default int lastTab() {
+            return -1;
+        }
+
+        /** Remembers the mode the hand is dealt by as the Swing random army's {@code tab}. */
+        default void lastTab(int tab) { }
+
+        /** Opens {@code unit}'s readout over the random army. */
+        default void readout(MekSummary unit) { }
     }
 
     /** Deals nothing while the RAT Generator loads. */
@@ -346,6 +373,11 @@ final class LobbyRandomArmyView {
             }
 
             @Override
+            public void readout(MekSummary unit) {
+                host.readout(unit);
+            }
+
+            @Override
             public RequisitionAdvancedSearch criteria() {
                 return criteria;
             }
@@ -380,7 +412,7 @@ final class LobbyRandomArmyView {
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("army-cancel");
         browser.locate(form.table());
         fillBrowser();
-        mode(Mode.TABLES);
+        mode(Mode.ofSwingTab(host.lastTab()));
         host.factions(this::factionsReady);
     }
 
@@ -389,6 +421,9 @@ final class LobbyRandomArmyView {
     /** Deals the hand by {@code next}: its tile lit, its pane on the left, its dealer the form's. */
     private void mode(Mode next) {
         if (!busy) {
+            if (next != mode) {
+                host.lastTab(next.swingTab());
+            }
             mode = next;
             form.dealer(dealer());
             countCell.setActor(form.dealer() == null || form.dealer().usesCount() ? countField : null);
@@ -824,6 +859,11 @@ final class LobbyRandomArmyView {
         } else {
             actions.add().expandX();
         }
+        UiButton inspect = kit.button("button-quiet-compact", "info", null, null);
+        inspect.setName("army-readout-" + index);
+        kit.tip(inspect, true).getActor().setText(Messages.getString("Lobby.randomArmy.readout"));
+        UiKit.onChange(inspect, () -> host.readout(unit));
+        actions.add(inspect).padLeft(space("xs"));
         UiButton discard = kit.button("button-quiet-compact", "close", null, null);
         discard.setName("army-discard-" + index);
         kit.tip(discard, true).getActor().setText(Messages.getString("Lobby.randomArmy.discard"));

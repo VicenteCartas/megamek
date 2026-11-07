@@ -58,12 +58,14 @@ import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
 import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.Team;
 import megamek.common.battlefieldSupport.BattlefieldSupportAsset;
 import megamek.common.enums.Gender;
 import megamek.common.force.Force;
 import megamek.common.game.Game;
+import megamek.common.icons.Camouflage;
 import megamek.common.loaders.EntityLoadingException;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.loaders.MekSummary;
@@ -340,6 +342,8 @@ final class GpuLobbyTools {
               });
         RatBrowser browser = new RatBrowser(RatBrowser.of(generator.getRatTree()));
         int year = client().getGame().getOptions().intOption(OptionsConstants.ALLOWED_YEAR);
+        int lastTab = MathUtility.parseInt(
+              GUIPreferences.getInstance().getRandomArmySetting(GUIPreferences.RND_ARMY_LAST_TAB), -1);
         LobbyRandomArmyView.Generators generators = new LobbyRandomArmyView.Generators(
               new BattleValueArmy(MekSummaryCache.getInstance()::getAllMeks, year),
               new BalancedArmy(MekSummaryCache.getInstance()::getAllMeks));
@@ -380,6 +384,22 @@ final class GpuLobbyTools {
             @Override
             public void remember(FactionChoice factions, int unitType) {
                 rememberFaction(factions, unitType);
+            }
+
+            @Override
+            public int lastTab() {
+                return lastTab;
+            }
+
+            @Override
+            public void lastTab(int tab) {
+                SwingUtilities.invokeLater(() -> GUIPreferences.getInstance()
+                      .setRandomArmySetting(GUIPreferences.RND_ARMY_LAST_TAB, String.valueOf(tab)));
+            }
+
+            @Override
+            public void readout(MekSummary unit) {
+                SwingUtilities.invokeLater(() -> armyReadout(unit));
             }
         };
         open(dialogs -> dialogs.randomArmy(form, browser, generators, key -> {
@@ -633,11 +653,31 @@ final class GpuLobbyTools {
         open(dialogs -> dialogs.readout(dossiers).page(page));
     }
 
+    /** Swing thread: reads a random army unit's file and opens its dossier over the random army. */
+    private void armyReadout(MekSummary unit) {
+        Entity entity;
+        try {
+            entity = new MekFileParser(unit.getSourceFile(), unit.getEntryName()).getEntity();
+        } catch (EntityLoadingException failure) {
+            LOGGER.error(failure, "Unable to load the unit {}: {}", unit.getSourceFile(), unit.getEntryName());
+            message(Messages.getString("Lobby.randomArmy.title"), Messages.getString("ClientGUI.errorLoadingFile"));
+            return;
+        }
+        LobbyReadoutView.Dossier dossier = dossier(entity, client().getLocalPlayer().getCamouflage());
+        open(dialogs -> dialogs.readoutOver(List.of(dossier)));
+    }
+
     private LobbyReadoutView.Dossier dossier(Entity unit) {
-        BufferedImage sprite = GpuLobbyWindow.sprite(unit, unit.getCamouflageOrElseOwners());
+        return dossier(unit, unit.getCamouflageOrElseOwners());
+    }
+
+    private LobbyReadoutView.Dossier dossier(Entity unit, Camouflage camouflage) {
+        BufferedImage sprite = GpuLobbyWindow.sprite(unit, camouflage);
         Player owner = unit.getOwner();
-        String line = Messages.getString("Lobby.readout.line", unit.calculateBattleValue(),
-              format(unit.getWeight()), owner == null ? "" : owner.getName());
+        String line = owner == null
+              ? Messages.getString("Lobby.readout.lineUnowned", unit.calculateBattleValue(), format(unit.getWeight()))
+              : Messages.getString("Lobby.readout.line", unit.calculateBattleValue(), format(unit.getWeight()),
+                    owner.getName());
         List<List<EntityReadout.Row>> pages = List.of(RequisitionReadout.summary(unit), RequisitionReadout.tro(unit),
               rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)));
         return new LobbyReadoutView.Dossier(unit.getShortName(), line, sprite, pages);
