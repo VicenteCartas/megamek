@@ -667,8 +667,8 @@ final class GpuLobbyTools {
 
     /**
      * Rolls a force into the force generator's command, as the Swing generator does: described on the Swing thread
-     * from what the chosen player already fields, generated off it, folded in on it; {@code done} hears on the GPU
-     * thread whether it found units.
+     * from what the chosen player already fields and the command's ships have spare, generated off it, folded in on
+     * it; {@code done} hears on the GPU thread whether it found units.
      */
     private void generateForce(ForceGeneratorForm force, @Nullable String chosenName, Consumer<Boolean> done) {
         ForceDescriptor[] rolled = new ForceDescriptor[1];
@@ -682,7 +682,7 @@ final class GpuLobbyTools {
                 }
             }
             options[0] = client().getGame().getOptions();
-            rolled[0] = force.build(ExistingLift.of(owned));
+            rolled[0] = force.build(ExistingLift.of(owned).plus(force.commandLift()));
         }, () -> {
             if (rolled[0] == null) {
                 done.accept(false);
