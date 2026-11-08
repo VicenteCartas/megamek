@@ -27,6 +27,10 @@ import megamek.common.units.Terrains;
  * <p>The hex the brush was opened on is painted at once with what it already holds, and follows the brush until the
  * Game Master paints a hex themselves, so changing just that hex needs no click on the map. Structures are not painted
  * here: a building is built on the ground and taken down by the building card, through the collapse rules.</p>
+ *
+ * <p>Swing thread only: the brush reads the board and the units on it through its {@link Host}, which the client's
+ * network updates change on the Swing thread. It is made, changed and asked there; a view drawing it on another thread
+ * draws an immutable {@link View} of it instead.</p>
  */
 public final class HexBrush {
     /** The brush's first terrain choice: nothing, which strips a hex to bare ground. */
@@ -43,7 +47,7 @@ public final class HexBrush {
     public static final int LOWEST_GROUND = -30;
     public static final int HIGHEST_GROUND = 30;
 
-    /** How the brush reaches the board and the server. */
+    /** How the brush reaches the board and the server, on the Swing thread. */
     public interface Host {
         /** @return the hex at {@code coords} on the edited board, or null off it */
         @Nullable Hex hex(Coords coords);
@@ -55,6 +59,36 @@ public final class HexBrush {
 
         /** Marks the painted hexes on the board, replacing the previous marks. */
         void showMarks(Collection<Coords> painted);
+    }
+
+    /**
+     * Everything a view shows of the brush at one moment, read from the board on the Swing thread, so that it may be
+     * drawn on any thread.
+     *
+     * @param terrainIndex   the chosen terrain's index in {@link #terrainNames()}
+     * @param levelNames     the terrain's levels, empty for bare ground
+     * @param levelIndex     the chosen level's index in {@code levelNames}, or -1 for bare ground
+     * @param factorEnabled  whether the terrain has a factor to set
+     * @param bookFactorText what the rules give the terrain when new, or null for bare ground
+     * @param paintedEntries each painted hex and what it will hold, in words, in the order painted
+     * @param groundText     where the ground and any water surface and bottom end up
+     * @param mayApply       whether the edit may be applied
+     * @param mayUndo        whether the edit just applied may be taken back
+     * @param legality       whether the edit is legal, or what is wrong with it, or that it was applied
+     */
+    public record View(int terrainIndex, List<String> levelNames, int levelIndex, boolean factorEnabled, int factor,
+          int factorMax, @Nullable String bookFactorText, boolean changeGround, int ground, boolean sevenHexes,
+          boolean erasing, List<String> paintedEntries, String groundText, boolean mayApply, boolean mayUndo,
+          String legality) {
+        public View {
+            levelNames = List.copyOf(levelNames);
+            paintedEntries = List.copyOf(paintedEntries);
+        }
+
+        /** @return whether any hex is painted */
+        public boolean anyPainted() {
+            return !paintedEntries.isEmpty();
+        }
     }
 
     private final int boardId;
@@ -443,6 +477,13 @@ public final class HexBrush {
     /** @return whether the edit just applied may be taken back */
     public boolean mayUndo() {
         return applied;
+    }
+
+    /** @return what the brush holds and has painted now, the legality checked against the board as it stands */
+    public View view() {
+        return new View(terrainIndex(), levelNames(), levelIndex(), factorEnabled(), factor, factorMax,
+              bookFactorText(), changeGround, ground, sevenHexes, erasing, paintedEntries(), groundText(), mayApply(),
+              mayUndo(), legality());
     }
 
     /** @return whether the edit is legal, or the first painted hex's problems, or that it was applied */

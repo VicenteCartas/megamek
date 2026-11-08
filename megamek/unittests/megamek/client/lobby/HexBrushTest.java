@@ -221,4 +221,61 @@ class HexBrushTest {
 
         assertEquals(List.of(new Coords(0, 0)), brush.painted());
     }
+
+    @Test
+    void theViewHoldsWhatThePanelDrawsAndKeepsItWhileTheBrushChanges() {
+        Coords opened = new Coords(4, 4);
+        Hex woods = hexHolding(Terrains.WOODS, 1);
+        woods.getTerrain(Terrains.WOODS).setTerrainFactor(15);
+        hexes.put(opened, woods);
+        HexBrush brush = new HexBrush(BOARD, opened, host);
+
+        HexBrush.View view = brush.view();
+        assertEquals(brush.terrainIndex(), view.terrainIndex());
+        assertEquals(brush.levelNames(), view.levelNames());
+        assertEquals(brush.levelIndex(), view.levelIndex());
+        assertTrue(view.factorEnabled());
+        assertEquals(15, view.factor());
+        assertEquals(brush.factorMax(), view.factorMax());
+        assertEquals(brush.bookFactorText(), view.bookFactorText());
+        assertEquals(brush.paintedEntries(), view.paintedEntries());
+        assertTrue(view.anyPainted());
+        assertEquals(brush.groundText(), view.groundText());
+        assertEquals(brush.legality(), view.legality());
+        assertTrue(view.mayApply());
+        assertFalse(view.mayUndo());
+
+        brush.terrainIndex(0);
+        brush.clear();
+        brush.changeGround(true);
+        brush.ground(3);
+        brush.sevenHexes(true);
+        brush.erasing(true);
+        assertEquals(15, view.factor(), "a view already handed out does not follow the brush");
+        assertTrue(view.anyPainted());
+
+        HexBrush.View after = brush.view();
+        assertEquals(0, after.terrainIndex());
+        assertTrue(after.levelNames().isEmpty());
+        assertNull(after.bookFactorText());
+        assertFalse(after.factorEnabled());
+        assertTrue(after.changeGround());
+        assertEquals(3, after.ground());
+        assertTrue(after.sevenHexes());
+        assertTrue(after.erasing());
+        assertFalse(after.anyPainted());
+        assertFalse(after.mayApply());
+    }
+
+    @Test
+    void theViewReadsTheBoardAsItStandsWhenMade() {
+        Coords hex = new Coords(6, 6);
+        HexBrush brush = new HexBrush(BOARD, hex, host);
+        brush.terrainIndex(WATER_INDEX);
+        assertTrue(brush.view().mayApply());
+
+        occupied.add(hex);
+
+        assertFalse(brush.view().mayApply(), "a unit moving in is seen by the next view");
+    }
 }

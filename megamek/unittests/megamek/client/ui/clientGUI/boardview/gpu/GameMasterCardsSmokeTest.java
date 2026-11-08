@@ -17,6 +17,9 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
 
@@ -34,6 +37,7 @@ import megamek.client.lobby.MapNoteForm;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.dialogs.GameMasterEditMemory;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Hex;
 import megamek.common.Player;
@@ -189,17 +193,21 @@ class GameMasterCardsSmokeTest {
                 GameMasterEditMemory.forget(hex);
             }
 
-            // The terrain brush beside the board, which takes board clicks while it paints
+            // The terrain brush beside the board, which takes board clicks while it paints; the brush lives on the
+            // Swing thread and the panel draws the views it is sent
             List<HexEditSpec> edits = new ArrayList<>();
-            HexBrush brush = new HexBrush(0, hex, new HexBrush.Host() {
+            boolean[] readOffSwing = new boolean[1];
+            HexBrush.Host brushHost = new HexBrush.Host() {
                 @Override
                 public Hex hex(Coords coords) {
+                    readOffSwing[0] |= !SwingUtilities.isEventDispatchThread();
                     return coords.getX() >= 0 && coords.getY() >= 0 && coords.getX() < 8 && coords.getY() < 8
                           ? new Hex() : null;
                 }
 
                 @Override
                 public boolean occupied(Coords coords) {
+                    readOffSwing[0] |= !SwingUtilities.isEventDispatchThread();
                     return false;
                 }
 
@@ -211,13 +219,29 @@ class GameMasterCardsSmokeTest {
                 @Override
                 public void showMarks(Collection<Coords> painted) {
                 }
+            };
+            HexBrush[] brush = new HexBrush[1];
+            HexBrush.View[] opening = new HexBrush.View[1];
+            onSwing(() -> {
+                brush[0] = new HexBrush(0, hex, brushHost);
+                opening[0] = brush[0].view();
             });
+            Queue<Runnable> gpu = new ConcurrentLinkedQueue<>();
             List<Boolean> painting = new ArrayList<>();
             boolean[] brushClosed = new boolean[1];
-            GpuHexBrushPanel panel = new GpuHexBrushPanel(ui.kit, ui.stage, brush, new GpuHexBrushPanel.Host() {
+            GpuHexBrushPanel panel = new GpuHexBrushPanel(ui.kit, ui.stage, opening[0], new GpuHexBrushPanel.Host() {
                 @Override
                 public void painting(boolean on) {
                     painting.add(on);
+                }
+
+                @Override
+                public void edit(Consumer<HexBrush> change, Consumer<HexBrush.View> then) {
+                    SwingUtilities.invokeLater(() -> {
+                        change.accept(brush[0]);
+                        HexBrush.View view = brush[0].view();
+                        gpu.add(() -> then.accept(view));
+                    });
                 }
 
                 @Override
@@ -230,13 +254,35 @@ class GameMasterCardsSmokeTest {
             find(ui, "brush-terrain");
             find(ui, "brush-size");
             find(ui, "brush-painted-0");
-            brush.brushHex(new Coords(5, 5));
-            panel.update();
+            onSwing(() -> {
+                brush[0].brushHex(new Coords(5, 5));
+                HexBrush.View view = brush[0].view();
+                gpu.add(() -> panel.show(view));
+            });
+            settle(ui, gpu);
             find(ui, "brush-painted-1");
             click(ui, find(ui, "brush-apply"));
+            settle(ui, gpu);
             assertEquals(1, edits.size());
             assertEquals(2, edits.get(0).getCoords().size());
             assertFalse(((UiButton) find(ui, "brush-undo")).isDisabled(), "the edit just applied may be undone");
+            click(ui, find(ui, "brush-change-ground"));
+            settle(ui, gpu);
+            click(ui, find(ui, "brush-ground-up"));
+            click(ui, find(ui, "brush-ground-up"));
+            flushSwing();
+            gpu.poll().run();
+            ui.draw();
+            assertEquals(2, ((UiStepper) find(ui, "brush-ground-level")).value(),
+                  "a view coming back while another step is out does not set the stepper back");
+            settle(ui, gpu);
+            assertEquals(2, ((UiStepper) find(ui, "brush-ground-level")).value());
+            onSwing(() -> assertEquals(2, brush[0].ground()));
+            click(ui, find(ui, "brush-clear"));
+            settle(ui, gpu);
+            assertNull(ui.stage.getRoot().findActor("brush-painted-0"), "Clear empties the painted list");
+            assertTrue(((UiButton) find(ui, "brush-apply")).isDisabled());
+            assertFalse(readOffSwing[0], "the brush reads the board on the Swing thread only");
             click(ui, find(ui, "brush-close"));
             assertTrue(brushClosed[0]);
             assertEquals(List.of(true, false), painting, "closing hands board clicks back");
@@ -246,11 +292,24 @@ class GameMasterCardsSmokeTest {
     }
 
     private static void flushSwing() {
+        onSwing(() -> { });
+    }
+
+    private static void onSwing(Runnable work) {
         try {
-            SwingUtilities.invokeAndWait(() -> { });
+            SwingUtilities.invokeAndWait(work);
         } catch (Exception failure) {
             throw new IllegalStateException(failure);
         }
+    }
+
+    /** Lets the Swing thread finish what the panel sent it, then runs on this GPU thread what it sent back. */
+    private static void settle(UiTestStage ui, Queue<Runnable> gpu) {
+        flushSwing();
+        for (Runnable work = gpu.poll(); work != null; work = gpu.poll()) {
+            work.run();
+        }
+        ui.draw();
     }
 
     private static Actor find(UiTestStage ui, String name) {

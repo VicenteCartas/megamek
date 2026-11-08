@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.Stage;
@@ -9,6 +11,7 @@ import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import jakarta.annotation.Nullable;
 import megamek.client.lobby.HexBrush;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
@@ -27,7 +30,9 @@ import megamek.client.ui.gdx.UiTextField;
  * whether the edit is legal, and Apply, Undo and Close. Unlike a card it is not modal: only the panel itself takes
  * clicks.
  * <p>
- * GPU thread.
+ * GPU thread. The {@link HexBrush} itself lives on the Swing thread, as it reads the board: the panel draws only the
+ * latest {@link HexBrush.View} it was given and sends each change the Game Master makes to the Swing thread through
+ * its {@link Host}, which answers with a new view.
  */
 final class GpuHexBrushPanel {
     /** What the panel asks of the battle, on the GPU thread. */
@@ -35,13 +40,26 @@ final class GpuHexBrushPanel {
         /** Turns board clicks into painting, or hands them back to the phase. */
         void painting(boolean on);
 
+        /**
+         * Changes the brush on the Swing thread, then hands {@code then} the brush's view on the GPU thread; null when
+         * the change could not be made.
+         */
+        void edit(Consumer<HexBrush> change, Consumer<HexBrush.View> then);
+
         /** The panel closed; the brush lets go of the board. */
         void closed();
     }
 
     private final UiKit kit;
-    private final HexBrush brush;
     private final Host host;
+    private HexBrush.View shown;
+    /** The changes sent to the brush whose view has not come back yet. */
+    private int pending;
+    private UiSelect size;
+    private UiChoice changeGround;
+    private UiStepper groundLevel;
+    private UiFormField groundField;
+    private UiChoice erase;
     private final Table root = new Table();
     private final Table content = new Table();
     private final Label ground;
@@ -55,10 +73,11 @@ final class GpuHexBrushPanel {
     private boolean paintingOn = true;
     private boolean open = true;
 
-    GpuHexBrushPanel(UiKit kit, Stage stage, HexBrush brush, Host host) {
+    /** @param view the brush as it opened */
+    GpuHexBrushPanel(UiKit kit, Stage stage, HexBrush.View view, Host host) {
         this.kit = kit;
-        this.brush = brush;
         this.host = host;
+        shown = view;
         ground = text("small", "text.secondary");
         ground.setName("brush-ground");
         legality = text("body", "text.primary");
@@ -105,70 +124,108 @@ final class GpuHexBrushPanel {
         return trimmed.endsWith(":") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
     }
 
-    /** Builds the panel again from the brush, as choosing a terrain changes which controls it has. */
+    /** Has the brush changed on the Swing thread; the view it answers with is shown once no other change is out. */
+    private void edit(Consumer<HexBrush> change) {
+        pending++;
+        host.edit(change, this::edited);
+    }
+
+    private void edited(@Nullable HexBrush.View view) {
+        pending = Math.max(0, pending - 1);
+        if (view != null) {
+            show(view);
+        }
+    }
+
+    /**
+     * Shows the brush as {@code view} has it, unless a change sent from the panel has yet to come back: that change's
+     * view is newer, and showing this one meanwhile would set back a control the Game Master is still working.
+     */
+    void show(HexBrush.View view) {
+        if (!open || pending > 0) {
+            return;
+        }
+        boolean otherControls = view.terrainIndex() != shown.terrainIndex()
+              || !view.levelNames().equals(shown.levelNames()) || view.levelIndex() != shown.levelIndex()
+              || !Objects.equals(view.bookFactorText(), shown.bookFactorText())
+              || view.factorEnabled() != shown.factorEnabled() || view.factorMax() != shown.factorMax();
+        shown = view;
+        if (otherControls) {
+            fill();
+        } else {
+            size.select(view.sevenHexes() ? 1 : 0);
+            changeGround.setChecked(view.changeGround());
+            groundField.setVisible(view.changeGround());
+            groundLevel.value(view.ground());
+            erase.setChecked(view.erasing());
+            update();
+        }
+    }
+
+    /** Builds the panel again from the brush's view, as choosing a terrain changes which controls it has. */
     private void fill() {
         content.clearChildren();
         content.top().left().defaults().left().growX();
 
         content.add(caption("HexEditDialog.brush")).row();
-        UiSelect size = kit.tokenSelect(true, HexBrush.sizeNames().toArray(String[]::new));
+        size = kit.tokenSelect(true, HexBrush.sizeNames().toArray(String[]::new));
         size.setName("brush-size");
-        size.select(brush.sevenHexes() ? 1 : 0);
+        size.select(shown.sevenHexes() ? 1 : 0);
         tip(size, "HexEditDialog.brushSize.tooltip");
         UiKit.onChange(size, () -> {
-            brush.sevenHexes(size.getSelectedIndex() == 1);
-            update();
+            boolean seven = size.getSelectedIndex() == 1;
+            edit(brush -> brush.sevenHexes(seven));
         });
         content.add(kit.formField(label("HexEditDialog.brushSizeLabel"), size)).padTop(space("xs")).row();
 
         UiSelect terrain = kit.tokenSelect(true, HexBrush.terrainNames().toArray(String[]::new));
         terrain.setName("brush-terrain");
-        terrain.select(brush.terrainIndex());
+        terrain.select(shown.terrainIndex());
         UiKit.onChange(terrain, () -> {
-            brush.terrainIndex(terrain.getSelectedIndex());
-            fill();
+            int index = terrain.getSelectedIndex();
+            edit(brush -> brush.terrainIndex(index));
         });
         content.add(kit.formField(label("HexEditDialog.terrainLabel"), terrain)).padTop(space("xs")).row();
 
-        List<String> levels = brush.levelNames();
+        List<String> levels = shown.levelNames();
         if (!levels.isEmpty()) {
             UiSelect level = kit.tokenSelect(true, levels.toArray(String[]::new));
             level.setName("brush-level");
-            level.select(Math.max(0, brush.levelIndex()));
+            level.select(Math.max(0, shown.levelIndex()));
             UiKit.onChange(level, () -> {
-                brush.levelIndex(level.getSelectedIndex());
-                fill();
+                int index = level.getSelectedIndex();
+                edit(brush -> brush.levelIndex(index));
             });
             content.add(kit.formField(label("HexEditDialog.levelLabel"), level)).padTop(space("xs")).row();
         }
-        String book = brush.bookFactorText();
+        String book = shown.bookFactorText();
         if (book != null) {
-            UiTextField factor = LobbyGameMasterViews.number(kit, "brush-factor", brush.factor(), 0,
-                  brush::factorMax, brush::factor, this::update);
-            factor.setDisabled(!brush.factorEnabled());
+            UiTextField factor = LobbyGameMasterViews.number(kit, "brush-factor", shown.factor(), 0,
+                  () -> shown.factorMax(), value -> edit(brush -> brush.factor(value)), () -> { });
+            factor.setDisabled(!shown.factorEnabled());
             tip(factor, "HexEditDialog.terrainFactor.tooltip");
             content.add(kit.formField(label("HexEditDialog.terrainFactorLabel"), factor)).padTop(space("xs"))
                   .row();
             content.add(kit.typeLabel(book, "small", "text.muted")).row();
         }
 
-        UiChoice changeGround = kit.check(Messages.getString("HexEditDialog.changeGround"), brush.changeGround());
+        changeGround = kit.check(Messages.getString("HexEditDialog.changeGround"), shown.changeGround());
         changeGround.setName("brush-change-ground");
         tip(changeGround, "HexEditDialog.changeGround.tooltip");
-        UiStepper groundLevel = kit.stepper(brush.ground(), HexBrush.LOWEST_GROUND, HexBrush.HIGHEST_GROUND);
+        groundLevel = kit.stepper(shown.ground(), HexBrush.LOWEST_GROUND, HexBrush.HIGHEST_GROUND);
         groundLevel.setName("brush-ground-level");
         groundLevel.up().setName("brush-ground-up");
         groundLevel.down().setName("brush-ground-down");
-        UiFormField groundField = kit.formField(label("HexEditDialog.hexLevel"), groundLevel);
-        groundField.setVisible(brush.changeGround());
+        groundField = kit.formField(label("HexEditDialog.hexLevel"), groundLevel);
+        groundField.setVisible(shown.changeGround());
         UiKit.onChange(changeGround, () -> {
-            brush.changeGround(changeGround.isChecked());
-            groundField.setVisible(changeGround.isChecked());
-            update();
+            boolean checked = changeGround.isChecked();
+            groundField.setVisible(checked);
+            edit(brush -> brush.changeGround(checked));
         });
         UiKit.onChange(groundLevel, () -> {
-            brush.ground(groundLevel.value());
-            update();
+            int value = groundLevel.value();
+            edit(brush -> brush.ground(value));
         });
         content.add(changeGround).padTop(space("sm")).row();
         content.add(groundField).padTop(space("xs")).row();
@@ -181,14 +238,15 @@ final class GpuHexBrushPanel {
             paintingOn = paint.isChecked();
             host.painting(paintingOn);
         });
-        UiChoice erase = kit.toggleSwitch(Messages.getString("HexEditDialog.erase"), brush.erasing());
+        erase = kit.toggleSwitch(Messages.getString("HexEditDialog.erase"), shown.erasing());
         erase.setName("brush-erase");
         tip(erase, "HexEditDialog.erase.tooltip");
-        UiKit.onChange(erase, () -> brush.erasing(erase.isChecked()));
-        brushAll = button("button-secondary-compact", "HexEditDialog.brushToAll", "brush-all", () -> {
-            brush.brushAll();
-            update();
+        UiKit.onChange(erase, () -> {
+            boolean erasing = erase.isChecked();
+            edit(brush -> brush.erasing(erasing));
         });
+        brushAll = button("button-secondary-compact", "HexEditDialog.brushToAll", "brush-all",
+              () -> edit(HexBrush::brushAll));
         tip(brushAll, "HexEditDialog.brushToAll.tooltip");
         content.add(paint).padTop(space("md")).row();
         content.add(erase).padTop(space("xs")).row();
@@ -196,14 +254,10 @@ final class GpuHexBrushPanel {
 
         content.add(caption("HexEditDialog.painted")).padTop(space("md")).row();
         content.add(painted).padTop(space("xs")).row();
-        undoLast = button("button-secondary-compact", "HexEditDialog.undoLastHex", "brush-undo-last", () -> {
-            brush.undoLastHex();
-            update();
-        });
-        clear = button("button-secondary-compact", "HexEditDialog.clearHexes", "brush-clear", () -> {
-            brush.clear();
-            update();
-        });
+        undoLast = button("button-secondary-compact", "HexEditDialog.undoLastHex", "brush-undo-last",
+              () -> edit(HexBrush::undoLastHex));
+        clear = button("button-secondary-compact", "HexEditDialog.clearHexes", "brush-clear",
+              () -> edit(HexBrush::clear));
         tip(clear, "HexEditDialog.clearHexes.tooltip");
         Table listButtons = new Table();
         listButtons.add(undoLast).padRight(space("xs"));
@@ -211,14 +265,8 @@ final class GpuHexBrushPanel {
         content.add(listButtons).padTop(space("xs")).fill(false, false).row();
         content.add(legality).padTop(space("md")).row();
 
-        apply = button("button-primary", "HexEditDialog.execute", "brush-apply", () -> {
-            brush.apply();
-            update();
-        });
-        undo = button("button-secondary", "HexEditDialog.undo", "brush-undo", () -> {
-            brush.undo();
-            update();
-        });
+        apply = button("button-primary", "HexEditDialog.execute", "brush-apply", () -> edit(HexBrush::apply));
+        undo = button("button-secondary", "HexEditDialog.undo", "brush-undo", () -> edit(HexBrush::undo));
         tip(undo, "HexEditDialog.undo.tooltip");
         UiButton close = button("button-quiet", "HexEditDialog.close", "brush-close", this::close);
         Table footer = new Table();
@@ -237,22 +285,22 @@ final class GpuHexBrushPanel {
         return button;
     }
 
-    /** Shows the brush's state again: the ground line, the painted hexes, whether the edit is legal, the buttons. */
-    void update() {
-        ground.setText(GpuBoardWindow.plainText(brush.groundText()));
+    /** Shows the brush's view again: the ground line, the painted hexes, whether the edit is legal, the buttons. */
+    private void update() {
+        ground.setText(GpuBoardWindow.plainText(shown.groundText()));
         painted.clearChildren();
         painted.top().left().defaults().left().growX();
         int row = 0;
-        for (String entry : brush.paintedEntries()) {
+        for (String entry : shown.paintedEntries()) {
             Label line = kit.typeLabel(entry, "small", "text.secondary");
             line.setName("brush-painted-" + row++);
             line.setEllipsis(true);
             painted.add(line).minWidth(0).row();
         }
-        legality.setText(GpuBoardWindow.plainText(brush.legality()));
-        boolean any = !brush.painted().isEmpty();
-        apply.setDisabled(!brush.mayApply());
-        undo.setDisabled(!brush.mayUndo());
+        legality.setText(GpuBoardWindow.plainText(shown.legality()));
+        boolean any = shown.anyPainted();
+        apply.setDisabled(!shown.mayApply());
+        undo.setDisabled(!shown.mayUndo());
         brushAll.setDisabled(!any);
         undoLast.setDisabled(!any);
         clear.setDisabled(!any);

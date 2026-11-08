@@ -354,12 +354,26 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
 
     /**
      * Opens the terrain brush on a hex, beside the board so that clicking the board paints; a brush already open
-     * closes first.
+     * closes first. The brush stays on the Swing thread, where the board changes, and the panel draws its views.
      */
     void hexBrush(Coords coords) {
         int boardId = gui.getClient().getGame().getBoard().getBoardId();
         BrushBoard board = new BrushBoard(boardId);
         HexBrush brush = new HexBrush(boardId, coords, board);
+        HexBrush.View opening = brush.view();
+        GpuHexBrushPanel[] panel = new GpuHexBrushPanel[1];
+        board.changed = () -> {
+            HexBrush.View view = brush.view();
+            gpu.accept(() -> {
+                if (panel[0] != null && brushPanel == panel[0]) {
+                    panel[0].show(view);
+                }
+            });
+        };
+        board.clicked = clicked -> {
+            brush.brushHex(clicked);
+            board.changed.run();
+        };
         gpu.accept(() -> {
             if (brushPanel != null) {
                 brushPanel.close();
@@ -369,17 +383,19 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
                 SwingUtilities.invokeLater(board::release);
                 return;
             }
-            GpuHexBrushPanel[] panel = new GpuHexBrushPanel[1];
-            board.clicked = clicked -> gpu.accept(() -> {
-                if (panel[0] != null && brushPanel == panel[0]) {
-                    brush.brushHex(clicked);
-                    panel[0].update();
-                }
-            });
-            panel[0] = new GpuHexBrushPanel(dialogs.kit(), dialogs.stage(), brush, new GpuHexBrushPanel.Host() {
+            panel[0] = new GpuHexBrushPanel(dialogs.kit(), dialogs.stage(), opening, new GpuHexBrushPanel.Host() {
                 @Override
                 public void painting(boolean on) {
                     SwingUtilities.invokeLater(() -> board.painting(on));
+                }
+
+                @Override
+                public void edit(Consumer<HexBrush> change, Consumer<HexBrush.View> then) {
+                    HexBrush.View[] view = new HexBrush.View[1];
+                    edt("terrain brush", () -> {
+                        change.accept(brush);
+                        view[0] = brush.view();
+                    }, () -> then.accept(view[0]));
                 }
 
                 @Override
@@ -397,13 +413,15 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
     /**
      * How the brush reaches the board, as the Swing dialog reached it: a left click on a hex paints while painting is
      * on, the phase display is kept from reading that click as an order, and the painted hexes are marked. Swing
-     * thread, except that the brush reads hexes from the GPU thread.
+     * thread, as is the brush that asks it for hexes and units.
      */
     private final class BrushBoard implements HexBrush.Host {
         private static final int ALL_HEX_BORDERS = 63;
         private final int boardId;
         private final List<TacticalMark> marks = new ArrayList<>();
-        private volatile Consumer<Coords> clicked = coords -> {};
+        private Consumer<Coords> clicked = coords -> {};
+        /** Sends the panel the brush's view again, as the board or the units on it may have changed. */
+        private Runnable changed = () -> {};
         private boolean painting;
         private @Nullable Distractable suppressed;
         private final BoardViewListenerAdapter listener = new BoardViewListenerAdapter() {
@@ -418,9 +436,12 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
         private final GameListenerAdapter phases = new GameListenerAdapter() {
             @Override
             public void gamePhaseChange(GamePhaseChangeEvent event) {
-                if (painting) {
-                    SwingUtilities.invokeLater(() -> painting(painting));
-                }
+                SwingUtilities.invokeLater(() -> {
+                    if (painting) {
+                        painting(true);
+                    }
+                    changed.run();
+                });
             }
         };
 
@@ -468,17 +489,14 @@ final class GpuBattleTools implements GpuLobbyTools.Surface {
 
         @Override
         public void sendHexEdit(HexEditSpec spec) {
-            SwingUtilities.invokeLater(() -> {
-                if (!closing()) {
-                    gui.getClient().sendHexEdit(spec);
-                }
-            });
+            if (!closing()) {
+                gui.getClient().sendHexEdit(spec);
+            }
         }
 
         @Override
         public void showMarks(Collection<Coords> painted) {
-            List<Coords> copy = List.copyOf(painted);
-            SwingUtilities.invokeLater(() -> showMarksNow(copy));
+            showMarksNow(List.copyOf(painted));
         }
 
         private void showMarksNow(List<Coords> painted) {
