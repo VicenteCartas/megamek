@@ -14,6 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import jakarta.annotation.Nullable;
+import megamek.client.ui.gdx.TableSort;
 import megamek.common.loaders.MekSummary;
 import megamek.common.loaders.MekSummaryCache;
 import megamek.logging.MMLogger;
@@ -27,14 +28,21 @@ import megamek.logging.MMLogger;
 public final class RequisitionSearch {
     private static final MMLogger LOGGER = MMLogger.create(RequisitionSearch.class);
 
-    /** What to look for: the game's rules, a category, the Commander's filters and the search text. */
+    /** What to look for: the game's rules, a category, the Commander's filters and the search text, and the order. */
     public record Query(RequisitionCatalog.Rules rules, RequisitionCatalog.Category category,
-          RequisitionCatalog.Filters filters, String search) {
+          RequisitionCatalog.Filters filters, String search, TableSort<RequisitionSort> sort) {
         public Query {
             Objects.requireNonNull(rules);
             Objects.requireNonNull(category);
             Objects.requireNonNull(filters);
             search = (search == null) ? "" : search;
+            sort = (sort == null) ? RequisitionSort.BY_NAME : sort;
+        }
+
+        /** A query whose results come in name order. */
+        public Query(RequisitionCatalog.Rules rules, RequisitionCatalog.Category category,
+              RequisitionCatalog.Filters filters, String search) {
+            this(rules, category, filters, search, RequisitionSort.BY_NAME);
         }
     }
 
@@ -42,7 +50,7 @@ public final class RequisitionSearch {
      * What a query found.
      *
      * @param query    the query
-     * @param rows     the units found, in name order
+     * @param rows     the units found, in the query's order
      * @param total    how many units the catalogue holds
      * @param sources  the source books of the units the rules allow, for the Source filter
      * @param millis   how long the query took, the catalogue's loading aside
@@ -141,8 +149,9 @@ public final class RequisitionSearch {
             sources = RequisitionCatalog.sources(index, query.rules());
             types = RequisitionCatalog.types(index, query.rules());
         }
+        List<RequisitionRow> ordered = RequisitionSort.sorted(shown, query.sort());
         long millis = (System.nanoTime() - start) / 1_000_000;
-        return new Result(query, shown, index.size(), sources, millis, loadMillis, types);
+        return new Result(query, ordered, index.size(), sources, millis, loadMillis, types);
     }
 
     /**
