@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,7 +12,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
 import java.awt.event.ActionEvent;
-import java.io.File;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
@@ -24,16 +23,14 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
-import megamek.common.Configuration;
 import megamek.common.actions.WeaponAttackAction;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The unit panel's actions on the local firing turn against a real FiringDisplay (unit panel design 9, 14 U4): a heat
@@ -41,21 +38,9 @@ import org.junit.jupiter.api.Timeout;
  * attacks; the actor's weapon loads a bin by its number, its queued attack declared again with it; and the field of
  * fire switch leaves the display's actor and weapon selection alone.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuUnitActionsTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void aHeatSinkChangeInTheFiringPhaseClearsTheUnsentAttacksAsTheUnitDisplaysControlDoes() throws Exception {

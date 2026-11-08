@@ -71,7 +71,7 @@ class GpuVolcanoFoliageSmokeTest {
                     for (boolean oblique : new boolean[] { false, true }) {
                         camera.setIsometric(oblique);
                         camera.fit(scene);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         var hit = terrain.hit(scene, ray);
                         assertNotNull(hit);
@@ -81,13 +81,13 @@ class GpuVolcanoFoliageSmokeTest {
                     for (int row : new int[] { 2, 5 }) {
                         camera.camera.zoom = .12f;
                         camera.center(BoardGeometry.center(new Coords(3, row), 0).add(0, 0, row == 2 ? 18 : 8));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, row == 2 ? "volcano-trees-close.png" : "volcano-thickets-close.png"));
                     }
                     camera.camera.zoom = 2.4f;
                     camera.center(BoardGeometry.center(new Coords(4, 3), 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     assertEquals(picked, terrain.hit(scene, ray));
                     GpuReviewFrame.save(new File(output, "volcano-far.png"));

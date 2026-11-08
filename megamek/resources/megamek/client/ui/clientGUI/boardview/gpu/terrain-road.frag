@@ -231,6 +231,7 @@ vec3 slabNormal(RoadMaps m, vec2 uv, mat2 g, vec2 along, vec2 onward, float stre
 // wheel paths at WHEEL_PATH). World-anchored fields place every feature and the heading only orients them,
 // symmetrically, so neighbouring hexes agree whichever way their paths run. Sizes are metres.
 uniform float u_metre;       // world units per metre
+uniform float u_gravity;     // scenario acceleration; without it there is no water (GpuTerrain.waterVisible)
 
 const float WHEEL_PATH = .4;  // BoardRoad.WHEEL_OFFSET over half of Kind.PAVED.halfWidth
 const float LANE_METRES = 2.7; // half of Kind.PAVED.halfWidth, in metres: B's full range
@@ -705,11 +706,11 @@ void main() {
         properties.g = .95;
     } else if (slabs) {
         // Settled dust, anchored to the ground, varies the repeating slabs.
-        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
+        wearPatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 18.0)).g;
         albedo *= mix(.92, 1.06, wearPatches);
     } else if (m.mapped && abs(m.transition) > .5) {
-        wearPatches = texture(u_rainNoise, groundUV / 18.0).g;
-        loosePatches = texture(u_rainNoise, groundUV / 5.0 + .37).b;
+        wearPatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 18.0)).g;
+        loosePatches = texture(u_surfaceNoise, rainNoiseAt(groundUV / 5.0 + .37)).b;
         albedo *= mix(.95, 1.05, wearPatches);
     }
     if (m.mapped && m.transition > .5) {
@@ -749,8 +750,8 @@ void main() {
     float soilBasins = 0.0, soilMud = 0.0;
     if (m.soil) {
         // Compact soil holds patchy mud and shallow water; the basins stay put as rainfall changes.
-        soilBasins = texture(u_rainNoise, groundUV / 22.0).r * .7
-              + texture(u_rainNoise, groundUV / 7.0 + .37).g * .3;
+        soilBasins = texture(u_surfaceNoise, rainNoiseAt(groundUV / 22.0)).r * .7
+              + texture(u_surfaceNoise, rainNoiseAt(groundUV / 7.0 + .37)).g * .3;
         // A track's puddles lie in its wheel tracks.
         if (track) soilBasins += .3 * wearWater - .15;
         float mud = wet * smoothstep(.24, .68, soilBasins);
@@ -784,6 +785,15 @@ void main() {
 #endif
     // Roads share their ground's step down into a recession; the uphill lift stays the ground's alone.
     albedo = levelGrade(materialReflectance(albedo), min(v_cloudPosition.z / u_levelHeight, 0.0));
+#ifdef roadMaskFlag
+    // A coat on a water hex's ground keeps the hue its column of water passes, as the bed does. Its alpha packs the
+    // water's palette and the levels over it (GpuRoads#underWater); a dry coat's is opaque.
+    if (v_color.a < .98 && u_gravity > 0.0) {
+        float waterTag = v_color.a * 127.5;
+        float palette = floor(waterTag / 31.0 + .001);
+        albedo *= waterBedTint(palette, (waterTag - 31.0 * palette) * .1);
+    }
+#endif
 #if defined(roadMaskFlag) && __VERSION__ < 450
     // Without the quad vote, a hidden lane skips the lighting; the vote keeps whole quads, whose lanes all light so
     // that the shadow receiver's derivatives (sculptShadow) read live neighbours. The hidden ones go at the end.
@@ -834,7 +844,7 @@ void main() {
     } else if (m.mapped && abs(m.transition) > .5 && !paved) {
         // The wide loose margin has no opaque shoulder underneath it. Clumps give way to isolated grains
         // and exposed ground; the compacted core remains continuous and at the authored road width.
-        float clumps = texture(u_rainNoise, groundUV / 32.0 + .19).r;
+        float clumps = texture(u_surfaceNoise, rainNoiseAt(groundUV / 32.0 + .19)).r;
         float threshold = .05 + .8 * clumps + .12 * loosePatches;
         float broken = smoothstep(threshold - .12, threshold + .12, roadColor.a + (grain - .5) * .32);
         alpha = mix(roadColor.a, broken, 4.0 * roadColor.a * (1.0 - roadColor.a));
@@ -851,5 +861,5 @@ void main() {
 
 // The shared noise over cells of `size` metres, filtered for the pixel: explicitly, as its reads sit in varying branches.
 vec4 wearNoise(vec2 m, float size, float offset, float pixel) {
-    return textureLod(u_rainNoise, m / size + offset, log2(max(pixel * 64.0 / size, 1.0)));
+    return textureLod(u_surfaceNoise, rainNoiseAt(m / size + offset), log2(max(pixel * 64.0 / size, 1.0)));
 }

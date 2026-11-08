@@ -115,7 +115,7 @@ class GpuHudLayoutSmokeTest {
             swap(hud, harness, name, layout.panels().contains(name), size(name, layout, metrics));
         }
         GpuBoardSource.Frame frame = frame(layout);
-        hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+        hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
 
         String name = "hud-slots-" + layout.name() + "-" + width + "x" + height;
         ScreenUtils.clear(.1f, .13f, .13f, 1, true);
@@ -202,7 +202,7 @@ class GpuHudLayoutSmokeTest {
         if (!layout.overlays() && forces != null && card != null) {
             assertEquals(12, forces.y - card.y - card.height, .5f, "A long forces list ends 12 above the card in " + name);
             swap(hud, harness, "forces-panel", true, new float[] { 300, 150 });
-            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
             hud.draw();
             Rectangle shortList = GpuHudTestStage.bounds(hud.stage.getRoot().findActor("forces-panel"));
             assertEquals(150, shortList.height, .5f, "A short forces list keeps its height in " + name);
@@ -338,8 +338,8 @@ class GpuHudLayoutSmokeTest {
               "Atlas AS7-D", "Atlas", "AS7-D", 100, "Assault", "", "Pilot", 4, 5, 1, 1, 0, 0, "30", 3, "5", 0, "", 0,
               0, 0, 0, false, false, false, false, Entity.DMG_NONE, List.of(), "", new Coords(5, 5), 0, null,
               List.of(), 0, 0, Player.PLAYER_NONE, List.of());
-        return GpuHudInputTest.frame(GpuHudInputTest.status(3, layout.phase(), true, 1, 0, unit),
-              GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY,
+        return GpuHudFixtures.frame(GpuHudFixtures.status(3, layout.phase(), true, 1, 0, unit),
+              GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY,
                     GpuUnitRecord.Snapshot.EMPTY));
     }
 }

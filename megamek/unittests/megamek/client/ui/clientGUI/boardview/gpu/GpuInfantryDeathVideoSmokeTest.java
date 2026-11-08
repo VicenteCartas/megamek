@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -205,7 +205,7 @@ class GpuInfantryDeathVideoSmokeTest {
                             var after = fixture.source.takeFrame().scene();
                             pending.set(List.of(new BoardScene.SceneUpdate(before),
                                   new BoardScene.Combat(result, attacker, target, target.location(), victim instanceof ConvInfantry),
-                                  UnitPlaybackTest.attack(target, target, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(after)));
+                                  UnitPlaybackFixture.attack(target, target, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(after)));
                             encoder = new ProcessBuilder(System.getProperty("megamek.gpu.ffmpeg"), "-hide_banner", "-y",
                                   "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", WIDTH + "x" + HEIGHT,
                                   "-framerate", "30", "-i", "pipe:0", "-vf", "vflip", "-an", "-c:v", "libx264",

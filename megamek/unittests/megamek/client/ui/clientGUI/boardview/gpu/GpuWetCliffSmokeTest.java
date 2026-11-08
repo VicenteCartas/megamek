@@ -26,7 +26,7 @@ class GpuWetCliffSmokeTest {
         String board = System.getProperty("megamek.gpu.cliff.board", "");
         BoardScene scene;
         if (board.isBlank()) {
-            scene = BoardWetCliffTest.mixedDepthScene();
+            scene = BoardScenes.mixedDepthScene();
         } else {
             // As a game loads a sheet: converted.
             var loaded = BoardFile.loadSheet(new File(board), false, true);
@@ -50,7 +50,7 @@ class GpuWetCliffSmokeTest {
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
                           board.isBlank() ? "mixed-depth-cliffs" : "custom-board-cliffs");
                     assertTrue(output.isDirectory() || output.mkdirs());
-                    BoardWetCliffTest.tune(true);
+                    BoardScenes.tune(true);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     var camera = new BoardCamera();

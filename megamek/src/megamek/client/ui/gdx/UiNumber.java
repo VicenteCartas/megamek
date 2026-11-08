@@ -101,7 +101,7 @@ public final class UiNumber extends Table {
                 syncSlider(value, true);
                 popup.showAbove(caption, 0);
                 if (dial != null) { dial.begin(event.getStageX(), event.getStageY(), value); }
-                cursor.capture(event.getStageX(), event.getStageY());
+                cursor.capture(event.getStageX(), event.getStageY(), event.getStage());
                 return true;
             }
             @Override public void touchDragged(InputEvent event, float x, float y, int pointer) {

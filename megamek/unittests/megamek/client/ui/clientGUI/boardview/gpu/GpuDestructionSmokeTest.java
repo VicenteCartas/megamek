@@ -63,7 +63,7 @@ class GpuDestructionSmokeTest {
                         var unit = unit(id, selection);
                         var instance = new ModelInstance(model.instance.model);
                         var animator = new UnitAnimator();
-                        var death = new UnitAttack(UnitPlaybackTest.attack(unit, unit, ResolvedAttack.Kind.DEATH, true));
+                        var death = new UnitAttack(UnitPlaybackFixture.attack(unit, unit, ResolvedAttack.Kind.DEATH, true));
                         var origin = BoardGeometry.center(unit.location().coords(), 0);
                         for (boolean top : List.of(false, true)) {
                             renderer.topView = top;

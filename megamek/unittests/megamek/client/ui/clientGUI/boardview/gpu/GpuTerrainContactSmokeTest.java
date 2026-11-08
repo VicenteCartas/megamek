@@ -41,7 +41,7 @@ class GpuTerrainContactSmokeTest {
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 int arrayHandle = 0;
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (var lod : TerrainLod.values()) {
@@ -58,9 +58,9 @@ class GpuTerrainContactSmokeTest {
                             camera.camera.zoom = .2f;
                             camera.center(BoardGeometry.center(new Coords(4, 4), shore ? 0 : 1));
                             terrain.update(scene, camera.camera);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                            var chunks = (List<?>) field(terrain, "chunks");
-                            assertEquals(lod, field(chunks.getFirst(), "lod"));
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
+                            var chunks = (List<?>) GpuTestSupport.field(terrain, "chunks");
+                            assertEquals(lod, GpuTestSupport.field(chunks.getFirst(), "lod"));
                             terrain.animate(.5f, List.of());
                             frame.render(terrain, camera, scene);
                             String contact = shore ? "shore-" : height < 3 ? "bank" + height + "-" : "cliff-";
@@ -83,7 +83,7 @@ class GpuTerrainContactSmokeTest {
                     camera.camera.zoom = .2f;
                     camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     terrain.animate(.5f, List.of());
                     frame.render(terrain, camera, scene, false);
                     var before = screen();
@@ -92,7 +92,7 @@ class GpuTerrainContactSmokeTest {
                         layersField.setAccessible(true);
                         @SuppressWarnings("unchecked")
                         var names = (List<String>) layersField.get(null);
-                        TextureArray array = ((GpuAssets) field(terrain, "assets")).sculptArray(names).color();
+                        TextureArray array = ((GpuAssets) GpuTestSupport.field(terrain, "assets")).sculptArray(names).color();
                         arrayHandle = array.getTextureObjectHandle();
                         // Change only land cover to a sentinel. Deep bed pixels must be independent of those maps.
                         array.bind();
@@ -158,16 +158,10 @@ class GpuTerrainContactSmokeTest {
     }
 
     private static BoardScene scene(int height) {
-        return BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() < 4 ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS,
               c.getY() < 4 ? height : 0, height == 0 && c.getY() >= 4 ? 2 : -1, 0));
     }
 
     private static Pixmap screen() { return Pixmap.createFromFrameBuffer(0, 0, 1280, 960); }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
-    }
 }

@@ -106,7 +106,8 @@ final class BoardRoadBank {
         grades.sort(Comparator.comparingInt((BoardRoadGrade grade) -> grade.tile().coords().getX())
               .thenComparingInt(grade -> grade.tile().coords().getY()));
         for (var grade : grades) {
-            if (grade.bridgeRamp() || grade.poured()) { continue; }
+            // Natural ground does not ease down to a road under water: it would lie below the water beside it, dry.
+            if (grade.bridgeRamp() || grade.poured() || grade.tile().liquid().present()) { continue; }
             // A road above shallow drops only fills them up as an embankment (BoardRoadGrade#FILL); beside a deeper
             // drop its fill stays at its own level, so the cliff below keeps its face.
             float floor = grade.low();
@@ -367,7 +368,8 @@ final class BoardRoadBank {
     /**
      * The faces split on the world's grid where the field can move them, as {@link #conform} splits them, their
      * vertices kept: so ground the field then moves in place ({@link #move}) meets ground beside it that conform eased,
-     * vertex for vertex.
+     * vertex for vertex. A bed stays whole: the field leaves a water hex's own cell as it is, so cuts across a floor's
+     * long fan triangles would only add triangles, and the shore's cuts lie on the bed's straight edges.
      */
     List<BoardSurface.Face> split(List<BoardSurface.Face> faces) {
         if (banks.isEmpty()) { return faces; }
@@ -375,7 +377,11 @@ final class BoardRoadBank {
         Map<Cut, Vector3> cuts = new HashMap<>();
         List<BoardSurface.Face> result = new ArrayList<>(faces.size());
         for (var face : faces) {
-            if (reached(face)) { split(face, grid, cuts, relief, result); } else { result.add(face); }
+            if (face.finish() != BoardSurface.Finish.BED && reached(face)) {
+                split(face, grid, cuts, relief, result);
+            } else {
+                result.add(face);
+            }
         }
         return result;
     }

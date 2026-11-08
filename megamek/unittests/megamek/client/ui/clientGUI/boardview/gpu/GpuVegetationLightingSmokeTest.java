@@ -71,7 +71,7 @@ class GpuVegetationLightingSmokeTest {
             var root = BoardGeometry.center(new Coords(0, 0), 0);
             for (String species : List.of("vegetation/tree-dead", "vegetation/pine-snow", "grass")) {
                 var stand = new GpuTreeInstances.Stand();
-                if (!species.equals("grass")) { stand.add(species, new Matrix4().setToTranslation(root)); }
+                if (!species.equals("grass")) { stand.add(species, new Matrix4().setToTranslation(root), 0); }
                 for (boolean top : new boolean[] { true, false }) {
                     var camera = camera(top, root.cpy().add(0, 0, species.equals("grass") ? 0 : 15), .14f);
                     for (float wetness : new float[] { 0, .7f }) {
@@ -120,7 +120,7 @@ class GpuVegetationLightingSmokeTest {
                           new Vector3(1.8f, .24f, .025f), 40);
                     for (String species : List.of("vegetation/tree", "vegetation/tree-dead", "vegetation/pine-snow", "vegetation/cactus")) {
                         var stand = new GpuTreeInstances.Stand();
-                        stand.add(species, new Matrix4().setToTranslation(root));
+                        stand.add(species, new Matrix4().setToTranslation(root), 0);
                         for (boolean top : new boolean[] { true, false }) {
                             var camera = camera(top, root.cpy().add(0, 0, 15), .14f);
                             for (int level = 0; level < TreeLod.LEVELS; level++) {
@@ -191,7 +191,7 @@ class GpuVegetationLightingSmokeTest {
                     timings = new GpuStageTimings();
                     board = scene(BoardLiquid.Kind.NONE, false);
                     for (int x = 0; x < 24; x++) for (int y = 0; y < 24; y++) {
-                        stand.add("vegetation/tree", new Matrix4().setToTranslation(x * 12, y * 12, 0));
+                        stand.add("vegetation/tree", new Matrix4().setToTranslation(x * 12, y * 12, 0), 0);
                     }
                     for (int i = 0; i < 32; i++) {
                         emitters.add(new GpuLavaLighting.Source(0, new Vector3(40 + i % 8 * 28, 40 + i / 8 * 56, 20),

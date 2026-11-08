@@ -1,18 +1,16 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import megamek.client.ui.clientGUI.unitDisplay.WeaponDisplayData;
-import megamek.common.Configuration;
 import megamek.common.HexTarget;
 import megamek.common.actions.ArtilleryAttackAction;
 import megamek.common.actions.EntityAction;
@@ -24,15 +22,15 @@ import megamek.common.equipment.EquipmentType;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The 3D board's weapons panel in the Targeting phase, where artillery declares its attacks: it lists the unit's
  * weapons, switches the loaded ammunition and declares a shot at a hex, through the Targeting phase's display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuTargetingFireOrdersTest {
     /**
@@ -41,19 +39,6 @@ class GpuTargetingFireOrdersTest {
      */
     private static final Coords LONG_TOM_HEX = new Coords(0, 0);
     private static final Coords TARGET_HEX = new Coords(15, 16);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void thePanelListsTheArtilleryUnitsWeaponsInTheTargetingPhase() throws Exception {

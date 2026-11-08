@@ -3,17 +3,28 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ENEMY;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.OWN;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.ToIntFunction;
+import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 
 import megamek.client.ui.Messages;
+import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.GUIPreferences;
+import megamek.client.ui.clientGUI.boardview.NameplateMode;
+import megamek.client.ui.clientGUI.boardview.RulerModel;
+import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Configuration;
 import megamek.common.Player;
@@ -21,6 +32,7 @@ import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.IArmorState;
 import megamek.common.units.Entity;
+import megamek.common.units.EntityMovementType;
 import megamek.common.units.EntityWeightClass;
 
 /**
@@ -136,5 +148,105 @@ final class GpuHudFixtures {
               IArmorState.ARMOR_NA, IArmorState.ARMOR_NA, 0, 0, "", 0, "", 0, "", 0, 0, -1, 0, false, false, false,
               false, Entity.DMG_NONE, List.of(), "", unit.position(), 0, blip(), List.of(), 0, 0, Player.PLAYER_NONE,
               List.of());
+    }
+
+    static final int FIRST = 1;
+
+    static final Coords HEX = new Coords(4, 6);
+
+    /** A frame of the given status and panels; the scene is a mock, so board clicks are routed. */
+    static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels) {
+        return frame(status, panels, mock(BoardScene.class));
+    }
+
+    static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels, BoardScene scene) {
+        return new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null,
+              GpuReportLog.Snapshot.EMPTY, status, panels);
+    }
+
+    static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route) {
+        return new GpuMovePlan.Snapshot(true, planner, false, GpuHudFixtures.FIRST, GpuMovePlan.Mode.AUTO, false, "", route,
+              List.of(), List.of(), route.isEmpty() ? null : GpuHudFixtures.HEX, 0, route.size(), 4, EntityMovementType.MOVE_WALK, "",
+              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), true, Map.of(), Set.of(), 0);
+    }
+
+    /** The panel bundle of the given snapshots, with the others empty. */
+    static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire,
+          GpuPhysicalOptions.Snapshot physical, GpuUnitRecord.Snapshot record) {
+        return new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move, fire, physical, record,
+              GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
+              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
+    }
+
+    static GpuHudData panels(GpuMovePlan.Snapshot move, GpuPhysicalOptions.Snapshot physical) {
+        return panels(move, GpuFireOrders.Snapshot.EMPTY, physical, GpuUnitRecord.Snapshot.EMPTY);
+    }
+
+    static GpuHudData panels(GpuUnitRecord.Snapshot record) {
+        return panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
+              record);
+    }
+
+    /**
+     * MegaMek's default key of every bind, so the user's own key bindings do not change the test; no report keywords,
+     * the minimap and contacts panels on, the conditions and turn details off, the Enhanced graphics, the overlays'
+     * defaults, the client's movement colours and every nameplate shown while its key is held.
+     */
+    static GpuBoardSource.UiPreferences preferences() {
+        return preferences(1);
+    }
+
+    /** {@link #preferences()} with the GUI scale {@code scale}. */
+    static GpuBoardSource.UiPreferences preferences(float scale) {
+        List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
+              .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
+        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds,
+              BoardGraphics.ENHANCED, GpuBoardSource.UiPreferences.Overlays.DEFAULTS,
+              GpuBoardSource.UiPreferences.capture().movementColors(), NameplateMode.HOLD,
+              GpuBoardSource.UiPreferences.capture().display());
+    }
+
+    static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,
+          GpuBattleStatus.UnitStatus... units) {
+        return new GpuBattleStatus.Snapshot(round, phase, myTurn, 1, actor, List.of(), turnIndex, List.of(units),
+              List.of(), false);
+    }
+
+    static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
+          boolean pending) {
+        return unit(id, side, canActNow, pending, 1);
+    }
+
+    static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
+          boolean pending, double armor) {
+        return unit(id, side, canActNow, pending, armor, false);
+    }
+
+    static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
+          boolean pending, double armor, boolean contact) {
+        return new GpuBattleStatus.UnitStatus(id, side, contact, "Unit " + id, "", "", 0, "", "", "", 0, 0, armor, 1,
+              0, 0, "", 0, "", 0, "", 0, 0, 0, 0, canActNow, pending, !pending, false, Entity.DMG_NONE, List.of(), "",
+              new Coords(id, id), 0, null, List.of(), 0, 0, Player.PLAYER_NONE, List.of());
+    }
+
+    /**
+     * {@code preferences} with the record components named in {@code changes} replaced and the others kept, so a test
+     * names only the preferences it changes; an unknown name fails.
+     */
+    static GpuBoardSource.UiPreferences with(GpuBoardSource.UiPreferences preferences, Map<String, ?> changes) {
+        RecordComponent[] components = GpuBoardSource.UiPreferences.class.getRecordComponents();
+        List<String> names = Arrays.stream(components).map(RecordComponent::getName).toList();
+        assertTrue(names.containsAll(changes.keySet()), "UiPreferences has no " + changes.keySet());
+        Object[] values = new Object[components.length];
+        try {
+            for (int i = 0; i < components.length; i++) {
+                values[i] = changes.containsKey(names.get(i)) ? changes.get(names.get(i))
+                      : components[i].getAccessor().invoke(preferences);
+            }
+            return GpuBoardSource.UiPreferences.class.getDeclaredConstructor(Arrays.stream(components)
+                  .map(RecordComponent::getType).toArray(Class<?>[]::new)).newInstance(values);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

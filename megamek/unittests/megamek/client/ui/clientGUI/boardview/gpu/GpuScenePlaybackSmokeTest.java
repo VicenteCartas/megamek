@@ -44,7 +44,7 @@ class GpuScenePlaybackSmokeTest {
                     try {
                         super.render();
                         if (frames() == 1) {
-                            playback = (UnitPlayback) field(this, "playback");
+                            playback = (UnitPlayback) GpuTestSupport.field(this, "playback");
                             playback.togglePaused();
                             boardCamera.setIsometric(false);
                             boardCamera.center(BoardGeometry.center(changed, 0));
@@ -62,9 +62,9 @@ class GpuScenePlaybackSmokeTest {
                                   UnitMotion.Speed.NORMAL);
                             playback.togglePaused();
                         } else if (frames() == 3 || frames() == 4) {
-                            var scene = (BoardScene) field(this, "scene");
+                            var scene = (BoardScene) GpuTestSupport.field(this, "scene");
                             assertEquals(0, scene.tile(changed).elevation());
-                            var poses = (Map<?, ?>) field(this, "unitFootprints");
+                            var poses = (Map<?, ?>) GpuTestSupport.field(this, "unitFootprints");
                             var pose = (UnitFootprint.Pose) poses.values().iterator().next();
                             assertTrue(pose.position().epsilonEquals(playback.motions.get(1).surfacePosition(scene), .001f));
                             assertTrue(pose.position().dst(playback.motions.get(1).destination()) > BoardGeometry.HEIGHT / 2);
@@ -78,12 +78,12 @@ class GpuScenePlaybackSmokeTest {
                                 playback.togglePaused();
                             }
                         } else if (frames() == 5) {
-                            assertEquals(1, ((BoardScene) field(this, "scene")).tile(changed).elevation());
+                            assertEquals(1, ((BoardScene) GpuTestSupport.field(this, "scene")).tile(changed).elevation());
                             assertSettledPose(this, middle);
                             GpuBoardTestUi.capture(new File(output, "scene-playback-first-arrival.png"));
                             playback.finish();
                         } else if (frames() == 6) {
-                            assertEquals(2, ((BoardScene) field(this, "scene")).tile(changed).elevation());
+                            assertEquals(2, ((BoardScene) GpuTestSupport.field(this, "scene")).tile(changed).elevation());
                             assertSettledPose(this, end);
                             Gdx.app.exit();
                         }
@@ -99,15 +99,9 @@ class GpuScenePlaybackSmokeTest {
     }
 
     private static void assertSettledPose(GpuBattleView view, Coords coords) throws ReflectiveOperationException {
-        var poses = (Map<?, ?>) field(view, "unitFootprints");
+        var poses = (Map<?, ?>) GpuTestSupport.field(view, "unitFootprints");
         var pose = (UnitFootprint.Pose) poses.values().iterator().next();
         assertEquals(coords, pose.unit().location().coords());
         assertTrue(pose.position().epsilonEquals(BoardGeometry.center(coords, pose.unit().location().elevation()), .001f));
-    }
-
-    private static Object field(GpuBattleView view, String name) throws ReflectiveOperationException {
-        var field = GpuBattleView.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(view);
     }
 }

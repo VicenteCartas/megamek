@@ -40,7 +40,7 @@ textures folder. The game reads these `StandardMaterial3D` properties and ignore
 | `heightmap_scale`, `heightmap_deep_parallax`, `heightmap_min_layers`, `heightmap_max_layers`, `heightmap_flip_tangent`, `heightmap_flip_binormal` | Parallax ([below](#parallax)); for magma the relief range too. |
 | `emission_enabled`, `emission`, `emission_operator`, `emission_texture`, `emission_energy` (or `emission_energy_multiplier`) | Emission. |
 | `subsurf_scatter_enabled`, `subsurf_scatter_texture`, `subsurf_scatter_strength` | Subsurface scattering. |
-| `transparency` | ALPHA (1) or ALPHA_DEPTH_PRE_PASS (4): alpha blended, the colour map's alpha (times `albedo_color`'s) the opacity, drawn after everything opaque without depth writes or shadows. Generated geometry takes it (the multi-hex buildings' dome glass); a GLB's own alpha mode decides its materials (`MASK` cutouts). |
+| `transparency` | ALPHA (1) or ALPHA_DEPTH_PRE_PASS (4): the colour map's alpha (times `albedo_color`'s) is the opacity. `MASK` cutouts, plants and fences alike, draw their solid texels with depth; their faded texels then blend over the scene in any order, layers stacking as in life (`GpuCutoutFade`, in every view that draws a cutout). How much a stack covers is exact; its colour is a depth-weighted average that favours the nearer layers, not strict back-to-front blending. Only the nearest glass is captured, so a faded texel between two panes has both panes in front of it. Glass blends whole, last among the scene's surfaces, without depth writes or sun shadows: generated geometry's (kit glass roofs, the multi-hex domes) by its `.tres`, a GLB's material when its `alphaMode` is `BLEND` (the authored building exporter writes it for a transparent `.tres` that is no cutout). |
 | `blend_mode` | With `transparency`: MIX (0) fades the whole lit colour by the opacity; PREMULT_ALPHA (4) fades only the diffuse share, so a reflection stays whole (glass). |
 
 ## Finish: one meaning on every surface
@@ -86,11 +86,12 @@ Two contracts carry it to the shaders:
   the GLB leaves out (normal, occlusion, emission, height). `GpuAssets.finish` gives the board's
   own single-material draws (classic tiles, industrial plants) the same.
 
-GLB material extras `mmEmission: "off"` suppress all emission on that surface, including inherited
-shared-material glow. The albedo, reflectivity, textures and stored emission remain intact; removing the
-override (or setting `"inherit"`) restores them. `mmNightEmission: true`, or a shared `.tres` with
-`metadata/mmNightEmission = true`, fades inherited emission with daylight. Explicit Off takes precedence.
-These controls survive authored hex slicing, LOD copies and generated modular kit assembly.
+`mmEmission` says when a material glows: `always`, `night` (fades with daylight) or `off`. GLB material extras
+override a shared `.tres`'s `metadata/mmEmission`; with neither it is always on. Off keeps the albedo, reflectivity,
+textures and stored emission, so removing it restores them. A GLB's nonzero emissive factor replaces the shared
+material's glow. A shared `.tres`'s `metadata/mmPaintMask = true` makes its albedo alpha a paint mask (extras
+`mmPaintMask` for an image embedded in the GLB). A generated kit reads its pieces' materials from their albedo images,
+whatever they are called. These controls survive authored hex slicing, LOD copies and generated modular kit assembly.
 
 What keeps its own shading:
 
@@ -98,7 +99,7 @@ What keeps its own shading:
 - A GLB material with no board texture is the GLB's own glTF material: its roughness, metallic and
   emissive factors. On a plant it keeps its role's response (bark .90, snow .95, leaves passing
   .35 of their light).
-- Impostor cards draw their plant's baked look; fungal glow breathes slowly across a colony.
+- Impostors draw their plant's baked look; fungal glow breathes slowly across a colony.
 - Marsh sedge, whose artwork is composited at run time, takes its material's finish as the
   means of its maps: a uniform roughness, metallic, scattering and glow. Crop plants have no
   artwork; they shade as dry leaves (roughness .86).
@@ -195,6 +196,7 @@ the previous bytes exactly, except crust heat's G and B, which no shader reads.
 | `HEIGHT` | Height, white high | A model's parallax |
 | `MOLTEN_HEAT` | Emission RGB, coverage | Molten lava |
 | `CRUST_HEAT` | Heat, –, –, glow | Solid crust |
+| `FLOES` | `<name>_floes.png` as it is: joints, snow field, shard cracks, shard value | Ice, which alone has this map; no `.tres` or preview shader names it |
 
 `heightmap_scale` is Godot's parallax depth in texture coordinates times 100: 10 is the
 full range, 0.1 of a repeat. Magma's relief takes it too. For sculpted terrain it is the
@@ -279,7 +281,7 @@ these values safely).
 ### Constrained (106)
 
 - `scenery/`: `demolition-materials`, `geyser-travertine`, `pool-water`, `rubble-brick`, `rubble-debris-concrete`, `rubble-debris-masonry`, `rubble-debris-timber`, `rubble-fines`, `rubble-slab`, `rubble-steel`, `rubble-timber`, `timber-bark`, `timber-endgrain`, `tunnel-concrete`
-- `structures/common/`: `chrome`, `corrugated`, `corrugated-painted`, `diamond-plate`, `hazard-stripes`, `iron`, `rusted-steel`, `safety-yellow`, `steel`, `vent-slots`, `weathered-paint`
+- `structures/common/`: `chrome`, `corrugated`, `corrugated-painted`, `diamond-plate`, `hazard-stripes`, `iron`, `louvre`, `rusted-steel`, `safety-yellow`, `steel`, `vent-slots`, `weathered-paint`
 - `structures/facades/`: `facade-fortress`, `facade-hangar`, `facade-hard`, `facade-heavy`, `facade-industrial`, `facade-light`, `facade-medium`
 - `structures/industrial/`: `fan`
 - `structures/turret/`: `turret-dark`, `turret-edge`, `turret-paint`
@@ -292,8 +294,18 @@ these values safely).
 - `vegetation/shrubs/`: `shrub-barren`, `shrub-desert`, `shrub-highland`, `shrub-rocky`, `shrub-snow`, `shrub-temperate`, `shrub-wetland`
 - `vegetation/volcano/`: `cinder-bark`, `cinder-cutout`
 
-Tree impostor atlases under `textures/vegetation/impostors` are baked renders of the models, not
-materials.
+Tree impostor atlases under `textures/vegetation/impostors` are baked renders of each plant's far mesh, not
+materials: `<name>.png` its unlit colour from 32 directions, `<name>_normal.png` its surfaces' mean normal (RGB, as short
+as they face different ways) and depth along each view (alpha), `<name>_crown.png` its coverage from above
+(BoardTreeCoverage). Each impostor's coverage and colour are fitted per row of frames so that at the switch it covers
+what the far mesh covers and is as bright, in the board's own frame at 8, 13 and 17 h, seen from each row's height
+(`mm-data/tools/calibrate_impostors.py`, GpuImpostorCalibrationSmokeTest): the material's alpha cutoff, and per row a
+colour factor and a coverage exponent baked into the atlas and recorded in the impostor material's extras
+(`mmImpostorTint`), which `prepare_tree_lods.py` applies when it rebakes.
+
+Every model colour image with transparent texels (leaves, impostors, fences) and every decal takes mip levels
+averaged by alpha (`GpuColorTexture.cutoutLevels`, made beside the pooled decode): plain mipmaps mix in the colour of
+the texels behind a cutout, and distant leaves took the colour of that filler, darkening as the view zoomed out.
 
 ## Authoring and export
 

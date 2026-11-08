@@ -1,10 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.AFTER_BACKSPACE;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.BOMBS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.DECLARED;
@@ -15,6 +14,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizatio
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.render;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.used;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -27,7 +27,6 @@ import static org.mockito.Mockito.when;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.ActionEvent;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -40,10 +39,9 @@ import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.dialogs.phaseDisplay.TriggerBPodDialog;
 import megamek.client.ui.panels.phaseDisplay.FiringDisplay.FiringCommand;
-import megamek.common.Configuration;
 import megamek.common.ToHitData;
 import megamek.common.actions.ActivateBloodStalkerAction;
 import megamek.common.actions.EntityAction;
@@ -61,10 +59,9 @@ import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
 import megamek.common.units.Infantry;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -73,21 +70,9 @@ import org.mockito.MockedStatic;
  * the refusal reason the Fire button acts on; Cancel in the ability and B-Pod target prompts declares nothing. The
  * literals are those GpuFiringCharacterizationTest recorded on the code before the extraction.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuFiringQueueTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void replacingTheQueueWithItsOwnActionsChangesNothing() throws Exception {

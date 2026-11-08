@@ -2,10 +2,12 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -141,7 +143,7 @@ class BoardConcreteMeshTest {
     }
 
     private static BoardScene commCenter() throws Exception {
-        return BoardCliffSeamTest.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        return BoardScenes.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
     }
 
     @Test
@@ -295,7 +297,7 @@ class BoardConcreteMeshTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 2 })
     void unmarkedConcreteStepsHaveSharpPlanarSlopesAndMatchingPicking(int levels) {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             BoardScene scene = scene(at -> at.getX() >= 8 ? levels : 0, false);
             Coords at = new Coords(8, 4);
             for (TerrainLod lod : TerrainLod.values()) {
@@ -334,7 +336,7 @@ class BoardConcreteMeshTest {
             complete.addAll(surface.faces);
             complete.addAll(surface.walls(scene, floor));
         }
-        BoardCliffSeamTest.assertClosed(complete, floor, "Concrete slope at the board cut");
+        BoardScenes.assertClosed(complete, floor, "Concrete slope at the board cut");
     }
 
     private static BoardScene scene(ToIntFunction<Coords> elevation, boolean natural) {
@@ -354,5 +356,106 @@ class BoardConcreteMeshTest {
             }
         }
         return new BoardScene(0, 11, 9, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
+    void tallConcreteCliffsRemainFlatDownToTheirFeet() {
+        float m = BoardRelief.metres(1);
+        for (int level : new int[] { 3, 6 }) {
+            BoardScene scene = BoardScenes.reliefScene(level, true, BoardScene.Surface.CONCRETE);
+            BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.RELIEF_CENTER));
+            Vector3 center = BoardGeometry.center(BoardScenes.RELIEF_CENTER, level);
+            int samples = 0;
+            for (BoardSurface.Face face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                // A rectangular slab needs only corner vertices; also measure inside its triangles.
+                Vector3 middle = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1 / 3f);
+                for (Vector3 p : List.of(face.a(), face.b(), face.c(), middle)) {
+                    // Distance beyond the nearest logical edge; the rounded corners are skipped.
+                    float beyond = -Float.MAX_VALUE, along = 0;
+                    for (int edge = 0; edge < 6; edge++) {
+                        Vector3 a = BoardGeometry.corner(BoardScenes.RELIEF_CENTER, level, edge);
+                        Vector3 b = BoardGeometry.corner(BoardScenes.RELIEF_CENTER, level, edge + 1);
+                        float ex = b.x - a.x, ey = b.y - a.y, length = (float) Math.hypot(ex, ey);
+                        float nx = ey / length, ny = -ex / length;
+                        if (nx * (a.x - center.x) + ny * (a.y - center.y) < 0) {
+                            nx = -nx;
+                            ny = -ny;
+                        }
+                        float distance = (p.x - a.x) * nx + (p.y - a.y) * ny;
+                        if (distance > beyond) {
+                            beyond = distance;
+                            along = ((p.x - a.x) * ex + (p.y - a.y) * ey) / (length * length);
+                        }
+                    }
+                    if (along < .15f || along > .85f) { continue; }
+                    assertEquals(0, beyond, .01f * m, "Cast concrete faces are flat, at " + p);
+                    samples++;
+                }
+            }
+            assertTrue(samples > 0, "Every face was measured");
+        }
+    }
+
+    @Test
+    void commCenterBoardCutNormalsStaySeparateFromTheRoadAbove() throws Exception {
+        BoardScene scene = BoardScenes.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        for (Coords at : List.of(new Coords(0, 2), new Coords(0, 3))) {
+            for (TerrainLod lod : TerrainLod.values()) {
+                var surface = new BoardSurface(scene, scene.tile(at), lod);
+                int checked = 0;
+                for (var face : surface.walls(scene, BoardGeometry.floor(scene))) {
+                    if (scene.tile(at.translated(BoardGeometry.edgeDirection(face.landEdge()))) != null) { continue; }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                    for (Vector3 point : List.of(face.a(), face.b(), face.c())) {
+                        // A sliver's own normal rounds off by about .0001; a road's normal differs by far more.
+                        assertTrue(surface.relief.shade(point).normal().epsilonEquals(normal, .002f),
+                              "The map cut must not inherit upward road normals at " + at + ", " + lod + ": " + point);
+                    }
+                    checked++;
+                }
+                assertTrue(checked > 0, "Exercise the exposed board cut beside the road");
+            }
+        }
+    }
+
+    @Test
+    void commCenterBoardCutsMeetEverySlope() throws Exception {
+        BoardScene scene = BoardScenes.capturedScene("GrassLands/16x17 Grasslands River CommCenter.board");
+        float floor = BoardGeometry.floor(scene);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<BoardScenes.Segment, Integer> joined = new HashMap<>();
+            Map<String, List<BoardSurface.Face>> cuts = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                Coords at = tile.coords();
+                if (at.getX() > 1 && at.getX() < scene.width() - 2 && at.getY() > 1 && at.getY() < scene.height() - 2) { continue; }
+                var surface = new BoardSurface(scene, tile, lod);
+                BoardScenes.countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, floor);
+                BoardScenes.countEdges(joined, walls);
+                if (!tile.liquid().present()) {
+                    for (int edge = 0; edge < 6; edge++) {
+                        if (scene.tile(at.translated(BoardGeometry.edgeDirection(edge))) != null) { continue; }
+                        int cut = edge;
+                        var panels = walls.stream().filter(face -> face.landEdge() == cut).toList();
+                        Vector3 outward = BoardGeometry.corner(at, 0, edge).add(BoardGeometry.corner(at, 0, edge + 1))
+                              .scl(.5f).sub(BoardGeometry.center(at, 0)).nor();
+                        for (var face : panels) {
+                            Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a())).nor();
+                            assertTrue(normal.dot(outward) > 0,
+                                  "The board cut must not fold inward at " + at + ", edge " + edge + ", " + lod);
+                        }
+                        cuts.put(at + " edge " + edge, panels);
+                    }
+                }
+            }
+            long bottom = Math.round(floor * 1000);
+            assertFalse(cuts.isEmpty());
+            for (var cut : cuts.entrySet()) {
+                Map<BoardScenes.Segment, Integer> boundary = new HashMap<>();
+                BoardScenes.countEdges(boundary, cut.getValue());
+                boundary.keySet().removeIf(edge -> edge.a().z() == bottom && edge.b().z() == bottom);
+                BoardScenes.assertJoined(boundary, joined, "CommCenter map-edge slope at " + cut.getKey() + ", " + lod);
+            }
+        }
     }
 }

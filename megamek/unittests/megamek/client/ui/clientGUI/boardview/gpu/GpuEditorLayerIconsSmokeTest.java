@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Layers rows show their layer's type in the real panel (the table itself is GpuBoardEditor.LAYER_ICONS; its keys are
- * checked against the blueprint in BoardSceneryDecodeDataTest): the Ground row keeps the hexagon, a component, a
+ * checked against the blueprint in BoardSceneryTest): the Ground row keeps the hexagon, a component, a
  * vehicle, a decal and a group row show their icons, no row shows the unit shield, and a reorderable row keeps its drag
  * handle before its type icon; an additive component (Elevators, Hazards, Scenario features with a deployment zone) has
  * its row while its fields are in the hex, and the zone's Edit field lists its IDs.

@@ -203,6 +203,7 @@ public final class GpuBoardWindow {
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
     private final Timer startupTimer;
+    private java.util.concurrent.CompletableFuture<?> plantsAhead;
     private volatile BoardSource source;
     private volatile String previewTitle;
     /** EDT-owned source of the current preview; null for a generated or assembled lobby map. */
@@ -899,6 +900,9 @@ public final class GpuBoardWindow {
         BoardClientState view = gui == null ? initialView : gui.getCurrentBoardState().orElse(null);
         if (mapGame == null && view == null) { return; }
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
+        // The board's first capture finds its plants searched: the search leaves this thread free, and the timer looks again.
+        if (mapGame != null && plantsAhead == null) { plantsAhead = BoardTiles.searchAhead(mapGame.getBoard()); }
+        if (plantsAhead != null && !plantsAhead.isDone()) { return; }
         try {
             source = mapGame == null ? new GpuBoardSource(view, panel)
                   : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit,

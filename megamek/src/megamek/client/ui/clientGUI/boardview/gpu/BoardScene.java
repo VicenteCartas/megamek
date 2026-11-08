@@ -125,6 +125,14 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
     static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
           java.util.function.Function<Coords, megamek.common.Hex> board,
           java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings, Set<String> buildingReferences) {
+        return captureTile(hex, pixels, previous, terrainImages, board, buildings, buildingReferences, null);
+    }
+
+    /** {@code searchedWoods}: the hex's woods if the capture ran their search ahead (BoardTiles), else null. */
+    static Tile captureTile(megamek.common.Hex hex, BoardArtwork.HexImage pixels, Tile previous, PixelPool terrainImages,
+          java.util.function.Function<Coords, megamek.common.Hex> board,
+          java.util.function.Function<Coords, megamek.common.units.IBuilding> buildings, Set<String> buildingReferences,
+          List<Feature> searchedWoods) {
         return new BoardScene.Tile(pixels.coords(), hex.getLevel(),
               hex.containsTerrain(Terrains.WATER) ? Math.max(0, hex.terrainLevel(Terrains.WATER)) : -1,
               hex.containsTerrain(Terrains.ICE),
@@ -133,7 +141,7 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
               terrainImages.captureOverlay(pixels.decals(), previous == null ? null : previous.decals()),
               terrainImages.capture(pixels.decalsWithoutLimbs(), previous == null ? null : previous.decalsWithoutLimbs()),
               BoardFeatures.capture(hex, pixels.coords(), pixels.structureModels(), pixels.blankTerrains(), board, pixels.scenery(),
-                    megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences),
+                    megamek.common.board.BoardTreeDistribution.NATURAL, buildingReferences, searchedWoods),
               pixels.text(), BoardLiquid.capture(hex),
               terrainImages.capture(pixels.tileset(), previous == null ? null : previous.tileset()),
               BoardFeatures.detailedGround(hex, pixels.structureModels(), pixels.blankTerrains(), pixels.scenery()),
@@ -683,6 +691,40 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
         /** Visual cap below an ultra-sublevel's mouth, including pits beside ground at the same authored level. */
         int groundLevel() { return elevation - (ultraSublevel ? 1 : 0); }
 
+        /** The level of the ground under this hex's liquid (Hex#floor): roads and bridges meet it, water being a layer over it. */
+        int floor() { return elevation - (liquid.present() ? Math.max(0, waterDepth) : 0); }
+
+        /**
+         * Whether a side the author separated parts this hex's water from {@code other}'s, the neighbour in
+         * {@code direction}. It holds between water at one level; across a step the water still falls.
+         */
+        boolean separated(Tile other, int direction) {
+            return elevation == other.elevation
+                  && ((liquid.separated() >> direction | other.liquid.separated() >> (direction + 3) % 6) & 1) != 0;
+        }
+
+        /** Whether this hex's liquid runs on into {@code other}, the neighbour in {@code direction}. */
+        boolean joins(Tile other, int direction) {
+            return liquid.connects(other.liquid) && !separated(other, direction);
+        }
+
+        /** {@link #joins(Tile, int)} for a neighbour known by its coordinates. */
+        boolean joins(Tile other) {
+            return liquid.connects(other.liquid) && ((liquid.separated() | other.liquid.separated()) == 0
+                  || !separated(other, coords.direction(other.coords)));
+        }
+
+        /** The sides the author parted from the pavement beside this hex's pavement. */
+        int pavementSides() {
+            return surface == Surface.CONCRETE ? megamek.common.board.HexAppearance.separated(appearance, "pavement") : 0;
+        }
+
+        /** Whether a side the author separated parts this hex's pavement from {@code other}'s, at one level. */
+        boolean pavementApart(Tile other, int direction) {
+            return surface == Surface.CONCRETE && other.surface == Surface.CONCRETE && elevation == other.elevation
+                  && ((pavementSides() >> direction | other.pavementSides() >> (direction + 3) % 6) & 1) != 0;
+        }
+
         /**
          * The sides of the tile's rails that lie on its ground: its captured {@link #railBed} (a destroyed rail's too,
          * which draws no track) and its ground route features (a hand-made tile's, the editor preview's stroke).
@@ -1213,6 +1255,9 @@ record BoardScene(int boardId, int width, int height, List<Tile> tiles, List<Uni
             for (int i = 0; i < width * height; i++) { if (rgba(i) != pixels.rgba(i)) { return false; } }
             return true;
         }
+
+        /** How many values this keeps in memory: a compacted image's runs, else its texels. */
+        int stored() { return argb.length + (runEnds == null ? 0 : runEnds.length); }
 
         public int width() {
             return width;

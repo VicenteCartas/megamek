@@ -24,7 +24,7 @@ vec2 slab(float u, float z, float h, float d, out float shade) {
     vec2 window = vec2(hash(id), hash(id + 17.3));
     // Each slab's own tone, grime settling toward its foot and run-off stains hanging from its top edge.
     shade = mix(.9, 1.07, hash(id + 5.1)) * mix(.84, 1.0, smoothstep(0.0, .3, up));
-    float runoff = smoothstep(.55, .85, texture(u_rainNoise, vec2(u / 3.1 + window.x * 7.0, z / 45.0)).r);
+    float runoff = smoothstep(.55, .85, texture(u_surfaceNoise, rainNoiseAt(vec2(u / 3.1 + window.x * 7.0, z / 45.0))).r);
     shade *= 1.0 - .14 * runoff * smoothstep(.45, 1.0, up);
     float seam = joint(min(fract(along), 1.0 - fract(along)) * width, .03);
     seam = max(seam, joint(min(up, 1.0 - up) * levelMetres, .03) * smoothstep(.1, .3, d) * smoothstep(.1, .3, h));

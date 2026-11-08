@@ -58,7 +58,7 @@ class GpuLegacyArtSmokeTest {
     @Test
     void convertedLegacyArtRendersInItsColoursAndPlaces() throws Exception {
         Board board = board();
-        BoardScene scene = GpuLegacyImportSmokeTest.scene(board);
+        BoardScene scene = BoardScenes.scene(board);
         assertTrue(OUTPUT.isDirectory() || OUTPUT.mkdirs());
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
@@ -86,7 +86,7 @@ class GpuLegacyArtSmokeTest {
                         camera.center(BoardGeometry.center(shot.getValue(), 0));
                         camera.camera.zoom = shot.getKey().startsWith("pad-ring") ? .5f : .2f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(OUTPUT, shot.getKey() + ".png"));
                     }

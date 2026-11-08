@@ -2,8 +2,6 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
-import static org.mockito.Mockito.mockStatic;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -47,8 +45,7 @@ class GpuAuthoredEditorSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         File output = new File("build/gpu-board-review/authored-buildings"); Files.createDirectories(output.toPath());
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1600, 1000); config.setInitialVisible(false);
-        try (var previews = mockStatic(GpuEditorTerrainPreviews.class, CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 long deadline, nextFrame; int step, aimed = -1;
                 @Override public void create() { super.create(); deadline = System.nanoTime() + 120_000_000_000L; }
@@ -87,10 +84,10 @@ class GpuAuthoredEditorSmokeTest {
                             GpuBoardTestUi.capture(new File(output, "arena-editor.png"));
                             source.editorCommand(new Command(Action.ASSET, "buildings/authored/hpg-headquarters"), source.takeFrame().boardGeneration());
                         } else {
-                            var preview = field(this, "editorPreview");
+                            var preview = GpuTestSupport.field(this, "editorPreview");
                             if (source.editorState().tool() != BoardEditorSession.Tool.PAINT || source.editorPreview().routes().isEmpty()) { return; }
-                            if (field(preview, "built") != source.editorPreview() || field(preview, "comparing") != null) { return; }
-                            assertFalse(((java.util.Collection<?>) field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
+                            if (GpuTestSupport.field(preview, "built") != source.editorPreview() || GpuTestSupport.field(preview, "comparing") != null) { return; }
+                            assertFalse(((java.util.Collection<?>) GpuTestSupport.field(preview, "ghosts")).isEmpty(), "Authored paint needs sliced ghost geometry: "
                                   + source.editorPreview().label() + ", hexes " + source.editorPreview().hexes() + ", routes " + source.editorPreview().routes().keySet());
                             GpuBoardTestUi.capture(new File(output, step == 3 ? "hpg-ghost.png" : step == 4 ? "arena-ghost.png" : "small-arena-ghost.png"));
                             if (step == 3) {
@@ -108,13 +105,5 @@ class GpuAuthoredEditorSmokeTest {
             }, config);
         } finally { SwingUtilities.invokeAndWait(source::close); }
         if (failure.get() != null) { throw new AssertionError("Authored editor", failure.get()); }
-    }
-
-    private static Object field(Object object, String name) throws Exception {
-        for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) {
-            try { var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(object); }
-            catch (NoSuchFieldException ignored) { /* The view fields live in its superclass. */ }
-        }
-        throw new NoSuchFieldException(name);
     }
 }

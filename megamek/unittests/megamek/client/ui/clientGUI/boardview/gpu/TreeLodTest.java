@@ -43,4 +43,14 @@ class TreeLodTest {
         assertEquals(2, TreeLod.level(TreeLod.PROPS, 10, 0));
         assertEquals(1, TreeLod.level(TreeLod.PROPS, 27, 2));
     }
+
+    @Test
+    void aGiantSwitchesAtFiveHexesOfItsSide() {
+        // 16 pixels a hex is .19 a unit: the 1,108-unit HPG's whole side would still be 213 pixels.
+        assertEquals(0, TreeLod.prop(1108, .25f, 0));
+        assertEquals(1, TreeLod.prop(1108, .16f, 0));
+        // The same scale leaves a smaller building as it was.
+        assertEquals(0, TreeLod.prop(300, .25f, 0));
+        assertEquals(1, TreeLod.prop(150, .45f, 0));
+    }
 }

@@ -23,6 +23,7 @@ import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 
 class BoardLiquidTest {
+
     @Test
     void terrainControlsTheLiquidAndHazardLevelsNeverBecomeWaterDepths() {
         Hex hex = new Hex(5);
@@ -92,10 +93,10 @@ class BoardLiquidTest {
         Coords pool = new Coords(3, 3);
         var pixels = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
         for (BoardLiquid.Kind kind : List.of(BoardLiquid.Kind.WATER, BoardLiquid.Kind.HAZARDOUS, BoardLiquid.Kind.MAGMA)) {
-            BoardScene scene = BoardSurfaceBlendTest.scene(c -> c.equals(pool)
+            BoardScene scene = BoardScenes.scene(c -> c.equals(pool)
                   ? new BoardScene.Tile(pool, 0, -1, false, 0, BoardScene.Surface.ROCK, null, null, List.of(),
                         List.of(), new BoardLiquid(kind, "", 0), null, true)
-                  : BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 1, -1, 0));
+                  : BoardScenes.tile(c, BoardScene.Surface.GRASS, 1, -1, 0));
             assertVisiblePool(scene, pool);
         }
     }
@@ -189,7 +190,7 @@ class BoardLiquidTest {
 
     @Test
     void volcanicSlopesShareGeometryAndPickingInEveryDirection() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             Coords high = new Coords(3, 3);
             for (int direction = 0; direction < 6; direction++) {
                 for (int drop : new int[] { 1, 2, 3 }) {

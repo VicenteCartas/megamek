@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.Coords;
@@ -45,7 +46,7 @@ class BoardPaintCoverTest {
 
     @Test
     void bladesStayOffAnEmblemYetGrowInItsTransparentCornersAndKeepTheirPlacesElsewhere() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         var tile = scene.tile(AT);
         var cross = new BoardDecoration("cross", "decal", "decal/emblems/red-cross", null, .05, 0, 20, false, .5,
               BoardDecoration.Placement.ground(), 0, false);
@@ -72,24 +73,59 @@ class BoardPaintCoverTest {
 
     @Test
     void bankRimsReedsAndCropsLoseTheirRootsUnderOpaquePaint() {
-        var bank = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, c.getX() < 5 ? 2 : 0, -1, 0));
+        var bank = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, c.getX() < 5 ? 2 : 0, -1, 0));
         var tile = bank.tile(AT);
         var paint = BoardDecals.Opacity.of(tile, stamp(COVER));
         assertTrue(GpuGroundCover.plantRim(bank, tile, support(bank), null).size > 0, "The bank's rim grows blades");
         assertNull(GpuGroundCover.plantRim(bank, tile, support(bank), paint));
         for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, kind, 0));
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, kind, 0));
             // Crops stand only in a field of wheat or maize.
-            var at = kind == BoardScene.Biome.FIELD ? BoardBiomeTest.CROPS : AT;
+            var at = kind == BoardScene.Biome.FIELD ? BoardScenes.CROPS : AT;
             var biome = scene.tile(at);
             var covered = BoardDecals.Opacity.of(biome, stamp(COVER, at));
             if (kind == BoardScene.Biome.MARSH) {
                 assertTrue(GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, null).size > 0, "The marsh grows reeds");
                 assertEquals(0, GpuBiomeVegetation.plantReeds(scene, biome, support(scene), 1, covered).size);
             } else {
-                assertTrue(BoardBiomeTest.cropPlants(scene, biome, support(scene, at), null).size > 0, "The field grows crops");
-                assertEquals(0, BoardBiomeTest.cropPlants(scene, biome, support(scene, at), covered).size);
+                assertTrue(BoardScenes.cropPlants(scene, biome, support(scene, at), null).size > 0, "The field grows crops");
+                assertEquals(0, BoardScenes.cropPlants(scene, biome, support(scene, at), covered).size);
             }
         }
+    }
+
+    @Test
+    void reedsAndCropsAvoidPlacedObjects() {
+        var fountain = new BoardDecoration("fountain", "prop", "scenery/parks/fountain", null, 0, 0, 0, false, 1,
+              BoardDecoration.Placement.ground(), 0);
+        var feature = new BoardScene.Feature(fountain.asset(), 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, fountain);
+        for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
+            // Crops stand only in a field of wheat or maize.
+            var at = kind == BoardScene.Biome.FIELD ? BoardScenes.CROPS : AT;
+            var plain = BoardScenes.scene(c -> BoardScenes.tile(c, kind, 0));
+            var base = plain.tile(at);
+            var placed = BoardScenes.replace(plain, new BoardScene.Tile(at, 0, -1, false, 0, base.surface(),
+                  null, null, List.of(feature), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
+                  BoardFireSmoke.NONE, kind));
+            var obstacles = new BoardObstacles(placed, placed.tile(at));
+            FloatArray bare = plantRoots(plain, kind, at), around = plantRoots(placed, kind, at);
+            Set<List<Float>> kept = new HashSet<>(), all = new HashSet<>();
+            for (int i = 0; i < bare.size; i += 4) { all.add(List.of(bare.get(i), bare.get(i + 1))); }
+            int inside = 0;
+            for (int i = 0; i < around.size; i += 4) {
+                kept.add(List.of(around.get(i), around.get(i + 1)));
+                if (obstacles.obstructs(new Vector3(around.get(i), around.get(i + 1), around.get(i + 2)), .01f, .01f)) { inside++; }
+            }
+            System.out.printf("COVER %s: %d plants, %d beside the fountain%n", kind, bare.size / 4, around.size / 4);
+            assertEquals(0, inside, kind + ": no plant through the fountain");
+            assertTrue(around.size > 0, kind + ": the rest of the hex still grows");
+            // Reeds and plants are points that keep their places.
+            assertTrue(around.size < bare.size && all.containsAll(kept), kind + ": the fountain clears its plants; the others stay");
+        }
+    }
+
+    private static FloatArray plantRoots(BoardScene scene, BoardScene.Biome kind, Coords at) {
+        return kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, scene.tile(at), support(scene, at), 1, null)
+              : BoardScenes.cropPlants(scene, scene.tile(at), support(scene, at), null);
     }
 }

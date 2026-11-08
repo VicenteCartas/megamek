@@ -13,6 +13,10 @@ import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.board.HexAppearance;
+import megamek.common.board.TilesetScenery;
+import megamek.common.units.BipedMek;
+import megamek.common.units.ConvInfantry;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
@@ -23,9 +27,9 @@ class BoardIndustrialTest {
     static final Coords CENTER = new Coords(4, 4);
 
     static BoardScene scene(Map<Coords, Integer> sites, int height, int neighborGround) {
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             int elevation = coords.equals(CENTER) ? 0 : neighborGround;
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, elevation, -1, 0);
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, elevation, -1, 0);
             Hex hex = new Hex(elevation);
             hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
             String asset = "buildings/saxarba/misc/heavy_industrial_" + (char) ('a' + sites.getOrDefault(coords, 0));
@@ -181,5 +185,51 @@ class BoardIndustrialTest {
     private static Vector3 world(BoardScene scene, Coords coords, BoardIndustrial.Port port) {
         return BoardGeometry.center(coords, 0).add(port.x() * BoardGeometry.hexScale(), port.y() * BoardGeometry.hexScale(),
               BoardGeometry.groundZ(scene.tile(coords)) + port.z() * BoardGeometry.level() / 18);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 2, 3, 4 })
+    void tankFarmDesignsUseFuelTankFeaturesWithoutBuildingInteriors(int weight) {
+        Hex hex = new Hex(0, "fuel_tank:" + weight + ":4;fuel_tank_cf:15;fuel_tank_elev:3;fuel_tank_magn:100", "");
+        hex.setAppearance(Map.of("fuelTank", new HexAppearance("building/tank-farm", null, null, null)));
+        var models = TilesetScenery.structureModels(hex);
+        assertEquals(java.util.Set.of(Terrains.FUEL_TANK), models.keySet());
+        var features = BoardFeatures.capture(hex, new Coords(1, 1), models);
+        assertEquals(1, features.size());
+        assertEquals(BoardScene.FeatureKind.FUEL_TANK, features.getFirst().kind(),
+              "Only BUILDING features generate interior floors and struts");
+        assertEquals(3, features.getFirst().height());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 1, 3, 7, 10 })
+    void industrialHeightProvidesCoverWithoutOccupiableStoreys(int height) {
+        Hex hex = new Hex(2);
+        hex.addTerrain(new Terrain(Terrains.INDUSTRIAL, height));
+        Coords coords = new Coords(2, 3);
+        for (String suffix : new String[] { "a", "b", "c", "d" }) {
+            String asset = "buildings/saxarba/misc/heavy_industrial_" + suffix;
+            var features = BoardFeatures.capture(hex, coords, Map.of(Terrains.INDUSTRIAL, asset));
+            assertEquals(1, features.size());
+            assertEquals(BoardScene.FeatureKind.INDUSTRIAL, features.getFirst().kind());
+            assertEquals(height, features.getFirst().height());
+            assertEquals(asset, features.getFirst().asset());
+        }
+        BipedMek unit = new BipedMek();
+        assertTrue(unit.isElevationValid(0, hex));
+        for (int elevation = 1; elevation <= height; elevation++) {
+            assertFalse(unit.isElevationValid(elevation, hex), "Industrial height is cover, not a building floor");
+        }
+        hex.addTerrain(new Terrain(Terrains.BUILDING, 2));
+        hex.addTerrain(new Terrain(Terrains.BLDG_ELEV, 3));
+        assertTrue(unit.isElevationValid(3, hex), "A coexisting real building retains its roof");
+        assertTrue(new ConvInfantry().isElevationValid(1, hex),
+              "Infantry can occupy the coexisting building's interior floors");
+        var mixed = BoardFeatures.capture(hex, coords, Map.of(Terrains.BUILDING, "building",
+              Terrains.INDUSTRIAL, "industry"));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.BUILDING
+              && feature.height() == 3));
+        assertTrue(mixed.stream().anyMatch(feature -> feature.kind() == BoardScene.FeatureKind.INDUSTRIAL
+              && feature.height() == height));
     }
 }

@@ -29,7 +29,7 @@ class BoardTropicalTest {
     @Test
     void raciceCapturesTropicalWoodsAndAuthoredDesertMixturesWithoutChangingTheMap() throws Exception {
         var board = racice();
-        var scene = BoardAridSurfaceTest.capture(board);
+        var scene = BoardScenes.capture(board);
         assertEquals(32, scene.width());
         assertEquals(17, scene.height());
         int tropical = 0, palms = 0, broadleaf = 0;
@@ -89,7 +89,7 @@ class BoardTropicalTest {
         }
         // As every load site converts a legacy board: the transition becomes its ground design.
         BoardSceneryLayouts.convert(board);
-        var scene = BoardAridSurfaceTest.capture(board);
+        var scene = BoardScenes.capture(board);
         var tile = scene.tile(new Coords(1, 1));
         var surface = new BoardSurface(scene, tile);
         var faces = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();

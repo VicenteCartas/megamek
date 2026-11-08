@@ -90,9 +90,10 @@ class GpuEditorTextKeysTest {
             String name = mode.name().toLowerCase(Locale.ROOT);
             keys.addAll(List.of("BoardEditor.sculpt." + name, "BoardEditor.hint." + name));
         }
-        // The Assets palette: every category and section of the blueprint, and the Theme category's two sections.
+        // The Assets palette: every category, subcategory and section of the blueprint, and the Theme category's two sections.
         for (var category : BoardEditorBlueprint.get().categories()) {
             keys.add("BoardEditor.palette." + category.id());
+            category.subcategories().forEach(subcategory -> keys.add("BoardEditor.palette." + category.id() + "." + subcategory));
             category.sections().forEach(section -> keys.add("BoardEditor.palette." + section.category() + "." + section.id()));
             if (category.themes() != null) {
                 keys.addAll(List.of("BoardEditor.palette." + category.id() + ".themes", "BoardEditor.palette." + category.id() + ".special"));

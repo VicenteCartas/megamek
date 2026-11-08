@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class GpuRoadJunctionFixtureSmokeTest {
     @Test
     void everyRoadRailCombinationAndTheSharedRoundabout() throws Exception {
-        var scene = GpuLegacyImportSmokeTest.scene(RoadJunctionFixture.create());
+        var scene = BoardScenes.scene(RoadJunctionFixture.create());
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "junction-fixture");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -61,7 +61,7 @@ class GpuRoadJunctionFixtureSmokeTest {
                                 camera.center(a.lerp(b, .5f));
                                 camera.camera.zoom = .75f;
                                 camera.update();
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 File file = new File(output, panel.name().toLowerCase(java.util.Locale.ROOT)
                                       + "-" + row + "-" + column + ".png");
@@ -106,7 +106,7 @@ class GpuRoadJunctionFixtureSmokeTest {
                     cases(terrain, frame, camera, scene, output, "controls", RoadJunctionFixture.controlCases(), false);
                     cases(terrain, frame, camera, scene, output, "controls-oblique", RoadJunctionFixture.controlCases(), true);
                     if (selected("seaport-board")) {
-                        var seaport = GpuRoadSourceTest.scene("Map Set 7/16x17 Seaport.board");
+                        var seaport = BoardScenes.installedScene("Map Set 7/16x17 Seaport.board");
                         terrain.update(seaport);
                         cases(terrain, frame, camera, seaport, output, "seaport-board", List.of(
                               new RoadJunctionFixture.Case("left", "Seaport.board: left three-hex junction", new Coords(9, 12)),
@@ -131,7 +131,7 @@ class GpuRoadJunctionFixtureSmokeTest {
                   : name.startsWith("controls") ? .2f : .34f;
             camera.center(BoardGeometry.center(sample.at(), 0));
             camera.update();
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
             File file = new File(output, name + "-" + sample.id() + ".png");
             GpuReviewFrame.save(file);

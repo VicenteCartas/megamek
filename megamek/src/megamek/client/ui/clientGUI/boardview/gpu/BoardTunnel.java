@@ -32,7 +32,7 @@ record BoardTunnel(Coords road, int direction, Vector3 origin, Vector3 along, Bo
     static List<BoardTunnel> entrances(BoardScene scene, BoardScene.Tile tile) {
         List<BoardTunnel> result = new ArrayList<>();
         if (BoardRoad.rendered(tile)) {
-            entrances(scene, tile, tile.roadExits(), tile.elevation(), tile.road(), false, result);
+            entrances(scene, tile, tile.roadExits(), BoardRoadGrade.ground(tile), tile.road(), false, result);
         }
         // A deck's road continues into the wall on its own sides.
         var feature = BoardBridge.feature(tile);

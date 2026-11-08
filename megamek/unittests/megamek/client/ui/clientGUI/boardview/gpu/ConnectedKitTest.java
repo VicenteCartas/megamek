@@ -176,6 +176,80 @@ class ConnectedKitTest {
         assertArrayEquals(new int[] { 1, 3, 0, 3, 0, 0 }, ConnectedKit.reach(scene, scene.tile(tall), 3));
     }
 
+    @Test
+    void aBuildingStandsOpenWhereItConnectsToNothingAsAfterACollapse() {
+        Hex[] hexes = new Hex[7 * 7];
+        for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
+        // A row of three running south, whose north end still connects north where nothing stands.
+        Coords end = new Coords(3, 2), next = end.translated(3), last = next.translated(3);
+        structure(hexes, end, Terrains.BUILDING, (1 << 0) | (1 << 3), 2);
+        structure(hexes, next, Terrains.BUILDING, (1 << 0) | (1 << 3), 2);
+        structure(hexes, last, Terrains.BUILDING, 1, 2);
+        var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertTrue(ConnectedKit.open(scene, scene.tile(end), 2), "Its north end is open");
+        assertTrue(ConnectedKit.open(scene, scene.tile(next), 2), "The inside of the hex it joins shows through that end");
+        assertFalse(ConnectedKit.open(scene, scene.tile(last), 2), "Two hexes in, the inside is out of sight");
+        hexes[end.getY() * 7 + end.getX()].getTerrain(Terrains.BUILDING).setExits(1 << 3);
+        scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertFalse(ConnectedKit.open(scene, scene.tile(end), 2), "Closed at its end, the row is closed");
+        assertFalse(ConnectedKit.open(scene, scene.tile(next), 2));
+    }
+
+    @Test
+    void wallsOfTwoHexesMeetingAtACornerTurnItTogetherAndOnlyThere() {
+        // A hex linked north and north-east whose two neighbours do not link each other: a 60-degree notch.
+        Hex[] hexes = new Hex[7 * 7];
+        for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
+        Coords centre = new Coords(3, 3), north = centre.translated(0), northEast = centre.translated(1);
+        structure(hexes, centre, Terrains.BUILDING, (1 << 0) | (1 << 1), 2);
+        structure(hexes, north, Terrains.BUILDING, 1 << 3, 2);
+        structure(hexes, northEast, Terrains.BUILDING, 1 << 4, 2);
+        var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        // Each neighbour's wall, square to its link, ends at the shared corner: its corner 2 (north's), 4 (north-east's).
+        assertArrayEquals(new int[] { 0, 0, bit(KitOutline.Junction.S1_NOTCH), 0, 0, 0 }, levelOf(junctions(scene, north, 2), 1));
+        assertArrayEquals(new int[] { 0, 0, 0, 0, bit(KitOutline.Junction.S0_NOTCH), 0 }, levelOf(junctions(scene, northEast, 2), 0));
+        assertArrayEquals(new int[12], junctions(scene, centre, 2), "Linked both ways, its corner holds no wall");
+        // Linked to each other too, the three close the corner inside the building.
+        hexes[north.getY() * 7 + north.getX()].getTerrain(Terrains.BUILDING).setExits((1 << 3) | (1 << 2));
+        hexes[northEast.getY() * 7 + northEast.getX()].getTerrain(Terrains.BUILDING).setExits((1 << 4) | (1 << 5));
+        scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertArrayEquals(new int[12], junctions(scene, north, 2));
+        assertArrayEquals(new int[12], junctions(scene, northEast, 2));
+    }
+
+    @Test
+    void wallsClosingLinksAboveAShorterNeighbourMeetTheNextHexsAcrossItsCorner() {
+        // A 3-level hex linked north (1 level) and north-west (2), which link each other: above the north one, the
+        // walls closing the links to it, the hex's and the north-west one's, meet at their shared corner.
+        Hex[] hexes = new Hex[7 * 7];
+        for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
+        Coords centre = new Coords(3, 3), north = centre.translated(0), northWest = centre.translated(5);
+        structure(hexes, centre, Terrains.BUILDING, (1 << 0) | (1 << 5), 3);
+        structure(hexes, north, Terrains.BUILDING, (1 << 3) | (1 << 4), 1);
+        structure(hexes, northWest, Terrains.BUILDING, (1 << 2) | (1 << 1), 2);
+        var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        int[] centres = junctions(scene, centre, 3), northWests = junctions(scene, northWest, 2);
+        assertArrayEquals(new int[6], levelOf(centres, 0), "All three stand and link at the ground");
+        assertEquals(bit(KitOutline.Junction.C1_CAP), levelOf(centres, 1)[5]);
+        assertEquals(bit(KitOutline.Junction.C0_CAP), levelOf(northWests, 1)[1]);
+        // Above the north-west one too, the hex's own two closing walls meet within its corner piece.
+        assertArrayEquals(new int[6], levelOf(centres, 2));
+    }
+
+    private static int[] junctions(BoardScene scene, Coords at, int height) {
+        var tile = scene.tile(at);
+        return ConnectedKit.junctions(height, ConnectedKit.reach(scene, tile, height), ConnectedKit.corners(scene, tile), true);
+    }
+
+    private static int[] levelOf(int[] junctions, int level) { return java.util.Arrays.copyOfRange(junctions, level * 6, level * 6 + 6); }
+
+    private static int bit(KitOutline.Junction junction) { return 1 << junction.ordinal(); }
+
     private static void structure(Hex[] hexes, Coords coords, int terrain, int exits, int height) {
         Hex hex = hexes[coords.getY() * 7 + coords.getX()];
         hex.addTerrain(new Terrain(terrain, 1, true, exits));

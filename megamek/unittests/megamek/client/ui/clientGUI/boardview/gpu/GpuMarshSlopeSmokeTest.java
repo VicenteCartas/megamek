@@ -79,14 +79,14 @@ class GpuMarshSlopeSmokeTest {
                   .append("CPU stage times measure submission, not synchronized whole-frame duration.\n");
         }
         try {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            BoardScenes.tune(.94f, true);
             // Shader recompilation must not reorder coplanar terrain by changing program identities.
             var sorter = ModelBatch.class.getDeclaredField("sorter");
             sorter.setAccessible(true);
-            sorter.set(field(terrain, "batch"), new DefaultRenderableSorter());
+            sorter.set(GpuTestSupport.field(terrain, "batch"), new DefaultRenderableSorter());
             for (boolean sloped : new boolean[] { false, true }) {
                 var scene = sloped ? scene("connected")
-                      : BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.MARSH, 0));
+                      : BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.MARSH, 0));
                 for (boolean rain : new boolean[] { false, true }) {
                     frame.configure(new BoardAtmosphere.Settings(16, 0, 0,
                           BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0,
@@ -97,7 +97,7 @@ class GpuMarshSlopeSmokeTest {
                         camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         terrain.animate(1.25f, List.of());
                         byte[] expected = null;
                         byte[] current = null;
@@ -203,7 +203,7 @@ class GpuMarshSlopeSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (String contact : new String[] { "connected", "downhill", "uphill" }) {
@@ -219,7 +219,7 @@ class GpuMarshSlopeSmokeTest {
                             camera.camera.zoom = .15f;
                             camera.center(BoardGeometry.center(new Coords(4, 4), 0));
                             terrain.update(scene, camera.camera);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, contact + "-" + lod + "-iso.png"));
                             camera.setIsometric(false);
@@ -243,7 +243,7 @@ class GpuMarshSlopeSmokeTest {
     }
 
     private static BoardScene scene(String contact) {
-        return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               contact.equals("connected") || (c.getY() < 4) == contact.equals("downhill")
                     ? BoardScene.Biome.MARSH : BoardScene.Biome.NONE, c.getY() < 4 ? 1 : 0));
     }
@@ -269,7 +269,7 @@ class GpuMarshSlopeSmokeTest {
               """);
         var mesh = new Mesh(true, 32, 0, VertexAttribute.Position());
         var target = new FrameBuffer(Pixmap.Format.RGBA8888, 32, 1, false);
-        var mask = new GpuBiomeSurface();
+        var mask = new GpuBiomeSurface(new GpuLavaLighting(null));
         try {
             assertTrue(shader.isCompiled(), shader.getLog());
             float metre = BoardRelief.metres(1), level = BoardGeometry.level() / metre;
@@ -289,8 +289,9 @@ class GpuMarshSlopeSmokeTest {
                 Gdx.gl.glDisable(GL20.GL_DEPTH_TEST);
                 Gdx.gl.glDisable(GL20.GL_BLEND);
                 shader.bind();
-                mask.texture().bind(0);
-                shader.setUniformi("u_biomeHexes", 0);
+                mask.lights().texture().bind(0);
+                shader.setUniformi("u_lavaLights", 0);
+                shader.setUniformi("u_hexTable", mask.lights().hexRow(), mask.lights().hexWidth());
                 shader.setUniformf("u_biomeBoard", (float) scene.width(), (float) scene.height());
                 shader.setUniformf("u_levelHeight", BoardGeometry.level());
                 shader.setUniformf("u_metre", metre);
@@ -314,12 +315,6 @@ class GpuMarshSlopeSmokeTest {
                     }
                 } finally { pixels.dispose(); }
             }
-        } finally { mask.dispose(); target.dispose(); mesh.dispose(); shader.dispose(); }
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
+        } finally { mask.lights().dispose(); target.dispose(); mesh.dispose(); shader.dispose(); }
     }
 }

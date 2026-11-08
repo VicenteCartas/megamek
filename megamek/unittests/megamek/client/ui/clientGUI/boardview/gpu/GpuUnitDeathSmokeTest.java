@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -110,7 +110,7 @@ class GpuUnitDeathSmokeTest {
                             joints = new ArrayList<>();
                             standing.nodes.forEach(node -> joints.add(node.localTransform.cpy()));
                             capture("before");
-                            var death = UnitPlaybackTest.attack(victim, victim, ResolvedAttack.Kind.DEATH, true);
+                            var death = UnitPlaybackFixture.attack(victim, victim, ResolvedAttack.Kind.DEATH, true);
                             SwingUtilities.invokeAndWait(() -> {
                                 fixture.entity.setDoomed(true);
                                 fixture.game.removeEntity(1, crewLoss ? IEntityRemovalConditions.REMOVE_EJECTED

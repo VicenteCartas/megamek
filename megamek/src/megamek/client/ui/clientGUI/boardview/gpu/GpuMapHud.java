@@ -241,8 +241,6 @@ final class GpuMapHud implements GpuBoardHud {
         losPanel.update(new GpuHud.Inputs(frame, view, dialog, preferences, metrics, occupied));
     }
 
-    boolean prepare() { return editor == null || editor.prepare(scene); }
-
     /** Shows the running print's step and share done, and Cancel for it; {@code null} hides the card. */
     void print(GpuBoardPrint print) {
         shownPrint = print;

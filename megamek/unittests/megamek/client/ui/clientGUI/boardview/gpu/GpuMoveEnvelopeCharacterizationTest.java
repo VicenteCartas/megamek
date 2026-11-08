@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -9,7 +9,6 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verify;
 
 import java.awt.Color;
-import java.io.File;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,13 +20,11 @@ import java.util.stream.Collectors;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.sprite.MovementEnvelopeSprite;
 import megamek.client.ui.panels.phaseDisplay.commands.MoveCommand;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.options.OptionsConstants;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -35,21 +32,9 @@ import org.mockito.ArgumentCaptor;
  * and the bands and borders the envelope sprite handler draws from it. The values were recorded on the code before
  * stage E2a extracted the envelope start path and the band helper, and must not change.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuMoveEnvelopeCharacterizationTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void eachGearKeepsItsEnvelopeHexesBandsAndBorders() throws Exception {

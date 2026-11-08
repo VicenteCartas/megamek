@@ -74,8 +74,13 @@ final class RigidGlb {
     /** Encoded bytes are retained for managed GPU texture recreation; external files keep a shared path key. */
     record Image(String key, byte[] encoded, String file, int minFilter, int magFilter, int wrapS, int wrapT) { }
 
-    /** A finite night light: file positions are glTF Y-up; decoded positions use the board's Z-up model units. */
-    record NightLight(Vector3 position, Vector3 color, float power, float size) { }
+    /**
+     * A finite night light: file positions are glTF Y-up; decoded positions use the board's Z-up model units. With an
+     * {@code end} it is one emitter spread along that segment, as a whole row of lamps.
+     */
+    record NightLight(Vector3 position, Vector3 end, Vector3 color, float power, float size) {
+        NightLight(Vector3 position, Vector3 color, float power, float size) { this(position, null, color, power, size); }
+    }
 
     static List<NightLight> nightLights(File file) {
         try {
@@ -114,13 +119,13 @@ final class RigidGlb {
     /**
      * A material's finish: roughness, metallic and subsurface scattering factors over its optional finish map (an image
      * key, {@link GpuMaterialMaps.Layout#METALLIC_ROUGHNESS}), its emission map's tint and its constant glow (both
-     * linear), its heightmap parallax, or null, and whether a board material's .tres gave it.
+     * linear), its heightmap parallax, or null, and the name of the board material whose .tres gave it, or null.
      */
     record Surface(float roughness, float metallic, float scatter, String map, float[] tint, float[] glow, Relief relief,
-          boolean board) {
+          String board) {
         /** glTF's own metallic-roughness: no scattering, emission as glTF's factor and texture give it, no relief. */
         Surface(float roughness, float metallic, String map) {
-            this(roughness, metallic, 0, map, new float[] { 1, 1, 1 }, new float[3], null, false);
+            this(roughness, metallic, 0, map, new float[] { 1, 1, 1 }, new float[3], null, null);
         }
     }
 
@@ -131,31 +136,51 @@ final class RigidGlb {
      */
     record Relief(String map, float depthU, float depthV, int minimumLayers, int maximumLayers) { }
 
+    /** When a material's emission shows: {@code mmEmission} in its extras, else in its .tres's metadata, else always. */
+    enum Emission {
+        ALWAYS, NIGHT, OFF;
+
+        static Emission of(Object mode) {
+            return switch (String.valueOf(mode)) {
+                case "always" -> ALWAYS;
+                case "night" -> NIGHT;
+                case "off" -> OFF;
+                default -> throw new IllegalArgumentException("mmEmission must be always, night or off, not " + mode);
+            };
+        }
+    }
+
     static final class Data extends ModelData {
         final Map<String, Image> images = new HashMap<>();
         final Map<String, Float> alphaTests = new HashMap<>();
         final Map<String, Surface> surfaces = new HashMap<>();
-        /** Materials whose albedo alpha is a paint mask (extras {@code mmPaintMask}, {@link GpuModelMaterial#paintMask}). */
+        /**
+         * Materials whose albedo alpha is a paint mask ({@link GpuModelMaterial#paintMask}): their .tres's
+         * {@code metadata/mmPaintMask}, or extras {@code mmPaintMask} on an image of the GLB's own.
+         */
         final Set<String> paintMasks = new HashSet<>();
         /** Explicit building paint regions (material extras {@code mmBuildingPaint}); absent means keep the finish. */
         final Set<String> buildingPaint = new HashSet<>();
-        /** Authored emission that fades out in daylight (material extras {@code mmNightEmission}). */
-        final Set<String> nightEmission = new HashSet<>();
-        /** Per-surface opt-out of both model emission and the shared material's emission. */
-        final Set<String> emissionOff = new HashSet<>();
+        /** When each material's emission shows; a material not listed always glows. */
+        final Map<String, Emission> emissions = new HashMap<>();
+        /** Emissive factors as the materials' finishes draw them, which a generated kit applies to its own finishes. */
+        final Map<String, float[]> ownGlows = new HashMap<>();
         /** Materials that draw a label's characters (extras {@code mmLabel}, {@link #label}). */
         final Set<String> labels = new HashSet<>();
         /**
-         * Materials textured along the board's axes, the value units a repeat (extras {@code mmBoardUV},
+         * Materials textured along the board's axes, the value units a repeat ({@link GeneratedMesh#kit},
          * {@link GpuModelMaterial#boardUV}): a turned or repeated piece's floors run on across its neighbours.
          */
         final Map<String, Float> boardUVs = new HashMap<>();
         /**
          * Materials drawn alpha blended, without depth writes, by their Godot blend mode ({@link GodotMaterial#blendMode}):
-         * board materials whose .tres is transparent ({@link GodotMaterial#blended}), including imported GLBs using
-         * those authored materials. Without a board material the GLB's own alpha mode decides.
+         * generated geometry's board materials whose .tres blends its albedo's alpha ({@link GodotMaterial#blended}).
+         * A GLB's own alpha mode decides its materials: BLEND glass blends, a plant's MASK foliage stays a cutout on
+         * such a board material.
          */
         final Map<String, Integer> blends = new HashMap<>();
+        /** Cutouts whose .tres uses the albedo's alpha ({@link GodotMaterial#blended}): their faded texels blend. */
+        final Set<String> fades = new HashSet<>();
         /** Each vertex's colour slot (0 none, n the n-th of {@link #colourSlots}), in the geometry's vertex order. */
         byte[] slots = new byte[0];
         List<ColourSlot> colourSlots = List.of();
@@ -167,11 +192,11 @@ final class RigidGlb {
             surfaces.putAll(source.surfaces);
             paintMasks.addAll(source.paintMasks);
             buildingPaint.addAll(source.buildingPaint);
-            nightEmission.addAll(source.nightEmission);
-            emissionOff.addAll(source.emissionOff);
+            emissions.putAll(source.emissions);
             labels.addAll(source.labels);
             boardUVs.putAll(source.boardUVs);
             blends.putAll(source.blends);
+            fades.addAll(source.fades);
         }
     }
 
@@ -184,20 +209,20 @@ final class RigidGlb {
     }
 
     /**
-     * The GLB that holds {@code asset} and the material variant to read from it: the asset's own file, or for a tree's
-     * winter form without one ({@code <species>-snow}), the bare species' file and its {@code snow} variant.
+     * The GLB that holds {@code asset} and whether to read its winter form: the asset's own file, or for a tree's winter
+     * form without one ({@code <species>-snow}), the bare species' file and its materials' {@code mmSnow}.
      */
-    record Source(File file, String variant) { }
+    record Source(File file, boolean snow) { }
 
     static Source source(File root, String asset) {
-        if (asset.startsWith("buildings/")) { return new Source(megamek.common.board.TilesetScenery.customBuildingFile(asset), null); }
+        if (asset.startsWith("buildings/")) { return new Source(megamek.common.board.TilesetScenery.customBuildingFile(asset), false); }
         File file = megamek.common.board.BoardModelBounds.file(root, asset);
-        return new Source(file, file.equals(new File(root, asset + ".glb")) ? null : "snow");
+        return new Source(file, !file.equals(new File(root, asset + ".glb")));
     }
 
     static List<ModelData> loadLods(Source source, Path textureRoot) {
         var asset = read(new FileHandle(source.file()), textureRoot);
-        return loadLods(new FileHandle(source.file()), asset, source.variant());
+        return loadLods(new FileHandle(source.file()), asset, source.snow());
     }
 
     /** A model's colour slots, from its file's JSON alone. */
@@ -559,10 +584,10 @@ final class RigidGlb {
     static ModelData load(FileHandle file, Path textureRoot) {
         var asset = read(file, textureRoot);
         var source = asset.model();
-        return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels(), null);
+        return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels(), false);
     }
 
-    /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor cards. */
+    /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor. */
     static final int LEVELS = 4;
 
     /** One file per component, identity groups named <component>-lodN. Missing levels reuse the preceding data. */
@@ -571,17 +596,17 @@ final class RigidGlb {
     }
 
     static List<ModelData> loadLods(FileHandle file, Path textureRoot) {
-        return loadLods(file, read(file, textureRoot), null);
+        return loadLods(file, read(file, textureRoot), false);
     }
 
-    private static List<ModelData> loadLods(FileHandle file, Asset asset, String variant) {
+    private static List<ModelData> loadLods(FileHandle file, Asset asset, boolean snow) {
         var source = asset.model();
         var roots = source.getSceneModels().get(asset.scene()).getNodeModels();
         String shape = file.nameWithoutExtension();
         Map<Integer, NodeModel> groups = new HashMap<>();
         if (source.getNodeModels().stream().anyMatch(root -> megamek.common.board.BuildingVolumes.helper(root.getName()))
               && roots.stream().noneMatch(root -> MeshLod.level(root.getName()) >= 0)) {
-            return java.util.Collections.nCopies(LEVELS, convert(file, shape + "-lod0", asset, roots, variant));
+            return java.util.Collections.nCopies(LEVELS, convert(file, shape + "-lod0", asset, roots, snow));
         }
         // Every level is named, so which mesh draws at a given size is always visible in the file itself: a group's name
         // ends with its level, whatever precedes it, so a renamed or moved file keeps its levels.
@@ -598,7 +623,7 @@ final class RigidGlb {
         }
         return MeshLod.load(shape, LEVELS, name -> {
             var group = groups.get(MeshLod.level(name));
-            return group == null ? null : convert(file, group.getName(), asset, group.getChildren(), variant);
+            return group == null ? null : convert(file, group.getName(), asset, group.getChildren(), snow);
         });
     }
 
@@ -691,12 +716,69 @@ final class RigidGlb {
     }
 
     /**
+     * Makes material {@code id} light up after dusk in {@code colour} (linear RGB: warm, cold or any other), whatever it
+     * is: the colour tints its emission map, or without one it glows evenly. A colour is only a uniform of the material's
+     * program, with no light to evaluate per pixel and no program of its own, so a board can hold any number of them.
+     */
+    static void nightEmission(Data result, String id, float... colour) {
+        glow(result, id, colour);
+        result.emissions.put(id, Emission.NIGHT);
+    }
+
+    /** Material {@code id}'s emission in {@code colour} (linear RGB): it tints its emission map, or without one it glows evenly. */
+    static void glow(Data result, String id, float... colour) {
+        boolean mapped = false;
+        for (var material : result.materials) {
+            if (material.id.equals(id) && material.textures != null) {
+                for (var texture : material.textures) { mapped |= texture.usage == ModelTexture.USAGE_EMISSIVE; }
+            }
+        }
+        var surface = result.surfaces.get(id);
+        result.surfaces.put(id, new Surface(surface.roughness(), surface.metallic(), surface.scatter(), surface.map(),
+              mapped ? colour : surface.tint(), mapped ? surface.glow() : colour, surface.relief(), surface.board()));
+    }
+
+    /** Material {@code id}'s own emission in place of its board material's, as {@link #boardSurface} leaves it: an even glow. */
+    static void ownGlow(Data result, String id, float... colour) {
+        for (var material : result.materials) {
+            if (material.id.equals(id) && material.textures != null) {
+                for (int at = material.textures.size - 1; at >= 0; at--) {
+                    if (material.textures.get(at).usage == ModelTexture.USAGE_EMISSIVE) { material.textures.removeIndex(at); }
+                }
+            }
+        }
+        glow(result, id, colour);
+    }
+
+    /**
+     * Adds generated geometry's material {@code id} as an opaque, clamped picture of {@code file}, its image the colour and
+     * emission maps ({@link #nightEmission} sets how it lights up) over the normal and occlusion maps of the board material
+     * {@code finish}. It has the layout of a building's lit windows and draws with their existing programs. It is matte
+     * as printed vinyl, past the roughness where a local light leaves a highlight (lavaLighting's glossy test).
+     */
+    static void pictureMaterial(Data result, String id, File file, String finish) {
+        boardMaterial(result, id, finish);
+        String path = file.toPath().toAbsolutePath().normalize().toString();
+        var image = new Image(path, null, path, GL20.GL_LINEAR_MIPMAP_LINEAR, GL20.GL_LINEAR, GL20.GL_CLAMP_TO_EDGE, GL20.GL_CLAMP_TO_EDGE);
+        result.images.put(image.key(), image);
+        var target = result.materials.peek();
+        for (var texture : target.textures) {
+            if (texture.usage == ModelTexture.USAGE_DIFFUSE) { texture.fileName = image.key(); }
+        }
+        texture(target, ModelTexture.USAGE_EMISSIVE, image.key());
+        var surface = result.surfaces.get(id);
+        result.surfaces.put(id, new Surface(.85f, 0, 0, null, surface.tint(), surface.glow(), null, surface.board()));
+    }
+
+    /**
      * A board material's finish, adding to {@code target} the normal, occlusion and emission maps of its .tres the GLB
      * leaves out, each sampled as the base colour is. Its factors and maps replace the GLB's own metallic-roughness.
+     * Its metadata says when it glows, unless the GLB's material has already said so, and whether its alpha is a paint mask.
      */
     private static Surface boardSurface(GodotMaterial board, Image base, ModelMaterial target, Data result) {
-        boolean night = board.flag("metadata/mmNightEmission", false);
-        if (night) { result.nightEmission.add(target.id); }
+        String emission = board.text("metadata/mmEmission");
+        result.emissions.putIfAbsent(target.id, emission == null ? Emission.ALWAYS : Emission.of(emission));
+        if (board.flag("metadata/mmPaintMask", false)) { result.paintMasks.add(target.id); }
         String sampler = base.key().substring(base.file().length());
         java.util.function.Function<File, String> image = file -> {
             String path = file.toPath().toAbsolutePath().normalize().toString();
@@ -705,8 +787,7 @@ final class RigidGlb {
             return copy.key();
         };
         var finish = GpuMaterialMaps.modelFinish(board);
-        boolean ownGlow = night && target.emissive != null
-              && target.emissive.r + target.emissive.g + target.emissive.b > 0;
+        boolean ownGlow = target.emissive != null && target.emissive.r + target.emissive.g + target.emissive.b > 0;
         for (int usage : new int[] { ModelTexture.USAGE_NORMAL, ModelTexture.USAGE_AMBIENT, ModelTexture.USAGE_EMISSIVE }) {
             File map = switch (usage) {
                 case ModelTexture.USAGE_NORMAL -> board.normal();
@@ -719,10 +800,11 @@ final class RigidGlb {
         }
         Relief relief = finish.heightmap() == null ? null : new Relief(image.apply(finish.heightmap()), finish.depthU(),
               finish.depthV(), finish.minimumLayers(), finish.maximumLayers());
-        // An authored lamp/window may choose its own night colour on a shared glass finish. Do not add the
+        // An authored lamp/window may choose its own colour on a shared glass finish. Do not add the
         // library's default window glow to that explicit glTF emission (e.g. a cool stadium floodlight lens).
         return new Surface(finish.roughness(), finish.metallic(), finish.scatter(),
-              finish.map() == null ? null : image.apply(finish.map()), finish.tint(), ownGlow ? new float[3] : finish.glow(), relief, true);
+              finish.map() == null ? null : image.apply(finish.map()), finish.tint(), ownGlow ? new float[3] : finish.glow(), relief,
+              GpuMaterialMaps.name(board, GpuMaterialMaps.boardTextures()));
     }
 
     private static Path imagePath(FileHandle file, Path root, String value) throws IOException {
@@ -733,12 +815,12 @@ final class RigidGlb {
     }
 
     /**
-     * {@code variant}, when not null, reads each material's {@code mmVariants.<variant>} extras instead of its own
+     * {@code snow} reads each material's {@code mmSnow} extras instead of its own
      * values where they name them: {@code name}, {@code textures} by role ({@code baseColor}, {@code normal},
      * {@code occlusion}, {@code emissive}), {@code colourScale} (linear factors on its triangles' vertex colours) and {@code colours}
      * (its one primitive's linear vertex colours). The bare species' GLB carries them.
      */
-    private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, String variant) {
+    private static ModelData convert(FileHandle file, String id, Asset asset, List<NodeModel> roots, boolean snow) {
         try {
             Data result = new Data();
             var source = asset.model();
@@ -748,28 +830,16 @@ final class RigidGlb {
             Set<String> materialNames = new HashSet<>();
             for (var sourceMaterial : source.getMaterialModels()) {
                 var material = (MaterialModelV2) sourceMaterial;
-                require(material.getAlphaMode() != MaterialModelV2.AlphaMode.BLEND,
-                      "Rigid kits use opaque or alpha-tested materials");
-                Map<?, ?> changes = variant == null || !(material.getExtras() instanceof Map<?, ?> extras)
-                      || !(extras.get("mmVariants") instanceof Map<?, ?> all) || !(all.get(variant) instanceof Map<?, ?> own)
-                      ? Map.of() : own;
+                Map<?, ?> changes = snow && material.getExtras() instanceof Map<?, ?> extras
+                      && extras.get("mmSnow") instanceof Map<?, ?> own ? own : Map.of();
                 variants.put(material, changes);
                 var target = new ModelMaterial();
                 target.id = changes.containsKey("name") ? (String) changes.get("name") : material.getName();
                 require(target.id != null && materialNames.add(target.id), "Material names must be unique");
                 if (material.getExtras() instanceof Map<?, ?> extras) {
-                    Object emissionMode = extras.get("mmEmission");
-                    require(emissionMode == null || "inherit".equals(emissionMode) || "off".equals(emissionMode),
-                          "mmEmission must be inherit or off");
-                    if ("off".equals(emissionMode)) { result.emissionOff.add(target.id); }
-                    if (Boolean.TRUE.equals(extras.get("mmPaintMask"))) { result.paintMasks.add(target.id); }
+                    if (extras.get("mmEmission") != null) { result.emissions.put(target.id, Emission.of(extras.get("mmEmission"))); }
                     if (Boolean.TRUE.equals(extras.get("mmBuildingPaint"))) { result.buildingPaint.add(target.id); }
-                    if (Boolean.TRUE.equals(extras.get("mmNightEmission"))) { result.nightEmission.add(target.id); }
                     if (Boolean.TRUE.equals(extras.get("mmLabel"))) { result.labels.add(target.id); }
-                    if (extras.get("mmBoardUV") instanceof Number repeat) {
-                        require(repeat.floatValue() > 0, "mmBoardUV is a positive repeat");
-                        result.boardUVs.put(target.id, repeat.floatValue());
-                    }
                 }
                 if (material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) {
                     float cutoff = material.getAlphaCutoff();
@@ -839,9 +909,30 @@ final class RigidGlb {
                       : GpuMaterialMaps.boardMaterial(new File(base.file()), GpuMaterialMaps.boardTextures());
                 result.surfaces.put(target.id, board == null ? new Surface(roughness, metallic, surfaceMap)
                       : boardSurface(board, base, target, result));
-                if (board != null && board.blended()) { result.blends.put(target.id, board.blendMode()); }
+                if (board != null && board.blended() && material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) { result.fades.add(target.id); }
+                // Glass: blended in its board material's .tres mode, so premultiplied glass keeps its whole reflection.
+                if (material.getAlphaMode() == MaterialModelV2.AlphaMode.BLEND) {
+                    require(board != null && board.blended(), "Only a board material whose .tres blends (glass) may blend");
+                    result.blends.put(target.id, board.blendMode());
+                }
+                // A board material's own metadata says whether its alpha is a paint mask.
+                if (board == null && material.getExtras() instanceof Map<?, ?> extras && Boolean.TRUE.equals(extras.get("mmPaintMask"))) {
+                    result.paintMasks.add(target.id);
+                }
                 result.materials.add(target);
                 materials.put(material, target.id);
+                // Every night light's colour is a uniform (nightEmission): its glTF emissive factor as the material's finish
+                // draws it. One the file switches off keeps its factor, so switching it back on restores it.
+                if (target.emissive != null) {
+                    float[] tint = result.surfaces.get(target.id).tint();
+                    Color factor = target.emissive;
+                    float[] own = { factor.r * tint[0], factor.g * tint[1], factor.b * tint[2] };
+                    if (own[0] + own[1] + own[2] > 0) { result.ownGlows.put(target.id, own); }
+                    if (result.emissions.get(target.id) == Emission.NIGHT) {
+                        target.emissive = null;
+                        nightEmission(result, target.id, own);
+                    }
+                }
             }
             Map<MeshPrimitiveModel, String> partIds = new IdentityHashMap<>();
             Map<Map<String, AccessorModel>, Integer> offsets = new HashMap<>();
@@ -911,7 +1002,7 @@ final class RigidGlb {
     }
 
     /**
-     * A material variant's vertex colours on one primitive, before its reverse faces copy them: {@code colourScale} on
+     * A material's winter vertex colours on one primitive, before its reverse faces copy them: {@code colourScale} on
      * the vertices its triangles use (each once), or {@code colours} for all of its vertices.
      */
     private static void paint(FloatArray vertices, short[] indices, int base, int count, Map<?, ?> changes, Set<Integer> painted) {
@@ -926,7 +1017,7 @@ final class RigidGlb {
             }
         }
         if (changes.get("colours") instanceof List<?> colours) {
-            require(colours.size() == count, "A variant's colours need one value per vertex");
+            require(colours.size() == count, "mmSnow's colours need one value per vertex");
             for (int vertex = 0; vertex < count; vertex++) {
                 var value = (List<?>) colours.get(vertex);
                 int at = (base + vertex) * STRIDE + 6;

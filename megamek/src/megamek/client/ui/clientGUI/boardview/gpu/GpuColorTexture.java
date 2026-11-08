@@ -41,6 +41,122 @@ final class GpuColorTexture {
         return texture(new ImageData(pixels, mipmaps, true, true, color));
     }
 
+    /**
+     * A colour image and its sRGB mip levels below level 0, level 1 first: their colours averaged by alpha, as
+     * premultiplied filtering averages them. glGenerateMipmap weighs the colour of transparent texels alike, so a cutout
+     * would take the colour of the filler around it at distance. A level's fully transparent texels keep the plain
+     * average, the image's own edge colour. No levels for an image without transparent texels: GL makes them.
+     */
+    record Cutout(Pixmap image, ByteBuffer[] levels) { }
+
+    /** A managed texture of a colour image and its levels ({@link #cutoutLevels}), made again when the context is restored. */
+    static Texture cutout(Supplier<Cutout> source) {
+        return texture(new ImageData(source));
+    }
+
+    private static final float[] DECODE = new float[256], ENCODE = new float[255];
+    static {
+        for (int i = 0; i < DECODE.length; i++) { DECODE[i] = GpuColor.linear(i / 255f); }
+        // Each code's upper bound in linear light: the code a linear value rounds to in sRGB, without a power.
+        for (int i = 0; i < ENCODE.length; i++) { ENCODE[i] = GpuColor.linear((i + .5f) / 255f); }
+    }
+
+    /**
+     * {@link Cutout}'s levels of {@code image}, which it takes, on the calling thread: a pooled decode makes them with its
+     * pixels. Each level is a box filter over the whole footprint of the level above (a 3-wide level must not lose its last
+     * column at 1-wide), its colours weighted by alpha in linear light.
+     */
+    static Cutout cutoutLevels(Pixmap image) {
+        if (image.getFormat() == Pixmap.Format.RGB888 || opaque(image)) { return new Cutout(image, null); }
+        if (image.getFormat() != Pixmap.Format.RGBA8888) {
+            Pixmap expanded = new Pixmap(image.getWidth(), image.getHeight(), Pixmap.Format.RGBA8888);
+            expanded.setBlending(Pixmap.Blending.None);
+            expanded.drawPixmap(image, 0, 0);
+            image.dispose();
+            image = expanded;
+        }
+        int width = image.getWidth(), height = image.getHeight();
+        float[] weighted = new float[width * height * 4], plain = new float[width * height * 3];
+        byte[] bytes = new byte[width * height * 4];
+        image.getPixels().get(0, bytes);
+        for (int texel = 0; texel < width * height; texel++) {
+            float alpha = (bytes[texel * 4 + 3] & 255) / 255f;
+            for (int c = 0; c < 3; c++) {
+                float value = DECODE[bytes[texel * 4 + c] & 255];
+                plain[texel * 3 + c] = value;
+                weighted[texel * 4 + c] = value * alpha;
+            }
+            weighted[texel * 4 + 3] = alpha;
+        }
+        var levels = new java.util.ArrayList<ByteBuffer>();
+        while (width > 1 || height > 1) {
+            int w = Math.max(1, width / 2), h = Math.max(1, height / 2);
+            boolean halves = width == 2 * w && height == 2 * h;
+            float[] nextWeighted = new float[w * h * 4], nextPlain = new float[w * h * 3];
+            byte[] level = new byte[w * h * 4];
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int texel = y * w + x;
+                    if (halves) {
+                        int a = 2 * y * width + 2 * x, b = a + 1, d = a + width, e = d + 1;
+                        for (int c = 0; c < 4; c++) {
+                            nextWeighted[texel * 4 + c] = .25f * (weighted[a * 4 + c] + weighted[b * 4 + c]
+                                  + weighted[d * 4 + c] + weighted[e * 4 + c]);
+                        }
+                        for (int c = 0; c < 3; c++) {
+                            nextPlain[texel * 3 + c] = .25f * (plain[a * 3 + c] + plain[b * 3 + c] + plain[d * 3 + c] + plain[e * 3 + c]);
+                        }
+                    } else {
+                        double top = y * (double) height / h, bottom = (y + 1) * (double) height / h;
+                        double left = x * (double) width / w, right = (x + 1) * (double) width / w;
+                        for (int sy = (int) top; sy < Math.ceil(bottom); sy++) {
+                            for (int sx = (int) left; sx < Math.ceil(right); sx++) {
+                                int from = sy * width + sx;
+                                float weight = (float) ((Math.min(bottom, sy + 1) - Math.max(top, sy))
+                                      * (Math.min(right, sx + 1) - Math.max(left, sx)) / ((bottom - top) * (right - left)));
+                                for (int c = 0; c < 4; c++) { nextWeighted[texel * 4 + c] += weighted[from * 4 + c] * weight; }
+                                for (int c = 0; c < 3; c++) { nextPlain[texel * 3 + c] += plain[from * 3 + c] * weight; }
+                            }
+                        }
+                    }
+                    float alpha = nextWeighted[texel * 4 + 3];
+                    for (int c = 0; c < 3; c++) {
+                        if (alpha > 0) { nextPlain[texel * 3 + c] = Math.min(1, nextWeighted[texel * 4 + c] / alpha); }
+                        level[texel * 4 + c] = (byte) encode(nextPlain[texel * 3 + c]);
+                    }
+                    level[texel * 4 + 3] = (byte) Math.round(alpha * 255);
+                }
+            }
+            levels.add(com.badlogic.gdx.utils.BufferUtils.newByteBuffer(level.length).put(level).flip());
+            weighted = nextWeighted;
+            plain = nextPlain;
+            width = w;
+            height = h;
+        }
+        return new Cutout(image, levels.toArray(ByteBuffer[]::new));
+    }
+
+    /** Whether an RGBA8888 image has no transparent texel; other layouts answer false and take the cutout levels. */
+    private static boolean opaque(Pixmap image) {
+        if (image.getFormat() != Pixmap.Format.RGBA8888) { return false; }
+        byte[] bytes = new byte[image.getWidth() * image.getHeight() * 4];
+        image.getPixels().get(0, bytes);
+        for (int i = 3; i < bytes.length; i += 4) {
+            if (bytes[i] != (byte) 255) { return false; }
+        }
+        return true;
+    }
+
+    /** The sRGB code of a linear value: as rounding GpuColor.display's, by a search of ENCODE. */
+    private static int encode(float linear) {
+        int low = 0, high = ENCODE.length;
+        while (low < high) {
+            int middle = (low + high) >>> 1;
+            if (linear < ENCODE[middle]) { high = middle; } else { low = middle + 1; }
+        }
+        return low;
+    }
+
     /** Its pixels come first: an image that cannot be decoded leaves no GL texture behind. */
     private static Texture texture(ImageData data) {
         data.prepare();
@@ -126,23 +242,42 @@ final class GpuColorTexture {
 
     private static final class ImageData implements TextureData {
         private final Supplier<Pixmap> source;
+        /** A cutout's image and levels instead of {@link #source} (GpuColorTexture#cutout). */
+        private final Supplier<Cutout> cutouts;
         private final boolean mipmaps, managed, dispose, color;
         private Pixmap pixels;
+        private ByteBuffer[] levels;
         private int width, height;
 
         ImageData(Supplier<Pixmap> source, boolean mipmaps, boolean managed, boolean dispose, boolean color) {
             this.source = source;
+            this.cutouts = null;
             this.mipmaps = mipmaps;
             this.managed = managed;
             this.dispose = dispose;
             this.color = color;
         }
 
+        ImageData(Supplier<Cutout> cutouts) {
+            this.source = null;
+            this.cutouts = cutouts;
+            this.mipmaps = true;
+            this.managed = true;
+            this.dispose = true;
+            this.color = true;
+        }
+
         @Override public TextureDataType getType() { return TextureDataType.Custom; }
         @Override public boolean isPrepared() { return pixels != null; }
         @Override public void prepare() {
             if (pixels != null) { throw new IllegalStateException("Image texture is already prepared"); }
-            pixels = source.get();
+            if (cutouts != null) {
+                Cutout cutout = cutouts.get();
+                pixels = cutout.image();
+                levels = cutout.levels();
+            } else {
+                pixels = source.get();
+            }
             width = pixels.getWidth();
             height = pixels.getHeight();
         }
@@ -160,11 +295,21 @@ final class GpuColorTexture {
                 Gdx.gl.glPixelStorei(GL20.GL_UNPACK_ALIGNMENT, 1);
                 Gdx.gl.glTexImage2D(target, 0, color ? GL30.GL_SRGB8_ALPHA8 : GL30.GL_RGBA8, width, height, 0,
                       upload.getGLFormat(), upload.getGLType(), upload.getPixels());
-                if (mipmaps) { Gdx.gl.glGenerateMipmap(target); }
+                if (levels != null) {
+                    for (int level = 1, w = width, h = height; level <= levels.length; level++) {
+                        w = Math.max(1, w / 2);
+                        h = Math.max(1, h / 2);
+                        Gdx.gl.glTexImage2D(target, level, GL30.GL_SRGB8_ALPHA8, w, h, 0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE,
+                              levels[level - 1]);
+                    }
+                } else if (mipmaps) {
+                    Gdx.gl.glGenerateMipmap(target);
+                }
             } finally {
                 if (upload != pixels) { upload.dispose(); }
                 if (dispose) { pixels.dispose(); }
                 pixels = null;
+                levels = null;
             }
         }
         @Override public Pixmap consumePixmap() { throw new UnsupportedOperationException("Image texture"); }

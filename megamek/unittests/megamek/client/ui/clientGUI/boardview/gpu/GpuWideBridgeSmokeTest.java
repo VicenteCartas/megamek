@@ -92,10 +92,10 @@ class GpuWideBridgeSmokeTest {
                                   : BoardGeometry.center(variant.ramp(), 1).lerp(BoardGeometry.center(variant.bank(), 0), .5f));
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, variant.name() + ".png"));
-                            // Diagonal grade geometry is covered at all six orientations in BoardBridgeWideSlopeTest.
+                            // Diagonal grade geometry is covered at all six orientations in BoardBridgeWideTest.
                             if (variant.direction() == 3) { checkRamp(terrain, scene, variant.rail()); }
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError(), variant.name());
                         } finally { terrain.dispose(); }
@@ -162,7 +162,7 @@ class GpuWideBridgeSmokeTest {
                 board.setHex(x, y, hex);
             }
         }
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         if (variant.rail()) {
             var corridor = scene.tile(variant.ramp()).deckCorridor();
             assertEquals(variant.exits(), corridor.sides(), "The fixture contains a shared deck corridor");

@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.Stream;
 
 import megamek.common.GameBoardTestCase;
@@ -161,6 +163,41 @@ public class BridgeTest extends GameBoardTestCase {
               hex 0103 0 "water:2;bridge:1;bridge_cf:100;bridge_elev:2" ""
               hex 0104 0 "water:2" ""
               hex 0105 0 "water:2" ""
+              end"""
+        );
+
+        // Water away from level 0: BRIDGE_ELEV still counts from the surface. Middle hex (0, 1).
+        initializeBoard("BOARD_BRIDGE_OVER_HIGH_WATER", """
+              size 1 3
+              hex 0101 3 "water:2" ""
+              hex 0102 3 "water:2;bridge:1;bridge_cf:100;bridge_elev:1" ""
+              hex 0103 3 "water:2" ""
+              end"""
+        );
+        initializeBoard("BOARD_DECK_ON_HIGH_WATER", """
+              size 1 3
+              hex 0101 3 "water:2" ""
+              hex 0102 3 "water:2;bridge:1;bridge_cf:100;bridge_elev:0" ""
+              hex 0103 3 "water:2" ""
+              end"""
+        );
+        initializeBoard("BOARD_DECK_ON_LOW_WATER", """
+              size 1 3
+              hex 0101 -2 "water:2" ""
+              hex 0102 -2 "water:2;bridge:1;bridge_cf:100;bridge_elev:0" ""
+              hex 0103 -2 "water:2" ""
+              end"""
+        );
+
+        // One column of deep water with decks from three levels under the surface to two over it: deck + 3 is the row.
+        initializeBoard("BOARD_DECKS_AROUND_THE_SURFACE", """
+              size 1 6
+              hex 0101 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:-3" ""
+              hex 0102 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:-2" ""
+              hex 0103 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:-1" ""
+              hex 0104 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:0" ""
+              hex 0105 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:1" ""
+              hex 0106 0 "water:4;bridge:1;bridge_cf:100;bridge_elev:2" ""
               end"""
         );
 
@@ -790,5 +827,84 @@ public class BridgeTest extends GameBoardTestCase {
               MoveStepType.FORWARDS);
         // Submarines travel underwater, bridges are above water
         assertTrue(movePath.isMoveLegal());
+    }
+
+    /** Whether a plain vessel at this elevation may not be in the middle hex of the set board. */
+    private boolean underBridgeProhibited(EntityMovementMode mode, int elevation) {
+        Tank vessel = new Tank();
+        vessel.setMovementMode(mode);
+        vessel.setGame(getGame());
+        return vessel.isLocationProhibited(new Coords(0, 1), getGame().getBoard().getBoardId(), elevation);
+    }
+
+    /** TW p.62: a surface vessel's clearance counts from the surface, at whatever level the water stands. */
+    @Test
+    void testNaval_ClearanceCountsFromTheSurfaceAtAnyLevel() {
+        setBoard("BOARD_BRIDGE_OVER_HIGH_WATER");
+        assertFalse(underBridgeProhibited(EntityMovementMode.NAVAL, 0), "A deck one level over the surface clears a vessel");
+        setBoard("BOARD_DECK_ON_LOW_WATER");
+        assertTrue(underBridgeProhibited(EntityMovementMode.NAVAL, 0), "A deck on the surface does not");
+        assertTrue(underBridgeProhibited(EntityMovementMode.HYDROFOIL, 0));
+    }
+
+    /** TW p.62: a submarine's clearance counts from its current depth, at whatever level the water stands. */
+    @Test
+    void testSubmarine_ClearanceCountsFromItsDepthAtAnyLevel() {
+        setBoard("BOARD_DECK_ON_HIGH_WATER");
+        assertFalse(underBridgeProhibited(EntityMovementMode.SUBMARINE, -1), "Dived a level, it passes under a deck on the surface");
+        assertTrue(underBridgeProhibited(EntityMovementMode.SUBMARINE, 0), "Surfaced, it does not");
+    }
+
+    /** A deck at a vessel's elevation stops its move: it cannot go under, and it does not stand on decks (TW p.62). */
+    @Test
+    void testVessels_CannotMoveIntoADeckAtTheirElevation() {
+        setBoard("BOARD_DECK_ON_HIGH_WATER");
+        for (EntityMovementMode mode : List.of(EntityMovementMode.NAVAL, EntityMovementMode.HYDROFOIL,
+              EntityMovementMode.SUBMARINE)) {
+            assertFalse(getMovePathFor(new Tank(), 0, mode, MoveStepType.CLIMB_MODE_OFF, MoveStepType.FORWARDS).isMoveLegal(),
+                  mode + " at the surface");
+        }
+        assertTrue(getMovePathFor(new Tank(), -1, EntityMovementMode.SUBMARINE, MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS).isMoveLegal(), "A submarine a level down passes under it");
+    }
+
+    /** The same deck does not stop a ship a level above it. */
+    @Test
+    void testNaval_MovesOverADeckALevelBelowIt() {
+        setBoard("BOARD_DECKS_AROUND_THE_SURFACE");
+        assertTrue(getMovePathFor(new Tank(), 0, EntityMovementMode.NAVAL, MoveStepType.CLIMB_MODE_OFF,
+              MoveStepType.FORWARDS, MoveStepType.FORWARDS).isMoveLegal(), "Decks at -3, -2 and -1 lie below its hull");
+    }
+
+    /** The decks, by level, that stop this vessel at this elevation in BOARD_DECKS_AROUND_THE_SURFACE. */
+    private List<Integer> decksInTheWay(Tank vessel, EntityMovementMode mode, double tons, int elevation) {
+        setBoard("BOARD_DECKS_AROUND_THE_SURFACE");
+        vessel.setMovementMode(mode);
+        vessel.setWeight(tons);
+        vessel.setGame(getGame());
+        List<Integer> decks = new ArrayList<>();
+        for (int deck = -3; deck <= 2; deck++) {
+            if (vessel.isLocationProhibited(new Coords(0, deck + 3), getGame().getBoard().getBoardId(), elevation)) {
+                decks.add(deck);
+            }
+        }
+        return decks;
+    }
+
+    /** A vessel clears a deck a level under its surface, as the Template A hull does (TO:AUE p.57). */
+    @Test
+    void testNaval_ClearsADeckOneLevelBelowIt() {
+        assertEquals(List.of(0), decksInTheWay(new Tank(), EntityMovementMode.NAVAL, 100, 0));
+        assertEquals(List.of(0), decksInTheWay(new SupportTank(), EntityMovementMode.NAVAL, 100, 0), "Support vessels too");
+        assertEquals(List.of(-1), decksInTheWay(new Tank(), EntityMovementMode.SUBMARINE, 100, -1), "From its own depth");
+    }
+
+    /** Heavier vessels stand taller and reach deeper: Templates B to E (TO:AUE p.57). */
+    @Test
+    void testLargeVessels_NeedMoreClearanceByWeight() {
+        assertEquals(List.of(0), decksInTheWay(new SupportTank(), EntityMovementMode.NAVAL, 6000, 0), "Template B, 1 / 1");
+        assertEquals(List.of(-1, 0), decksInTheWay(new SupportTank(), EntityMovementMode.NAVAL, 12000, 0), "Template C, 1 / 2");
+        assertEquals(List.of(-1, 0, 1), decksInTheWay(new SupportTank(), EntityMovementMode.NAVAL, 30000, 0), "Template D, 2 / 2");
+        assertEquals(List.of(-2, -1, 0, 1, 2), decksInTheWay(new SupportTank(), EntityMovementMode.NAVAL, 100000, 0), "Template E, 3 / 3");
     }
 }

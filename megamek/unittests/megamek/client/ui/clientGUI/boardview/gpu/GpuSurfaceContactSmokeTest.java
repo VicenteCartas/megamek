@@ -43,7 +43,7 @@ class GpuSurfaceContactSmokeTest {
                         for (int lower = 0; lower < BoardSurfaceBlend.FAMILIES; lower++) {
                             int bottom = lower;
                             for (int rise : new int[] { 0, 4 }) {
-                                var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                                var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                                       c.getY() < 4 ? top : bottom, c.getY() < 4 ? rise : 0));
                                 capture(scene, "pair-" + upper + "-" + lower + "-" + rise, .20f,
                                       terrain, frame, camera, output);
@@ -51,7 +51,7 @@ class GpuSurfaceContactSmokeTest {
                         }
                     }
                     for (var family : BoardScene.Surface.values()) {
-                        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                               c.getX() == 4 && c.getY() < 4 ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                               c.getX() == 4 && c.getY() < 4 ? 9 : 0,
                               c.getY() >= 4 ? 0 : c.getX() < 4 || c.getY() < 2 ? 2 : 3, family));
@@ -78,7 +78,7 @@ class GpuSurfaceContactSmokeTest {
         camera.camera.zoom = zoom;
         camera.center(BoardGeometry.center(new Coords(4, 3), 1));
         terrain.update(scene, camera.camera);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         assertTrue(terrain.ready(scene));
         terrain.animate(.5f, List.of());
         frame.render(terrain, camera, scene);

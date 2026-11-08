@@ -758,8 +758,6 @@ public class Terrain implements Serializable {
               || (type == FUEL_TANK_CF))
               && level < 1) {
             valid = false;
-        } else if ((type == BRIDGE_ELEV) && (level < 0)) {
-            valid = false;
         } else if ((type == HAZARDOUS_LIQUID) && (level < 0 || level > 3)) {
             valid = false;
         } else if ((type == RAIL) && (level < 0 || level > 2)) {

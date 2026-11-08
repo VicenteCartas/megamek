@@ -6,15 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import java.util.concurrent.FutureTask;
-import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
-import megamek.common.game.Game;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -32,7 +29,7 @@ class BoardAridSurfaceTest {
         var at = new Coords(0, 0);
         var hex = new Hex(2, terrains, theme, at);
         board.setHex(at, hex);
-        var scene = capture(board);
+        var scene = BoardScenes.capture(board);
         var tile = scene.tile(at);
         boolean sand = hex.containsTerrain(Terrains.SAND);
         assertTrue(tile.detailedGround(), "Native ground must replace old tile artwork for " + terrains);
@@ -61,11 +58,11 @@ class BoardAridSurfaceTest {
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             board.setHex(new Coords(x, y), new Hex(0, "", theme));
         }
-        var before = capture(board);
+        var before = BoardScenes.capture(board);
         for (int x = 0; x < 3; x++) for (int y = 0; y < 3; y++) {
             board.setHex(new Coords(x, y), new Hex(0, "sand:1", theme));
         }
-        var after = capture(board);
+        var after = BoardScenes.capture(board);
         var tile = after.tile(center);
         assertEquals(before.tile(center).surface(), tile.surface(), "The theme's geology is unchanged");
         assertFalse(before.tile(center).sameGeometry(tile), "Editing SAND must invalidate cached material data");
@@ -88,7 +85,7 @@ class BoardAridSurfaceTest {
         for (int x = 0; x < 5; x++) for (int y = 0; y < 5; y++) {
             board.setHex(new Coords(x, y), new Hex(0, "sand:1", "grass"));
         }
-        var scene = capture(board);
+        var scene = BoardScenes.capture(board);
         int roots = 0;
         float metre = BoardRelief.metres(1);
         for (var at : List.of(new Coords(2, 2), new Coords(2, 3), new Coords(3, 2))) {
@@ -104,15 +101,5 @@ class BoardAridSurfaceTest {
             }
         }
         assertTrue(roots > 100 && roots < 3000, "Sparse living patches without turning sand into a meadow: " + roots);
-    }
-
-    static BoardScene capture(Board board) throws Exception {
-        var task = new FutureTask<>(() -> {
-            var game = new Game();
-            game.setBoard(board);
-            try (var source = new GpuMapSource(game, null, null)) { return source.takeFrame().scene(); }
-        });
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 }

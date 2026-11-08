@@ -37,7 +37,7 @@ lighting, while leaves retain the existing foliage lighting.
 All levels share a ground origin and a 30-unit authored height. The existing
 `GpuTreeInstances` and `TreeLod` select the meshes at 80/48/24 framebuffer pixels
 with 10% hysteresis, including the colour, depth and shadow passes, and below
-24 px the impostor cards (`-lod3`, 12 triangles) described in
+24 px the impostor (`-lod3`, 2 triangles) described in
 [gpu-board-performance.md](gpu-board-performance.md). The atlas is
 shared across parts and LODs through the existing texture cache.
 

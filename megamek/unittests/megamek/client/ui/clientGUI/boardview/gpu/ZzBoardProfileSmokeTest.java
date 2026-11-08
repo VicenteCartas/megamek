@@ -143,6 +143,8 @@ class ZzBoardProfileSmokeTest {
             modes.add(new Mode(parts[0], parts[1].equals("iso"), Float.parseFloat(parts[2]), parts.length > 3 ? parts[3] : ""));
         }
         GUIPreferences preferences = GUIPreferences.getInstance();
+        // The switches below only count in High.
+        preferences.setBoardQuality("HIGH");
         preferences.setBoardAmbientOcclusion(Boolean.getBoolean("megamek.gpu.profileAo"));
         preferences.setBoardTessellation(Boolean.getBoolean("megamek.gpu.profileTessellation"));
         Board board = BoardFile.loadSheet(new File(path), false, true);
@@ -152,7 +154,7 @@ class ZzBoardProfileSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {
-                try { ((Timer) GpuMixedUnitBenchmarkSmokeTest.field(fixture.source, "timer")).stop(); }
+                try { ((Timer) GpuTestSupport.field(fixture.source, "timer")).stop(); }
                 catch (Exception error) { throw new IllegalStateException(error); }
             });
             var config = GpuBoardWindow.configuration(false);
@@ -224,7 +226,7 @@ class ZzBoardProfileSmokeTest {
                             }
                         }
                         if (mode.motion().equals("refit")) {
-                            ((GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain")).refreshShadows();
+                            ((GpuTerrain) GpuTestSupport.field(this, "terrain")).refreshShadows();
                         }
                         if (mode.motion().equals("pan")) {
                             // Across the board at 1.5 m a frame, from a third of its width: the shadow map refits as it goes.

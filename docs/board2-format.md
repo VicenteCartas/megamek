@@ -12,7 +12,7 @@ structural placement explicitly rebakes its covered cells and derived heights in
 ## Hexes and buildings
 
 Every hex appears once, with one-based `[column, row]` coordinates and its ground `elevation`. Empty hexes can omit
-`components`. Document metadata (`name`, `description`, `tags`, `boardType`, `options`, `notes`, `sourceHeader`) and
+`components`. Document metadata (`name`, `description`, `tags`, `boardType`, `notes`, `sourceHeader`) and
 placed `decorations` retain their existing fields. Gameplay and appearance are read from `components`.
 
 ```json
@@ -143,16 +143,23 @@ appearance owners are folded into the building's appearance when saving.
 
 ## Other components
 
+`water` and `pavement` store no connections: their sides derive from the neighbours when a board is read. Their
+`appearance.separated` lists, as directions, the sides the author parted from the same terrain beside them, for example
+`"water": {"depth": 1, "appearance": {"separated": ["se", "s"]}}`. Absent means every side joins. It is cosmetic: the 3D
+views draw a strip of ground along those sides, between hexes at one level; rules and the 2D views ignore it. The editor
+stores a side on both hexes, and either one parts it. A legacy file's hand-set exits on these terrains stay in
+`legacyExits`, where they choose 2D tiles and part nothing.
+
 | Component | Fields |
 |---|---|
 | `bridge` | `type`, `cf`, `height`, `mud`, `connections` |
 | `fuelTank` | `type`, `cf`, `height`, `magnitude`, `connections` |
 | `road`, `bridgeRoad` | `type` (`paved`, `alley`, `dirt`, `gravel`), `connections` |
 | `rail`, `bridgeRail` | `type` (`rail`, `maglev`), `connections` |
-| `water` | `depth`, `rapids`, `connections` |
+| `water` | `depth`, `rapids` |
 | `vegetation` | `woods`, `jungle` (`light`, `heavy`, `ultra`), `height` |
 | `ground` | `sand`, `tundra`, `fields`, `swamp`, `mud` |
-| `pavement` | `level`, `connections` |
+| `pavement` | `level` |
 | `rough` | `level` (`normal`, `ultra`) |
 | `rubble` | `type` (`light`, `medium`, `heavy`, `hardened`, `wall`, `ultra`) |
 | `industry` | `height` |
@@ -192,8 +199,9 @@ changes for undo and appearance inheritance.
 
 A structural GLB uses the existing placement list, with one instance owned by an anchor hex. Its UID, asset path,
 XY offsets, rotation, colours and placement are ordinary object fields. An assembled building additionally stores
-`levels`; a fixed whole model omits it. The distinction comes from the GLB, with no `mode` flag. Each occupied hex
-retains its normal building component and a reference to that single placement:
+`levels`; a fixed whole model omits it. The distinction comes from the GLB, with no `mode` flag. Placements may overlap:
+a contested hex goes to the placement with the most of its roof over it, on equal shares to the taller, and returns
+to the other if the winner moves away or goes. Each occupied hex retains its normal building component and a reference to that single placement:
 
 ```json
 {
@@ -275,10 +283,11 @@ The fixed local left edge stays attached while the free cloth hangs down and lif
 Swept cloth segments slide against nearby buildings, props and units using coarse world
 bounding boxes. Contact preserves the cloth's connected rows and columns instead of stretching
 them into spikes. When coarse bounds enclose the rigid attachment, their nearest face is
-trimmed to a common attachment plane for that flag. Ground contact samples the installed
-terrain support along cloth segments and across triangle edges/interiors, including ice,
-slopes and height transitions, with a scale-aware clearance; no floor is invented outside
-the board. This is a procedural drape, not a full cloth solver: no self-collision or detailed
+trimmed to a common attachment plane for that flag. Ground contact reads a height grid, sampled
+once from the installed terrain support per pose and terrain install, along cloth segments and
+across triangle edges/interiors, including ice, slopes and height transitions, with a
+scale-aware clearance; no floor is invented outside the board. Cloth outside the view holds
+its pose, and at a steady frame rate each flag updates every other frame. This is a procedural drape, not a full cloth solver: no self-collision or detailed
 concave contact; an attachment inside a solid or below ground remains
 where authored. Identical artwork shares one texture while each flag keeps its own mesh.
 Colour, animated shadow and picking passes use the current mesh. The editor's pattern/emblem controls work
@@ -286,3 +295,36 @@ on both the placement brush and selected objects; sampling, copying and undo pre
 
 `scenery/steel-stick` is a separate steel prop (24 units tall, 0.7 diameter), available in
 Parks with the flag; ordinary object scaling, stretching, rotation and placement apply.
+
+### Billboards
+
+`scenery/billboard` is one generated visual `prop` (stable UID `billbord`), with no gameplay effect. The optional
+`billboard` object contains:
+
+```json
+"billboard": {
+  "decals": ["decal/billboards/3_1/some-picture", ""],
+  "ratio": "3_1",
+  "scale": 1,
+  "legs": true,
+  "lights": true
+}
+```
+
+`ratio` is the panels' aspect ratio, width to height: `3_1`, `2_1` or `2_3`. Each is a folder of pictures drawn at that
+ratio, `models/board/decals/billboards/<ratio>`, and `decals` holds one picture per panel from that folder, 1 to 8, from
+the top of the stack down; panels stack 0.4 m apart in one structure. An empty entry is a blank panel. A picture fills
+its panel as drawn, so author it at its folder's ratio. `scale` sizes the panels: at 1 a panel is 4.27 m (14 feet, a US
+bulletin's height) tall, so the default `3_1` panel is 12.8 m wide. Only the panels take the size: frames, catwalk deck
+and rails run along them at the same section, and legs, stiffeners, brackets, rail posts and lamps keep their real size
+and repeat at their real spacing.
+
+The local origin is the middle of the lowest panel's lower edge, on the structure's rear plane. The front faces -Y. Rotate
+the object to turn it. The placement's height lifts the stack and is the legs' height: `legs` reach from there down to the
+supporting surface and their footings run on below it, so a roof or a slope needs no other setting. Without legs nothing lies behind the rear
+plane: put the origin against a wall and raise it to hang the billboard there. A board stores no random art: the editor
+picks a picture when Random is chosen or a Random brush places a billboard.
+
+`lights` adds the catwalk and its lamps. After dusk their lenses and the pictures light up by night emission, which costs
+no light per pixel, and the whole row of lamps is one finite segment light that fades with daylight, as a building's
+`mmNightLights` do.

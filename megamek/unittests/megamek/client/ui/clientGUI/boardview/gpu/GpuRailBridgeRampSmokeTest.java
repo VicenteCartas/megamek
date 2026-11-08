@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -65,11 +65,11 @@ class GpuRailBridgeRampSmokeTest {
                     var scene = scene();
                     for (int elevation : new int[] { 0, 1 }) {
                         if (elevation == 1) {
-                            scene = BoardNaturalBridgeTest.replace(scene, tile(BRIDGE, elevation));
+                            scene = BoardScenes.replace(scene, tile(BRIDGE, elevation));
                         }
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "rail-ramp-level-" + elevation + ".png"));
                         checkRoutes(terrain, scene, elevation);
@@ -119,7 +119,7 @@ class GpuRailBridgeRampSmokeTest {
         if (elevation == 0) { return; }
         for (float along : new float[] { .35f, .45f, .55f, .65f }) {
             var point = BoardGeometry.center(BRIDGE, 0).lerp(BoardGeometry.center(APPROACH, 0), along);
-            float expected = (1 - BoardBridgeSlopeTest.eased(along)) * elevation * BoardGeometry.level() + lift + railTop;
+            float expected = (1 - BridgeScenes.eased(along)) * elevation * BoardGeometry.level() + lift + railTop;
             for (int side : new int[] { -1, 1 }) {
                 var ray = new Ray(new Vector3(point.x + side * BoardRail.GAUGE_HALF * scale, point.y, 200),
                       new Vector3(0, 0, -1));
@@ -177,7 +177,7 @@ class GpuRailBridgeRampSmokeTest {
         boolean water = at.getY() < APPROACH.getY();
         boolean track = at.getX() == BRIDGE.getX() && at.getY() >= 5;
         boolean bridge = track && water;
-        var ground = BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0);
+        var ground = BoardScenes.tile(at, BoardScene.Surface.GRASS, 0, water ? 1 : -1, 0);
         var hex = new Hex(0);
         if (bridge) {
             hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, 9));
@@ -192,6 +192,6 @@ class GpuRailBridgeRampSmokeTest {
         var tile = new BoardScene.Tile(at, 0, ground.waterDepth(), false, 0, ground.surface(), null, null,
               BoardFeatures.capture(hex, at, Map.of()), List.of(), ground.liquid(), null,
               true, BoardRoad.Kind.NONE);
-        return bridge ? BoardBridgeTypeTest.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
+        return bridge ? BridgeScenes.appearance(tile, Map.of("bridge", HexAppearance.TRUSS_PILLARS)) : tile;
     }
 }

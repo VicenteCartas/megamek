@@ -13,13 +13,34 @@ uniform float u_alphaTest;
 in float v_depth;
 // SHADOW_MAP_PASS: GpuTerrain's shadow pass defines SHADOW_PASS.
 #ifdef SHADOW_PASS
-// The pass's view-projection (libGDX's camera uniform), and the map's texels across (GpuShadowLight.register).
-uniform mat4 u_projViewTrans;
+// The map's texels across (GpuShadowLight.register).
 uniform float u_shadowTexels;
 #endif
 #endif
+#if defined(PackedDepthFlag) && defined(SHADOW_PASS) || defined(impostorFlag)
+// The pass's view-projection (libGDX's camera uniform).
+uniform mat4 u_projViewTrans;
+#endif
+#ifdef impostorFlag
+// IMPOSTOR_SAMPLE
+// Its normal atlas, whose alpha holds the depth of each texel's surface along its frame's view (prepare_tree_lods.py).
+uniform sampler2D u_normalTexture;
+#endif
 
 void main() {
+#ifdef impostorFlag
+    // A tree impostor shows the frame nearest the light's view (impostor-sample.glsl), and its texel's surface stands off
+    // the quad by its depth along that view (terrain-foliage.frag places it alike): the map stores that surface, so the
+    // plant shadows itself and what stands near it as its mesh does. The sun's map is orthographic: depth is linear.
+    vec2 gradX, gradY;
+    vec3 frameView;
+    vec2 uv = impostorUV(gradX, gradY, frameView);
+    float coverage = textureGrad(u_diffuseTexture, uv, gradX, gradY).a;
+    vec3 offset = impostorOffset(frameView, textureGrad(u_normalTexture, uv, gradX, gradY).a);
+    float offsetDepth = .5 * dot(vec3(u_projViewTrans[0][2], u_projViewTrans[1][2], u_projViewTrans[2][2]), offset);
+#else
+    float offsetDepth = 0.0;
+#endif
 #ifdef PackedDepthFlag
     // Measured in shadow texels, this follows the actual face slope along the light, including vertical cliffs.
     // Half-texel PCF offsets plus bilinear comparisons reach at most 1.5 texels in each axis.
@@ -43,10 +64,13 @@ void main() {
     vec2 bent = abs(change - drift);
     vec2 axes = max(abs(change) + .5 * bent, 1.5 * bent);
     float bias = axes.x + axes.y;
-    // Plus one step of the 16-bit map, which rounds what it stores: a face square to the light keeps its own depth.
-    float depth = min(1.0, v_depth + bias + 1.0 / 65535.0);
+    // Plus one step of the 16-bit map, which rounds what it stores: a face square to the light keeps its own depth. An
+    // impostor's bias follows its quad, whose depth is smooth, not its texels' surfaces.
+    float depth = clamp(v_depth + offsetDepth + bias + 1.0 / 65535.0, 0.0, 1.0);
 #endif
-#if defined(diffuseTextureFlag) && defined(blendedFlag)
+#ifdef impostorFlag
+    if (coverage < u_alphaTest) discard;
+#elif defined(diffuseTextureFlag) && defined(blendedFlag)
     if (texture(u_diffuseTexture, v_texCoords0).a < u_alphaTest) discard;
 #endif
 #ifdef PackedDepthFlag

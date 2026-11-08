@@ -19,7 +19,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 /** Raised connected storeys retain their ground footprint and close only above shorter neighbours. */
 class ConnectedKitFootprintTest {
     private static final List<String> ASSETS = List.of("buildings/building_light/building_light",
-          "buildings/lunar_habitat/lunar_habitat", "buildings/lunar_habitat/lunar_habitat@parapet");
+          "buildings/lunar_habitat/lunar_habitat", "buildings/lunar_habitat/lunar_habitat@parapet", "buildings/civic/civic",
+          "buildings/utopia/utopia", "buildings/frontier/frontier");
 
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
@@ -40,7 +41,9 @@ class ConnectedKitFootprintTest {
                         var hit = new Vector3();
                         var down = new Ray(new Vector3(0, 34, height * 18 + 30).mul(turn), new Vector3(0, 0, -1));
                         assertTrue(Intersector.intersectRayTriangles(down, triangles, hit), context);
-                        assertTrue(hit.z >= height * 18, "The top roof must cover the connected floor: " + context + " " + hit);
+                        // A bevelled roof edge (the Frontier modules') may stand up to a chamfer below the roof; an open
+                        // roof would show the storey below, a level lower.
+                        assertTrue(hit.z >= height * 18 - 3, "The top roof must cover the connected floor: " + context + " " + hit);
                         // A wall across the former connection must enclose the upper storey at its original hexside.
                         var upper = new Ray(new Vector3(.37f, 50, (height - .47f) * 18).mul(turn),
                               new Vector3(0, -1, 0).rot(turn));

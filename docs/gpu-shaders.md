@@ -120,7 +120,7 @@ and, unless the board makes its entrance, a close view of its centre;
 the brief effects of play (weapons, missiles, explosions, TAG beams, jump jets, heat, hex
 masks, range walls and labels, routes and their pulse) link with the first of them
 (`GpuBattleView.warmUp`), and those of the board where it has them: hex fire and smoke,
-splashes, spores and geysers (the editor's always). Lasting effects link when they first
+splashes, spores and geysers (the editor's geysers always). Lasting effects link when they first
 show: the board's weather, pilot flames and ECM fields in those frames; star shells, the
 deployment tint and another weather once they appear. Fire and smoke a board gains later link
 as a nuke launches or a scheduled one goes off, before its burning hexes arrive; other new
@@ -137,14 +137,15 @@ serves the links of earlier runs. On a cold cache Grassland 3's Tactical View li
 unit-material program, its thermal view three wireframe and three thermal-unit programs,
 SMAA three and FSR two. The views' programs link in the background (`after-loading-deferred`):
 no frame freezes, and until they are linked their draws wait. SMAA and FSR link on the render
-thread when switched on later, holding that frame (`GpuShaderLoadSmokeTest`). The editor's board also
-prepares the palette's kinds while it loads (`GpuEditorTerrainPreviews.kinds`: each preview,
-preset and look but buildings' designs, apart on clear ground; frozen land and its border
-both ways) and the wave simulations. `GpuMapHud.prepare` also warms the palette's own
-terrain and model preview providers before the loading stage ends; warming the main board
-provider alone does not prepare those separate owners. An edit whose new materials still
-need a program shows the previous terrain until it is linked (`GpuTerrain.awaitingLinks`),
-not the loading stage. Changing wet terrain to dry resets ocean storage while retaining
+thread when switched on later, holding that frame (`GpuShaderLoadSmokeTest`). The editor loads
+only what its starting view draws, with no close view: the palette's cards, a closer zoom and
+whatever a stroke brings link when first asked for, while the board shows and a spinner beside
+the issues triangle says so (`GpuBoardEditor.showPreparing`). Its geysers' and wave simulations'
+programs still link while it loads, 18 ms together, so that a first stroke of water holds no
+frame. An editor's programs always keep the crystal stage, as they keep the biome stage: that
+flag is in every program's key, so the first crystal in a card or a stroke would link the whole
+set again. An edit whose new materials still need a program shows the previous terrain until it
+is linked (`GpuTerrain.awaitingLinks`), not the loading stage. Changing wet terrain to dry resets ocean storage while retaining
 its compiled programs; only final disposal releases those programs.
 Once the board shows, a material program still missing links in the same preparation
 (`GpuGlsl.deferral`) while its draws are skipped (`GpuShaderProvider.UNLINKED`), at most
@@ -153,23 +154,47 @@ complete. `-Dmegamek.gpu.shaderTiming=true` logs a compile that held a frame as
 `after-loading` (`after-loading-offscreen` for those renderers), one linked so as
 `after-loading-deferred`; `GpuShaderLoadSmokeTest` asserts no late synchronous or deferred
 links and no returning loading stage for a game (late deployments, SMAA, a 75% render resolution; the Tactical
-View and the thermal view may link their own programs, but bring back no loading stage)
-and for the editor (every Assets category, a search, strokes of lava, water, ice, scorch,
-a car and the board's first building, followed by a specular-AA switch and fresh model/junction previews). Such links still
-cost frames: NVIDIA reports a parallel link complete, then holds its first status query for
-about half the link (5–150 ms for an object's program, 5–8 s for a sculpt program), and
-first draws a program loaded from the cache slowly (3.5 s for the ice card's sculpt program);
-on Iris Xe a link on the shared context holds the render thread throughout. The preview
-warm-up therefore includes the palette's object models even when no terrain kind shows them.
-Model previews key preparation by both the board renderer and their actual lighting
-environment flags, so changing specular AA prepares the new programs during the
-lighting reload. Obsolete warmup meshes are disposed when that key changes.
+View and the thermal view may link their own programs, but bring back no loading stage).
+For the editor (every Assets category, a search, strokes of lava, water, ice, scorch, a car and
+the board's first building, followed by a Quality switch and fresh model and junction previews)
+it asserts that no link holds a frame, that no loading stage returns and that the spinner shows,
+then goes. It counts links from source only, so a program the cache serves hides a missing
+preparation: run it with an empty `-Dmegamek.gpu.programCacheDir`. Background links can still cost
+frames: on an empty cache the walk's 116 links left a longest frame of 445 ms on an RTX 4070
+Laptop. On Iris Xe a link on the shared context holds the render thread throughout, and the
+spinner stops turning meanwhile. On an empty cache that walk's frames over 1 s there were five, of
+3.5–7.5 s: the 242 KB sculpt program, plain and blended, and its land-ice variants, each linking the
+whole shader. All the others stayed under 1 s, and on the walk's second pass the program cache left
+a longest frame of 361 ms.
 
-The 2026-10-19 Iris Xe runtime check passed with zero late synchronous/deferred links
-and no returning loading stage, both during normal editing and on the first presented
-frames after the AA change. This used a private application cache and is a preparation
-correctness result, not a claim of hitch-free editing: the longest editing frame was
-546.5 ms. Evidence is in `build/shader-audit/handoff-20261018/iris-finish/runtime-editor/`.
+Opening the editor, RTX 4070 Laptop at 1920x1080, until the first frame without the loading stage:
+
+| Board | Program cache | Prepared up front | On demand |
+| --- | --- | ---: | ---: |
+| 16x17 Grassland 3 | warm | 37 s | 12.6 s |
+| 16x17 Grassland 3 | empty | 103 s | 15–29 s |
+| 48x48 The Trainjob | warm | 76–81 s | 35 s |
+| 48x48 The Trainjob | empty | 100 s | 36 s |
+
+An empty program cache can still find the driver's own: the lower Grassland figure had it warm.
+
+The same on Iris Xe, at 1920x1080. The first ten seconds after opening also ran smoother: on warm
+Grassland 3, 224 frames and a longest of 474 ms against 83 and 10 s; on warm The Trainjob, 408 and
+280 ms against 109 and 15 s.
+
+| Board | Program cache | Prepared up front | On demand |
+| --- | --- | ---: | ---: |
+| 16x17 Grassland 3 | warm | 25.5 s | 11.9 s |
+| 16x17 Grassland 3 | empty | 152 s | 85 s |
+| 48x48 The Trainjob | warm | 41.6 s | 29.8 s |
+
+The empty-cache "on demand" ran first, with the driver's cache cold, so that gap is understated.
+The Trainjob opened right after Grassland 3 took 48.8 s on demand against 41.1 s, as the old load
+had already linked everything.
+
+A board's plant searches run on the pool (`BoardTiles.search`), and before a window's first capture
+with the Swing thread free (`BoardTiles.searchAhead`): The Trainjob's capture holds that thread for
+about 2 s instead of 8–11 s, and every plant lands where it did.
 
 Once the board shows, sculpted ground draws with family programs (`GpuFamilyPrograms`): the
 same source with the draw's surface families as constants (`SCULPT_FAMILY`,
@@ -183,11 +208,38 @@ generic program until the next load. A load compiles at most four family program
 (`GpuFamilyPrograms.FRESH`), the most-drawn first, beside every one the program cache holds; the
 other variants keep the generic program, and each later load compiles the next four (without a
 program cache, every load the first four). A lighting change behind the loading stage counts as a load. Uncached, a
-family program costs about 15 s on Iris Xe, most of it Intel's compile at its first draw: with
-nothing cached, Fire and Ice 2's first load took 693 s with all 28 and 367 s with four (RTX 4070:
-112 s and 45 s). Crust and bank draws and volcanic palettes with at most
+family program links on Iris Xe at Medium in about 1.2 s on plain ground, 2.3 s on a blend and 3.4 s on a blend with the
+biome stage, at High in 1.7, 4.4 and 5.9 s; a level tops' program (below) in 0.8, 1.4 and 2.4 s, at High in 1.2, 2.4 and
+4 s; a first draw in a raw test adds 1-3 ms. Crust and bank draws and volcanic palettes with at most
 one ordinary family keep the generic program, which already compiles one family's path; so
-do scarred surfaces, scatter, water, editor previews and board prints. A terrain keeps at
+do scarred surfaces, scatter, water, editor previews and board prints.
+
+A chunk's level tops draw apart from the rest of their material (`GpuFamilyPrograms.flat`): triangles whose three
+vertices are ground kind with normals at least .601 high, so the wall test (`rocky`) is false throughout. Their family
+program (`SCULPT_TOPS`, `unlessTops`) has no wall, rock, plant or pit path. Concrete and crust stay whole, a generic
+program draws both parts, and page merges keep them apart (`GpuPropBatch.Merge`). On Iris Xe at 1080p, with every family
+program built, that saves 1.4-5.8 ms on terrain views at Medium and 1.2-7.6 ms at High, for 2-9% more draws on real
+boards.
+
+Without the driver's parallel compiler a link anywhere in the game's process holds the render thread for the whole link:
+on Iris Xe, frames of 2.1 to 6.8 s, since every call that touches a program, texture or buffer waits. There
+`GpuLinkHelper` links in a process of its own, and the binary comes back through the program cache in 2-4 ms: one helper,
+below normal priority, started on the first job, gone after a minute with none or with the game. The loading stage then
+waits for the generic programs and for family programs the cache holds. Every other family program asks once behind it,
+with no `FRESH` limit, and arrives beside the frames, one a frame within the frame's budget for links. A generic program
+draws the same pixels meanwhile. Nothing optional links in the game's process: if the helper ends, those stay generic
+until the next load. A required program links there only when its binary can't reach the game, because the cache can't be
+written or the driver keeps rejecting it. Drivers with the parallel compiler and drivers without binary formats keep
+their own paths; `-Dmegamek.gpu.linkHelper` overrides the choice.
+
+Iris Xe, 1080p, Medium, nothing cached, without / with the helper: Fenland loads in 118 / 72 s, then all ten family
+programs arrive 30 s later (four of ten without, and 59.6 / 51.3 ms a settled frame); Fire and Ice 2 loads in 185 / 168 s,
+and 32 of its 33 arrive over seven minutes of play (four without, and 30.2 / 25.6 ms). The longest frame while they
+arrive is 59-157 ms; a frame that adopts one costs up to about 10 ms more, up to about 25 ms on Fire and Ice 2. Second
+loads: 62.5 / 47 s and 32 / 17 s. Programs asked for outside a preparation (effects, the first hidden frame's 4 s) and
+the shader editor still link in the process. Not run yet in a packaged build; two running MegaMeks each have a helper.
+
+A terrain keeps at
 most 32 family programs for each lighting configuration and 64 in all. A board without clouds has four
 configurations (specular anti-aliasing with and without a directional light), up to eight across the cloud marker's
 states; once a terrain holds 64, a third configuration draws with the generic programs: on the calibration board at
@@ -197,12 +249,12 @@ the family programs with the other variants, on the render thread.
 `-Dmegamek.gpu.familyPrograms=false` draws with the generic programs only.
 
 The depth pre-pass (`GpuTerrain.renderPrepass`) draws the trees' depth before the opaque colour pass: leaves and
-impostor cards with their own alpha test, after which `terrain-foliage.frag` returns under `depthPrepassFlag`, trunks
+impostors with their own alpha test, after which `terrain-foliage.frag` returns under `depthPrepassFlag`, trunks
 and other solid tree parts with an empty fragment stage (`terrain-depth.frag`). It also draws the relief of chunks with
 many cliffs, with that empty stage: a chunk's walls (each relief triangle's area as seen from beside it, the board's
 outer sides left out) must cover more than 0.45 of its hexes' area (`GpuTerrain.cliffWalls`), measured where its meshes
 are prepared. Such a chunk marks its relief materials (`Ground.cliffs`, `Prepass.CLIFFS`), so their draws stay apart
-from other chunks' in shared pages and batches and use the same programs. Their colour draws then test `GL_EQUAL`
+from other chunks' in shared pages and batches and use the same programs. Their colour draws then test `GL_LEQUAL`
 without writing depth, so hidden leaves and ground are not shaded. It draws building shells too, the walls and roofs of
 buildings and fuel tanks other than kit buildings: their surfaces carry `GpuModelMaterial.occluder`, so each of their
 draws takes its program's objects twin (`Prepass.OBJECTS`), which links behind the loading stage, while a hex is at least
@@ -216,17 +268,23 @@ the same prefix and vertex stage, which its family programs share. Twins are pro
 outside the family programs' capacity, and link behind the loading stage with the generic programs, every tree detail
 level included. Every terrain vertex stage declares `gl_Position` invariant, and a cutout's vertex stage also the alpha
 test's inputs (`foliage-coverage.glsl`); below GLSL 4.20, `terrain-foliage.frag` declares those inputs invariant too
-(`coverageIn`). The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
+(`coverageIn`). An instanced tree's twins, its solid parts' included, run `terrain-foliage.frag` to its alpha test and
+its dissolve between detail levels, so they keep the pixels its colour draw keeps. The frame's single gather, draw order and flushes do not change. A draw without a twin, a variant that
 appears later and a shader edit's replacements draw as before until the warm-up pairs them. The Tactical View, the
 Classic columns and the wireframe draw without it. `-Dmegamek.gpu.depthPrepass=false` turns it off; `=all` adds the
 other chunks' relief, for measurements only, since on an Iris Xe their twins cost about what they save. On NVIDIA the
-frames are bit-identical with and without the pre-pass; on an Iris Xe, `GL_EQUAL` drops a few isolated pixels on leaf
-edges and tufts (5 to 2133 of a 1080p view's 2.07 million) and on cliff relief (0 to 5). On an Iris Xe at 1080p the 40
+frames are bit-identical with and without the pre-pass. On an Iris Xe, `GL_EQUAL` loses a few isolated pixels on leaf
+edges and tufts (5 to 2133 of a 1080p view's 2.07 million) and on cliff relief (0 to 5), others each frame, so a still
+camera's frames differ. With `GL_LEQUAL` they repeat exactly (Grassland 3, City Districts, Sand Drift 1, Dome Vent 2).
+City Districts' view took 21.3 to 22.3 ms at `GL_EQUAL` and 22.05 to 23.36 ms at `GL_LEQUAL`, about 0.7 ms on the means
+within a spread of about 1 ms. Only a building without a kit is a shell; City Districts, City (Skyscraper) and the 48 by
+48 city draw kit buildings. Those stay out of the pre-pass: with their modules in it, on an Iris Xe at 1080p and Medium,
+the 48 by 48 city's fitted view went from 39.3 to 45.8 ms and its middle view from 56.9 to 60.8 ms (runs of 55 to 71 ms),
+and City Districts' and City (Skyscraper)'s views stayed within their runs' spread, although the middle view's shaded
+samples of the instanced model program fell from 3.7 to 1.9 million. On an Iris Xe at 1080p the 40
 by 40 forest's middle view draws in 32 ms instead of 53.5 ms; the cliff chunks take the Box Canyon's middle view from
 19.2 to 13.5 ms and the calibration board's from 22.2 to 20.7 ms, leave the Jotun Mountains' unchanged within its
-rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. The building shells save 5.2 to 6.7 ms in
-the 48 by 48 city's middle view (two processes; rounds 2.7 to 8.2 ms) and 0.8 to 1.6 ms in Valencia City's, for 0.1 to
-0.4 ms of pre-pass; in the city's fitted view (29-pixel hexes) about 0.5 ms, within its rounds' spread of 3 ms. Grass and the crops' plants stay out: they
+rounds' spread of about 1 ms, and the 48 by 48 city and Grassland 3 have none. Grass and the crops' plants stay out: they
 shade about 1.55 fragments per visible pixel, and on an Iris Xe their twins saved about 1 ms on the Farmland board's views
 and cost about 1 ms on Mesa City's grass. `GpuDepthPrepassSmokeTest` checks the
 parity and shader edits; `GpuDepthPrepassBenchmarkSmokeTest` times it.
@@ -257,17 +315,34 @@ Its two RGBA16F targets (visibility, camera distance, contact visibility) follow
 
 Sun shadows filter the shadow map with one tent (`shadowTent`, `surface-lighting.glsl`): a separable tent of a half
 width in texels, read as bilinear comparisons at positions whose weights make it exact, so it is smooth in position
-and width with no noise pattern. Models and other surfaces take it a texel and a half wide in four comparisons
-(`surfaceVisibility`). On sculpted ground and trees (`sculptShadow`) it widens with the distance to what casts the
-shadow, as the sun's half-degree disc does, from one texel to three, in nine comparisons. The widest tent reads six by
-six texels, nine blocks of two by two: the centre and its four edges lit, against the highest depth any tent compares
-there, is lit (the corners, a fifth of the widest tent's weight, unseen); all nine shadowed against the lowest is the
-umbra, exactly, without the tent. Elsewhere the same five blocks at the receiver's depth and 3 m and 15 m nearer the sun
-tell how far the caster stands. No second sampler reads raw depth. On
+and width with no noise pattern. Grass blades, roads, ice and, at Medium, models take it a texel and a half wide in
+four comparisons (`surfaceVisibility`). On sculpted ground and trees (`sculptShadow`) and, at High, on models
+(`modelVisibility`) it widens with the distance to what casts the shadow (`contactShadow`), as the sun's half-degree disc
+does, from one texel (on models a texel and a half, narrower their straight edges show the map's texel steps): up to
+three in nine comparisons, wider in six by six (`shadowWideTent`) on one of the map's three coarser levels, the finest
+that holds it in five of its texels, blended into the next across the top fifth of that range (`shadowPenumbra`). Each
+coarser level keeps the top left texel of every two by two of the one above (`shadow-levels.frag`), so a tree crown's
+gaps stay gaps; `GpuShadowLight.levels` writes them once a map revision, at High only (the Shadows choice changes
+only the map's resolution). Widths are per map axis
+(`shadowTexels`), as the fit stretches the square map's texels along one. Both look the shadow up out along the face's
+normal (`shadowLookup`), so a face lit at a grazing angle never shadows itself, and a face turned from the sun that
+neither scatters nor transmits light reads none. The three-texel tent reads six by six texels, nine blocks of two by
+two: the centre and its four edges lit, against the highest depth any tent compares there, is lit (the corners, a fifth
+of its weight, unseen); all nine shadowed against the lowest is the umbra, exactly, without the tent. When the frame's
+widest penumbra (a caster at most the casters' slab away) passes three texels, the coarse level whose blocks span it must
+agree: its five for lit, looking only for casters farther than the three-texel tent shows (nearer ones the finest blocks
+saw, and a receiver's own plane across the coarse blocks would read as one), and its nine for the umbra. Elsewhere five blocks at the receiver's depth and nearer the sun
+tell how far the caster stands, on the finest level, or on the coarse one where the finest find none: a far caster's
+penumbra reaches past them. They sit on the pixel, not on the block grid, so the width changes smoothly along an edge,
+and probe at a twentieth (only past three texels) and every fifth of the distance whose penumbra fills the frame's
+widest, each past a blocker at the one before; the caster's distance is the area under the share still blocked, joined
+by straight lines: a few hexes up close and many zoomed out, so a tower's long
+shadow under a low sun is crisp at its foot and soft for hexes toward its tip. The fog's light shafts read the finest
+level. No second sampler
+reads raw depth. On
 sculpted ground the lookup rises with the visible grain (its height map, `RELIEF_METRES` deep), so raised grains break
-a shadow's edge, and the cavity shades hollows first where the sun grazes. Its lookup also shifts across the light by
-up to `FRAY_METRES` (a quarter metre) in 0.1 to 0.3 m tufts of the rain-noise texture, as grass, clods and stones fray
-a natural shadow's edge; the noise's mipmaps take the shift out with distance.
+a shadow's edge, and the cavity shades hollows first where the sun grazes. A shadow's edge follows what casts it: grass,
+plants and stones break it with their own geometry, nothing shifts the lookup.
 
 Sculpted relief can be tessellated where the context offers it (`GpuTessellation`; OpenGL 4.0 and later, so every Mac's
 4.1 and current Windows and Linux drivers' 4.6), by the Tuning panel's Tessellation switch (`GpuTerrain.setTessellation`,
@@ -370,14 +445,36 @@ shader and section previews use `GpuSceneDisplay` for the same final conversion.
 
 macOS's OpenGL gives each shader stage only 16 texture units, and a program that
 samples more fails to link there, so the board does not draw on a Mac although
-Windows and Linux drivers (32 units) accept it. Add maps as layers of an existing
-array where they are aligned repeats of one set, as the sculpt maps
-(`u_terrainLayers`), each magma set (`u_magmaMaps`) and the ice normal and surface maps
-(`u_iceMaps`) are. The on-demand
-`GpuSamplerBudgetSmokeTest` renders the battle view over volcanic, rain, snow, fog,
-river, highway and hazardous-liquid boards, fails on any program over 16, and
-prints every variant's count. On 2026-10-16 the combined ice and volcanic sculpt
-material used all 16, including the local light list (`u_lavaLights`).
+Windows and Linux drivers (32 units) accept it. A fragment stage keeps to 13, which
+leaves room for new features. Add maps as layers of an existing array of their format
+and size, read at the same texel density:
+
+- `u_terrainLayers` and `u_terrainData`: the sculpted surfaces.
+- `u_fullSizeColor` and `u_fullSizeData` (`GpuAssets.fullSizeMaps`, full-size-maps.glsl):
+  the 1024-texel maps of the tundra carpets, ice and both lavas. A board that reads any
+  of them loads them all.
+- `u_roadColors` and `u_roadData` (`GpuAssets.roadArray`): the road materials, and the ice
+  sheet again, so ice on a road coat takes no other unit.
+- `u_surfaceNoise` (`GpuWaterShader.surfaceNoise`, surface-noise.glsl): the water detail
+  and the rain noise, whose 64 texels repeat four times across their 256-texel layer and
+  are read at a quarter of the coordinates, so reads and mips stay those of a 64-texel texture.
+
+The order of both pairs' layers is `GpuAssets.FULL_SIZE_PLAN` and `ROAD_PLAN`, which build the
+arrays and write the layer numbers the shaders read (`GpuAssets.carpetLayers`, `iceLayers`).
+
+Exact-texel tables can share a texture: `u_lavaLights` also holds the board's hex table
+(`GpuLavaLighting.setHexes`, `boardHex` in terrain-hexes.glsl). Procedural water compiles
+out the authored colour's sampler. The on-demand `GpuSamplerBudgetSmokeTest` renders the
+battle view over volcanic, rain, snow, fog, river, highway and hazardous-liquid boards and
+an editor, whose biome stage and crystal stage add to every program, fails on a fragment
+stage over 13 or a program over 16, and prints every variant's fragment count. At the
+budget are road ground and cached ground with ambient occlusion, and the editor's sculpted
+ground; water's fragment stage reads 12. Two kinds of program are
+exceptions: at High quality with ambient occlusion and the crystal stage (an editor, or a
+board with crystals) road ground reads 14, since its 1024-texel road maps and 512-texel
+sculpt maps need an array pair each, and cached ground on a board with biomes reads 14,
+since its pages stay in three arrays: one array for moments and detail would halve the
+pages a driver's layer limit allows, and a wide 4K view needs more than that.
 
 A shader edit normally replaces programs and invalidates affected render caches;
 it does not change game state, terrain support or picking. Change Java geometry

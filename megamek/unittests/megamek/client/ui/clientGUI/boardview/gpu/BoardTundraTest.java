@@ -26,9 +26,9 @@ class BoardTundraTest {
         var board = Board.createEmptyBoard(1, 1);
         var at = new Coords(0, 0);
         board.setHex(at, new Hex(2, "", theme));
-        var before = BoardAridSurfaceTest.capture(board).tile(at);
+        var before = BoardScenes.capture(board).tile(at);
         board.setHex(at, new Hex(2, "tundra:1", theme));
-        var scene = BoardAridSurfaceTest.capture(board);
+        var scene = BoardScenes.capture(board);
         var after = scene.tile(at);
         assertEquals(before.surface(), after.surface());
         assertEquals(before.groundCover(), after.groundCover());
@@ -74,7 +74,7 @@ class BoardTundraTest {
     @Test
     void connectedCrustHasNoHexSeamsAndIsolatedBankEventuallyFades() {
         var center = new Coords(4, 4);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA, 2));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.TUNDRA, 2));
         for (int edge = 0; edge < 6; edge++) {
             var p = BoardGeometry.corner(center, 2, edge);
             assertEquals(1, BoardBiome.coverage(scene, BoardScene.Biome.TUNDRA, p.x, p.y, p.z), .00001);
@@ -90,7 +90,7 @@ class BoardTundraTest {
         var high = new Coords(4, 3);
         var low = high.translated(3);
         for (int levels : new int[] { 1, 2 }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, BoardScene.Biome.TUNDRA,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Biome.TUNDRA,
                   c.getY() <= high.getY() ? levels : 0));
             float x = (BoardGeometry.centerX(high) + BoardGeometry.centerX(low)) * .5f;
             float y = (BoardGeometry.centerY(high) + BoardGeometry.centerY(low)) * .5f;
@@ -106,7 +106,7 @@ class BoardTundraTest {
         var board = Board.createEmptyBoard(1, 1);
         var at = new Coords(0, 0);
         board.setHex(at, new Hex(0, "pavement:1;tundra:1", "grass"));
-        var tile = BoardAridSurfaceTest.capture(board).tile(at);
+        var tile = BoardScenes.capture(board).tile(at);
         assertEquals(BoardScene.Surface.CONCRETE, tile.surface());
         assertEquals(BoardScene.Biome.TUNDRA, BoardBiome.kind(tile));
         assertEquals(BoardScene.Biome.NONE, BoardFeatures.biome(new Hex(0, "pavement:1;swamp:1", "grass")));
@@ -116,7 +116,7 @@ class BoardTundraTest {
     @Test
     void grassRootsRespectTheSharedTundraBoundary() {
         var center = new Coords(4, 4);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() >= 5 ? BoardScene.Biome.TUNDRA : BoardScene.Biome.NONE, 0));
         var tile = scene.tile(center);
         var support = BoardTacticalGeometry.Surface.of(new BoardSurface(scene, tile), scene, -1);

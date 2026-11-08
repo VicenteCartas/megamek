@@ -36,14 +36,14 @@ class GpuTerrainBlendSmokeTest {
                 GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    var mixed = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                    var mixed = BoardScenes.scene(c -> BoardScenes.tile(c,
                           c.getX() < 4 ? BoardScene.Surface.SAND : c.getY() < 4 ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS,
                           0, -1, 0));
                     capture(mixed, "mixed", terrain, frame, camera);
-                    var mixedStep = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                    var mixedStep = BoardScenes.scene(c -> BoardScenes.tile(c,
                                 c.getX() < 4 ? BoardScene.Surface.GRASS : BoardScene.Surface.SNOW,
                                 c.getX() < 4 ? 1 : 0, -1, 0));
                     capture(mixedStep, "mixed-step", terrain, frame, camera);
@@ -56,27 +56,27 @@ class GpuTerrainBlendSmokeTest {
                     terrain.setWetness(0);
                     var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND,
                           BoardScene.Surface.ROCK, BoardScene.Surface.SNOW);
-                    capture(BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                    capture(BoardScenes.scene(c -> BoardScenes.tile(c,
                                 families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), 0, -1, 0)),
                           "crowded", terrain, frame, camera);
                     // Successive snapshots on the same renderer exercise neighbour invalidation after a local edit.
                     for (var patch : List.of(BoardScene.Surface.SNOW, BoardScene.Surface.SAND)) {
-                        var island = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
-                              c.equals(BoardSurfaceBlendTest.CENTER) ? patch : BoardScene.Surface.GRASS, 0, -1, 0));
+                        var island = BoardScenes.scene(c -> BoardScenes.tile(c,
+                              c.equals(BoardScenes.CENTER) ? patch : BoardScene.Surface.GRASS, 0, -1, 0));
                         capture(island, "island-" + patch.name().toLowerCase(java.util.Locale.ROOT), terrain, frame, camera);
                         if (patch == BoardScene.Surface.SAND) { compareRebuild(island, terrain, frame, camera); }
                     }
                     for (int depth : new int[] { 0, 1 }) {
-                        var shores = BoardTerrainDetailTest.shores(depth, false);
+                        var shores = BoardScenes.shores(depth, false);
                         terrain.update(shores);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .13f;
-                        camera.center(BoardGeometry.center(BoardTerrainDetailTest.WATER, 0));
+                        camera.center(BoardGeometry.center(BoardScenes.WATER, 0));
                         frame.render(terrain, camera, shores);
                         GpuReviewFrame.save(new File(output, "mixed-shores-close-depth" + depth + ".png"));
                     }
                     for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW)) {
-                        var steps = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family,
+                        var steps = BoardScenes.scene(c -> BoardScenes.tile(c, family,
                               c.getY() < 3 ? 4 : c.getY() < 5 ? 1 : 0, -1, 0));
                         capture(steps,
                               "steps-" + family.name().toLowerCase(java.util.Locale.ROOT), terrain, frame, camera);
@@ -104,7 +104,7 @@ class GpuTerrainBlendSmokeTest {
                 for (boolean oblique : new boolean[] { false, true }) {
                     camera.setIsometric(oblique);
                     camera.camera.zoom = .42f;
-                    camera.center(BoardGeometry.center(BoardSurfaceBlendTest.CENTER, 0));
+                    camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                     renderSettled(terrain, frame, camera, scene);
                     GpuReviewFrame.save(new File(output, name + (oblique ? "-oblique" : "-top") + ".png"));
                 }
@@ -127,6 +127,9 @@ class GpuTerrainBlendSmokeTest {
                     var clock = GpuTerrain.class.getDeclaredField("clock");
                     clock.setAccessible(true);
                     fresh.animate(clock.getFloat(terrain), List.of());
+                    // A renderer's first frame still shows softer ground: the next settle refines what that frame drew,
+                    // as the edited renderer's earlier frames already have.
+                    renderSettled(fresh, frame, camera, scene);
                     renderSettled(fresh, frame, camera, scene);
                     byte[] rebuilt = screen();
                     GpuReviewFrame.save(new File(output, "island-sand-rebuilt.png"));
@@ -146,7 +149,7 @@ class GpuTerrainBlendSmokeTest {
 
             private void renderSettled(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene) throws Exception {
                 // Ground cover is planted with the terrain: once the terrain is installed, one frame shows it completely.
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
             }
 

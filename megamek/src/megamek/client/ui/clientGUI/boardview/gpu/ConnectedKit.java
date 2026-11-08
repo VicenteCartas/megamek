@@ -50,6 +50,7 @@ final class ConnectedKit {
     private static final Pattern NODE = Pattern.compile(
           ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
+    private static final Pattern JUNCTION = Pattern.compile(".*-junction-[0-9]+");
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
     private static final float REACH_TOLERANCE = 1;
     private static final Map<File, BoardKit<Kit>> KITS = new ConcurrentHashMap<>();
@@ -78,11 +79,12 @@ final class ConnectedKit {
     }
 
     /**
-     * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code grounds}: per
-     * level of detail, each role's lowest point over its core and all its tagged pieces, the height it stands on.
+     * A kit file's levels of detail and pieces, read and checked once and shared by terrain workers. {@code pieces}: the
+     * near level's; {@code parts}: each level of detail's ({@link #parts}). {@code grounds}: per level of detail, each
+     * role's lowest point over its core and all its tagged pieces, the height it stands on.
      */
-    record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, Map<String, String> roles, boolean symmetric,
-          List<Map<String, Float>> grounds) { }
+    record Kit(List<RigidGlb.Data> lods, List<Piece> pieces, List<List<Piece>> parts, Map<String, String> roles,
+          boolean symmetric, List<Map<String, Float>> grounds) { }
 
     /** Validate every node name before any assembly; a kit without tags has one core piece per role. */
     static List<Piece> parts(ModelData data) {
@@ -91,10 +93,12 @@ final class ConnectedKit {
         // Terrain workers read kit metadata concurrently; libGDX's cached Array iterator is shared.
         for (int index = 0; index < data.nodes.size; index++) {
             var node = data.nodes.get(index);
+            // A corner piece's junction twins are placed by their corners' walls, not chosen as pieces (placements).
+            if (JUNCTION.matcher(node.id).matches()) { continue; }
             require(!node.id.matches(".*\\.[0-9]{3}"), "Rename Blender's duplicate suffix: " + node.id);
             var match = NODE.matcher(node.id);
             require(match.matches(), "Expected -baseN, -floorN or -roofN, then -link-<dir> or -end-<dir> tags: " + node.id);
-            require(node.parts != null && (node.parts.length > 0 || match.group(1).equals("roof") && "-cap".equals(match.group(4)))
+            require(node.parts != null && (node.parts.length > 0 || "-cap".equals(match.group(4)))
                   && (node.children == null || node.children.length == 0),
                   "Building modules must be mesh nodes: " + node.id);
             int links = 0, ends = 0;
@@ -112,8 +116,7 @@ final class ConnectedKit {
             require(!bend || match.group(1).equals("roof") && links == 0 && Integer.bitCount(ends) == 2,
                   "A bend piece is a linkless corner's roof: " + node.id);
             require(!cap || Integer.bitCount(links) == 1 && ends == 0, "A cap closes one link: " + node.id);
-            require(closed == 0 || match.group(1).equals("roof") && (closed & ~links) == 0,
-                  "A closed roof includes only its own exposed links: " + node.id);
+            require(closed == 0 || (closed & ~links) == 0, "A closed piece closes only its own links: " + node.id);
             var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend, cap, closed);
             require(seen.add(piece.role() + "/" + piece.identity()), "Duplicate building module: " + node.id);
             result.add(piece);
@@ -137,10 +140,11 @@ final class ConnectedKit {
 
     static Kit load(List<ModelData> lods) {
         List<RigidGlb.Data> data = lods.stream().map(RigidGlb.Data.class::cast).toList();
-        List<Piece> pieces = parts(data.getFirst());
+        List<List<Piece>> parts = data.stream().map(ConnectedKit::parts).toList();
+        List<Piece> pieces = parts.getFirst();
         Set<String> signature = signature(pieces);
-        for (var lod : data) {
-            require(signature(parts(lod)).equals(signature), "Kit pieces must match across LODs: " + lod.id);
+        for (int lod = 0; lod < data.size(); lod++) {
+            require(signature(parts.get(lod)).equals(signature), "Kit pieces must match across LODs: " + data.get(lod).id);
         }
         Map<String, String> roles = new LinkedHashMap<>();
         pieces.forEach(piece -> roles.putIfAbsent(piece.role(), piece.node()));
@@ -170,7 +174,7 @@ final class ConnectedKit {
                   && other.tags() == piece.tags()), "A bend piece stands in for its plain corner piece: " + piece.node());
             require(piece.closed() == 0 || pieces.stream().anyMatch(other -> other.role().equals(piece.role())
                   && other.closed() == 0 && !other.cap() && other.tags() == piece.tags()),
-                  "A closed roof stands in for its open roof piece: " + piece.node());
+                  "A closed piece stands in for its open piece: " + piece.node());
             require(!piece.cap() || roles.keySet().stream().filter(role -> !role.startsWith("base")).allMatch(role -> pieces.stream()
                   .anyMatch(other -> other.role().equals(role) && other.cap() && other.links() == piece.links())),
                   "Every floor and roof needs the kit's link caps: " + piece.node());
@@ -201,9 +205,10 @@ final class ConnectedKit {
             }
         }
         List<Map<String, Float>> grounds = new ArrayList<>();
-        for (var lod : data) {
+        for (int level = 0; level < data.size(); level++) {
+            var lod = data.get(level);
             Map<String, BoundingBox> bounds = new HashMap<>();
-            for (var piece : parts(lod)) {
+            for (var piece : parts.get(level)) {
                 var node = node(lod, piece.node());
                 if (node.parts.length == 0) { continue; }
                 bounds.computeIfAbsent(piece.role(), ignored -> new BoundingBox().inf()).ext(bounds(lod, node, new Matrix4()));
@@ -217,7 +222,7 @@ final class ConnectedKit {
             });
             grounds.add(Map.copyOf(ground));
         }
-        return new Kit(data, pieces, Map.copyOf(roles), symmetric, List.copyOf(grounds));
+        return new Kit(data, pieces, parts, Map.copyOf(roles), symmetric, List.copyOf(grounds));
     }
 
     private static Set<String> signature(List<Piece> pieces) {
@@ -298,16 +303,95 @@ final class ConnectedKit {
     }
 
     /**
+     * What {@link #junctions} needs of the hexes around {@code tile}'s corners: each neighbour's top in this hex's levels
+     * (board direction d), then how many of them the two neighbours at each corner (board directions d and d + 1)
+     * connect across their own hexside ({@link #reach}), at 6 + d. A neighbour of other structure terrain, or on other
+     * ground, counts as none: its levels do not line up with this hex's.
+     */
+    static int[] corners(BoardScene scene, BoardScene.Tile tile) {
+        int[] result = new int[12];
+        BoardScene.Tile[] around = new BoardScene.Tile[6];
+        for (int direction = 0; direction < 6; direction++) {
+            var neighbor = scene.neighbor(tile, direction);
+            if (neighbor == null || neighbor.elevation() != tile.elevation() || !alike(tile.cover(), neighbor.cover())) { continue; }
+            around[direction] = neighbor;
+            result[direction] = Math.max(1, neighbor.cover().height());
+        }
+        for (int direction = 0; direction < 6; direction++) {
+            var a = around[direction];
+            if (a != null && around[(direction + 1) % 6] != null) {
+                // From the first neighbour, the second lies two directions on clockwise.
+                result[6 + direction] = reach(scene, a, result[direction])[(direction + 2) % 6];
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Per level from the ground (storeys) and board corner d (between directions d and d + 1), at level * 6 + d: a mask
+     * of the {@link KitOutline.Junction}s where this hex's walls end at that corner on another wall, from {@code reach}
+     * and {@link #corners}. {@code capped}: pieces stand by the ground's connections, caps closing the links exposed
+     * above (as {@link #placements} chooses them); the hexes around are taken to be capped alike.
+     */
+    static int[] junctions(int height, int[] reach, int[] corners, boolean capped) {
+        int[] result = new int[height * 6];
+        for (int level = 0; level < height; level++) {
+            for (int corner = 0; corner < 6; corner++) {
+                result[level * 6 + corner] = junction(level, corner, reach, corners, capped);
+            }
+        }
+        return result;
+    }
+
+    private static int junction(int level, int corner, int[] reach, int[] corners, boolean capped) {
+        int a = corner, b = (corner + 1) % 6;
+        // This hex's links towards A (across side a) and B, and theirs to each other: at the ground and at this level.
+        boolean g0 = reach[a] > 0, g1 = reach[b] > 0, gab = corners[6 + corner] > 0;
+        boolean l0 = reach[a] > level, l1 = reach[b] > level, lab = corners[6 + corner] > level;
+        // Its ends at the corner: a wall square to its one side linked there, walls closing the links exposed above. Two
+        // of its own meet within its piece.
+        boolean p0 = capped ? g0 : l0, p1 = capped ? g1 : l1;
+        boolean s0 = p0 && !p1, s1 = p1 && !p0, c0 = capped && g0 && !l0, c1 = capped && g1 && !l1;
+        if (count(s0, s1, c0, c1) != 1) { return 0; }
+        // The one other wall ending here, in A or B where they stand at this level and join this hex's building.
+        boolean pab = capped ? gab : lab, capAB = capped && gab && !lab;
+        boolean aIn = corners[a] > level && (l0 || lab && l1), bIn = corners[b] > level && (l1 || lab && l0);
+        // A's ends: square to its side with this hex (straight on from S0) or with B, caps along either.
+        boolean aSquareX = p0 && !pab, aSquareAB = pab && !p0, aCapX = capped && g0 && !l0;
+        boolean bSquareX = p1 && !pab, bSquareAB = pab && !p1, bCapX = capped && g1 && !l1;
+        int aEnds = aIn ? count(aSquareX, aSquareAB, aCapX, capAB) : 0, bEnds = bIn ? count(bSquareX, bSquareAB, bCapX, capAB) : 0;
+        // A hex with two ends here meets itself; only one wall may be left for this one's end.
+        boolean aOne = aEnds == 1, bOne = bEnds == 1;
+        if (aOne == bOne) { return 0; }
+        KitOutline.Junction junction = null;
+        if (s0) { junction = bOne && bSquareAB ? KitOutline.Junction.S0_NOTCH : aOne && capAB ? KitOutline.Junction.S0_CAP : null; }
+        if (s1) { junction = aOne && aSquareAB ? KitOutline.Junction.S1_NOTCH : bOne && capAB ? KitOutline.Junction.S1_CAP : null; }
+        if (c0) { junction = !bOne ? null : capAB ? KitOutline.Junction.C0_CAP : bSquareX ? KitOutline.Junction.C0_SQUARE : null; }
+        if (c1) { junction = !aOne ? null : capAB ? KitOutline.Junction.C1_CAP : aSquareX ? KitOutline.Junction.C1_SQUARE : null; }
+        return junction == null ? 0 : bit(junction);
+    }
+
+    private static int bit(KitOutline.Junction junction) { return 1 << junction.ordinal(); }
+
+    private static int count(boolean... ends) {
+        int count = 0;
+        for (boolean end : ends) { count += end ? 1 : 0; }
+        return count;
+    }
+
+    /** Same structure terrain: both buildings, or both fuel tanks. */
+    private static boolean alike(BoardScene.Cover cover, BoardScene.Cover other) {
+        return other.structure() != 0 && (other.structure() == BoardScene.Cover.FUEL_TANK) == (cover.structure() == BoardScene.Cover.FUEL_TANK);
+    }
+
+    /**
      * Whether the neighbour towards {@code direction} is the same structure terrain (building or fuel tank) and connects
      * back across the shared hexside.
      */
     static boolean back(BoardScene scene, BoardScene.Tile tile, int direction) {
         var neighbor = scene.neighbor(tile, direction);
         var other = neighbor == null ? BoardScene.Cover.NONE : neighbor.cover();
-        var cover = tile.cover();
-        return other.structure() != 0
-              && (other.structure() == BoardScene.Cover.FUEL_TANK) == (cover.structure() == BoardScene.Cover.FUEL_TANK)
-              && (other.exits() & 1 << (direction + 3) % 6) != 0;
+        return alike(tile.cover(), other) && (other.exits() & 1 << (direction + 3) % 6) != 0;
     }
 
     /**
@@ -315,9 +399,39 @@ final class ConnectedKit {
      * the lower top where their vertical spans overlap, else the whole {@code height}.
      */
     static int arm(BoardScene.Tile tile, int height, BoardScene.Tile neighbor, int neighborHeight) {
-        int top = neighbor.elevation() - tile.elevation() + neighborHeight;
         // No overlapping vertical span means a terrain step separates the structures; do not invent a bridge.
-        return top > 0 && neighbor.elevation() < tile.elevation() + height ? Math.min(height, top) : height;
+        return overlaps(tile, height, neighbor, neighborHeight)
+              ? Math.min(height, neighbor.elevation() - tile.elevation() + neighborHeight) : height;
+    }
+
+    private static boolean overlaps(BoardScene.Tile tile, int height, BoardScene.Tile neighbor, int neighborHeight) {
+        return neighbor.elevation() - tile.elevation() + neighborHeight > 0 && neighbor.elevation() < tile.elevation() + height;
+    }
+
+    /**
+     * Whether the inside of the structure of {@code tile}, {@code height} levels high, shows from outside: it, or a
+     * neighbour it connects with, connects across a hexside where nothing connects back over its span ({@link #reach}),
+     * such as a missing or collapsed neighbour, and stands open there.
+     */
+    static boolean open(BoardScene scene, BoardScene.Tile tile, int height) {
+        if (openEnd(scene, tile, height)) { return true; }
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.cover().exits() & 1 << direction) == 0 || !back(scene, tile, direction)) { continue; }
+            var neighbor = scene.neighbor(tile, direction);
+            if (openEnd(scene, neighbor, Math.max(1, neighbor.cover().height()))) { return true; }
+        }
+        return false;
+    }
+
+    private static boolean openEnd(BoardScene scene, BoardScene.Tile tile, int height) {
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.cover().exits() & 1 << direction) == 0) { continue; }
+            var neighbor = scene.neighbor(tile, direction);
+            if (!back(scene, tile, direction) || !overlaps(tile, height, neighbor, Math.max(1, neighbor.cover().height()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -373,12 +487,18 @@ final class ConnectedKit {
     }
 
     static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps, boolean stepped) {
+        return placements(kit, lod, selected, reach, steps, stepped, null);
+    }
+
+    /** {@code junctions}: {@link #junctions} for the hex, or null for none. */
+    static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps, boolean stepped,
+          int[] junctions) {
         var source = kit.lods().get(lod);
         var ground = kit.grounds().get(lod);
         int height = selected.size() - 1;
-        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedRoofs = new HashMap<>();
-        for (var piece : parts(source)) {
-            (piece.closed() != 0 ? closedRoofs : piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>())
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedPieces = new HashMap<>();
+        for (var piece : kit.parts().get(lod)) {
+            (piece.closed() != 0 ? closedPieces : piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>())
                   .put(piece.bend() ? piece.tags() : piece.identity(), piece);
         }
         boolean capped = !stepped && kit.pieces().stream().anyMatch(Piece::cap);
@@ -421,9 +541,11 @@ final class ConnectedKit {
                     // Where it stops behind a 60-degree bend (connected across just the two hexsides opposite it).
                     Piece bend = holds || role == null ? null : bends.getOrDefault(role, Map.of()).get(tags);
                     if (bend != null && connected[capped ? 0 : level - 1] == turn(turned.ends(), 3)) { piece = bend; }
-                    if (capped && piece != null && role.startsWith("roof") && !piece.cap()) {
-                        int closed = piece.links() & ~turn(connected[level - 1], -turn);
-                        piece = closedRoofs.getOrDefault(role, Map.of()).getOrDefault(piece.identity() | (long) closed << 14, piece);
+                    // Its links exposed beside shorter neighbours: a roof's below it, a storey's at its own level; the
+                    // twin closing them stands in where the kit holds one.
+                    if (capped && piece != null && !piece.cap() && (holds || role.startsWith("roof"))) {
+                        int closed = piece.links() & ~turn(connected[role.startsWith("roof") ? level - 1 : level], -turn);
+                        piece = closedPieces.getOrDefault(role, Map.of()).getOrDefault(piece.identity() | (long) closed << 14, piece);
                     }
                     if (piece != null && node(source, piece.node()).parts.length > 0) {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
@@ -433,7 +555,34 @@ final class ConnectedKit {
                 }
             }
         }
+        if (junctions != null) { placeJunctions(result, kit, source, byRole, selected, ground, junctions, steps); }
         return List.copyOf(result);
+    }
+
+    /**
+     * Each storey's junctions at its corners ({@link #junctions}): twins of the corner piece linked both ways, turned to
+     * the corner in a kit that holds north only.
+     */
+    private static void placeJunctions(List<Placement> result, Kit kit, RigidGlb.Data source, Map<String, Map<Long, Piece>> byRole,
+          List<String> selected, Map<String, Float> ground, int[] junctions, int steps) {
+        Set<String> ids = new HashSet<>();
+        for (int index = 0; index < source.nodes.size; index++) { ids.add(source.nodes.get(index).id); }
+        for (int level = 0; level < selected.size() - 1; level++) {
+            String role = selected.get(level);
+            for (int corner = 0; corner < 6; corner++) {
+                // Kit corner k lies at board corner k + steps.
+                int mask = junctions[level * 6 + (corner + steps) % 6], local = kit.symmetric() ? 0 : corner;
+                Piece both = mask == 0 ? null : byRole.getOrDefault(role, Map.of()).get((long) (1 << local | 1 << (local + 1) % 6) << 6);
+                if (both == null) { continue; }
+                int turn = kit.symmetric() ? corner : 0;
+                for (var junction : KitOutline.Junction.values()) {
+                    String node = both.node() + "-junction-" + junction.ordinal();
+                    if ((mask & bit(junction)) == 0 || !ids.contains(node)) { continue; }
+                    result.add(new Placement(node, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
+                          turn + steps), node + "@" + turn + "/" + role + "-at-" + level + "/"));
+                }
+            }
+        }
     }
 
     private static final float[] COS = { 1, .5f, -.5f, -1, -.5f, .5f };

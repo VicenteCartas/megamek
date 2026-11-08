@@ -31,7 +31,7 @@ final class BoardFlow {
             List<BoardScene.Tile> adjacent = new ArrayList<>();
             for (int direction = 0; direction < 6; direction++) {
                 BoardScene.Tile neighbor = scene.tile(tile.coords().translated(direction));
-                if (neighbor != null && !neighbor.frozen() && tile.liquid().connects(neighbor.liquid())) {
+                if (neighbor != null && !neighbor.frozen() && tile.joins(neighbor, direction)) {
                     adjacent.add(neighbor);
                 }
             }

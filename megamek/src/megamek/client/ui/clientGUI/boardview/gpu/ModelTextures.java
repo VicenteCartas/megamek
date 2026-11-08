@@ -62,17 +62,23 @@ final class ModelTextures {
             return image == null ? null : GpuAssets.joined(roles.computeIfAbsent(usage + ":" + key,
                   ignored -> CompletableFuture.completedFuture(role(image, key, usage, textures))));
         };
-        // The pixels of the images not cached yet decode together on the common pool. A texture takes its own at its
-        // upload; a managed texture's next one (a context restore) decodes them again.
+        // The pixels of the images not cached yet decode together on the common pool, a colour image's mip levels with
+        // them (GpuColorTexture#cutoutLevels: averaged by alpha where it has transparent texels, so a distant leaf keeps
+        // its colour instead of taking the filler's around it). A texture takes its own at its upload; a managed texture's
+        // next one (a context restore) decodes them again.
         Map<String, CompletableFuture<Pixmap>> ahead = new HashMap<>();
+        Map<String, CompletableFuture<GpuColorTexture.Cutout>> aheadColours = new HashMap<>();
         BiFunction<String, Integer, Texture> load = (key, usage) -> {
             var read = role.apply(key, usage);
             if (read == null) { return external.apply(key, color(usage)); }
             return cache.computeIfAbsent(read.key(), ignored -> {
-                Texture texture = GpuColorTexture.create(() -> {
+                Texture texture = read.color() ? GpuColorTexture.cutout(() -> {
+                    var started = aheadColours.remove(read.key());
+                    return started != null ? GpuAssets.joined(started) : GpuColorTexture.cutoutLevels(read.pixels().get());
+                }) : GpuColorTexture.create(() -> {
                     var started = ahead.remove(read.key());
                     return started != null ? GpuAssets.joined(started) : read.pixels().get();
-                }, true, read.color());
+                }, true, false);
                 texture.setFilter(filter(read.image().minFilter()), filter(read.image().magFilter()));
                 texture.setWrap(wrap(read.image().wrapS()), wrap(read.image().wrapT()));
                 return texture;
@@ -82,8 +88,11 @@ final class ModelTextures {
         try {
             for (var read : reads) {
                 var image = role.apply(read.getKey(), read.getValue());
-                if (image != null && !cache.containsKey(image.key()) && !ahead.containsKey(image.key())) {
-                    ahead.put(image.key(), GpuAssets.pooled(image.pixels()));
+                if (image == null || cache.containsKey(image.key())) { continue; }
+                if (image.color()) {
+                    aheadColours.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(() -> GpuColorTexture.cutoutLevels(image.pixels().get())));
+                } else {
+                    ahead.computeIfAbsent(image.key(), ignored -> GpuAssets.pooled(image.pixels()));
                 }
             }
             reads.forEach(read -> load.apply(read.getKey(), read.getValue()));
@@ -91,6 +100,8 @@ final class ModelTextures {
             // Pixels a failure left untaken, before or during a texture's construction.
             ahead.values().forEach(pixels -> pixels.thenAccept(Pixmap::dispose));
             ahead.clear();
+            aheadColours.values().forEach(levels -> levels.thenAccept(untaken -> untaken.image().dispose()));
+            aheadColours.clear();
         }
         Model model = new Model(data, key -> load.apply(key, usages.getOrDefault(key, ModelTexture.USAGE_UNKNOWN)));
         // glTF permits one source image in both a color and a data role. Each role needs its own GPU storage.
@@ -118,10 +129,10 @@ final class ModelTextures {
                 if (glb.buildingPaint.contains(material.id)) {
                     material.set(new GpuBuildingPaint(com.badlogic.gdx.graphics.Color.WHITE));
                 }
-                if (glb.emissionOff.contains(material.id)) {
-                    material.set(new GpuModelLight(0, 0, 1));
-                } else if (glb.nightEmission.contains(material.id)) {
-                    material.set(new GpuModelLight(1, 0, 1, true));
+                switch (glb.emissions.getOrDefault(material.id, RigidGlb.Emission.ALWAYS)) {
+                    case OFF -> material.set(new GpuModelLight(0, 0, 1));
+                    case NIGHT -> material.set(new GpuModelLight(1, 0, 1, true));
+                    case ALWAYS -> { }
                 }
             });
             glb.surfaces.forEach((id, surface) -> {
@@ -129,7 +140,7 @@ final class ModelTextures {
                 var relief = surface.relief();
                 material.set(new GpuModelMaterial(surface.roughness(), surface.metallic(), surface.scatter(),
                       surface.map() == null ? null : load.apply(surface.map(), GpuMaterialMaps.METALLIC_ROUGHNESS_USAGE),
-                      surface.tint(), surface.glow(), surface.board(), relief == null ? new float[4]
+                      surface.tint(), surface.glow(), surface.board() != null, relief == null ? new float[4]
                             : new float[] { relief.depthU(), relief.depthV(), relief.minimumLayers(), relief.maximumLayers() },
                       glb.paintMasks.contains(id), glb.boardUVs.getOrDefault(id, 0f)));
                 // The heightmap is the material's bump texture (GpuModelMaterial).
@@ -140,6 +151,11 @@ final class ModelTextures {
             glb.alphaTests.forEach((id, cutoff) -> model.getMaterial(id).set(
                   new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
                   new FloatAttribute(FloatAttribute.AlphaTest, cutoff)));
+            glb.fades.forEach(id -> {
+                var material = model.getMaterial(id);
+                var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                if (surface != null) { material.set(surface.fading()); }
+            });
             // Godot's alpha blending: the colour map's alpha is the opacity; nothing behind is hidden by depth. Its
             // premultiplied mode fades only the diffuse share (model.frag), so glass keeps its whole reflection.
             glb.blends.forEach((id, mode) -> {

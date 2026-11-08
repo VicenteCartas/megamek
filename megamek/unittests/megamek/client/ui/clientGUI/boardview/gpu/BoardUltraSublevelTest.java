@@ -73,7 +73,7 @@ class BoardUltraSublevelTest {
 
     @Test
     void pitRimsUseForcedCliffsWithoutExtendingATalusApronIntoTheOpening() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             for (int drop : new int[] { 0, 1, 2 }) {
                 BoardScene pit = scene(at -> new Hex(at.equals(PIT) ? -drop : 0,
                       at.equals(PIT) ? "ultra_sublevel:0" : "", "fungus"));
@@ -192,7 +192,7 @@ class BoardUltraSublevelTest {
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void mixedHeightPitRimsStayClosedAtEveryDetail(boolean transitions) {
-        BoardSculptTest.withTransitions(transitions, () -> {
+        BoardScenes.withTransitions(transitions, () -> {
             BoardScene scene = scene(at -> new Hex(at.equals(PIT) ? -2
                   : at.distance(PIT) == 1 ? -(PIT.direction(at) % 3) : 0,
                   at.equals(PIT) ? "ultra_sublevel:0" : "", "fungus"));
@@ -214,7 +214,7 @@ class BoardUltraSublevelTest {
                         }
                     }
                 }
-                BoardCliffSeamTest.assertClosed(faces, floor, "Pit among different rim levels " + lod);
+                BoardScenes.assertClosed(faces, floor, "Pit among different rim levels " + lod);
             }
         });
     }

@@ -85,7 +85,7 @@ final class BoardRoadGrade {
         this.eased = eased;
         cx = BoardGeometry.centerX(tile.coords());
         cy = BoardGeometry.centerY(tile.coords());
-        level = tile.elevation() * BoardGeometry.level();
+        level = ground(tile) * BoardGeometry.level();
         for (int d = 0; d < 6; d++) {
             edges[d] = (arms & 1 << d) == 0 ? level
                   : edgeLevel(tile, scene.neighbor(tile, d), d) * BoardGeometry.level();
@@ -117,7 +117,7 @@ final class BoardRoadGrade {
                 // A natural road ramping down onto an apron stays natural, cut into its own ground: the apron casts its
                 // own half of the ramp. One ramping up to an apron stands on a cast base.
                 boolean across = (next.surface() == BoardScene.Surface.CONCRETE) != concrete
-                      && (concrete || !apron(tile, next, d) || next.elevation() > tile.elevation());
+                      && (concrete || !apron(tile, next, d) || ground(next) > ground(tile));
                 intoApron |= !concrete && !across && apron(tile, next, d);
                 crossing |= across;
                 natural |= !across && !concrete;
@@ -141,7 +141,7 @@ final class BoardRoadGrade {
             // A ramp ending at a level crossing eases fully into it. Otherwise both hexes take the steepest slope of
             // one ease over both their ramps, from their estimates of each other's ramp length.
             int back = (d + 3) % 6;
-            float across = (edgeLevel(next, tile, back) - next.elevation()) * BoardGeometry.level();
+            float across = (edgeLevel(next, tile, back) - ground(next)) * BoardGeometry.level();
             if (across == 0) { continue; }
             float runs = (1 - starts[d]) * inradius(d) + (1 - rampStart(scene, next, back)) * inradius(back);
             slopes[d] = 1.5f * (rise - across) / (runs * BoardGeometry.hexScale());
@@ -163,7 +163,12 @@ final class BoardRoadGrade {
         if (BoardRoad.climbingTurn(exits, ramps(scene, tile))) { return 0; }
         // Measured from the centre, as a share of the centre-to-edge run (half the hex's width).
         return next != null && partners(tile, next, direction) && junction(tile) == junction(next)
-              ? 1 - 2 * SHARED_RAMP : 0;
+              && tile.liquid().present() == next.liquid().present() ? 1 - 2 * SHARED_RAMP : 0;
+    }
+
+    /** A hex's ground in levels, which a road on it lies at: under a liquid its bed, as BoardGeometry#groundZ draws it. */
+    static float ground(BoardScene.Tile tile) {
+        return tile.liquid().present() ? BoardGeometry.groundZ(tile) / BoardGeometry.level() : tile.elevation();
     }
 
     /** Distance in tile pixels from the hex centre to the edge in this direction. */
@@ -199,7 +204,8 @@ final class BoardRoadGrade {
      * {@code eased} selects Enhanced's ramps.
      */
     static BoardRoadGrade of(BoardScene scene, BoardScene.Tile tile, boolean eased) {
-        if (tile == null) { return null; }
+        // Classic's water column shows its liquid only.
+        if (tile == null || !eased && tile.liquid().present()) { return null; }
         var grades = Cache.of(scene).grades;
         long key = (long) tile.coords().getX() << 33 | (long) tile.coords().getY() << 1 | (eased ? 1 : 0);
         Optional<BoardRoadGrade> known = grades.get(key);
@@ -246,7 +252,7 @@ final class BoardRoadGrade {
 
     /** The directions a hex's carriageway or apron runs out by; 0 where it reserves no ground. */
     private static int arms(BoardScene scene, BoardScene.Tile tile) {
-        if (tile == null || tile.liquid().present() || tile.ultraSublevel() || tile.backdrop().present()) { return 0; }
+        if (tile == null || !BoardRoad.groundShown(tile) || tile.ultraSublevel() || tile.backdrop().present()) { return 0; }
         if (BoardRoad.carriageway(tile)) { return tile.wayExits() & 63; }
         int arms = 0;
         for (int d = 0; d < 6; d++) {
@@ -256,11 +262,12 @@ final class BoardRoadGrade {
         return arms;
     }
 
-    /** The edges a hex's carriageway ramps to: it meets them away from the hex's level. */
+    /** The edges a hex's carriageway ramps to: it meets them away from the hex's level; a ford's dip is no ramp. */
     static int ramps(BoardScene scene, BoardScene.Tile tile) {
         int arms = arms(scene, tile), result = 0;
         for (int d = 0; d < 6; d++) {
-            if ((arms & 1 << d) != 0 && edgeLevel(tile, scene.neighbor(tile, d), d) != tile.elevation()) {
+            var next = scene.neighbor(tile, d);
+            if ((arms & 1 << d) != 0 && next != null && next.floor() != tile.floor() && edgeLevel(tile, next, d) != ground(tile)) {
                 result |= 1 << d;
             }
         }
@@ -271,35 +278,33 @@ final class BoardRoadGrade {
      * The level at which a carriageway meets the edge in this direction. A junction keeps its crossing level, so the
      * road beyond it carries the whole ramp; two roads alike share it, meeting halfway. A road ending at unpaved ground
      * carries the whole ramp to that ground's level, which keeps its own shape. A bridge deck keeps its own approach
-     * height.
+     * height. Dry ground keeps its level beside water, which would flood a ramp cut into it: the wet hex carries the ramp.
      */
     static float edgeLevel(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
-        if (next == null || tile.ultraSublevel() || next.ultraSublevel() || tile.liquid().present()) {
-            return tile.elevation();
-        }
+        if (next == null || tile.ultraSublevel() || next.ultraSublevel()) { return ground(tile); }
         if (BoardSurface.connectingBridge(tile, next, direction) != null) {
             return BoardSurface.roadEdgeElevation(tile, next, direction);
         }
-        if (!graded(tile, next, direction)) { return tile.elevation(); }
-        if (!partners(tile, next, direction)) { return next.elevation(); }
+        if (!graded(tile, next, direction)) { return ground(tile); }
+        if (tile.liquid().present() != next.liquid().present()) { return ground(tile.liquid().present() ? next : tile); }
+        if (!partners(tile, next, direction)) { return ground(next); }
         boolean junction = junction(tile), across = junction(next);
-        return junction == across ? (tile.elevation() + next.elevation()) / 2f
-              : junction ? tile.elevation() : next.elevation();
+        return junction == across ? (ground(tile) + ground(next)) / 2f : ground(junction ? tile : next);
     }
 
     private static boolean junction(BoardScene.Tile tile) { return Integer.bitCount(tile.wayExits() & 63) >= 3; }
 
     /**
      * Graded to each other across this edge: two carriageways sharing it (see {@link #partners}), or a road exit onto
-     * dry ground within two levels.
+     * ground within two levels.
      */
     static boolean graded(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
-        if (next == null || next.liquid().present() || next.ultraSublevel() || next.backdrop().present()
-              || tile.liquid().present()) { return false; }
+        if (next == null || next.ultraSublevel() || next.backdrop().present() || !BoardRoad.groundShown(next)
+              || !BoardRoad.groundShown(tile)) { return false; }
         // A road onto this hex's bridge deck leaves the ground beneath the deck as it is.
         if (BoardSurface.connectingBridge(next, tile, (direction + 3) % 6) != null) { return false; }
         return partners(tile, next, direction) || (tile.wayExits() & 1 << direction) != 0
-              && Math.abs(tile.elevation() - next.elevation()) <= 2;
+              && Math.abs(tile.floor() - next.floor()) <= 2;
     }
 
     /** Both hexes reserve ground at this edge: reciprocal carriageways, or a road ending at a roadless concrete apron. */
@@ -311,9 +316,9 @@ final class BoardRoadGrade {
 
     /** A road ending at a roadless concrete hex within two levels ramps into that apron. */
     static boolean apron(BoardScene.Tile road, BoardScene.Tile apron, int direction) {
-        return (road.wayExits() & 1 << direction) != 0 && !road.liquid().present()
+        return (road.wayExits() & 1 << direction) != 0 && BoardRoad.groundShown(road)
               && apron.surface() == BoardScene.Surface.CONCRETE && !BoardRoad.carriageway(apron)
-              && !apron.liquid().present() && Math.abs(road.elevation() - apron.elevation()) <= 2
+              && !apron.liquid().present() && Math.abs(road.floor() - apron.floor()) <= 2
               && BoardSurface.connectingBridge(road, apron, direction) == null;
     }
 

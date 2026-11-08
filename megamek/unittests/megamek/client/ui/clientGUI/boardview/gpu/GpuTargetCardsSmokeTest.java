@@ -21,7 +21,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -45,17 +44,15 @@ import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTheme;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * G9: the target cards over the board-space harness in the states of the hud-v3 shots 05, 06, 07 (Tactical View) and
@@ -64,6 +61,7 @@ import org.junit.jupiter.api.Test;
  * services, a focused grip's Alt+Up/Down, and the reordering over a real FiringDisplay, where the letters stay. The
  * mock orders are display values read off the shots, as E3b publishes them.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuTargetCardsSmokeTest {
     private static final int TIMBER_WOLF = 6;
@@ -86,8 +84,6 @@ class GpuTargetCardsSmokeTest {
     private static final int[][] PANELS_15 = { { 16, 16, 250, 80 }, { 16, 108, 250, 356 }, { 16, 478, 250, 226 },
           { 930, 18, 334, 56 }, { 994, 90, 270, 178 }, { 994, 282, 270, 368 }, { 712, 90, 270, 144 },
           { 390, 532, 500, 158 }, { 1112, 662, 152, 36 } };
-
-    private static File originalDataDir;
 
     /**
      * The cards with the context menu, and the nameplates and board labels below them, stacked as GpuHud's labels
@@ -115,7 +111,7 @@ class GpuTargetCardsSmokeTest {
         Layer update(GpuHudTestStage hud, GpuBoardSource.Frame frame, GpuHud.HudView view, List<Rectangle> panels) {
             state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
             frame.status().units().stream().map(GpuBattleStatus.UnitStatus::icon).forEach(hud.sprites::add);
-            GpuHud.Inputs inputs = new GpuHud.Inputs(frame, view, null, GpuHudInputTest.preferences(),
+            GpuHud.Inputs inputs = new GpuHud.Inputs(frame, view, null, GpuHudFixtures.preferences(),
                   GpuHud.Metrics.of(hud.width(), hud.height()), panels);
             menu.update(inputs);
             plates.update(inputs);
@@ -139,17 +135,6 @@ class GpuTargetCardsSmokeTest {
             }
             labels.dispose();
         }
-    }
-
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
     }
 
     @Test
@@ -427,12 +412,12 @@ class GpuTargetCardsSmokeTest {
      */
     @Test
     void reorderingThroughTheFiringDisplayKeepsTheLetters() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
-            Entity crab = GpuFireOrdersTest.enemy(firing, "Crab CRB-20.mtf", 44, GpuFireOrdersTest.NORTH);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
             int archer = firing.ahead.getId();
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             GpuHudTestStage.run(hud -> {
                 GpuBoardSource source = firing.board.source;
                 Layer layer = new Layer(hud, source, null);
@@ -443,7 +428,7 @@ class GpuTargetCardsSmokeTest {
                 source.fire().assign(left, TargetKey.unit(crab.getId()));
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
-                      GpuFireOrdersTest.queue(firing));
+                      GpuFiringFixture.queue(firing));
                 assertEquals(List.of("A", "ARCHER ARC-2R"), rows(layer.card(archer)).subList(0, 2));
                 assertEquals(List.of("B", "CRAB CRB-20"), rows(layer.card(crab.getId())).subList(0, 2));
 
@@ -453,7 +438,7 @@ class GpuTargetCardsSmokeTest {
                 UiTestStage.settle(hud.stage);
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("Medium Laser RA@42", "AC/20 RT@42", "Medium Laser LA@44"),
-                      GpuFireOrdersTest.queue(firing));
+                      GpuFiringFixture.queue(firing));
                 Table card = layer.card(archer);
                 assertEquals("MEDIUM LASER", rows(card.findActor("card-row-1")).getFirst());
                 assertSame(card.findActor("card-grip-" + right), hud.stage.getKeyboardFocus());
@@ -464,7 +449,7 @@ class GpuTargetCardsSmokeTest {
                 UiTestStage.settle(hud.stage);
                 show(hud, layer, GpuWeaponsPanelSmokeTest.settled(firing), view);
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
-                      GpuFireOrdersTest.queue(firing));
+                      GpuFiringFixture.queue(firing));
                 assertEquals(List.of("A", "ARCHER ARC-2R"), rows(layer.card(archer)).subList(0, 2));
                 hud.capture("cards-firing-display").dispose();
                 layer.dispose();
@@ -640,7 +625,7 @@ class GpuTargetCardsSmokeTest {
     }
 
     private static GpuBoardSource.Frame firing(GpuFireOrders.Snapshot fire) {
-        return GpuHudInputTest.frame(GpuBoardOverlaySmokeTest.status(GamePhase.FIRING, ATLAS), panels(fire));
+        return GpuHudFixtures.frame(GpuBoardOverlaySmokeTest.status(GamePhase.FIRING, ATLAS), panels(fire));
     }
 
     private static GpuBoardSource.Frame firing(BoardScene scene, GpuBattleStatus.Snapshot status,
@@ -650,7 +635,7 @@ class GpuTargetCardsSmokeTest {
     }
 
     private static GpuHudData panels(GpuFireOrders.Snapshot fire) {
-        return GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY,
+        return GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire, GpuPhysicalOptions.Snapshot.EMPTY,
               GpuUnitRecord.Snapshot.EMPTY);
     }
 

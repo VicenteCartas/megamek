@@ -28,15 +28,15 @@ class GpuPlaybackCameraTest {
 
     @Test
     void returnsToTheOriginalViewAfterTheEntireMoveAndFiringQueueIncludingAPausedHold() throws Exception {
-        var selected = UnitPlaybackTest.unit(1, 0);
+        var selected = UnitPlaybackFixture.unit(1, 0);
         var move = movement(2, 7, 9);
-        var target = UnitPlaybackTest.unit(3, 11);
-        var shot = UnitPlaybackTest.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
+        var target = UnitPlaybackFixture.unit(3, 11);
+        var shot = UnitPlaybackFixture.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
         for (boolean isometric : List.of(false, true)) {
             var view = view(isometric);
             try {
                 assertTrue(view.boardCamera.returnAfterPlayback(), "Camera return starts enabled");
-                view.updateCameraFocus(scene(selected.id(), selected, UnitPlaybackTest.unit(2, 7), target), INITIAL_CENTER);
+                view.updateCameraFocus(scene(selected.id(), selected, UnitPlaybackFixture.unit(2, 7), target), INITIAL_CENTER);
                 view.boardCamera.camera.zoom = .25f;
                 view.boardCamera.center(BoardGeometry.center(selected.location().coords(), 0));
                 var origin = view.boardCamera.focus.cpy();
@@ -152,7 +152,7 @@ class GpuPlaybackCameraTest {
 
     @Test
     void initialFitIgnoresOldLegacy2DCenterRequestsButNewRequestsStillWork() {
-        var unit = UnitPlaybackTest.unit(1, 0);
+        var unit = UnitPlaybackFixture.unit(1, 0);
         var view = view(true);
         try {
             BoardScene scene = scene(unit.id(), unit);
@@ -176,8 +176,8 @@ class GpuPlaybackCameraTest {
 
     @Test
     void unitNavigationUsesTheSameTransitionBeforeAndDuringAnActingTurnWithoutRepeatClickSnaps() {
-        var first = UnitPlaybackTest.unit(1, 0);
-        var next = UnitPlaybackTest.unit(3, 11);
+        var first = UnitPlaybackFixture.unit(1, 0);
+        var next = UnitPlaybackFixture.unit(3, 11);
         for (boolean actingTurn : List.of(false, true)) {
             var view = view(true);
             try {
@@ -215,7 +215,7 @@ class GpuPlaybackCameraTest {
 
     @Test
     void unitIdentityDeterminesFramingInAStackedHexAndMissingUnitsAreNotInferredFromCoordinates() {
-        var ground = UnitPlaybackTest.unit(1, 2);
+        var ground = UnitPlaybackFixture.unit(1, 2);
         var raised = new BoardScene.Unit(2, -1, "Raised unit", new BoardScene.Waypoint(ground.location().coords(), 8, 0),
               null, false, null, 5, true);
         var view = view(true);
@@ -248,7 +248,7 @@ class GpuPlaybackCameraTest {
         var view = view(true);
         try {
             var playback = playback(view);
-            view.updateCameraFocus(scene(-1, UnitPlaybackTest.unit(1, 0), other), INITIAL_CENTER);
+            view.updateCameraFocus(scene(-1, UnitPlaybackFixture.unit(1, 0), other), INITIAL_CENTER);
             var latest = scene(-1, move.unit(), other);
             playback.accept(List.of(move), latest, ignored -> false);
             playback.advance(0, UnitMotion.Speed.NORMAL, state -> view.preparePlaybackCamera(state, latest));
@@ -269,8 +269,8 @@ class GpuPlaybackCameraTest {
 
     @Test
     void instantSelectionSnapsAndSwitchingSpeedFinishesAnExistingTransition() throws Exception {
-        var first = UnitPlaybackTest.unit(1, 0);
-        var next = UnitPlaybackTest.unit(3, 11);
+        var first = UnitPlaybackFixture.unit(1, 0);
+        var next = UnitPlaybackFixture.unit(3, 11);
         for (boolean alreadyAnimating : List.of(false, true)) {
             var view = view(false);
             try {
@@ -297,10 +297,10 @@ class GpuPlaybackCameraTest {
 
     @Test
     void instantQueueUsesOnlyTheFinalActionOrNewSelection() throws Exception {
-        var selected = UnitPlaybackTest.unit(1, 0);
+        var selected = UnitPlaybackFixture.unit(1, 0);
         var move = movement(2, 4, 7);
-        var target = UnitPlaybackTest.unit(3, 11);
-        var shot = UnitPlaybackTest.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
+        var target = UnitPlaybackFixture.unit(3, 11);
+        var shot = UnitPlaybackFixture.attack(move.unit(), target, ResolvedAttack.Kind.SHOT, true);
         for (boolean selectTarget : List.of(false, true)) {
             var view = view(true);
             view.boardCamera.setReturnAfterPlayback(false);
@@ -351,7 +351,7 @@ class GpuPlaybackCameraTest {
         var view = view(false);
         view.boardCamera.setReturnAfterPlayback(false);
         try {
-            var initial = scene(1, UnitPlaybackTest.unit(1, 0), UnitPlaybackTest.unit(2, 7));
+            var initial = scene(1, UnitPlaybackFixture.unit(1, 0), UnitPlaybackFixture.unit(2, 7));
             view.updateCameraFocus(initial, INITIAL_CENTER);
             var latest = scene(1, first.unit(), last.unit());
             var playback = playback(view);
@@ -387,7 +387,7 @@ class GpuPlaybackCameraTest {
         var view = view(false);
         try {
             var playback = playback(view);
-            view.updateCameraFocus(scene(1, UnitPlaybackTest.unit(1, 0)), INITIAL_CENTER);
+            view.updateCameraFocus(scene(1, UnitPlaybackFixture.unit(1, 0)), INITIAL_CENTER);
             view.boardCamera.pan(-30, 10);
             var before = view.boardCamera.focus.cpy();
             var latest = scene(1, move.unit());
@@ -412,7 +412,7 @@ class GpuPlaybackCameraTest {
     void framesEachQueuedRouteBeforeTravelAndKeepsTheCameraStillDuringTravelAndHolds() throws Exception {
         var first = movement(1, 0, 2);
         var enemy = movement(2, 7, 9);
-        var next = UnitPlaybackTest.unit(3, 11);
+        var next = UnitPlaybackFixture.unit(3, 11);
         for (boolean isometric : List.of(false, true)) {
             for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE,
                   UnitMotion.Speed.QUADRUPLE)) {
@@ -420,7 +420,7 @@ class GpuPlaybackCameraTest {
                 view.boardCamera.setReturnAfterPlayback(false);
                 try {
                     var playback = playback(view);
-                    var initial = scene(1, UnitPlaybackTest.unit(1, 0), UnitPlaybackTest.unit(2, 7), next);
+                    var initial = scene(1, UnitPlaybackFixture.unit(1, 0), UnitPlaybackFixture.unit(2, 7), next);
                     view.updateCameraFocus(initial, INITIAL_CENTER);
                     view.boardCamera.center(BoardGeometry.center(first.path().getFirst().coords(), 0));
                     var latest = scene(next.id(), first.unit(), enemy.unit(), next);
@@ -477,10 +477,10 @@ class GpuPlaybackCameraTest {
 
     @Test
     void firingKeepsBothParticipantsInFrameThroughAPausedHoldThenUsesTheLatestSelection() throws Exception {
-        var attacker = UnitPlaybackTest.unit(2, 7);
-        var target = UnitPlaybackTest.unit(1, 0);
-        var next = UnitPlaybackTest.unit(3, 11);
-        var shot = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var attacker = UnitPlaybackFixture.unit(2, 7);
+        var target = UnitPlaybackFixture.unit(1, 0);
+        var next = UnitPlaybackFixture.unit(3, 11);
+        var shot = UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
         for (boolean isometric : List.of(false, true)) {
             var view = view(isometric);
             view.boardCamera.setReturnAfterPlayback(false);
@@ -523,10 +523,10 @@ class GpuPlaybackCameraTest {
 
     @Test
     void historicalAttackReviewKeepsItsFrameAfterCompletionUntilALaterLocateRequest() throws Exception {
-        var attacker = UnitPlaybackTest.unit(2, 2);
-        var target = UnitPlaybackTest.unit(1, 0);
-        var next = UnitPlaybackTest.unit(3, 11);
-        var shot = UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var attacker = UnitPlaybackFixture.unit(2, 2);
+        var target = UnitPlaybackFixture.unit(1, 0);
+        var next = UnitPlaybackFixture.unit(3, 11);
+        var shot = UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
         for (boolean isometric : List.of(false, true)) {
             var view = view(isometric);
             try {
@@ -582,7 +582,7 @@ class GpuPlaybackCameraTest {
 
     @Test
     void skippingMovementDoesNotStartAnotherCameraMoveWhenSelectionHasNotChanged() throws Exception {
-        var selected = UnitPlaybackTest.unit(1, 0);
+        var selected = UnitPlaybackFixture.unit(1, 0);
         var enemy = movement(2, 7, 9);
         for (Consumer<UnitPlayback> skip : List.<Consumer<UnitPlayback>>of(
               playback -> playback.advance(0, UnitMotion.Speed.INSTANT), UnitPlayback::finish)) {
@@ -609,8 +609,8 @@ class GpuPlaybackCameraTest {
 
     @Test
     void idleSelectionChangesAnimateOnceAndExplicitCenterRequestsStillTakeControl() {
-        var first = UnitPlaybackTest.unit(1, 0);
-        var next = UnitPlaybackTest.unit(3, 11);
+        var first = UnitPlaybackFixture.unit(1, 0);
+        var next = UnitPlaybackFixture.unit(3, 11);
         var view = view(false);
         try {
             view.updateCameraFocus(scene(first.id(), first, next), INITIAL_CENTER);
@@ -646,9 +646,9 @@ class GpuPlaybackCameraTest {
     /** Off-board artillery taking its turn in the Targeting phase: the camera stays on the map the player aims at. */
     @Test
     void selectingAUnitOffTheMapLeavesTheCameraOnTheBoard() {
-        var first = UnitPlaybackTest.unit(1, 0);
-        var onMap = UnitPlaybackTest.unit(3, 11);
-        var offBoard = UnitPlaybackTest.unit(4, -18);
+        var first = UnitPlaybackFixture.unit(1, 0);
+        var onMap = UnitPlaybackFixture.unit(3, 11);
+        var offBoard = UnitPlaybackFixture.unit(4, -18);
         var view = view(false);
         try {
             view.updateCameraFocus(scene(first.id(), first, onMap, offBoard), INITIAL_CENTER);
@@ -675,7 +675,7 @@ class GpuPlaybackCameraTest {
 
     @Test
     void freeFlightIgnoresSelectionAndPlaybackFramingWithoutDelayingTheAnimation() throws Exception {
-        var first = UnitPlaybackTest.unit(1, 0);
+        var first = UnitPlaybackFixture.unit(1, 0);
         var move = movement(2, 7, 9);
         var view = view(true);
         try {
@@ -695,7 +695,7 @@ class GpuPlaybackCameraTest {
             view.updateCameraFocus(latest, request);
             view.boardCamera.frameSelection(move.unit(), 800);
             view.boardCamera.frameAttacks(List.of(new UnitAttack(
-                  UnitPlaybackTest.attack(first, move.unit(), ResolvedAttack.Kind.SHOT, true))), 800);
+                  UnitPlaybackFixture.attack(first, move.unit(), ResolvedAttack.Kind.SHOT, true))), 800);
             view.boardCamera.advance(2);
             assertEquals(eye, view.boardCamera.camera.position);
             assertFalse(view.boardCamera.isFraming());
@@ -725,8 +725,8 @@ class GpuPlaybackCameraTest {
     }
 
     private static BoardScene.Movement movement(int id, int from, int to) {
-        var start = UnitPlaybackTest.unit(id, from);
-        var end = UnitPlaybackTest.unit(id, to);
+        var start = UnitPlaybackFixture.unit(id, from);
+        var end = UnitPlaybackFixture.unit(id, to);
         return new BoardScene.Movement(id, 0, List.of(start.location(), end.location()), EntityMovementType.MOVE_WALK, 0, 2, end);
     }
 

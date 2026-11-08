@@ -43,10 +43,10 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
 
     // Broad noise, slow enough never to shear an advected pattern: G staggers the flow's restarts, B gathers
     // rapids foam into clusters a hex or two across, R varies the deep water's tone and the surf along a bank.
-    vec4 broad = texture(u_rainNoise, position * 0.008 + 0.29);
+    vec4 broad = texture(u_surfaceNoise, rainNoiseAt(position * 0.008 + 0.29));
     // Gusts roll downwind in patches, so the wind never roughens a lake evenly: cat's paws on the chop. The drift
     // is integrated as the wind turns, so the patches never jump.
-    float gust = texture(u_rainNoise, position * 0.035 - u_waterDrift * 0.006).r;
+    float gust = texture(u_surfaceNoise, rainNoiseAt(position * 0.035 - u_waterDrift * 0.006)).r;
 
     // Foam grain and, in rapids, fine chop. A current advects them in two phases, each restarting only while
     // its weight is zero, however weak the current, so no restart ever shows; in still water both phases read
@@ -69,8 +69,8 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     // Fine facets gently oscillate instead of transporting the lake along an arbitrary fixed bearing. River
     // advection still comes from its current; the oscillation has bounded displacement and one shared clock.
     vec2 driftB = vec2(sin(u_rainTime * .47), cos(u_rainTime * .31)) * .025;
-    vec4 small = ((texture(u_waterDetail, crossing * advectedA * 3.8 + driftB) - 0.5) * weightA
-          + (texture(u_waterDetail, crossing * advectedB * 3.8 + driftB) - 0.5) * weightB) * preserve;
+    vec4 small = ((texture(u_surfaceNoise, vec3(crossing * advectedA * 3.8 + driftB, WATER_DETAIL)) - 0.5) * weightA
+          + (texture(u_surfaceNoise, vec3(crossing * advectedB * 3.8 + driftB, WATER_DETAIL)) - 0.5) * weightB) * preserve;
     small.rg = small.rg * crossing;
     // Rapids churn in larger patches than ordinary current ripples, carried by the current alone. Still, agitated
     // water (a lake's pouring lip) keeps a slow churn in the same restarting phases, whose patterns never overlap.
@@ -84,8 +84,8 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     vec2 rapidDxB = dFdx(rapidB), rapidDyB = dFdy(rapidB);
     vec4 rapidDetail = vec4(0.0);
     if (agitation > 0.0) {
-        rapidDetail = ((textureGrad(u_waterDetail, rapidA, rapidDxA, rapidDyA) - 0.5) * weightA
-              + (textureGrad(u_waterDetail, rapidB, rapidDxB, rapidDyB) - 0.5) * weightB)
+        rapidDetail = ((textureGrad(u_surfaceNoise, vec3(rapidA, WATER_DETAIL), rapidDxA, rapidDyA) - 0.5) * weightA
+              + (textureGrad(u_surfaceNoise, vec3(rapidB, WATER_DETAIL), rapidDxB, rapidDyB) - 0.5) * weightB)
               * liquidFlowVariance(flow);
     }
     rapidDetail.rg = rapidDetail.rg * crossing;
@@ -138,7 +138,7 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
         fineUV = u_waterOceanScale.z;
         noise = small.b;
     } else {
-        vec4 large = texture(u_waterDetail, crossing * position * 1.65 + vec2(u_rainTime * 0.018, 0.0)) - 0.5;
+        vec4 large = texture(u_surfaceNoise, vec3(crossing * position * 1.65 + vec2(u_rainTime * 0.018, 0.0), WATER_DETAIL)) - 0.5;
         slope = large.rg * crossing * 0.5 * lit.x * smoothstep(0.0, .25, u_waterWind.z);
         broadSlope = slope;
         noise = large.b * 0.6 + small.b * 0.4;
@@ -210,7 +210,7 @@ vec4 waterPool(bool falling, vec3 geometric, vec4 habitat, vec4 mixture, vec3 ti
     // Whitecaps where the simulated crests fold over; the simulation drags their foam out into downwind streaks.
     // Dense where the crest folds, fraying into lace as the foam thins. Seen from afar the lace averages out, so the
     // threshold widens and thin foam fades instead of hardening into solid patches.
-    float lace = texture(u_waterDetail, crossing * position * 2.3 + 0.53).b;
+    float lace = texture(u_surfaceNoise, vec3(crossing * position * 2.3 + 0.53, WATER_DETAIL)).b;
     float laceEdge = mix(.8, .12, u_rainDetail);
     float whitecap = smoothstep(1.0 - .65 * whitecaps, 1.0 - .65 * whitecaps + laceEdge, mix(grainy, lace, .6))
           * smoothstep(0.0, .35, whitecaps) * mix(.55, 1.0, u_rainDetail);

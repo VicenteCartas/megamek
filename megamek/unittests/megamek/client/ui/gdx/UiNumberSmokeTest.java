@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -71,22 +70,22 @@ class UiNumberSmokeTest {
             Vector2 at = point(ui.stage, number.findActor("editor-scrub-Distance"));
             try {
                 ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
-                assertTrue(Gdx.input.isCursorCatched());
+                assertTrue(UiCursorCapture.active());
                 ui.stage.touchDragged((int) at.x + 4000, (int) at.y, 0);
                 assertEquals(new Change("1000", false), events.getLast());
                 ui.stage.touchDragged((int) at.x - 4000, (int) at.y, 0);
                 assertEquals(new Change("-1000", false), events.getLast());
                 ui.stage.touchUp((int) at.x - 4000, (int) at.y, 0, Input.Buttons.LEFT);
-                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(UiCursorCapture.active());
                 assertEquals(new Change("-1000", true), events.getLast());
                 assertEquals(1, events.stream().filter(Change::finished).count());
 
                 for (Runnable end : new Runnable[] {ui.stage::cancelTouchFocus, number::dismiss, number::remove,
                       number::close}) {
                     ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
-                    assertTrue(Gdx.input.isCursorCatched());
+                    assertTrue(UiCursorCapture.active());
                     end.run();
-                    assertFalse(Gdx.input.isCursorCatched(), "Ending the gesture must restore the cursor");
+                    assertFalse(UiCursorCapture.active(), "Ending the gesture must restore the cursor");
                     assertFalse(number.editing());
                     ui.stage.addActor(number);
                 }
@@ -106,7 +105,7 @@ class UiNumberSmokeTest {
                 int x = (int) caption.x, y = (int) caption.y;
                 // From the caption, half a degree per unit: right and up add, left and down subtract, across the seam.
                 ui.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
-                assertTrue(Gdx.input.isCursorCatched());
+                assertTrue(UiCursorCapture.active());
                 ui.stage.touchDragged(x + 30, y, 0);
                 assertEquals(new Change("-175", false), events.getLast(), "Right adds");
                 ui.stage.touchDragged(x + 30, y - 20, 0);
@@ -116,7 +115,7 @@ class UiNumberSmokeTest {
                 ui.stage.touchUp(x - 30, y + 40, 0, Input.Buttons.LEFT);
                 assertEquals(new Change("135", true), events.getLast());
                 assertEquals(1, events.stream().filter(Change::finished).count());
-                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(UiCursorCapture.active());
                 assertFalse(number.editing());
 
                 // A caption click opens the dial, which a straight drag turns the same way.
@@ -128,12 +127,12 @@ class UiNumberSmokeTest {
                 // Zero points up and values turn clockwise, so 135 degrees lies at -45 from the right.
                 Vector2 grip = dialPoint(ui.stage, dial, -45);
                 ui.stage.touchDown((int) grip.x, (int) grip.y, 0, Input.Buttons.LEFT);
-                assertTrue(Gdx.input.isCursorCatched());
+                assertTrue(UiCursorCapture.active());
                 ui.stage.touchDragged((int) grip.x, (int) grip.y - 50, 0);
                 assertEquals(new Change("160", false), events.getLast(), "Up on the dial adds");
                 ui.stage.touchUp((int) grip.x, (int) grip.y - 50, 0, Input.Buttons.LEFT);
                 assertEquals(new Change("160", true), events.getLast());
-                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(UiCursorCapture.active());
                 assertFalse(number.editing());
 
                 // A click on the dial points it there, as a compass reads: the right is 90, the left -90, the top 0.
@@ -145,7 +144,7 @@ class UiNumberSmokeTest {
                     ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                     ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                     assertEquals(new Change(String.valueOf(aim[1]), true), events.getLast());
-                    assertFalse(Gdx.input.isCursorCatched());
+                    assertFalse(UiCursorCapture.active());
                 }
 
                 TextField field = number.findActor("editor-Z");
@@ -178,7 +177,7 @@ class UiNumberSmokeTest {
                 Vector2 at = point(ui.stage, caption);
                 ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                 ui.stage.touchUp((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
-                assertFalse(Gdx.input.isCursorCatched(), "A caption click must release the cursor too");
+                assertFalse(UiCursorCapture.active(), "A caption click must release the cursor too");
                 assertTrue(number.editing());
                 assertTrue(ui.stage.getRoot().findActor("editor-number-popup").isVisible());
                 assertTrue(events.isEmpty(), "Opening the slider does not edit the value");
@@ -210,7 +209,7 @@ class UiNumberSmokeTest {
                 ui.stage.touchDown((int) at.x, (int) at.y, 0, Input.Buttons.LEFT);
                 ui.stage.touchDragged((int) at.x + 20, (int) at.y, 0);
                 ui.stage.cancelTouchFocus();
-                assertFalse(Gdx.input.isCursorCatched());
+                assertFalse(UiCursorCapture.active());
                 assertEquals(new Change("5", true), events.getLast(), "Focus loss commits the last preview, not cancelled pointer coordinates");
                 assertFalse(number.editing());
                 ui.stage.setKeyboardFocus(field); field.setText("NaN"); ui.stage.setKeyboardFocus(null);

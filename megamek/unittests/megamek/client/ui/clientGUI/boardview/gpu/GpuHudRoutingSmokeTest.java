@@ -4,7 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ENEMY;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.OWN;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -512,7 +512,7 @@ class GpuHudRoutingSmokeTest {
      */
     @Test
     void aRealPhaseDisplaysListPromptIsAnsweredInTheNativeWindow() throws Exception {
-        ClientGUI gui = GpuDialogRoutingTest.routingClient();
+        ClientGUI gui = GpuDialogFixture.routingClient();
         Client client = mock(Client.class);
         GUIPreferences preferences = GUIPreferences.getInstance();
         float originalScale = preferences.getBoardUiScale();
@@ -526,7 +526,7 @@ class GpuHudRoutingSmokeTest {
             GroundObject briefcase = GpuListPromptBridgeTest.groundObject(new Briefcase(), "Briefcase", 1);
             fixture.player.getGroundObjectsToPlace().addAll(List.of(crate, briefcase));
             DeployMinefieldDisplay display = GpuListPromptBridgeTest.placingCargo(gui);
-            GpuDialogRoutingTest.present(gui, fixture.view, fixture.source);
+            GpuDialogFixture.present(gui, fixture.view, fixture.source);
             try {
                 Lwjgl3ApplicationConfiguration configuration = GpuBoardWindow.configuration(false);
                 configuration.setWindowedMode(1920, 1080);
@@ -538,7 +538,7 @@ class GpuHudRoutingSmokeTest {
                             System.out.println("GL renderer " + Gdx.gl.glGetString(GL20.GL_RENDERER));
                             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
                             float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
-                            GpuDialogRoutingTest.onSwing(() -> {
+                            GpuTestSupport.onSwing(() -> {
                                 preferences.setBoardUiScale(preference);
                                 fixture.source.refresh();
                                 return null;
@@ -580,8 +580,8 @@ class GpuHudRoutingSmokeTest {
                     }
                 }, configuration);
             } finally {
-                GpuDialogRoutingTest.dismiss();
-                GpuDialogRoutingTest.onSwing(() -> {
+                GpuDialogFixture.dismiss();
+                GpuTestSupport.onSwing(() -> {
                     display.removeAllListeners();
                     preferences.setBoardUiScale(originalScale);
                     return null;
@@ -615,7 +615,7 @@ class GpuHudRoutingSmokeTest {
                         try {
                             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
                             float preference = .1f / DisplayScale.read(.1f, new GpuDisplayScale().contentScale());
-                            GpuDialogRoutingTest.onSwing(() -> {
+                            GpuTestSupport.onSwing(() -> {
                                 preferences.setBoardUiScale(preference);
                                 fixture.source.setVisibleArea(new Rectangle(0, 0, 16, 17));
                                 fixture.source.refresh();
@@ -664,7 +664,7 @@ class GpuHudRoutingSmokeTest {
                     }
                 }, configuration);
             } finally {
-                GpuDialogRoutingTest.onSwing(() -> {
+                GpuTestSupport.onSwing(() -> {
                     preferences.setBoardUiScale(originalScale);
                     return null;
                 });
@@ -678,7 +678,7 @@ class GpuHudRoutingSmokeTest {
     /** Lets the source capture what the view posted, then draws its frames. */
     private static void settle(GpuBoardFixture fixture, GpuBattleView view) throws Exception {
         for (int pass = 0; pass < 3; pass++) {
-            GpuDialogRoutingTest.onSwing(() -> {
+            GpuTestSupport.onSwing(() -> {
                 fixture.source.refresh();
                 return null;
             });
@@ -717,10 +717,10 @@ class GpuHudRoutingSmokeTest {
                   SCENARIOS.get(0), SCENARIOS.get(4), SCENARIOS.get(10), SCENARIOS.get(13))) {
                 // In the end report no turn accepts the units: nothing is the focus until a click picks one.
                 boolean pending = !scenario.phase().isEndReport();
-                GpuBoardSource.Frame shown = routing.frame(GpuHudInputTest.status(3, scenario.phase(), false,
-                      Entity.NONE, 1, GpuHudInputTest.unit(OWN_ID, OWN, false, pending),
-                      GpuHudInputTest.unit(OTHER_OWN_ID, OWN, false, pending),
-                      GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)), GpuHudData.EMPTY);
+                GpuBoardSource.Frame shown = routing.frame(GpuHudFixtures.status(3, scenario.phase(), false,
+                      Entity.NONE, 1, GpuHudFixtures.unit(OWN_ID, OWN, false, pending),
+                      GpuHudFixtures.unit(OTHER_OWN_ID, OWN, false, pending),
+                      GpuHudFixtures.unit(FOE_ID, ENEMY, false, false)), GpuHudData.EMPTY);
                 routing.show(shown);
                 assertEquals(pending ? OWN_ID : Entity.NONE, state.focus(), scenario + ": the C.5 focus");
                 clearInvocations(routing.source);
@@ -731,10 +731,10 @@ class GpuHudRoutingSmokeTest {
                     routing.capture("i1a2-initiative-friendly-click");
                 }
                 // A later capture of the same phase keeps the pick.
-                routing.frame.set(routing.frame(GpuHudInputTest.status(3, scenario.phase(), false, Entity.NONE, 1,
-                      GpuHudInputTest.unit(OWN_ID, OWN, false, pending),
-                      GpuHudInputTest.unit(OTHER_OWN_ID, OWN, false, pending),
-                      GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)), GpuHudData.EMPTY));
+                routing.frame.set(routing.frame(GpuHudFixtures.status(3, scenario.phase(), false, Entity.NONE, 1,
+                      GpuHudFixtures.unit(OWN_ID, OWN, false, pending),
+                      GpuHudFixtures.unit(OTHER_OWN_ID, OWN, false, pending),
+                      GpuHudFixtures.unit(FOE_ID, ENEMY, false, false)), GpuHudData.EMPTY));
                 routing.view.render();
                 assertSelected(routing, OTHER_OWN_ID, scenario + ", a later capture");
 
@@ -750,10 +750,10 @@ class GpuHudRoutingSmokeTest {
             }
 
             // The local movement turn: an own unit that cannot act now is inspected, never in the enemy's coral.
-            routing.show(routing.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT, true, OWN_ID, 1,
-                  GpuHudInputTest.unit(OWN_ID, OWN, true, true), GpuHudInputTest.unit(OTHER_OWN_ID, OWN, false, false),
-                  GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)),
-                  GpuHudInputTest.panels(GpuHudInputTest.move(true, List.of()), GpuFireOrders.Snapshot.EMPTY,
+            routing.show(routing.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, OWN_ID, 1,
+                  GpuHudFixtures.unit(OWN_ID, OWN, true, true), GpuHudFixtures.unit(OTHER_OWN_ID, OWN, false, false),
+                  GpuHudFixtures.unit(FOE_ID, ENEMY, false, false)),
+                  GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuFireOrders.Snapshot.EMPTY,
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY)));
             routing.press(routing.find("forces-unit-" + OTHER_OWN_ID));
             assertEquals(OTHER_OWN_ID, state.inspected);
@@ -857,11 +857,11 @@ class GpuHudRoutingSmokeTest {
                   SCENARIOS.get(2), SCENARIOS.get(4))) {
                 boolean own = scenario.myTurn();
                 // In the own turn the second own unit has moved; otherwise it waits for its turn as the first does.
-                routing.show(routing.frame(GpuHudInputTest.status(3, scenario.phase(), own,
-                      own ? OWN_ID : Entity.NONE, 1, GpuHudInputTest.unit(OWN_ID, OWN, own, true),
-                      GpuHudInputTest.unit(OTHER_OWN_ID, OWN, false, !own),
-                      GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)),
-                      GpuHudInputTest.panels(GpuHudInputTest.move(scenario.planner(), List.of()),
+                routing.show(routing.frame(GpuHudFixtures.status(3, scenario.phase(), own,
+                      own ? OWN_ID : Entity.NONE, 1, GpuHudFixtures.unit(OWN_ID, OWN, own, true),
+                      GpuHudFixtures.unit(OTHER_OWN_ID, OWN, false, !own),
+                      GpuHudFixtures.unit(FOE_ID, ENEMY, false, false)),
+                      GpuHudFixtures.panels(GpuHudFixtures.move(scenario.planner(), List.of()),
                             GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
                             GpuUnitRecord.Snapshot.EMPTY)));
                 // The C.5 focus: the Atlas, or after the own turn the next own unit.
@@ -932,12 +932,12 @@ class GpuHudRoutingSmokeTest {
     void aListTakesTheWheelOnlyWhileThePointerIsOverIt() throws Exception {
         run(routing -> {
             // Thirty more own units, more than the list has room for.
-            List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(List.of(GpuHudInputTest.unit(OWN_ID, OWN, false,
-                  true), GpuHudInputTest.unit(FOE_ID, ENEMY, false, false)));
+            List<GpuBattleStatus.UnitStatus> units = new ArrayList<>(List.of(GpuHudFixtures.unit(OWN_ID, OWN, false,
+                  true), GpuHudFixtures.unit(FOE_ID, ENEMY, false, false)));
             for (int id = 10; id < 40; id++) {
-                units.add(GpuHudInputTest.unit(id, OWN, false, true));
+                units.add(GpuHudFixtures.unit(id, OWN, false, true));
             }
-            routing.show(routing.frame(GpuHudInputTest.status(3, GamePhase.INITIATIVE_REPORT, false, Entity.NONE, 1,
+            routing.show(routing.frame(GpuHudFixtures.status(3, GamePhase.INITIATIVE_REPORT, false, Entity.NONE, 1,
                   units.toArray(GpuBattleStatus.UnitStatus[]::new)), GpuHudData.EMPTY));
             ScrollPane list = routing.find("forces-list");
             assertTrue(list.isScrollY(), "the forces list scrolls");
@@ -1098,9 +1098,9 @@ class GpuHudRoutingSmokeTest {
             verify(routing.fire).assign(4, TargetKey.unit(FOE_ID));
             assertEquals(-1, state.armedWeapon, "the armed weapon is used once");
             clearInvocations(routing.fire);
-            routing.show(routing.frame(GpuHudInputTest.status(3, GamePhase.FIRING, true, OWN_ID, 1,
-                  GpuHudInputTest.unit(OWN_ID, OWN, true, true),
-                  GpuHudInputTest.unit(FOE_ID, ENEMY, false, false, 1, true)), GpuHudData.EMPTY));
+            routing.show(routing.frame(GpuHudFixtures.status(3, GamePhase.FIRING, true, OWN_ID, 1,
+                  GpuHudFixtures.unit(OWN_ID, OWN, true, true),
+                  GpuHudFixtures.unit(FOE_ID, ENEMY, false, false, 1, true)), GpuHudData.EMPTY));
             state.armedWeapon = 4;
             routing.click(FOE_HEX, Input.Buttons.LEFT, 0, 0);
             verify(routing.fire).focusTarget(TargetKey.unit(FOE_ID));
@@ -1339,8 +1339,9 @@ class GpuHudRoutingSmokeTest {
         Routing(GpuBoardSource.Frame board, GpuBoardFixture fixture) throws Exception {
             this.board = board;
             this.fixture = fixture;
+            when(source.scenarioAtmosphere()).thenAnswer(invocation -> fixture.source.scenarioAtmosphere());
             // One HUD unit per window pixel, as in the prototype's 1920 x 1080 captures.
-            source.uiPreferences = GpuHudInputTest.preferences(.1f
+            source.uiPreferences = GpuHudFixtures.preferences(.1f
                   / DisplayScale.read(.1f, new GpuDisplayScale().contentScale()));
             // The view reads the preferences through the accessor; tests change them through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
@@ -1363,14 +1364,14 @@ class GpuHudRoutingSmokeTest {
 
         /** A frame of the real board whose status and panels script {@code scenario}. */
         GpuBoardSource.Frame frame(Scenario scenario) {
-            GpuBattleStatus.Snapshot status = GpuHudInputTest.status(3, scenario.phase(), scenario.myTurn(),
+            GpuBattleStatus.Snapshot status = GpuHudFixtures.status(3, scenario.phase(), scenario.myTurn(),
                   scenario.myTurn() ? OWN_ID : Entity.NONE, 1,
-                  GpuHudInputTest.unit(OWN_ID, OWN, scenario.myTurn(), true),
-                  GpuHudInputTest.unit(FOE_ID, ENEMY, false, false));
+                  GpuHudFixtures.unit(OWN_ID, OWN, scenario.myTurn(), true),
+                  GpuHudFixtures.unit(FOE_ID, ENEMY, false, false));
             GpuPhysicalOptions.Snapshot adjacent = scenario.phase().isPhysical()
                   ? new GpuPhysicalOptions.Snapshot(true, OWN_ID, Entity.NONE, List.of(FOE_ID), List.of())
                   : GpuPhysicalOptions.Snapshot.EMPTY;
-            GpuHudData panels = GpuHudInputTest.panels(GpuHudInputTest.move(scenario.planner(), List.of()),
+            GpuHudData panels = GpuHudFixtures.panels(GpuHudFixtures.move(scenario.planner(), List.of()),
                   GpuFireOrders.Snapshot.EMPTY, adjacent, GpuUnitRecord.Snapshot.EMPTY);
             return frame(status, panels);
         }

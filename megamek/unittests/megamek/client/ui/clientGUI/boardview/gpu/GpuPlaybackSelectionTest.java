@@ -23,15 +23,15 @@ import org.junit.jupiter.api.Test;
 
 /** Selection follows the real shared playback clock, rather than incoming turn packets or movement contact. */
 class GpuPlaybackSelectionTest {
-    private static final BoardScene.Unit FIRST = UnitPlaybackTest.unit(1, 0);
-    private static final BoardScene.Unit MOVED = UnitPlaybackTest.unit(1, 2);
-    private static final BoardScene.Unit SECOND = UnitPlaybackTest.unit(2, 4);
-    private static final BoardScene.Unit ENEMY_UNIT = UnitPlaybackTest.unit(9, 6);
+    private static final BoardScene.Unit FIRST = UnitPlaybackFixture.unit(1, 0);
+    private static final BoardScene.Unit MOVED = UnitPlaybackFixture.unit(1, 2);
+    private static final BoardScene.Unit SECOND = UnitPlaybackFixture.unit(2, 4);
+    private static final BoardScene.Unit ENEMY_UNIT = UnitPlaybackFixture.unit(9, 6);
 
     @Test
     void movementCombatAndConversionHoldSelectionThroughTheirCompleteAnimationAndFinalHold() {
         BoardScene.Movement movement = movement();
-        BoardScene.Combat shot = UnitPlaybackTest.attack(FIRST, ENEMY_UNIT, ResolvedAttack.Kind.SHOT, true);
+        BoardScene.Combat shot = UnitPlaybackFixture.attack(FIRST, ENEMY_UNIT, ResolvedAttack.Kind.SHOT, true);
         BoardScene.Conversion conversion = new BoardScene.Conversion(0, FIRST, MOVED);
         for (BoardScene.Animation action : List.of(movement, shot, conversion)) {
             GamePhase phase = action instanceof BoardScene.Combat ? GamePhase.FIRING : GamePhase.MOVEMENT;
@@ -105,9 +105,9 @@ class GpuPlaybackSelectionTest {
     void aDeferredSamePlayerTurnSelectsTheNextCandidateOnlyOnce() {
         var state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         state.update(frame(status(GamePhase.MOVEMENT, 1, 1), 1, record(1), preview(1), 0), false);
-        var later = GpuHudInputTest.status(1, GamePhase.MOVEMENT, true, 3, 2,
-              GpuHudInputTest.unit(1, OWN, false, false), GpuHudInputTest.unit(2, OWN, true, true),
-              GpuHudInputTest.unit(3, OWN, true, true));
+        var later = GpuHudFixtures.status(1, GamePhase.MOVEMENT, true, 3, 2,
+              GpuHudFixtures.unit(1, OWN, false, false), GpuHudFixtures.unit(2, OWN, true, true),
+              GpuHudFixtures.unit(3, OWN, true, true));
         var next = frame(later, 3, record(3), preview(3), 0);
         assertEquals(Entity.NONE, state.update(next, true));
         assertEquals(1, state.focus());
@@ -173,10 +173,10 @@ class GpuPlaybackSelectionTest {
         var before = frame(status(GamePhase.MOVEMENT, 1, 1), 1, record(9), preview(1), 0);
         state.inspected = 9;
         state.update(before, false);
-        var authorized = GpuHudInputTest.status(1, GamePhase.MOVEMENT, true, 2, 2,
-              GpuHudInputTest.unit(1, OWN, false, false), GpuHudInputTest.unit(2, OWN, true, true));
+        var authorized = GpuHudFixtures.status(1, GamePhase.MOVEMENT, true, 2, 2,
+              GpuHudFixtures.unit(1, OWN, false, false), GpuHudFixtures.unit(2, OWN, true, true));
         var hidden = frame(authorized, 2, record(2), preview(2), 0)
-              .withScene(UnitPlaybackTest.scene(MOVED, SECOND))
+              .withScene(UnitPlaybackFixture.scene(MOVED, SECOND))
               .withTimeline(List.of(new BoardScene.Concealed(9, 0), movement()));
         state.update(hidden, true);
         var shown = state.presented(hidden);
@@ -205,19 +205,19 @@ class GpuPlaybackSelectionTest {
     }
 
     private static GpuBattleStatus.Snapshot status(GamePhase phase, int actor, int turn) {
-        return GpuHudInputTest.status(1, phase, true, actor, turn,
-              GpuHudInputTest.unit(1, OWN, actor == 1, actor == 1),
-              GpuHudInputTest.unit(2, OWN, true, true), GpuHudInputTest.unit(9, ENEMY, false, false));
+        return GpuHudFixtures.status(1, phase, true, actor, turn,
+              GpuHudFixtures.unit(1, OWN, actor == 1, actor == 1),
+              GpuHudFixtures.unit(2, OWN, true, true), GpuHudFixtures.unit(9, ENEMY, false, false));
     }
 
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, int selected,
           GpuUnitRecord.Snapshot record, GpuFirePreview.Snapshot preview, long generation) {
-        BoardScene source = UnitPlaybackTest.scene(FIRST, SECOND, ENEMY_UNIT);
+        BoardScene source = UnitPlaybackFixture.scene(FIRST, SECOND, ENEMY_UNIT);
         BoardScene scene = new BoardScene(source.boardId(), source.width(), source.height(), source.tiles(), source.units(),
               List.of(FIRST.location(), MOVED.location()), selected, status.phase().name(),
               List.of(new BoardScene.Command("captured unit command", true, () -> { })));
         var panels = new GpuHudData(new GpuBoardActions.PhaseInfo("ready", false, "done", "skip", "clear", List.of(), List.of()),
-              GpuHudInputTest.move(true, List.of()), GpuFireOrders.Snapshot.EMPTY,
+              GpuHudFixtures.move(true, List.of()), GpuFireOrders.Snapshot.EMPTY,
               new GpuPhysicalOptions.Snapshot(true, selected, Entity.NONE, List.of(9), List.of()), record, preview,
               new GpuChat.Snapshot(List.of()), new GpuToasts.Snapshot(List.of()), RulerModel.Snapshot.NONE,
               GpuPlayers.Snapshot.EMPTY);

@@ -150,7 +150,7 @@ class GpuTerrainMaterialReviewSmokeTest {
                 camera.camera.zoom = BoardRelief.metres(.18f);
                 camera.update();
                 compositor.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 compositor.render(terrain, camera, scene);
                 refinementMaximum = 0;
             }
@@ -159,7 +159,7 @@ class GpuTerrainMaterialReviewSmokeTest {
                 for (float metres : new float[] { .18f, .35f, .60f }) {
                     camera.camera.zoom = BoardRelief.metres(metres);
                     camera.center(focus);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     compositor.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, name() + "-" + metres + "m.png"));
                     // A whole-pixel translation must preserve the same material at the same world points. This
@@ -197,12 +197,12 @@ class GpuTerrainMaterialReviewSmokeTest {
                 camera.camera.zoom = .16f;
                 camera.center(BoardGeometry.center(new Coords(8, 5), 2));
                 if (scenario % 2 == 1) { camera.orbit(30, 12); }
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 compositor.render(terrain, camera, scene);
                 GpuReviewFrame.save(new File(output, name() + "-rim.png"));
                 camera.camera.zoom = .06f;
                 camera.update();
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 compositor.render(terrain, camera, scene);
                 GpuReviewFrame.save(new File(output, name() + "-rim-close.png"));
             }

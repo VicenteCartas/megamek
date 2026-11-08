@@ -68,7 +68,9 @@ final class HabitatKit {
 
     /** A footprint's roof fittings: its hatch and vent pieces (each on the roof at its centre) and their layouts. */
     record Fitting(String hatch, String vent, List<Layout> layouts) { }
-    record Layout(List<double[]> hatches, List<double[]> vents) { }
+
+    /** Where a roof's hatches and vents stand (x, y), and any other pieces by name (x, y and a turn in degrees). */
+    record Layout(List<double[]> hatches, List<double[]> vents, Map<String, List<double[]>> pieces) { }
 
     /** A pier at a wall's start: where, facing which way, whether at a corner. */
     private record Pier(double x, double y, double[] n, boolean corner) { }
@@ -113,12 +115,9 @@ final class HabitatKit {
             // A linkless Angled corner's roof also as it stands behind a 60-degree bend (ConnectedKit.Twin).
             if (roof && !square && piece.direction() != null && !piece.tags().contains("link")) { twins.put("-bend", piece); }
             if (roof) {
-                int links = 0;
-                for (int direction = 0; direction < 6; direction++) {
-                    if ((piece.tags() + "-").contains("-link-" + KitOutline.DIRECTIONS[direction] + "-")) { links |= 1 << direction; }
-                }
+                int links = KitOutline.links(piece);
                 for (int closed = links; closed > 0; closed = (closed - 1) & links) {
-                    twins.put("-closed-" + closed, KitOutline.closedRoof(piece, closed));
+                    twins.put("-closed-" + closed, KitOutline.closed(piece, closed));
                 }
             }
             Map<String, GeneratedMesh> result = new LinkedHashMap<>();
@@ -150,7 +149,6 @@ final class HabitatKit {
         });
         for (var level : levels) {
             level.buildingPaint.add(spec.materials().get("wall"));
-            level.paintMasks.add(spec.materials().get("wall"));
         }
         return levels;
     }
@@ -406,14 +404,30 @@ final class HabitatKit {
                 piers.add(pierAt(wall, piece.walls()));
             }
         }
-        // Move the fittings with a compact isolated roof; the fittings themselves keep their authored dimensions.
+        fittings(geometry, modelled, lod, fitting, layout, piece, deck, spec.lone().halfLength(), footprintScale);
+        return new Laid(geometry, piers);
+    }
+
+    /**
+     * A roof's fittings of {@code layout} about the hex's middle, on the deck at {@code deck}: they move in with a compact
+     * isolated roof (its outline's half length against the lone hex's {@code halfLength}), keeping their own size.
+     */
+    static void fittings(GeneratedMesh geometry, List<ModelData> modelled, int lod, Fitting fitting, Layout layout,
+          KitOutline.Piece piece, double deck, double halfLength, float footprintScale) {
         boolean isolated = piece.direction() == null && !piece.tags().contains("-link-");
         double across = isolated ? footprintScale : 1;
         double along = isolated
-              ? piece.polygons().stream().flatMap(List::stream).mapToDouble(p -> Math.abs(p[1])).max().orElse(0) / spec.lone().halfLength() : 1;
-        for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck, across, along), 0); }
-        for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck, across, along), 0); }
-        return new Laid(geometry, piers);
+              ? piece.polygons().stream().flatMap(List::stream).mapToDouble(p -> Math.abs(p[1])).max().orElse(0) / halfLength : 1;
+        if (layout.hatches() != null) {
+            for (double[] at : layout.hatches()) { GeneratedKit.piece(geometry, modelled, lod, fitting.hatch(), on(at, deck, across, along), 0); }
+        }
+        if (layout.vents() != null) {
+            for (double[] at : layout.vents()) { GeneratedKit.piece(geometry, modelled, lod, fitting.vent(), on(at, deck, across, along), 0); }
+        }
+        if (layout.pieces() != null) {
+            layout.pieces().forEach((name, places) -> places.forEach(at -> GeneratedKit.piece(geometry, modelled, lod, name,
+                  on(at, deck, across, along).rotate(0, 0, 1, at.length > 2 ? (float) at[2] : 0), 0)));
+        }
     }
 
     /**

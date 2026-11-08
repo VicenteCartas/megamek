@@ -66,7 +66,7 @@ class GpuDecalPlacementSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (int i = 0; i < SAMPLES.size(); i++) {
@@ -131,18 +131,12 @@ class GpuDecalPlacementSmokeTest {
 
     private static List<Vector3> overlayTriangles(GpuTerrain terrain, boolean tactical) throws Exception {
         List<Vector3> triangles = new ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object object : (List<?>) field(chunk, tactical ? "tilesetDecals" : "surfaceDecals")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object object : (List<?>) GpuTestSupport.field(chunk, tactical ? "tilesetDecals" : "surfaceDecals")) {
                 var instance = (ModelInstance) object;
                 triangles.addAll(GpuTerrain.triangles(instance.model));
             }
         }
         return triangles;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

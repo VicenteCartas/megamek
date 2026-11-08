@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class GpuTropicalSmokeTest {
     @Test
     void rendersTropicalRaciceAndMaterialContactsInBothViews() throws Exception {
-        var racice = BoardAridSurfaceTest.capture(BoardTropicalTest.racice());
+        var racice = BoardScenes.capture(BoardTropicalTest.racice());
         var study = Board.createEmptyBoard(9, 7);
         for (int x = 0; x < 9; x++) for (int y = 0; y < 7; y++) {
             String theme = x < 2 ? "grass" : x > 6 ? "desert" : "tropical";
@@ -43,19 +43,19 @@ class GpuTropicalSmokeTest {
             if (x == 8 && y == 3) { cover = "magma:2"; }
             study.setHex(new Coords(x, y), new Hex(y < 2 ? 2 : 0, cover, theme));
         }
-        var contacts = BoardAridSurfaceTest.capture(study);
+        var contacts = BoardScenes.capture(study);
         var themes = List.of("grass", "tropical", "desert", "snow", "fungus", "volcano");
         var gradients = Board.createEmptyBoard(themes.size() * 2, 5);
         for (int x = 0; x < themes.size() * 2; x++) for (int y = 0; y < 5; y++) {
             gradients.setHex(new Coords(x, y), new Hex(0, "", themes.get(x / 2)));
         }
-        var themeContacts = BoardAridSurfaceTest.capture(gradients);
+        var themeContacts = BoardScenes.capture(gradients);
         var tropical = Board.createEmptyBoard(7, 5);
         for (int x = 0; x < 7; x++) for (int y = 0; y < 5; y++) {
             tropical.setHex(new Coords(x, y), new Hex(x < 2 ? 1 : 0,
                   (x + y) % 3 == 0 ? "woods:1;foliage_elev:2" : "", "tropical"));
         }
-        var pure = BoardAridSurfaceTest.capture(tropical);
+        var pure = BoardScenes.capture(tropical);
         var materials = new ArrayList<BoardScene>();
         for (String type : List.of("desert", "tropical", "mixed")) {
             var material = Board.createEmptyBoard(3, 3);
@@ -63,7 +63,7 @@ class GpuTropicalSmokeTest {
                 material.setHex(new Coords(x, y), new Hex(0, type.equals("mixed") ? "ground_fluff:1:3" : "",
                       type.equals("desert") ? "desert" : "tropical"));
             }
-            materials.add(BoardAridSurfaceTest.capture(material));
+            materials.add(BoardScenes.capture(material));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "tropical");
         Files.createDirectories(output.toPath());
@@ -80,7 +80,7 @@ class GpuTropicalSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     camera.setIsometric(false);
                     camera.camera.zoom = .12f;
                     camera.center(BoardGeometry.center(new Coords(1, 1), 0));

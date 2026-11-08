@@ -159,6 +159,9 @@ class GpuBuildingConnectionsSmokeTest {
             }
             kits.add("buildings/lunar_habitat/lunar_habitat");
             kits.add("buildings/lunar_habitat/lunar_habitat@parapet");
+            kits.addAll(List.of("buildings/civic/civic", "buildings/civic/civic@ribbons", "buildings/civic/civic@offices",
+                  "buildings/utopia/utopia", "buildings/utopia/utopia@bands", "buildings/frontier/frontier",
+                  "buildings/frontier/frontier@medical", "buildings/frontier/frontier@industrial", "buildings/frontier/frontier@greenhouse"));
             for (String asset : kits) {
                 for (var footprint : HexAppearance.Footprint.values()) {
                     String design = TilesetScenery.footprint(asset, footprint);
@@ -241,15 +244,11 @@ class GpuBuildingConnectionsSmokeTest {
     }
 
     private static GpuBuilding.Assembly building(GpuTerrain terrain, Coords at) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                if (at.equals(field(prop, "coords")) && field(prop, "building") instanceof GpuBuilding.Assembly assembly) { return assembly; }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if (at.equals(GpuTestSupport.field(prop, "coords")) && GpuTestSupport.field(prop, "building") instanceof GpuBuilding.Assembly assembly) { return assembly; }
             }
         }
         return null;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner);
     }
 }

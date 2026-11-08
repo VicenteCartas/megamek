@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +13,8 @@ import java.util.Vector;
 import java.util.stream.Stream;
 import javax.swing.SwingUtilities;
 
+import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
@@ -173,6 +176,92 @@ class UnitFootprintTest {
         } finally {
             BoardGeometry.tune(original);
         }
+    }
+
+    private static void assertCoversEveryCorner(UnitFootprint.Oval oval, Coords origin, List<Coords> occupied) {
+        var center = BoardGeometry.center(origin, 0);
+        float cos = MathUtils.cosDeg(-oval.angle());
+        float sin = MathUtils.sinDeg(-oval.angle());
+        for (Coords coords : occupied) {
+            for (int corner = 0; corner < 6; corner++) {
+                var point = BoardGeometry.corner(coords, 0, corner).sub(center).sub(oval.x(), oval.y(), 0);
+                float along = (point.x * cos - point.y * sin) / oval.major();
+                float across = (point.x * sin + point.y * cos) / oval.minor();
+                assertTrue(along * along + across * across <= 1.001f, coords + " corner " + corner);
+            }
+        }
+    }
+
+    @Test
+    void aRoundFootprintGetsACircleAndALongOneAnOvalAlongItEachAroundEveryHex() {
+        var origin = new Coords(5, 5);
+        List<Coords> flower = new ArrayList<>(List.of(origin));
+        for (int facing = 0; facing < 6; facing++) {
+            flower.add(origin.translated(facing));
+        }
+        var round = UnitFootprint.oval(origin, flower);
+        assertCoversEveryCorner(round, origin, flower);
+        assertEquals(round.major(), round.minor(), .1f);
+        assertEquals(0, Vector3.len(round.x(), round.y(), 0), .1f);
+        // Through the seven hexes' outermost corners: a side's half beyond two hexes' spacing over the apothem.
+        float apothem = BoardGeometry.height() / 2;
+        assertEquals(Math.hypot(3 * apothem, BoardGeometry.width() / 4), round.major(), .2f);
+
+        var line = List.of(new Coords(5, 4), origin, new Coords(5, 6), new Coords(5, 7));
+        var along = UnitFootprint.oval(origin, line);
+        assertCoversEveryCorner(along, origin, line);
+        assertTrue(along.major() > 1.5f * along.minor(), "Long along the line: " + along);
+        assertEquals(along.major(), along.halfHeight(), .1f, "The line runs north to south");
+        assertEquals(along.minor(), along.halfWidth(), .1f);
+        assertEquals(-apothem, along.y(), .1f, "Centred on the hexes, not on the unit's own");
+        assertEquals(along.y() + along.major(), along.rim(0).y, .1f, "The rim to the north");
+    }
+
+    @Test
+    void aStitchedShipsOvalFollowsItsArtAndTurnsWithIt() {
+        var art = new BufferedImage(210, 216, BufferedImage.TYPE_INT_ARGB);
+        for (int x = 85; x < 125; x++) {
+            for (int y = 18; y < 198; y++) {
+                art.setRGB(x, y, 0xFF808080);
+            }
+        }
+        var origin = new Coords(5, 5);
+        List<Coords> flower = new ArrayList<>(List.of(origin));
+        for (int facing = 0; facing < 6; facing++) {
+            flower.add(origin.translated(facing));
+        }
+        var image = new BoardScene.Pixels(art);
+        var north = UnitFootprint.oval(new BoardScene.Unit(1, -1, "Long ship", new BoardScene.Waypoint(origin, 0, 0), image, false, null, 1, false, null,
+              0, flower), flower);
+        assertTrue(north.major() > 2 * north.minor(), "Long as the art, though its hexes are round: " + north);
+        assertEquals(north.major(), north.halfHeight(), .1f);
+        assertEquals(north.minor(), north.halfWidth(), .1f);
+        var scale = UnitFootprint.imageScale(UnitFootprint.layout(origin, flower, 0), image);
+        assertTrue(north.halfHeight() >= 90 * scale && north.halfHeight() <= 90 * scale * 1.6f, "Around the art: " + north);
+        var turned = UnitFootprint.oval(new BoardScene.Unit(1, -1, "Long ship", new BoardScene.Waypoint(origin, 0, 1), image, false, null, 1, false, null,
+              0, flower), flower);
+        assertEquals(north.major(), turned.rim(60).len(), .5f, "Its nose lies along the facing");
+        assertEquals(north.minor(), turned.rim(150).len(), .5f);
+    }
+
+    @Test
+    void aUnitDrawnInPartsIsMarkedOnceOnItsFirstPartAroundThemAll() {
+        var waypoint = new BoardScene.Waypoint(new Coords(1, 1), 0, 0);
+        var first = new BoardScene.Unit(7, 0, "Ship", waypoint, null, false, null, 1, false, null, 0, List.of(new Coords(1, 1)));
+        var second = new BoardScene.Unit(7, 1, "Ship", new BoardScene.Waypoint(new Coords(1, 2), 0, 0), null, false, null, 1, false, null, 0,
+              List.of(new Coords(1, 2)));
+        var other = new BoardScene.Unit(8, -1, "Other", new BoardScene.Waypoint(new Coords(4, 4), 0, 0), null, false, null, 1, false, null, 0,
+              List.of(new Coords(4, 4)));
+        List<BoardScene.Tile> tiles = new ArrayList<>();
+        for (int x = 0; x < 8; x++) {
+            for (int y = 0; y < 8; y++) {
+                tiles.add(new BoardScene.Tile(new Coords(x, y), 0, -1, false, 0, BoardScene.Surface.GRASS, null, List.of(), List.of()));
+            }
+        }
+        var scene = new BoardScene(0, 8, 8, tiles, List.of(first, second, other), List.of(), -1, "", List.of());
+        assertEquals(List.of(new Coords(1, 1), new Coords(1, 2)), UnitFootprint.markedHexes(scene, first));
+        assertEquals(List.of(), UnitFootprint.markedHexes(scene, second));
+        assertEquals(List.of(new Coords(4, 4)), UnitFootprint.markedHexes(scene, other));
     }
 
     @Test

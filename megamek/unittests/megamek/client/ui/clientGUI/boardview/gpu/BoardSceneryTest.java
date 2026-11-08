@@ -8,22 +8,37 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.image.BufferedImage;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import javax.imageio.ImageIO;
 
 import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.badlogic.gdx.utils.JsonReader;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Board;
+import megamek.common.board.BoardBillboard;
+import megamek.common.board.BoardDecalArt;
+import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BoardFlag;
 import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
+import megamek.common.board.RailRoute;
 import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class BoardSceneryTest {
@@ -371,5 +386,240 @@ class BoardSceneryTest {
             }
         }
         return count;
+    }
+
+    static final List<String> VARIANTS = List.of("1", "2", "3", "4", "5", "6", "7", "8", "2b", "3b");
+
+    static final List<Integer> COUNTS = List.of(10, 6, 10, 11, 7, 6, 5, 6, 5, 6);
+
+    @Test
+    void everyParkingSpriteKeepsItsCarsAndNeutralBodiesMatchTheOriginalPixels() throws Exception {
+        var root = Configuration.dataDir().toPath().resolve("models/board");
+        int neutralCars = 0;
+        for (int index = 0; index < VARIANTS.size(); index++) {
+            String variant = VARIANTS.get(index);
+            String name = "scenery/fluff/cars_" + variant;
+            var layout = BoardSceneryLayouts.layout(name);
+            var cars = layout.components().stream().filter(c -> c.asset().startsWith("scenery/vehicles/car")).toList();
+            assertEquals(COUNTS.get(index).intValue(), cars.size(), variant);
+            assertFalse(Files.exists(root.resolve(name + ".glb")), "No duplicate car geometry stays in the layout");
+            BufferedImage reference = ImageIO.read(new File(Configuration.hexesDir(), "fluff/cars_" + variant + ".gif"));
+            for (var car : cars) {
+                assertFalse(car.tree());
+                var data = RigidGlb.loadLods(new FileHandle(root.resolve(car.asset() + ".glb").toFile()), root).getFirst();
+                // The row's paint replaces the shared car's paint slot, as the renderer replaces it.
+                RigidGlb.recolour(data, car.colours());
+                float[] vertices = data.meshes.first().vertices;
+                float red = vertices[6], green = vertices[7], blue = vertices[8];
+                if (Math.max(red, Math.max(green, blue)) - Math.min(red, Math.min(green, blue)) > .01f) { continue; }
+                neutralCars++;
+                int bodyPixels = 0;
+                double angle = Math.toRadians(car.rotation());
+                for (int x = -1; x <= 1; x++) for (int y = -2; y <= 2; y++) {
+                    int px = Math.round(42 + car.x() + (float) (x * Math.cos(angle) - y * Math.sin(angle)));
+                    int py = Math.round(36 - car.y() - (float) (x * Math.sin(angle) + y * Math.cos(angle)));
+                    int pixel = reference.getRGB(px, py);
+                    int r = pixel >> 16 & 255, g = pixel >> 8 & 255, b = pixel & 255;
+                    if ((pixel >>> 24) > 128 && Math.min(r, Math.min(g, b)) > 45
+                          && Math.max(r, Math.max(g, b)) - Math.min(r, Math.min(g, b)) < 5) { bodyPixels++; }
+                }
+                assertTrue(bodyPixels >= 7, "Neutral car must overlap its body, not blue-gray curb paint: "
+                      + variant + " at " + car.x() + "," + car.y() + " / " + bodyPixels);
+            }
+            var coords = new Coords(2, 2);
+            assertEquals(layout.chosen(coords, BoardTreeDistribution.PARK, false), layout.chosen(coords, BoardTreeDistribution.PARK, true),
+                  "The tree distribution cannot randomize parked cars");
+        }
+        assertEquals(16, neutralCars);
+        // The road-free 2b/3b sprites are 7/8 without the lane.
+        assertEquals(objects("scenery/fluff/cars_7"), objects("scenery/fluff/cars_2b"));
+        assertEquals(objects("scenery/fluff/cars_8"), objects("scenery/fluff/cars_3b"));
+    }
+
+    private static List<BoardSceneryLayouts.Component> objects(String layout) {
+        return BoardSceneryLayouts.layout(layout).components().stream().filter(c -> !c.decal()).toList();
+    }
+
+    @Test
+    void parkingBarrierPaintIsPartOfItsLowConcreteSurface() {
+        var data = load("scenery/vehicles/parking-barrier");
+        assertEquals(1, data.materials.size);
+        assertEquals(1, data.meshes.first().parts.length);
+        assertTrue(data.meshes.first().parts[0].indices.length / 3 <= 80);
+        int paint = 0, ground = 0;
+        float[] values = data.meshes.first().vertices;
+        for (int i = 0; i < values.length; i += RigidGlb.STRIDE) {
+            float x = Math.abs(values[i] - 24), y = values[i + 1], z = values[i + 2];
+            assertTrue(x <= 1.4001f && Math.abs(y) <= 12.5001f && z >= 0 && z <= 2.1001f);
+            if (z == 0) { ground++; }
+            if (values[i + 6] < .2f || values[i + 6] > .8f) {
+                paint++;
+                assertTrue(Math.abs(z - 2.1f) < .0001f ||
+                      z >= .2799f && Math.abs(x - (1.4f - (z - .28f) * .85f / 1.82f)) < .0001f,
+                      "Hazard paint belongs on the top or sloped concrete, with no floating panels");
+            }
+        }
+        assertTrue(paint > 30 && ground >= 4);
+    }
+
+    @Test
+    void suburbsUseSharedFurnitureAndLeaveBiomeGroundUncovered() {
+        var root = Configuration.dataDir().toPath().resolve("models/board");
+        for (int variant = 1; variant <= 3; variant++) {
+            String name = "scenery/fluff/suburb" + variant;
+            var layout = BoardSceneryLayouts.layout(name);
+            assertFalse(Files.exists(root.resolve(name + ".glb")), "No residual slab remains");
+            for (var component : layout.components()) {
+                assertFalse(component.asset().equals(name));
+                if (component.tree()) { continue; }
+                float lowFloorArea = 0;
+                for (var mesh : load(component.asset()).meshes) {
+                    float[] values = mesh.vertices;
+                    for (var part : mesh.parts) {
+                        for (int i = 0; i < part.indices.length; i += 3) {
+                            int a = (part.indices[i] & 0xFFFF) * RigidGlb.STRIDE;
+                            int b = (part.indices[i + 1] & 0xFFFF) * RigidGlb.STRIDE;
+                            int c = (part.indices[i + 2] & 0xFFFF) * RigidGlb.STRIDE;
+                            if (values[a + 5] < .99f || Math.max(values[a + 2],
+                                  Math.max(values[b + 2], values[c + 2])) > .61f) { continue; }
+                            lowFloorArea += Math.abs((values[b] - values[a]) * (values[c + 1] - values[a + 1])
+                                  - (values[b + 1] - values[a + 1]) * (values[c] - values[a])) / 2;
+                        }
+                    }
+                }
+                assertTrue(lowFloorArea * component.scale() * component.scale() < 40,
+                      "Only small structural feet/steps may cover the ground: " + component.asset());
+            }
+        }
+        var grandstand = BoardSceneryLayouts.layout("scenery/fluff/suburb1").components().stream()
+              .filter(c -> c.asset().equals("scenery/parks/grandstand")).toList();
+        assertEquals(1, grandstand.size());
+        assertTrue(load(grandstand.getFirst().asset()).meshes.first().parts[0].indices.length / 3 <= 400);
+        var courtyard = BoardSceneryLayouts.layout("scenery/fluff/suburb2").components();
+        assertEquals(1, courtyard.stream().filter(c -> c.asset().equals("scenery/parks/picnic-table")).count());
+        var pipes = BoardSceneryLayouts.layout("scenery/fluff/suburb3").components().stream()
+              .filter(c -> c.asset().equals("scenery/construction/concrete-pipe")).toList();
+        assertEquals(3, pipes.size());
+        for (int i = 0; i < pipes.size(); i++) {
+            assertEquals(10 + i * 4, pipes.get(i).x());
+            assertEquals(-7 + i * 2, pipes.get(i).y());
+            assertEquals(0, pipes.get(i).z());
+        }
+    }
+
+    private static ModelData load(String asset) {
+        var root = Configuration.dataDir().toPath().resolve("models/board");
+        return RigidGlb.loadLods(new FileHandle(root.resolve(asset + ".glb").toFile()), root).getFirst();
+    }
+
+    /** A route marker's track is generated by the route builder, never a model file. */
+    private static boolean generated(String asset) {
+        return RailRoute.Kind.of(asset) != null || asset.equals(BoardFlag.ASSET) || asset.equals(BoardBillboard.ASSET);
+    }
+
+    /** Terrain-owned rows: rubble, gravel and plates, and a vegetation skin's composition ({@code yard/}). */
+    private static boolean undecoded(String key) {
+        return key.matches("scenery/saxarba/(misc/|rubble_|cleared_rubble_gravel).*") || key.startsWith("yard/");
+    }
+
+    @Test
+    void decodeRowsAndThePaletteAgree() throws Exception {
+        Path root = Configuration.dataDir().toPath().resolve("models/board");
+        JsonNode layouts = new ObjectMapper().readTree(root.resolve("scenery/layouts.json").toFile());
+        JsonNode decals = new ObjectMapper().readTree(root.resolve("decals/decals.json").toFile());
+        BoardEditorBlueprint blueprint = BoardEditorBlueprint.get();
+        for (var keys = layouts.fieldNames(); keys.hasNext(); ) {
+            String key = keys.next();
+            if (undecoded(key)) {
+                for (JsonNode row : layouts.get(key)) {
+                    String asset = row.get("asset").asText();
+                    assertTrue(asset.startsWith("decal/") ? BoardDecalArt.image(asset).isFile()
+                          && decals.get("decals").has(asset) : Files.isRegularFile(root.resolve(asset + ".glb")),
+                          "Terrain-owned art exists: " + key + " draws " + asset);
+                }
+                continue;
+            }
+            for (JsonNode row : layouts.get(key)) {
+                String asset = row.get("asset").asText();
+                var entry = blueprint.asset(asset);
+                assertTrue(entry != null, "Imported objects keep a label: " + asset);
+                assertTrue(entry.kind().equals("decal") ? BoardDecalArt.image(asset).isFile()
+                      : generated(asset) || Files.isRegularFile(root.resolve(asset + ".glb")), asset);
+                if (row.has("seat")) {
+                    var plates = new java.util.ArrayList<String>();
+                    layouts.get(key).forEach(other -> { if (other.get("asset").asText().startsWith("decal/")) { plates.add(other.get("asset").asText()); } });
+                    assertTrue(row.get("seat").get(1).asInt() < BoardDecalArt.footprint(plates.get(row.get("seat").get(0).asInt())).slots().size(),
+                          "A seat names a slot of one of the key's decal rows: " + key);
+                }
+                assertEquals(0, row.get("position").get(2).asDouble(), "Rows stand on their receiver: " + key);
+                if (row.has("stretch")) {
+                    var stretch = row.get("stretch");
+                    assertTrue(stretch.size() == 3 && stretch.get(0).asDouble() > 0 && stretch.get(1).asDouble() > 0
+                          && stretch.get(2).asDouble() > 0, "Stretch is three positive factors: " + key);
+                }
+                if (row.has("colours")) {
+                    assertTrue(row.get("colours").size() <= RigidGlb.colourSlots(root.resolve(asset + ".glb").toFile()).size(),
+                          "A row recolours only its mesh's slots: " + key);
+                }
+            }
+        }
+        // Every cover of every skin names a terrain-owned composition (its rows' art exists, above).
+        for (var variant : blueprint.variants("vegetation")) {
+            if (variant.skin() == null) { continue; }
+            variant.skin().layouts().forEach((cover, key) -> assertTrue(undecoded(key) && layouts.has(key), variant.id() + " " + cover));
+        }
+        // A legacy decal id decodes to a decal with an image; a one-hex variant shrinks it, a set piece shows it whole.
+        for (var ids = decals.get("legacy").fieldNames(); ids.hasNext(); ) {
+            var legacy = BoardDecalArt.legacy(ids.next());
+            assertTrue(BoardDecalArt.image(legacy.decal()).isFile() && decals.get("decals").has(legacy.decal()), legacy.decal());
+            assertTrue(legacy.set() ? legacy.scale() == 1 && legacy.rotation() == 0 : legacy.direction() == -1 && legacy.scale() <= 1,
+                  legacy.toString());
+        }
+        for (var asset : blueprint.assets()) {
+            assertFalse(layouts.has(asset.id()), "A palette id is never a decode key: " + asset.id());
+            if (asset.layout() != null) {
+                assertEquals("prop", asset.kind());
+                for (int exits = 0; exits < (asset.layout().contains("{exits}") ? 64 : 1); exits++) {
+                    String key = asset.layout().replace("{exits}", String.format(Locale.ROOT, "%02d", exits));
+                    assertTrue(layouts.has(key), asset.id() + " stamps " + key);
+                }
+                // A train stamp (freight, express and colony trains, city and colony maglevs) rides one kind
+                // of route with every member, so a stamp on a track snaps the whole train onto it.
+                if (asset.id().endsWith("-train")) {
+                    var rides = new java.util.HashSet<RailRoute.Kind>();
+                    for (JsonNode row : layouts.get(asset.layout())) {
+                        String member = row.get("asset").asText();
+                        assertTrue(RailRoute.vehicle(member), asset.id() + ": " + member + " is a vehicle");
+                        rides.add(RailRoute.rides(member));
+                    }
+                    assertEquals(1, rides.size(), asset.id() + " rides one route kind: " + rides);
+                }
+            }
+            if (asset.layout() == null && asset.kind().equals("prop") && !generated(asset.model())) {
+                // A palette entry may place another model in other colours, as a pond is a pool in pond colours.
+                var model = (asset.model().startsWith("buildings/") ? root.getParent() : root).resolve(asset.model() + ".glb").toFile();
+                assertTrue(model.isFile(), asset.id() + " places " + asset.model());
+                assertTrue(asset.colours().slots().size() <= RigidGlb.colourSlots(model).size(), asset.id());
+            }
+            // A tree takes its winter form on snow, so the -snow trees stay out of the palette.
+            if (!asset.sections().isEmpty() && asset.kind().equals("prop")) { assertFalse(asset.id().endsWith("-snow"), asset.id()); }
+            if (asset.kind().equals("decal")) {
+                assertTrue(BoardDecalArt.image(asset.id()).isFile() && decals.get("decals").has(asset.id()), asset.id());
+            }
+        }
+        // Layers type icons name components by id and objects by palette section or category: a renamed one loses its icon.
+        var icons = GpuBoardEditor.class.getDeclaredField("LAYER_ICONS");
+        icons.setAccessible(true);
+        for (Object key : ((Map<?, ?>) icons.get(null)).keySet()) {
+            assertTrue(blueprint.components().stream().anyMatch(c -> c.id().equals(key))
+                  || blueprint.categories().stream().anyMatch(c -> c.id().equals(key)
+                        || c.sections().stream().anyMatch(section -> section.path().equals(key))),
+                  "Layers icon key " + key + " is a component id, a palette category or a section path");
+        }
+    }
+
+    @BeforeAll
+    static void loadNatives() {
+        GdxNativesLoader.load();
     }
 }

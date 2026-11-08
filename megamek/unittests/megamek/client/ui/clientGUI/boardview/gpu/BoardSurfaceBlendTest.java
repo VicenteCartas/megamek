@@ -4,38 +4,13 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.image.BufferedImage;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
 
 import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class BoardSurfaceBlendTest {
-    static final Coords CENTER = new Coords(4, 4);
     private static final BoardScene.Pixels PIXELS = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
-
-    static BoardScene.Tile tile(Coords coords, BoardScene.Surface family, int level, int depth, int road) {
-        return new BoardScene.Tile(coords, level, depth, false, road, family, null, null,
-              List.of(), List.of(), depth < 0 ? BoardLiquid.NONE : BoardLiquid.WATER, null, true);
-    }
-
-    static BoardScene scene(Function<Coords, BoardScene.Tile> tiles) {
-        List<BoardScene.Tile> result = new ArrayList<>();
-        for (int x = 0; x < 9; x++) {
-            for (int y = 0; y < 9; y++) { result.add(tiles.apply(new Coords(x, y))); }
-        }
-        return new BoardScene(0, 9, 9, result, List.of(), List.of(), -1, "", List.of());
-    }
-
-    static BoardScene.Tile tile(Coords coords, int family, int level) {
-        var surface = family >= BoardSurfaceBlend.CRUST ? BoardScene.Surface.ROCK : BoardScene.Surface.values()[family];
-        var liquid = family < BoardSurfaceBlend.CRUST ? BoardLiquid.NONE : new BoardLiquid(
-              family == BoardSurfaceBlend.CRUST ? BoardLiquid.Kind.MAGMA_CRUST : BoardLiquid.Kind.MAGMA, "", 0);
-        return new BoardScene.Tile(coords, level, -1, false, 0, surface, null, null,
-              List.of(), List.of(), liquid, null, true);
-    }
 
     @Test
     void everyFamilyMeetsTheReceivingNaturalGroundAtItsCliffFootInEveryDirection() {
@@ -45,11 +20,11 @@ class BoardSurfaceBlendTest {
             if (lower == BoardScene.Surface.CONCRETE.ordinal()) { lower = BoardScene.Surface.ROCK.ordinal(); }
             int receiving = lower;
             for (int direction = 0; direction < 6; direction++) {
-                var next = CENTER.translated(direction);
-                var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : receiving, c.equals(CENTER) ? 4 : 0));
-                var high = scene.tile(CENTER);
+                var next = BoardScenes.CENTER.translated(direction);
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? upper : receiving, c.equals(BoardScenes.CENTER) ? 4 : 0));
+                var high = scene.tile(BoardScenes.CENTER);
                 var low = scene.tile(next);
-                var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+                var p = BoardGeometry.center(BoardScenes.CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
                 p.z = BoardGeometry.groundZ(low);
                 var foot = BoardSurfaceBlend.sampleCliff(scene, high, p.x, p.y, p.z);
                 assertEquals(foot, BoardSurfaceBlend.sample(scene, low, p.x, p.y, p.z), "Shared foot, family " + family);
@@ -66,16 +41,16 @@ class BoardSurfaceBlendTest {
     void lavaMeltsSnowAndBurnsTurfAtTheFootOfTheirCliffs() {
         for (var hill : new BoardScene.Surface[] { BoardScene.Surface.SNOW, BoardScene.Surface.GRASS }) {
             int upper = hill.ordinal(), melted = BoardSurfaceBlend.melted(upper);
-            var scene = scene(c -> tile(c, c.equals(CENTER) ? upper : BoardSurfaceBlend.BANK, c.equals(CENTER) ? 2 : 0));
-            var high = scene.tile(CENTER);
-            var next = CENTER.translated(0);
-            var foot = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? upper : BoardSurfaceBlend.BANK, c.equals(BoardScenes.CENTER) ? 2 : 0));
+            var high = scene.tile(BoardScenes.CENTER);
+            var next = BoardScenes.CENTER.translated(0);
+            var foot = BoardGeometry.center(BoardScenes.CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
             foot.z = BoardGeometry.groundZ(scene.tile(next));
             var cover = BoardSurfaceBlend.sampleCliff(scene, high, foot.x, foot.y, foot.z);
             assertEquals(0, cover.weight(upper), .00001f, hill + " at the lava's edge");
             assertTrue(cover.weight(melted) > .05f, cover.toString());
             // A hex's width away the heat is gone.
-            var top = BoardGeometry.center(CENTER, 0);
+            var top = BoardGeometry.center(BoardScenes.CENTER, 0);
             top.z = BoardGeometry.groundZ(high);
             assertEquals(BoardSurfaceBlend.solid(upper), BoardSurfaceBlend.sample(scene, high, top.x, top.y, top.z));
         }
@@ -84,12 +59,12 @@ class BoardSurfaceBlendTest {
     @Test
     void naturalCliffsDoNotSpillTheirCoverAcrossLowerPavement() {
         for (int rise : new int[] { 1, 2, 3, 4, 8 }) {
-            var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
-                  c.equals(CENTER) ? 0 : rise, -1, 0));
-            var pavement = scene.tile(CENTER);
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
+                  c.equals(BoardScenes.CENTER) ? 0 : rise, -1, 0));
+            var pavement = scene.tile(BoardScenes.CENTER);
             assertFalse(BoardSurfaceBlend.boundary(scene, pavement));
             for (int edge = 0; edge < 6; edge++) {
-                var point = BoardGeometry.corner(CENTER, 0, edge);
+                var point = BoardGeometry.corner(BoardScenes.CENTER, 0, edge);
                 assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.CONCRETE),
                       BoardSurfaceBlend.sample(scene, pavement, point.x, point.y, point.z));
             }
@@ -100,7 +75,7 @@ class BoardSurfaceBlendTest {
     void concreteKeepsItsMaterialAtEveryHeight() {
         for (int level = 0; level <= 4; level++) {
             int rise = level;
-            var scene = scene(c -> tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
                   : BoardScene.Surface.DIRT.ordinal(), c.getY() < 4 ? rise : 0));
             var high = scene.tile(new Coords(4, 3));
             var low = scene.tile(new Coords(4, 4));
@@ -114,7 +89,7 @@ class BoardSurfaceBlendTest {
 
     @Test
     void tallConcreteKeepsACleanMaterialEdgeAtItsFittedFootAtEveryDetail() {
-        var scene = scene(c -> tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.getY() < 4 ? BoardScene.Surface.CONCRETE.ordinal()
               : BoardScene.Surface.DIRT.ordinal(), c.getY() < 4 ? 4 : 0));
         int checked = 0;
         for (var lod : TerrainLod.values()) {
@@ -140,14 +115,14 @@ class BoardSurfaceBlendTest {
 
     @Test
     void lunarAndRockKeepDistinctCoverageWithoutBecomingVolcanic() {
-        var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.LUNAR : BoardScene.Surface.ROCK, 0, -1, 0));
-        var lunar = scene.tile(CENTER);
-        var rock = scene.tile(CENTER.translated(2));
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? BoardScene.Surface.LUNAR : BoardScene.Surface.ROCK, 0, -1, 0));
+        var lunar = scene.tile(BoardScenes.CENTER);
+        var rock = scene.tile(BoardScenes.CENTER.translated(2));
         assertTrue(BoardSurfaceBlend.boundary(scene, lunar));
         assertTrue(BoardSurfaceBlend.boundary(scene, rock));
         assertFalse(new GpuSurfaceBlend.Palette(BoardScene.Surface.LUNAR, BoardScene.Surface.ROCK,
               BoardScene.Surface.SAND).volcanic());
-        var center = BoardGeometry.center(CENTER, 0);
+        var center = BoardGeometry.center(BoardScenes.CENTER, 0);
         assertEquals(1, BoardSurfaceBlend.sample(scene, lunar, center.x, center.y, center.z).lunar());
         var edge = center.lerp(BoardGeometry.center(rock.coords(), 0), .5f);
         var cover = BoardSurfaceBlend.sample(scene, lunar, edge.x, edge.y, edge.z);
@@ -161,13 +136,13 @@ class BoardSurfaceBlendTest {
     void volcanicBoundariesShareCoverageOnLevelGround() {
         for (int family : new int[] { BoardSurfaceBlend.CRUST, BoardSurfaceBlend.BANK }) {
             for (var host : new BoardScene.Surface[] { BoardScene.Surface.ROCK, BoardScene.Surface.LUNAR }) {
-                var scene = scene(c -> tile(c, c.equals(CENTER) ? family : host.ordinal(), 0));
-                var next = CENTER.translated(2);
-                var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
-                var cover = BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z);
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? family : host.ordinal(), 0));
+                var next = BoardScenes.CENTER.translated(2);
+                var p = BoardGeometry.center(BoardScenes.CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+                var cover = BoardSurfaceBlend.sample(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z);
                 assertEquals(cover, BoardSurfaceBlend.sample(scene, scene.tile(next), p.x, p.y, p.z));
                 assertTrue(cover.weight(host) > .05f && cover.weight(family) > .05f, cover.toString());
-                assertTrue(BoardSurfaceBlend.boundary(scene, scene.tile(CENTER)));
+                assertTrue(BoardSurfaceBlend.boundary(scene, scene.tile(BoardScenes.CENTER)));
             }
         }
     }
@@ -175,12 +150,12 @@ class BoardSurfaceBlendTest {
     @Test
     void bothSidesAgreeInAllDirectionsAndTileCentresKeepTheirIdentity() {
         for (int direction = 0; direction < 6; direction++) {
-            Coords next = CENTER.translated(direction);
-            BoardScene scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, 0, -1, 0));
-            Vector3 a = BoardGeometry.center(CENTER, 0), b = BoardGeometry.center(next, 0);
+            Coords next = BoardScenes.CENTER.translated(direction);
+            BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? BoardScene.Surface.SNOW : BoardScene.Surface.GRASS, 0, -1, 0));
+            Vector3 a = BoardGeometry.center(BoardScenes.CENTER, 0), b = BoardGeometry.center(next, 0);
             for (float t : new float[] { 0, .35f, .45f, .5f, .55f, .65f, 1 }) {
                 Vector3 p = new Vector3(a).lerp(b, t);
-                var cover = BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z);
+                var cover = BoardSurfaceBlend.sample(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z);
                 assertEquals(cover, BoardSurfaceBlend.sample(scene, scene.tile(next), p.x, p.y, p.z));
                 assertEquals(1, cover.grass() + cover.snow(), .00001f);
                 if (t == 0) { assertEquals(1, cover.snow(), .00001f); }
@@ -192,12 +167,12 @@ class BoardSurfaceBlendTest {
 
     @Test
     void threeCoversMeetAtOneCornerWithoutChoosingOneNeighbourForTheHex() {
-        Coords a = CENTER.translated(BoardGeometry.edgeDirection(0));
-        Coords b = CENTER.translated(BoardGeometry.edgeDirection(5));
-        BoardScene scene = scene(c -> tile(c, c.equals(a) ? BoardScene.Surface.SNOW
+        Coords a = BoardScenes.CENTER.translated(BoardGeometry.edgeDirection(0));
+        Coords b = BoardScenes.CENTER.translated(BoardGeometry.edgeDirection(5));
+        BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(a) ? BoardScene.Surface.SNOW
               : c.equals(b) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
-        Vector3 p = BoardGeometry.corner(CENTER, 0, 0);
-        var cover = BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z);
+        Vector3 p = BoardGeometry.corner(BoardScenes.CENTER, 0, 0);
+        var cover = BoardSurfaceBlend.sample(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z);
         assertTrue(cover.snow() > .1f && cover.sand() > .1f && cover.grass() > .1f, cover.toString());
         assertEquals(1, cover.grass() + cover.sand() + cover.snow(), .00001f);
         assertEquals(cover, BoardSurfaceBlend.sample(scene, scene.tile(a), p.x, p.y, p.z));
@@ -207,40 +182,40 @@ class BoardSurfaceBlendTest {
     @Test
     void uniformFamiliesHaveNoBoundaryBand() {
         for (var family : BoardScene.Surface.values()) {
-            var scene = scene(c -> tile(c, family, 0, -1, 0));
-            assertFalse(BoardSurfaceBlend.boundary(scene, scene.tile(CENTER)));
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family, 0, -1, 0));
+            assertFalse(BoardSurfaceBlend.boundary(scene, scene.tile(BoardScenes.CENTER)));
             for (int edge = 0; edge < 6; edge++) {
-                var p = BoardGeometry.corner(CENTER, 0, edge);
-                assertEquals(1, BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z).weight(family), .00001f);
+                var p = BoardGeometry.corner(BoardScenes.CENTER, 0, edge);
+                assertEquals(1, BoardSurfaceBlend.sample(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z).weight(family), .00001f);
             }
         }
     }
 
     @Test
     void waterRoadsAndLevelConcreteEdgesBlockNaturalCover() {
-        Coords next = CENTER.translated(2);
+        Coords next = BoardScenes.CENTER.translated(2);
         for (int mode = 0; mode < 3; mode++) {
             final int obstacle = mode;
-            var scene = scene(c -> c.equals(next) ? tile(c, obstacle == 2 ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SNOW,
+            var scene = BoardScenes.scene(c -> c.equals(next) ? BoardScenes.tile(c, obstacle == 2 ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SNOW,
                   0, obstacle == 0 ? 1 : -1, obstacle == 1 ? 9 : 0)
-                  : tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
-            Vector3 p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .49f);
-            assertEquals(1, BoardSurfaceBlend.sample(scene, scene.tile(CENTER), p.x, p.y, p.z).grass(), .00001f);
-            assertFalse(BoardSurfaceBlend.boundary(scene, scene.tile(CENTER)));
+                  : BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+            Vector3 p = BoardGeometry.center(BoardScenes.CENTER, 0).lerp(BoardGeometry.center(next, 0), .49f);
+            assertEquals(1, BoardSurfaceBlend.sample(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z).grass(), .00001f);
+            assertFalse(BoardSurfaceBlend.boundary(scene, scene.tile(BoardScenes.CENTER)));
         }
     }
 
     @Test
     void cliffContactsContinueDownAllSixCornersWithoutBorrowingTheValleyCover() {
         for (int corner = 0; corner < 6; corner++) {
-            var neighbour = CENTER.translated(BoardGeometry.edgeDirection(corner));
-            var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.GRASS
+            var neighbour = BoardScenes.CENTER.translated(BoardGeometry.edgeDirection(corner));
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? BoardScene.Surface.GRASS
                   : c.equals(neighbour) ? BoardScene.Surface.SAND : BoardScene.Surface.SNOW,
-                  c.equals(CENTER) || c.equals(neighbour) ? 4 : 0, -1, 0));
-            var p = BoardGeometry.corner(CENTER, 0, corner);
+                  c.equals(BoardScenes.CENTER) || c.equals(neighbour) ? 4 : 0, -1, 0));
+            var p = BoardGeometry.corner(BoardScenes.CENTER, 0, corner);
             for (int level = 1; level <= 4; level++) {
                 p.z = level * BoardGeometry.level();
-                var cover = BoardSurfaceBlend.sampleCliff(scene, scene.tile(CENTER), p.x, p.y, p.z);
+                var cover = BoardSurfaceBlend.sampleCliff(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z);
                 assertEquals(cover, BoardSurfaceBlend.sampleCliff(scene, scene.tile(neighbour), p.x, p.y, p.z));
                 assertTrue(cover.grass() > .1f && cover.sand() > .1f, "Corner " + corner + ": " + cover);
                 assertEquals(0, cover.snow(), "The valley floor cannot paint a cliff above it");
@@ -251,19 +226,19 @@ class BoardSurfaceBlendTest {
 
     @Test
     void valleyCoverCannotPaintTheCliffAboveItsFootBand() {
-        var next = CENTER.translated(2);
-        var scene = scene(c -> tile(c, c.equals(CENTER) ? BoardScene.Surface.SAND
-              : BoardScene.Surface.GRASS, c.equals(CENTER) ? 4 : 1, -1, 0));
-        var p = BoardGeometry.center(CENTER, 3).lerp(BoardGeometry.center(next, 3), .5f);
+        var next = BoardScenes.CENTER.translated(2);
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(BoardScenes.CENTER) ? BoardScene.Surface.SAND
+              : BoardScene.Surface.GRASS, c.equals(BoardScenes.CENTER) ? 4 : 1, -1, 0));
+        var p = BoardGeometry.center(BoardScenes.CENTER, 3).lerp(BoardGeometry.center(next, 3), .5f);
         assertEquals(BoardSurfaceBlend.solid(BoardScene.Surface.SAND),
-              BoardSurfaceBlend.sampleCliff(scene, scene.tile(CENTER), p.x, p.y, p.z));
+              BoardSurfaceBlend.sampleCliff(scene, scene.tile(BoardScenes.CENTER), p.x, p.y, p.z));
     }
 
     @Test
     void neighbouringBanksAgreeFromTheirLandCornerDownToTheWaterline() {
         for (int depth : new int[] { 0, 1 }) {
-            var scene = BoardTerrainDetailTest.shores(depth, false);
-            var water = scene.tile(BoardTerrainDetailTest.WATER);
+            var scene = BoardScenes.shores(depth, false);
+            var water = scene.tile(BoardScenes.WATER);
             var surface = new BoardSurface(scene, water);
             // The sand/rock and dirt/sand junctions from the mixed-bank regression fixture.
             for (int corner : new int[] { 2, 3 }) {
@@ -294,14 +269,14 @@ class BoardSurfaceBlendTest {
     void adjacentWaterBedsStayContinuousAcrossAllSixEdges() {
         for (int depth : new int[] { 0, 1 }) for (int direction = 0; direction < 6; direction++) {
             int waterDepth = depth;
-            var next = CENTER.translated(direction);
-            var scene = scene(c -> tile(c,
-                  c.equals(CENTER) ? BoardScene.Surface.DESERT : c.equals(next) ? BoardScene.Surface.MARS
-                        : c.distance(CENTER) <= c.distance(next) ? BoardScene.Surface.GRASS : BoardScene.Surface.TROPICAL,
-                  0, c.equals(CENTER) || c.equals(next) ? waterDepth : -1, 0));
-            var first = scene.tile(CENTER);
+            var next = BoardScenes.CENTER.translated(direction);
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
+                  c.equals(BoardScenes.CENTER) ? BoardScene.Surface.DESERT : c.equals(next) ? BoardScene.Surface.MARS
+                        : c.distance(BoardScenes.CENTER) <= c.distance(next) ? BoardScene.Surface.GRASS : BoardScene.Surface.TROPICAL,
+                  0, c.equals(BoardScenes.CENTER) || c.equals(next) ? waterDepth : -1, 0));
+            var first = scene.tile(BoardScenes.CENTER);
             var second = scene.tile(next);
-            var a = BoardGeometry.center(CENTER, 0);
+            var a = BoardGeometry.center(BoardScenes.CENTER, 0);
             var b = BoardGeometry.center(next, 0);
             for (float along : new float[] { -.35f, 0, .35f }) {
                 var midpoint = new Vector3(a).lerp(b, .5f);
@@ -325,8 +300,8 @@ class BoardSurfaceBlendTest {
 
     @Test
     void shallowBarsShareTheirCentralCoverAndKeepBankPalettesBounded() {
-        var scene = BoardTerrainDetailTest.shores(0, false);
-        var water = scene.tile(BoardTerrainDetailTest.WATER);
+        var scene = BoardScenes.shores(0, false);
+        var water = scene.tile(BoardScenes.WATER);
         var center = BoardGeometry.center(water.coords(), 0);
         var banks = scene.tiles().stream().filter(t -> BoardSurfaceBlend.natural(t)
               && t.coords().distance(water.coords()) == 1).toList();
@@ -347,12 +322,40 @@ class BoardSurfaceBlendTest {
 
     @Test
     void editingANeighbourChangesCoverageAndTheExistingSurfaceCacheKey() {
-        Coords next = CENTER.translated(2);
-        var before = scene(c -> tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
-        var after = scene(c -> tile(c, c.equals(next) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
-        var p = BoardGeometry.center(CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
-        assertEquals(0, BoardSurfaceBlend.sample(before, before.tile(CENTER), p.x, p.y, p.z).sand());
-        assertTrue(BoardSurfaceBlend.sample(after, after.tile(CENTER), p.x, p.y, p.z).sand() > .1f);
-        assertNotEquals(BoardSurface.geometryKey(before, before.tile(CENTER)), BoardSurface.geometryKey(after, after.tile(CENTER)));
+        Coords next = BoardScenes.CENTER.translated(2);
+        var before = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        var after = BoardScenes.scene(c -> BoardScenes.tile(c, c.equals(next) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
+        var p = BoardGeometry.center(BoardScenes.CENTER, 0).lerp(BoardGeometry.center(next, 0), .5f);
+        assertEquals(0, BoardSurfaceBlend.sample(before, before.tile(BoardScenes.CENTER), p.x, p.y, p.z).sand());
+        assertTrue(BoardSurfaceBlend.sample(after, after.tile(BoardScenes.CENTER), p.x, p.y, p.z).sand() > .1f);
+        assertNotEquals(BoardSurface.geometryKey(before, before.tile(BoardScenes.CENTER)), BoardSurface.geometryKey(after, after.tile(BoardScenes.CENTER)));
+    }
+
+    @Test
+    void everyBankAndShallowBarUsesItsOwnNeighbourIncludingRoadAndConcreteGround() {
+        for (int depth : new int[] { 0, 1 }) {
+            for (boolean mouths : new boolean[] { false, true }) {
+                BoardScene scene = BoardScenes.shores(depth, mouths);
+                BoardSurface surface = new BoardSurface(scene, scene.tile(BoardScenes.WATER));
+                int[] banks = new int[6];
+                for (var face : surface.faces) {
+                    if (face.finish() != BoardSurface.Finish.TOP && face.finish() != BoardSurface.Finish.BED) { continue; }
+                    assertTrue(face.landEdge() >= 0, "Every bank retains its source edge");
+                    var land = scene.tile(BoardScenes.WATER.translated(BoardGeometry.edgeDirection(face.landEdge())));
+                    if (!land.liquid().present()) {
+                        assertEquals(land.surface(), surface.family(face));
+                        banks[face.landEdge()]++;
+                    } else if (face.finish() == BoardSurface.Finish.TOP) {
+                        fail("A mouth's dry stub must take the bank's material, not the water neighbour");
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    assertTrue(normal.z >= -.001f * normal.len(), () -> "Folded material partition: " + face);
+                }
+                for (int e = 0; e < 6; e++) {
+                    var land = scene.tile(BoardScenes.WATER.translated(BoardGeometry.edgeDirection(e)));
+                    if (!land.liquid().present()) { assertTrue(banks[e] > 0, "Missing shore for edge " + e); }
+                }
+            }
+        }
     }
 }

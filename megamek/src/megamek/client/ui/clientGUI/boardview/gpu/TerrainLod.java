@@ -40,8 +40,23 @@ enum TerrainLod {
         this.dressing = dressing;
     }
 
+    /** Whether the level asks for medium detail late ({@link BoardQuality#detailScale}): coarse carries what medium shows. */
+    static boolean lateDetail() {
+        return BoardQuality.current.detailScale > 1;
+    }
+
+    /**
+     * Whether this detail carries the ground's small formations (rocks, planting pits): from medium, or coarse on a late
+     * level, whose first close zoom would otherwise wait for each chunk's rebuild. They stand in the same places at every
+     * detail.
+     */
+    boolean formations() {
+        return dressing || this == COARSE && lateDetail();
+    }
+
     /** Nearest-point projected hex width, with separate refinement/coarsening thresholds to avoid oscillation. */
     static TerrainLod select(float pixels, TerrainLod current) {
+        pixels /= BoardQuality.current.detailScale;
         int level = current == null ? 3 : current.ordinal();
         while (level > 0 && pixels >= tuning.threshold(level - 1) * (current == null ? 1 : 1.1f)) { level--; }
         while (level < 3 && pixels < tuning.threshold(level) * .9f) { level++; }

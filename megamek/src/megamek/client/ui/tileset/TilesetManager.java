@@ -67,6 +67,7 @@ import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.IPreferenceChangeListener;
 import megamek.common.preference.PreferenceChangeEvent;
 import megamek.common.preference.PreferenceManager;
+import megamek.common.units.Dropship;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.ProtoMek;
@@ -342,6 +343,12 @@ public class TilesetManager implements IPreferenceChangeListener {
         return entityImage == null ? getGenericImage(entity, secondaryPos) : entityImage.getBase();
     }
 
+    /** The clean artwork of a unit drawn whole: a DropShip on its hexes has its stitched image, others their own. */
+    public Image wholeTextureFor(Entity entity) {
+        boolean stitched = (entity instanceof Dropship) && !entity.getSecondaryPositions().isEmpty() && !entity.hasEmbeddedIcon();
+        return textureFor(entity, stitched ? MekTileset.WHOLE : -1);
+    }
+
     /** Retrieves the image from the cache and loads it if not present. */
     private EntityImage getFromCache(Entity entity, int secondaryPos) {
         List<Integer> temp = new ArrayList<>();
@@ -541,6 +548,9 @@ public class TilesetManager implements IPreferenceChangeListener {
             loadImage(en, -1);
         } else {
             en.getSecondaryPositions().keySet().forEach(p -> loadImage(en, p));
+            if (en instanceof Dropship) {
+                loadImage(en, MekTileset.WHOLE);
+            }
         }
     }
 
@@ -584,7 +594,8 @@ public class TilesetManager implements IPreferenceChangeListener {
      */
     public synchronized void loadImage(Entity entity, int secondaryPos) {
         Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity, secondaryPos);
-        Image wreck = wreckTileset.imageFor(entity, secondaryPos);
+        boolean whole = secondaryPos == MekTileset.WHOLE;
+        Image wreck = whole ? null : wreckTileset.imageFor(entity, secondaryPos);
 
         Player player = entity.getOwner();
         Camouflage camouflage = (player == null) ? new Camouflage()
@@ -604,9 +615,13 @@ public class TilesetManager implements IPreferenceChangeListener {
 
         // if we don't have a cached image, make a new one
         if (entityImage == null) {
-            entityImage = EntityImage.createIcon(base, wreck, camouflage, entity, secondaryPos);
+            entityImage = EntityImage.createIcon(base, wreck, camouflage, entity, whole ? -1 : secondaryPos);
             mekImageList.add(entityImage);
-            entityImage.loadFacings();
+            if (whole) {
+                entityImage.loadWholeImage();
+            } else {
+                entityImage.loadFacings();
+            }
         }
 
         // relate this id to this image set

@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.math.Intersector;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import megamek.common.Configuration;
@@ -28,11 +29,17 @@ final class BoardObstacles {
 
     /** Model and kit files that could not be read: their features keep no clearance, and are not read again. */
     private static final java.util.Set<File> UNREADABLE = ConcurrentHashMap.newKeySet();
+    /** Whether each model or kit file exists, asked once: every hex's pass reads its neighbours' structures again. */
+    private static final Map<File, Boolean> FILES = new ConcurrentHashMap<>();
 
     private record Geometry(Map<String, BoardShape> shapes, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
-    static void reload() { MODELS.clear(); UNREADABLE.clear(); BoardWall.reload(); BoardMultiHexBuilding.reload(); }
+    static void reload() {
+        MODELS.clear(); UNREADABLE.clear(); FILES.clear(); BoardWall.reload(); BoardMultiHexBuilding.reload();
+    }
+
+    private static boolean isFile(File file) { return FILES.computeIfAbsent(file, File::isFile); }
 
     /** Remembers a file that cannot be read, unless the read failed because a closing board interrupted its worker. */
     private static void unreadable(File file, RuntimeException failure) {
@@ -185,7 +192,7 @@ final class BoardObstacles {
             boolean multiHex = BoardMultiHexBuilding.supports(feature.asset());
             boolean assembled = BoardIndustrial.supports(feature) || wall || multiHex;
             File customFile = feature.asset().startsWith("buildings/") ? TilesetScenery.customBuildingFile(feature.asset()) : null;
-            boolean custom = object == null && !assembled && customFile != null && customFile.isFile()
+            boolean custom = object == null && !assembled && customFile != null && isFile(customFile)
                   && !UNREADABLE.contains(customFile);
             File root = new File(Configuration.dataDir(), "models/board");
             ConnectedKit.Kit kit = null;
@@ -202,7 +209,7 @@ final class BoardObstacles {
             File file = custom ? customFile : RigidGlb.source(root, feature.asset()).file();
             // A missing or unreadable model draws the renderer's marked box (GpuAssets#missing), which keeps no clearance;
             // a placed one stays editable.
-            if (!assembled && (!file.isFile() || UNREADABLE.contains(file))) { continue; }
+            if (!assembled && (!isFile(file) || UNREADABLE.contains(file))) { continue; }
             Geometry geometry;
             try {
                 geometry = assembled || custom ? null : geometry(root, file);
@@ -210,6 +217,8 @@ final class BoardObstacles {
                 unreadable(file, failure);
                 continue;
             }
+            // An earthwork keeps its triangles' heights (Footprint#earthwork).
+            boolean earthwork = object == null && BoardGroundCut.digs(feature.asset());
             List<Vector3> points = new ArrayList<>();
             if (wall) {
                 // Ground cover grows up to a military wall's body; other dressing also keeps clear of its buttresses. A
@@ -229,10 +238,14 @@ final class BoardObstacles {
                 points.addAll(BoardIndustrial.triangles(BoardIndustrial.layout(scene, tile, feature)));
             } else if (custom) {
                 // The drawn kit's pieces for this hex's connections (GpuBuilding), with the selected roof's underside
-                // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole.
+                // that defines the rendered building's occupied interior; a roof without one (a tank's cap) whole. A
+                // storey's piece repeating a lower one's plan (each comes lowest first) adds nothing a footprint without
+                // local heights tests.
                 int levels = Math.max(1, Math.round(feature.height()));
+                var plans = new java.util.HashSet<Plan>();
                 for (var piece : ConnectedKit.placements(kit, 0, levels, ConnectedKit.reach(scene, tile, levels), 0,
                       GpuBuilding.seed(tile, feature), megamek.common.board.HexAppearance.steppedBuilding(tile.appearance()))) {
+                    if (!earthwork && !piece.role().startsWith("roof") && !plans.add(Plan.of(piece))) { continue; }
                     var triangles = ConnectedKit.triangles(kit, 0, piece);
                     var underside = !piece.role().startsWith("roof") ? List.<Vector3>of()
                           : GpuBuildingInterior.plane(triangles, piece.level() * GpuBuilding.LEVEL_HEIGHT, false);
@@ -298,7 +311,7 @@ final class BoardObstacles {
                 // The tall pier must not reserve empty space over its shorter connecting arms.
                 for (Vector3 point : points) { point.z = low + point.z * verticalScale + upperGround - ground; }
             }
-            if (object == null && BoardGroundCut.digs(feature.asset())) {
+            if (earthwork) {
                 // An earthwork stands on its hex's ground at its model's own zero.
                 points.forEach(point -> point.z = low + point.z * verticalScale);
                 footprints.add(new Footprint(List.copyOf(points), low + bounds.min.z * verticalScale,
@@ -306,6 +319,15 @@ final class BoardObstacles {
                 continue;
             }
             footprints.add(new Footprint(List.copyOf(points), low, low + height + upperGround - ground, bounds, wall || multiHex));
+        }
+    }
+
+    /** A kit piece's footprint seen from above: its node and the rows of its placement that give x and y. */
+    private record Plan(String node, float xx, float xy, float xz, float x, float yx, float yy, float yz, float y) {
+        static Plan of(ConnectedKit.Placement piece) {
+            float[] m = piece.matrix().val;
+            return new Plan(piece.node(), m[Matrix4.M00], m[Matrix4.M01], m[Matrix4.M02], m[Matrix4.M03],
+                  m[Matrix4.M10], m[Matrix4.M11], m[Matrix4.M12], m[Matrix4.M13]);
         }
     }
 
@@ -385,7 +407,7 @@ final class BoardObstacles {
         }
         File root = new File(Configuration.dataDir(), "models/board");
         File file = RigidGlb.source(root, feature.asset()).file();
-        if (!file.isFile() || UNREADABLE.contains(file)) { return null; }
+        if (!isFile(file) || UNREADABLE.contains(file)) { return null; }
         BoundingBox bounds;
         try {
             bounds = geometry(root, file).bounds();
@@ -448,7 +470,7 @@ final class BoardObstacles {
             float edgeZ = BoardBridge.deckZ(BoardBridge.edgeElevation(tile, next, d));
             passage(centre, edge, across, Math.min(centreZ, edgeZ) - BoardBridge.SLAB * s, Math.max(centreZ, edgeZ));
             if (BoardBridge.family(tile) != BoardBridge.Family.NATURAL && !BoardBridge.guideway(tile)
-                  && BoardBridge.bank(tile, next, d) && next.elevation() < tile.elevation() + bridge.elevation()) {
+                  && BoardBridge.bank(tile, next, d) && BoardRoadGrade.ground(next) < tile.elevation() + bridge.elevation()) {
                 // The solid ramp begins at the bridge inset and ends with a wider authored landing block.
                 // Reserve that whole passage, leaving the level centre of the span height-aware above.
                 float lane = (tile.deckCorridor().sides() & 1 << d) != 0

@@ -317,11 +317,7 @@ public class Hex implements Serializable {
                 cTerr.setExit(direction, true);
             }
 
-            // A ground road meets a bridge deck that lands on its hex (the deck exits back, within a level); never from
-            // beneath a deck.
-            if ((other != null) && (cTerr.getType() == Terrains.ROAD) && !containsTerrain(Terrains.BRIDGE)
-                  && other.containsTerrainExit(Terrains.BRIDGE, (direction + 3) % 6)
-                  && (Math.abs(other.getLevel() + other.terrainLevel(Terrains.BRIDGE_ELEV) - getLevel()) <= 1)) {
+            if ((cTerr.getType() == Terrains.ROAD) && bridgeLandsFrom(other, direction)) {
                 cTerr.setExit(direction, true);
             }
 
@@ -338,6 +334,19 @@ public class Hex implements Serializable {
             }
 
         }
+    }
+
+    /**
+     * @param other     the neighbouring hex in the specified direction
+     * @param direction the <code>int</code> direction of the neighbour
+     *
+     * @return Whether a ground road here meets the bridge deck of {@code other}: the deck exits back within a level, and
+     *       this hex holds no deck for the road to lie beneath.
+     */
+    public boolean bridgeLandsFrom(Hex other, int direction) {
+        return (other != null) && !containsTerrain(Terrains.BRIDGE)
+              && other.containsTerrainExit(Terrains.BRIDGE, (direction + 3) % 6)
+              && (Math.abs(other.getLevel() + other.terrainLevel(Terrains.BRIDGE_ELEV) - getLevel()) <= 1);
     }
 
     /**
@@ -1014,6 +1023,11 @@ public class Hex implements Serializable {
               && !containsAllTerrainsOf(Terrains.BRIDGE, Terrains.BRIDGE_ELEV, Terrains.BRIDGE_CF)) {
             newErrors.add("Incomplete Bridge! A hex with any bridge terrain must contain "
                   + "the bridge type, bridge elevation and the bridge CF.");
+        }
+
+        // A deck can lie under water, but not under the ground the water stands on.
+        if (hasBridge() && containsTerrain(Terrains.BRIDGE_ELEV) && terrainLevel(Terrains.BRIDGE_ELEV) < -depth()) {
+            newErrors.add("Bridge below the ground! A bridge deck must not lie lower than the floor of its hex.");
         }
 
         // A road or rail on a deck needs the bridge, and runs only along its exits. Automatic bridge exits follow the

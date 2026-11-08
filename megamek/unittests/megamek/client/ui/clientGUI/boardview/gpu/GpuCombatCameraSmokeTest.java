@@ -86,20 +86,20 @@ class GpuCombatCameraSmokeTest {
                         ticks++;
                         assertTrue(System.nanoTime() < deadline, "Combat camera review must finish");
                         if (GpuBoardTestUi.loading(this)) { return; }
-                        var playback = (UnitPlayback) field(this, "playback");
-                        var ui = (GpuHud) field(this, "ui");
+                        var playback = (UnitPlayback) GpuTestSupport.field(this, "playback");
+                        var ui = (GpuHud) GpuTestSupport.field(this, "ui");
                         if (boardCamera.isFraming()) {
                             playback.attacks().forEach(shot -> assertTrue(shot.seconds <= 0,
                                   "No weapon animation may advance before the camera is ready"));
                         }
                         if (step == 0) {
-                            var scene = (BoardScene) field(this, "scene");
+                            var scene = (BoardScene) GpuTestSupport.field(this, "scene");
                             assertTrue(boardCamera.camera.zoom < 10,
                                   "Opening the window must not zoom far beyond the board");
                             var attacker = scene.units().stream().filter(unit -> unit.id() == 1).findFirst()
                                   .orElseThrow();
                             shots = scene.units().stream().filter(unit -> unit.id() != 1)
-                                  .<BoardScene.Animation>map(target -> UnitPlaybackTest.attack(attacker, target,
+                                  .<BoardScene.Animation>map(target -> UnitPlaybackFixture.attack(attacker, target,
                                         ResolvedAttack.Kind.SHOT, true)).toList();
                             assertEquals(2, shots.size());
                             boardCamera.setIsometric(true);
@@ -107,7 +107,7 @@ class GpuCombatCameraSmokeTest {
                             boardCamera.center(BoardGeometry.center(attacker.location().coords(),
                                   attacker.location().elevation()));
                             boardCamera.zoom(.12f);
-                            ((GpuPlaybackHistory) field(this, "history")).speed(UnitMotion.Speed.QUADRUPLE);
+                            ((GpuPlaybackHistory) GpuTestSupport.field(this, "history")).speed(UnitMotion.Speed.QUADRUPLE);
                             beforePanelChange = boardCamera.camera.combined.val.clone();
                             logWasOpen = ui.state.logOpen();
                             GpuBoardTestUi.click("utility-log");
@@ -179,7 +179,7 @@ class GpuCombatCameraSmokeTest {
                 @SuppressWarnings("unchecked")
                 private void assertCoverage(GpuHud ui) throws Exception {
                     float left = ui.framingLeft(), right = left + ui.framingWidth();
-                    var instances = (Map<String, ModelInstance>) field(this, "unitInstances");
+                    var instances = (Map<String, ModelInstance>) GpuTestSupport.field(this, "unitInstances");
                     for (int id : new int[] { 1, 42, 43 }) {
                         var instance = instances.entrySet().stream()
                               .filter(entry -> entry.getKey().startsWith(id + ":"))
@@ -205,11 +205,5 @@ class GpuCombatCameraSmokeTest {
 
     private static boolean firing(UnitPlayback playback) {
         return playback.attack() != null && playback.attack().seconds > UnitAttack.ANTICIPATION_SECONDS;
-    }
-
-    private static Object field(GpuBattleView view, String name) throws ReflectiveOperationException {
-        var field = GpuBattleView.class.getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(view);
     }
 }

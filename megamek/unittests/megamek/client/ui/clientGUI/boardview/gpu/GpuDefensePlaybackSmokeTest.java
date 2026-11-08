@@ -66,7 +66,7 @@ class GpuDefensePlaybackSmokeTest {
                             var incoming = combat(source, target, launcher, ResolvedAttack.Shot.capture(launcher).withResolution(null, 8).withInterception(id, 6));
                             var defense = combat(target, source, counter, ResolvedAttack.Shot.capture(counter).asDefensive().withInterception(id, 0));
                             var playback = new UnitPlayback();
-                            playback.accept(List.of(defense, incoming), UnitPlaybackTest.scene(source, target), ignored -> false);
+                            playback.accept(List.of(defense, incoming), UnitPlaybackFixture.scene(source, target), ignored -> false);
                             playback.advance(0, UnitMotion.Speed.NORMAL);
                             var attack = playback.attacks().stream().filter(shot -> !shot.defensive()).findFirst().orElseThrow();
                             int maxBursts = 0, laserFrames = 0;

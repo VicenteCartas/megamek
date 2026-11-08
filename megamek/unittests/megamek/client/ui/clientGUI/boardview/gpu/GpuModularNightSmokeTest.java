@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 class GpuModularNightSmokeTest {
     @Test void assembledWindowsLightOnlyAtNightAcrossLods() throws Exception {
         File output = new File("build/gpu-board-review/modular-night"); Files.createDirectories(output.toPath());
-        var scene = BoardSurfaceBlendTest.scene(at -> BoardSurfaceBlendTest.tile(at, BoardScene.Surface.CONCRETE, 0, -1, 0));
+        var scene = BoardScenes.scene(at -> BoardScenes.tile(at, BoardScene.Surface.CONCRETE, 0, -1, 0));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1000, 900); config.setInitialVisible(false);
         new Lwjgl3Application(new ApplicationAdapter() {

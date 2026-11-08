@@ -90,7 +90,7 @@ class GpuNameplatesSmokeTest {
         final GpuHudState state = new GpuHudState(new GpuPlaybackHistory(new UnitPlayback()));
         final GpuNameplates nameplates;
         final Table root;
-        GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
+        GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
 
         Plates(GpuHudTestStage hud) {
             nameplates = new GpuNameplates(hud.kit, mock(GpuBoardSource.class), state);
@@ -103,7 +103,7 @@ class GpuNameplatesSmokeTest {
         void update(GpuHudTestStage hud, GpuBattleStatus.Snapshot status, GpuHudData panels,
               Map<Integer, Vector2> heads, boolean tactical, int hovered) {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
-            nameplates.update(new GpuHud.Inputs(GpuHudInputTest.frame(status, panels),
+            nameplates.update(new GpuHud.Inputs(GpuHudFixtures.frame(status, panels),
                   new GpuHud.HudView(tactical, false, Map.of(), heads, Map.of(), null, hovered, 0), null,
                   preferences, GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
@@ -377,11 +377,11 @@ class GpuNameplatesSmokeTest {
             assertEquals(UiTheme.MINT.g, plates.pip(WARHAMMER).getColor().g, 1e-6);
 
             // The Always setting shows every tag without the key.
-            plates.preferences = GpuHudInputTest.with(GpuHudInputTest.preferences(),
+            plates.preferences = GpuHudFixtures.with(GpuHudFixtures.preferences(),
                   Map.of("nameplates", NameplateMode.ALWAYS));
             plates.update(hud, moving, none, heads, false, Entity.NONE);
             assertEquals(allTags(), plates.markers(roster));
-            plates.preferences = GpuHudInputTest.preferences();
+            plates.preferences = GpuHudFixtures.preferences();
 
             // Hovering an enemy in the movement phase gives its distance from the focus unit; a friend, its model.
             plates.update(hud, moving, none, heads, false, TIMBER_WOLF);
@@ -522,12 +522,12 @@ class GpuNameplatesSmokeTest {
                 // Shot 04's turn: the Atlas has moved, the opponent moves and the Warhammer is up next.
                 List<UnitStatus> roster = new ArrayList<>(GpuHudFixtures.status().units());
                 roster.set(ATLAS - 1, unit(roster.get(ATLAS - 1), false, false, true, false, List.of()));
-                GpuBoardSource.Frame frame = GpuHudInputTest.frame(status(GpuHudFixtures.status(),
+                GpuBoardSource.Frame frame = GpuHudFixtures.frame(status(GpuHudFixtures.status(),
                       GamePhase.MOVEMENT, false, TIMBER_WOLF, roster), panels(GpuFireOrders.Snapshot.EMPTY,
                       GpuPhysicalOptions.Snapshot.EMPTY));
                 GpuHud.HudView view = new GpuHud.HudView(false, false, Map.of(), grid(roster), Map.of(), null,
                       Entity.NONE, 0);
-                GpuBoardSource.UiPreferences preferences = GpuHudInputTest.preferences();
+                GpuBoardSource.UiPreferences preferences = GpuHudFixtures.preferences();
                 Group root = hud.stage.getRoot();
                 Map<Integer, List<String>> pips = pips(roster);
                 pips.put(WARHAMMER, List.of("Warhammer", ""));
@@ -861,7 +861,7 @@ class GpuNameplatesSmokeTest {
     }
 
     private static GpuHudData panels(GpuFireOrders.Snapshot fire, GpuPhysicalOptions.Snapshot physical) {
-        return GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire, physical, GpuUnitRecord.Snapshot.EMPTY);
+        return GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire, physical, GpuUnitRecord.Snapshot.EMPTY);
     }
 
     /** The Atlas's orders of shots 05-07: the Timber Wolf (A, primary, focused) and the BattleMaster (B). */

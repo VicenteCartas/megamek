@@ -68,11 +68,11 @@ class GpuSceneryTreeSmokeTest {
                         var installed = new ArrayList<ModelInstance>();
                         // The tree-stand species of each installed object (null for other props).
                         var treeAssets = new ArrayList<Object>();
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                var instance = (ModelInstance) field(prop, "instance");
-                                var treeAsset = field(prop, "treeAsset");
-                                if (coords.equals(field(prop, "coords")) && roots.stream().anyMatch(f ->
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+                                var treeAsset = GpuTestSupport.field(prop, "treeAsset");
+                                if (coords.equals(GpuTestSupport.field(prop, "coords")) && roots.stream().anyMatch(f ->
                                       f.asset().equals(treeAsset) || instance.nodes.first().id.equals(
                                             f.asset().substring(f.asset().lastIndexOf('/') + 1)))) {
                                     installed.add(instance);
@@ -112,7 +112,7 @@ class GpuSceneryTreeSmokeTest {
                                   samples.get(index).name().equals("roof-trees") ? 3 * BoardGeometry.level() : 5));
                             camera.camera.zoom = .16f;
                             camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, samples.get(index).name() + (overhead ? "-top.png" : ".png")));
                             var center = BoardGeometry.center(coords, 0);
@@ -127,11 +127,5 @@ class GpuSceneryTreeSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Decorative tree integration", failure.get()); }
-    }
-
-    private static Object field(Object target, String name) throws ReflectiveOperationException {
-        var field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
     }
 }

@@ -619,7 +619,7 @@ final class GpuBoardLabels implements GpuHud.Component {
     private static float ringClearance(Vector2 point, Vector2 direction, Rectangle body) {
         if (body == null) { return 0; }
         Vector2 offset = new Vector2(point).sub(body.getCenter(new Vector2()));
-        float radius = body.width / 2 * RING_GAP;
+        float radius = Math.max(body.width, body.height) / 2 * RING_GAP;
         // The far intersection of the line from the point with the circle: t^2 + 2bt + c = 0.
         float b = offset.dot(direction);
         float root = b * b - (offset.len2() - radius * radius);

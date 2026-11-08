@@ -118,6 +118,8 @@ public class EntityImage {
 
     /** Facing-dependent camo overlays (add shadows and highlighting) */
     private static final int[][] pOverlays = new int[6][IMG_SIZE];
+    /** {@link #applyColor}: an image no facing's overlay applies to. */
+    static final int NO_FACING = -1;
 
     // Battlefield Support Asset marker-stripe overlay tuning.
     /** The repeat period in pixels (colored stripe + gap) of the repeating marker pattern. */
@@ -347,8 +349,8 @@ public class EntityImage {
             }
         }
 
-        // Apply the player/unit camouflage
-        base = applyColor(base, 0);
+        // Apply the player/unit camouflage, without a facing's baked shadow: nothing draws this image at a facing of its own
+        base = applyColor(base, NO_FACING);
         if (shouldApplyOverlay()) {
             base = applyAssetStripeOverlay(base);
         }
@@ -426,11 +428,23 @@ public class EntityImage {
     }
 
     public @Nullable Image loadPreviewImage(final boolean showDamage) {
+        return loadPreviewImage(showDamage, NO_FACING);
+    }
+
+    /** A whole multi-hex image ({@link MekTileset#WHOLE}), larger than a hex and without facings: the base, camouflaged. */
+    void loadWholeImage() {
+        if (base != null) {
+            base = applyColor(base, NO_FACING, base.getWidth(null), base.getHeight(null));
+        }
+    }
+
+    /** {@link #loadPreviewImage(boolean)} with the shadows and highlights of {@code facing} ({@link #applyColor}). */
+    @Nullable Image loadPreviewImage(final boolean showDamage, final int facing) {
         if (base == null) {
             return null;
         }
 
-        base = applyColor(getBase(), 0);
+        base = applyColor(getBase(), facing);
         if (shouldApplyOverlay()) {
             base = applyAssetStripeOverlay(getBase());
         }
@@ -446,8 +460,19 @@ public class EntityImage {
         return getBase();
     }
 
-    /** Applies the unit individual or player camouflage to the icon. */
+    /**
+     * Applies the unit individual or player camouflage to the icon, with the shadows and highlights of {@code facing}, or
+     * none with {@link #NO_FACING}.
+     */
     protected Image applyColor(Image image, int facing) {
+        return applyColor(image, facing, IMG_WIDTH, IMG_HEIGHT);
+    }
+
+    /**
+     * {@link #applyColor(Image, int)} on an image of the given size: the camouflage keeps its size, repeating mirrored
+     * ({@link #mirroredIndex}) across a larger image without a seam.
+     */
+    private Image applyColor(Image image, int facing, int width, int height) {
         if (image == null) {
             return null;
         }
@@ -456,10 +481,10 @@ public class EntityImage {
         final int colour = colourCamouflage ? PlayerColour.parseFromString(getCamouflage().getFilename()).getHex() : -1;
 
         // Prepare the images for access
-        int[] pMek = new int[IMG_SIZE];
+        int[] pMek = new int[width * height];
         int[] pCamo = new int[IMG_SIZE];
         try {
-            grabImagePixels(image, pMek);
+            grabImagePixels(image, pMek, width, height);
             if (!colourCamouflage && hasCamouflage) {
                 grabImagePixels(getCamouflage().getImage(), pCamo);
             }
@@ -470,7 +495,7 @@ public class EntityImage {
 
         if (hasCamouflage) {
             // Overlay the camo or color
-            for (int i = 0; i < IMG_SIZE; i++) {
+            for (int i = 0; i < pMek.length; i++) {
                 int pixel = pMek[i];
                 int alpha = (pixel >> 24) & 0xff;
                 int red = (pixel >> 16) & 0xff;
@@ -485,15 +510,15 @@ public class EntityImage {
                 // Apply the camo only on the icon pixels, not on transparent pixels
                 if (alpha != 0) {
                     int pixel1 = colourCamouflage ? colour
-                          : rotatedAndScaledColor(i, getCamouflage().getRotationRadians(),
-                          getCamouflage().getScaleFactor(), pCamo);
+                          : rotatedAndScaledColor(i % width - (width - 1) / 2.0, i / width - (height - 1) / 2.0,
+                          getCamouflage().getRotationRadians(), getCamouflage().getScaleFactor(), pCamo);
                     int red1 = (pixel1 >> 16) & 0xff;
                     int green1 = (pixel1 >> 8) & 0xff;
                     int blue1 = (pixel1) & 0xff;
 
                     // Pretreat with the camo overlay (but not Infantry, they're too small, it'll just darken them)
                     int overlayAlpha = 128;
-                    if (GUIP.getUseCamoOverlay() && !isInfantry && isSingleHex) {
+                    if (facing != NO_FACING && GUIP.getUseCamoOverlay() && !isInfantry && isSingleHex) {
                         overlayAlpha = pOverlays[facing][i] & 0xff;
                     }
 
@@ -515,7 +540,7 @@ public class EntityImage {
                 }
             }
         }
-        ImageProducer producer = new MemoryImageSource(IMG_WIDTH, IMG_HEIGHT, pMek, 0, IMG_WIDTH);
+        ImageProducer producer = new MemoryImageSource(width, height, pMek, 0, width);
         Image result = Toolkit.getDefaultToolkit().createImage(producer);
         return ImageUtil.createAcceleratedImage(result);
     }
@@ -615,30 +640,25 @@ public class EntityImage {
     }
 
     /**
-     * Returns a color from the given camoImage lookup array where the given lookup index is rotated by the given angle
-     * and scaled by the given scale.
+     * Returns a color from the given camoImage lookup array for a pixel of the image being colored, rotated around the
+     * center by the given angle and scaled by the given scale.
      *
-     * @param originalIndex The original lookup index (0 ... 84 x 72 - 1)
-     * @param angle         The rotation angle in radians (0 = no change)
-     * @param scale         The scale factor (1 = no change)
-     * @param camoImage     The image pixel grabber lookup array
+     * @param cx        The pixel's horizontal distance from the center of the image being colored
+     * @param cy        The pixel's vertical distance from the center of the image being colored
+     * @param angle     The rotation angle in radians (0 = no change)
+     * @param scale     The scale factor (1 = no change)
+     * @param camoImage The image pixel grabber lookup array
      *
      * @return The rotated and scaled image pixel color as an int value (as from the image lookup array)
      */
-    private int rotatedAndScaledColor(int originalIndex, double angle, double scale, int[] camoImage) {
-        // get the pixel coordinates
-        int y = originalIndex / 84;
-        int x = originalIndex - y * 84;
-        // center coordinates to rotate around the image center
-        double cy = y - 35.5;
-        double cx = x - 41.5;
+    private int rotatedAndScaledColor(double cx, double cy, double angle, double scale, int[] camoImage) {
         // rotate, scale and remove centering
         double ry = (Math.sin(angle) * cx + Math.cos(angle) * cy) / scale + 35.5;
         double rx = (Math.cos(angle) * cx - Math.sin(angle) * cy) / scale + 41.5;
         // interpolate between the four surrounding actual image pixels
-        int rx1 = (int) rx;
+        int rx1 = (int) Math.floor(rx);
         int rx2 = rx1 + 1;
-        int ry1 = (int) ry;
+        int ry1 = (int) Math.floor(ry);
         int ry2 = ry1 + 1;
         double dx = rx - rx1;
         double dy = ry - ry1;
@@ -800,7 +820,12 @@ public class EntityImage {
 
     /** Initiates the PixelGrabber for the given image and int array. */
     private static void grabImagePixels(Image img, int[] pixels) throws InterruptedException, RuntimeException {
-        PixelGrabber pg = new PixelGrabber(img, 0, 0, IMG_WIDTH, IMG_HEIGHT, pixels, 0, IMG_WIDTH);
+        grabImagePixels(img, pixels, IMG_WIDTH, IMG_HEIGHT);
+    }
+
+    private static void grabImagePixels(Image img, int[] pixels, int width, int height)
+          throws InterruptedException, RuntimeException {
+        PixelGrabber pg = new PixelGrabber(img, 0, 0, width, height, pixels, 0, width);
         pg.grabPixels();
         if ((pg.getStatus() & ImageObserver.ABORT) != 0) {
             throw new RuntimeException("ImageObserver aborted.");

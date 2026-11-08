@@ -478,4 +478,27 @@ class BoardCameraPanTest {
         }
         return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
+
+    @Test
+    void panFollowsThePointerAndZoomRetainsItsAnchorWithoutRaisingThePivot() {
+        BoardCamera view = new BoardCamera();
+        view.resize(1100, 750);
+        for (float tilt : new float[] { 0, 35, BoardCamera.MAX_TILT }) {
+            view.setIsometric(false);
+            view.orbit(135, tilt);
+            view.center(BoardGeometry.center(new Coords(2, 2), 0));
+            Vector3 anchor = BoardGeometry.center(new Coords(3, 3), 0);
+            Vector3 before = view.camera.project(new Vector3(anchor), 0, 0, 1100, 750);
+            view.pan(75, -25);
+            Vector3 panned = view.camera.project(new Vector3(anchor), 0, 0, 1100, 750);
+            assertEquals(before.x + 75, panned.x, 0.1f);
+            assertEquals(before.y + 25, panned.y, 0.1f);
+            assertEquals(0, view.focus.z, 0.001f);
+            view.zoomAt(0.6f, panned.x, panned.y);
+            Vector3 zoomed = view.camera.project(new Vector3(anchor), 0, 0, 1100, 750);
+            assertEquals(panned.x, zoomed.x, 0.1f);
+            assertEquals(panned.y, zoomed.y, 0.1f);
+            assertEquals(0, view.focus.z, 0.001f);
+        }
+    }
 }

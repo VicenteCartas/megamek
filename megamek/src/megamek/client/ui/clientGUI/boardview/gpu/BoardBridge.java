@@ -262,6 +262,12 @@ final class BoardBridge {
                     }
                 }
             }
+            // Two of this deck's own approaches meet here and no other deck: the corner lies on both their edges, at
+            // their heights, so the turn between them has no crease down towards the ground's lower mean.
+            if (!bankHeight && joined[1] && joined[2] && feature(neighbors[1]) == null && feature(neighbors[2]) == null) {
+                result.add((edgeElevation(tile, neighbors[1], first) + edgeElevation(tile, neighbors[2], second)) / 2 - level);
+                continue;
+            }
             float height = 0;
             int count = 0;
             float banks = 0;
@@ -269,10 +275,10 @@ final class BoardBridge {
             for (int i = 0; i < neighbors.length; i++) {
                 if (joined[i]) {
                     var bridge = feature(neighbors[i]);
-                    height += neighbors[i].elevation() + (bridge == null ? 0 : bridge.elevation());
+                    height += bridge == null ? neighbors[i].floor() : neighbors[i].elevation() + bridge.elevation();
                     count++;
                     if (bridge == null) {
-                        banks += neighbors[i].elevation();
+                        banks += neighbors[i].floor();
                         bankCount++;
                     }
                 }
@@ -306,8 +312,8 @@ final class BoardBridge {
                 if (connected(current, next, d) && family(next) == family) {
                     if (visited.add(next.coords())) { pending.add(next); }
                 } else if (family == Family.NATURAL && !(next != null && next.roadExits() != 0 && road(current, next, d))
-                      && abutment(current, next, d) && next.surface() != BoardScene.Surface.CONCRETE
-                      && banks.add(next.coords())) {
+                      && abutment(current, next, d) && !next.liquid().present()
+                      && next.surface() != BoardScene.Surface.CONCRETE && banks.add(next.coords())) {
                     votes[next.surface().ordinal()]++;
                 }
             }
@@ -334,15 +340,15 @@ final class BoardBridge {
 
     static boolean bank(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         return abutment(tile, next, direction)
-              && next.elevation() <= tile.elevation() + feature(tile).elevation() + 1;
+              && next.floor() <= tile.elevation() + feature(tile).elevation() + 1;
     }
 
-    /** Solid ground that can anchor a span, including a cliff rising above its deck. */
+    /** Solid ground that can anchor a span, including a cliff rising above its deck; under water, its bed. */
     static boolean abutment(BoardScene.Tile tile, BoardScene.Tile next, int direction) {
         var bridge = feature(tile);
-        return bridge != null && next != null && !next.liquid().present() && feature(next) == null
+        return bridge != null && next != null && BoardRoad.groundShown(next) && feature(next) == null
               && (bridge.bridgeExits() & (1 << direction)) != 0
-              && next.elevation() >= tile.elevation() + bridge.elevation() - 1;
+              && next.floor() >= tile.elevation() + bridge.elevation() - 1;
     }
 
     /** A bridge's passage at deck height, through a bank or along the deck; what lies well below it is no obstruction. */
@@ -383,10 +389,12 @@ final class BoardBridge {
             direction.scl(1 / length);
             // Both styles reserve the usable passage. A distant road edit must not change the bank's ground mesh.
             float width = passage(tile, d) * BoardGeometry.hexScale();
-            float level = span ? Math.min(tile.elevation() + own.elevation(),
-                  edgeElevation(tile, scene.tile(tile.coords().translated(d)), d)) * BoardGeometry.level() : center.z;
+            float level = (span ? Math.min(tile.elevation() + own.elevation(),
+                  edgeElevation(tile, scene.tile(tile.coords().translated(d)), d)) : BoardRoadGrade.ground(tile))
+                  * BoardGeometry.level();
             boolean supportedLanding = !span && family(next) != Family.NATURAL && !guideway(next)
-                  && road(next, tile, (d + 3) % 6) && next.elevation() + feature(next).elevation() == tile.elevation();
+                  && road(next, tile, (d + 3) % 6)
+                  && next.elevation() + feature(next).elevation() == BoardRoadGrade.ground(tile);
             result.add(new Approach(center.x, center.y, direction.x, direction.y, length, width, level, supportedLanding));
         }
         return List.copyOf(result);
@@ -412,7 +420,7 @@ final class BoardBridge {
         float level = tile.elevation() + feature(tile).elevation();
         if (connected(tile, next, direction)) { return (level + next.elevation() + feature(next).elevation()) / 2; }
         boolean ramp = road(tile, next, direction) || family(tile) != Family.NATURAL && !guideway(tile)
-              && bank(tile, next, direction) && next.elevation() < level;
-        return ramp ? (level + next.elevation()) / 2 : level;
+              && bank(tile, next, direction) && BoardRoadGrade.ground(next) < level;
+        return ramp ? (level + BoardRoadGrade.ground(next)) / 2 : level;
     }
 }

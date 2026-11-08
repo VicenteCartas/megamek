@@ -20,7 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardRoadConcreteTest {
     private static BoardScene scene() {
-        return BoardCliffSeamTest.scene(new File(
+        return BoardScenes.scene(new File(
               "data/boards/unofficial/SimonLandmine/32x34/32x34 DesertCity1 NE.board"));
     }
 
@@ -67,13 +67,13 @@ class BoardRoadConcreteTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 3, 4, 5 })
     void roadsReachFittedConcreteFromEveryDirection(int direction) {
-        var at = BoardRoadTest.CENTER;
+        var at = BoardScenes.CENTER;
         var receiver = at.translated(direction);
         var paving = new HashSet<Coords>();
         for (int i = -2; i <= 2; i++) {
             paving.add(receiver.translated((direction + (i < 0 ? 4 : 1)) % 6, Math.abs(i)));
         }
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE, c.equals(at) ? 1 << direction : 0, 0,
               paving.contains(c) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND));
         var concrete = new BoardSurface(scene, scene.tile(receiver));
@@ -121,7 +121,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseConcreteApronsDoNotReceiveRoundedRoadCaps() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var at : List.of(new Coords(5, 6), new Coords(7, 15), new Coords(7, 16),
               new Coords(8, 15), new Coords(8, 16), new Coords(14, 8), new Coords(15, 8), new Coords(15, 9))) {
             var apron = scene.tile(at);
@@ -146,7 +146,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseRoadsMeetConcreteAcrossTheirFullCarriageways() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var lod : TerrainLod.values()) {
             for (int direction : new int[] { 1, 2 }) { assertMeetsConcrete(scene, new Coords(6, 16), direction, lod); }
             for (int direction : new int[] { 4, 5 }) { assertMeetsConcrete(scene, new Coords(9, 15), direction, lod); }
@@ -155,7 +155,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void militaryBaseConcreteEntrancesHaveNoLinesAndRetainPaintFartherAlongTheRoad() throws Exception {
-        var scene = GpuRoadSourceTest.scene("buildingsnobasement/militarybase2.board");
+        var scene = BoardScenes.installedScene("buildingsnobasement/militarybase2.board");
         for (var at : List.of(new Coords(6, 16), new Coords(9, 15))) {
             var tile = scene.tile(at);
             var road = BoardRoad.of(scene, tile);
@@ -182,7 +182,7 @@ class BoardRoadConcreteTest {
                     double distance = edges.stream().mapToDouble(edge -> Line2D.ptSegDist(
                           edge[0].x, edge[0].y, edge[1].x, edge[1].y, wx, wy)).min().orElseThrow() / scale;
                     final float px = x, py = y;
-                    float alpha = (float) paint.stream().mapToDouble(mask -> BoardRoadTest.maskAlpha(mask, px, py))
+                    float alpha = (float) paint.stream().mapToDouble(mask -> BoardScenes.maskAlpha(mask, px, py))
                           .max().orElse(0);
                     if (distance < 12) {
                         assertEquals(0, alpha, .001f, "No stop bar or divider beside the fitted apron: "
@@ -198,8 +198,8 @@ class BoardRoadConcreteTest {
 
     @Test
     void anExplicitRoadOnConcreteRetainsItsOwnPaint() {
-        var at = BoardRoadTest.CENTER;
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        var at = BoardScenes.CENTER;
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(at) || c.equals(at.translated(0)) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
               c.equals(at) || c.equals(at.translated(0)) ? 9 : 0, 0,
               c.equals(at) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND));
@@ -218,7 +218,7 @@ class BoardRoadConcreteTest {
 
     @Test
     void parkDistrictThroughRoadsAndRoundaboutsStayPaintedAcrossFittedConcrete() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack City/City Districts/16x17 Park District.board");
+        var scene = BoardScenes.installedScene("Map Pack City/City Districts/16x17 Park District.board");
         record Crossing(Coords road, Coords concrete) { }
         for (var crossing : List.of(
               new Crossing(new Coords(13, 7), new Coords(14, 7)),
@@ -240,7 +240,7 @@ class BoardRoadConcreteTest {
                 // Fitted concrete can move well outside its nominal hex; sample the actual road footprint.
                 for (int x = (int) Math.floor(bounds.getMinX()); x <= Math.ceil(bounds.getMaxX()); x++) {
                     for (int y = (int) Math.floor(bounds.getMinY()); y <= Math.ceil(bounds.getMaxY()); y++) {
-                        if (BoardRoadTest.maskAlpha(painted.mask(), x, y) < .99f) { continue; }
+                        if (BoardScenes.maskAlpha(painted.mask(), x, y) < .99f) { continue; }
                         float px = BoardGeometry.centerX(crossing.road()) + x * scale;
                         float py = BoardGeometry.centerY(crossing.road()) + y * scale;
                         if (!Float.isFinite(BoardSurface.sampleHeight(surface.groundFaces(), px, py, Float.NaN))) { continue; }
@@ -274,7 +274,7 @@ class BoardRoadConcreteTest {
     private record Road(Coords at, GpuRoads.MaskData mask, List<BoardTacticalGeometry.Triangle> triangles) {
         boolean covers(float x, float y) {
             float scale = BoardGeometry.hexScale();
-            if (BoardRoadTest.maskAlpha(mask, (x - BoardGeometry.centerX(at)) / scale,
+            if (BoardScenes.maskAlpha(mask, (x - BoardGeometry.centerX(at)) / scale,
                   (y - BoardGeometry.centerY(at)) / scale) < .99f) { return false; }
             // Use terrain's border tolerance: a float ray can reject both triangles of an exact shared edge.
             return triangles.stream().anyMatch(t -> Float.isFinite(new BoardSurface.Face(t.a(), t.b(), t.c(), BoardSurface.Finish.TOP)

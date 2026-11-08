@@ -215,7 +215,10 @@ final class LobbyBoardPreview extends Table implements Disposable {
             if (!interactive() || button == -1) { return; }
             hover(x, y);
             if (!dragged && Math.abs(x - startX) + Math.abs(y - startY) < BoardCameraControls.DRAG_THRESHOLD) { return; }
-            if (!dragged && orbiting) { cursor.capture(x, y); }
+            if (!dragged && orbiting) {
+                cursor.capture(x, y, event.getStage());
+                cursor.beganAt(startX, startY);
+            }
             dragged = true;
             if (orbiting) {
                 Vector2 at = cursor.trusted(x, y);
@@ -264,6 +267,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
         }
 
         private void hover(float x, float y) {
+            // The hidden cursor points at nothing; its return move after the release refreshes the hover.
+            if (UiCursorCapture.pointerHidden()) { return; }
             hovering = true;
             hoverX = x; hoverY = y;
             Pick hit = pick(x, y);
@@ -546,6 +551,8 @@ final class LobbyBoardPreview extends Table implements Disposable {
         installed = false;
         image.setDrawable(null);
         if (terrain != null) {
+            // As the battle view does: nothing drawn without a view inherits this one's choice.
+            BoardQuality.current = BoardQuality.HIGH;
             terrain.dispose();
             terrain = null;
         }

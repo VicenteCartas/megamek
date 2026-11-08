@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -144,11 +145,31 @@ public final class BoardEditorBlueprint {
         /** A picker family: assets on one card, which a Type row swaps. */
         public boolean picker() { return family() && !gallery(); }
     }
-    public record Section(String category, String id, List<Card> cards) {
+    /** {@code subcategory}: the subcategory that shows it, behind one card of the category's page; null for that page itself. */
+    public record Section(String category, String id, String subcategory, List<Card> cards) {
         public String path() { return category + "/" + id; }
     }
-    /** {@code themes}: null except for the Theme category (its special themes); {@code iconNode}: one hex in the .board2 form. */
-    public record Category(String id, List<String> themes, List<Section> sections, String iconNode) {
+    /**
+     * {@code themes}: null except for the Theme category (its special themes); {@code sections}: all of them, the
+     * subcategories' too; {@code iconNode}: one hex in the .board2 form; {@code shelves}: the page section whose shelf shows
+     * a subcategory's card, for those not on the top shelf.
+     */
+    public record Category(String id, List<String> themes, List<Section> sections, String iconNode, Map<String, String> shelves) {
+        /** The subcategories, in order. */
+        public List<String> subcategories() {
+            return sections.stream().map(Section::subcategory).filter(Objects::nonNull).distinct().toList();
+        }
+
+        /** The subcategories whose cards {@code section}'s shelf shows; null: the top shelf's. */
+        public List<String> subcategories(String section) {
+            return subcategories().stream().filter(subcategory -> Objects.equals(shelves.get(subcategory), section)).toList();
+        }
+
+        /** The sections of {@code subcategory}; null: those on the category's own page. */
+        public List<Section> sections(String subcategory) {
+            return sections.stream().filter(section -> Objects.equals(section.subcategory(), subcategory)).toList();
+        }
+
         /** A fresh hex each call. */
         public Hex icon() {
             try { return BoardFile.fromClipboard(HEX + iconNode); }
@@ -332,12 +353,28 @@ public final class BoardEditorBlueprint {
         List<Category> categories = new ArrayList<>();
         for (JsonNode category : root.withArray("categories")) {
             String id = category.path("id").asText();
+            Map<String, String> subcategories = new HashMap<>();
+            for (var subcategory : category.path("subcategories").properties()) {
+                for (String section : strings(subcategory.getValue())) {
+                    if (!sections.containsKey(id + "/" + section) || subcategories.putIfAbsent(section, subcategory.getKey()) != null) {
+                        throw new IOException("Subcategory " + subcategory.getKey() + " has an unknown or taken section " + section);
+                    }
+                }
+            }
             List<Section> list = new ArrayList<>();
             for (JsonNode section : category.withArray("sections")) {
-                list.add(new Section(id, section.asText(), List.copyOf(sections.get(id + "/" + section.asText()))));
+                list.add(new Section(id, section.asText(), subcategories.get(section.asText()), List.copyOf(sections.get(id + "/" + section.asText()))));
+            }
+            Map<String, String> shelves = new HashMap<>();
+            for (var shelf : category.path("subcategoryShelf").properties()) {
+                String section = shelf.getValue().asText();
+                if (!subcategories.containsValue(shelf.getKey()) || !sections.containsKey(id + "/" + section) || subcategories.containsKey(section)) {
+                    throw new IOException("Subcategory " + shelf.getKey() + " needs a section of its category's page for its card, not " + section);
+                }
+                shelves.put(shelf.getKey(), section);
             }
             categories.add(new Category(id, category.has("themes") ? strings(category.get("themes")) : null, List.copyOf(list),
-                  category.path("icon").toString()));
+                  category.path("icon").toString(), Map.copyOf(shelves)));
         }
         return new BoardEditorBlueprint(components, variants, assets, categories, entries, cards);
     }

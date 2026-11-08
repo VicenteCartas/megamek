@@ -61,7 +61,7 @@ class GpuTundraSmokeTest {
             camera.camera.zoom = .32f;
             camera.center(BoardGeometry.center(new Coords(5, 3), 0));
             for (String theme : List.of("grass", "fungus", "lunar")) {
-                var scene = BoardAridSurfaceTest.capture(BoardTundraTest.board(theme, true));
+                var scene = BoardScenes.capture(BoardTundraTest.board(theme, true));
                 install(terrain, frame, camera, scene);
                 frame.render(terrain, camera, scene);
                 byte[] baseline = pixels(camera);
@@ -70,7 +70,7 @@ class GpuTundraSmokeTest {
                     var changed = manager.apply(Map.of("terrain-tundra.glsl",
                           source.replace(boundary, boundary + " return " + endpoint + ".0;")));
                     assertTrue(changed.success(), changed.message());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     endpoints[endpoint] = pixels(camera);
                     GpuReviewFrame.save(new File(output, theme + "-variant-" + endpoint + ".png"));
@@ -89,7 +89,7 @@ class GpuTundraSmokeTest {
                 }
                 var restored = manager.apply(Map.of());
                 assertTrue(restored.success(), restored.message());
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
                 assertArrayEquals(baseline, pixels(camera), theme + " must restore the landform wetness");
             }
@@ -104,8 +104,8 @@ class GpuTundraSmokeTest {
         var before = new ArrayList<BoardScene>();
         var after = new ArrayList<BoardScene>();
         for (String theme : BoardTundraTest.THEMES) {
-            before.add(BoardAridSurfaceTest.capture(BoardTundraTest.board(theme, false)));
-            after.add(BoardAridSurfaceTest.capture(BoardTundraTest.board(theme, true)));
+            before.add(BoardScenes.capture(BoardTundraTest.board(theme, false)));
+            after.add(BoardScenes.capture(BoardTundraTest.board(theme, true)));
         }
         var mixedBoard = BoardTundraTest.board("grass", true);
         for (int x = 0; x < 8; x++) for (int y = 0; y < 6; y++) {
@@ -113,7 +113,7 @@ class GpuTundraSmokeTest {
                   : y == 3 && x == 2 ? "pavement:1;tundra:1" : "tundra:1";
             mixedBoard.setHex(new Coords(x, y), new Hex(y < 2 ? 3 : 0, cover, x < 4 ? "grass" : "fungus"));
         }
-        var mixed = BoardAridSurfaceTest.capture(mixedBoard);
+        var mixed = BoardScenes.capture(mixedBoard);
         var terracesBefore = new ArrayList<BoardScene>();
         var terracesAfter = new ArrayList<BoardScene>();
         for (boolean concrete : new boolean[] { false, true }) {
@@ -124,7 +124,7 @@ class GpuTundraSmokeTest {
                     if (tundra && x >= 4) { cover += ";tundra:1"; }
                     board.setHex(new Coords(x, y), new Hex(y < 2 ? 2 : y < 4 ? 1 : 0, cover, "grass"));
                 }
-                (tundra ? terracesAfter : terracesBefore).add(BoardAridSurfaceTest.capture(board));
+                (tundra ? terracesAfter : terracesBefore).add(BoardScenes.capture(board));
             }
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "tundra");
@@ -142,7 +142,7 @@ class GpuTundraSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     for (int i = 0; i < before.size(); i++) {
                         for (boolean oblique : new boolean[] { false, true }) {
                             camera.setIsometric(oblique);
@@ -222,7 +222,7 @@ class GpuTundraSmokeTest {
           throws Exception {
         frame.prepare(terrain, camera, scene);
         terrain.update(scene);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
     }
 
     private static byte[] pixels(BoardCamera camera) {

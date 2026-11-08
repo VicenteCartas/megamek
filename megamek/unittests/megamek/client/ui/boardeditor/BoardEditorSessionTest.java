@@ -92,14 +92,12 @@ class BoardEditorSessionTest {
         session.save(file);
         send(session, Action.ELEVATION, "", "2");
         session.board().addTag("Arena");
-        session.board().setRoadsAutoExit(!session.board().getRoadsAutoExit());
         send(session, Action.UNDO, "", "");
         assertTrue(session.dirty(), "Undoing a hex cannot hide unsaved board settings");
         session.save(file);
         assertFalse(session.dirty());
         var loaded = BoardFile.read(file);
         assertEquals(session.board().getTags(), loaded.getTags());
-        assertEquals(session.board().getRoadsAutoExit(), loaded.getRoadsAutoExit());
     }
 
     /**
@@ -307,7 +305,10 @@ class BoardEditorSessionTest {
         var blueprint = BoardEditorBlueprint.get();
         var covered = blueprint.components().stream().flatMap(c -> c.fields().stream()).map(BoardEditorBlueprint.Field::terrain).toList();
         assertEquals(covered.size(), covered.stream().distinct().count());
-        for (int type = 1; type < Terrains.SIZE; type++) { assertTrue(covered.contains(Terrains.getName(type)), Terrains.getName(type)); }
+        // The import takes bldg_fluff, so no editor document holds one and the blueprint has no field for it.
+        for (int type = 1; type < Terrains.SIZE; type++) {
+            if (type != Terrains.BLDG_FLUFF) { assertTrue(covered.contains(Terrains.getName(type)), Terrains.getName(type)); }
+        }
         var hex = new megamek.common.Hex(0, "road:1:9;fluff:12;woods:1;foliage_elev:2", "");
         hex.setAppearance(Map.of("road", new megamek.common.board.HexAppearance("road/rounded", null, null, null)));
         var query = blueprint.artwork(hex, "road");
@@ -1057,7 +1058,6 @@ class BoardEditorSessionTest {
     /** A road or bridge that does not join up is an issue with its recommended fix; games do not refuse it. */
     @Test void aRoadIntoNothingIsAnIssueWithItsFixButNoRulesError() throws Exception {
         var board = megamek.common.board.Board.createEmptyBoard(3, 3);
-        board.setRoadsAutoExit(false);
         Coords road = new Coords(1, 1);
         board.setHex(road, new Hex(0, "road:1:1", ""));
         Path file = directory.resolve("road.board2"); BoardFile.save(board, file);
@@ -1426,11 +1426,23 @@ class BoardEditorSessionTest {
         assertFalse(session.snapshot().canUndo(), "Flood was one undo step");
     }
 
+    /** Your flooded city: the ground stays, the water rises two levels, and a deck one level over the ground ends up under it. */
+    @Test void floodLeavesADeckOverTheSameGround() {
+        var session = session();
+        Coords street = new Coords(2, 2);
+        session.board().setHex(street, new Hex(-2, "bridge:1:9;bridge_cf:40;bridge_elev:1", ""));
+        send(session, Action.FLOOD, "", "0");
+        Hex flooded = session.board().getHex(street);
+        assertEquals(2, flooded.terrainLevel(Terrains.WATER));
+        assertEquals(-1, flooded.terrainLevel(Terrains.BRIDGE_ELEV));
+        assertTrue(flooded.isValid(null), "A deck may lie under water");
+    }
+
     /**
-     * Flood with Remove clears the submerged hexes but keeps a bridge whose deck stays above the water (with the objects
-     * on its deck, its height now above the new surface) and the deployment zones, which are scenario data.
+     * Flood with Remove clears the submerged hexes but keeps a bridge where it is (with the objects on its deck, its height
+     * now from the new surface) and the deployment zones, which are scenario data.
      */
-    @Test void floodRemoveKeepsADeckAboveTheWaterAndTheDeploymentZones() {
+    @Test void floodRemoveKeepsDecksAndTheDeploymentZones() {
         var session = session();
         Coords woods = new Coords(2, 2), building = new Coords(4, 4), bridge = new Coords(6, 6), sunk = new Coords(8, 8);
         session.board().setHex(woods, new Hex(-1, "woods:1;foliage_elev:2;deployment_zone:0:5", ""));
@@ -1451,7 +1463,7 @@ class BoardEditorSessionTest {
         assertTrue(kept.containsTerrain(Terrains.BRIDGE));
         assertEquals(1, kept.terrainLevel(Terrains.BRIDGE_ELEV), "The deck stays at L1, now one level above the surface");
         assertEquals(List.of("on-deck"), kept.getDecorations().stream().map(BoardDecoration::id).toList());
-        assertFalse(session.board().getHex(sunk).containsTerrain(Terrains.BRIDGE), "A deck below the surface goes");
+        assertEquals(-2, session.board().getHex(sunk).terrainLevel(Terrains.BRIDGE_ELEV), "A deck the water rises past stays at L-2");
         send(session, Action.UNDO, "", "");
         assertEquals(before, nodes(session, woods, building, bridge, sunk));
     }
@@ -1519,21 +1531,83 @@ class BoardEditorSessionTest {
         assertEquals(before, nodes(session, new Coords(5, 5), new Coords(9, 9)));
     }
 
-    /** Exit Roads to Pavement: a road beside pavement loses its automatic exit, and the option is saved. */
-    @Test void exitRoadsToPavementChangesAutomaticRoadExitsAndIsSaved() throws Exception {
-        var session = session();
+    /** A legacy road keeps its exit into pavement when opened, as a game of that file has it, and the saved file holds it. */
+    @Test void anOpenedLegacyRoadKeepsItsExitsAsStoredOnes() throws Exception {
         Coords road = new Coords(3, 3), pavement = road.translated(0);
-        session.board().setHex(road, new Hex(0, "road:1", ""));
-        session.board().setHex(pavement, new Hex(0, "pavement:1", ""));
-        assertTrue(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0), "The road exits to the pavement");
-        send(session, Action.BOARD, "roads", "false");
-        assertFalse(session.snapshot().roadsAutoExit());
-        assertFalse(session.board().getHex(road).containsTerrainExit(Terrains.ROAD, 0));
-        assertTrue(session.dirty());
+        var legacy = megamek.common.board.Board.createEmptyBoard(8, 8);
+        legacy.setHex(pavement, new Hex(0, "pavement:1", ""));
+        legacy.setHex(road, new Hex(0, "road:1", ""));
+        var session = new BoardEditorSession();
+        session.open(legacy, null);
+        var opened = session.board().getHex(road).getTerrain(Terrains.ROAD);
+        assertTrue(opened.hasExitsSpecified());
+        assertEquals(1, opened.getExits());
         Path file = directory.resolve("roads.board2");
         session.save(file);
-        assertTrue(Files.readString(file).contains("\"exitRoadsToPavement\":false"));
-        assertFalse(BoardFile.read(file).getRoadsAutoExit());
+        assertEquals(1, BoardFile.read(file).getHex(road).getTerrain(Terrains.ROAD).getExits());
+    }
+
+    /**
+     * A water or pavement side turned off in Edit parts both hexes, saves as named directions under one property and no
+     * derived sides, and survives reopening; only the same terrain at the same level can be parted, and terrain gone from
+     * a hex rejoins its neighbours' sides, so what is painted there again connects.
+     */
+    @Test void separatedSidesPartBothHexesAndSaveAsNamedDirections() throws Exception {
+        for (String terrain : List.of("water", "pavement")) {
+            Coords here = new Coords(3, 3), north = here.translated(0), south = here.translated(3);
+            var board = megamek.common.board.Board.createEmptyBoard(8, 8);
+            for (Coords hex : List.of(here, north, south)) { board.setHex(hex, new Hex(0, terrain + ":1", "")); }
+            var session = new BoardEditorSession();
+            session.open(board, null);
+            send(session, Action.SELECT_AT, "3,3", "");
+            assertEquals(9, session.snapshot().joinedSides().get(terrain), terrain + " joins by default");
+
+            send(session, Action.EDGE, terrain, "0");
+            assertEquals(8, session.snapshot().joinedSides().get(terrain));
+            assertEquals(1, separated(session, here, terrain));
+            assertEquals(8, separated(session, north, terrain), "Both hexes of the side");
+
+            Path file = directory.resolve(terrain + "-sides.board2");
+            session.save(file);
+            String text = Files.readString(file);
+            assertTrue(text.contains("\"separated\":[\"n\"]"), text);
+            assertFalse(text.contains("connections"), "No derived sides: " + text);
+            session.open(file);
+            send(session, Action.SELECT_AT, "3,3", "");
+            assertEquals(8, session.snapshot().joinedSides().get(terrain), "Reopened");
+
+            send(session, Action.EDGE, terrain, "1");
+            assertEquals(Messages.getString("BoardEditor.connectedSidesRefused"), session.snapshot().message());
+            assertEquals(1, separated(session, here, terrain));
+
+            send(session, Action.EDGE, terrain, "0");
+            assertEquals(9, session.snapshot().joinedSides().get(terrain), "Turned on again");
+            assertEquals(0, separated(session, north, terrain));
+            send(session, Action.UNDO, "", "");
+            assertEquals(1, separated(session, here, terrain), "One undo step, both hexes");
+            assertEquals(8, separated(session, north, terrain));
+
+            send(session, Action.SELECT_AT, north.getX() + "," + north.getY(), "");
+            send(session, Action.REMOVE_COMPONENT, "", terrain);
+            assertEquals(0, separated(session, here, terrain), "Nothing left to part it from");
+        }
+    }
+
+    /** A legacy file's exits on water choose 2D tiles: they part nothing, and Edit shows the water joined. */
+    @Test void legacyWaterExitsAreNotSeparatedSides() {
+        Coords here = new Coords(3, 3);
+        var board = megamek.common.board.Board.createEmptyBoard(8, 8);
+        board.setHex(here, new Hex(0, "water:1:0", ""));
+        board.setHex(here.translated(0), new Hex(0, "water:1:0", ""));
+        var session = new BoardEditorSession();
+        session.open(board, null);
+        send(session, Action.SELECT_AT, "3,3", "");
+        assertEquals(1, session.snapshot().joinedSides().get("water"));
+        assertEquals(0, separated(session, here, "water"));
+    }
+
+    private static int separated(BoardEditorSession session, Coords at, String terrain) {
+        return megamek.common.board.HexAppearance.separated(session.board().getHex(at).getAppearance(), terrain);
     }
 
     /** The user's own Open (a Recent Boards entry) and Save add the file to the launcher's Recent Boards list. */
@@ -1658,7 +1732,6 @@ class BoardEditorSessionTest {
         session.board().setDescription("Ridge");
         session.board().setAnnotations(other, List.of("Note"));
         send(session, Action.BOARD, "arena", "true");
-        send(session, Action.BOARD, "roads", "false");
         session.validateAll();
         Path file = directory.resolve("resize.board2");
         session.save(file);
@@ -1673,7 +1746,6 @@ class BoardEditorSessionTest {
         assertEquals(hex, BoardFile.hexNode(session.board().getHex(new Coords(4, 4))));
         assertEquals(van, BoardFile.hexNode(session.board().getHex(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
         assertTrue(session.snapshot().arena());
-        assertFalse(session.board().getRoadsAutoExit());
         assertEquals("Ridge", session.board().getDescription());
         assertEquals(List.of("Note"), List.copyOf(session.board().getAnnotations(megamek.common.util.BoardUtilities.resized(other, 2, 3))));
         Coords movedIssue = megamek.common.util.BoardUtilities.resized(broken, 2, 3);

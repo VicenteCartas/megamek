@@ -100,8 +100,9 @@ final class GeneratedKit {
                     if (role.startsWith("base") && piece.tags().endsWith("-cap")) { continue; }
                     for (var twin : module.build(role, piece, lod).entrySet()) {
                         String node = kit + "-lod" + lod + "-" + role + piece.tags() + twin.getKey();
-                        // A distant roof without a parapet needs no cap geometry, but keeps the same node contract.
-                        if (twin.getValue().parts.isEmpty() && !(role.startsWith("roof") && piece.tags().endsWith("-cap"))) {
+                        // A cap whose closed twins carry its edge, or a distant roof's without a parapet, needs no
+                        // geometry, but keeps the same node contract.
+                        if (twin.getValue().parts.isEmpty() && !piece.tags().endsWith("-cap")) {
                             throw new IllegalStateException("Empty piece " + node);
                         }
                         nodes.put(node, twin.getValue());
@@ -110,10 +111,19 @@ final class GeneratedKit {
             }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
             var source = (RigidGlb.Data) modelled.get(lod);
-            generated.buildingPaint.addAll(source.buildingPaint);
-            generated.paintMasks.addAll(source.paintMasks);
-            generated.nightEmission.addAll(source.nightEmission);
-            generated.emissionOff.addAll(source.emissionOff);
+            // Each piece material keeps its finish and alpha mode, as an authored GLB's do: the kit draws it under the
+            // same id (GeneratedMesh#piece), a cutout alpha tested rather than blended as its board material's .tres says.
+            source.surfaces.forEach((id, surface) -> {
+                if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
+                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
+                if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
+                if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
+                if (source.alphaTests.containsKey(id)) {
+                    generated.alphaTests.put(id, source.alphaTests.get(id));
+                    generated.blends.remove(id);
+                }
+                if (source.fades.contains(id)) { generated.fades.add(id); }
+            });
             result.add(generated);
         }
         return result;

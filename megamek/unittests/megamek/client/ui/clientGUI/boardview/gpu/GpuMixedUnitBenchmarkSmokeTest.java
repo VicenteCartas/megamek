@@ -93,7 +93,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                                   ResolvedAttack.Shot.capture(gun))).toList());
                         }
                         fixture.source.refresh();
-                        ((Timer) field(fixture.source, "timer")).stop();
+                        ((Timer) GpuTestSupport.field(fixture.source, "timer")).stop();
                     } catch (Exception error) { throw new IllegalStateException(error); }
                 });
                 var config = GpuBoardWindow.configuration(false);
@@ -122,7 +122,7 @@ class GpuMixedUnitBenchmarkSmokeTest {
                     void updateEquipmentDetail() {
                         if (compareLod && frame / 111 < views) {
                             try {
-                                for (Object value : ((Map<?, ?>) field(this, "unitInstances")).values()) {
+                                for (Object value : ((Map<?, ?>) GpuTestSupport.field(this, "unitInstances")).values()) {
                                     if (value instanceof GpuUnitInstance instance) { instance.equipmentDetail(boardCamera.camera, true); }
                                 }
                             } catch (Exception error) { throw new IllegalStateException(error); }
@@ -155,10 +155,10 @@ class GpuMixedUnitBenchmarkSmokeTest {
                             int phase = frame % 111;
                             int view = frame / 111;
                             if (phase >= 44 && !firing.isEmpty()) {
-                                var playback = (UnitPlayback) field(this, "playback");
+                                var playback = (UnitPlayback) GpuTestSupport.field(this, "playback");
                                 if (phase == 44 || playback.holdSeconds() > 0 || !playback.busy()) {
                                     playback.clear();
-                                    playback.accept(firing, (BoardScene) field(this, "scene"), unit -> false);
+                                    playback.accept(firing, (BoardScene) GpuTestSupport.field(this, "scene"), unit -> false);
                                 }
                             }
                             if (phase == 110) { profiler.reset(); profiler.enable(); }
@@ -175,12 +175,12 @@ class GpuMixedUnitBenchmarkSmokeTest {
                             }
                             if (phase == 1) {
                                 ((Slider) GpuBoardTestUi.tuning(this, "Time of day")).setValue(13);
-                                var scene = (BoardScene) field(this, "scene");
+                                var scene = (BoardScene) GpuTestSupport.field(this, "scene");
                                 assertEquals(count, scene.units().size());
                                 boardCamera.setIsometric(battalion ? view % views >= 2 : view % views == 1);
                                 boardCamera.fit(scene);
                                 if (battalion && view % 2 == 1) { boardCamera.zoom(.45f); }
-                                var playback = (UnitPlayback) field(this, "playback");
+                                var playback = (UnitPlayback) GpuTestSupport.field(this, "playback");
                                 playback.clear();
                                 List<BoardScene.Animation> events = new ArrayList<>();
                                 for (int i = 0; i < 8; i++) {
@@ -228,11 +228,11 @@ class GpuMixedUnitBenchmarkSmokeTest {
                     @Override
                     public void dispose() {
                         try {
-                            var library = field(this, "unitModels");
+                            var library = GpuTestSupport.field(this, "unitModels");
                             timings.close();
                             super.dispose();
                             for (String cache : List.of("assemblies", "modular", "descriptors", "failed", "modelTextures")) {
-                                Object value = field(library, cache);
+                                Object value = GpuTestSupport.field(library, cache);
                                 assertTrue(value instanceof Map<?, ?> map ? map.isEmpty() : ((java.util.Set<?>) value).isEmpty(), cache);
                             }
                         } catch (Throwable error) { failure.compareAndSet(null, error); }
@@ -245,18 +245,6 @@ class GpuMixedUnitBenchmarkSmokeTest {
             Files.writeString(output.toPath().resolve("mixed-unit-stage-timing.txt"), stages);
         }
         System.out.print(report);
-    }
-
-    static Object field(Object object, String name) throws Exception {
-        Class<?> type = object.getClass();
-        while (type != null) {
-            try {
-                var field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(object);
-            } catch (NoSuchFieldException ignored) { type = type.getSuperclass(); }
-        }
-        throw new NoSuchFieldException(name);
     }
 
     private static Board board() {

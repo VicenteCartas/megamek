@@ -94,7 +94,7 @@ class TerrainLodTest {
     void waterCliffsMeetAcrossMixedDetailChunkBoundaries() {
         var previous = BoardRelief.tuning();
         try {
-            BoardWetCliffTest.tune(true);
+            BoardScenes.tune(true);
             Coords land = new Coords(7, 3);
             var scene = waterScene(land);
             for (TerrainLod lod : TerrainLod.values()) {

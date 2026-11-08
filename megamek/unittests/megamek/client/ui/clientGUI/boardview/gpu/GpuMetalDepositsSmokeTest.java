@@ -56,12 +56,12 @@ class GpuMetalDepositsSmokeTest {
                         camera.center(BoardGeometry.center(centre, 0));
                         camera.camera.zoom = .1f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         int minerals = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                ModelInstance instance = (ModelInstance) field(prop, "instance");
-                                if (!centre.equals(field(prop, "coords"))) { continue; }
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                ModelInstance instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+                                if (!centre.equals(GpuTestSupport.field(prop, "coords"))) { continue; }
                                 assertFalse(instance.materials.isEmpty());
                                 assertEquals(3, instance.materials.size);
                                 assertNotSame(instance.model.materials.first(), instance.materials.first(),
@@ -83,7 +83,7 @@ class GpuMetalDepositsSmokeTest {
                         GpuReviewFrame.save(new File(output, oblique ? "metal-oblique.png" : "metal-top.png"));
                         camera.camera.zoom = .04f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, oblique ? "metal-close-oblique.png" : "metal-close-top.png"));
                     }
@@ -95,7 +95,7 @@ class GpuMetalDepositsSmokeTest {
                         camera.center(BoardGeometry.center(centre, 0));
                         camera.camera.zoom = .1f;
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, rough, camera);
+                        GpuReviewFrame.settle(terrain, null, rough, camera);
                         frame.render(terrain, camera, rough);
                         GpuReviewFrame.save(new File(output, oblique ? "rough-oblique.png" : "rough-top.png"));
                     }
@@ -105,11 +105,5 @@ class GpuMetalDepositsSmokeTest {
             }
         }, config);
         if (failure.get() != null) { throw new AssertionError("Native metal deposits", failure.get()); }
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

@@ -126,7 +126,7 @@ class GpuWaterLocalLightSmokeTest {
         capture(terrain, frame, low, volcanic, output, "night-lava-low");
 
         // A fireball before a waterfall's curtain: the falling sheet mirrors it as it does the sun.
-        BoardScene falls = GpuRiverTerrainSmokeTest.dropScene(BoardScene.Surface.GRASS);
+        BoardScene falls = BoardScenes.dropScene(BoardScene.Surface.GRASS);
         show(terrain, falls);
         Vector3 plunge = BoardGeometry.center(new Coords(4, 3), 0);
         BoardScene.Tile pool = falls.tile(new Coords(4, 3));

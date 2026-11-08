@@ -178,7 +178,7 @@ building in the editor's Footprint row and stored as the hex appearance `footpri
 `TilesetScenery.footprint` maps a Square hex to a generated kit's Square footprint): Angled,
 the default and the classic exits art's (walls along the hex's directions; a lone hex and a hex with one link are
 whole-hex pieces), and Square, right-angled blocks. Their floors and roofs are textured from the board position (a
-material's `mmBoardUV`, the model vertex stage), so turned and neighbouring pieces join without seams. The lunar
+slab's `repeat` in the kit's JSON, the model vertex stage), so turned and neighbouring pieces join without seams. The lunar
 habitat (`buildings/lunar_habitat/`, generated from its JSON spec and pieces GLB by `HabitatKit`) is drawn Square on
 most of the Lunar Base board, as the printed lunar maps draw it: rounded blocks of dark ribbed steel with window strips, a battered skirt, piers at the joints rising past the
 roof's edge, which rounds down into the walls, riveted roof plating with low vents and hatches (six layouts). Each storey above the ground picks lit or
@@ -201,8 +201,7 @@ podium. A domed building's hex wholly outside every podium is an annex, rectangu
 printed lunar map's level 1 and 2 structures round the biodome); towards a hex under the domes to its north or south,
 a wing as wide as its core runs straight on into the podium's ring, else it meets the plinth. The glass is a transparent board material: its `.tres`
 says so (Godot's `transparency`, and `blend_mode` 4, premultiplied alpha, so its reflections stay whole), and it
-draws after everything opaque, without depth writes or shadows; the Tactical View, which hides the buildings,
-hides it too. A
+draws last among the scene's surfaces, over the water and the faded edges of the plants it shelters, without depth writes or shadows. A
 legacy board's lunar-theme buildings take these designs at conversion (`BoardSceneryLayouts`): a building
 glazed over half its hexes (skylights, glass roofs) with a full ring of hexes holding most of it becomes a
 glass dome, two full rings a biodome, any other a habitat; a dome's own glazing objects go.
@@ -265,7 +264,7 @@ GPU Tuning's General tab has a **Unit display** selector, applied live in both c
 - **3D Models** restores the existing authored-model presentation, including flat artwork when a model is unavailable.
 
 The Defaults button restores All Meeples. Sensor contacts retain their anonymous markers. The Tactical View draws
-every unit, troops included, as its token on a base, whatever the selector shows ([HUD](gpu-hud.md#5-the-tactical-view)). The token mesh reuses the libGDX branch's alpha-contour extrusion through
+every unit, troops included, as its flat icon on a base, whatever the selector shows ([HUD](gpu-hud.md#5-the-tactical-view)). The token mesh reuses the libGDX branch's alpha-contour extrusion through
 `GpuCutout`. Both cameras use the same posed geometry for drawing, picking, shadows, attachments and effects.
 The extrusion traces the half-alpha contour and simplifies pixel steps into panels within 0.55 source pixels.
 Caps and walls share those outlines, including holes and separate islands. Gentle wall turns share normals;
@@ -345,7 +344,7 @@ one level, while large support vehicles such as the Saturn Harvester occupy two.
 Both Meeples and authored models display flight altitude above the occupied hex: altitude 1 over level-10 terrain
 is drawn at level 11. Movement playback uses each waypoint's hex elevation; landing returns to the landing surface.
 LAM and QuadVee forms use their captured movement mode and occupied height, with a brief tilt and smooth height
-transition on the conversion clock. Whole multi-hex tokens fit and center on the existing occupied footprint.
+transition on the conversion clock. Whole multi-hex tokens fit and center on the existing occupied footprint. A DropShip's token is its seven hex sections stitched into one image: `mekset.txt`'s `_whole` entries, made by mm-data's `tools/stitch_dropship_sections.py`. `EntityImage.loadWholeImage` camouflages it at the camouflage's own size, repeating mirrored across the image without a seam.
 
 Token caps use clean camouflaged tileset artwork; walls use the shared camouflage shader. Whole-body damage, on
 tokens and on models without location parts (vehicles, aerospace, DropShips, naval), follows the unit's damage level,
@@ -413,7 +412,8 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
   bridge footings and tunnels as Enhanced. Natural bridges have a full hex cap over
   their hollow arch, topped with the art of an abutting bank of the span's surface; without one the arch shows its rock.
   Flat road and rail carriers retain normal Classic tops and vertical terrain edges;
-  actual grades and tunnel openings retain their shared carrier geometry. A nearby
+  actual grades keep their course and end heights on straight ramps, which Enhanced eases, and
+  tunnel openings retain their shared carrier geometry. A nearby
   flat route does not introduce sculpted hillsides into Classic terrain.
   Unrelated hexes retain plain columns; no water
   or lava field or planting is prepared.
@@ -443,7 +443,7 @@ feature. Classic, for low-end computers, is a build mode of the same chunk pipel
 - **Cliffs.** The Classic tops carry no cliff stroke; the Tactical View's ground layer strokes cliffs in both graphics.
 - **Print.** Menu > Print (`GpuBoardPrint`) builds its own terrain with the live view's installed graphics
   (`setColumns(lender.columns())`; the print starts only once the live terrain is ready), so a Classic print shows the
-  columns and an Enhanced print the 3D terrain. It keeps the 3D view's fluff in the Tactical View too and draws the
+  columns and an Enhanced print the 3D terrain. It keeps the scatter in the Tactical View too and draws the
   plain grid, not the ground layer, so a print strokes no cliff in either graphics; its labels give the levels.
   It renders 1024-pixel tiles at 200 dots per inch (a hex 1.5 by 1.3 inches) and writes a JPEG at quality 0.92 without
   chroma subsampling, with that density in its JFIF header: on the 12 × 9 smoke board 1.9 MB against 9.5 MB as the
@@ -479,24 +479,28 @@ review captures), `GpuTilesetTerrainTest` (column geometry), `BoardRimTest.class
 
 ## Tactical View
 
-The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View, a top view, and back ([HUD](gpu-hud.md#5-the-tactical-view)). The terrain
-does not follow the view: the 3D Graphics setting chooses it, and T never rebuilds it. Every unit is its meeple on a
-`GpuUnitBases` base (side ring, facing and twist notches, status badges, wreck cross), the ground layer of `GpuHexGrid`
-marks cliffs (including Cliff Top exits, by `BoardRim.high`), 1- and 2-level steps, woods, roofs with their CF, water
-by depth, smoke and fire, and the fixed north-west light (`BoardAtmosphere.TACTICAL`) replaces the hour's.
+The HUD's Tactical view utility and the Toggle Tactical View key (T) switch the camera to the Tactical View and back
+([HUD](gpu-hud.md#5-the-tactical-view)). It is the common renderer with a forced top view, overlays and annotations, and
+one draw rule. The terrain does not follow the view: the 3D Graphics setting chooses it, and T never rebuilds it.
 
-`GpuBattleView` calls `GpuTerrain.setFluffHidden(boardCamera.tactical())` every frame. The rule is a draw rule only
-(b11-design 4.3): trees, scatter, grass and biome vegetation, building, industrial, fuel tank and placed object models,
-decals and authored paint, combat scars and ground damage, water (Enhanced water pages and ice, Classic liquid frames
-and ice), the ocean and lava wave simulations, spores and geysers hide; the relief or the columns, roads, bridges,
-rough, rubble and fortifications (`Prop.tactical`), tunnel portals and rail and maglev routes stay.
-Molten lava and magma lie in the opaque layer in both graphics and stay, still (their waves stop). T neither rebuilds
-nor recaches: the 3D prop caches and their pages stay, and the passes draw each chunk's kept props instead, packed on
-the view's first draw of the chunk (`GpuTerrain.Chunk#keptProps`), so only the shadow map is redrawn. Picking is
-unchanged: a click picks the same hex and floor (a building's roof included) and overlays drape on the same surfaces as
-in the 3D view (`GpuTacticalViewSmokeTest.verifyFluffHidden`, which also audits that one Tactical View frame submits no
-tree, placed object, building module, scatter, grass, water or packed prop draw, in both graphics, and draws the
-Enhanced bridge from the kept props).
+- **Draw rule.** `GpuBattleView` calls `GpuTerrain.setScatterHidden(boardCamera.tactical())` every frame: scatter, grass
+  and biome vegetation hide, and only the shadow map is redrawn. Everything else draws as in every view. Picking is
+  unchanged (`GpuTacticalViewSmokeTest.verifyScatterHidden`).
+- **Units.** Every unit is its flat icon (`MeepleVisual.icon`, the artwork the 3D view's token extrudes, with no shading
+  baked in: `EntityImage` keeps the facing's camouflage overlay to the 2D board's rotated images) on a `GpuUnitBases` base,
+  unlit and casting no shadow. Icons draw after the water, in the depth range up to `MeepleVisual.ICON_DEPTH`, nearer than
+  anything on the board, and write no depth, so weapon effects see the board and draw over them. After the composite
+  `GpuUnitVisibility.renderDepth` adds that depth, for what follows. What says something about one hex or unit draws over the icons:
+  badges and the wreck's cross, unit labels, hex labels, the destination ghost, the ruler, attack lines, range labels, target rings,
+  movement step markers, the tactical text (movement steps, heat-map turns, crane countdowns), the board's markers (`GpuMarkers`:
+  collapse warnings, incoming strikes, minefields, objectives) and incoming rounds' target hexes. What paints an area or a path lies
+  under them: route lines and pulses (they test at exactly `ICON_DEPTH`), range borders, tints and hatching.
+- **Buildings.** An occupied building fades away fully (opacity 0): `GpuTerrain` then counts it as no cover and draws no
+  shadow from it, and the ground layer marks its roof. Hovering opens none.
+- **Overlays.** The ground layer of `GpuHexGrid` marks cliffs (including Cliff Top exits, by `BoardRim.high`), 1- and
+  2-level steps, woods, roofs with their CF, water by depth, smoke and fire.
+- **Look.** The fixed north-west light (`BoardAtmosphere.TACTICAL`) replaces the hour's, with clear air and no weather;
+  3D smoke and fire stay marks on their hexes.
 
 ## Threads and update ownership
 

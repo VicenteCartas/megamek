@@ -1,7 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ARCHER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS_MOVED;
@@ -13,6 +12,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.MARAUDER
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.PANTHER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.TIMBER_WOLF;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.WARHAMMER;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -51,7 +51,6 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuLiveBoardSpaceSmokeTest.Live
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.panels.phaseDisplay.PhysicalDisplay;
 import megamek.client.ui.panels.phaseDisplay.ReportDisplay;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
 import megamek.common.board.Coords;
@@ -60,10 +59,9 @@ import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Per-screenshot parity of the live battle view with the hud-v3 mock (rebuild plan P1). For each of the mock's 16
@@ -76,6 +74,7 @@ import org.junit.jupiter.api.Test;
  * (each panel's bounds beside the mock's, and its texts) and, with the mock at hand, parity-NN-sbs.png, the capture
  * beside the mock's shot.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuHudParitySmokeTest {
     /** The tolerance of a panel's width against the mock's frame, in HUD units. */
@@ -84,19 +83,6 @@ class GpuHudParitySmokeTest {
     private static final float MOCK_HEX = 112;
     /** The mock's camera tilt from straight down, in degrees, from its hexes' proportions (about .6 high per wide). */
     private static final float MOCK_TILT = 45;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixtures need the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     /** Which edge of a panel the prototype's layout anchors; free panels (cards, menus) are only reported. */
     private enum Edge { TOP, BOTTOM, FREE }
@@ -290,7 +276,7 @@ class GpuHudParitySmokeTest {
 
     @Test
     void firing() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             declare(firing);
             GpuLiveBoardSpaceSmokeTest.run(firing.board.source, live -> {
                 start(live, UnaryOperator.identity());
@@ -318,17 +304,17 @@ class GpuHudParitySmokeTest {
                 live.view.setTacticalView(false);
 
                 // 06: the AC/20 moves to the King Crab (C), a third target.
-                int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(KING_CRAB)));
-                GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
+                int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(KING_CRAB)));
+                GpuFiringFixture.command(firing, fire -> fire.selectWeapon(cannon));
+                GpuFiringFixture.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
                 publish(live, UnaryOperator.identity());
                 live.zoom(new Coords(13, 10), MOCK_HEX);
                 shot(live, "06", "06-three-targets.jpg", HEADER, MINIMAP, FORCES, WEAPONS, CARD_CHIP, SOLUTION,
                       FIRE_DOCK, free("target-card-" + TIMBER_WOLF, 869, 76, 299, 218));
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(TIMBER_WOLF)));
-                GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-                GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(TIMBER_WOLF)));
+                GpuFiringFixture.command(firing, fire -> fire.selectWeapon(cannon));
+                GpuFiringFixture.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
             });
 
             // 15: the declaration of 05 in a 1280 x 720 window.
@@ -348,7 +334,7 @@ class GpuHudParitySmokeTest {
 
     @Test
     void physical() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             GpuBoardFixture board = firing.board;
             PhysicalDisplay physical = onSwing(() -> {
                 attach(board, firing.gui);
@@ -401,7 +387,7 @@ class GpuHudParitySmokeTest {
 
     @Test
     void playback() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             GpuBoardFixture board = firing.board;
             ReportDisplay report = onSwing(() -> {
                 when(firing.client.isMyTurn()).thenReturn(false);
@@ -459,16 +445,16 @@ class GpuHudParitySmokeTest {
      */
     private static void declare(GpuFiringFixture firing) throws Exception {
         firingTurn(firing);
-        int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+        int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
         for (int[] order : new int[][] { { cannon, TIMBER_WOLF },
-              { GpuFireOrdersTest.eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO), TIMBER_WOLF },
-              { GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM), TIMBER_WOLF },
-              { GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM), TIMBER_WOLF },
-              { GpuFireOrdersTest.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO), BATTLEMASTER } }) {
-            GpuFireOrdersTest.command(firing, fire -> fire.assign(order[0], TargetKey.unit(order[1])));
+              { GpuFiringFixture.eqNum(firing, "SRM 6", Mek.LOC_LEFT_TORSO), TIMBER_WOLF },
+              { GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM), TIMBER_WOLF },
+              { GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM), TIMBER_WOLF },
+              { GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO), BATTLEMASTER } }) {
+            GpuFiringFixture.command(firing, fire -> fire.assign(order[0], TargetKey.unit(order[1])));
         }
-        GpuFireOrdersTest.command(firing, fire -> fire.selectWeapon(cannon));
-        GpuFireOrdersTest.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
+        GpuFiringFixture.command(firing, fire -> fire.selectWeapon(cannon));
+        GpuFiringFixture.command(firing, fire -> fire.focusTarget(TargetKey.unit(TIMBER_WOLF)));
     }
 
     /** The firing fixture's game with the roster after its movement, on the local player's firing turn (Atlas). */
@@ -606,7 +592,7 @@ class GpuHudParitySmokeTest {
         List<GpuReportLog.Entry> entries = new ArrayList<>();
         for (Attack attack : attacks) {
             boolean hit = attack.damage() > 0;
-            BoardScene.Combat shot = UnitPlaybackTest.attack(unit(scene, attack.attacker()),
+            BoardScene.Combat shot = UnitPlaybackFixture.attack(unit(scene, attack.attacker()),
                   unit(scene, attack.target()), ResolvedAttack.Kind.SHOT, hit);
             UUID id = shot.result().id();
             shots.add(shot);
@@ -660,7 +646,7 @@ class GpuHudParitySmokeTest {
      * one), so the card shows its unit's record and the fire preview follows the focus.
      */
     static void start(Live live, UnaryOperator<GpuBattleStatus.Snapshot> status) throws Exception {
-        live.source.uiPreferences = GpuHudInputTest.with(live.source.uiPreferences,
+        live.source.uiPreferences = GpuHudFixtures.with(live.source.uiPreferences,
               Map.of("binds", live.real.uiPreferences.binds()));
         doAnswer(invocation -> {
             live.real.setCardUnit(invocation.getArgument(0));

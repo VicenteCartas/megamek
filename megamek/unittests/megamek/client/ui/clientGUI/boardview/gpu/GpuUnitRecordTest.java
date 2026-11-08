@@ -25,8 +25,6 @@ import static org.mockito.Mockito.when;
 import java.awt.Component;
 import java.io.File;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -69,10 +67,9 @@ import megamek.common.units.Entity;
 import megamek.common.units.LandAirMek;
 import megamek.common.units.Mek;
 import megamek.common.units.Tank;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -80,24 +77,12 @@ import org.mockito.MockedStatic;
  * shows them, the unit's vitals and the Unit Display's content), and that each unit action sends what the Unit
  * Display's control sends (UnitDisplayActionsTest records those packets from the Swing panels).
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuUnitRecordTest {
     private static final String UNITS = "testresources/megamek/common/units/";
     private static final List<Integer> STANDARD_TICKS = List.of(5, 8, 10, 13, 14, 15, 17, 18, 19, 20, 22, 23, 24, 25,
           26, 27, 28, 29, 30);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void heatTicksAreTheLevelsWhereTheMekHeatEffectsChange() throws Exception {
@@ -129,9 +114,9 @@ class GpuUnitRecordTest {
             // The game changes on the EDT, where the source's refresh timer reads it.
             Entity atlas = fixture.entity;
             int id = atlas.getId();
-            Mounted<?> ecm = onSwing(() -> atlas.addEquipment(EquipmentType.get("ISGuardianECMSuite"),
+            Mounted<?> ecm = GpuTestSupport.onSwing(() -> atlas.addEquipment(EquipmentType.get("ISGuardianECMSuite"),
                   Mek.LOC_LEFT_ARM));
-            Mounted<?> blade = onSwing(() -> atlas.addEquipment(EquipmentType.get("ISMediumVibroblade"),
+            Mounted<?> blade = GpuTestSupport.onSwing(() -> atlas.addEquipment(EquipmentType.get("ISMediumVibroblade"),
                   Mek.LOC_RIGHT_ARM));
             // ECM modes are shared type state that each game sets from its options, as it does when a unit joins it.
             SwingUtilities.invokeAndWait(atlas::setGameOptions);
@@ -253,11 +238,11 @@ class GpuUnitRecordTest {
 
             // A one-shot launcher's ammunition has no critical slot, so the Systems tab never lists it: the rules
             // alone would let it be dumped, yet it has no bin and its dump sends nothing
-            Mounted<?> launcher = onSwing(() -> atlas.addEquipment(EquipmentType.get("RL10"), Mek.LOC_LEFT_TORSO));
+            Mounted<?> launcher = GpuTestSupport.onSwing(() -> atlas.addEquipment(EquipmentType.get("RL10"), Mek.LOC_LEFT_TORSO));
             Mounted<?> oneShot = launcher.getLinked();
             int oneShotNum = atlas.getEquipmentNum(oneShot);
             assertEquals(Entity.LOC_NONE, oneShot.getLocation());
-            assertTrue(onSwing(() -> UnitEquipmentActions.canDump(session.client, atlas, oneShot)));
+            assertTrue(GpuTestSupport.onSwing(() -> UnitEquipmentActions.canDump(session.client, atlas, oneShot)));
             assertTrue(session.record().ammo().stream().noneMatch(bin -> bin.eqNum() == oneShotNum));
             session.source.record().setDumping(id, oneShotNum, true);
             session.flush();
@@ -303,7 +288,7 @@ class GpuUnitRecordTest {
             session.flush();
             // What the Unit Display sends for the same pick (UnitDisplayStateTest)
             verify(session.client).sendAmmoChange(1, 10, 13, 1, 0);
-            assertSame(bins.get(1), onSwing(lrm::getLinkedAmmo));
+            assertSame(bins.get(1), GpuTestSupport.onSwing(lrm::getLinkedAmmo));
             assertEquals(1, session.record().weapons().get(2).loadedAmmo());
 
             // The bin loaded already, a bin the weapon's list does not offer and another player's weapon: nothing
@@ -314,7 +299,7 @@ class GpuUnitRecordTest {
             session.source.record().setAmmo(enemy.getId(), 10, new GpuUnitRecord.AmmoChoice(enemy.getId(), 12, ""));
             session.flush();
             verify(session.client, times(1)).sendAmmoChange(anyInt(), anyInt(), anyInt(), anyInt(), anyInt());
-            assertSame(bins.get(1), onSwing(lrm::getLinkedAmmo));
+            assertSame(bins.get(1), GpuTestSupport.onSwing(lrm::getLinkedAmmo));
         }
     }
 
@@ -335,7 +320,7 @@ class GpuUnitRecordTest {
             session.flush();
             verify(session.client).sendModeChange(omega.getId(), omega.getEquipmentNum(dual.getMount2()), -1);
             verify(session.client, never()).sendModeChange(omega.getId(), omega.getEquipmentNum(dual.getMount()), -1);
-            assertEquals(List.of(false, true), onSwing(() -> List.of(dual.getMount().isPendingDump(),
+            assertEquals(List.of(false, true), GpuTestSupport.onSwing(() -> List.of(dual.getMount().isPendingDump(),
                   dual.getMount2().isPendingDump())));
         } finally {
             Game.rulesManager = rules;
@@ -488,7 +473,7 @@ class GpuUnitRecordTest {
             int id = atlas.getId();
             SwingUtilities.invokeAndWait(() -> fixture.game.removeEntity(id,
                   IEntityRemovalConditions.REMOVE_SALVAGEABLE));
-            GpuUnitRecord.Snapshot record = onSwing(() -> session.source.record().capture(id));
+            GpuUnitRecord.Snapshot record = GpuTestSupport.onSwing(() -> session.source.record().capture(id));
             assertEquals(List.of(id, true, true, 8, 7), List.of(record.unitId(), record.own(), record.removed(),
                   record.locations().size(), record.weapons().size()));
             assertEquals(List.of(), record.equipment());
@@ -683,7 +668,7 @@ class GpuUnitRecordTest {
             MegaMekController controller = mock(MegaMekController.class);
             AtomicReference<MockedStatic<MegaMekGUI>> keys = new AtomicReference<>();
             UnitDisplayState display = new UnitDisplayState(session.gui);
-            FiringDisplay firing = onSwing(() -> {
+            FiringDisplay firing = GpuTestSupport.onSwing(() -> {
                 // Stubbed on the EDT, where the source's refresh timer reads the same mocks.
                 when(session.gui.getUnitDisplayState()).thenReturn(display);
                 when(session.gui.getDisplayedUnit()).thenReturn(fixture.entity);
@@ -698,16 +683,16 @@ class GpuUnitRecordTest {
                 return phase;
             });
             try {
-                int weapon = onSwing(() -> display.getSelectedWeaponNum());
+                int weapon = GpuTestSupport.onSwing(() -> display.getSelectedWeaponNum());
                 assertEquals(fixture.entity.getId(), display.getSelectedEntityId());
                 session.source.setCardUnit(enemy.getId());
                 session.source.record().setSheetOpen(true);
                 assertEquals(enemy.getId(), session.record().unitId());
-                assertEquals(fixture.entity.getId(), onSwing(display::getSelectedEntityId),
+                assertEquals(fixture.entity.getId(), GpuTestSupport.onSwing(display::getSelectedEntityId),
                       "The record sheet never shows its unit in the firing display's weapon panel");
-                assertEquals(weapon, (int) onSwing(display::getSelectedWeaponNum));
+                assertEquals(weapon, (int) GpuTestSupport.onSwing(display::getSelectedWeaponNum));
             } finally {
-                onSwing(() -> {
+                GpuTestSupport.onSwing(() -> {
                     firing.removeAllListeners();
                     keys.get().close();
                     return null;
@@ -784,12 +769,6 @@ class GpuUnitRecordTest {
         return new MekFileParser(new File(Configuration.dataDir(), "mekfiles/unit_files.zip"), entry).getEntity();
     }
 
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
-    }
-
     /** A board source over the fixture's view whose client GUI and client are mocks, as a local player's game. */
     private static final class Session implements AutoCloseable {
         final Client client = mock(Client.class);
@@ -808,7 +787,7 @@ class GpuUnitRecordTest {
             when(gui.getMenuBar()).thenReturn(menu);
             view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
-            source = onSwing(() -> {
+            source = GpuTestSupport.onSwing(() -> {
                 fixture.source.close();
                 return new GpuBoardSource(view, () -> fixture.panel);
             });
@@ -818,7 +797,7 @@ class GpuUnitRecordTest {
             Player enemy = new Player(2, "Enemy");
             enemy.setTeam(2);
             Entity atlas = unit("Atlas AS7-D.mtf");
-            onSwing(() -> {
+            GpuTestSupport.onSwing(() -> {
                 fixture.game.addPlayer(enemy.getId(), enemy);
                 atlas.setId(42);
                 atlas.setOwner(enemy);
@@ -834,7 +813,7 @@ class GpuUnitRecordTest {
         /** EDT: adds the unit as the local player's, damages it, and captures its record. */
         GpuUnitRecord.Snapshot capture(GpuBoardFixture fixture, Entity unit, Consumer<Entity> damage)
               throws Exception {
-            return onSwing(() -> {
+            return GpuTestSupport.onSwing(() -> {
                 unit.setId(nextId++);
                 unit.setOwner(fixture.player);
                 unit.setPosition(new Coords(2, 2));

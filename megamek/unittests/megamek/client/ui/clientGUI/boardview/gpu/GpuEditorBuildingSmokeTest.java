@@ -2,11 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.CALLS_REAL_METHODS;
-import static org.mockito.Mockito.mockStatic;
 
 import java.io.File;
-import java.util.List;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
@@ -54,9 +51,8 @@ class GpuEditorBuildingSmokeTest {
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
         config.setInitialVisible(false);
-        try (var previews = mockStatic(GpuEditorTerrainPreviews.class, CALLS_REAL_METHODS)) {
+        try {
             // Warm this test's building materials; the full palette also builds every unrelated terrain and theme.
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
             new Lwjgl3Application(new GpuBattleView(source) {
                 long deadline;
                 int step;

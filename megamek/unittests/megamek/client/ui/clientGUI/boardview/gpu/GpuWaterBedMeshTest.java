@@ -26,7 +26,7 @@ class GpuWaterBedMeshTest {
     })
     void convertedShallowBarsKeepTheirGeometryAndContinuousWaterMaterial(String path, int x, int y) throws Exception {
         var board = BoardFile.loadSheet(new File(Configuration.boardsDir(), path), false, true);
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         var tile = scene.tile(new Coords(x, y));
         assertEquals(0, tile.waterDepth(), "The converted fixture includes the reported shallow bar");
         for (TerrainLod lod : List.of(TerrainLod.FULL, TerrainLod.MEDIUM)) {
@@ -41,7 +41,7 @@ class GpuWaterBedMeshTest {
             assertTrue(highest > BoardGeometry.waterZ(tile) + .01f, "Keep the existing exposed bar: " + path);
             var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());
             int dry = 0, wet = 0;
-            for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+            for (var triangle : BoardScenes.blendedTriangles(plan)) {
                 var a = triangle.a().vertex().position;
                 var b = triangle.b().vertex().position;
                 var c = triangle.c().vertex().position;
@@ -83,8 +83,8 @@ class GpuWaterBedMeshTest {
     @ValueSource(ints = { 1, 4 })
     void levelPoolBedsStayInsideTheWaterAlongCurvedBanksAndMouths(int depth) {
         for (boolean mouths : new boolean[] { false, true }) {
-            var center = BoardSurfaceBlendTest.CENTER;
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.SAND,
+            var center = BoardScenes.CENTER;
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.SAND,
                   0, c.equals(center) || mouths && (c.equals(center.translated(1)) || c.equals(center.translated(4)))
                         ? depth : -1, 0));
             var original = new BoardSurface(scene, scene.tile(center));
@@ -110,13 +110,13 @@ class GpuWaterBedMeshTest {
     @EnumSource(TerrainLod.class)
     void levelWaterKeepsTheSparseBedThroughMaterialPreparation(TerrainLod lod) {
         for (boolean varyingDepth : new boolean[] { false, true }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.SAND,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.SAND,
                   0, varyingDepth ? 1 + Math.floorMod(c.getX() + c.getY(), 4) : 2, 0));
-            var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+            var tile = scene.tile(BoardScenes.CENTER);
             var surface = new BoardSurface(scene, tile, lod);
             var bed = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.BED).toList();
             var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), lod, new HashMap<>());
-            var drawn = plan.blended().values().stream().flatMap(List::stream).toList();
+            var drawn = BoardScenes.blendedTriangles(plan);
             System.out.printf("WATER BED lod=%s varyingDepth=%s source=%d rendered=%d%n", lod, varyingDepth,
                   bed.size(), drawn.size());
             assertEquals(bed.size(), drawn.size(), "Water's internal diagonals must not subdivide the bed");

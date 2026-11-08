@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 class GpuNaturalBridgeSmokeTest {
     @Test
     void lavaTubeArchesJoinTheirCliffsFromAboveAndBelow() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
+        var scene = BoardScenes.installedScene("Map Pack Volcanic/16x17 Lava Tubes 1.board");
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -57,7 +57,7 @@ class GpuNaturalBridgeSmokeTest {
                             camera.setIsometric(false);
                             camera.orbit(110, tilt);
                             camera.center(BoardGeometry.center(at, -.5f));
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, "lava-tubes-" + at.getBoardNum() + "-" + (int) tilt + ".png"));
                             grid.render(camera, scene, false, false, GpuBattleStatus.Arc.NONE);
@@ -85,7 +85,7 @@ class GpuNaturalBridgeSmokeTest {
     void raisedLavaTubeJointsCloseOntoTheirBanks() throws Exception {
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "natural-bridges");
         Files.createDirectories(output.toPath());
-        var scenes = List.of(BoardNaturalBridgeTest.raisedLavaTubes(4, 4), BoardNaturalBridgeTest.raisedLavaTubes(4, 3));
+        var scenes = List.of(BridgeScenes.raisedLavaTubes(4, 4), BridgeScenes.raisedLavaTubes(4, 3));
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 1024);
@@ -109,7 +109,7 @@ class GpuNaturalBridgeSmokeTest {
                             camera.setIsometric(false);
                             camera.orbit(rotation, 55);
                             camera.center(joint);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, name + "-" + (int) rotation + ".png"));
                         }
@@ -136,12 +136,12 @@ class GpuNaturalBridgeSmokeTest {
                 var weather = new BoardAtmosphere.Settings(13, 0, 0, BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT,
                       0, 0, new BoardAtmosphere.Effects(0, 0, 0, 0, 0, 0, 0));
                 var frame = new GpuReviewFrame(weather);
-                var at = BoardNaturalBridgeTest.CENTER;
+                var at = BoardScenes.CENTER;
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW)) {
-                        var scene = BoardNaturalBridgeTest.scene(family, false, true);
+                        var scene = BridgeScenes.canyonScene(family, false, true);
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
@@ -150,7 +150,7 @@ class GpuNaturalBridgeSmokeTest {
                             camera.setIsometric(oblique);
                             if (oblique) { camera.orbit(75, 10); }
                             camera.center(BoardGeometry.center(at, 1.5f));
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             String name = family.name().toLowerCase(java.util.Locale.ROOT);
                             GpuReviewFrame.save(new File(output, name + (oblique ? "-oblique.png" : "-top.png")));
@@ -164,38 +164,38 @@ class GpuNaturalBridgeSmokeTest {
                             assertTrue(crossing == null || !at.equals(crossing.coords()), "The lower passage stays hollow");
                         }
                     }
-                    var river = BoardNaturalBridgeTest.scene(BoardScene.Surface.ROCK, true, false);
+                    var river = BridgeScenes.canyonScene(BoardScene.Surface.ROCK, true, false);
                     frame.prepare(terrain, camera, river);
                     terrain.update(river);
                     camera.setIsometric(true);
                     camera.orbit(75, 10);
                     camera.center(BoardGeometry.center(at, 1.5f));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, river, camera);
+                    GpuReviewFrame.settle(terrain, null, river, camera);
                     frame.render(terrain, camera, river);
                     GpuReviewFrame.save(new File(output, "river-oblique.png"));
 
-                    var scene = BoardNaturalBridgeTest.scene(BoardScene.Surface.GRASS, false, true);
+                    var scene = BridgeScenes.canyonScene(BoardScene.Surface.GRASS, false, true);
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     camera.setIsometric(false);
                     camera.center(BoardGeometry.center(at, 3));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     int natural = sample(camera, at);
-                    var approach = BoardRoadTest.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
+                    var approach = BoardScenes.tile(at.translated(0), BoardRoad.Kind.PAVED, 9, 3, BoardScene.Surface.GRASS);
                     // The road-attached span is built and carries the road over its exits (as a converted board stores
                     // it); the bare one stays natural.
-                    var built = BoardBridgeTypeTest.typed(BoardNaturalBridgeTest.replace(scene, approach),
+                    var built = BridgeScenes.typed(BoardScenes.replace(scene, approach),
                           HexAppearance.BUILT_BRIDGE);
-                    var edited = BoardNaturalBridgeTest.replace(built,
-                          BoardBridgeMaterialsTest.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
+                    var edited = BoardScenes.replace(built,
+                          BridgeScenes.withDeckRoad(built.tile(at), BoardRoad.Kind.PAVED, 9));
                     var footing = BoardBridgeFooting.build(edited, edited.tile(at), TerrainLod.FULL, new HashMap<>());
                     var gravelTip = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
                           .add(0, -footing.lengths().get(3) * BoardGeometry.hexScale() - BoardRelief.metres(5), 0);
                     int bareBank = sample(camera, gravelTip);
                     frame.prepare(terrain, camera, edited);
                     terrain.update(edited);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     frame.render(terrain, camera, edited);
                     GpuReviewFrame.save(new File(output, "road-bridge-top.png"));
                     assertTrue(difference(natural, sample(camera, at)) > 10, "Adding a road replaces the natural shell with asphalt");
@@ -210,7 +210,7 @@ class GpuNaturalBridgeSmokeTest {
                     camera.setIsometric(true);
                     camera.orbit(75, 10);
                     camera.center(BoardGeometry.center(at, 1.5f));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     frame.render(terrain, camera, edited);
                     GpuReviewFrame.save(new File(output, "road-bridge-oblique.png"));
                     var landing = BoardGeometry.center(at, 3).lerp(BoardGeometry.center(at.translated(3), 3), .5f)
@@ -220,7 +220,7 @@ class GpuNaturalBridgeSmokeTest {
                         camera.setIsometric(oblique);
                         if (oblique) { camera.orbit(-15, 5); }
                         camera.center(landing);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                        GpuReviewFrame.settle(terrain, null, edited, camera);
                         frame.render(terrain, camera, edited);
                         GpuReviewFrame.save(new File(output, "bridge-landing-" + (oblique ? "oblique.png" : "top.png")));
                     }
@@ -229,16 +229,16 @@ class GpuNaturalBridgeSmokeTest {
                     camera.center(BoardGeometry.center(at, 3));
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     assertTrue(difference(natural, sample(camera, at)) < 1, "Removing the road restores the natural material");
                     camera.camera.zoom = 12;
                     camera.center(BoardGeometry.center(at, 3));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     camera.camera.zoom = .16f;
                     camera.center(BoardGeometry.center(at, 3));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     assertTrue(difference(natural, sample(camera, at)) < 1, "Returning from distant LOD restores the same surface");
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

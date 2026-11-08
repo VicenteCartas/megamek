@@ -86,7 +86,7 @@ class GpuWaterQualitySmokeTest {
                     frame.prepare(terrain, initial, scene);
                     long start = System.nanoTime();
                     terrain.update(scene, initial.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, initial);
+                    GpuReviewFrame.settle(terrain, null, scene, initial);
                     System.out.printf("WATER build %.1f ms; GPU %s%n", (System.nanoTime() - start) / 1e6,
                           renderer);
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "quality");
@@ -117,7 +117,7 @@ class GpuWaterQualitySmokeTest {
                         }
                         camera.update();
                         frame.prepare(terrain, camera, scene);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         // Populate spatial pages before measuring; steady camera motion must not rebuild them.
                         for (int i = 0; i < 64; i++) { frame.render(terrain, camera, scene); }
                         for (float wind : new float[] { 0, .6f, 1 }) {
@@ -223,7 +223,7 @@ class GpuWaterQualitySmokeTest {
                 }
                 previous = variant;
                 frame.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 try (var timing = new GpuStageTimings()) {
                     for (int i = 0; i < 150; i++) {
                         Gdx.gl.glFinish();

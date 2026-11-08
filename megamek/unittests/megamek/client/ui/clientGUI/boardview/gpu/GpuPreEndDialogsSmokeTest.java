@@ -2,9 +2,9 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuPreEndDialogsTest.ticked;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
@@ -123,7 +123,7 @@ class GpuPreEndDialogsSmokeTest {
           DialogRequest answered, String name) throws Exception {
         DialogRequest request = next(source, answered, null);
         for (int frame = 0; frame < 2; frame++) {
-            modal.update(new GpuHud.Inputs(null, GpuHud.HudView.EMPTY, request, GpuHudInputTest.preferences(),
+            modal.update(new GpuHud.Inputs(null, GpuHud.HudView.EMPTY, request, GpuHudFixtures.preferences(),
                   GpuHud.Metrics.of(harness.width(), harness.height()), List.of()));
             harness.draw();
         }

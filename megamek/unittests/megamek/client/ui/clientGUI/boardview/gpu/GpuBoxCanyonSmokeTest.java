@@ -77,7 +77,7 @@ class GpuBoxCanyonSmokeTest {
                     camera.setIsometric(iso);
                     camera.camera.zoom = scene.tile(at).elevation() == 8 ? .055f : .10f;
                     camera.center(BoardGeometry.center(at, scene.tile(at).elevation()));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     String name = "box-canyon-" + at.getBoardNum() + (iso ? "-iso-" : "-top-");
                     for (String mode : List.of("material", "normal", "contact")) {
                         // The uniform-controlled mix retains the full shader interface during diagnostic reloads.

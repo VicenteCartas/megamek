@@ -93,7 +93,7 @@ final class GpuAmbientOcclusion implements Disposable {
      * This frame's occlusion from the scene depth {@code depth}, which the depth pre-pass has just drawn. It runs inside
      * the terrain's opaque batch, through the render context that tracks the bound textures and the state it changes,
      * and restores the scene target and viewport. Nothing unless the terrain's lighting carries it, or without a
-     * pre-pass (the Tactical View, the Classic columns).
+     * pre-pass (the Classic columns).
      */
     void render(Camera camera, GpuTerrain terrain, Texture depth) {
         current = false;
@@ -181,15 +181,10 @@ final class GpuAmbientOcclusion implements Disposable {
 
     /**
      * The define that compiles the occlusion into a lit program (ambient-occlusion.glsl) while its environment's
-     * lighting carries it. Its sampler would take a 17th texture unit, which macOS does not give a stage
-     * (GpuSamplerBudgetSmokeTest), from sculpted ground with volcanic crust beside the board's sky visibility
-     * (GpuSkyVisibility) or ice: that ground draws without it, keeping the board-wide sky occlusion, which a crust patch
-     * in deep shade would visibly lack.
+     * lighting carries it.
      */
     static String prefix(Renderable renderable) {
         return GpuEnvironmentLighting.ambientOcclusion(renderable.environment) != null
-              && !(renderable.material.has(GpuMagmaShader.TYPE)
-                    && (GpuSkyVisibility.STRENGTH > 0 || GpuIceShader.mode(renderable.material) != 0))
               ? "#define ambientOcclusionFlag\n" : "";
     }
 

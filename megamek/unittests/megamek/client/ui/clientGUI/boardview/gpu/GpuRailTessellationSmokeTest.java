@@ -138,7 +138,7 @@ class GpuRailTessellationSmokeTest {
         BoardScene scene = scene(true);
         var available = new AtomicBoolean();
         var failure = new AtomicReference<Throwable>();
-        File output = GpuDepthPrepassBaselineSmokeTest.OUTPUT;
+        File output = GpuCalibrationScenes.OUTPUT;
         Files.createDirectories(output.toPath());
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 900);
@@ -147,12 +147,12 @@ class GpuRailTessellationSmokeTest {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+                var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
                 var camera = new BoardCamera();
                 try {
                     available.set(GpuTessellation.available());
                     if (!available.get()) { return; }
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                     for (float tilt : new float[] { 0, 55 }) {
                         camera.setIsometric(false);
                         camera.orbit(0 - camera.azimuth(), tilt - camera.tilt());

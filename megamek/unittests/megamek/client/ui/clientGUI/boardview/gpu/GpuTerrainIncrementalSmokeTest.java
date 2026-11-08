@@ -117,18 +117,18 @@ class GpuTerrainIncrementalSmokeTest {
     /** Compare the actual emitted triangles, independently of material grouping and mesh packing. */
     private static Map<Coords, long[]> triangles(GpuTerrain terrain) throws Exception {
         Map<Coords, long[]> result = new HashMap<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (var entry : ((Map<?, ?>) field(chunk, "tileMeshes")).entrySet()) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (var entry : ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).entrySet()) {
                 LongArray triangles = new LongArray();
-                for (Object range : (List<?>) field(entry.getValue(), "ranges")) {
-                    Mesh mesh = (Mesh) field(range, "mesh");
+                for (Object range : (List<?>) GpuTestSupport.field(entry.getValue(), "ranges")) {
+                    Mesh mesh = (Mesh) GpuTestSupport.field(range, "mesh");
                     FloatArray points = new FloatArray();
                     ShortArray indices = new ShortArray();
-                    GpuPropBatch.copyVertices(mesh, (int) field(range, "offset"), (int) field(range, "count"), points, indices);
+                    GpuPropBatch.copyVertices(mesh, (int) GpuTestSupport.field(range, "offset"), (int) GpuTestSupport.field(range, "count"), points, indices);
                     int stride = mesh.getVertexSize() / Float.BYTES;
                     var normal = mesh.getVertexAttributes().findByUsage(VertexAttributes.Usage.Normal);
                     for (int i = 0; i < indices.size; i += 3) {
-                        long hash = (int) field(range, "layer") + 1;
+                        long hash = (int) GpuTestSupport.field(range, "layer") + 1;
                         for (int j = 0; j < 3; j++) {
                             int start = Short.toUnsignedInt(indices.get(i + j)) * stride;
                             for (int n = 0; n < 3; n++) { hash = hash * 31 + Math.round(points.get(start + n) * 10000); }
@@ -147,12 +147,6 @@ class GpuTerrainIncrementalSmokeTest {
             }
         }
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static BoardScene edit(BoardScene scene, Coords at, int level, int depth, BoardScene.Surface family) {
