@@ -152,6 +152,8 @@ final class GeneratedMesh {
         }
         placement = new Matrix4(frame).mul(placement);
         Matrix3 normals = new Matrix3().set(placement).inv().transpose();
+        // A mirrored piece (a bay laid end for end) keeps facing out: its triangles wound the other way.
+        boolean mirror = placement.det3x3() < 0;
         for (var nodePart : node.parts) {
             String board = ((RigidGlb.Data) source).surfaces.get(nodePart.materialId).board();
             if (board == null) {
@@ -162,8 +164,9 @@ final class GeneratedMesh {
                 throw new IllegalArgumentException("Piece material " + nodePart.materialId + " is not named after its board material " + board);
             }
             var target = parts.computeIfAbsent(nodePart.materialId, ignored -> new FloatArray());
-            for (short index : meshParts.get(nodePart.meshPartId).indices) {
-                int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
+            short[] indices = meshParts.get(nodePart.meshPartId).indices;
+            for (int i = 0; i < indices.length; i++) {
+                int at = Short.toUnsignedInt(indices[mirror && i % 3 > 0 ? i - i % 3 + 3 - i % 3 : i]) * RigidGlb.STRIDE;
                 float[] vertex = Arrays.copyOfRange(mesh.vertices, at, at + RigidGlb.STRIDE);
                 point.set(vertex[0], vertex[1], vertex[2]).mul(placement);
                 vertex[0] = point.x; vertex[1] = point.y; vertex[2] = point.z;
@@ -387,7 +390,7 @@ final class GeneratedMesh {
         Set<String> materials = new HashSet<>();
         var vertices = new FloatArray();
         List<ModelMeshPart> meshParts = new ArrayList<>();
-        Map<String, Integer> welded = new HashMap<>();
+        Map<Weld, Integer> welded = new HashMap<>();
         for (var piece : pieces.entrySet()) {
             int count = piece.getValue().parts.values().stream().mapToInt(part -> part.size / RigidGlb.STRIDE).sum();
             if (vertices.size > 0 && vertices.size / RigidGlb.STRIDE + count > MESH_VERTICES) {
@@ -447,10 +450,19 @@ final class GeneratedMesh {
         return suffix < 0 ? key : key.substring(0, suffix);
     }
 
-    private static String key(float[] items, int offset) {
-        var key = new StringBuilder(RigidGlb.STRIDE * 9);
-        for (int k = 0; k < RigidGlb.STRIDE; k++) { key.append(Float.floatToIntBits(items[offset + k])).append(','); }
-        return key.toString();
+    /** A vertex's attributes, bit for bit: two vertices weld when every bit matches. */
+    private record Weld(int[] bits) {
+        @Override
+        public boolean equals(Object other) { return other instanceof Weld weld && Arrays.equals(bits, weld.bits); }
+
+        @Override
+        public int hashCode() { return Arrays.hashCode(bits); }
+    }
+
+    private static Weld key(float[] items, int offset) {
+        int[] bits = new int[RigidGlb.STRIDE];
+        for (int k = 0; k < bits.length; k++) { bits[k] = Float.floatToIntBits(items[offset + k]); }
+        return new Weld(bits);
     }
 
     private static VertexAttribute[] attributes() {

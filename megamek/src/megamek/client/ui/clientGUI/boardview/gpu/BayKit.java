@@ -161,12 +161,29 @@ final class BayKit {
             result.put("-closed-" + closed, module(spec, modelled, role, closedPiece, closed, lod,
                   square, footprintScale, fitting, layout, halfLength));
         }
-        // A storey's junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
+        // At a notch its walls ending open turn the corner with the next hex's ({@link KitOutline#notched}): a twin for
+        // each set of such corners, which ConnectedKit picks; not where modules part at their joints.
+        boolean jointed = spec.modules().values().stream().flatMap(List::stream).anyMatch(run -> run.joints() != null);
+        int open = square || jointed || piece.tags().endsWith("-cap") ? 0 : KitOutline.openCorners(piece);
+        for (int notch = open; notch > 0; notch = (notch - 1) & open) {
+            result.put("-notch-" + notch, module(spec, modelled, role, KitOutline.notched(piece, notch), 0, lod, square,
+                  footprintScale, fitting, layout, halfLength));
+        }
+        // Where modules part at their joints, the neighbours' walls end in their grooves at a notch; the corner piece
+        // linked both ways closes its corner between them ({@link KitOutline#capped}).
+        double groove = spec.modules().values().stream().flatMap(List::stream).filter(run -> run.joints() != null)
+              .mapToDouble(run -> run.joints().length()).max().orElse(0);
+        if (jointed && !square && piece.direction() != null && piece.walls().isEmpty() && KitOutline.links(piece) != 0) {
+            result.put("-notch-" + (1 << piece.direction()), module(spec, modelled, role, KitOutline.capped(piece, groove), 0, lod,
+                  square, footprintScale, fitting, layout, halfLength, groove));
+        }
+        // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
         if (!square && !role.startsWith("roof") && piece.direction() != null && piece.walls().isEmpty()
               && run.bays() != null && !run.bays().isEmpty()) {
             for (var junction : KitOutline.Junction.values()) {
+                if (junction.notch()) { continue; }
                 var wedge = junction(run, piece.direction(), junction, modelled, lod);
                 if (!wedge.parts.isEmpty()) { result.put("-junction-" + junction.ordinal(), wedge); }
             }
@@ -200,12 +217,20 @@ final class BayKit {
      */
     private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
           int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
+        return module(spec, modelled, role, piece, closed, lod, square, footprintScale, fitting, layout, halfLength, 0);
+    }
+
+    /** {@code capped}: at a notch, how far the piece's joints keep off its corner ({@link KitOutline#capped}); 0, none. */
+    private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
+          int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength,
+          double capped) {
         boolean ground = role.startsWith("base"), top = role.startsWith("roof"), cap = piece.tags().endsWith("-cap");
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
         boolean seamed = top && run.seam() != null;
         List<KitOutline.Wall> joints = cap || run.joints() == null && !seamed ? List.of()
               : KitOutline.joints(square, KitOutline.links(piece) & ~closed);
+        if (capped > 0) { joints = KitOutline.capJoints(joints, piece.direction(), capped); }
         // How far a wall goes on along a joint that continues it: its joint's bevel, or the roof's off its seam.
         double chamfer = seamed ? spec.roof().inset() : run.joints() != null ? run.joints().length() : 0;
         var result = new GeneratedMesh();
@@ -281,13 +306,14 @@ final class BayKit {
     }
 
     /**
-     * Lays {@code run} along {@code wall}, {@code inset} inside its line: a cut or corner end goes on {@link
-     * KitOutline#EXTEND} past (the piece's cut or the wall's mitre trims it), an open or joint end stops square. Where
-     * its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty) and a seamed roof's
-     * edge mitred to the joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At the piece's {@code
-     * cut} or an open end (the next hex's wall goes on) its end bays go on a hair under the next piece's, the bays
-     * beyond a cut stopping exactly on it; a mitred corner is closed ({@link #closeMitre}). Returns how far it goes on
-     * before and after the wall.
+     * Lays {@code run} along {@code wall}, {@code inset} inside its line: a cut, corner, round or notch end goes on
+     * {@link KitOutline#EXTEND} past (the piece's cut or the wall's mitre trims it), an open or joint end stops square.
+     * Where its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty; none on a facet)
+     * and a seamed roof's edge mitred to the joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At
+     * the piece's {@code cut} or an open end (the next hex's wall goes on) its end bays go on a hair under the next
+     * piece's, the bays beyond a cut stopping exactly on it; a mitred corner is closed ({@link #closeMitre}), a notch's by
+     * the run's first bay laid on past it on both walls.
+     * Returns how far it goes on before and after the wall.
      */
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<GeneratedMesh.Keep> wallKeeps,
           List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, boolean facet,
@@ -311,7 +337,7 @@ final class BayKit {
                 laps[k] = KitOutline.SEAM_OVERLAP / 2;
             }
             if (meets[k].kind() == Meeting.CONTINUES) { keeps.removeIf(keep -> Math.abs(keep.at(point[0], point[1])) < 1e-6); }
-            if (meets[k].kind() == Meeting.ENDS && run.joints() != null) { pads[k] = run.joints().length(); }
+            if (meets[k].kind() == Meeting.ENDS && run.joints() != null && !facet) { pads[k] = run.joints().length(); }
             if (meets[k].kind() == Meeting.ENDS && run.seam() != null && meets[k].joint() != null) {
                 var joint = meets[k].joint();
                 keeps.add(KitOutline.mitre(point, normal(p, wall.q()), normal(joint.p(), joint.q()), k == 0 ? wall.q() : p));
@@ -340,7 +366,13 @@ final class BayKit {
         keeps.add((x, y) -> length + keepAfter - (x - p[0]) * u[0] - (y - p[1]) * u[1]);
         result.add(laid.clipped(keeps));
         for (int k = 0; k < 2; k++) {
-            if ((k == 0 ? wall.start() : wall.end()) == KitOutline.End.CORNER) { closeMitre(result, laid, wall, k == 0, walls); }
+            boolean start = k == 0;
+            KitOutline.End end = start ? wall.start() : wall.end();
+            double[] point = start ? p : wall.q();
+            if (end == KitOutline.End.CORNER) {
+                walls.stream().filter(other -> other != wall && KitOutline.close(start ? other.q() : other.p(), point)).findFirst()
+                      .ifPresent(next -> closeMitre(result, laid, wall, start, normal(next.p(), next.q())));
+            }
         }
         return new double[] { before, after };
     }
@@ -349,13 +381,9 @@ final class BayKit {
      * A mitred corner cuts the bays' recesses on a slant; where the next wall's bays leave the slant open, the inside
      * showed through. A dark face on the mitre, from the wall's line to its bays' deepest recess, closes this wall's cut.
      */
-    private static void closeMitre(GeneratedMesh result, GeneratedMesh laid, KitOutline.Wall wall, boolean start,
-          List<KitOutline.Wall> walls) {
+    private static void closeMitre(GeneratedMesh result, GeneratedMesh laid, KitOutline.Wall wall, boolean start, double[] m) {
         double[] c = start ? wall.p() : wall.q(), inside = start ? wall.q() : wall.p(), n = normal(wall.p(), wall.q());
-        KitOutline.Wall next = walls.stream().filter(other -> other != wall
-              && KitOutline.close(start ? other.q() : other.p(), c)).findFirst().orElse(null);
-        if (next == null) { return; }
-        double[] m = normal(next.p(), next.q()), b = { n[0] + m[0], n[1] + m[1] };
+        double[] b = { n[0] + m[0], n[1] + m[1] };
         double along = Math.hypot(b[0], b[1]);
         if (along < 1e-6) { return; }
         b[0] /= along; b[1] /= along;
@@ -442,7 +470,9 @@ final class BayKit {
             }
             reach[k] = EXTEND;
             keeps.add(KitOutline.mitre(point, n, m, start ? q : p));
-            if (wall && turn > 1e-6) {
+            // A wall ending in its joint piece there keeps the seam off that piece's bevel; a facet's meets it on the mitre.
+            boolean facet = (KitOutline.close(next.p(), point) ? next.start() : next.end()) == KitOutline.End.ROUND;
+            if (wall && turn > 1e-6 && !facet) {
                 keeps.add((x, y) -> -((x - p[0]) * n[0] + (y - p[1]) * n[1]) - ((x - at[0]) * m[0] + (y - at[1]) * m[1]) - chamfer);
             }
         }
@@ -482,9 +512,9 @@ final class BayKit {
     /** A board material's part textured on the board's axes ({@link GeneratedMesh#BOARD_UV}). */
     private static String board(String material) { return material + GeneratedMesh.BOARD_UV; }
 
-    /** Whether a facade goes on past an end, to be trimmed there: by the piece's cut, the corner's mitre, an arc's bisector. */
+    /** Whether a facade goes on past an end, to be trimmed there: by the piece's cut, a corner's or notch's mitre, an arc's bisector. */
     private static boolean goesOn(KitOutline.End end) {
-        return end == KitOutline.End.CUT || end == KitOutline.End.CORNER || end == KitOutline.End.ROUND;
+        return end == KitOutline.End.CUT || end == KitOutline.End.CORNER || end == KitOutline.End.ROUND || end == KitOutline.End.NOTCH;
     }
 
     /**
@@ -522,12 +552,17 @@ final class BayKit {
                 int last = count(run, partners[0].length(), other);
                 beyond.add(new Placed(startPad - run.bay() * other, bay(run, partners[0], last - 1, last, ground), other));
             } else if (before > 0) {
-                beyond.add(new Placed(startPad - run.bay() * scale, bay(run, wall, -1, count, ground), scale));
+                beyond.add(new Placed(startPad - run.bay() * scale, wall.start() == KitOutline.End.NOTCH ? run.bays().getFirst()
+                      : bay(run, wall, -1, count, ground), scale));
             }
             if (after > 0 && partners[1] != null) {
                 double other = scale(run, partners[1].length(), 0, 0, 1);
                 beyond.add(new Placed(length - endPad, bay(run, partners[1], 0, count(run, partners[1].length(), other), ground),
                       other));
+            } else if (after > 0 && wall.end() == KitOutline.End.NOTCH) {
+                // Round a notch's corner both walls go on in their run's first bay, its end on the corner (a wall ending
+                // there lays it mirrored): the two meet on the mitre in the same section.
+                beyond.add(new Placed(length - endPad + run.bay() * scale, run.bays().getFirst(), -scale));
             } else if (after > 0) {
                 beyond.add(new Placed(length - endPad, bay(run, wall, count, count, ground), scale));
             }

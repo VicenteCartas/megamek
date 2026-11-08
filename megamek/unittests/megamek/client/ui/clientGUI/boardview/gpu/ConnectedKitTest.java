@@ -211,14 +211,19 @@ class ConnectedKitTest {
         // Each neighbour's wall, square to its link, ends at the shared corner: its corner 2 (north's), 4 (north-east's).
         assertArrayEquals(new int[] { 0, 0, bit(KitOutline.Junction.S1_NOTCH), 0, 0, 0 }, levelOf(junctions(scene, north, 2), 1));
         assertArrayEquals(new int[] { 0, 0, 0, 0, bit(KitOutline.Junction.S0_NOTCH), 0 }, levelOf(junctions(scene, northEast, 2), 0));
-        assertArrayEquals(new int[12], junctions(scene, centre, 2), "Linked both ways, its corner holds no wall");
+        // The three stand level, so the roofs' walls turn the corner too.
+        assertArrayEquals(new int[] { 0, 0, bit(KitOutline.Junction.S1_NOTCH), 0, 0, 0 }, levelOf(junctions(scene, north, 2), 2));
+        // Linked both ways, its corner holds no wall of its own: where modules part at joints it closes the notch.
+        for (int level = 0; level < 3; level++) {
+            assertArrayEquals(new int[] { ConnectedKit.CORNER_NOTCH, 0, 0, 0, 0, 0 }, levelOf(junctions(scene, centre, 2), level));
+        }
         // Linked to each other too, the three close the corner inside the building.
         hexes[north.getY() * 7 + north.getX()].getTerrain(Terrains.BUILDING).setExits((1 << 3) | (1 << 2));
         hexes[northEast.getY() * 7 + northEast.getX()].getTerrain(Terrains.BUILDING).setExits((1 << 4) | (1 << 5));
         scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
               Entity.NONE, "", List.of());
-        assertArrayEquals(new int[12], junctions(scene, north, 2));
-        assertArrayEquals(new int[12], junctions(scene, northEast, 2));
+        assertArrayEquals(new int[18], junctions(scene, north, 2));
+        assertArrayEquals(new int[18], junctions(scene, northEast, 2));
     }
 
     @Test

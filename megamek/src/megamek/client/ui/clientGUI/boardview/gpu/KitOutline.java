@@ -36,9 +36,10 @@ final class KitOutline {
     /**
      * How a wall's end meets the next: on a corner piece's cut line (extended, the cut mitres it), on a cut line within a
      * whole-hex piece (goes straight on), at a turn to another wall of the piece ({@code keeps} hold its mitres), at a
-     * hexside the building continues across, or between a rounded corner's arcs.
+     * hexside the building continues across, between a rounded corner's arcs, or at a notch, going on past the hex corner
+     * to the next hex's wall ({@code keeps} hold the mitre, {@link #notched}).
      */
-    enum End { CUT, JOINT, CORNER, OPEN, ROUND }
+    enum End { CUT, JOINT, CORNER, OPEN, ROUND, NOTCH }
 
     /**
      * A wall from p to q with the building on its left. {@code front}: on a whole-hex piece's front (its outline's first
@@ -67,7 +68,10 @@ final class KitOutline {
         /** B's closing wall along AB; B's wall square to side c + 1. */
         C0_CAP, C0_SQUARE,
         /** A's closing wall along AB; A's wall square to side c. */
-        C1_CAP, C1_SQUARE
+        C1_CAP, C1_SQUARE;
+
+        /** At a notch the wall's own piece turns the corner ({@link #notched}); the other kinds take a twin past it. */
+        boolean notch() { return this == S0_NOTCH || this == S1_NOTCH; }
     }
 
     /** The wall whose end at corner {@code c} {@code junction} carries on, as its piece lays it. */
@@ -96,6 +100,78 @@ final class KitOutline {
             case C1_SQUARE -> new double[] { -e0[0], -e0[1] };
             case C0_SQUARE -> new double[] { -e1[0], -e1[1] };
         };
+    }
+
+    /** The hex corners where {@code piece}'s walls end open: where a wall square to a linked side meets the hexside. */
+    static int openCorners(Piece piece) {
+        int result = 0;
+        for (Wall wall : piece.walls()) {
+            for (int c = 0; c < 6; c++) {
+                if (wall.start() == End.OPEN && close(wall.p(), hexCorner(c)) || wall.end() == End.OPEN && close(wall.q(), hexCorner(c))) {
+                    result |= 1 << c;
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * {@code piece} at a notch on the hex corners in {@code corners} ({@link Junction#S0_NOTCH}, S1_NOTCH): each wall
+     * ending open there goes on past the corner, mitred with the next hex's wall, an inside corner; what stands out of
+     * either wall meets the other's on the notch's bisector.
+     */
+    static Piece notched(Piece piece, int corners) {
+        List<Wall> walls = new ArrayList<>();
+        for (Wall wall : piece.walls()) {
+            End start = wall.start(), end = wall.end();
+            List<GeneratedMesh.Keep> keeps = new ArrayList<>(wall.keeps());
+            for (int c = 0; c < 6; c++) {
+                if ((corners & 1 << c) == 0) { continue; }
+                double[] at = hexCorner(c), partner = partnerNormal(Junction.S0_NOTCH, c), n = normal(wall.p(), wall.q());
+                if (start == End.OPEN && close(wall.p(), at)) {
+                    start = End.NOTCH;
+                    keeps.add(mitre(at, n, partner, wall.q()));
+                }
+                if (end == End.OPEN && close(wall.q(), at)) {
+                    end = End.NOTCH;
+                    keeps.add(mitre(at, n, partner, wall.p()));
+                }
+            }
+            walls.add(new Wall(wall.p(), wall.q(), start, end, keeps, wall.front()));
+        }
+        return new Piece(piece.tags(), piece.direction(), piece.polygons(), walls);
+    }
+
+    /**
+     * {@code piece}, a corner piece linked both ways, at a notch in a kit whose modules part at their joints: the
+     * neighbours' walls end there in their joints' grooves, {@code depth} along each hexside from the corner, and the
+     * piece closes its corner between them with a facet (ROUND ends: the kit's corner facet piece), its floor cut there.
+     * Its joints then start at the grooves ({@link #capJoints}).
+     */
+    static Piece capped(Piece piece, double depth) {
+        double[] p0 = capPoint(piece.direction(), piece.direction(), depth), p1 = capPoint(piece.direction(), piece.direction() + 1, depth);
+        double[] chord = { p0[0] - p1[0], p0[1] - p1[1] };
+        List<GeneratedMesh.Keep> inside = List.of((x, y) -> cross(chord, new double[] { x - p1[0], y - p1[1] }));
+        List<List<double[]>> polygons = piece.polygons().stream().map(polygon -> clipped(polygon, inside))
+              .filter(polygon -> !polygon.isEmpty()).toList();
+        List<Wall> walls = new ArrayList<>(piece.walls());
+        walls.add(new Wall(p1, p0, End.ROUND, End.ROUND, List.of(), false));
+        return new Piece(piece.tags(), piece.direction(), polygons, walls);
+    }
+
+    /** {@code joints} starting or ending at hex corner {@code corner}, kept from {@code depth} along them ({@link #capped}). */
+    static List<Wall> capJoints(List<Wall> joints, int corner, double depth) {
+        double[] at = hexCorner(corner);
+        return joints.stream().map(joint -> close(joint.p(), at) ? new Wall(lerp(joint.p(), joint.q(), depth / joint.length()),
+              joint.q(), joint.start(), joint.end(), joint.keeps(), joint.front())
+              : close(joint.q(), at) ? new Wall(joint.p(), lerp(joint.q(), joint.p(), depth / joint.length()), joint.start(),
+                    joint.end(), joint.keeps(), joint.front()) : joint).toList();
+    }
+
+    /** The point {@code depth} from hex corner {@code corner} along its side {@code side} (corner or corner + 1). */
+    private static double[] capPoint(int corner, int side, double depth) {
+        double[] at = hexCorner(corner), u = unit(new double[] { MIDPOINTS[side % 6][0] - at[0], MIDPOINTS[side % 6][1] - at[1] });
+        return new double[] { at[0] + u[0] * depth, at[1] + u[1] * depth };
     }
 
     /** The unit normal of a hexside along {@code side} on {@code toward}'s side. */
@@ -619,7 +695,7 @@ final class KitOutline {
                 double scale = 2 / (half[0] * half[0] + half[1] * half[1]);
                 result[2 * k] = point;
                 result[2 * k + 1] = new double[] { half[0] * scale, half[1] * scale };
-            } else if (kind == End.CUT || kind == End.CORNER) {
+            } else if (kind == End.CUT || kind == End.CORNER || kind == End.NOTCH) {
                 result[2 * k] = new double[] { point[0] + u[0] * sign * EXTEND, point[1] + u[1] * sign * EXTEND };
                 result[2 * k + 1] = n;
             } else {

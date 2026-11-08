@@ -41,14 +41,16 @@ import megamek.common.board.HexTile;
  * piece may have a {@code -bend} variant, which stands in for it behind a 60-degree bend (the hex connects across just
  * the two hexsides opposite it): a roof whose plating mitres along the bend's two arms. Kits with {@code -cap} pieces
  * retain their ground footprint above shorter neighbours, closing the exposed hexsides with those walls and roof rims.
- * A roof's {@code -closed-N} variant includes the exposed links in bitmask N in its deck and edge calculation.
+ * A roof's {@code -closed-N} variant includes the exposed links in bitmask N in its deck and edge calculation. A piece's
+ * {@code -notch-N} variant turns its walls ending at the hex corners in bitmask N on into a notch's inside corner
+ * ({@link KitOutline#notched}).
  */
 final class ConnectedKit {
     /** Tag directions in MegaMek's order, clockwise from north. */
     static final List<String> DIRECTIONS = List.of("n", "ne", "se", "s", "sw", "nw");
     private static final String DIRECTION = "(?:ne|nw|se|sw|n|s)";
     private static final Pattern NODE = Pattern.compile(
-          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*)?");
+          ".*-(base|floor|roof)(0|[1-9][0-9]*)((?:-(?:link|end)-" + DIRECTION + ")*)(-bend|-cap|-closed-[1-9][0-9]*|-notch-[1-9][0-9]*)?");
     private static final Pattern TAG = Pattern.compile("-(link|end)-(" + DIRECTION + ")");
     private static final Pattern JUNCTION = Pattern.compile(".*-junction-[0-9]+");
     /** How far a link arm's far end may lie from its edge line (authored seams overlap the neighbour's slightly). */
@@ -60,22 +62,25 @@ final class ConnectedKit {
     /**
      * One mesh node: its module role ({@code base0}, {@code floor1}, ...), the directions that must (not) connect, and
      * whether it is a linkless corner's {@code -bend} variant or a {@code -cap} closing a link above a shorter neighbour.
-     * {@code closed} names a roof twin's exposed links in the same direction mask as {@code links}.
+     * {@code closed} names a twin's exposed links in the same direction mask as {@code links}; {@code notch}, the hex
+     * corners where a twin's walls turn a notch's corner (corner c between directions c and c + 1).
      */
-    record Piece(String node, String role, int links, int ends, boolean bend, boolean cap, int closed) {
+    record Piece(String node, String role, int links, int ends, boolean bend, boolean cap, int closed, int notch) {
         boolean core() { return links == 0 && ends == 0; }
 
         boolean whole() { return (links | ends) == 63; }
 
         boolean holds(int connected) { return (connected & links) == links && (connected & ends) == 0; }
 
-        Piece turned(int steps) { return new Piece(node, role, turn(links, steps), turn(ends, steps), bend, cap, turn(closed, steps)); }
+        Piece turned(int steps) {
+            return new Piece(node, role, turn(links, steps), turn(ends, steps), bend, cap, turn(closed, steps), turn(notch, steps));
+        }
 
         /** The same tags, as an identity shared by every module role; a bend shares its plain piece's. */
         long tags() { return (long) links << 6 | ends; }
 
         /** The tags and piece kind: what a kit holds once per role. */
-        long identity() { return tags() | (bend ? 1L << 12 : 0) | (cap ? 1L << 13 : 0) | (long) closed << 14; }
+        long identity() { return tags() | (bend ? 1L << 12 : 0) | (cap ? 1L << 13 : 0) | (long) closed << 14 | (long) notch << 20; }
     }
 
     /**
@@ -113,11 +118,14 @@ final class ConnectedKit {
             boolean bend = "-bend".equals(match.group(4)), cap = "-cap".equals(match.group(4));
             int closed = match.group(4) != null && match.group(4).startsWith("-closed-")
                   ? Integer.parseInt(match.group(4).substring(8)) : 0;
+            int notch = match.group(4) != null && match.group(4).startsWith("-notch-")
+                  ? Integer.parseInt(match.group(4).substring(7)) : 0;
+            require(notch < 64, "A notch names hex corners: " + node.id);
             require(!bend || match.group(1).equals("roof") && links == 0 && Integer.bitCount(ends) == 2,
                   "A bend piece is a linkless corner's roof: " + node.id);
             require(!cap || Integer.bitCount(links) == 1 && ends == 0, "A cap closes one link: " + node.id);
             require(closed == 0 || (closed & ~links) == 0, "A closed piece closes only its own links: " + node.id);
-            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend, cap, closed);
+            var piece = new Piece(node.id, match.group(1) + match.group(2), links, ends, bend, cap, closed, notch);
             require(seen.add(piece.role() + "/" + piece.identity()), "Duplicate building module: " + node.id);
             result.add(piece);
         }
@@ -172,9 +180,9 @@ final class ConnectedKit {
                   "Every module needs the kit's whole-hex pieces: " + piece.node());
             require(!piece.bend() || pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && !other.bend()
                   && other.tags() == piece.tags()), "A bend piece stands in for its plain corner piece: " + piece.node());
-            require(piece.closed() == 0 || pieces.stream().anyMatch(other -> other.role().equals(piece.role())
-                  && other.closed() == 0 && !other.cap() && other.tags() == piece.tags()),
-                  "A closed piece stands in for its open piece: " + piece.node());
+            require(piece.closed() == 0 && piece.notch() == 0 || pieces.stream().anyMatch(other -> other.role().equals(piece.role())
+                  && other.closed() == 0 && other.notch() == 0 && !other.cap() && other.tags() == piece.tags()),
+                  "A closed or notched piece stands in for its plain piece: " + piece.node());
             require(!piece.cap() || roles.keySet().stream().filter(role -> !role.startsWith("base")).allMatch(role -> pieces.stream()
                   .anyMatch(other -> other.role().equals(role) && other.cap() && other.links() == piece.links())),
                   "Every floor and roof needs the kit's link caps: " + piece.node());
@@ -187,10 +195,11 @@ final class ConnectedKit {
         if (!symmetric) {
             for (var piece : pieces) {
                 for (int steps = 1; steps < 6 && !piece.core(); steps++) {
-                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps), closed = turn(piece.closed(), steps);
+                    int links = turn(piece.links(), steps), ends = turn(piece.ends(), steps), closed = turn(piece.closed(), steps),
+                          notch = turn(piece.notch(), steps);
                     require(pieces.stream().anyMatch(other -> other.role().equals(piece.role()) && other.links() == links
                           && other.ends() == ends && other.bend() == piece.bend() && other.cap() == piece.cap()
-                          && other.closed() == closed),
+                          && other.closed() == closed && other.notch() == notch),
                           "A kit tags north only, or every direction: " + piece.node());
                 }
             }
@@ -328,20 +337,31 @@ final class ConnectedKit {
     }
 
     /**
-     * Per level from the ground (storeys) and board corner d (between directions d and d + 1), at level * 6 + d: a mask
-     * of the {@link KitOutline.Junction}s where this hex's walls end at that corner on another wall, from {@code reach}
-     * and {@link #corners}. {@code capped}: pieces stand by the ground's connections, caps closing the links exposed
-     * above (as {@link #placements} chooses them); the hexes around are taken to be capped alike.
+     * Per level from the ground (storeys, then the roof) and board corner d (between directions d and d + 1), at level *
+     * 6 + d: a mask of the {@link KitOutline.Junction}s where this hex's walls end at that corner on another wall, or
+     * {@link #CORNER_NOTCH} where it is linked both ways and its neighbours' walls end there in a notch, from {@code
+     * reach} and {@link #corners}. {@code capped}: pieces stand by the ground's connections, caps closing the
+     * links exposed above (as {@link #placements} chooses them); the hexes around are taken to be capped alike. A roof's
+     * walls go on round a notch, or close it, where both neighbours' roofs stand level with its own.
      */
     static int[] junctions(int height, int[] reach, int[] corners, boolean capped) {
-        int[] result = new int[height * 6];
+        int[] result = new int[(height + 1) * 6];
         for (int level = 0; level < height; level++) {
             for (int corner = 0; corner < 6; corner++) {
                 result[level * 6 + corner] = junction(level, corner, reach, corners, capped);
             }
         }
+        for (int corner = 0; height > 0 && corner < 6; corner++) {
+            if (corners[corner] == height && corners[(corner + 1) % 6] == height) {
+                result[height * 6 + corner] = result[(height - 1) * 6 + corner] & NOTCHES;
+            }
+        }
         return result;
     }
+
+    /** In {@link #junctions}: linked both ways at the corner, where the two neighbours' walls meet in a notch. */
+    static final int CORNER_NOTCH = 1 << KitOutline.Junction.values().length;
+    private static final int NOTCHES = bit(KitOutline.Junction.S0_NOTCH) | bit(KitOutline.Junction.S1_NOTCH) | CORNER_NOTCH;
 
     private static int junction(int level, int corner, int[] reach, int[] corners, boolean capped) {
         int a = corner, b = (corner + 1) % 6;
@@ -352,14 +372,17 @@ final class ConnectedKit {
         // of its own meet within its piece.
         boolean p0 = capped ? g0 : l0, p1 = capped ? g1 : l1;
         boolean s0 = p0 && !p1, s1 = p1 && !p0, c0 = capped && g0 && !l0, c1 = capped && g1 && !l1;
+        // Linked both ways, between two neighbours standing here that do not link each other: their walls' notch.
+        if (p0 && p1 && l0 && l1 && corners[a] > level && corners[b] > level && !(capped ? gab : lab)) { return CORNER_NOTCH; }
         if (count(s0, s1, c0, c1) != 1) { return 0; }
         // The one other wall ending here, in A or B where they stand at this level and join this hex's building.
         boolean pab = capped ? gab : lab, capAB = capped && gab && !lab;
         boolean aIn = corners[a] > level && (l0 || lab && l1), bIn = corners[b] > level && (l1 || lab && l0);
-        // A's ends: square to its side with this hex (straight on from S0) or with B, caps along either.
-        boolean aSquareX = p0 && !pab, aSquareAB = pab && !p0, aCapX = capped && g0 && !l0;
-        boolean bSquareX = p1 && !pab, bSquareAB = pab && !p1, bCapX = capped && g1 && !l1;
-        int aEnds = aIn ? count(aSquareX, aSquareAB, aCapX, capAB) : 0, bEnds = bIn ? count(bSquareX, bSquareAB, bCapX, capAB) : 0;
+        // A's ends: square to its side with this hex (straight on from S0) or with B, or its cap along AB. (Standing here, it
+        // has no cap along its side with this hex.)
+        boolean aSquareX = p0 && !pab, aSquareAB = pab && !p0;
+        boolean bSquareX = p1 && !pab, bSquareAB = pab && !p1;
+        int aEnds = aIn ? count(aSquareX, aSquareAB, capAB) : 0, bEnds = bIn ? count(bSquareX, bSquareAB, capAB) : 0;
         // A hex with two ends here meets itself; only one wall may be left for this one's end.
         boolean aOne = aEnds == 1, bOne = bEnds == 1;
         if (aOne == bOne) { return 0; }
@@ -490,18 +513,31 @@ final class ConnectedKit {
         return placements(kit, lod, selected, reach, steps, stepped, null);
     }
 
+    /**
+     * Whether pieces stand by the ground's connections, the kit's caps closing the links exposed above; else (no caps, or
+     * a stepped building) by each level's.
+     */
+    static boolean capped(Kit kit, boolean stepped) { return !stepped && kit.pieces().stream().anyMatch(Piece::cap); }
+
     /** {@code junctions}: {@link #junctions} for the hex, or null for none. */
     static List<Placement> placements(Kit kit, int lod, List<String> selected, int[] reach, int steps, boolean stepped,
           int[] junctions) {
         var source = kit.lods().get(lod);
         var ground = kit.grounds().get(lod);
         int height = selected.size() - 1;
-        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedPieces = new HashMap<>();
+        Map<String, Map<Long, Piece>> byRole = new HashMap<>(), bends = new HashMap<>(), closedPieces = new HashMap<>(),
+              notched = new HashMap<>();
+        // Per role and plain piece, the hex corners where its twins turn a notch's corner.
+        Map<String, Map<Long, Integer>> notchable = new HashMap<>();
         for (var piece : kit.parts().get(lod)) {
-            (piece.closed() != 0 ? closedPieces : piece.bend() ? bends : byRole).computeIfAbsent(piece.role(), ignored -> new HashMap<>())
-                  .put(piece.bend() ? piece.tags() : piece.identity(), piece);
+            (piece.closed() != 0 ? closedPieces : piece.notch() != 0 ? notched : piece.bend() ? bends : byRole)
+                  .computeIfAbsent(piece.role(), ignored -> new HashMap<>()).put(piece.bend() ? piece.tags() : piece.identity(), piece);
+            if (piece.notch() != 0) {
+                notchable.computeIfAbsent(piece.role(), ignored -> new HashMap<>())
+                      .merge(piece.identity() & ~(63L << 20), piece.notch(), (a, b) -> a | b);
+            }
         }
-        boolean capped = !stepped && kit.pieces().stream().anyMatch(Piece::cap);
+        boolean capped = capped(kit, stepped);
         int[] connected = new int[height];
         for (int level = 0; level < height; level++) {
             for (int direction = 0; direction < 6; direction++) {
@@ -547,6 +583,12 @@ final class ConnectedKit {
                         int closed = piece.links() & ~turn(connected[role.startsWith("roof") ? level - 1 : level], -turn);
                         piece = closedPieces.getOrDefault(role, Map.of()).getOrDefault(piece.identity() | (long) closed << 14, piece);
                     }
+                    // Its walls ending at a notch turn the corner there with the next hex's: a storey's, or the roof's on
+                    // the top storey's notches (board corner b at this piece's own corner b - steps - turn).
+                    int notch = junctions == null || piece == null || piece.closed() != 0 || role.startsWith("roof") && level != height
+                          ? 0 : turn(notches(junctions, level), -turn - steps)
+                          & notchable.getOrDefault(role, Map.of()).getOrDefault(piece.identity(), 0);
+                    if (notch != 0) { piece = notched.get(role).getOrDefault(piece.identity() | (long) notch << 20, piece); }
                     if (piece != null && node(source, piece.node()).parts.length > 0) {
                         result.add(new Placement(piece.node(), role, level, placement(level * GpuBuilding.LEVEL_HEIGHT
                               - ground.get(role), turn + steps), piece.node() + "@" + turn + "/" + role + "-at-" + level + "/"));
@@ -559,9 +601,18 @@ final class ConnectedKit {
         return List.copyOf(result);
     }
 
+    /** The board corners where {@code junctions}' level (storeys, then the roof) meets a notch. */
+    private static int notches(int[] junctions, int level) {
+        int result = 0;
+        for (int corner = 0; corner < 6; corner++) {
+            if ((junctions[level * 6 + corner] & NOTCHES) != 0) { result |= 1 << corner; }
+        }
+        return result;
+    }
+
     /**
-     * Each storey's junctions at its corners ({@link #junctions}): twins of the corner piece linked both ways, turned to
-     * the corner in a kit that holds north only.
+     * Each storey's junctions at its corners but notches ({@link #junctions}): twins of the corner piece linked both
+     * ways, turned to the corner in a kit that holds north only.
      */
     private static void placeJunctions(List<Placement> result, Kit kit, RigidGlb.Data source, Map<String, Map<Long, Piece>> byRole,
           List<String> selected, Map<String, Float> ground, int[] junctions, int steps) {
@@ -577,7 +628,7 @@ final class ConnectedKit {
                 int turn = kit.symmetric() ? corner : 0;
                 for (var junction : KitOutline.Junction.values()) {
                     String node = both.node() + "-junction-" + junction.ordinal();
-                    if ((mask & bit(junction)) == 0 || !ids.contains(node)) { continue; }
+                    if (junction.notch() || (mask & bit(junction)) == 0 || !ids.contains(node)) { continue; }
                     result.add(new Placement(node, role, level, placement(level * GpuBuilding.LEVEL_HEIGHT - ground.get(role),
                           turn + steps), node + "@" + turn + "/" + role + "-at-" + level + "/"));
                 }

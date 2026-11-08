@@ -46,7 +46,8 @@ final class GpuBuilding implements Disposable {
     private final ConnectedKit.Kit kit;
     private final List<Model> models = new ArrayList<>();
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
-    // Whether the kit holds junctions where its walls meet the neighbours' at a corner (ConnectedKit#junctions).
+    // Whether the kit holds junctions or notch twins where its walls meet the neighbours' at a corner
+    // (ConnectedKit#junctions).
     private boolean junctions;
     // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
@@ -95,7 +96,7 @@ final class GpuBuilding implements Disposable {
             for (Node node : models.getFirst().nodes) {
                 triangles.put(node.id, GpuTerrain.triangles(List.of(node), part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
                 bounds.put(node.id, node.calculateBoundingBox(new BoundingBox()));
-                junctions |= node.id.contains("-junction-");
+                junctions |= node.id.contains("-junction-") || node.id.contains("-notch-");
             }
         } catch (RuntimeException | Error error) {
             dispose();
@@ -165,7 +166,7 @@ final class GpuBuilding implements Disposable {
     /** {@code corners}: {@link ConnectedKit#corners}, or null for none of its walls' junctions with the neighbours'. */
     Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners) {
         // Pieces stand by the ground's connections where the kit caps the links above ({@link ConnectedKit#placements}).
-        boolean capped = !stepped && kit.pieces().stream().anyMatch(ConnectedKit.Piece::cap);
+        boolean capped = ConnectedKit.capped(kit, stepped);
         List<Integer> junctions = corners == null || !this.junctions ? List.of()
               : Arrays.stream(ConnectedKit.junctions(levels, reach, corners, capped)).boxed().toList();
         var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped,
