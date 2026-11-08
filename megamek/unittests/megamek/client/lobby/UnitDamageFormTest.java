@@ -46,6 +46,7 @@ import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.equipment.AmmoMounted;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
+import megamek.common.interfaces.ILocationExposureStatus;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.AbstractBuildingEntity;
 import megamek.common.units.Crew;
@@ -466,6 +467,40 @@ class UnitDamageFormTest {
         assertTrue(atlas.getWeaponList().stream().filter(weapon -> !weapon.canJam()).allMatch(weapon ->
               value(form.place(atlas.getLocationAbbr(weapon.getLocation())), weapon.getName()).flags().stream()
                     .noneMatch(flag -> flag.label().equals("Jammed"))), "only weapons a rule can jam");
+    }
+
+    @Test
+    void theSummaryListsFlaggedLocationsAndEquipmentWithTheLocationTheyOpen() throws Exception {
+        Entity atlas = load("Atlas AS7-D.mtf");
+        UnitDamageForm whole = UnitDamageForm.of(atlas);
+        assertTrue(whole.summarized());
+        assertTrue(whole.summary().isEmpty(), "an undamaged unit has nothing to list");
+
+        atlas.setLocationStatus(Mek.LOC_LEFT_ARM, ILocationExposureStatus.BREACHED);
+        WeaponMounted autocannon = atlas.getWeaponList().stream().filter(WeaponMounted::canJam).findFirst()
+              .orElseThrow();
+        autocannon.setJammedImmediately(true);
+        UnitDamageForm form = UnitDamageForm.of(atlas);
+        List<UnitDamageSummary.Line> lines = form.summary();
+        assertEquals(2, lines.size(), lines.toString());
+
+        UnitDamageSummary.Line arm = lines.get(0);
+        assertEquals(atlas.getLocationName(Mek.LOC_LEFT_ARM) + ": Breached", arm.text());
+        assertEquals(form.place("LA"), form.placeOf(arm.location()));
+
+        UnitDamageSummary.Line weapon = lines.get(1);
+        String at = atlas.getLocationAbbr(autocannon.getLocation());
+        assertEquals(autocannon.getName() + " (" + at + ")", weapon.item());
+        assertEquals(List.of("Jammed"), weapon.states());
+        assertEquals(form.place(at), form.placeOf(weapon.location()));
+        assertNotNull(form.placeOf(weapon.location()));
+    }
+
+    @Test
+    void conventionalInfantryHasNoSummary() throws Exception {
+        UnitDamageForm form = UnitDamageForm.of(load("Foot Platoon (AFFS) (Laser 3067+).blk"));
+        assertFalse(form.summarized());
+        assertTrue(form.summary().isEmpty());
     }
 
     private static List<String> labels(UnitDamageForm.Place place) {
