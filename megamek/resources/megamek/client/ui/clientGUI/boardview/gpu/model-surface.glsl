@@ -181,9 +181,7 @@ float modelVisibility(vec3 geometric, bool transmits) {
 #if defined(shadowMapFlag) && !defined(mediumQualityFlag)
     vec3 light = sunDirection();
     float texel = shadowTexel(), depthPerUnit;
-    // A non-uniformly scaled model (a Square-footprint kit) brings its normal unnormalized: at that length the offset
-    // would carry the lookup into the model's own shadow.
-    vec3 shadowUv = shadowLookup(v_cloudPosition, normalize(geometric), light, texel);
+    vec3 shadowUv = shadowLookup(v_cloudPosition, geometric, light, texel);
     vec2 slope = receiverPlane(shadowUv, light, u_metre, depthPerUnit);
     // Derivatives above remain defined across the light horizon. A face turned from the sun takes no direct light
     // unless it transmits it (shadeSurface): it needs no comparisons.
