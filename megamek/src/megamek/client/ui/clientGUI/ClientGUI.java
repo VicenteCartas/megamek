@@ -1293,6 +1293,14 @@ public class ClientGUI extends AbstractClientGUI
         getGameOptionsDialog().setVisible(true);
     }
 
+    /**
+     * Whether the game is in the lounge, where the menu's dialogs show as they always have; outside it they show
+     * natively over the battle window.
+     */
+    private boolean inLounge() {
+        return client.getGame().getPhase().isLounge();
+    }
+
     private void showNetworkInformation() {
         // Display the network information screen
         getNetworkInformationDialog().refresh();
@@ -1467,10 +1475,20 @@ public class ClientGUI extends AbstractClientGUI
                 showAbout();
                 break;
             case HELP_SKINNING:
-                showSkinningHowTo();
+                if (inLounge()) {
+                    showSkinningHowTo();
+                } else if (!GpuBoardWindow.showHelp(this, Messages.getString("ClientGUI.skinningHelpPath.title"),
+                      new File(Messages.getString("ClientGUI.skinningHelpPath")))) {
+                    logger.warn("No battle window to show the skinning help over");
+                }
                 break;
             case HELP_CONTENTS:
-                showHelp();
+                if (inLounge()) {
+                    showHelp();
+                } else if (!GpuBoardWindow.showHelp(this, Messages.getString("CommonMenuBar.HelpMenu"),
+                      new File(MMConstants.MEGAMEK_README_FILE_PATH))) {
+                    logger.warn("No battle window to show the help over");
+                }
                 break;
             case FILE_UNITS_SAVE:
                 ignoreHotKeys = true;
@@ -1497,7 +1515,11 @@ public class ClientGUI extends AbstractClientGUI
                     ignoreHotKeys = false;
                     return;
                 }
-                getRandomArmyDialog().setVisible(true);
+                if (inLounge()) {
+                    getRandomArmyDialog().setVisible(true);
+                } else if (!GpuBoardWindow.showReinforcements(this)) {
+                    logger.warn("No battle window to show the random reinforcements over");
+                }
                 ignoreHotKeys = false;
                 break;
             case FILE_REFRESH_CACHE:
@@ -1512,7 +1534,11 @@ public class ClientGUI extends AbstractClientGUI
                 showSettings();
                 break;
             case VIEW_GAME_OPTIONS:
-                showOptions();
+                if (inLounge()) {
+                    showOptions();
+                } else if (!GpuBoardWindow.showGameOptions(this)) {
+                    logger.warn("No battle window to show the game options over");
+                }
                 break;
             case GAME_GIVE_UP_GAME_MASTER:
                 giveUpGameMaster();
@@ -1538,7 +1564,11 @@ public class ClientGUI extends AbstractClientGUI
                 showNetworkInformation();
                 break;
             case VIEW_PLAYER_SETTINGS:
-                customizePlayer();
+                if (inLounge()) {
+                    customizePlayer();
+                } else if (!GpuBoardWindow.showPlayerSettings(this)) {
+                    logger.warn("No battle window to show the player settings over");
+                }
                 break;
             case VIEW_PLAYER_LIST:
                 GUIP.togglePlayerListEnabled();

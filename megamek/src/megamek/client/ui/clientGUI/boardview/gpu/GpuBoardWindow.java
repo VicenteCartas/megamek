@@ -53,6 +53,8 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.GameMasterUnitTools;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
@@ -175,15 +177,12 @@ public final class GpuBoardWindow {
     private static final List<Class<? extends Dialog>> SWING_DIALOGS = List.of(
           // R6: Client Settings, which hold the real settings (user item 3)
           megamek.client.ui.dialogs.buttonDialogs.CommonSettingsDialog.class,
-          // R6: Game Options
-          megamek.client.ui.dialogs.buttonDialogs.GameOptionsDialog.class,
-          // R6: Player Settings
-          megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog.class,
           // R6: Edit Bots
           megamek.client.ui.dialogs.buttonDialogs.EditBotsDialog.class,
           // R6: a bot's settings, opened from Edit Bots and Player Settings
           megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog.class,
-          // R6: Random Army, also the game master's random reinforcements
+          // R6: Random Army; the battle menu's reinforcements are native, but the Swing game master player setup,
+          // kept below, still opens this dialog over the battle
           megamek.client.ui.dialogs.randomArmy.RandomArmyDialog.class,
           // R6: Network information
           megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
@@ -195,8 +194,6 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.BuildingEditDialog.class,
           // U2, GM editors: hex
           megamek.client.ui.dialogs.HexEditDialog.class,
-          // U2, GM editors: unit
-          megamek.client.ui.dialogs.UnitEditorDialog.class,
           // U2, GM tools: the command form of the Commands menu (kick, game master commands)
           megamek.client.ui.dialogs.ClientCommandDialog.class,
           // U2, GM editors: player setup
@@ -211,10 +208,6 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.phaseDisplay.NovaNetworkViewDialog.class,
           // U2: unit cache loading
           megamek.client.ui.dialogs.UnitLoadingDialog.class,
-          // U2: Readme
-          megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog.class,
-          // U2: Help
-          megamek.client.ui.dialogs.helpDialogs.HelpDialog.class,
           // U2: the developer conditions editor behind the Tuning utility
           megamek.client.ui.dialogs.clientDialogs.PlanetaryConditionsDialog.class);
     private final ClientGUI gui;
@@ -293,6 +286,8 @@ public final class GpuBoardWindow {
     private volatile GpuBattleView battleView;
     private final GpuHost.Scene scene = new HostScene();
     private volatile boolean closing;
+    /** EDT: the lobby views the battle's menus open natively over it, made when first asked for. */
+    private GpuBattleTools battleTools;
     private volatile boolean presented;
     private volatile boolean restoreLegacy2D;
     private volatile boolean exitRequested;
@@ -1333,6 +1328,12 @@ public final class GpuBoardWindow {
     @SuppressWarnings("OptionalAssignedToNull")
     public static @Nullable Optional<File> chooseFile(ClientGUI gui, @Nullable File directory, String title,
           FileNameExtensionFilter filter, boolean save) {
+        return chooseFile(gui, new SystemFileDialog.Request(directory, title, filter, save));
+    }
+
+    /** EDT: as {@link #chooseFile(ClientGUI, File, String, FileNameExtensionFilter, boolean)}, for a full request. */
+    @SuppressWarnings("OptionalAssignedToNull")
+    static @Nullable Optional<File> chooseFile(ClientGUI gui, SystemFileDialog.Request request) {
         GpuBoardWindow window = active;
         if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui || !window.asksPrompts()
               || Thread.holdsLock(GpuBoardWindow.class)) {
@@ -1342,7 +1343,7 @@ public final class GpuBoardWindow {
         AtomicReference<SystemFileDialog.Choice> chosen = new AtomicReference<>();
         AtomicBoolean answered = new AtomicBoolean();
         SecondaryLoop loop = Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
-        SystemFileDialog.show(new SystemFileDialog.Request(directory, title, filter, save), () -> window.nativeOwner,
+        SystemFileDialog.show(request, () -> window.nativeOwner,
               gui::getFrame, busy -> window.post(battle -> battle.setInputBlocked(busy || window.modalOpen)),
               choice -> {
                   chosen.set(choice);
@@ -1409,6 +1410,98 @@ public final class GpuBoardWindow {
     public static boolean drawsDialogsFor(ClientGUI gui) {
         GpuBoardWindow window = active;
         return window != null && window.gui == gui && window.presented;
+    }
+
+    /**
+     * EDT: shows the Game Master's damage card of {@code entity} over this client's native window, which takes no
+     * board input while it shows; its edits and server acts go through {@code host} on the Swing thread. False,
+     * showing nothing, when no native window of this client asks its prompts.
+     *
+     * @param closed runs on the Swing thread once the card has closed, however it closed
+     */
+    public static boolean editDamage(ClientGUI gui, Entity entity, GameMasterUnitTools.Host host, Runnable closed) {
+        GpuBoardWindow window = active;
+        if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui || !window.asksPrompts()
+              || !(entity.getGame() instanceof megamek.common.game.Game game)) {
+            return false;
+        }
+        UnitDamageForm form = UnitDamageForm.of(entity, UnitDamageForm.Options.inPlay(game));
+        window.focus(false);
+        GpuHost.post(() -> {
+            GpuBattleView battle = window.battleView;
+            LobbyNativeDialogs cards = battle == null ? null : battle.cards();
+            if (cards == null) {
+                SwingUtilities.invokeLater(closed);
+                return;
+            }
+            cards.gameMasterDamage(form, (work, then) -> SwingUtilities.invokeLater(() -> {
+                try {
+                    work.run();
+                } finally {
+                    GpuHost.post(then);
+                }
+            }), host, () -> SwingUtilities.invokeLater(closed));
+        });
+        return true;
+    }
+
+    /**
+     * EDT: shows the game options to read, natively over this client's battle window. False, showing nothing, when no
+     * native window of this client asks its prompts.
+     */
+    public static boolean showGameOptions(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.gameOptions();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows the local player's settings natively over this client's battle window; false as above. */
+    public static boolean showPlayerSettings(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.playerSettings();
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: opens the random army natively over this client's battle window, whose units join as reinforcements; false
+     * as above.
+     */
+    public static boolean showReinforcements(ClientGUI gui) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.reinforce();
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows the HTML guide {@code file} natively over this client's battle window; false as above. */
+    public static boolean showHelp(ClientGUI gui, String title, File file) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.help(title, file);
+        }
+        return tools != null;
+    }
+
+    /** EDT: the battle tools of this client's native window, raised to show them; null when none asks its prompts. */
+    private static @Nullable GpuBattleTools battleTools(ClientGUI gui) {
+        GpuBoardWindow window = active;
+        if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui
+              || !window.asksPrompts()) {
+            return null;
+        }
+        window.focus(false);
+        if (window.battleTools == null) {
+            window.battleTools = new GpuBattleTools(gui, GpuHost::post, () -> window.closing || active != window, () -> {
+                GpuBattleView battle = window.battleView;
+                return battle == null ? null : battle.cards();
+            });
+        }
+        return window.battleTools;
     }
 
     /** The board's one HTML-to-text rule, for prompt texts that Swing renders as HTML. */

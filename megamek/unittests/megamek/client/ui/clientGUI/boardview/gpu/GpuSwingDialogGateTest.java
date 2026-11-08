@@ -67,7 +67,7 @@ import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
-import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
+import megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionDialog;
@@ -514,18 +514,18 @@ class GpuSwingDialogGateTest {
         try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
             JFrame frame = declaring.frame;
             gate.present();
-            // A kept window (Readme) and a dialog it owns. LOS has its own native panel now.
-            MMReadMeHelpDialog help = onSwing(() -> new MMReadMeHelpDialog(frame));
+            // A kept window (the network information) and a dialog it owns. LOS and Help have native panels now.
+            NetworkInformationDialog help = onSwing(() -> new NetworkInformationDialog(declaring.gui));
             assertTrue(gate.raised(() -> {
                 help.setVisible(true);
                 return null;
-            }, MMReadMeHelpDialog.class::isInstance), "U2: Readme");
+            }, NetworkInformationDialog.class::isInstance), "U2: the network information");
             assertTrue(gate.raised(() -> {
                 JDialog detail = new JDialog(help, "Help detail");
                 detail.setSize(120, 80);
                 detail.setVisible(true);
                 return null;
-            }, window -> window.getOwner() == help), "A dialog Readme owns");
+            }, window -> window.getOwner() == help), "A dialog the network information owns");
             assertEquals(List.of(), gate.errors, "A dialog a kept window owns is part of it");
             onSwing(() -> {
                 help.dispose();

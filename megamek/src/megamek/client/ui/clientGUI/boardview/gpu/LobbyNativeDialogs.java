@@ -22,6 +22,7 @@ import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.ForceNameRequest;
+import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LanceRoleForm;
@@ -355,6 +356,45 @@ final class LobbyNativeDialogs {
         return dialog;
     }
 
+    /**
+     * Shows the Game Master's damage card of a unit in a running game, read with
+     * {@link UnitDamageForm.Options#inPlay}: OK sends the edits to the server through {@code host}, and the card adds
+     * the Game Master's tools, whose server acts ask here first.
+     *
+     * @param closed runs once the card has closed, however it closed
+     */
+    UiDialog gameMasterDamage(UnitDamageForm form, LobbyPromptViews.Edt edt, GameMasterUnitTools.Host host,
+          Runnable closed) {
+        if (paperdolls == null) {
+            paperdolls = new GpuPaperdolls();
+        }
+        UiDialog dialog = begin(Messages.getString("Lobby.damage.title", form.entity().getDisplayName()),
+              LobbyDamageView.sheet(paperdolls, form) ? "dialog.xl" : "dialog.lg", true, closed);
+        new LobbyDamageView(kit, dialog, form, paperdolls, edt, () -> { }, this::close, new LobbyDamageView.Battle() {
+            @Override
+            public void confirm(String title, String text, Runnable yes, Runnable no) {
+                LobbyNativeDialogs.this.confirm(title, text, yes, no);
+            }
+
+            @Override
+            public void confirm(String title, String text, String check, String checkTip, boolean checkable,
+                  Consumer<Boolean> yes) {
+                yesNo(title, List.of(text), check, checkTip, checkable, (answer, checked) -> {
+                    if (answer) {
+                        yes.accept(checked);
+                    }
+                });
+            }
+
+            @Override
+            public GameMasterUnitTools.Host host() {
+                return host;
+            }
+        });
+        show(dialog);
+        return dialog;
+    }
+
     /** Asks for a train's order over whatever shows. */
     UiDialog trainOrder(TrainOrderForm form, LobbyPromptViews.Edt edt, Consumer<List<Entity>> ordered) {
         UiDialog dialog = begin(Messages.getString("TrainOrderDialog.title"), "dialog.sm", true, () -> { });
@@ -461,6 +501,15 @@ final class LobbyNativeDialogs {
      * such as with Esc, answers nothing.
      */
     UiDialog yesNo(String title, List<String> paragraphs, String check, YesNoAnswer answer) {
+        return yesNo(title, paragraphs, check, null, true, answer);
+    }
+
+    /**
+     * As {@link #yesNo(String, List, String, YesNoAnswer)}, its box explained by {@code checkTip} when not null and
+     * only to be checked when {@code checkable}.
+     */
+    UiDialog yesNo(String title, List<String> paragraphs, String check, @Nullable String checkTip,
+          boolean checkable, YesNoAnswer answer) {
         UiDialog dialog = begin(title, "dialog.md", true, () -> { });
         float gap = DesignTokens.shipped().space().get("md");
         for (String paragraph : paragraphs) {
@@ -470,6 +519,10 @@ final class LobbyNativeDialogs {
         }
         UiChoice box = kit.check(check, false);
         box.setName("yes-no-check");
+        box.setDisabled(!checkable);
+        if (checkTip != null) {
+            kit.tip(box, true).getActor().setText(checkTip);
+        }
         dialog.body().add(box).left().padTop(gap);
         dialog.primary(Messages.getString("Yes"), () -> {
             close();

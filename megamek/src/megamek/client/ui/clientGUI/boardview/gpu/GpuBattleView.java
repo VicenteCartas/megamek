@@ -210,6 +210,8 @@ class GpuBattleView extends ApplicationAdapter {
     private ShaderProgram tetherShader;
     /** The HUD; its skin also holds the hex labels' font. */
     private GpuBoardHud ui;
+    /** The battle's own cards over the HUD, such as the Game Master's damage card; made when first shown. */
+    private LobbyNativeDialogs cards;
     private GpuBoardSkin theme;
     /** The presentation settings the board reads; the HUD's developer tuning panel edits them. */
     private GpuBoardTuning tuning;
@@ -3714,6 +3716,21 @@ class GpuBattleView extends ApplicationAdapter {
         return playback.busy();
     }
 
+    /**
+     * GPU thread: the battle's own cards over its HUD, such as the Game Master's damage card; null before the HUD
+     * stands or once the view is gone.
+     */
+    LobbyNativeDialogs cards() {
+        if (ui == null || disposed) {
+            return null;
+        }
+        if (cards == null) {
+            cards = new LobbyNativeDialogs(ui.uiKit(), ui.stage(),
+                  !megamek.client.ui.clientGUI.GUIPreferences.getInstance().getReduceMotion());
+        }
+        return cards;
+    }
+
     @Override
     public void dispose() {
         try { shaderEdits.run(this::disposeView); }
@@ -3734,6 +3751,10 @@ class GpuBattleView extends ApplicationAdapter {
         groundSurfaces.clear();
         clearUnitInstances();
         disposeSceneRenderers();
+        if (cards != null) {
+            cards.dispose();
+            cards = null;
+        }
         if (ui != null) {
             ui.dispose();
         }

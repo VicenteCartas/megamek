@@ -1373,8 +1373,8 @@ work for Swing, and item 11 is under investigation.
          - The values live in the toolkit-free `UnitDamageForm`, which writes a partial `DamageEditSpec` through
            `DamageEditApplier`, so what it does not show stays as it was. More… (the way to the Swing editor) is
            gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
-         - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
-           game in play, and the lobby has none yet.
+         - The Game Master's skill modifiers are only on the board's native editor, with a game in play; the lobby
+           has none yet.
          - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
        - Game options moved to the top bar, because testers did not find them in the battlefield column: a
          `button-special` Game options button with a gavel stands before the Game Master's seat, its tooltip naming
@@ -1514,7 +1514,8 @@ work for Swing, and item 11 is under investigation.
          odds cancels the simulation; closing while resolving reopens the card with the result. The dead Swing
          battlefield commands (`SwingLobbyServices.battlefieldCommand`, `runAutoResolve`) and the Swing
          `VictoryConditionsDialog` are removed; the Swing auto-resolve dialogs stay for MekHQ. The lobby now opens
-         no Swing dialog except the startup-failure message. Checks: `AutoResolveRunTest`, the smoke test's
+         no Swing dialog except Client Settings (`CommonSettingsDialog`, below) and the startup-failure message.
+         Checks: `AutoResolveRunTest`, the smoke test's
          auto-resolve briefing. Live: `lobby+resolve` (with the odds; `+click=autoresolve-proceed,autoresolve-report`
          goes on through the battle and its report) and `lobby+resolve=quick` (without them).
        - Done: help documents and the battle report read a chapter at a time (`LobbyDocumentView` over the
@@ -1528,11 +1529,40 @@ work for Swing, and item 11 is under investigation.
          Fixed on the way: the report's `acar.short_range` key and its `&ensp;` indents. Checks: `HelpDocumentTest`,
          `MapSetupHelpTest` and the smoke test's document and nag. Live: `lobby+princesshelp` (with
          `+click=document-chapter-1`), `lobby+maphelp`, the auto-resolve report above.
-       - The unit dialogs still in Swing, from the lobby and the board:
-         - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
-         - the SBF and Alpha Strike stats dialogs on the board (the lobby's are native, see below);
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
-         Settings and About. The "Save First?" question when leaving a battle is native since #39.
+       - Done: the Game Master's board damage editor is native. In a running game, Edit damage on a unit opens the
+         lobby's damage card over the battle (`GpuBoardWindow.editDamage`, `LobbyNativeDialogs.gameMasterDamage`)
+         with the in-play tools the Swing editor used to offer: edits commit through the server, temporary skill and
+         target modifiers, ejection settings, equipment settings, a bot unit's forced withdrawal order, owner change,
+         and Explode, Withdraw and Destroy (with eject crew), each confirmed. The toolkit-free `GameMasterUnitTools`
+         builds the server commands. The Swing `UnitEditorDialog` stays only for MekHQ and MegaMekLab; the board no
+         longer opens it, and its Game Master mode is removed, so these tools have one copy. Checks:
+         `GameMasterUnitToolsTest`, `BattleDamageCardSmokeTest`. The SBF and Alpha Strike stats dialogs are gone (the
+         lobby's are native, see below); nothing on the board opened them.
+       - Still Swing from the lobby: Client Settings (the gear in the top bar opens `CommonSettingsDialog`, about
+         4,900 lines; its port is several PRs).
+       - Stays Swing: the startup-failure message falls back to a Swing dialog only when the OpenGL window never
+         opened or there is no start screen to return to (MekHQ); when the start screen returns it is native.
+       - Done: the battle menu's dialogs that have native lobby views open them over the battle
+         (`GpuBattleTools`, which drives `GpuLobbyTools` through its `Surface`): Game Options (read-only, as the
+         Swing dialog is once the game starts; Save still works), Player Settings, the Game Master's random
+         reinforcements (the Force Generator; `Reinforcements` makes the units arrive next round, as the Swing
+         random army does) and Help (the Readme and the skinning guide in `LobbyDocumentView`). In the lounge these
+         menu items behave as before. `GameOptionsDialog`, `PlayerSettingsDialog`, `MMReadMeHelpDialog` and
+         `HelpDialog` left `SWING_DIALOGS`. Checks: `ReinforcementsTest`, `BattleMenuCardsSmokeTest`.
+       - The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist (R6/U2), by size of the port:
+         - Small, the Game Master's editors and notices (next PR): hex (`HexEditDialog`), building
+           (`BuildingEditDialog`), note (`NoteDialog`), the Game Master vote (`GameMasterVoteDialog`) and appointment
+           notice (`GameMasterAppointedDialog`), the command form (`ClientCommandDialog`: kick and Game Master
+           commands) and Game Master player setup (`GameMasterPlayerSetupDialog`). The player setup still opens the
+           Swing `RandomArmyDialog`, which stays on the allowlist until it is native.
+         - Medium: the reinforcement unit selector (`MegaMekUnitSelectorDialog`) and its `UnitLoadingDialog`, Edit
+           Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
+           (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and the accessibility window
+           (`AccessibilityDialog`).
+         - Big: Client Settings (`CommonSettingsDialog`, several PRs; also the map editor's), and the map editor's
+           About.
+         - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
+       - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
          only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.

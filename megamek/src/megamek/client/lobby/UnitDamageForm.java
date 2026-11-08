@@ -48,7 +48,9 @@ import megamek.common.compute.damage.CritAssignment;
 import megamek.common.compute.damage.PreExistingDamageApplier;
 import megamek.common.compute.damage.PreExistingDamageLevel;
 import megamek.common.compute.damage.PreExistingDamageResult;
+import megamek.common.enums.ChargeLevel;
 import megamek.common.equipment.AmmoMounted;
+import megamek.common.equipment.AmmoType;
 import megamek.common.equipment.DockingCollar;
 import megamek.common.equipment.EquipmentMode;
 import megamek.common.equipment.GunEmplacement;
@@ -56,6 +58,7 @@ import megamek.common.equipment.MiscMounted;
 import megamek.common.equipment.MiscType;
 import megamek.common.equipment.Mounted;
 import megamek.common.equipment.WeaponMounted;
+import megamek.common.equipment.WeaponType;
 import megamek.common.game.Game;
 import megamek.common.interfaces.ILocationExposureStatus;
 import megamek.common.options.OptionsConstants;
@@ -77,6 +80,7 @@ import megamek.common.units.QuadVee;
 import megamek.common.units.SmallCraft;
 import megamek.common.units.Tank;
 import megamek.common.units.VTOL;
+import megamek.common.weapons.Weapon;
 import megamek.common.weapons.attacks.InfantryAttack;
 
 /**
@@ -118,14 +122,30 @@ public final class UnitDamageForm {
      *                   objectives
      * @param hullDown   whether the game's rules let units start hull-down (TacOps hull-down)
      * @param hidden     whether the game's rules let units start hidden (hidden units)
+     * @param inPlay     whether a Game Master edits the unit in a running game: the edits go to the server, the
+     *                   unit's heat and stance are part of them instead of its deployment, and the card offers the
+     *                   {@link GameMasterUnitTools}
      */
-    public record Options(boolean damage, boolean preGame, boolean scanTarget, boolean hullDown, boolean hidden) {
+    public record Options(boolean damage, boolean preGame, boolean scanTarget, boolean hullDown, boolean hidden,
+          boolean inPlay) {
         /** Everything editable that every game offers, as for a unit's owner with no game master present. */
         public static final Options ALL = new Options(true, false, false);
+
+        /** Options for the lobby. */
+        public Options(boolean damage, boolean preGame, boolean scanTarget, boolean hullDown, boolean hidden) {
+            this(damage, preGame, scanTarget, hullDown, hidden, false);
+        }
 
         /** Options for a game without the optional hull-down and hidden-unit rules. */
         public Options(boolean damage, boolean preGame, boolean scanTarget) {
             this(damage, preGame, scanTarget, false, false);
+        }
+
+        /** A Game Master's options in the running {@code game}. */
+        public static Options inPlay(Game game) {
+            return new Options(true, false, false,
+                  game.getOptions().booleanOption(OptionsConstants.ADVANCED_GROUND_MOVEMENT_TAC_OPS_HULL_DOWN),
+                  game.getOptions().booleanOption(OptionsConstants.ADVANCED_HIDDEN_UNITS), true);
         }
     }
 
@@ -160,6 +180,7 @@ public final class UnitDamageForm {
         private Value hits;
         private String tip;
         private int value;
+        private int explosive = -1;
 
         private Value(String label, Kind kind, int value, int max, Repair repair, Writer writer) {
             this.label = label;
@@ -229,6 +250,14 @@ public final class UnitDamageForm {
         /** A choice's options, in the order of their indices; empty for another kind. */
         public List<String> choices() {
             return choices;
+        }
+
+        /**
+         * The number of the equipment the Game Master can explode from this row in play, as a critical hit would set
+         * it off; -1 when there is none.
+         */
+        public int explosive() {
+            return explosive;
         }
 
         /** Back to the value it was read with, without the change hook: a roll starts from the unit as read. */
@@ -307,6 +336,8 @@ public final class UnitDamageForm {
     private Value structuralIntegrity;
     /** How many transport bays the unit's bay values cover. */
     private int bays;
+    /** The Game Master's in-play tools, or null outside play. */
+    private final GameMasterUnitTools gameMaster;
 
     private UnitDamageForm(Entity entity, Options options) {
         this.entity = entity;
@@ -321,6 +352,7 @@ public final class UnitDamageForm {
             readSystems();
         }
         readDeployment();
+        gameMaster = options.inPlay() ? new GameMasterUnitTools(this) : null;
     }
 
     /**
@@ -351,6 +383,14 @@ public final class UnitDamageForm {
     /** Whether the damage may be edited; when not, only the {@link #deployment()} values are. */
     public boolean damageEditable() {
         return options.damage();
+    }
+
+    /**
+     * The Game Master's in-play tools, whose {@link GameMasterUnitTools#commit} sends the edits to the server instead
+     * of {@link #apply}; null outside play.
+     */
+    public GameMasterUnitTools gameMaster() {
+        return gameMaster;
     }
 
     /** The locations with something to edit, in the unit's order. */
@@ -423,6 +463,9 @@ public final class UnitDamageForm {
         for (Value value : values()) {
             value.writer.write(spec, value.value);
         }
+        if (gameMaster != null) {
+            gameMaster.write(spec);
+        }
         return spec;
     }
 
@@ -432,7 +475,7 @@ public final class UnitDamageForm {
     }
 
     /**
-     * Rolls pre-existing damage at {@code level} into the form, as the Swing editor's roller does: each roll starts
+     * Rolls pre-existing damage at {@code level} into the form: each roll starts
      * again from the unit as read, and None, or no level, just goes back to it. The unit itself is only read.
      */
     public void roll(PreExistingDamageLevel level) {
@@ -573,7 +616,7 @@ public final class UnitDamageForm {
                     Value blownOff = add(place, text("UnitEditorDialog.location.blownOff"), Kind.TOGGLE,
                           entity.isLocationBlownOff(location) ? 1 : 0, 1, Repair.CLEAR,
                           (spec, value) -> spec.locationBlownOff[at] = value > 0);
-                    // a limb brought back comes back whole, as in the Swing editor
+                    // a limb brought back comes back whole
                     blownOff.changed = value -> {
                         if (!value.on()) {
                             for (Value layer : new Value[] { place.armor, place.rear, place.internal }) {
@@ -618,27 +661,34 @@ public final class UnitDamageForm {
     }
 
     private void readDeployment() {
+        boolean play = options.inPlay();
         if (entity.tracksHeat()) {
             int heat = Math.max(entity.heat, 0);
-            deployment.add(deploy(new Value(text("UnitEditorDialog.heat"), Kind.STEPPER, heat,
+            state(new Value(text("UnitEditorDialog.heat"), Kind.STEPPER, heat,
                   SettableHeat.maximum(entity.getGame(), heat, entity.getHeatCapacityWithWater()), Repair.KEEP,
-                  null), (unit, value) -> unit.heat = value));
+                  play ? (spec, value) -> spec.heat = value : null), (unit, value) -> unit.heat = value);
         }
         boolean canLieDown = !entity.isAero() && !entity.isAirborne() && !entity.isAirborneVTOLorWIGE()
               && !entity.isConventionalInfantry();
         if (canLieDown && entity.isMek()) {
-            deployment.add(deploy(toggle("UnitEditorDialog.status.prone", entity.isProne(), null),
-                  (unit, value) -> unit.setProne(value > 0)));
+            state(toggle("UnitEditorDialog.status.prone", entity.isProne(),
+                  play ? (spec, value) -> spec.prone = value > 0 : null), (unit, value) -> unit.setProne(value > 0));
         }
         // Optional rules gate these; a unit already in the state still shows it, so it can be cleared
         boolean hullDownCapable = entity.isMek() || (entity instanceof Tank tank && tank.isHullDownCapable());
         if (canLieDown && hullDownCapable && (options.hullDown() || entity.isHullDown())) {
-            deployment.add(deploy(toggle("UnitEditorDialog.status.hullDown", entity.isHullDown(), null),
-                  (unit, value) -> unit.setHullDown(value > 0)));
+            state(toggle("UnitEditorDialog.status.hullDown", entity.isHullDown(),
+                        play ? (spec, value) -> spec.hullDown = value > 0 : null),
+                  (unit, value) -> unit.setHullDown(value > 0));
         }
         if (entity.canHide() && (options.hidden() || entity.isHidden())) {
-            deployment.add(deploy(toggle("UnitEditorDialog.status.hidden", entity.isHidden(), null),
-                  (unit, value) -> unit.setHidden(value > 0)));
+            state(toggle("UnitEditorDialog.status.hidden", entity.isHidden(),
+                        play ? (spec, value) -> spec.hidden = value > 0 : null),
+                  (unit, value) -> unit.setHidden(value > 0));
+        }
+        if (play) {
+            // in play the unit is on the field: there is no deployment round left to set, nor a scan target to mark
+            return;
         }
         if (options.scanTarget()) {
             deployment.add(deploy(toggle("Lobby.status.scanTarget", entity.isDesignatedScanTarget(), null),
@@ -665,6 +715,18 @@ public final class UnitDamageForm {
     private static Value deploy(Value value, Setter setter) {
         value.setter = setter;
         return value;
+    }
+
+    /**
+     * Adds a value of how the unit stands: to the deployment, written by its setter, before the game; to the general
+     * values, written into the spec the server applies, in play.
+     */
+    private void state(Value value, Setter setter) {
+        if (options.inPlay()) {
+            general.add(value);
+        } else {
+            deployment.add(deploy(value, setter));
+        }
     }
 
     private void readConditions() {
@@ -737,11 +799,13 @@ public final class UnitDamageForm {
             }
             Value crit = mark("eq:" + number, new Value(label, Kind.BOXES, hits, Math.max(slots, 1), Repair.CLEAR,
                   (spec, value) -> spec.equipmentHits.put(number, value)));
+            Value row = crit;
             if (mounted instanceof AmmoMounted bin) {
-                target(mounted.getLocation()).add(shots(bin, number, crit));
-                continue;
+                row = shots(bin, number, crit);
+                target(mounted.getLocation()).add(row);
+            } else {
+                target(mounted.getLocation()).add(crit);
             }
-            target(mounted.getLocation()).add(crit);
             if (mounted instanceof WeaponMounted weapon) {
                 flags(weapon, number, crit);
                 if (entity instanceof AbstractBuildingEntity building && building.isTurretMounted(weapon)) {
@@ -749,12 +813,19 @@ public final class UnitDamageForm {
                           (spec, value) -> spec.buildingTurretLocked.put(number, value > 0)));
                 }
             }
+            if (options.inPlay()) {
+                settings(mounted, number, row);
+                // a building's damage path has not been tried with an explosion
+                if (!(entity instanceof AbstractBuildingEntity) && mounted.wouldExplodeWhenHit()) {
+                    row.explosive = number;
+                }
+            }
         }
     }
 
     /**
      * An ammunition bin's shots, with its hit boxes: a hit empties the bin and clearing the hit fills it back to what
-     * it held, as in the Swing editor; a bin read as hit holds nothing and comes back full.
+     * it held; a bin read as hit holds nothing and comes back full.
      */
     private Value shots(AmmoMounted bin, int number, Value crit) {
         int full = bin.isOneShot() ? 1 : bin.getOriginalShots() > 0 ? bin.getOriginalShots() : bin.getType().getShots();
@@ -794,6 +865,94 @@ public final class UnitDamageForm {
         Value flag = new Value(text(key), Kind.TOGGLE, on ? 1 : 0, 1, Repair.CLEAR, writer);
         flag.tip = text(key + ".tooltip");
         return flag;
+    }
+
+    /**
+     * The Game Master's in-play settings of a piece of equipment, under its row: a
+     * machine gun's burst fire and a bin's hot-loading under their optional rules, then a charge, an on/off switch or
+     * a mode, whichever comes first. None of them changes with Restore Unit or a roll. In the lobby the Configure
+     * dialog owns these settings.
+     */
+    private void settings(Mounted<?> mounted, int number, Value row) {
+        Game game = entity.getGame();
+        if (game == null) {
+            return;
+        }
+        if (mounted.getType() instanceof WeaponType weapon && weapon.hasFlag(WeaponType.F_MG)
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_BURST)) {
+            row.flags.add(setting("UnitEditorDialog.mgBurst", mounted.isRapidFire(), "UnitEditorDialog.mgBurst.tooltip",
+                  (spec, value) -> spec.mgBurst.put(number, value > 0)));
+        }
+        if (mounted instanceof AmmoMounted bin && bin.getType().hasFlag(AmmoType.F_HOTLOAD)
+              && game.getOptions().booleanOption(OptionsConstants.ADVANCED_COMBAT_TAC_OPS_HOT_LOAD)) {
+            row.flags.add(setting("UnitEditorDialog.hotLoad", bin.isHotLoaded(), "UnitEditorDialog.hotLoad.tooltip",
+                  (spec, value) -> spec.hotLoadedAmmo.put(number, value > 0)));
+        }
+        boolean stealth = mounted.getType() instanceof MiscType misc && misc.hasFlag(MiscType.F_STEALTH);
+        int modes = mounted.getType().getModesCount(mounted);
+        String off = offMode(mounted);
+        if (chargeable(mounted)) {
+            boolean charged = mounted.getType() instanceof MiscType
+                  ? mounted.curMode().equals(Mounted.MODE_CAPACITOR_CHARGE)
+                  : mounted.getChargeState() == ChargeLevel.CHARGED;
+            row.flags.add(setting("UnitEditorDialog.equipCharged", charged, "UnitEditorDialog.equipCharge.tooltip",
+                  (spec, value) -> spec.equipmentCharged.put(number, value > 0)));
+        } else if (mounted.isModeSwitchable() && !stealth && modes == 2 && off != null) {
+            String active = off;
+            for (int index = 0; index < modes; index++) {
+                String name = mounted.getType().getMode(index).getName();
+                if (!name.equals(off)) {
+                    active = name;
+                    break;
+                }
+            }
+            String on = active;
+            Value onOff = new Value(text("MekDisplay.modeLabel"), Kind.CHOICE,
+                  mounted.curMode().getName().equals(off) ? 0 : 1, 1, Repair.KEEP,
+                  (spec, value) -> spec.equipmentMode.put(number, value > 0 ? on : off));
+            onOff.choices = List.of(text("UnitEditorDialog.equipOff"), text("UnitEditorDialog.equipOn"));
+            onOff.tip = text("UnitEditorDialog.equipOnOff.tooltip");
+            row.flags.add(onOff);
+        } else if (mounted.isModeSwitchable() && !(mounted instanceof AmmoMounted) && !stealth && modes >= 2) {
+            List<String> names = new ArrayList<>();
+            List<String> shown = new ArrayList<>();
+            for (int index = 0; index < modes; index++) {
+                EquipmentMode mode = mounted.getType().getMode(index);
+                names.add(mode.getName());
+                shown.add(mode.getDisplayableName(true));
+            }
+            Value mode = new Value(text("MekDisplay.modeLabel"), Kind.CHOICE,
+                  Math.max(0, names.indexOf(mounted.curMode().getName())), modes - 1, Repair.KEEP,
+                  (spec, value) -> spec.equipmentMode.put(number, names.get(value)));
+            mode.choices = List.copyOf(shown);
+            mode.tip = text("UnitEditorDialog.equipMode.tooltip");
+            row.flags.add(mode);
+        }
+    }
+
+    private static Value setting(String key, boolean on, String tipKey, Writer writer) {
+        Value setting = new Value(text(key), Kind.TOGGLE, on ? 1 : 0, 1, Repair.KEEP, writer);
+        setting.tip = text(tipKey);
+        return setting;
+    }
+
+    /** Whether the Game Master can set the equipment's charge: a bombast laser or a PPC capacitor. */
+    private static boolean chargeable(Mounted<?> mounted) {
+        if (mounted.getType() instanceof WeaponType weapon && weapon.hasFlag(WeaponType.F_BOMBAST_LASER)) {
+            return true;
+        }
+        return mounted.getType() instanceof MiscType misc && misc.hasFlag(MiscType.F_PPC_CAPACITOR);
+    }
+
+    /** The equipment's switched-off mode: "Off", or a gauss rifle's "Powered Down"; null when it has none. */
+    private static String offMode(Mounted<?> mounted) {
+        if (mounted.getType().hasModeType(Mounted.MODE_OFF)) {
+            return Mounted.MODE_OFF;
+        }
+        if (mounted.getType().hasModeType(Weapon.MODE_GAUSS_POWERED_DOWN)) {
+            return Weapon.MODE_GAUSS_POWERED_DOWN;
+        }
+        return null;
     }
 
     private void readSystems() {

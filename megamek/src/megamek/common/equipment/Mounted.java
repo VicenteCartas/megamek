@@ -1983,8 +1983,8 @@ public class Mounted<T extends EquipmentType> implements Serializable, RoundUpda
     /**
      * @return the shots this ammunition's bin holds when full: 1 for a one-shot weapon's ammunition, else its original
      *       shots where the unit records them (they are 0 for a Mek's bins), else one load of its type; never fewer
-     *       than it holds now. 0 for equipment that is not ammunition. The rule of the unit editor's shots control
-     *       ({@code UnitDamagePanelBuilder.fullShots}); the GPU unit record uses it.
+     *       than it holds now. 0 for equipment that is not ammunition. The rule of the damage editor's shots control;
+     *       the GPU unit record uses it.
      */
     public int getFullShots() {
         if (!(type instanceof AmmoType ammoType)) {

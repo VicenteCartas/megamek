@@ -112,6 +112,8 @@ class BuildingAttackResolutionTest extends GameBoardTestCase {
         Player player = new Player(0, "Test");
         gameManager = Mockito.spy(new TWGameManager());
         Mockito.doNothing().when(gameManager).send(any(Packet.class));
+        // attack animations go to each player who sees them, by connection
+        Mockito.doNothing().when(gameManager).send(anyInt(), any(Packet.class));
         Mockito.doNothing().when(gameManager).sendChangedHex(any(Coords.class), any(int.class));
         Mockito.doNothing().when(gameManager).entityUpdate(any(int.class));
         Mockito.doNothing().when(gameManager).sendChangedBuildings(any());
