@@ -207,9 +207,8 @@ const float SUN_DIAMETER = .0093;
 const float RECEIVER_PLANE_METRES = 1.0;
 
 // metre: world units per metre. lift: how far the visible surface stands out along normal from the mesh, its relief
-// (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first. fray: a shift
-// of the lookup across the light, in metres: the grass, clods and stones that fray a natural shadow's edge.
-float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, bool receivesSun) {
+// (terrain parallax): raised grains catch the light at a shadow's edge and hollows fall into it first.
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift, bool receivesSun) {
 #ifdef shadowMapFlag
     // Normal offset: the lookup moves out along the surface normal by half a shadow texel, and by up to two where the
     // light skims the surface, so a flat face lit at a grazing angle never shadows itself.
@@ -238,9 +237,6 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, 
     shadowPlaneDrift = shadowDrift();
     // Derivatives above remain defined across the light horizon; only unused comparisons are skipped.
     if (!receivesSun) return 1.0;
-    // After the receiver plane: the fray moves where the edge falls, along the surface as the taps do, never into it.
-    vec2 frayUv = fray * metre * .5 * length(row);
-    shadowUv += vec3(frayUv, shadowPlane(frayUv, slope));
     // The widest tent (shadowTent) reaches six by six texels: nine blocks of two by two, each one comparison at its
     // middle. Against the highest depth any tent compares in a block (half a texel of the receiver's plane above: its
     // drift in full, the plane's clamp bounding the rest), the centre and its four edges lit: lit, the corners, a fifth
@@ -277,8 +273,8 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, 
 #endif
 }
 
-float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray) {
-    return sculptShadow(normal, light, metre, lift, fray, true);
+float sculptShadow(vec3 normal, vec3 light, float metre, float lift) {
+    return sculptShadow(normal, light, metre, lift, true);
 }
 
 // Shared dielectric response: callers can reuse their shadow sample for mapped leaves as well as opaque surfaces.

@@ -33,8 +33,6 @@ uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; d
 uniform float u_metre;      // world units per metre
 // How deep the ground's visible grain (its height map) stands, in metres, for the shadow lookup (sculptShadow).
 const float RELIEF_METRES = .2;
-// How far, in metres, what grows and lies along a natural shadow's edge frays it (sculptShadow).
-const float FRAY_METRES = .25;
 uniform float u_normalMaps;
 uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform vec4 u_materialCacheDebug; // draw-path tint; alpha is zero unless the session's Debug switch is on
@@ -891,20 +889,11 @@ void main() {
     // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
     // any sun; shadeSurface shades them by the cavity (micro-shadowing).
     float lift = max(materialHeight - .5, 0.0) * RELIEF_METRES * u_metre;
-    // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
-    // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer. Poured concrete
-    // has none: its shadows keep clean edges.
-    vec2 fray = vec2(0.0);
-    if (!family(4.0)) {
-        vec2 tufts = world.xy + world.z * vec2(.6, -.4);
-        fray = (texture(u_surfaceNoise, rainNoiseAt(tufts / 19.2 + .31)).gb - .5 + .5 * (texture(u_surfaceNoise, rainNoiseAt(tufts / 6.4 + .67)).rg - .5))
-              * (2.0 * FRAY_METRES / 1.5);
-    }
     // shadeSurface has no directional lobe on this hemisphere unless it transmits or scatters light.
     bool receivesSun = leaf || volcanic > 0.0 || finish.scatter > 0.0
           || dot(smoothSupport ? face : geometric, light) > 0.0;
     Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray, receivesSun)
+          sculptShadow(receiver, light, u_metre, lift, receivesSun)
                 * sunOnRelief(relief, dot(face, light))
                 * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.

@@ -145,7 +145,7 @@ void main() {
 #endif
     vec3 light = sunDirection();
     // Use the crown's smooth normal for stable shadow offsets; the detail normal is only leaf relief.
-    float visibility = sculptShadow(crownNormal, light, u_metre, 0.0, vec2(0.0));
+    float visibility = sculptShadow(crownNormal, light, u_metre, 0.0);
 #endif
     // Alpha-tested texels own no color or depth. Keep texture/receiver derivatives above this cutoff;
     // normal detail uses the captured gradients, and single-level shadow/cloud reads use explicit LOD.
