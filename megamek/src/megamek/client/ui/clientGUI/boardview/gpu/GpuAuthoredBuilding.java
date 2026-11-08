@@ -297,6 +297,8 @@ final class GpuAuthoredBuilding {
             boundaries.add((px, py) -> length * .5 - (px - cx) * (dx / length) - (py - cy) * (dy / length));
         }
         List<ModelData> levels = new ArrayList<>();
+        // The near share's triangles: the walls its floors keep clear of.
+        List<Vector3> shell = new ArrayList<>();
         for (Geometry lod : placed.levels()) {
             // Bound the otherwise unbounded Voronoi region by this placement's visual envelope, once per share.
             float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
@@ -324,6 +326,7 @@ final class GpuAuthoredBuilding {
                     // then follow a preview transform without reading every mesh vertex again on the render thread.
                     if (levels.isEmpty()) { localBounds.ext(localPoint.set(part.items[i], part.items[i + 1], part.items[i + 2]).mul(unplace)); }
                     part.items[i] -= cx; part.items[i + 1] -= cy;
+                    if (levels.isEmpty()) { shell.add(new Vector3(part.items[i], part.items[i + 1], part.items[i + 2])); }
                 }
             }
             levels.add(share.data("authored-" + object.id() + "-" + layout.cell(), lod.source()));
@@ -348,6 +351,8 @@ final class GpuAuthoredBuilding {
                 if (level == 0 || layout.interiors() == BuildingInteriors.YES) {
                     Area floor = new Area(placed.sections().computeIfAbsent(z + .02, height -> BuildingVolumes.section(placed.solids(), height))); floor.intersect(interiorCell);
                     floor.transform(AffineTransform.getTranslateInstance(-cx, -cy));
+                    // Its edge keeps clear of the walls beside its slab; the ground floor's slab lies under the terrain.
+                    if (level > 0) { floor = GpuBuildingInterior.keepClear(floor, GpuBuildingInterior.faces(shell, floorHeight(layout, level))); }
                     floors.add(GpuBuildingInterior.triangles(floor));
                 }
                 Area middle = new Area(placed.sections().computeIfAbsent(z + HexTile.LEVEL_HEIGHT * .5, height -> BuildingVolumes.section(placed.solids(), height))); middle.intersect(interiorCell);

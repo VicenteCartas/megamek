@@ -88,10 +88,17 @@ final class GpuBuildingInterior {
      * of them as one.
      */
     static List<float[]> faces(List<Vector3> shell, float top) {
+        // Only triangles reaching into the slab's depth cross it.
+        List<Integer> beside = new ArrayList<>();
+        for (int i = 0; i < shell.size(); i += 3) {
+            float low = Math.min(shell.get(i).z, Math.min(shell.get(i + 1).z, shell.get(i + 2).z));
+            float high = Math.max(shell.get(i).z, Math.max(shell.get(i + 1).z, shell.get(i + 2).z));
+            if (low < top && high > top - SLAB) { beside.add(i); }
+        }
         Map<Point, Set<Point>> segments = new LinkedHashMap<>();
         for (int step = 0; step <= 4; step++) {
             float z = top - .01f - step * (SLAB - .02f) / 4;
-            for (int i = 0; i < shell.size(); i += 3) {
+            for (int i : beside) {
                 List<Point> crossings = new ArrayList<>(2);
                 for (int side = 0; side < 3; side++) {
                     Vector3 a = shell.get(i + side), b = shell.get(i + (side + 1) % 3);
@@ -159,8 +166,8 @@ final class GpuBuildingInterior {
                 float s1 = (face[2] - ax) * ux + (face[3] - ay) * uy, t1 = (face[2] - ax) * nx + (face[3] - ay) * ny;
                 float[] clipped = clip(s0, t0, s1, t1, -CLEARANCE, length + CLEARANCE, -CLEARANCE, CLEARANCE);
                 if (clipped == null) { continue; }
-                float from = Math.max(0, Math.min(clipped[0], clipped[2]) - CLEARANCE);
-                float to = Math.min(length, Math.max(clipped[0], clipped[2]) + CLEARANCE);
+                // Past the edge's ends too: a wall that goes on past a corner of the floor keeps clear of it there.
+                float from = Math.min(clipped[0], clipped[2]) - CLEARANCE, to = Math.max(clipped[0], clipped[2]) + CLEARANCE;
                 float depth = CLEARANCE + Math.max(clipped[1], clipped[3]);
                 cuts.moveTo(ax + ux * from - nx * .01f, ay + uy * from - ny * .01f);
                 cuts.lineTo(ax + ux * to - nx * .01f, ay + uy * to - ny * .01f);
