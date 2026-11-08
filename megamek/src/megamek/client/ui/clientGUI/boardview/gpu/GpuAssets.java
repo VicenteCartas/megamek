@@ -1470,6 +1470,12 @@ final class GpuAssets implements Disposable {
 
     GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
           megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale) {
+        return building(asset, levels, reach, seed, interiors, stepped, footprintScale, null);
+    }
+
+    /** {@code corners}: {@link ConnectedKit#corners}, for its walls' junctions with the neighbours' (null: none). */
+    GpuBuilding.Assembly building(String asset, int levels, int[] reach, long seed,
+          megamek.common.board.BuildingInteriors interiors, boolean stepped, float footprintScale, int[] corners) {
         if (!asset.startsWith("buildings/") || BoardWall.supports(asset)) { return null; }
         File file = TilesetScenery.customBuildingFile(asset);
         // A kit that cannot load is reported under its own name; the caller then draws the asset's model, or its box.
@@ -1478,7 +1484,7 @@ final class GpuAssets implements Disposable {
         if (unloadable.containsKey(kit)) { missing(kit, unloadable.get(kit)); return null; }
         try {
             return buildings.computeIfAbsent(GpuBuilding.kit(asset, footprintScale), key -> new GpuBuilding(key, this::createModel))
-                  .assemble(levels, reach, seed, interiors, stepped);
+                  .assemble(levels, reach, seed, interiors, stepped, corners);
         } catch (RuntimeException failure) {
             missing(kit, reason(failure));
             return null;

@@ -51,6 +51,61 @@ final class KitOutline {
     /** A kit piece: its tags ({@code -link-n-end-ne}...), its corner direction (null for a whole hex), floors and walls. */
     record Piece(String tags, Integer direction, List<List<double[]>> polygons, List<Wall> walls) { }
 
+    /**
+     * How a hex's wall ending at its corner c (between its sides c and c + 1; A across side c, B across c + 1) meets the
+     * wall of another hex that goes on from there, in an inside corner: its own wall square to side c (S0, a corner or
+     * band piece linked across c alone) or to side c + 1 (S1), or the wall closing its link across side c (C0) or c + 1
+     * (C1) above a shorter neighbour ({@link #closed}); then the other wall. Its end is carried on past the corner
+     * and cut on the mitre ({@link #junctionWall}, {@link #partnerNormal}); ConnectedKit finds them from the hexes
+     * around the corner. A hex's own walls meet within its pieces.
+     */
+    enum Junction {
+        /** B's wall square to side AB (a 60-degree notch); A's closing wall along AB. */
+        S0_NOTCH, S0_CAP,
+        /** A's wall square to side AB; B's closing wall along AB. */
+        S1_NOTCH, S1_CAP,
+        /** B's closing wall along AB; B's wall square to side c + 1. */
+        C0_CAP, C0_SQUARE,
+        /** A's closing wall along AB; A's wall square to side c. */
+        C1_CAP, C1_SQUARE
+    }
+
+    /** The wall whose end at corner {@code c} {@code junction} carries on, as its piece lays it. */
+    static Wall junctionWall(Junction junction, int c) {
+        double[] corner = hexCorner(c);
+        return switch (junction.name().substring(0, 2)) {
+            case "S0" -> new Wall(scaled(MIDPOINTS[(c + 1) % 6], NOSE / H), corner, End.CUT, End.OPEN, List.of(), false);
+            case "S1" -> new Wall(corner, scaled(MIDPOINTS[c % 6], NOSE / H), End.OPEN, End.CUT, List.of(), false);
+            case "C0" -> new Wall(corner, hexCorner(c + 5), End.OPEN, End.OPEN, List.of(), false);
+            default -> new Wall(hexCorner(c + 1), corner, End.OPEN, End.OPEN, List.of(), false);
+        };
+    }
+
+    /** The outward normal of the wall that {@code junction}'s end meets at corner {@code c}. */
+    static double[] partnerNormal(Junction junction, int c) {
+        double[] corner = hexCorner(c);
+        double[] e0 = unit(new double[] { MIDPOINTS[c % 6][0] - corner[0], MIDPOINTS[c % 6][1] - corner[1] });
+        double[] e1 = unit(new double[] { MIDPOINTS[(c + 1) % 6][0] - corner[0], MIDPOINTS[(c + 1) % 6][1] - corner[1] });
+        // Along the hexside between A and B, away from this hex.
+        double[] ab = unit(new double[] { -e0[0] - e1[0], -e0[1] - e1[1] });
+        return switch (junction) {
+            // A wall square to a side faces away from that side's middle; a cap faces the hex across it.
+            case S0_NOTCH, S1_NOTCH -> new double[] { -ab[0], -ab[1] };
+            case S0_CAP, C1_CAP -> across(ab, e1);
+            case S1_CAP, C0_CAP -> across(ab, e0);
+            case C1_SQUARE -> new double[] { -e0[0], -e0[1] };
+            case C0_SQUARE -> new double[] { -e1[0], -e1[1] };
+        };
+    }
+
+    /** The unit normal of a hexside along {@code side} on {@code toward}'s side. */
+    private static double[] across(double[] side, double[] toward) {
+        double[] normal = { -side[1], side[0] };
+        return normal[0] * toward[0] + normal[1] * toward[1] >= 0 ? normal : new double[] { -normal[0], -normal[1] };
+    }
+
+    private static double[] scaled(double[] point, double by) { return new double[] { point[0] * by, point[1] * by }; }
+
     static double cross(double[] a, double[] b) { return a[0] * b[1] - a[1] * b[0]; }
 
     /** The outward normal of a wall from p to q: its right. */
@@ -371,8 +426,12 @@ final class KitOutline {
         result.add(joint(b, a));
     }
 
-    /** Close exposed links for a roof without changing its footprint; its deck and rim share the new mitred outline. */
-    static Piece closedRoof(Piece piece, int closed) {
+    /**
+     * Close exposed links without changing the footprint: a roof's above shorter neighbours (its deck and rim share the
+     * new mitred outline), a storey's beside them, each link's wall along the whole hexside, mitred with the piece's
+     * walls it meets.
+     */
+    static Piece closed(Piece piece, int closed) {
         List<Wall> walls = new ArrayList<>(piece.walls());
         for (int direction = 0; direction < 6; direction++) {
             if ((closed & 1 << direction) == 0) { continue; }

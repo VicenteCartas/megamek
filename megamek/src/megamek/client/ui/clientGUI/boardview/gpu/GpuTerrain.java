@@ -4461,7 +4461,7 @@ final class GpuTerrain implements Disposable {
             GpuBuilding.Assembly building = generatedIndustrial || feature.decoration() != null ? null : assets.building(feature.asset(), Math.round(feature.height()),
                   ConnectedKit.reach(scene, tile, Math.round(feature.height())), GpuBuilding.seed(tile, feature),
                   feature.kind() == BoardScene.FeatureKind.BUILDING && !wallBuilding ? tile.cover().interiors() : BuildingInteriors.NO,
-                  HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale());
+                  HexAppearance.steppedBuilding(tile.appearance()), feature.footprintScale(), ConnectedKit.corners(scene, tile));
             // A placed object draws the same way in every view: one shared mesh per model and level (GpuAssets#slotted),
             // its colours passed per placement, its parts instanced (Chunk#cacheDecorations). Rail and maglev routes keep
             // their own route caching. What a rail owns (its buffer stops) is drawn as an object but never edited as one.
@@ -7642,7 +7642,10 @@ final class GpuTerrain implements Disposable {
                   && (before.cover().interiors() != after.cover().interiors()
                         || HexAppearance.steppedBuilding(before.appearance()) != HexAppearance.steppedBuilding(after.appearance())
                         || !Arrays.equals(ConnectedKit.reach(was.scene(), before, Math.round(feature.height())),
-                              ConnectedKit.reach(shown.scene(), after, Math.round(feature.height()))))) { return false; }
+                              ConnectedKit.reach(shown.scene(), after, Math.round(feature.height())))
+                        || !Arrays.equals(ConnectedKit.corners(was.scene(), before), ConnectedKit.corners(shown.scene(), after)))) {
+                return false;
+            }
             if (BoardRail.route(feature) && !BoardRail.layout(was.scene(), before, feature, was.surfaces().get(at),
                   was.infrastructure().bridgeShapes()::get).equals(BoardRail.layout(shown.scene(), after, feature,
                   shown.surfaces().get(at), shown.infrastructure().bridgeShapes()::get))) { return false; }

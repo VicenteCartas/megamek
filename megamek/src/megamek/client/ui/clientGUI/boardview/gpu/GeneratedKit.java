@@ -100,8 +100,9 @@ final class GeneratedKit {
                     if (role.startsWith("base") && piece.tags().endsWith("-cap")) { continue; }
                     for (var twin : module.build(role, piece, lod).entrySet()) {
                         String node = kit + "-lod" + lod + "-" + role + piece.tags() + twin.getKey();
-                        // A distant roof without a parapet needs no cap geometry, but keeps the same node contract.
-                        if (twin.getValue().parts.isEmpty() && !(role.startsWith("roof") && piece.tags().endsWith("-cap"))) {
+                        // A cap whose closed twins carry its edge, or a distant roof's without a parapet, needs no
+                        // geometry, but keeps the same node contract.
+                        if (twin.getValue().parts.isEmpty() && !piece.tags().endsWith("-cap")) {
                             throw new IllegalStateException("Empty piece " + node);
                         }
                         nodes.put(node, twin.getValue());

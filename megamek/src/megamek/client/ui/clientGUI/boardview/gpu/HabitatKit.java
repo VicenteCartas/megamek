@@ -117,7 +117,7 @@ final class HabitatKit {
             if (roof) {
                 int links = KitOutline.links(piece);
                 for (int closed = links; closed > 0; closed = (closed - 1) & links) {
-                    twins.put("-closed-" + closed, KitOutline.closedRoof(piece, closed));
+                    twins.put("-closed-" + closed, KitOutline.closed(piece, closed));
                 }
             }
             Map<String, GeneratedMesh> result = new LinkedHashMap<>();

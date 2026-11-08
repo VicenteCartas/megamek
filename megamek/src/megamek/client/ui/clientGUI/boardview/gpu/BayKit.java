@@ -142,21 +142,56 @@ final class BayKit {
     }
 
     /**
-     * A role's module for a piece; a seamed roof's also closed above each set of its links' lower neighbours (the twins
-     * a closed roof stands in for), its caps empty since those carry its edge.
+     * A role's module for a piece; also closed beside each set of its links' shorter neighbours (the twins that stand in
+     * for it there): a seamed roof's, an Angled storey's, whose own walls then meet in corners like the kit's others, and
+     * its roof's where those corners round. Their caps stay empty, since those twins carry their edges.
      */
     private static Map<String, GeneratedMesh> twins(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece,
           int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
         boolean seamed = role.startsWith("roof") && spec.modules().get(role).stream().anyMatch(run -> run.seam() != null);
-        if (seamed && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
+        boolean closing = seamed || !square && (!role.startsWith("roof") || spec.cornerRadius() > 0);
+        if (closing && piece.tags().endsWith("-cap")) { return Map.of("", new GeneratedMesh()); }
         Map<String, GeneratedMesh> result = new LinkedHashMap<>();
         result.put("", module(spec, modelled, role, piece, 0, lod, square, footprintScale, fitting, layout, halfLength));
-        int links = seamed ? KitOutline.links(piece) : 0;
+        int links = closing ? KitOutline.links(piece) : 0;
         for (int closed = links; closed > 0; closed = (closed - 1) & links) {
-            result.put("-closed-" + closed, module(spec, modelled, role, KitOutline.closedRoof(piece, closed), closed, lod,
+            // Its new corners round like the kit's others.
+            var closedPiece = KitOutline.rounded(KitOutline.closed(piece, closed), spec.cornerRadius(),
+                  Math.max(1, spec.cornerSegments()));
+            result.put("-closed-" + closed, module(spec, modelled, role, closedPiece, closed, lod,
                   square, footprintScale, fitting, layout, halfLength));
         }
+        // A storey's junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
+        List<Run> runs = spec.modules().get(role);
+        Run run = runs.get(Math.min(lod, runs.size() - 1));
+        if (!square && !role.startsWith("roof") && piece.direction() != null && piece.walls().isEmpty()
+              && run.bays() != null && !run.bays().isEmpty()) {
+            for (var junction : KitOutline.Junction.values()) {
+                var wedge = junction(run, piece.direction(), junction, modelled, lod);
+                if (!wedge.parts.isEmpty()) { result.put("-junction-" + junction.ordinal(), wedge); }
+            }
+        }
         return result;
+    }
+
+    /**
+     * Where a wall ends at a hex corner on another hex's wall that does not go straight on ({@link KitOutline.Junction}),
+     * it is carried on past the corner by its run's first bay and cut on the mitre between the two: an inside corner.
+     * The bay's end lies on the corner either way (mirrored on a wall ending there), so both walls show the same
+     * section there.
+     */
+    private static GeneratedMesh junction(Run run, int corner, KitOutline.Junction junction, List<ModelData> modelled, int lod) {
+        var wall = KitOutline.junctionWall(junction, corner);
+        double[] at = KitOutline.hexCorner(corner), u = KitOutline.direction(wall);
+        boolean ends = KitOutline.close(wall.q(), at);
+        var laid = new GeneratedMesh();
+        lay(laid, List.of(ends ? new Placed(wall.length() + run.bay(), run.bays().getFirst(), -1)
+              : new Placed(-run.bay(), run.bays().getFirst(), 1)), wall, 0, modelled, lod);
+        if (run.planar() != null) { run.planar().forEach((material, repeat) -> planar(laid, material, wall, repeat)); }
+        // Past the corner, with a lap under the wall's own end bay, on its side of the mitre.
+        double lap = KitOutline.SEAM_OVERLAP / 2, sign = ends ? 1 : -1;
+        return laid.clipped(List.of((x, y) -> lap + sign * ((x - at[0]) * u[0] + (y - at[1]) * u[1]),
+              KitOutline.mitre(at, normal(wall.p(), wall.q()), KitOutline.partnerNormal(junction, corner), ends ? wall.p() : wall.q())));
     }
 
     /**

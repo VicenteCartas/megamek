@@ -46,6 +46,8 @@ final class GpuBuilding implements Disposable {
     private final ConnectedKit.Kit kit;
     private final List<Model> models = new ArrayList<>();
     private final Map<Recipe, Assembly> assemblies = new HashMap<>();
+    // Whether the kit holds junctions where its walls meet the neighbours' at a corner (ConnectedKit#junctions).
+    private boolean junctions;
     // Per piece in its authored frame: near for picking and roof outlines, far for wall sections.
     private final Map<String, List<Vector3>> triangles = new HashMap<>();
     private final Map<String, List<Vector3>> farTriangles = new HashMap<>();
@@ -63,7 +65,9 @@ final class GpuBuilding implements Disposable {
     private final Map<Assembly, BoundingBox> instanceBounds = new java.util.IdentityHashMap<>();
 
     private record Interior(List<List<Vector3>> footprints, int floors) { }
-    record Recipe(List<String> modules, List<Integer> reach, BuildingInteriors interiors, boolean stepped) { }
+    /** {@code junctions}: {@link ConnectedKit#junctions} where the kit holds them, else empty. */
+    record Recipe(List<String> modules, List<Integer> reach, BuildingInteriors interiors, boolean stepped,
+          List<Integer> junctions) { }
 
     /** No expanded Model is cached: each level of detail places the shared kit's nodes ({@link #instance}). */
     record Assembly(Recipe recipe, List<ConnectedKit.Placement> near, Model interior, GpuBuilding kit) {
@@ -86,11 +90,12 @@ final class GpuBuilding implements Disposable {
                 int previous = data.indexOf(data.get(lod));
                 models.add(previous < lod ? models.get(previous) : upload.apply(data.get(lod)));
             }
-            // Every kit shares its picking geometry; only enterable buildings need wall/roof footprints.
-            for (var piece : kit.pieces()) {
-                Node node = models.getFirst().getNode(piece.node());
-                triangles.put(piece.node(), GpuTerrain.triangles(List.of(node), part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
-                bounds.put(piece.node(), node.calculateBoundingBox(new BoundingBox()));
+            // Every kit shares its picking geometry, a corner's junctions too; only enterable buildings need wall/roof
+            // footprints.
+            for (Node node : models.getFirst().nodes) {
+                triangles.put(node.id, GpuTerrain.triangles(List.of(node), part -> !part.material.id.endsWith(GeneratedMesh.BUILDING_FLOOR)));
+                bounds.put(node.id, node.calculateBoundingBox(new BoundingBox()));
+                junctions |= node.id.contains("-junction-");
             }
         } catch (RuntimeException | Error error) {
             dispose();
@@ -154,7 +159,17 @@ final class GpuBuilding implements Disposable {
     }
 
     Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped) {
-        var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped);
+        return assemble(levels, reach, seed, policy, stepped, null);
+    }
+
+    /** {@code corners}: {@link ConnectedKit#corners}, or null for none of its walls' junctions with the neighbours'. */
+    Assembly assemble(int levels, int[] reach, long seed, BuildingInteriors policy, boolean stepped, int[] corners) {
+        // Pieces stand by the ground's connections where the kit caps the links above ({@link ConnectedKit#placements}).
+        boolean capped = !stepped && kit.pieces().stream().anyMatch(ConnectedKit.Piece::cap);
+        List<Integer> junctions = corners == null || !this.junctions ? List.of()
+              : Arrays.stream(ConnectedKit.junctions(levels, reach, corners, capped)).boxed().toList();
+        var recipe = new Recipe(select(kit.roles(), levels, seed), Arrays.stream(reach).boxed().toList(), policy, stepped,
+              junctions);
         return assemblies.computeIfAbsent(recipe, key -> {
             var near = placements(key, 0);
             if (policy == BuildingInteriors.NO) { return new Assembly(key, near, null, this); }
@@ -168,8 +183,8 @@ final class GpuBuilding implements Disposable {
     }
 
     private List<ConnectedKit.Placement> placements(Recipe recipe, int lod) {
-        return ConnectedKit.placements(kit, lod, recipe.modules(),
-              recipe.reach().stream().mapToInt(Integer::intValue).toArray(), 0, recipe.stepped());
+        return ConnectedKit.placements(kit, lod, recipe.modules(), recipe.reach().stream().mapToInt(Integer::intValue).toArray(),
+              0, recipe.stepped(), recipe.junctions().isEmpty() ? null : recipe.junctions().stream().mapToInt(Integer::intValue).toArray());
     }
 
     /**
