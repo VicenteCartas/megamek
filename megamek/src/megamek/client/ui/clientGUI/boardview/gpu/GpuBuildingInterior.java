@@ -311,16 +311,24 @@ final class GpuBuildingInterior {
     }
 
     /** A floor's walking surface stays at its gameplay level; the slab extends below it and closes at its outline. */
-    static void floor(MeshPartBuilder floors, List<Vector3> triangles, float z) {
+    static void floor(MeshPartBuilder floors, List<Vector3> triangles, float z) { floor(floors, triangles, triangles, z); }
+
+    /**
+     * A floor whose walking surface {@code top} stays at its gameplay level; its slab extends below it only over
+     * {@code body} and closes at that outline. Elsewhere (an overhang, a thin deck's edge) the surface alone.
+     */
+    static void floor(MeshPartBuilder floors, List<Vector3> top, List<Vector3> body, float z) {
         float bottom = z - SLAB;
-        for (int index = 0; index < triangles.size(); index += 3) {
-            Vector3 a = triangles.get(index), b = triangles.get(index + 1), c = triangles.get(index + 2);
-            floors.triangle(vertex(a, z, 1), vertex(b, z, 1), vertex(c, z, 1));
+        for (int index = 0; index < top.size(); index += 3) {
+            floors.triangle(vertex(top.get(index), z, 1), vertex(top.get(index + 1), z, 1), vertex(top.get(index + 2), z, 1));
+        }
+        for (int index = 0; index < body.size(); index += 3) {
+            Vector3 a = body.get(index), b = body.get(index + 1), c = body.get(index + 2);
             floors.triangle(vertex(c, bottom, -1), vertex(b, bottom, -1), vertex(a, bottom, -1));
         }
         Vector3 first = new Vector3(), previous = new Vector3();
         float[] point = new float[6];
-        for (var path = area(triangles).getPathIterator(null); !path.isDone(); path.next()) {
+        for (var path = area(body).getPathIterator(null); !path.isDone(); path.next()) {
             int kind = path.currentSegment(point);
             if (kind == PathIterator.SEG_MOVETO) { first.set(point[0], point[1], z); previous.set(first); continue; }
             Vector3 next = kind == PathIterator.SEG_CLOSE ? first.cpy() : new Vector3(point[0], point[1], z);

@@ -46,9 +46,12 @@ final class GpuAuthoredBuilding {
     record Slice(List<Model> levels, Model interior, List<Vector3> roof) {
         void dispose() { levels.stream().distinct().forEach(Model::dispose); if (interior != null) { interior.dispose(); } }
     }
-    /** CPU geometry prepared with the terrain snapshot; only upload and small interior meshes touch GL. */
-    record Prepared(Layout layout, List<ModelData> levels, List<List<Vector3>> floors, List<Vector3> columns,
-          List<Vector3> roof, BoundingBox localBounds) { }
+    /**
+     * CPU geometry prepared with the terrain snapshot; only upload and small interior meshes touch GL. {@code floors}:
+     * each level's walking surface; {@code bodies}: where its slab has depth below it.
+     */
+    record Prepared(Layout layout, List<ModelData> levels, List<List<Vector3>> floors, List<List<Vector3>> bodies,
+          List<Vector3> columns, List<Vector3> roof, BoundingBox localBounds) { }
     private record Assembly(String asset, List<BuildingVolumes.Module> modules) { }
     private record Placement(Coords anchor, BoardDecoration object, double base, int width, int height) { }
     private record Geometry(ModelData source, GeneratedMesh mesh) { }
@@ -331,7 +334,7 @@ final class GpuAuthoredBuilding {
             }
             levels.add(share.data("authored-" + object.id() + "-" + layout.cell(), lod.source()));
         }
-        if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of(), localBounds); }
+        if (layout.height() == 0) { return new Prepared(layout, List.copyOf(levels), List.of(), List.of(), List.of(), List.of(), localBounds); }
         Area cell = BuildingVolumes.hex(layout.cell());
         Area interiorCell = new Area(cell);
         // Floor slab edges must sit behind the neutral map cap, not flicker through its coincident plane.
@@ -343,7 +346,7 @@ final class GpuAuthoredBuilding {
                   HexTile.cornerX(layout.cell(), next, HexTile.MODEL_WIDTH), HexTile.cornerY(layout.cell(), next, HexTile.HEIGHT));
             interiorCell.subtract(new Area(new BasicStroke(.08f, BasicStroke.CAP_SQUARE, BasicStroke.JOIN_MITER).createStrokedShape(boundary)));
         }
-        List<List<Vector3>> floors = new ArrayList<>();
+        List<List<Vector3>> floors = new ArrayList<>(), bodies = new ArrayList<>();
         List<Vector3> columns = new ArrayList<>();
         if (layout.interiors() != BuildingInteriors.NO && !BuildingVolumes.tilted(object)) {
             for (int level = 0; level < layout.height(); level++) {
@@ -351,9 +354,21 @@ final class GpuAuthoredBuilding {
                 if (level == 0 || layout.interiors() == BuildingInteriors.YES) {
                     Area floor = new Area(placed.sections().computeIfAbsent(z + .02, height -> BuildingVolumes.section(placed.solids(), height))); floor.intersect(interiorCell);
                     floor.transform(AffineTransform.getTranslateInstance(-cx, -cy));
-                    // Its edge keeps clear of the walls beside its slab; the ground floor's slab lies under the terrain.
-                    if (level > 0) { floor = GpuBuildingInterior.keepClear(floor, GpuBuildingInterior.faces(shell, floorHeight(layout, level))); }
+                    Area body = floor;
+                    // The ground floor's slab lies under the terrain. Above, the floor covers its storey's whole
+                    // volume, overhangs included, but its slab has depth only where a volume (the storey below, a
+                    // deck) reaches under it too; both edges keep clear of the walls beside the slab.
+                    if (level > 0) {
+                        var faces = GpuBuildingInterior.faces(shell, floorHeight(layout, level));
+                        floor = GpuBuildingInterior.keepClear(floor, faces);
+                        body = new Area(placed.sections().computeIfAbsent(z - GpuBuildingInterior.SLAB + .05,
+                              height -> BuildingVolumes.section(placed.solids(), height)));
+                        body.transform(AffineTransform.getTranslateInstance(-cx, -cy));
+                        body.intersect(floor);
+                        body = GpuBuildingInterior.keepClear(body, faces);
+                    }
                     floors.add(GpuBuildingInterior.triangles(floor));
+                    bodies.add(body == floor ? floors.getLast() : GpuBuildingInterior.triangles(body));
                 }
                 Area middle = new Area(placed.sections().computeIfAbsent(z + HexTile.LEVEL_HEIGHT * .5, height -> BuildingVolumes.section(placed.solids(), height))); middle.intersect(interiorCell);
                 var bounds = middle.getBounds2D();
@@ -381,7 +396,8 @@ final class GpuAuthoredBuilding {
             standing.add(new Vector3(triangle.b()).set(triangle.b().x, triangle.b().y, roofZ));
             standing.add(new Vector3(triangle.c()).set(triangle.c().x, triangle.c().y, roofZ));
         }
-        return new Prepared(layout, List.copyOf(levels), List.copyOf(floors), List.copyOf(columns), List.copyOf(standing), localBounds);
+        return new Prepared(layout, List.copyOf(levels), List.copyOf(floors), List.copyOf(bodies), List.copyOf(columns),
+              List.copyOf(standing), localBounds);
     }
 
     private static Model interior(Prepared prepared) {
@@ -402,7 +418,7 @@ final class GpuAuthoredBuilding {
             var triangles = prepared.floors().get(level);
             if (triangles.isEmpty()) { continue; }
             var floor = builder.part("floor-" + level, GL20.GL_TRIANGLES, attributes, material);
-            GpuBuildingInterior.floor(floor, triangles, floorHeight(layout, level));
+            GpuBuildingInterior.floor(floor, triangles, prepared.bodies().get(level), floorHeight(layout, level));
         }
         return builder.end();
     }
