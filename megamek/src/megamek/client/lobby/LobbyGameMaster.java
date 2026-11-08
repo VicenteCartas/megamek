@@ -84,6 +84,39 @@ public record LobbyGameMaster(Seat seat, String holder, String requester, List<B
               && ballot.choice() == Choice.PENDING);
     }
 
+    /**
+     * @return whether the local player has a ballot in the running vote and did not call it, and so may cast it or
+     *       change it while the vote runs
+     */
+    public boolean votesSelf() {
+        if (seat != Seat.VOTE || requestedBySelf()) {
+            return false;
+        }
+        for (Ballot ballot : ballots) {
+            if (ballot.self()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @return the ballot of the local player in the running vote, or null when they have none */
+    public Ballot selfBallot() {
+        if (seat == Seat.VOTE) {
+            for (Ballot ballot : ballots) {
+                if (ballot.self()) {
+                    return ballot;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** @return the chat command that casts the local player's vote: allow or deny the request */
+    public static String voteCommand(boolean yes) {
+        return yes ? LobbyCommands.GAME_MASTER_ALLOW_COMMAND : LobbyCommands.GAME_MASTER_DENY_COMMAND;
+    }
+
     /** @return how many ballots chose {@code choice} */
     public int count(Choice choice) {
         return (int) ballots.stream().filter(ballot -> ballot.choice() == choice).count();

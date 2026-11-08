@@ -36,8 +36,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Consumer;
 
@@ -338,18 +340,25 @@ public final class UnitDamageForm {
     private int bays;
     /** The Game Master's in-play tools, or null outside play. */
     private final GameMasterUnitTools gameMaster;
+    /** The equipment numbers of the equipment the editor lists. */
+    private final Set<Integer> listedEquipment = new HashSet<>();
+    /** The damage summary as read, or null for a unit that edits no locations, such as conventional infantry. */
+    private final List<UnitDamageSummary.Line> summary;
 
     private UnitDamageForm(Entity entity, Options options) {
         this.entity = entity;
         this.options = options;
         if (entity.isConventionalInfantry()) {
             readInfantry((Infantry) entity);
+            summary = null;
         } else {
             readLocations();
             readCrew();
             readConditions();
             readEquipment();
             readSystems();
+            summary = UnitDamageSummary.lines(entity,
+                  mounted -> listedEquipment.contains(entity.getEquipmentNum(mounted)));
         }
         readDeployment();
         gameMaster = options.inPlay() ? new GameMasterUnitTools(this) : null;
@@ -401,6 +410,28 @@ public final class UnitDamageForm {
     /** The location whose paperdoll region has {@code code}, or null. */
     public Place place(String code) {
         return places.values().stream().filter(place -> place.abbr.equals(code)).findFirst().orElse(null);
+    }
+
+    /** The unit's location {@code location} when it has something to edit, or null. */
+    public Place placeOf(int location) {
+        return places.get(location);
+    }
+
+    /**
+     * Whether the card shows the damage summary: for every unit that edits its locations, so not for conventional
+     * infantry.
+     */
+    public boolean summarized() {
+        return summary != null;
+    }
+
+    /**
+     * The damage summary as read: each blown off or breached location and each listed piece of equipment that is not
+     * in working order, with the location it opens ({@link #placeOf}, or the general values where that is null); empty
+     * when nothing is flagged or the card shows no summary.
+     */
+    public List<UnitDamageSummary.Line> summary() {
+        return summary == null ? List.of() : summary;
     }
 
     /** The values that sit in no location: structural integrity, fuel, crew, systems and conditions. */
@@ -778,6 +809,7 @@ public final class UnitDamageForm {
                   || bayMembers.contains(number)) {
                 continue;
             }
+            listedEquipment.add(number);
             int slots = mounted.getNumCriticalSlots();
             int hits = entity.getDamagedCriticalSlots(CriticalSlot.TYPE_EQUIPMENT, number, mounted.getLocation());
             if (mounted.isSplit()) {

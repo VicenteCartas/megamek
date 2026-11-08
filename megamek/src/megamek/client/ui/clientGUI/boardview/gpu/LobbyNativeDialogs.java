@@ -4,6 +4,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,13 +20,18 @@ import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
+import megamek.client.lobby.BuildingEditForm;
 import megamek.client.lobby.CamoCatalog;
 import megamek.client.lobby.CamoChoice;
+import megamek.client.lobby.ClientCommandForm;
 import megamek.client.lobby.ForceNameRequest;
+import megamek.client.lobby.GameMasterPlayerSetup;
 import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.LanceRoleForm;
+import megamek.client.lobby.LobbyGameMaster;
+import megamek.client.lobby.MapNoteForm;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
@@ -45,6 +51,8 @@ import megamek.client.ui.gdx.UiChoice;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.util.KeyCommandBind;
+import megamek.common.Player;
+import megamek.common.SpecialHexDisplay;
 import megamek.common.icons.Camouflage;
 import megamek.common.icons.Portrait;
 import megamek.common.units.Entity;
@@ -393,6 +401,89 @@ final class LobbyNativeDialogs {
         });
         show(dialog);
         return dialog;
+    }
+
+    /** A map note's text and who sees it, over whatever shows; Done hands the note to {@code done}. */
+    UiDialog mapNote(MapNoteForm form, LobbyPromptViews.Edt edt, Consumer<SpecialHexDisplay> done, Runnable closed) {
+        UiDialog dialog = begin(Messages.getString("NoteDialog.title"), "dialog.sm", true, closed);
+        LobbyGameMasterViews.mapNote(kit, dialog, form, edt, done, () -> closeDialog(dialog));
+        show(dialog);
+        return dialog;
+    }
+
+    /**
+     * The running Game Master vote over whatever shows, filled again in place through the card it returns.
+     *
+     * @param closed runs once the card has closed, however it closed
+     */
+    LobbyGameMasterViews.VoteCard gameMasterVote(LobbyGameMaster vote, LobbyGameMasterViews.VoteActions actions,
+          Runnable closed) {
+        UiDialog dialog = begin(Messages.getString("GameMasterVoteDialog.title"), "dialog.sm", true, closed);
+        LobbyGameMasterViews.VoteCard card = new LobbyGameMasterViews.VoteCard(kit, dialog, actions);
+        card.fill(vote);
+        show(dialog);
+        return card;
+    }
+
+    /** A command's arguments as a form over whatever shows; Execute asks, then sends it through {@code chat}. */
+    UiDialog clientCommand(ClientCommandForm form, LobbyPromptViews.Edt edt, Consumer<String> chat) {
+        UiDialog dialog = begin(form.title(), "dialog.md", true, () -> { });
+        LobbyGameMasterViews.clientCommand(kit, dialog, form, this::confirm, edt, chat, () -> closeDialog(dialog));
+        show(dialog);
+        return dialog;
+    }
+
+    /** A player's team and deployment zone over whatever shows, with the ways to hand them units. */
+    UiDialog playerSetup(GameMasterPlayerSetup setup, LobbyPromptViews.Edt edt, Consumer<String> chat,
+          Consumer<Player> fromFile, Consumer<Player> fromGenerator) {
+        UiDialog dialog = begin(Messages.getString("GameMasterPlayerSetupDialog.title"), "dialog.md", true, () -> { });
+        LobbyGameMasterViews.playerSetup(kit, dialog, setup, edt, chat, fromFile, fromGenerator,
+              () -> closeDialog(dialog));
+        show(dialog);
+        return dialog;
+    }
+
+    /** A hex's building or fuel tank over whatever shows. */
+    UiDialog building(BuildingEditForm form, LobbyPromptViews.Edt edt, LobbyGameMasterViews.BuildingPicture picture,
+          Runnable closed) {
+        Runnable[] dispose = new Runnable[1];
+        UiDialog dialog = begin(form.title(), "dialog.md", true, () -> {
+            if (dispose[0] != null) {
+                dispose[0].run();
+            }
+            closed.run();
+        });
+        dispose[0] = LobbyGameMasterViews.building(kit, dialog, form, edt, (title, text, ignored) -> message(title,
+              text), picture, () -> closeDialog(dialog));
+        show(dialog);
+        return dialog;
+    }
+
+    /** Closes {@code dialog} wherever it stands among those that show, as its own close would. */
+    void closeDialog(UiDialog dialog) {
+        Iterator<Open> each = open.iterator();
+        while (each.hasNext()) {
+            Open shown = each.next();
+            if (shown.dialog() == dialog) {
+                each.remove();
+                dialog.close();
+                shown.closed().run();
+                Open top = open.peek();
+                if (top != null) {
+                    stage.setScrollFocus(top.dialog().scroll());
+                }
+                return;
+            }
+        }
+    }
+
+    /** The kit and stage the cards show on, for a panel beside the board that is not a card, such as the brush. */
+    UiKit kit() {
+        return kit;
+    }
+
+    Stage stage() {
+        return stage;
     }
 
     /** Asks for a train's order over whatever shows. */

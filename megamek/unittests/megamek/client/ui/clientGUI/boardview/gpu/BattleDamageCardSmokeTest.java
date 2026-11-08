@@ -14,11 +14,13 @@ import java.util.function.Supplier;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.common.Player;
+import megamek.common.equipment.WeaponMounted;
 import megamek.common.game.Game;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.DamageEditSpec;
@@ -29,7 +31,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Opens the Game Master's damage card of a unit in a running game, as the battle window shows it from the board's
  * Edit damage entry: its Game Master section, an Explode button, and Destroy, which asks and then sends the server's
- * kill command and closes the card.
+ * kill command and closes the card; and its damage summary, whose chips open the location they name.
  */
 @Tag("on-demand")
 class BattleDamageCardSmokeTest {
@@ -83,6 +85,36 @@ class BattleDamageCardSmokeTest {
             assertTrue(edits.isEmpty(), "Destroy drops the other edits");
             assertTrue(closed[0], "the act closes the card");
             assertFalse(dialogs.isOpen());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void aSummaryChipOpensTheLocationItNames() {
+        UiTestStage.run(ui -> {
+            Entity atlas = atlas();
+            WeaponMounted autocannon = atlas.getWeaponList().stream().filter(WeaponMounted::canJam).findFirst()
+                  .orElseThrow();
+            autocannon.setJammedImmediately(true);
+            UnitDamageForm form = UnitDamageForm.of(atlas, UnitDamageForm.Options.inPlay((Game) atlas.getGame()));
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            dialogs.gameMasterDamage(form, EDT, new GameMasterUnitTools.Host() {
+                @Override
+                public void sendDamageEdit(DamageEditSpec spec) {
+                }
+
+                @Override
+                public void sendChat(String command) {
+                }
+            }, () -> { });
+            ui.draw();
+
+            click(ui, find(ui, "damage-whole"));
+            find(ui, "damage-summary");
+            click(ui, find(ui, "damage-summary-0"));
+            String expected = form.placeOf(autocannon.getLocation()).name();
+            assertEquals(expected, ((Label) find(ui, "damage-heading")).getText().toString(),
+                  "the chip opens the jammed gun's location");
             dialogs.dispose();
         });
     }

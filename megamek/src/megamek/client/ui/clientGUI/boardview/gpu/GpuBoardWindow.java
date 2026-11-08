@@ -54,6 +54,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.GameMasterUnitTools;
+import megamek.client.lobby.LobbyGameMaster;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
@@ -70,13 +71,18 @@ import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.advancedSearchMap.AdvancedSearchMapDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.common.Configuration;
+import megamek.common.Player;
+import megamek.common.SpecialHexDisplay;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
+import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.game.Game;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.units.Entity;
+import megamek.common.voting.Poll;
 import megamek.logging.MMLogger;
+import megamek.server.commands.ClientServerCommand;
 
 /**
  * The battle, the map editor and the map preview as scenes of MegaMek's one native window ({@link GpuHost}), which
@@ -181,25 +187,8 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.buttonDialogs.EditBotsDialog.class,
           // R6: a bot's settings, opened from Edit Bots and Player Settings
           megamek.client.ui.dialogs.buttonDialogs.BotConfigDialog.class,
-          // R6: Random Army; the battle menu's reinforcements are native, but the Swing game master player setup,
-          // kept below, still opens this dialog over the battle
-          megamek.client.ui.dialogs.randomArmy.RandomArmyDialog.class,
           // R6: Network information
           megamek.client.ui.dialogs.buttonDialogs.NetworkInformationDialog.class,
-          // U2, GM tools (swing-inventory R7): the game master vote
-          megamek.client.ui.dialogs.GameMasterVoteDialog.class,
-          // U2, GM tools: the new game master's notice
-          megamek.client.ui.dialogs.GameMasterAppointedDialog.class,
-          // U2, GM editors: building
-          megamek.client.ui.dialogs.BuildingEditDialog.class,
-          // U2, GM editors: hex
-          megamek.client.ui.dialogs.HexEditDialog.class,
-          // U2, GM tools: the command form of the Commands menu (kick, game master commands)
-          megamek.client.ui.dialogs.ClientCommandDialog.class,
-          // U2, GM editors: player setup
-          megamek.client.ui.dialogs.GameMasterPlayerSetupDialog.class,
-          // U2, GM editors: notes
-          megamek.client.ui.dialogs.NoteDialog.class,
           // U2: the reinforcement selector
           megamek.client.ui.dialogs.unitSelectorDialogs.MegaMekUnitSelectorDialog.class,
           // U2: the accessibility window
@@ -1483,6 +1472,93 @@ public final class GpuBoardWindow {
         GpuBattleTools tools = battleTools(gui);
         if (tools != null) {
             tools.help(title, file);
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: edits the local player's {@code note} on a hex natively over this client's battle window; false as above.
+     *
+     * @param closed runs on the Swing thread once the card has closed, however it closed; not when this returns false
+     */
+    public static boolean editNote(ClientGUI gui, SpecialHexDisplay note, Coords coords, int boardId,
+          Runnable closed) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.mapNote(note, coords, boardId, closed);
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows the running Game Master vote natively over this client's battle window, or brings the card that
+     * shows it up to date; false as above.
+     */
+    public static boolean showGameMasterVote(ClientGUI gui, Poll poll) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.gameMasterVote(LobbyGameMaster.of(gui.getClient().getGame(), gui.getClient().getLocalPlayer(),
+                  poll));
+        }
+        return tools != null;
+    }
+
+    /** EDT: closes the Game Master vote's card, as the vote has ended; nothing when none shows. */
+    public static void closeGameMasterVote(ClientGUI gui) {
+        GpuBoardWindow window = active;
+        if (SwingUtilities.isEventDispatchThread() && window != null && window.gui == gui
+              && window.battleTools != null) {
+            window.battleTools.closeGameMasterVote();
+        }
+    }
+
+    /** EDT: tells who the vote made Game Master, natively over this client's battle window; false as above. */
+    public static boolean announceGameMaster(ClientGUI gui, String name) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.gameMasterAppointed(name);
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: shows {@code command}'s arguments as a form natively over this client's battle window, opened on
+     * {@code coords} when a hex was clicked; false as above.
+     */
+    public static boolean showClientCommand(ClientGUI gui, ClientServerCommand command, @Nullable Coords coords) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.clientCommand(command, coords);
+        }
+        return tools != null;
+    }
+
+    /** EDT: shows the Game Master's player setup natively over this client's battle window; false as above. */
+    public static boolean showPlayerSetup(ClientGUI gui, @Nullable Player player) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.playerSetup(player);
+        }
+        return tools != null;
+    }
+
+    /** EDT: edits the building in a hex natively over this client's battle window; false as above. */
+    public static boolean editBuilding(ClientGUI gui, Coords coords) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.building(coords);
+        }
+        return tools != null;
+    }
+
+    /**
+     * EDT: opens the Game Master's terrain brush on a hex beside the board of this client's battle window, whose board
+     * clicks then paint; false as above.
+     */
+    public static boolean editHex(ClientGUI gui, Coords coords) {
+        GpuBattleTools tools = battleTools(gui);
+        if (tools != null) {
+            tools.hexBrush(coords);
         }
         return tools != null;
     }

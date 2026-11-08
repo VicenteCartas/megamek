@@ -44,6 +44,7 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
@@ -51,6 +52,7 @@ import com.badlogic.gdx.utils.Align;
 import jakarta.annotation.Nullable;
 import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.UnitDamageForm;
+import megamek.client.lobby.UnitDamageSummary;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.Cell;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.View;
@@ -72,7 +74,8 @@ import megamek.common.compute.damage.PreExistingDamageLevel;
  * the picked location's name, stepped through with the chevrons beside it, over its values: armor and structure as
  * health bars, hits as boxes and states as switches; under both, the pre-existing damage roller's level tiles. A click
  * on any doll picks a location. Restore Unit brings every value back to a whole unit. A unit with no locations to edit,
- * such as conventional infantry, shows its values alone. The whole unit's values end with its deployment: heat,
+ * such as conventional infantry, shows its values alone. The whole unit's values list the damage summary, each chip
+ * opening the location it names, and end with its deployment: heat,
  * stance, hidden, scan target and deployment round, which its owner sets even where a Game Master keeps the damage,
  * showing it read-only.
  */
@@ -451,6 +454,10 @@ final class LobbyDamageView {
                 rows++;
             }
         }
+        if (chosen == null && form.summarized()) {
+            summarySection(rows == 0);
+            rows++;
+        }
         List<UnitDamageForm.Value> deployment = form.deployment();
         if (chosen == null && !deployment.isEmpty()) {
             // how the unit starts the game, its owner's to set even where its damage is the Game Master's
@@ -464,6 +471,35 @@ final class LobbyDamageView {
         }
         if (chosen == null && tools != null) {
             gameMasterSection(rows == 0);
+        }
+    }
+
+    /**
+     * The damage summary of the whole unit's values, as the Swing editor's general panel lists it: a chip for each
+     * flagged location or piece of equipment, which opens the location it names, or None.
+     */
+    private void summarySection(boolean first) {
+        Label caption = kit.typeLabel(Messages.getString("UnitEditorDialog.damageSummary"), "body.strong",
+              "text.primary");
+        caption.setName("damage-summary");
+        kit.tip(caption, true).getActor().setText(Messages.getString("UnitEditorDialog.damageSummary.tooltip"));
+        values.add(caption).left().padTop(first ? 0 : space("xl")).row();
+        List<UnitDamageSummary.Line> lines = form.summary();
+        if (lines.isEmpty()) {
+            Label none = kit.typeLabel(Messages.getString("UnitEditorDialog.damageSummary.none"), "small",
+                  "text.muted");
+            none.setName("damage-summary-none");
+            values.add(none).left().padTop(space("xs")).row();
+            return;
+        }
+        for (int index = 0; index < lines.size(); index++) {
+            UnitDamageSummary.Line line = lines.get(index);
+            Button chip = kit.actingChip(line.text(), UiKit.Tone.BAD);
+            chip.setName("damage-summary-" + index);
+            kit.tip(chip, true).getActor().setText(Messages.getString("UnitEditorDialog.damageSummary.link.tooltip"));
+            // the place is null for equipment in no location the card shows, which the whole unit's values hold
+            UiKit.onChange(chip, () -> choose(form.placeOf(line.location())));
+            values.add(chip).left().padTop(space("xs")).row();
         }
     }
 
