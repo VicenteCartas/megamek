@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector3;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BuildingInteriors;
 import megamek.common.board.Coords;

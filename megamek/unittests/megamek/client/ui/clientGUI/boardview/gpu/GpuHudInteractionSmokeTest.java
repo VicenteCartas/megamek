@@ -1,8 +1,6 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.ATLAS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.BATTLEMASTER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.HEXES;
@@ -12,6 +10,8 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.MARAUDER
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.PANTHER;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.TIMBER_WOLF;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuParityBattle.WARHAMMER;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;

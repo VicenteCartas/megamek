@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.awaitDialog;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.EAST;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.NORTH;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.assertSameActions;
@@ -16,6 +15,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.queue;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.sent;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.targets;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.used;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;

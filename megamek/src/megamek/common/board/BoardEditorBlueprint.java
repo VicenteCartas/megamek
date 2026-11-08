@@ -151,12 +151,18 @@ public final class BoardEditorBlueprint {
     }
     /**
      * {@code themes}: null except for the Theme category (its special themes); {@code sections}: all of them, the
-     * subcategories' too; {@code iconNode}: one hex in the .board2 form.
+     * subcategories' too; {@code iconNode}: one hex in the .board2 form; {@code shelves}: the page section whose shelf shows
+     * a subcategory's card, for those not on the top shelf.
      */
-    public record Category(String id, List<String> themes, List<Section> sections, String iconNode) {
+    public record Category(String id, List<String> themes, List<Section> sections, String iconNode, Map<String, String> shelves) {
         /** The subcategories, in order. */
         public List<String> subcategories() {
             return sections.stream().map(Section::subcategory).filter(Objects::nonNull).distinct().toList();
+        }
+
+        /** The subcategories whose cards {@code section}'s shelf shows; null: the top shelf's. */
+        public List<String> subcategories(String section) {
+            return subcategories().stream().filter(subcategory -> Objects.equals(shelves.get(subcategory), section)).toList();
         }
 
         /** The sections of {@code subcategory}; null: those on the category's own page. */
@@ -359,8 +365,16 @@ public final class BoardEditorBlueprint {
             for (JsonNode section : category.withArray("sections")) {
                 list.add(new Section(id, section.asText(), subcategories.get(section.asText()), List.copyOf(sections.get(id + "/" + section.asText()))));
             }
+            Map<String, String> shelves = new HashMap<>();
+            for (var shelf : category.path("subcategoryShelf").properties()) {
+                String section = shelf.getValue().asText();
+                if (!subcategories.containsValue(shelf.getKey()) || !sections.containsKey(id + "/" + section) || subcategories.containsKey(section)) {
+                    throw new IOException("Subcategory " + shelf.getKey() + " needs a section of its category's page for its card, not " + section);
+                }
+                shelves.put(shelf.getKey(), section);
+            }
             categories.add(new Category(id, category.has("themes") ? strings(category.get("themes")) : null, List.copyOf(list),
-                  category.path("icon").toString()));
+                  category.path("icon").toString(), Map.copyOf(shelves)));
         }
         return new BoardEditorBlueprint(components, variants, assets, categories, entries, cards);
     }

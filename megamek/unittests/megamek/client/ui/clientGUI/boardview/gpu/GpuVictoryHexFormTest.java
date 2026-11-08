@@ -6,10 +6,10 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientF
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.set;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.gdx.UiKit.text;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;

@@ -28,10 +28,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
+import megamek.common.Configuration;
 import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardFlag;
-import megamek.common.Configuration;
-import megamek.common.board.RailRoute;
 import megamek.logging.MMLogger;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */

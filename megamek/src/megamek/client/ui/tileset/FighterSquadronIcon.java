@@ -40,9 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import megamek.common.icons.Camouflage;
 import megamek.common.units.Entity;
 import megamek.common.units.FighterSquadron;
-import megamek.common.icons.Camouflage;
 import megamek.common.util.ImageUtil;
 
 /**

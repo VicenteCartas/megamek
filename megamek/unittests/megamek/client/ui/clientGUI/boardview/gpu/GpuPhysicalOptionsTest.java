@@ -3,9 +3,9 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;

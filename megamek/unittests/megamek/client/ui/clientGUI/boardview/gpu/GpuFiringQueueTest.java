@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.AFTER_BACKSPACE;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.BOMBS;
@@ -15,6 +14,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizatio
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.render;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringCharacterizationTest.used;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuFiringFixture.weapon;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;

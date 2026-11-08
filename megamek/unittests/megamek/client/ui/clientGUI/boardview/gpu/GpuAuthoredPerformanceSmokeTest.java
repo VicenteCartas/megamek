@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import jdk.jfr.Configuration;
 import jdk.jfr.Recording;
 import megamek.client.ui.boardeditor.BoardEditorSession;

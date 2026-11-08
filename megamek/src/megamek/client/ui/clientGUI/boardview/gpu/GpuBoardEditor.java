@@ -33,8 +33,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextField;
 import com.badlogic.gdx.scenes.scene2d.utils.FocusListener;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
-import megamek.common.board.BoardBillboard;
-import megamek.common.board.BoardFlag;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.boardeditor.BoardEditorSession.Action;
 import megamek.client.ui.boardeditor.BoardEditorSession.Command;
@@ -51,9 +49,11 @@ import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.gdx.UiTree;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
+import megamek.common.board.BoardBillboard;
 import megamek.common.board.BoardDecalArt;
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardEditorBlueprint;
+import megamek.common.board.BoardFlag;
 import megamek.common.board.BuildingInteriors;
 import megamek.common.board.BuildingVolumes;
 import megamek.common.board.Coords;
@@ -1003,11 +1003,17 @@ final class GpuBoardEditor implements com.badlogic.gdx.utils.Disposable {
         }
         if (category.themes() != null) { return shelves(category); }
         List<Shelf> shelves = new ArrayList<>();
-        var subcategories = category.subcategories();
+        var subcategories = category.subcategories(null);
         if (!subcategories.isEmpty()) {
             shelves.add(new Shelf(category.id(), null, subcategories.stream().map(id -> new Tile(null, null, id)).toList()));
         }
-        category.sections(null).forEach(section -> shelves.add(shelf(section)));
+        for (var section : category.sections(null)) {
+            // A subcategory placed in a section ("Looks": Civic, Utopia, Frontier) leads that section's cards.
+            Shelf shelf = shelf(section);
+            List<Tile> tiles = new ArrayList<>(category.subcategories(section.id()).stream().map(id -> new Tile(null, null, id)).toList());
+            tiles.addAll(shelf.tiles());
+            shelves.add(new Shelf(shelf.id(), shelf.title(), tiles));
+        }
         return shelves;
     }
 

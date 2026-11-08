@@ -10,13 +10,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
-import java.lang.reflect.InvocationTargetException;
-import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
-import javax.swing.SwingUtilities;
 
 import com.formdev.flatlaf.ui.FlatNativeWindowsLibrary;
 import org.junit.jupiter.api.AfterEach;

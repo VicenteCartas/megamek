@@ -2,17 +2,17 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.labels;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.pick;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.button;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.labels;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.pick;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.CLUSTER;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.HE;
 import static megamek.common.equipment.enums.BombType.BombTypeEnum.LG;
