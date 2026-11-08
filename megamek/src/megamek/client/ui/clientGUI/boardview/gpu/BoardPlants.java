@@ -12,7 +12,7 @@ import com.badlogic.gdx.utils.FloatArray;
  * {@link TerrainLod#MEDIUM}, so a chunk already carries its blades while its full-detail replacement is still being
  * built: grass only shows from 120 projected pixels per hex and crop plants from the 24 at which medium detail is
  * requested, and a medium chunk's roots keep their places and ranks on the full ground. A level that takes detail
- * late ({@link BoardVegetation#lateDetail}) asks for medium only once they begin to show, so its coarse chunks carry
+ * late ({@link TerrainLod#lateDetail}) asks for medium only once they begin to show, so its coarse chunks carry
  * them too, grass only where the level draws meadows: its first zoom would otherwise wait on bare ground for each
  * chunk's rebuild. A chunk keeps what its level planted when the level changes on an open board, until it is rebuilt.
  * Nothing grows through paint: every kind grows by one minus the opacity of the decals painting the hex's ground
@@ -28,7 +28,7 @@ record BoardPlants(FloatArray reeds, FloatArray grass, FloatArray wheat, FloatAr
         }
         var kind = BoardBiome.plantKind(scene, tile);
         var paint = BoardDecals.Opacity.of(tile, stamps);
-        boolean lateDetail = BoardVegetation.lateDetail();
+        boolean lateDetail = TerrainLod.lateDetail();
         // Reed tiers start at 240, 64 and 12 projected pixels per hex; a chunk plants the tiers its detail lives at:
         // medium, and coarse on a late level (to about 79), up to the middle one, other coarse chunks the sparsest.
         FloatArray reeds = kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, tile, support,

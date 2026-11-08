@@ -3874,8 +3874,8 @@ final class BoardRelief {
      */
     private void rocks(List<BoardSurface.Face> destination, Vector3 anchor) {
         // Geological rim and fallen rocks belong on banks and riverbeds, including positive-depth water.
-        // Cosmetic field scatter has its own stricter water rule; coarse tiers still omit these small formations.
-        if (!detail.dressing || !self.detailed() || tile.liquid().volcanic()) { return; }
+        // Cosmetic field scatter has its own stricter water rule; coarse tiers carry these only on a late level.
+        if (!detail.formations() || !self.detailed() || tile.liquid().volcanic()) { return; }
         float m = metres(1);
         BoardScene.Surface family = BoardScene.Surface.values()[self.family()];
         boolean paved = tile.surface() == BoardScene.Surface.CONCRETE;
@@ -3998,7 +3998,7 @@ final class BoardRelief {
      */
     private void fallRocks(List<BoardSurface.Face> destination, Vector3 anchor, Vector3[] crests, int falls,
           int mouths) {
-        if (!detail.dressing || !self.detailed() || tile.liquid().volcanic()) { return; }
+        if (!detail.formations() || !self.detailed() || tile.liquid().volcanic()) { return; }
         float m = metres(1);
         BoardScene.Surface family = BoardScene.Surface.values()[self.family()];
         int perEdge = crests.length / 6;
@@ -4102,7 +4102,7 @@ final class BoardRelief {
      * what stands on it, so the tree and any unit keep the game level.
      */
     private void pits(List<BoardSurface.Face> destination) {
-        if (!detail.dressing || !self.detailed() || tile.surface() != BoardScene.Surface.CONCRETE) { return; }
+        if (!detail.formations() || !self.detailed() || tile.surface() != BoardScene.Surface.CONCRETE) { return; }
         float m = metres(1);
         List<BoardScene.Feature> trees = tile.features().stream()
               .filter(feature -> feature.kind() == BoardScene.FeatureKind.TREE && !feature.authoredPlacement()).toList();

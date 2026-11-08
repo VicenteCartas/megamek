@@ -58,14 +58,9 @@ final class BoardVegetation {
     static boolean carriesGrass(TerrainLod lod) {
         return switch (lod) {
             case FULL, MEDIUM -> true;
-            case COARSE -> lateDetail() && BoardQuality.current.meadowShare > 0;
+            case COARSE -> TerrainLod.lateDetail() && BoardQuality.current.meadowShare > 0;
             case DISTANT -> false;
         };
-    }
-
-    /** Whether the level asks for medium detail late ({@link BoardQuality#detailScale}): coarse chunks plant as medium. */
-    static boolean lateDetail() {
-        return BoardQuality.current.detailScale > 1;
     }
 
     /** Whether a hex's sculpted support carries ground cover at this detail. */
