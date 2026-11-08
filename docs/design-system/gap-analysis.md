@@ -1373,8 +1373,8 @@ work for Swing, and item 11 is under investigation.
          - The values live in the toolkit-free `UnitDamageForm`, which writes a partial `DamageEditSpec` through
            `DamageEditApplier`, so what it does not show stays as it was. More… (the way to the Swing editor) is
            gone, and with it the bug where More → Apply closed both dialogs and dropped the damage.
-         - The Game Master's skill modifiers stay on the board's editor: the Swing dialog offers them only with a
-           game in play, and the lobby has none yet.
+         - The Game Master's skill modifiers are only on the board's native editor, with a game in play; the lobby
+           has none yet.
          - `lobby+unitdamage` opens it for a shot, `+next` steps on a location and `+heavy` clicks the Heavy tile.
        - Game options moved to the top bar, because testers did not find them in the battlefield column: a
          `button-special` Game options button with a gavel stands before the Game Master's seat, its tooltip naming
@@ -1531,13 +1531,13 @@ work for Swing, and item 11 is under investigation.
          `+click=document-chapter-1`), `lobby+maphelp`, the auto-resolve report above.
        - Done: the Game Master's board damage editor is native. In a running game, Edit damage on a unit opens the
          lobby's damage card over the battle (`GpuBoardWindow.editDamage`, `LobbyNativeDialogs.gameMasterDamage`)
-         with the Swing editor's in-play tools: edits commit through the server, temporary skill and target
-         modifiers, ejection settings, equipment settings, a bot unit's forced withdrawal order, owner change, and
-         Explode, Withdraw and Destroy (with eject crew), each confirmed. The toolkit-free `GameMasterUnitTools`
+         with the in-play tools the Swing editor used to offer: edits commit through the server, temporary skill and
+         target modifiers, ejection settings, equipment settings, a bot unit's forced withdrawal order, owner change,
+         and Explode, Withdraw and Destroy (with eject crew), each confirmed. The toolkit-free `GameMasterUnitTools`
          builds the server commands. The Swing `UnitEditorDialog` stays only for MekHQ and MegaMekLab; the board no
-         longer opens it. Checks: `GameMasterUnitToolsTest`,
-         `BattleDamageCardSmokeTest`. The SBF and Alpha Strike stats dialogs are gone (the lobby's are native, see
-         below); nothing on the board opened them.
+         longer opens it, and its Game Master mode is removed, so these tools have one copy. Checks:
+         `GameMasterUnitToolsTest`, `BattleDamageCardSmokeTest`. The SBF and Alpha Strike stats dialogs are gone (the
+         lobby's are native, see below); nothing on the board opened them.
        - Still Swing from the lobby: Client Settings (the gear in the top bar opens `CommonSettingsDialog`, about
          4,900 lines; its port is several PRs).
        - Stays Swing: the startup-failure message falls back to a Swing dialog only when the OpenGL window never

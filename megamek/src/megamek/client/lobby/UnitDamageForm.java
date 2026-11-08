@@ -475,7 +475,7 @@ public final class UnitDamageForm {
     }
 
     /**
-     * Rolls pre-existing damage at {@code level} into the form, as the Swing editor's roller does: each roll starts
+     * Rolls pre-existing damage at {@code level} into the form: each roll starts
      * again from the unit as read, and None, or no level, just goes back to it. The unit itself is only read.
      */
     public void roll(PreExistingDamageLevel level) {
@@ -616,7 +616,7 @@ public final class UnitDamageForm {
                     Value blownOff = add(place, text("UnitEditorDialog.location.blownOff"), Kind.TOGGLE,
                           entity.isLocationBlownOff(location) ? 1 : 0, 1, Repair.CLEAR,
                           (spec, value) -> spec.locationBlownOff[at] = value > 0);
-                    // a limb brought back comes back whole, as in the Swing editor
+                    // a limb brought back comes back whole
                     blownOff.changed = value -> {
                         if (!value.on()) {
                             for (Value layer : new Value[] { place.armor, place.rear, place.internal }) {
@@ -815,7 +815,7 @@ public final class UnitDamageForm {
             }
             if (options.inPlay()) {
                 settings(mounted, number, row);
-                // a building's damage path has not been tried with an explosion, as in the Swing editor
+                // a building's damage path has not been tried with an explosion
                 if (!(entity instanceof AbstractBuildingEntity) && mounted.wouldExplodeWhenHit()) {
                     row.explosive = number;
                 }
@@ -825,7 +825,7 @@ public final class UnitDamageForm {
 
     /**
      * An ammunition bin's shots, with its hit boxes: a hit empties the bin and clearing the hit fills it back to what
-     * it held, as in the Swing editor; a bin read as hit holds nothing and comes back full.
+     * it held; a bin read as hit holds nothing and comes back full.
      */
     private Value shots(AmmoMounted bin, int number, Value crit) {
         int full = bin.isOneShot() ? 1 : bin.getOriginalShots() > 0 ? bin.getOriginalShots() : bin.getType().getShots();
@@ -868,7 +868,7 @@ public final class UnitDamageForm {
     }
 
     /**
-     * The Game Master's in-play settings of a piece of equipment, under its row as the Swing editor appends them: a
+     * The Game Master's in-play settings of a piece of equipment, under its row: a
      * machine gun's burst fire and a bin's hot-loading under their optional rules, then a charge, an on/off switch or
      * a mode, whichever comes first. None of them changes with Restore Unit or a roll. In the lobby the Configure
      * dialog owns these settings.

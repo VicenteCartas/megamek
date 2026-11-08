@@ -574,8 +574,8 @@ final class LobbyDamageView {
     }
 
     /**
-     * The owner picked: asks first, then hands the unit over and closes the card without its other edits, as the
-     * Swing editor does; asked no, the owner goes back.
+     * The owner picked: asks first, then hands the unit over and closes the card without its other edits; asked no,
+     * the owner goes back.
      */
     private void reassign(UiStepper owner) {
         int picked = owner.value();

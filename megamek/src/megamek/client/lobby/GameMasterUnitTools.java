@@ -54,12 +54,11 @@ import megamek.common.units.Mek;
 import megamek.common.units.TemporarySkillModifiers;
 
 /**
- * The Game Master's in-play tools of a unit's damage card, as the Swing {@code UnitEditorDialog} offers them in a
- * running game: the edits go to the server instead of the local unit, and beside them the unit's owner, a bot's Forced
- * Withdrawal order, the crew's temporary skill modifiers, the target modifier, the ejection settings, and the server
- * acts that end the edit: explode a piece of equipment, withdraw the unit or destroy it. Read from the unit on the
- * Swing thread with its {@link UnitDamageForm}; every server act is a command a {@link Host} sends, so it is tested
- * without a client.
+ * The Game Master's in-play tools of a unit's damage card in a running game: the edits go to the server instead of
+ * the local unit, and beside them the unit's owner, a bot's Forced Withdrawal order, the crew's temporary skill
+ * modifiers, the target modifier, the ejection settings, and the server acts that end the edit: explode a piece of
+ * equipment, withdraw the unit or destroy it. Read from the unit on the Swing thread with its {@link UnitDamageForm};
+ * every server act is a command a {@link Host} sends, so it is tested without a client.
  */
 public final class GameMasterUnitTools {
     static final String DESTROY_UNIT_COMMAND = "/kill %d %b";
@@ -67,7 +66,7 @@ public final class GameMasterUnitTools {
     static final String CHANGE_OWNER_COMMAND = "/changeOwner %d %d";
     static final String EXPLODE_EQUIPMENT_COMMAND = "/explode %d %d";
     static final String WITHDRAW_ORDER_COMMAND = "/withdrawOrder %d %s";
-    /** How long a new modifier lasts, as the Swing editor offers it. */
+    /** How long a new modifier lasts. */
     public static final int DEFAULT_MODIFIER_ROUNDS = 3;
     /** The longest a modifier can be set to last. */
     public static final int MAX_MODIFIER_ROUNDS = 100;
@@ -216,7 +215,7 @@ public final class GameMasterUnitTools {
 
     /**
      * Reads the tools of the form's unit; call on the thread that owns the unit. A conventional platoon gets only the
-     * server acts, as the Swing editor's infantry panel has no Game Master column.
+     * server acts.
      */
     GameMasterUnitTools(UnitDamageForm form) {
         this.form = form;
@@ -260,7 +259,7 @@ public final class GameMasterUnitTools {
         return owner;
     }
 
-    /** Asks before handing the unit to the {@code index}th player, as the Swing editor does. */
+    /** Asks before handing the unit to the {@code index}th player. */
     public String ownerConfirmation(int index) {
         return Messages.getString("Gamemaster.Traitor.confirmation", entity.getDisplayName(),
               owners.get(index).getName());
@@ -393,7 +392,7 @@ public final class GameMasterUnitTools {
 
     // ------------------------------------------------------------------------------------------------ server acts
 
-    /** Fills the spec with the modifiers and the ejection settings, as the Swing editor's spec builder does. */
+    /** Fills the spec with the modifiers and the ejection settings. */
     void write(DamageEditSpec spec) {
         if (gunnery != null) {
             spec.gunneryModifier = gunnery.value;
