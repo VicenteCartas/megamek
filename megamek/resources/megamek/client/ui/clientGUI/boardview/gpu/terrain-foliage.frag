@@ -61,10 +61,15 @@ uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin 
 // normal variance, as antialiasedRoughness adds it). Leaves facing every way over the outward hemisphere are the
 // cosine-weighted facet distribution, which is GGX at alpha^2 = 1 (projected variance 1/2).
 const float CROWN_NORMAL_VARIANCE = 1.0;
+#ifdef impostorFlag
+// The direction an impostor card's renders looked from, per tree and card width, and the tree's horizontal over its
+// vertical scale (tree-instances.glsl).
+in vec3 v_impostorDepth;
+in float v_impostorAspect;
+#endif
 #if defined(impostorFlag) && defined(normalTextureFlag) && defined(ambientTextureFlag)
 // External pilot: these existing bindings hold represented geometry and resolved material data.
 #define impostorMaterialFlag
-in float v_impostorAspect;
 #endif
 
 // CUTOUT_FADE
@@ -86,12 +91,33 @@ void main() {
     // How much of the surface is leaves, which scatter light around, rather than bark, cactus or snow.
     float leaves = abs(u_foliage - 1.0) < .5 ? 1.0 : 0.0;
 #ifdef impostorFlag
-    // An impostor card's colour says how its plant takes the sun (prepare_tree_lods.py): red, the share its own leaves
-    // let through; green, how much of what the card shows is bark, cactus or snow. The card's shadow lookup skips the
-    // crown it stands in (surface-lighting.glsl), so the shadow map adds other casters alone.
+    // An impostor card's colour describes the surface its texels show (prepare_tree_lods.py): red, their mean
+    // occlusion; green, the share of them that is bark, cactus or snow; blue and alpha, the mean roughness and scatter
+    // of the rest, its leaves.
 #ifndef impostorMaterialFlag
-    float sunlit = v_color.r;
     leaves = 1.0 - v_color.g;
+#ifdef normalTextureFlag
+    // Its normal atlas, in the frame the bake used: x along u, y across it about z, the direction the render looked from.
+    // RGB, the normal of the surface the texel shows; alpha, how far that surface stands out of the card along z, in
+    // panel sides (a third of the texture's width) about .5. The frame is built in the plant's own axes, turned as the
+    // tree stands: world vectors with its vertical scale undone, so the bake's angles hold; the normal then takes the
+    // inverse scale, as the mesh's do (instanceNormal).
+    vec4 card = textureGrad(u_normalTexture, v_diffuseUV, du, dv);
+    float cardDeterminant = du.x * dv.y - du.y * dv.x;
+    vec3 alongU = abs(cardDeterminant) > 1e-10 ? (dx * dv.y - dy * du.y) / cardDeterminant : vec3(0.0);
+    vec3 alongV = abs(cardDeterminant) > 1e-10 ? (dy * du.x - dx * dv.x) / cardDeterminant : vec3(0.0);
+    vec3 unscaled = vec3(1.0, 1.0, v_impostorAspect);
+    vec3 cardZ = normalize(v_impostorDepth * unscaled);
+    vec3 cardX = alongU * unscaled - cardZ * dot(cardZ, alongU * unscaled);
+    cardX = dot(cardX, cardX) > 1e-20 ? normalize(cardX) : vec3(1.0, 0.0, 0.0);
+    vec3 cardY = cross(cardZ, cardX);
+    if (dot(cardY, alongV * unscaled) < 0.0) cardY = -cardY;
+    vec3 cardShape = (card.rgb * 255.0 - 128.0) / 127.0;
+    vec3 cardNormal = normalize((cardX * cardShape.x + cardY * cardShape.y + cardZ * cardShape.z) * unscaled);
+    // Its shadow is looked up there (surface-lighting.glsl). A panel side in world units: u spans three, along the
+    // horizontal scale.
+    impostorSurface = length(alongU) / 3.0 * v_impostorDepth * (card.a * 2.0 - 1.0);
+#endif
 #endif
 #elif defined(colorFlag)
     diffuse *= v_color;
@@ -112,16 +138,14 @@ void main() {
     vec3 surface = vec3(1.0, .58, .35);
 #ifdef impostorMaterialFlag
     surface = cardSurface.rgb;
+#elif defined(impostorFlag)
+    surface = v_color.rba;
 #elif defined(ambientTextureFlag)
     surface = texture(u_ambientTexture, v_diffuseUV).rgb;
 #endif
     vec3 light = sunDirection();
     // Use the crown's smooth normal for stable shadow offsets; the detail normal is only leaf relief.
     float visibility = sculptShadow(crownNormal, light, u_metre, 0.0, vec2(0.0));
-#if defined(impostorFlag) && !defined(impostorMaterialFlag)
-    // The card's baked crown self-shadow follows the shadow strength, as the shadow map does.
-    visibility *= shadowVisibility(sunlit);
-#endif
 #endif
     // Alpha-tested texels own no color or depth. Keep texture/receiver derivatives above this cutoff;
     // normal detail uses the captured gradients, and single-level shadow/cloud reads use explicit LOD.
@@ -147,6 +171,10 @@ void main() {
     mat3 cardFrame = mat3(1.0);
     bool cardFrameValid = false;
     bool normalEnabled = true;
+#elif defined(impostorFlag)
+    // A card's normals are its plant's shape, not optional detail: decoded above.
+    face = cardNormal;
+    bool normalEnabled = false;
 #else
     bool normalEnabled = u_normalMaps > .5;
 #endif
@@ -265,7 +293,7 @@ void main() {
     // A card's leaves face every way about its crown: each side takes the light that reaches it.
     plant.geometric = face;
 #endif
-#if defined(normalTextureFlag) && !defined(ambientTextureFlag)
+#if defined(normalTextureFlag) && !defined(ambientTextureFlag) && !defined(impostorFlag)
     // Opaque cactus skin has a broad waxy highlight under the coarse shadow filter, using the terrain's existing
     // dielectric light model.
     plant.visibility = surfaceVisibility();

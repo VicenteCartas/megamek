@@ -241,10 +241,16 @@ class GpuShadowCacheSmokeTest {
         detail.invoke(terrain, camera.camera);
     }
 
-    /** The sum of the chunks' tree levels the view chose. */
+    /** The sum of the trees' levels the view chose (GpuTreeInstances.Stand#detail). */
+    @SuppressWarnings("unchecked")
     private static int treeLevels(GpuTerrain terrain) throws ReflectiveOperationException {
         int sum = 0;
-        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) { sum += (int) GpuTestSupport.field(chunk, "treeLod"); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            Object stand = GpuTestSupport.field(chunk, "stand");
+            for (int[] starts : ((java.util.Map<String, int[]>) GpuTestSupport.field(stand, "starts")).values()) {
+                for (int level = 0; level + 1 < starts.length; level++) { sum += level * (starts[level + 1] - starts[level]); }
+            }
+        }
         return sum;
     }
 }

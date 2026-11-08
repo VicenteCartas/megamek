@@ -39,9 +39,10 @@ import com.badlogic.gdx.utils.ShortArray;
  * Trees, modular building parts and placed objects drawn with OpenGL instancing. Each model at each detail level is
  * held once; a placement adds only its place, turn, size and mirror, so the geometry in memory does not grow with the
  * number of trees.
- * Every chunk's trees stay uploaded in one buffer per species and detail level, in board order; each pass draws the
- * ranges of the chunks it sees, so panning, zooming and a change of detail upload nothing. A chunk's trees upload
- * again only when the chunk is replaced with different trees. Building and object parts still gather per pass.
+ * Each species and detail level keeps one buffer of the trees at that level, in board order; each pass draws the ranges
+ * of the chunks it sees, so panning uploads nothing, and a zoom uploads only the buffers whose trees changed level. A
+ * chunk's trees upload again when the chunk is replaced with different trees. Building and object parts still gather
+ * per pass.
  */
 final class GpuTreeInstances implements RenderableProvider, Disposable {
     /** Marks the materials of instanced renderables, so the shader providers pick the instanced shaders. */
@@ -191,13 +192,86 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         return new VertexAttributes(attributes(RigidGlb.colourSlotted(layout)));
     }
 
-    /** One chunk's trees, grouped by species; each tree as {@link #STRIDE} floats. */
+    /**
+     * One chunk's trees, grouped by species; each tree as {@link #STRIDE} floats, largest first, so the trees that take
+     * one detail level at a scale ({@link #detail}) lie in one run of them.
+     */
     static final class Stand {
         final Map<String, FloatArray> trees = new LinkedHashMap<>();
+        /** Each species' trees' bounding diagonals, in world units, in their order. */
+        private final Map<String, FloatArray> diameters = new HashMap<>();
+        /** Each species' first tree at each detail level, then its count ({@link TreeLod#LEVELS} + 1 entries). */
+        private final Map<String, int[]> starts = new HashMap<>();
+        /** Each species' trees at each detail level: copies of its runs, new only where a run changed. */
+        private final Map<String, FloatArray[]> levels = new HashMap<>();
+        private float pixelsPerUnit;
 
-        /** A tree's transform is a translation, a turn about z and a scale that is equal along x and y. */
-        void add(String species, Matrix4 transform) {
-            append(trees.computeIfAbsent(species, key -> new FloatArray()), transform);
+        /**
+         * A tree's transform is a translation, a turn about z and a scale that is equal along x and y; {@code diameter}
+         * is its bounds' diagonal in world units, against which its detail level is chosen.
+         */
+        void add(String species, Matrix4 transform, float diameter) {
+            FloatArray sizes = diameters.computeIfAbsent(species, key -> new FloatArray());
+            int at = sizes.size;
+            while (at > 0 && sizes.get(at - 1) < diameter) { at--; }
+            sizes.insert(at, diameter);
+            FloatArray tree = new FloatArray(STRIDE);
+            append(tree, transform);
+            FloatArray placed = trees.computeIfAbsent(species, key -> new FloatArray());
+            placed.insertRange(at * STRIDE, STRIDE);
+            System.arraycopy(tree.items, 0, placed.items, at * STRIDE, STRIDE);
+            levels.remove(species);
+        }
+
+        /** No trees; the scale stays for the next ones (GpuTerrain.Chunk#restand). */
+        void clear() {
+            trees.clear();
+            diameters.clear();
+            starts.clear();
+            levels.clear();
+        }
+
+        /**
+         * Each tree at the level its own diameter asks at this scale ({@link TreeLod#level}), past each threshold's
+         * hysteresis from its level at the last scale. A larger tree never takes a coarser level than a smaller one.
+         */
+        void detail(float pixelsPerUnit) {
+            this.pixelsPerUnit = pixelsPerUnit;
+            for (String species : trees.keySet()) { split(species); }
+        }
+
+        /** A species' trees at each detail level at the last scale. */
+        FloatArray[] levels(String species) {
+            FloatArray[] result = levels.get(species);
+            return result != null ? result : split(species);
+        }
+
+        private FloatArray[] split(String species) {
+            FloatArray sizes = diameters.get(species), all = trees.get(species);
+            int[] previous = starts.get(species);
+            // New or changed trees start from the nearest level, as a new chunk's did.
+            if (previous != null && previous[TreeLod.LEVELS] != sizes.size) { previous = null; }
+            int[] next = new int[TreeLod.LEVELS + 1];
+            int level = 0, was = 0;
+            for (int i = 0; i < sizes.size; i++) {
+                while (previous != null && was < TreeLod.LEVELS - 1 && i >= previous[was + 1]) { was++; }
+                int own = Math.max(level, TreeLod.level(sizes.get(i) * pixelsPerUnit, was));
+                while (level < own) { next[++level] = i; }
+            }
+            while (level < TreeLod.LEVELS) { next[++level] = sizes.size; }
+            FloatArray[] old = levels.get(species), result = new FloatArray[TreeLod.LEVELS];
+            for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
+                if (old != null && previous != null && previous[lod] == next[lod] && previous[lod + 1] == next[lod + 1]) {
+                    result[lod] = old[lod];
+                    continue;
+                }
+                int count = (next[lod + 1] - next[lod]) * STRIDE;
+                result[lod] = new FloatArray(Math.max(count, 1));
+                result[lod].addAll(all, next[lod] * STRIDE, count);
+            }
+            starts.put(species, next);
+            levels.put(species, result);
+            return result;
         }
     }
 
@@ -236,7 +310,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     data.addAll(trees);
                 }
                 starts.add(data.size / STRIDE);
-                batch.upload(data);
+                // A level no tree takes draws nothing: its buffer keeps what it held.
+                if (data.size > 0) { batch.upload(data); }
             }
             // Chunks lie in board order, so a column of visible chunks is one contiguous range and one draw.
             ranges.clear();
@@ -286,9 +361,26 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     /**
-     * Adds a chunk's trees at its detail level, in board order, whether the pass sees the chunk or not: a chunk's
-     * place in every species buffer stays fixed while it is unchanged, and only the visible chunks draw.
+     * Adds a chunk's trees, each at its own detail level ({@link Stand#detail}), in board order, whether the pass sees
+     * the chunk or not: a chunk's place in each level's buffer stays fixed while its trees there are unchanged, and only
+     * the visible chunks draw.
      */
+    void add(Stand stand, boolean visible) {
+        for (String name : stand.trees.keySet()) {
+            FloatArray[] runs = stand.levels(name);
+            Species[] levels = species.computeIfAbsent(name, key -> new Species[TreeLod.LEVELS]);
+            for (int lod = 0; lod < levels.length; lod++) {
+                if (levels[lod] == null) {
+                    if (!visible || runs[lod].size == 0) { continue; }
+                    levels[lod] = new Species(models.apply(name, lod));
+                }
+                gather(levels[lod]);
+                levels[lod].add(runs[lod], visible);
+            }
+        }
+    }
+
+    /** Adds all of a chunk's trees at one detail level: the shadow map's, chosen from its texel (GpuTerrain#renderDepth). */
     void add(Stand stand, int level, boolean visible) {
         for (Map.Entry<String, FloatArray> entry : stand.trees.entrySet()) {
             Species[] levels = species.computeIfAbsent(entry.getKey(), key -> new Species[TreeLod.LEVELS]);
@@ -298,10 +390,12 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     levels[lod] = new Species(models.apply(entry.getKey(), lod));
                 }
                 gather(levels[lod]);
-                levels[lod].add(entry.getValue(), visible && lod == level);
+                levels[lod].add(lod == level ? entry.getValue() : NONE, visible && lod == level);
             }
         }
     }
+
+    private static final FloatArray NONE = new FloatArray(1);
 
     private void gather(Species level) {
         if (!level.gathered) { level.gathered = true; stands.add(level); }
@@ -496,7 +590,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#ifdef impostorFlag\n"
-                    + "v_impostorLift = u_impostorLift * a_instance0.w;\n#endif\n");
+                    + "v_impostorDepth = instanceTurn(a_normal * instanceScale()) / a_instance0.w;\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");

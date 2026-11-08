@@ -1420,73 +1420,14 @@ final class GpuAssets implements Disposable {
         return materials.computeIfAbsent(file.toPath().toAbsolutePath().normalize().toString(), key -> paintTexture(file));
     }
 
-    /**
-     * Straight-alpha mip levels whose colours are averaged by alpha, as premultiplied filtering would average them:
-     * glGenerateMipmap would weigh the colour of transparent texels equally and tint multi-coloured edges at distance.
-     * A level's fully transparent texels keep the plain average of the level above, the image's own edge colour.
-     */
+    /** Mip levels averaged by alpha ({@link GpuColorTexture#cutout}), so multi-coloured edges keep their colour at distance. */
     private static Texture paintTexture(File file) {
-        Pixmap source = GpuColorTexture.decode(new FileHandle(file));
-        Pixmap image = new Pixmap(source.getWidth(), source.getHeight(), Pixmap.Format.RGBA8888);
-        try {
-            image.setBlending(Pixmap.Blending.None);
-            image.drawPixmap(source, 0, 0);
-            Texture texture = GpuColorTexture.create(image, false);
-            int width = image.getWidth(), height = image.getHeight();
-            float[] weighted = new float[width * height * 4], plain = new float[width * height * 3];
-            var bytes = image.getPixels();
-            for (int texel = 0; texel < width * height; texel++) {
-                float alpha = (bytes.get(texel * 4 + 3) & 255) / 255f;
-                for (int c = 0; c < 3; c++) {
-                    plain[texel * 3 + c] = GpuColor.linear((bytes.get(texel * 4 + c) & 255) / 255f);
-                    weighted[texel * 4 + c] = plain[texel * 3 + c] * alpha;
-                }
-                weighted[texel * 4 + 3] = alpha;
-            }
-            texture.bind();
-            for (int level = 1; width > 1 || height > 1; level++) {
-                int w = Math.max(1, width / 2), h = Math.max(1, height / 2);
-                float[] nextWeighted = new float[w * h * 4], nextPlain = new float[w * h * 3];
-                var upload = com.badlogic.gdx.utils.BufferUtils.newByteBuffer(w * h * 4);
-                for (int y = 0; y < h; y++) {
-                    double top = y * (double) height / h, bottom = (y + 1) * (double) height / h;
-                    for (int x = 0; x < w; x++) {
-                        int texel = y * w + x;
-                        double left = x * (double) width / w, right = (x + 1) * (double) width / w;
-                        // Integrate the whole footprint: a 3-wide source must not lose its last column at 1-wide.
-                        for (int sy = (int) top; sy < Math.ceil(bottom); sy++) {
-                            for (int sx = (int) left; sx < Math.ceil(right); sx++) {
-                                int from = sy * width + sx;
-                                float weight = (float) ((Math.min(bottom, sy + 1) - Math.max(top, sy))
-                                      * (Math.min(right, sx + 1) - Math.max(left, sx)) / ((bottom - top) * (right - left)));
-                                for (int c = 0; c < 4; c++) { nextWeighted[texel * 4 + c] += weighted[from * 4 + c] * weight; }
-                                for (int c = 0; c < 3; c++) { nextPlain[texel * 3 + c] += plain[from * 3 + c] * weight; }
-                            }
-                        }
-                        float alpha = nextWeighted[texel * 4 + 3];
-                        for (int c = 0; c < 3; c++) {
-                            if (alpha > 0) { nextPlain[texel * 3 + c] = Math.min(1, nextWeighted[texel * 4 + c] / alpha); }
-                            // Re-encode only at the sRGB storage boundary; the weighted mip calculation stays linear.
-                            upload.put(texel * 4 + c, (byte) Math.round(GpuColor.display(nextPlain[texel * 3 + c]) * 255));
-                        }
-                        upload.put(texel * 4 + 3, (byte) Math.round(alpha * 255));
-                    }
-                }
-                try {
-                    Gdx.gl.glTexImage2D(GL20.GL_TEXTURE_2D, level, GL30.GL_SRGB8_ALPHA8, w, h, 0,
-                          GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, upload);
-                } finally { Reference.reachabilityFence(upload); }
-                weighted = nextWeighted; plain = nextPlain; width = w; height = h;
-            }
-            texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
-            texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
-            // Ground paint is seen at grazing angles; keep its lines sharp along the view direction.
-            texture.setAnisotropicFilter(8);
-            return texture;
-        } finally {
-            source.dispose();
-            image.dispose();
-        }
+        Texture texture = GpuColorTexture.cutout(() -> GpuColorTexture.cutoutLevels(GpuColorTexture.decode(new FileHandle(file))));
+        texture.setFilter(Texture.TextureFilter.MipMapLinearLinear, Texture.TextureFilter.Linear);
+        texture.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge);
+        // Ground paint is seen at grazing angles; keep its lines sharp along the view direction.
+        texture.setAnisotropicFilter(8);
+        return texture;
     }
 
     /**

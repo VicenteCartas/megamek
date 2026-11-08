@@ -871,13 +871,6 @@ final class GpuTerrain implements Disposable {
                     target.set(id, "canopy-cutout".equals(role) || "canopy-snow-cutout".equals(role) ? 1f : 0f);
                 }
             });
-            result.register("u_impostorLift", new BaseShader.LocalSetter() {
-                @Override
-                public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                    Impostor impostor = attributes.get(Impostor.class, Impostor.TYPE);
-                    if (impostor != null) { target.set(id, impostor.value); }
-                }
-            });
             result.register("u_sculptTiles", new BaseShader.LocalSetter() {
                 @Override
                 public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
@@ -1100,6 +1093,11 @@ final class GpuTerrain implements Disposable {
     }
     /** Every tree of the board, drawn instanced; each pass gathers the trees of the chunks it draws. */
     private final GpuTreeInstances trees;
+    /**
+     * The shadow map's own tree buffers: it draws each chunk's trees at one level of its own (renderDepth), where the
+     * view draws each tree at its own level, so sharing the buffers would upload them twice on every refit.
+     */
+    private final GpuTreeInstances shadowTrees;
     private final Environment environment = new Environment();
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
     private final GpuCrystalTransmission crystalTransmission = new GpuCrystalTransmission();
@@ -1471,6 +1469,7 @@ final class GpuTerrain implements Disposable {
         environmentLighting.lavaLighting = lavaLighting;
         biomes = new GpuBiomeSurface(lavaLighting);
         trees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
+        shadowTrees = new GpuTreeInstances((name, level) -> foliage(assets.lodModel(name, level)));
     }
 
     private static final class Prop {
@@ -1731,17 +1730,14 @@ final class GpuTerrain implements Disposable {
         public Foliage copy() { return new Foliage(value); }
     }
 
-    /**
-     * Impostor cards and their plant's crown radius in model units. A card stands in the middle of its crown, so its
-     * shadow is looked up a crown radius toward the light: its own cards and crown cannot shade it, other casters can.
-     */
+    /** Marks impostor cards: their atlases place each texel's surface, so it is lit and shadowed there (terrain-foliage.frag). */
     private static final class Impostor extends FloatAttribute {
         static final long TYPE = register("boardImpostor");
 
-        Impostor(float radius) { super(TYPE, radius); }
+        Impostor() { super(TYPE, 0); }
 
         @Override
-        public Impostor copy() { return new Impostor(value); }
+        public Impostor copy() { return new Impostor(); }
     }
 
     /** Plant material roles are authored in the GLB, so new plant assets need no editor-specific ID mapping. */
@@ -1767,12 +1763,10 @@ final class GpuTerrain implements Disposable {
             // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.
             // They draw as opaque (unblended, sorted with the solid trees), so they too hide the ground beneath first.
             if (material.id.equals("impostor") && !material.has(Impostor.TYPE)) {
-                BoundingBox bounds = model.calculateBoundingBox(new BoundingBox());
                 if (!material.has(FloatAttribute.AlphaTest)) {
                     material.set(FloatAttribute.createAlphaTest(.5f));
                 }
-                material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1),
-                      new Impostor(Math.max(bounds.getWidth(), bounds.getHeight()) / 2));
+                material.set(new BlendingAttribute(false, GL20.GL_ONE, GL20.GL_ZERO, 1), new Impostor());
             }
         }
         return model;
@@ -1998,8 +1992,8 @@ final class GpuTerrain implements Disposable {
         final List<GpuFungus.Emitter> spores = new ArrayList<>();
         final List<GpuGeysers.Emitter> geysers = new ArrayList<>();
         final List<GpuLavaLighting.Source> fungalLights = new ArrayList<>();
+        /** Its largest tree's bounding diagonal: the shadow map's level for all its trees (renderDepth). */
         float treeDiameter;
-        int treeLod;
         final List<InteriorStruts> struts = new ArrayList<>();
         final Array<Renderable> propRenderables = new Array<>();
         Array<Renderable> scatterRenderables = new Array<>();
@@ -2106,9 +2100,9 @@ final class GpuTerrain implements Disposable {
          * place: the stand's buffers find a changed chunk by array identity, so an editor preview moves its trees.
          */
         void restand() {
-            stand.trees.clear();
+            stand.clear();
             for (Prop prop : props) {
-                if (!prop.scatter && prop.standing()) { stand.add(prop.treeAsset, prop.instance().transform); }
+                if (!prop.scatter && prop.standing()) { stand.add(prop.treeAsset, prop.instance().transform, prop.treeDiameter); }
             }
         }
 
@@ -3453,6 +3447,7 @@ final class GpuTerrain implements Disposable {
             for (Renderable part : chunk.decorationRenderables) { sharedSources.add(part.meshPart.mesh); }
         }
         trees.retainParts(sharedSources);
+        shadowTrees.retainParts(sharedSources);
         assets.retain(this, liveBuildings, liveIndustrial, liveRoutes);
         updateLight(scene.light());
     }
@@ -5361,7 +5356,7 @@ final class GpuTerrain implements Disposable {
                     // Plain trees fill the stand below (restand); scatter keeps its own stand.
                     if (prop.scatter) {
                         chunk.scatterDiameter = Math.max(chunk.scatterDiameter, prop.treeDiameter);
-                        chunk.scatterStand.add(prop.treeAsset, prop.instance().transform);
+                        chunk.scatterStand.add(prop.treeAsset, prop.instance().transform, prop.treeDiameter);
                     }
                     var glow = GpuFungus.light(scene.height(), prop.coords(), prop.treeAsset, prop.bounds());
                     if (glow != null) { chunk.fungalLights.add(glow); }
@@ -8467,8 +8462,8 @@ final class GpuTerrain implements Disposable {
             propBatch.add(chunk.routeRenderables, propPage, visible && packed);
             if (visible && !packed) { renderRetainedProps(chunk, batch, environment, false); }
             if (terrain) {
-                trees.add(chunk.stand, chunk.treeLod, visible);
-                trees.add(chunk.scatterStand, chunk.treeLod, scatterVisible);
+                trees.add(chunk.stand, visible);
+                trees.add(chunk.scatterStand, scatterVisible);
             }
             if (!visible) {
                 continue;
@@ -8476,7 +8471,7 @@ final class GpuTerrain implements Disposable {
             if (packed) {
                 if (chunk.sharedPlacements == null) { chunk.sharedPlacements = trees.placements(chunk.sharedProps); }
                 trees.add(chunk.sharedPlacements);
-                addDecorations(chunk, batch, environment, false, false);
+                addDecorations(chunk, batch, trees, environment, false, false);
             }
         }
         if (lifts != null) { lifts.render(batch, environment); }
@@ -8631,12 +8626,12 @@ final class GpuTerrain implements Disposable {
 
     /** Bytes of shared tree/building geometry and instance data held on the GPU; see {@link GpuTreeInstances#bytes()}. */
     long treeGeometryBytes() {
-        return trees.bytes();
+        return trees.bytes() + shadowTrees.bytes();
     }
 
     /** Tree/building instance buffer uploads so far; see {@link GpuTreeInstances#uploads()}. */
     long treeInstanceUploads() {
-        return trees.uploads();
+        return trees.uploads() + shadowTrees.uploads();
     }
 
     /** Water and faded features follow units, with depth testing but no depth writes. */
@@ -8726,8 +8721,8 @@ final class GpuTerrain implements Disposable {
             boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
             boolean scatterVisible = terrain && !scatterHidden && visible && chunk.scatterVisible;
             if (terrain) {
-                trees.add(chunk.stand, chunk.treeLod, visible);
-                trees.add(chunk.scatterStand, chunk.treeLod, scatterVisible);
+                trees.add(chunk.stand, visible);
+                trees.add(chunk.scatterStand, scatterVisible);
             }
             if (!visible) { continue; }
             fadeBounds.ext(chunk.bounds);
@@ -8883,7 +8878,8 @@ final class GpuTerrain implements Disposable {
      * (#render, #renderDepth, #renderOutlineDepth). Placed objects take the same fades (Chunk#cacheProps with omitFaded)
      * and shadows that ignore fading; only they hide by size ({@link #drawn}).
      */
-    private void addDecorations(Chunk chunk, ModelBatch target, Environment environment, boolean shadows, boolean sunlight) {
+    private void addDecorations(Chunk chunk, ModelBatch target, GpuTreeInstances instances, Environment environment,
+          boolean shadows, boolean sunlight) {
         if (shadows) { translucentGeometry(chunk, target, environment, true, sunlight); }
         else {
             // Cloudy ruby transports light inside its body, but its visible boundary writes solid camera depth.
@@ -8898,7 +8894,7 @@ final class GpuTerrain implements Disposable {
         }
         for (int i = 0; i < chunk.decorationRenderables.size; i++) {
             Prop owner = chunk.decorationOwners.get(i);
-            if (drawn(owner, shadows) && (shadows || !chunk.faded.contains(owner))) { trees.add(chunk.decorationRenderables.get(i)); }
+            if (drawn(owner, shadows) && (shadows || !chunk.faded.contains(owner))) { instances.add(chunk.decorationRenderables.get(i)); }
         }
         for (int i = 0; i < chunk.looseDecorations.size; i++) {
             Prop owner = chunk.looseOwners.get(i);
@@ -9034,7 +9030,7 @@ final class GpuTerrain implements Disposable {
                 }
                 depthBatch.render(chunk.shadowProps);
                 // Placed objects, complete like the packed shadow caches above (KEEP IN SYNC, see addDecorations).
-                addDecorations(chunk, depthBatch, null, true, false);
+                addDecorations(chunk, depthBatch, trees, null, true, false);
                 trees.add(chunk.sharedShadows);
             }
         }
@@ -9058,7 +9054,8 @@ final class GpuTerrain implements Disposable {
           boolean includeScatter) {
         pass.begin(camera);
         try {
-            trees.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
+            GpuTreeInstances instances = shadows ? shadowTrees : trees;
+            instances.begin(shadows ? GpuTreeInstances.Pass.SHADOW : GpuTreeInstances.Pass.DEPTH);
             // The shadow map takes its casters' detail from its own texel, not from the camera's pixels: trees and
             // scatter at the level their size in texels needs (TreeLod's thresholds), and scatter only where the map
             // resolves it, as well as where the view shows it. A map's casters are then the same wherever the view
@@ -9071,9 +9068,14 @@ final class GpuTerrain implements Disposable {
                 boolean visible = camera.frustum.boundsInFrustum(chunk.bounds);
                 boolean scatterVisible = includeScatter && !scatterHidden && visible && chunk.scatterVisible
                       && (!shadows || chunk.scatterDiameter * texels >= 2);
-                int level = shadows ? Math.max(TreeLod.level(chunk.treeDiameter * texels, 0), coarsest) : chunk.treeLod;
-                trees.add(chunk.stand, level, visible);
-                trees.add(chunk.scatterStand, level, scatterVisible);
+                if (shadows) {
+                    int level = Math.max(TreeLod.level(chunk.treeDiameter * texels, 0), coarsest);
+                    instances.add(chunk.stand, level, visible);
+                    instances.add(chunk.scatterStand, level, scatterVisible);
+                } else {
+                    instances.add(chunk.stand, visible);
+                    instances.add(chunk.scatterStand, scatterVisible);
+                }
                 if (visible) {
                     Hidden hidden = hidden(chunk);
                     if (hidden.ground() != null) { renderRetained(hidden.ground(), pass, null); }
@@ -9086,14 +9088,14 @@ final class GpuTerrain implements Disposable {
                         // A shadow ignores fading, unless a building has faded away fully.
                         boolean wholeShadows = shadows && buildingOpacity > 0;
                         pass.render(wholeShadows ? chunk.shadowProps : chunk.solidProps);
-                        addDecorations(chunk, pass, null, shadows, shadows);
+                        addDecorations(chunk, pass, instances, null, shadows, shadows);
                         pass.render(chunk.routes);
-                        trees.add(wholeShadows ? chunk.sharedShadows : chunk.sharedProps);
+                        instances.add(wholeShadows ? chunk.sharedShadows : chunk.sharedProps);
                     }
                     if (!includeScatter || shadows && hidden.props()) { translucentGeometry(chunk, pass, null, shadows, shadows); }
                 }
             }
-            pass.render(trees);
+            pass.render(instances);
             if (lifts != null && !shadows) { lifts.render(pass, null); }
             renderDepthUnits(camera, units, pass);
         } finally { pass.end(); }
@@ -9183,9 +9185,10 @@ final class GpuTerrain implements Disposable {
                 scarSurfaceRevision++;
                 chunk.cacheDecorations();
             }
-            // Largest tree wins: smaller neighbors may retain extra detail, never lose it early. The shadow map chooses
-            // its own levels from its texel (renderDepth).
-            chunk.treeLod = TreeLod.level(chunk.treeDiameter * pixelsPerUnit, chunk.treeLod);
+            // Each tree takes the level its own size asks (Stand.detail). The shadow map chooses its own levels from its
+            // texel (renderDepth).
+            chunk.stand.detail(pixelsPerUnit);
+            chunk.scatterStand.detail(pixelsPerUnit);
         }
     }
 
@@ -9250,6 +9253,7 @@ final class GpuTerrain implements Disposable {
         paintPages.dispose();
         waterPages.dispose();
         trees.dispose();
+        shadowTrees.dispose();
         pickingSurfaces.clear();
         chunks.forEach(Chunk::dispose);
         chunks.clear();

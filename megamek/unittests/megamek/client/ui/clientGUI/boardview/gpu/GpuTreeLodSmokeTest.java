@@ -316,7 +316,7 @@ class GpuTreeLodSmokeTest {
                     float diameter = dimensions.len();
                     assertTrue(Float.isFinite(diameter) && diameter > 0, "Finite real bounds: " + name);
                     var stand = new GpuTreeInstances.Stand();
-                    stand.add(name, placement);
+                    stand.add(name, placement, 0);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(true);
@@ -653,8 +653,8 @@ class GpuTreeLodSmokeTest {
 
     /** Native pixel scale at the largest size each coarse mesh can retain through hysteresis. */
     private static void compareDistantLevels(GpuAssets assets, Environment environment, List<String> names) throws Exception {
-        // Impostor vertex colors encode lighting, not pigment. Use the actual instanced foliage shader here;
-        // the default ModelBatch used for silhouette comparisons would tint these cards purple.
+        // Impostor vertex colors encode surface data, not pigment. Use the actual instanced foliage shader here;
+        // the default ModelBatch used for silhouette comparisons would tint these cards.
         var preview = new GpuTerrain();
         var batchField = GpuTerrain.class.getDeclaredField("batch");
         batchField.setAccessible(true);
@@ -679,7 +679,7 @@ class GpuTreeLodSmokeTest {
             for (int row = 0; row < names.size(); row++) {
                 String name = names.get(row);
                 var stand = new GpuTreeInstances.Stand();
-                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
+                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f), 0);
                 BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
                 graphics.drawString(name, 12, row * 132 + 94);
@@ -736,7 +736,7 @@ class GpuTreeLodSmokeTest {
             }
             for (String name : materialPlants) {
                 var stand = new GpuTreeInstances.Stand();
-                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
+                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f), 0);
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 var detail = new BufferedImage(1152, 416, BufferedImage.TYPE_INT_RGB);
                 var paint = detail.createGraphics();

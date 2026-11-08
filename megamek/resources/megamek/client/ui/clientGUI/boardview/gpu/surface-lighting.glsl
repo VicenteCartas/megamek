@@ -195,8 +195,8 @@ float surfaceVisibility() {
 }
 
 #ifdef impostorFlag
-// The crown radius of an impostor card's tree, in world units (tree-instances.glsl).
-in float v_impostorLift;
+// From an impostor card to the surface of its plant that the texel shows, in world units (terrain-foliage.frag sets it).
+vec3 impostorSurface = vec3(0.0);
 #endif
 
 // The sculpted terrain and its trees widen the tent with the distance to what casts the shadow (contact hardening).
@@ -218,9 +218,9 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, vec2 fray, 
     float skim = 1.0 - abs(dot(normal, light));
     vec3 receiver = v_cloudPosition + normal * (texel * (.5 + 1.5 * skim) + lift);
 #ifdef impostorFlag
-    // An impostor card stands in the middle of its crown, whose leaves face the light about a crown radius nearer:
-    // looked up there, the card's own cards and crown cannot shade it, while other trees and buildings still do.
-    receiver += light * v_impostorLift;
+    // An impostor card stands in the middle of its plant: its texel takes the shadow at the surface it shows, as the
+    // mesh it stands for does, its own crown and other casters alike.
+    receiver += impostorSurface;
 #endif
     vec4 lifted = u_shadowMapProjViewTrans * vec4(receiver, 1.0);
     vec3 shadowUv = lifted.xyz / lifted.w * .5 + .5;

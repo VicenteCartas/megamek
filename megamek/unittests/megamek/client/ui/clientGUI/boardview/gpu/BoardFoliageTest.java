@@ -172,9 +172,9 @@ class BoardFoliageTest {
             assertEquals(0, low, .001f, "All detail levels remain grounded");
             assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
             if (lod == 0) { assertEquals(18, high - low, .001f); }
-            // Every mesh part binds its source-aligned relief and surface maps; impostors retain their baked atlas.
+            // Every mesh part binds its source-aligned relief and surface maps; impostors their baked colour and shape.
             for (var material : data.materials) {
-                assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size);
+                assertEquals(material.id.equals("impostor") ? 2 : 3, material.textures.size);
                 for (var texture : material.textures) {
                     String file = texture.fileName.replace('\\', '/');
                     assertTrue(file.contains("/textures/vegetation/"), file);
@@ -190,15 +190,15 @@ class BoardFoliageTest {
     }
 
     /**
-     * Impostor cards carry their plant's own colours. Decode detail texels before multiplying the mesh's linear
-     * vertex colour, then display-encode the result to compare with the PNG atlas. The estimate weights the near
-     * mesh's faces by the area the three card views show.
+     * Impostor cards carry their plant's own colours: those of its far mesh, which they stand for. Decode detail texels
+     * before multiplying the mesh's linear vertex colour, then display-encode the result to compare with the PNG atlas.
+     * The estimate weights the mesh's faces by the area the three card views show.
      */
     @Test
     void impostorAtlasesHoldTheirPlantsColours() throws IOException {
         File root = new File(Configuration.dataDir(), "models/board");
         File[] atlases = new File(root, "textures/vegetation/impostors")
-              .listFiles((folder, name) -> name.endsWith(".png"));
+              .listFiles((folder, name) -> name.endsWith(".png") && !name.endsWith("_normal.png"));
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
@@ -208,12 +208,12 @@ class BoardFoliageTest {
                   .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
             // Crystal clusters draw shards at every level: their white atlas is only the crown mask BoardTreeCoverage reads.
             if (plant.startsWith("crystal/")) { continue; }
-            var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
-                  .getFirst();
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath());
+            var far = (RigidGlb.Data) levels.get(levels.size() - 2);
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
-            for (var material : near.materials) {
-                var image = near.images.get(material.textures.first().fileName);
+            for (var material : far.materials) {
+                var image = far.images.get(material.textures.first().fileName);
                 byte[] encoded = image.file() != null ? Files.readAllBytes(Path.of(image.file())) : image.encoded();
                 textures.put(material.id, ImageIO.read(new ByteArrayInputStream(encoded)));
                 if (material.id.endsWith("-cutout")) {
@@ -236,8 +236,8 @@ class BoardFoliageTest {
                 }
             }
             Map<String, String> partMaterials = new HashMap<>();
-            partMaterials(near.nodes, partMaterials);
-            var mesh = near.meshes.first();
+            partMaterials(far.nodes, partMaterials);
+            var mesh = far.meshes.first();
             float[] v = mesh.vertices;
             double[] expected = new double[3];
             double weight = 0;
@@ -278,7 +278,7 @@ class BoardFoliageTest {
             double ratio = luma(baked) / opaque / (luma(expected) / weight);
             // The estimate takes one texel or a cutout's mean per face; the sparse twigs of foliage-barren, whose
             // impostor prepare_tree_lods.py reproduces exactly, estimate at 1.65.
-            assertTrue(ratio > .75 && ratio < 1.7, plant + " impostor lightness against its near mesh: " + ratio);
+            assertTrue(ratio > .75 && ratio < 1.7, plant + " impostor lightness against its far mesh: " + ratio);
         }
     }
 

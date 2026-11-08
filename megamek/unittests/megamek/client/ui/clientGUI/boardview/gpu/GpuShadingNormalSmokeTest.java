@@ -841,7 +841,7 @@ class GpuShadingNormalSmokeTest {
                             }
                         } else {
                             assertTrue(GpuTreeInstances.placeable(placement), "Positive tree placement");
-                            stand.add(species, placement);
+                            stand.add(species, placement, 0);
                         }
                         tuft.transform.set(placement);
                         var bounds = grass ? new com.badlogic.gdx.math.collision.BoundingBox(

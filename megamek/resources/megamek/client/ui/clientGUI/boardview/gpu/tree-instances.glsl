@@ -7,9 +7,9 @@ layout(location = 15) in vec4 a_instance1;
 layout(location = 13) in vec4 a_instance2;
 #endif
 #ifdef impostorFlag
-// An impostor card's plant crown radius in model units; at this tree's scale it lifts the card's shadow lookup.
-uniform float u_impostorLift;
-out float v_impostorLift;
+// The direction an impostor card's renders looked from (its vertex normal), placed as a direction of the tree and divided
+// by its horizontal scale: times its texels' depth in world units of the card's width, the way to the surface they show.
+out vec3 v_impostorDepth;
 out float v_impostorAspect;
 #endif
 
