@@ -95,12 +95,14 @@ class GpuShadowSmokeTest {
         String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
         assertTrue(renderer.contains(System.getProperty("megamek.gpu.expectedRenderer", "")), renderer);
         String original = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        // The sculpt chooses the face whose side the sun must reach; shadeSurface (surface-shading.glsl) gates on it.
+        // The sculpt chooses the face whose side the sun must reach; shadeSurface (surface-shading.glsl) gates on it,
+        // and so does receivesSun, which skips the shadow lookup on the far side: a variant changes both.
         String incidentFace = "smoothSupport ? face : geometric";
         String viewGuard = "normal = shadingNormal(normal, geometric, view);";
         String output = "fragColor = vec4(result, 1.0);";
-        for (String anchor : List.of(incidentFace, viewGuard, output)) {
-            assertEquals(1, original.split(java.util.regex.Pattern.quote(anchor), -1).length - 1);
+        for (String anchor : List.of(incidentFace, viewGuard, output)) { assertTrue(original.contains(anchor), anchor); }
+        for (String anchor : List.of(viewGuard, output)) {
+            assertEquals(1, original.split(java.util.regex.Pattern.quote(anchor), -1).length - 1, anchor);
         }
         // These are causal review probes, not proposed fixes. Real opaque back-side rejection stays in production.
         var variants = new java.util.LinkedHashMap<String, String>();
