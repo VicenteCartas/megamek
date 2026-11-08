@@ -1540,8 +1540,9 @@ final class BoardRoad {
 
     /** Union before tessellation: junctions have one surface, without overlapping translucent road arms. */
     Area footprint(float margin) {
-        // Road patches reuse several margins; callers subtract their own masks from a fresh copy.
-        return new Area(outlines.computeIfAbsent(margin, this::sharedOutline));
+        // Road patches reuse several margins; callers subtract their own masks from a fresh copy. The road's own outline
+        // is its own: its curves memoise as Area operations read them, so they never reach another road's thread.
+        return new Area(outlines.computeIfAbsent(margin, at -> new Area(sharedOutline(at))));
     }
 
     /** Everything an {@link #outline} is made of: its courses, margin, termini, borders and square joins. */
@@ -1553,24 +1554,24 @@ final class BoardRoad {
 
     /**
      * Recent outlines by what they are made of ({@link OutlineKey}): roads alike anywhere on a board, and the same road
-     * built again for its paint, its furniture or a neighbour's clearance, share one. An outline is only ever copied
-     * ({@link #footprint}), never changed. Least recently used go first.
+     * built again for its paint, its furniture or a neighbour's clearance, share one. Each is kept as its path, which is
+     * only ever read, and every road builds its own Area from it (#footprint). Least recently used go first.
      */
-    private static final Map<OutlineKey, Area> SHARED_OUTLINES = new java.util.LinkedHashMap<>(256, .75f, true) {
+    private static final Map<OutlineKey, Path2D.Double> SHARED_OUTLINES = new java.util.LinkedHashMap<>(256, .75f, true) {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<OutlineKey, Area> eldest) { return size() > OUTLINES_KEPT; }
+        protected boolean removeEldestEntry(Map.Entry<OutlineKey, Path2D.Double> eldest) { return size() > OUTLINES_KEPT; }
     };
 
-    private Area sharedOutline(float margin) {
+    private Path2D.Double sharedOutline(float margin) {
         var key = new OutlineKey(paths.stream().map(List::copyOf).toList(), margin, List.copyOf(ends), List.copyOf(borders),
               List.copyOf(joins), squared);
         synchronized (SHARED_OUTLINES) {
-            Area shared = SHARED_OUTLINES.get(key);
+            Path2D.Double shared = SHARED_OUTLINES.get(key);
             if (shared != null) { return shared; }
         }
-        Area built = outline(margin);
+        Path2D.Double built = new Path2D.Double(outline(margin));
         synchronized (SHARED_OUTLINES) {
-            Area shared = SHARED_OUTLINES.putIfAbsent(key, built);
+            Path2D.Double shared = SHARED_OUTLINES.putIfAbsent(key, built);
             return shared != null ? shared : built;
         }
     }
