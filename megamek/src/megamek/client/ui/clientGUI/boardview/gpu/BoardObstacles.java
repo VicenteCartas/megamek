@@ -29,11 +29,17 @@ final class BoardObstacles {
 
     /** Model and kit files that could not be read: their features keep no clearance, and are not read again. */
     private static final java.util.Set<File> UNREADABLE = ConcurrentHashMap.newKeySet();
+    /** Whether each model or kit file exists, asked once: every hex's pass reads its neighbours' structures again. */
+    private static final Map<File, Boolean> FILES = new ConcurrentHashMap<>();
 
     private record Geometry(Map<String, BoardShape> shapes, BoundingBox bounds) { }
 
     /** Reload assets publishes fresh models on the next terrain build; workers retain their immutable snapshot. */
-    static void reload() { MODELS.clear(); UNREADABLE.clear(); BoardWall.reload(); BoardMultiHexBuilding.reload(); }
+    static void reload() {
+        MODELS.clear(); UNREADABLE.clear(); FILES.clear(); BoardWall.reload(); BoardMultiHexBuilding.reload();
+    }
+
+    private static boolean isFile(File file) { return FILES.computeIfAbsent(file, File::isFile); }
 
     /** Remembers a file that cannot be read, unless the read failed because a closing board interrupted its worker. */
     private static void unreadable(File file, RuntimeException failure) {
@@ -186,7 +192,7 @@ final class BoardObstacles {
             boolean multiHex = BoardMultiHexBuilding.supports(feature.asset());
             boolean assembled = BoardIndustrial.supports(feature) || wall || multiHex;
             File customFile = feature.asset().startsWith("buildings/") ? TilesetScenery.customBuildingFile(feature.asset()) : null;
-            boolean custom = object == null && !assembled && customFile != null && customFile.isFile()
+            boolean custom = object == null && !assembled && customFile != null && isFile(customFile)
                   && !UNREADABLE.contains(customFile);
             File root = new File(Configuration.dataDir(), "models/board");
             ConnectedKit.Kit kit = null;
@@ -203,7 +209,7 @@ final class BoardObstacles {
             File file = custom ? customFile : RigidGlb.source(root, feature.asset()).file();
             // A missing or unreadable model draws the renderer's marked box (GpuAssets#missing), which keeps no clearance;
             // a placed one stays editable.
-            if (!assembled && (!file.isFile() || UNREADABLE.contains(file))) { continue; }
+            if (!assembled && (!isFile(file) || UNREADABLE.contains(file))) { continue; }
             Geometry geometry;
             try {
                 geometry = assembled || custom ? null : geometry(root, file);
@@ -401,7 +407,7 @@ final class BoardObstacles {
         }
         File root = new File(Configuration.dataDir(), "models/board");
         File file = RigidGlb.source(root, feature.asset()).file();
-        if (!file.isFile() || UNREADABLE.contains(file)) { return null; }
+        if (!isFile(file) || UNREADABLE.contains(file)) { return null; }
         BoundingBox bounds;
         try {
             bounds = geometry(root, file).bounds();
