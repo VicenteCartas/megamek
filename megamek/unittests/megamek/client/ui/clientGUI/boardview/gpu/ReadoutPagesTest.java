@@ -6,11 +6,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import java.awt.event.ActionListener;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import megamek.client.ratgenerator.RATGenerator;
 import megamek.client.ratgenerator.UnitAvailability;
 import megamek.client.ui.entityreadout.EntityReadout.Row;
 import megamek.client.ui.entityreadout.EntityReadout.Row.Kind;
@@ -43,6 +54,41 @@ class ReadoutPagesTest {
               "an era nobody fields the unit in is left out, and the factions go by name");
     }
 
+    @Test
+    void theFactionPageWaitsForTheForceGeneratorRatherThanShowingNone() throws Exception {
+        RATGenerator generator = mock(RATGenerator.class);
+        AtomicBoolean loaded = new AtomicBoolean();
+        when(generator.isInitialized()).thenAnswer(invocation -> loaded.get());
+        List<ActionListener> listeners = new CopyOnWriteArrayList<>();
+        doAnswer(invocation -> listeners.add(invocation.getArgument(0))).when(generator).registerListener(any());
+        doAnswer(invocation -> listeners.remove(invocation.getArgument(0))).when(generator).removeListener(any());
+        List<Row> factions = List.of(new Row(Kind.TEXT, List.of("Davion")));
+        AtomicInteger reads = new AtomicInteger();
+        LobbyReadoutView.LaterRows later = ReadoutAvailability.later("Waiting Test\n" + System.nanoTime(),
+              () -> generator, () -> {
+                  reads.incrementAndGet();
+                  return factions;
+              });
+
+        CountDownLatch asked = new CountDownLatch(1);
+        later.read(asked::countDown);
+        CountDownLatch again = new CountDownLatch(1);
+        later.read(again::countDown);
+        Thread.sleep(200);
+        assertEquals(1, asked.getCount(), "nothing is shown while the Force Generator loads");
+        assertNull(later.rows(), "the page keeps saying it is reading");
+        assertEquals(0, reads.get());
+        assertEquals(1, listeners.size(), "a second ask waits on the same listener");
+
+        loaded.set(true);
+        for (ActionListener listener : listeners) {
+            listener.actionPerformed(null);
+        }
+        assertTrue(again.await(5, TimeUnit.SECONDS), "the page that asked last is told once it is ready");
+        assertEquals(factions, later.rows());
+        assertEquals(1, reads.get());
+        assertTrue(listeners.isEmpty(), "the listener goes once the rows are read");
+    }
     @Test
     void theAlphaStrikePageHasTheCardAndTheConversion() throws Exception {
         EquipmentType.initializeTypes();

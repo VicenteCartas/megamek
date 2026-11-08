@@ -885,7 +885,8 @@ final class GpuLobbyTools {
             dossiers.add(dossier(unit));
         }
         List<Integer> ids = units.stream().map(Entity::getId).toList();
-        List<Shown> shown = units.stream().map(Shown::of).toList();
+        GameOptions options = client().getGame().getOptions();
+        List<Shown> shown = units.stream().map(unit -> Shown.of(unit, options)).toList();
         open(dialogs -> {
             LobbyReadoutView view = dialogs.readout(dossiers).page(page);
             liveReadout = view;
@@ -939,7 +940,7 @@ final class GpuLobbyTools {
         for (int id : ids) {
             Entity unit = game.getEntity(id);
             if (unit != null && gui().lobbyCommands().canSeeAll(List.of(unit))) {
-                now.add(Shown.of(unit));
+                now.add(Shown.of(unit, game.getOptions()));
                 units.add(unit);
             }
         }
@@ -1000,18 +1001,23 @@ final class GpuLobbyTools {
 
     /**
      * What a readout of {@code unit} shows it from: the server sends a changed unit as a new one, and its owner and
-     * camouflage show on its line and sprite.
+     * camouflage show on its line and sprite. Its Battle Value also moves with things outside the unit, such as its
+     * C3 partners, and the game options shape its Battle Value, cost and Alpha Strike pages; the client replaces the
+     * options whole when they change.
      */
-    private record Shown(Entity unit, @Nullable String owner, Camouflage camouflage) {
-        static Shown of(Entity unit) {
+    private record Shown(Entity unit, @Nullable String owner, Camouflage camouflage, int battleValue,
+          GameOptions options) {
+        static Shown of(Entity unit, GameOptions options) {
             Player owner = unit.getOwner();
-            return new Shown(unit, (owner == null) ? null : owner.getName(), unit.getCamouflageOrElseOwners());
+            return new Shown(unit, (owner == null) ? null : owner.getName(), unit.getCamouflageOrElseOwners(),
+                  unit.calculateBattleValue(), options);
         }
 
         @Override
         public boolean equals(Object other) {
             return other instanceof Shown shown && shown.unit == unit && Objects.equals(shown.owner, owner)
-                  && Objects.equals(shown.camouflage, camouflage);
+                  && Objects.equals(shown.camouflage, camouflage) && shown.battleValue == battleValue
+                  && shown.options == options;
         }
 
         @Override
