@@ -2025,8 +2025,11 @@ final class GpuTerrain implements Disposable {
         final Array<Renderable> looseDecorations = new Array<>();
         /** The object of each part above, in the same order: every pass asks whether it is drawn. */
         final Array<Prop> decorationOwners = new Array<>(), looseOwners = new Array<>();
-        /** Individual translucent primitives sort with glass and faded buildings, never with species instances. */
-        final Array<Renderable> translucentParts = new Array<>(), translucentShadows = new Array<>();
+        /**
+         * Individual translucent primitives sort with glass and faded buildings, never with species instances; each
+         * has an opaque copy for outlines and wireframe (translucentGeometry).
+         */
+        final Array<Renderable> translucentParts = new Array<>(), translucentSolids = new Array<>();
         final Array<Prop> translucentOwners = new Array<>();
         /** The faded texels of its props that stand in no tree stand, as fences, and whose prop each is. */
         final Array<Renderable> fadeParts = new Array<>();
@@ -2130,7 +2133,7 @@ final class GpuTerrain implements Disposable {
          */
         void cacheDecorations() {
             translucentParts.clear();
-            translucentShadows.clear();
+            translucentSolids.clear();
             translucentOwners.clear();
             fadeParts.clear();
             fadeOwners.clear();
@@ -2166,11 +2169,11 @@ final class GpuTerrain implements Disposable {
                     if (prop.translucent && (blended(part.material) || GpuCrystalTransmission.ruby(part.material))) {
                         translucentParts.add(part);
                         translucentOwners.add(prop);
-                        var shadow = new Renderable().set(part);
+                        var solid = new Renderable().set(part);
                         var one = new Array<Renderable>();
-                        one.add(shadow);
+                        one.add(solid);
                         opaqueMaterials(one);
-                        translucentShadows.add(shadow);
+                        translucentSolids.add(solid);
                         continue;
                     }
                     var one = new Array<Renderable>();
@@ -8910,8 +8913,9 @@ final class GpuTerrain implements Disposable {
      */
     private void addDecorations(Chunk chunk, ModelBatch target, GpuTreeInstances instances, Environment environment,
           boolean shadows, boolean sunlight) {
-        if (shadows) { translucentGeometry(chunk, target, environment, true, sunlight); }
-        else {
+        if (shadows) {
+            if (!sunlight) { translucentGeometry(chunk, target, true); }
+        } else {
             // Cloudy ruby transports light inside its body, but its visible boundary writes solid camera depth.
             // Intergrown crystals cannot be correctly ordered as whole alpha-blended prisms.
             for (int i = 0; i < chunk.translucentParts.size; i++) {
@@ -8942,15 +8946,16 @@ final class GpuTerrain implements Disposable {
         }
     }
 
-    /** Actual boundaries for camera depth, outlines and wireframe; ruby instead transmits light in the sun pass. */
-    private void translucentGeometry(Chunk chunk, ModelBatch target, Environment lighting, boolean shadows, boolean sunlight) {
-        for (int i = 0; i < chunk.translucentShadows.size; i++) {
+    /**
+     * Actual boundaries for outlines and wireframe. The sun's map takes none: glass lets the sun through, like the
+     * multi-hex buildings' glass ({@link BoardMultiHexBuilding#glass}), and ruby transmits it in its own pass.
+     */
+    private void translucentGeometry(Chunk chunk, ModelBatch target, boolean shadows) {
+        for (int i = 0; i < chunk.translucentSolids.size; i++) {
             if (!drawn(chunk.translucentOwners.get(i), shadows)) { continue; }
-            Renderable part = chunk.translucentShadows.get(i);
-            // Ruby absorption has its own colour pass over opaque receiver depth; outlines still draw the full body.
-            if (sunlight && GpuCrystalTransmission.ruby(part.material)) { continue; }
+            Renderable part = chunk.translucentSolids.get(i);
             part.shader = null;
-            part.environment = lighting;
+            part.environment = null;
             target.render(part);
         }
     }
@@ -9122,7 +9127,7 @@ final class GpuTerrain implements Disposable {
                         pass.render(chunk.routes);
                         instances.add(wholeShadows ? chunk.sharedShadows : chunk.sharedProps);
                     }
-                    if (!includeScatter || shadows && hidden.props()) { translucentGeometry(chunk, pass, null, shadows, shadows); }
+                    if (!includeScatter) { translucentGeometry(chunk, pass, false); }
                 }
             }
             pass.render(instances);

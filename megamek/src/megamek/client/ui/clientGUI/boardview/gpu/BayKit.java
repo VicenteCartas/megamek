@@ -46,7 +46,7 @@ final class BayKit {
     /**
      * A flat surface over the piece: a board material, {@code repeat} units a repeat on the board's axes, at a height per
      * level of detail (the last for any further), kept {@code inset} off the walls; with {@code underlay} (a glass roof),
-     * a dark floor just under it, so the glass shows a dark interior rather than the ground down a seam.
+     * a planted bed just under it, so the glass shows a greenhouse rather than the ground down a seam.
      */
     record Slab(String material, double repeat, double inset, double[] heights, boolean underlay) {
         double height(int lod) { return heights[Math.min(lod, heights.length - 1)]; }
@@ -201,7 +201,8 @@ final class BayKit {
                     flat(result, board(slab.material()) + (top ? "" : GeneratedMesh.BUILDING_FLOOR), part, height, slab.repeat(), null);
                 }
                 if (top) { result.slab(GeneratedMesh.BUILDING_BODY, part, height - 1.2, height, false); }
-                if (top && slab.underlay()) { dark(result, part, height - .3); }
+                // A glass roof's underlay: the biodome's planted bed, which the sun lights through the glass.
+                if (top && slab.underlay()) { flat(result, board(BoardMultiHexBuilding.GARDEN), part, height - .3, 24, null); }
             }
         }
         if (top && layout != null) {
@@ -213,22 +214,6 @@ final class BayKit {
 
     /** The dark of a module's inside, as vertex colour on the building body. */
     private static final float DARK = .17f;
-
-    /**
-     * A glass roof's underlay: near black. The sun reaches it through the glass 0.3 above (a model's contact shadow
-     * leaves so near a caster out), and at {@link #DARK} it showed as a grey roof.
-     */
-    private static final float UNDERLAY = .03f;
-
-    /** A glass roof's dark underlay, an upward polygon at {@code z}. */
-    private static void dark(GeneratedMesh result, List<double[]> polygon, double z) {
-        var dark = new GeneratedMesh();
-        flat(dark, GeneratedMesh.BUILDING_BODY, polygon, z, 18, null);
-        dark.parts.values().forEach(part -> {
-            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) { part.items[at + 6] = part.items[at + 7] = part.items[at + 8] = UNDERLAY; }
-        });
-        result.add(dark);
-    }
 
     /** Whether a wall is a facet of a rounded corner's arc: both ends round, and no longer than an arc's facet. */
     private static boolean facet(Spec spec, KitOutline.Wall wall) {

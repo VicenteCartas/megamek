@@ -175,7 +175,8 @@ final class RigidGlb {
         /**
          * Materials drawn alpha blended, without depth writes, by their Godot blend mode ({@link GodotMaterial#blendMode}):
          * generated geometry's board materials whose .tres blends its albedo's alpha ({@link GodotMaterial#blended}).
-         * A GLB's own alpha mode decides its materials: a plant's MASK foliage stays a cutout on such a board material.
+         * A GLB's own alpha mode decides its materials: BLEND glass blends, a plant's MASK foliage stays a cutout on
+         * such a board material.
          */
         final Map<String, Integer> blends = new HashMap<>();
         /** Cutouts whose .tres uses the albedo's alpha ({@link GodotMaterial#blended}): their faded texels blend. */
@@ -829,8 +830,6 @@ final class RigidGlb {
             Set<String> materialNames = new HashSet<>();
             for (var sourceMaterial : source.getMaterialModels()) {
                 var material = (MaterialModelV2) sourceMaterial;
-                require(material.getAlphaMode() != MaterialModelV2.AlphaMode.BLEND,
-                      "Rigid kits use opaque or alpha-tested materials");
                 Map<?, ?> changes = snow && material.getExtras() instanceof Map<?, ?> extras
                       && extras.get("mmSnow") instanceof Map<?, ?> own ? own : Map.of();
                 variants.put(material, changes);
@@ -911,6 +910,11 @@ final class RigidGlb {
                 result.surfaces.put(target.id, board == null ? new Surface(roughness, metallic, surfaceMap)
                       : boardSurface(board, base, target, result));
                 if (board != null && board.blended() && material.getAlphaMode() == MaterialModelV2.AlphaMode.MASK) { result.fades.add(target.id); }
+                // Glass: blended in its board material's .tres mode, so premultiplied glass keeps its whole reflection.
+                if (material.getAlphaMode() == MaterialModelV2.AlphaMode.BLEND) {
+                    require(board != null && board.blended(), "Only a board material whose .tres blends (glass) may blend");
+                    result.blends.put(target.id, board.blendMode());
+                }
                 // A board material's own metadata says whether its alpha is a paint mask.
                 if (board == null && material.getExtras() instanceof Map<?, ?> extras && Boolean.TRUE.equals(extras.get("mmPaintMask"))) {
                     result.paintMasks.add(target.id);

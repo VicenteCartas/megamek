@@ -254,7 +254,7 @@ class RigidGlbTest {
     }
 
     @Test
-    void cutoutsKeepTheirAuthoredThresholdWithoutEnablingBlendedKits() throws Exception {
+    void cutoutsKeepTheirAuthoredThresholdWithoutBlendingOutsideBoardGlass() throws Exception {
         var document = document();
         ((ObjectNode) document.get("materials").get(0)).put("doubleSided", true)
               .put("alphaMode", "MASK").put("alphaCutoff", .37f);
@@ -263,7 +263,7 @@ class RigidGlbTest {
         assertEquals(6, data.meshes.first().parts[0].indices.length, "Cutout backs remain visible");
         ((ObjectNode) document.get("materials").get(0)).put("alphaMode", "BLEND");
         var file = file(document, false);
-        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file));
+        assertThrows(IllegalArgumentException.class, () -> RigidGlb.load(file), "Only board glass blends");
     }
 
     private ObjectNode levels() throws Exception {
@@ -500,11 +500,15 @@ class RigidGlbTest {
         var previous = megamek.common.Configuration.dataDir();
         megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
         try {
-            var document = onBoardMaterial("transparency=1");
-            ((ObjectNode) document.get("materials").get(0)).put("alphaMode", "MASK").put("alphaCutoff", .3);
+            var document = onBoardMaterial("transparency=1", "blend_mode=4");
+            var material = ((ObjectNode) document.get("materials").get(0)).put("alphaMode", "MASK").put("alphaCutoff", .3);
             var plant = level(document);
             assertFalse(plant.blends.containsKey("paint"), "A plant stays a cutout on a blended .tres, or the ground shows through it");
             assertEquals(.3f, plant.alphaTests.get("paint"), 1e-6f);
+            material.put("alphaMode", "BLEND").remove("alphaCutoff");
+            var glass = level(document);
+            assertEquals(4, glass.blends.get("paint"), "Glass blends in its .tres's mode (premultiplied: its reflection stays whole)");
+            assertFalse(glass.alphaTests.containsKey("paint"));
         } finally { megamek.common.Configuration.setDataDir(previous); }
     }
 
@@ -535,17 +539,16 @@ class RigidGlbTest {
     }
 
     @Test
-    void aKitDrawsAMaterialAsTheBoardMaterialItsImageBelongsTo() throws Exception {
+    void aKitDrawsEachPieceMaterialAsItsBoardMaterialInItsOwnFinish() throws Exception {
         com.badlogic.gdx.utils.GdxNativesLoader.load();
         var previous = megamek.common.Configuration.dataDir();
         megamek.common.Configuration.setDataDir(directory.resolve("data").toFile());
         try {
             var document = onBoardMaterial("emission_enabled=true", "emission=Color(1, 0.5, 0, 1)", "emission_texture=ExtResource( 5 )",
                   "metadata/mmEmission=\"night\"");
-            var material = (ObjectNode) document.get("materials").get(0);
+            var material = ((ObjectNode) document.get("materials").get(0)).put("name", "test/glass");
             var extras = material.putObject("extras").put("mmBuildingPaint", true);
             var library = kit(document).getFirst();
-            assertTrue(library.surfaces.containsKey("test/glass"), "The material's name, paint, does not matter");
             assertTrue(library.buildingPaint.contains("test/glass"));
             assertEquals(RigidGlb.Emission.NIGHT, library.emissions.get("test/glass"), "From the .tres");
             assertTrue(emissionMapped(library, "test/glass"));
@@ -557,14 +560,22 @@ class RigidGlbTest {
             assertArrayEquals(new float[] { .4f, .2f, .1f }, own.surfaces.get("test/glass").glow(), 1e-6f);
             assertFalse(emissionMapped(own, "test/glass"), "As on a rigid model, an own factor replaces the library's emission map");
 
-            // Two materials of one board material are drawn as one, so they have to say the same.
+            // Each finish of one board material draws apart, under its own id (authored_examples#material_id).
             var materials = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("materials");
-            materials.add(material.deepCopy().put("name", "same"));
-            assertTrue(kit(document).getFirst().surfaces.containsKey("test/glass"));
+            materials.add(material.deepCopy().put("name", "test/glass#off"));
             ((ObjectNode) materials.get(1).get("extras")).put("mmEmission", "off");
-            var conflict = assertThrows(IllegalArgumentException.class, () -> kit(document));
-            assertTrue(conflict.getMessage().contains("paint") && conflict.getMessage().contains("same"), conflict.getMessage());
+            var primitives = (com.fasterxml.jackson.databind.node.ArrayNode) document.get("meshes").get(0).get("primitives");
+            primitives.add(((ObjectNode) primitives.get(0).deepCopy()).put("material", 1));
+            var finishes = kit(document).getFirst();
+            assertEquals(RigidGlb.Emission.ALWAYS, finishes.emissions.get("test/glass"));
+            assertEquals(RigidGlb.Emission.OFF, finishes.emissions.get("test/glass#off"));
+            primitives.remove(1);
             materials.remove(1);
+
+            material.put("name", "paint");
+            var unnamed = assertThrows(IllegalArgumentException.class, () -> kit(document));
+            assertTrue(unnamed.getMessage().contains("not named after its board material"), unnamed.getMessage());
+            material.put("name", "test/glass");
 
             ((ObjectNode) material.get("pbrMetallicRoughness")).remove("baseColorTexture");
             var plain = assertThrows(IllegalArgumentException.class, () -> kit(document));
