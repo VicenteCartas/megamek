@@ -1542,8 +1542,27 @@ work for Swing, and item 11 is under investigation.
          4,900 lines; its port is several PRs).
        - Stays Swing: the startup-failure message falls back to a Swing dialog only when the OpenGL window never
          opened or there is no start screen to return to (MekHQ); when the start screen returns it is native.
-       - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
-         Settings and About. The "Save First?" question when leaving a battle is native since #39.
+       - Done: the battle menu's dialogs that have native lobby views open them over the battle
+         (`GpuBattleTools`, which drives `GpuLobbyTools` through its `Surface`): Game Options (read-only, as the
+         Swing dialog is once the game starts; Save still works), Player Settings, the Game Master's random
+         reinforcements (the Force Generator; `Reinforcements` makes the units arrive next round, as the Swing
+         random army does) and Help (the Readme and the skinning guide in `LobbyDocumentView`). In the lounge these
+         menu items behave as before. `GameOptionsDialog`, `PlayerSettingsDialog`, `MMReadMeHelpDialog` and
+         `HelpDialog` left `SWING_DIALOGS`. Checks: `ReinforcementsTest`, `BattleMenuCardsSmokeTest`.
+       - The board's remaining Swing dialogs, the `SWING_DIALOGS` allowlist (R6/U2), by size of the port:
+         - Small, the Game Master's editors and notices (next PR): hex (`HexEditDialog`), building
+           (`BuildingEditDialog`), note (`NoteDialog`), the Game Master vote (`GameMasterVoteDialog`) and appointment
+           notice (`GameMasterAppointedDialog`), the command form (`ClientCommandDialog`: kick and Game Master
+           commands) and Game Master player setup (`GameMasterPlayerSetupDialog`). The player setup still opens the
+           Swing `RandomArmyDialog`, which stays on the allowlist until it is native.
+         - Medium: the reinforcement unit selector (`MegaMekUnitSelectorDialog`) and its `UnitLoadingDialog`, Edit
+           Bots (`EditBotsDialog`) and a bot's settings (`BotConfigDialog`), the Nova network view
+           (`NovaNetworkViewDialog`), Network information (`NetworkInformationDialog`) and the accessibility window
+           (`AccessibilityDialog`).
+         - Big: Client Settings (`CommonSettingsDialog`, several PRs; also the map editor's), and the map editor's
+           About.
+         - Developer only: the conditions editor behind the Tuning utility (`PlanetaryConditionsDialog`).
+       - The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and
          thumbnail grid with the camo chooser (`LobbyIconBrowser` over `IconCatalog`), so the next icon chooser
          only adds its own preview and footer. The Swing `PortraitChooserDialog` stays for the Swing pilot view.

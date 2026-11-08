@@ -144,8 +144,11 @@ public final class GpuLobbyWindow {
     private static final int MAP_DELAY_MS = 150;
     /** How long a sent ready state shows before the server's echo, at most. */
     private static final long PENDING_READY_NANOS = 3_000_000_000L;
-    /** The folders the unit list dialogs last used, kept while MegaMek runs, as the Swing client's choosers keep them. */
-    private static final LobbyFiles.Folders FOLDERS = new LobbyFiles.Folders();
+    /**
+     * The folders the unit list dialogs last used, kept while MegaMek runs, as the Swing client's choosers keep them;
+     * shared with the battle's Game Master tools.
+     */
+    static final LobbyFiles.Folders FOLDERS = new LobbyFiles.Folders();
 
     /** EDT: the lobby holding the window or about to. */
     private static GpuLobbyWindow active;

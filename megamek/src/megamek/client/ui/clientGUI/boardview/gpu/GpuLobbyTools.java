@@ -21,6 +21,7 @@ import java.util.function.Consumer;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import jakarta.annotation.Nullable;
 import megamek.MegaMek;
 import megamek.SuiteConstants;
@@ -53,6 +54,7 @@ import megamek.client.lobby.RandomSkillsForm;
 import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.RatGeneratorForm;
 import megamek.client.lobby.ReadyCheck;
+import megamek.client.lobby.Reinforcements;
 import megamek.client.lobby.RequisitionReadout;
 import megamek.client.lobby.SbfStatsForm;
 import megamek.client.lobby.TrainOrderForm;
@@ -118,7 +120,43 @@ final class GpuLobbyTools {
     /** How long the lobby must stay still before an open readout reads its units again. */
     private static final int READOUT_REFRESH_MS = 400;
 
-    private final GpuLobbyWindow window;
+    /** What the tools show over and ask of: the lobby window, or the battle window for its Game Master tools. */
+    interface Surface {
+        ClientGUI gui();
+
+        /** Any thread: runs {@code work} on the GPU thread. */
+        void post(Runnable work);
+
+        /** Whether the window is closing, so that waits stop and answers are dropped. */
+        boolean closing();
+
+        /** Runs {@code work} on the Swing thread unless the window closes, then {@code then} on the GPU thread. */
+        void edt(String what, Runnable work, Runnable then);
+
+        LobbyFiles files();
+
+        /** Has the unit sprites of {@code units} drawn for the views that show them. */
+        void requisitionSprites(List<MekSummary> units);
+
+        /** GPU thread: has {@code open} open a dialog over what shows. */
+        void nativeDialog(Consumer<LobbyNativeDialogs> open);
+
+        /** GPU thread: the native dialogs that show, if any. */
+        @Nullable LobbyNativeDialogs nativeDialogs();
+
+        /** GPU thread: the unit sprite drawn for {@code key}, or null while there is none. */
+        @Nullable TextureRegionDrawable requisitionSprite(String key);
+
+        void openSettings();
+
+        /** Tells the player something in passing. */
+        void chatNotice(String text);
+
+        /** Reads the window again soon. */
+        void refreshSoon();
+    }
+
+    private final Surface window;
     private final LobbyAsks asks = new NativeAsks();
     private static final int RAT_POLL_MS = 250;
     private @Nullable Timer ratWait;
@@ -137,6 +175,75 @@ final class GpuLobbyTools {
     private @Nullable Timer readoutRefresh;
 
     GpuLobbyTools(GpuLobbyWindow window) {
+        this(new Surface() {
+            @Override
+            public ClientGUI gui() {
+                return window.gui();
+            }
+
+            @Override
+            public void post(Runnable work) {
+                GpuHost.post(work);
+            }
+
+            @Override
+            public boolean closing() {
+                return window.closing();
+            }
+
+            @Override
+            public void edt(String what, Runnable work, Runnable then) {
+                window.edt(what, work, then);
+            }
+
+            @Override
+            public LobbyFiles files() {
+                return window.files();
+            }
+
+            @Override
+            public void requisitionSprites(List<MekSummary> units) {
+                window.requisitionSprites(units);
+            }
+
+            @Override
+            public void nativeDialog(Consumer<LobbyNativeDialogs> open) {
+                GpuLobbyScreen screen = window.screen();
+                if (screen != null) {
+                    screen.nativeDialog(open);
+                }
+            }
+
+            @Override
+            public @Nullable LobbyNativeDialogs nativeDialogs() {
+                GpuLobbyScreen screen = window.screen();
+                return (screen == null) ? null : screen.nativeDialogs();
+            }
+
+            @Override
+            public @Nullable TextureRegionDrawable requisitionSprite(String key) {
+                GpuLobbyScreen screen = window.screen();
+                return (screen == null) ? null : screen.requisitionSprite(key);
+            }
+
+            @Override
+            public void openSettings() {
+                window.openSettings();
+            }
+
+            @Override
+            public void chatNotice(String text) {
+                window.chatNotice(text);
+            }
+
+            @Override
+            public void refreshSoon() {
+                window.refreshSoon();
+            }
+        });
+    }
+
+    GpuLobbyTools(Surface window) {
         this.window = window;
     }
 
@@ -153,14 +260,9 @@ final class GpuLobbyTools {
         return gui().getClient();
     }
 
-    /** Any thread: has {@code open} open a dialog on the GPU thread, over the lobby. */
+    /** Any thread: has {@code open} open a dialog on the GPU thread, over what shows. */
     private void open(Consumer<LobbyNativeDialogs> open) {
-        GpuHost.post(() -> {
-            GpuLobbyScreen screen = window.screen();
-            if (screen != null) {
-                screen.nativeDialog(open);
-            }
-        });
+        window.post(() -> window.nativeDialog(open));
     }
 
     /** Runs a view's answer on the Swing thread, then {@code then} back on the GPU thread, and reads the lobby. */
@@ -537,10 +639,7 @@ final class GpuLobbyTools {
                 SwingUtilities.invokeLater(() -> armyReadout(unit));
             }
         };
-        open(dialogs -> dialogs.randomArmy(form, browser, generators, key -> {
-            GpuLobbyScreen screen = window.screen();
-            return screen == null ? null : screen.requisitionSprite(key);
-        }, host));
+        open(dialogs -> dialogs.randomArmy(form, browser, generators, window::requisitionSprite, host));
     }
 
     /** Runs {@code then} once the RAT Generator has read its data, started here if it is not yet. */
@@ -633,13 +732,6 @@ final class GpuLobbyTools {
             try {
                 Entity entity = new MekFileParser(summary.getSourceFile(), summary.getEntryName()).getEntity();
                 skillsAndName(entity, skillsClient, chosenName);
-                entity.setOwner(owner);
-                if (!client.getGame().getPhase().isLounge()) {
-                    entity.setDeployRound(client.getGame().getRoundCount() + 1);
-                    entity.setGame(client.getGame());
-                    entity.setDone(true);
-                    entity.setUnloaded(true);
-                }
                 entities.add(entity);
             } catch (EntityLoadingException failure) {
                 LOGGER.error(failure, "Unable to load the unit {}: {}", summary.getSourceFile(),
@@ -648,6 +740,7 @@ final class GpuLobbyTools {
                 return;
             }
         }
+        Reinforcements.prepare(entities, owner, client.getGame());
         client.sendAddEntity(entities);
         client.sendServerChat(Player.PLAYER_NONE, Messages.getString("RandomArmyDialog.loadedUnitsChat",
               local, owner.getName(), entities.size()));
@@ -718,15 +811,7 @@ final class GpuLobbyTools {
         Client client = client();
         Player owner = armyOwner(army.playerName());
         force.wire(units);
-        for (Entity unit : units) {
-            unit.setOwner(owner);
-            if (!client.getGame().getPhase().isLounge()) {
-                unit.setDeployRound(client.getGame().getRoundCount() + 1);
-                unit.setGame(client.getGame());
-                unit.setDone(true);
-                unit.setUnloaded(true);
-            }
-        }
+        Reinforcements.prepare(units, owner, client.getGame());
         force.loadCarriers(units);
         client.sendAddEntity(units);
         client.sendServerChat(Player.PLAYER_NONE, Messages.getString("RandomArmyDialog.loadedUnitsChat",
@@ -923,8 +1008,7 @@ final class GpuLobbyTools {
 
     /** GPU thread: the readout that shows, if any. */
     private @Nullable LobbyReadoutView showingReadout() {
-        GpuLobbyScreen screen = window.screen();
-        LobbyNativeDialogs dialogs = (screen == null) ? null : screen.nativeDialogs();
+        LobbyNativeDialogs dialogs = window.nativeDialogs();
         return (dialogs == null) ? null : dialogs.readoutView();
     }
 
@@ -1046,7 +1130,7 @@ final class GpuLobbyTools {
     }
 
     /** Any thread: shows an HTML guide a chapter at a time in the native help dialog; an unreadable one shows empty. */
-    private void helpDocument(String title, File file) {
+    void helpDocument(String title, File file) {
         showDocument(title, file, true, HelpDocument::guide);
     }
 

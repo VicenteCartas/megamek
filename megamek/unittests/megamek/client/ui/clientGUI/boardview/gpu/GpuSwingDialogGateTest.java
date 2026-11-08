@@ -62,12 +62,12 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuTurretFacingRoutingTest.Turr
 import megamek.client.ui.dialogs.BotCommands.HexTargetPicker;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.ConfirmDialog;
+import megamek.client.ui.dialogs.GameMasterAppointedDialog;
 import megamek.client.ui.dialogs.MMAboutDialog;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.PlayerListDialog;
 import megamek.client.ui.dialogs.SliderDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
-import megamek.client.ui.dialogs.helpDialogs.MMReadMeHelpDialog;
 import megamek.client.ui.dialogs.minimap.MinimapPanel;
 import megamek.client.ui.dialogs.phaseDisplay.AbandonUnitDialog;
 import megamek.client.ui.dialogs.phaseDisplay.AutomaticEjectionDialog;
@@ -528,18 +528,18 @@ class GpuSwingDialogGateTest {
         try (Declaring declaring = Declaring.create(); Gate gate = new Gate(declaring.gui, declaring.fixture)) {
             JFrame frame = declaring.frame;
             gate.present();
-            // A kept window (Readme) and a dialog it owns. LOS has its own native panel now.
-            MMReadMeHelpDialog help = onSwing(() -> new MMReadMeHelpDialog(frame));
+            // A kept window (the new game master's notice) and a dialog it owns. LOS has its own native panel now.
+            GameMasterAppointedDialog help = onSwing(() -> new GameMasterAppointedDialog(frame, "Appointed"));
             assertTrue(gate.raised(() -> {
                 help.setVisible(true);
                 return null;
-            }, MMReadMeHelpDialog.class::isInstance), "U2: Readme");
+            }, GameMasterAppointedDialog.class::isInstance), "U2: the new game master's notice");
             assertTrue(gate.raised(() -> {
                 JDialog detail = new JDialog(help, "Help detail");
                 detail.setSize(120, 80);
                 detail.setVisible(true);
                 return null;
-            }, window -> window.getOwner() == help), "A dialog Readme owns");
+            }, window -> window.getOwner() == help), "A dialog the notice owns");
             assertEquals(List.of(), gate.errors, "A dialog a kept window owns is part of it");
             onSwing(() -> {
                 help.dispose();
