@@ -334,13 +334,16 @@ float contactShadow(vec3 shadowUv, vec2 slope, float depthPerUnit, float narrowe
     // texels may be finer along one): a caster stands at most the casters' slab (the map's whole depth) along the light
     // from what it shades. Past shadowTent's three, the map's coarser levels take it, up to three texels of the coarsest;
     // the level whose blocks span it decides lit and umbra too, in the same five comparisons, as a far caster's penumbra
-    // reaches past the finest blocks. A high sun over low casters needs none.
+    // reaches past the finest blocks. For lit it looks only for casters farther than the finest tent's widest shows
+    // (fartherDepth): nearer ones the finest blocks have seen, and a receiver's own plane, extended across the coarse
+    // blocks, would read as one. A high sun over low casters needs none.
     vec2 texels = shadowTexels();
     vec2 widestAxes = clamp(.5 * SUN_DIAMETER / max(depthPerUnit * texels, 1e-12) + .5, 3.0, 3.0 * exp2(levels));
     float widest = max(widestAxes.x, widestAxes.y);
     float coarse = ceil(log2(widest / 3.0) - 1e-3), coarseBound = bound * exp2(coarse);
+    float fartherDepth = 5.0 * min(texels.x, texels.y) / SUN_DIAMETER * depthPerUnit;
     float lit = shadowCross(shadowUv, slope, middle, spacing, bound);
-    if (lit >= 4.9999 && (coarse < .5 || shadowLevelCross(shadowUv, slope, coarse, coarseBound, true, false) >= 4.9999)) {
+    if (lit >= 4.9999 && (coarse < .5 || shadowLevelCross(shadowUv, slope, coarse, -fartherDepth, true, false) >= 4.9999)) {
         return 1.0;
     }
     if (lit <= 1e-4 && shadowCross(shadowUv, slope, middle, spacing, -bound)
@@ -353,7 +356,7 @@ float contactShadow(vec3 shadowUv, vec2 slope, float depthPerUnit, float narrowe
     // sun; a blocker still found there stands farther away. None at its own depth: the crispest. The probes scale with
     // the map: reach is the distance whose penumbra fills the frame's widest tent, so they look as far as the tent can
     // show, a few hexes up close and many from afar. At a twentieth (in frames wider than three texels: a contact stays
-    // crisp), a fifth, two fifths and all of it, each past a blocker at the one before, they place the caster in a band.
+    // crisp), then every fifth of it, each past a blocker at the one before, they place the caster between two of them.
     // They sit on the pixel, not on a grid, so the width changes smoothly along an edge. Where the finest blocks find no
     // caster, the coarse level's do: a far caster's penumbra reaches past them.
     float level = 0.0, blocked = 5.0 - shadowLevelCross(shadowUv, slope, 0.0, 0.0, false, false);
@@ -368,9 +371,12 @@ float contactShadow(vec3 shadowUv, vec2 slope, float depthPerUnit, float narrowe
         float contact = coarse > .5 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -.05 * depth, false, false) : blocked;
         float nearer = contact > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -.2 * depth, false, false) : 0.0;
         float farther = nearer > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -.4 * depth, false, false) : 0.0;
-        float beyond = farther > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -depth, false, false) : 0.0;
-        // The bands' middles: 2.5, 12.5, 30 and 70 hundredths of the reach, and the reach itself.
-        float caster = reach * (.025 + (.1 * contact + .175 * nearer + .4 * farther + .3 * beyond) / blocked);
+        float further = farther > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -.6 * depth, false, false) : 0.0;
+        float furthest = further > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -.8 * depth, false, false) : 0.0;
+        float beyond = furthest > 1e-4 ? 5.0 - shadowLevelCross(shadowUv, slope, level, -depth, false, false) : 0.0;
+        // The share still blocked at each probe, joined by straight lines from all at the receiver: the area under them.
+        float caster = reach * (.025 + (.1 * contact + .175 * nearer + .2 * (farther + further + furthest) + .1 * beyond)
+              / blocked);
         halfWidth = clamp(.5 * SUN_DIAMETER * caster / texels + .5, vec2(narrowest), widestAxes);
     }
     return shadowVisibility(shadowPenumbra(shadowUv, slope, halfWidth, levels));
