@@ -41,20 +41,20 @@ class GpuBiomeLodSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     camera.setIsometric(true);
-                    var scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                    var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                           c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
                                 ? kind : BoardScene.Biome.MUD, 0));
                     var focus = BoardGeometry.center(new Coords(4, 4), 0);
                     camera.camera.zoom = .2f;
                     camera.center(focus);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
-                    var plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
+                    var plants = (GpuBiomeVegetation) GpuTestSupport.field(terrain, "biomeVegetation");
                     frame.render(terrain, camera, scene);
                     unchangedTerrainKeepsItsPlants(terrain, plants, camera, scene);
                     var metrics = new StringBuilder("Perspective, boundary, direction, changed pixels, field area fraction\n");
@@ -132,21 +132,15 @@ class GpuBiomeLodSmokeTest {
         plants.visible(scene, camera.camera, scene.tiles(), terrain::planted);
         var batches = GpuBiomeSmokeTest.batches(plants);
         float[][] roots = new float[batches.size()][];
-        for (int i = 0; i < batches.size(); i++) { roots[i] = ((FloatArray) field(batches.get(i), "data")).toArray(); }
+        for (int i = 0; i < batches.size(); i++) { roots[i] = ((FloatArray) GpuTestSupport.field(batches.get(i), "data")).toArray(); }
         long uploads = plants.uploads();
         plants.visible(scene, camera.camera, scene.tiles(), replanted::get);
         assertEquals(uploads, plants.uploads(), "Equal replanted rows must not upload again");
         assertEquals(batches, GpuBiomeSmokeTest.batches(plants), "A chunk handoff must keep the chunk batches");
         for (int i = 0; i < batches.size(); i++) {
-            assertArrayEquals(roots[i], ((FloatArray) field(batches.get(i), "data")).toArray(),
+            assertArrayEquals(roots[i], ((FloatArray) GpuTestSupport.field(batches.get(i), "data")).toArray(),
                   "A chunk handoff must not clear or partially repopulate the visible field");
         }
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
     }
 
     private static int changed(Pixmap before) {

@@ -146,7 +146,7 @@ class BoardCameraTacticalTest {
 
     @Test
     void theFitToTheWindowTravelsWithThePoseInBothDirections() {
-        BoardScene scene = UnitPlaybackTest.scene();
+        BoardScene scene = UnitPlaybackFixture.scene();
         BoardCamera fitted = new BoardCamera();
         fitted.resize(1100, 750);
         fitted.setIsometric(true);
@@ -198,14 +198,14 @@ class BoardCameraTacticalTest {
               null, false, null, 2, true);
         var target = new BoardScene.Unit(3, -1, "Unit 3", new BoardScene.Waypoint(new Coords(40, 30), 0, 0),
               null, false, null, 2, true);
-        view.frameAttacks(List.of(new UnitAttack(UnitPlaybackTest.attack(attacker, target, ResolvedAttack.Kind.SHOT,
+        view.frameAttacks(List.of(new UnitAttack(UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT,
               true))), 700);
         view.advance(BoardCamera.CAMERA_FRAMING_SECONDS);
         assertTopView(view);
         BoardCameraFramingTest.assertVisible(view, 700, attacker);
         BoardCameraFramingTest.assertVisible(view, 700, target);
 
-        view.reset(UnitPlaybackTest.scene(unit));
+        view.reset(UnitPlaybackFixture.scene(unit));
         assertTopView(view);
         assertTrue(view.tactical(), "Reset fits the board without leaving the Tactical View");
     }

@@ -3,7 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.ENEMY;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBattleStatus.Side.OWN;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -20,7 +20,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +48,6 @@ import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.PlayerColour;
-import megamek.common.Configuration;
 import megamek.common.OffBoardDirection;
 import megamek.common.ResolvedAttack;
 import megamek.common.actions.ArtilleryAttackAction;
@@ -58,11 +56,10 @@ import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The G6 command dock in the component harness: every variant beside the hud-v3 shot it ports (01-06, 08-11, 15),
@@ -72,6 +69,7 @@ import org.junit.jupiter.api.Test;
  * playback history plays scripted events, and More opens in the dock's drawer. The weapon declaration also
  * runs over the real FiringDisplay with its fire orders (GpuFiringFixture, scripted turns).
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuCommandDockSmokeTest {
     private static final GpuBattleStatus.Snapshot MOCK = GpuHudFixtures.status();
@@ -93,9 +91,9 @@ class GpuCommandDockSmokeTest {
     private static final float HINT_GAP = 12;
     private static final float HINT_HEIGHT = 16;
     /** The board the scripted playback plays on: one hex, as the playback only needs the scene's board. */
-    private static final BoardScene SCENE = UnitPlaybackTest.scene(IntStream.concat(
+    private static final BoardScene SCENE = UnitPlaybackFixture.scene(IntStream.concat(
           IntStream.rangeClosed(ATLAS, BATTLEMASTER), IntStream.of(ENEMY_LOCUST))
-          .mapToObj(id -> UnitPlaybackTest.unit(id, id)).toArray(BoardScene.Unit[]::new));
+          .mapToObj(id -> UnitPlaybackFixture.unit(id, id)).toArray(BoardScene.Unit[]::new));
 
     private final GpuBoardSource source = mock(GpuBoardSource.class);
     private final GpuMovePlan moves = mock(GpuMovePlan.class);
@@ -113,7 +111,7 @@ class GpuCommandDockSmokeTest {
           GpuReportLog.Snapshot reports, Consumer<GpuPlaybackHistory> playback,
           GpuBoardSource.UiPreferences preferences) {
         Shot(GpuBattleStatus.Snapshot status, GpuHudData panels, List<BoardScene.Command> commands) {
-            this(status, panels, commands, GpuReportLog.Snapshot.EMPTY, history -> { }, GpuHudInputTest.preferences());
+            this(status, panels, commands, GpuReportLog.Snapshot.EMPTY, history -> { }, GpuHudFixtures.preferences());
         }
     }
 
@@ -134,20 +132,6 @@ class GpuCommandDockSmokeTest {
         Group drawer() {
             return (Group) dock.drawer().actor();
         }
-    }
-
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the firing fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
     }
 
     @BeforeEach
@@ -752,16 +736,16 @@ class GpuCommandDockSmokeTest {
      */
     @Test
     void theWeaponDockTwistsClearsFiresAndHoldsThroughTheFiringDisplay() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Entity sagittaire = GpuFireDraftsTest.own(firing);
             GpuFireDraftsTest.scriptTurns(firing, LOCAL_PLAYER, ENEMY_PLAYER, LOCAL_PLAYER);
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int laser = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int laser = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
             GpuBattleStatus.Snapshot atlasTurn = status(GamePhase.FIRING, true, ATLAS, 0);
             GpuHudTestStage.run(hud -> {
                 Dock dock = dock(hud, firing.board.source);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(laser, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(laser, TargetKey.unit(firing.ahead.getId())));
                 Shot orders = settled(firing, atlasTurn);
                 show(hud, dock, orders);
                 assertEquals(List.of("ATLAS \u00B7 2 WEAPON ATTACKS \u00B7 1 TARGET", "1 more unit to declare"),
@@ -773,35 +757,35 @@ class GpuCommandDockSmokeTest {
                 assertEquals("Twisting clears 2 queued attacks.", label(dock, "dock-confirm-text"));
                 clickAndShow(hud, dock, orders, "dock-confirm-no");
                 settled(firing, atlasTurn);
-                assertEquals(List.of("AC/20 RT@42", "Medium Laser LA@42"), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of("AC/20 RT@42", "Medium Laser LA@42"), GpuFiringFixture.queue(firing));
                 // Twist anyway twists the torso, and the display clears the queue.
                 dock.dock().twist(-1);
                 show(hud, dock, orders);
                 clickAndShow(hud, dock, orders, "dock-confirm-yes");
                 Shot twisted = settled(firing, atlasTurn);
                 show(hud, dock, twisted);
-                assertEquals(List.of(), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of(), GpuFiringFixture.queue(firing));
                 assertEquals(List.of("LEFT", "HOLD FIRE"), List.of(label(dock, "dock-torso-value"),
                       button(dock, "dock-main").getText().toString()));
                 assertTrue(button(dock, "dock-twist-left").isDisabled(), "The Atlas twists one hex side");
                 assertTrue(button(dock, "dock-clear").isDisabled());
 
                 // H6: Clear, as the Delete key, drops the queue and the armed weapon.
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 show(hud, dock, settled(firing, atlasTurn));
                 dock.state().armedWeapon = laser;
                 dock.dock().clearOrders();
                 settled(firing, atlasTurn);
-                assertEquals(List.of(), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of(), GpuFiringFixture.queue(firing));
                 assertEquals(-1, dock.state().armedWeapon);
 
                 // Enter fires the queued weapons through MegaMek's Done.
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
                 show(hud, dock, settled(firing, atlasTurn));
                 assertEquals("FIRE WEAPONS", button(dock, "dock-main").getText().toString());
                 dock.dock().main();
                 settled(firing, atlasTurn);
-                assertEquals(List.of("AC/20 RT@42"), GpuFireOrdersTest.sent(firing, ATLAS));
+                assertEquals(List.of("AC/20 RT@42"), GpuFiringFixture.sent(firing, ATLAS));
 
                 // The opponent's turn, then the Sagittaire's: as the last unit to declare, Enter holds its fire.
                 GpuFireDraftsTest.nextTurn(firing, firing.attacker);
@@ -812,7 +796,7 @@ class GpuCommandDockSmokeTest {
                       List.of(button(dock, "dock-main").getText().toString()));
                 dock.dock().main();
                 settled(firing, atlasTurn);
-                assertEquals(List.of(), GpuFireOrdersTest.sent(firing, sagittaire.getId()));
+                assertEquals(List.of(), GpuFiringFixture.sent(firing, sagittaire.getId()));
             });
         }
     }
@@ -825,16 +809,16 @@ class GpuCommandDockSmokeTest {
      */
     @Test
     void resolveRunsThroughTheFireOrdersAndTheFocusUnitsDraftIsReadOnlyMeanwhile() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Entity sagittaire = GpuFireDraftsTest.own(firing);
             GpuFireDraftsTest.scriptTurns(firing, LOCAL_PLAYER, ENEMY_PLAYER, LOCAL_PLAYER);
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             GpuBattleStatus.Snapshot ownTurn = status(GamePhase.FIRING, true, sagittaire.getId(), 0);
             GpuHudTestStage.run(hud -> {
                 Dock dock = dock(hud, firing.board.source);
                 firing.board.source.setFocusUnit(ATLAS);
-                GpuFireOrdersTest.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
-                GpuFireOrdersTest.command(firing, fire -> fire.selectUnit(sagittaire.getId()));
+                GpuFiringFixture.command(firing, fire -> fire.assign(cannon, TargetKey.unit(firing.ahead.getId())));
+                GpuFiringFixture.command(firing, fire -> fire.selectUnit(sagittaire.getId()));
                 Shot declaring = settled(firing, ownTurn);
                 show(hud, dock, declaring);
                 clickAndShow(hud, dock, declaring, "dock-resolve");
@@ -847,7 +831,7 @@ class GpuCommandDockSmokeTest {
                 clickAndShow(hud, dock, declaring, "dock-resolve", "dock-confirm-yes");
                 Shot resolving = settled(firing, ownTurn);
                 show(hud, dock, resolving);
-                assertEquals(List.of(), GpuFireOrdersTest.sent(firing, sagittaire.getId()), "It holds fire at once");
+                assertEquals(List.of(), GpuFiringFixture.sent(firing, sagittaire.getId()), "It holds fire at once");
                 assertEquals("Auto-declaring \u00B7 2 remaining", label(dock, "dock-span"));
                 assertNotNull(dock.find("dock-stop"));
 
@@ -1092,8 +1076,8 @@ class GpuCommandDockSmokeTest {
             List<String> weapon = physical ? List.of("", "LL") : index < 4 ? volley.get(index)
                   : List.of("Medium Laser", "LA");
             boolean hit = index % 2 == 1;
-            BoardScene.Combat attack = UnitPlaybackTest.attack(UnitPlaybackTest.unit(attacker, attacker),
-                  UnitPlaybackTest.unit(target, target), kind, hit);
+            BoardScene.Combat attack = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(attacker, attacker),
+                  UnitPlaybackFixture.unit(target, target), kind, hit);
             events.add(attack);
             combat.add(new GpuReportLog.CombatEvent(attack.result().id(), MOCK.round(), phase, kind, attacker,
                   target, weapon.get(0), weapon.get(1), hit, !hit ? 0 : index == 1 ? 12 : 5, List.of(), null, 0));
@@ -1126,7 +1110,7 @@ class GpuCommandDockSmokeTest {
         Round shown = new Round(log, round.events());
         return new Shot(status(phase, false, Entity.NONE, 0), panels(info(), GpuMovePlan.Snapshot.EMPTY,
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY), List.of(command(DONE, "Done", true)),
-              log, history -> played.accept(history, shown), GpuHudInputTest.preferences());
+              log, history -> played.accept(history, shown), GpuHudFixtures.preferences());
     }
 
     /** A first frame primes the history at the round's start; then the round's events arrive. */
@@ -1247,7 +1231,7 @@ class GpuCommandDockSmokeTest {
         GpuBoardActions.PhaseInfo info = new GpuBoardActions.PhaseInfo("", false, DONE, SKIP, "",
               List.of("Walk 1 hex (1 MP)", "Walk 1 hex (2 MP)"), List.of());
         return new Shot(shot.status(), withPhase(panels, info), shot.commands(), shot.reports(), shot.playback(),
-              GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("turnDetails", true)));
+              GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("turnDetails", true)));
     }
 
     /** The shot whose phase info names these Done and skip commands, as GpuBoardActions.phaseInfo derives them. */

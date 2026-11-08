@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import com.badlogic.gdx.Gdx;
@@ -109,7 +108,7 @@ final class GpuBiomeVegetation implements Disposable {
     static final float[] CROP_KEEP = { 550, 160 };
     /**
      * Projected pixels per hex over which a field's plants fade into the ground's crop colour: they stand on medium and
-     * full terrain detail only (BoardPlants), which a chunk keeps down to TerrainLod's 24.
+     * full terrain detail (BoardPlants), which a chunk keeps down to TerrainLod's 24, and on a late level's coarse.
      */
     static final float[] CROP_FADE = { 24, 40 };
 
@@ -120,7 +119,7 @@ final class GpuBiomeVegetation implements Disposable {
     static String cropSource() {
         return "#define CROP_HEIGHT " + CROP_HEIGHT + "\n#define CROP_HEX_METRES "
               + BoardGeometry.width() / BoardRelief.metres(1) + "\n#define CROP_KEEP " + pair(CROP_KEEP)
-              + "\n#define CROP_FADE " + pair(CROP_FADE)
+              + "\n#define CROP_FADE " + pair(CROP_FADE) + "\n#define CROP_MEDIUM_SCALE " + BoardQuality.MEDIUM.detailScale
               + "\n" + GpuShaderSource.read("terrain-crops.glsl");
     }
 
@@ -128,8 +127,10 @@ final class GpuBiomeVegetation implements Disposable {
 
     /** The share of a crop's plants by rank that stands at this projected size, as terrain-crops.glsl draws them. */
     static float cropDensity(BoardFields.Crop crop, float pixels) {
-        float fade = Math.clamp((pixels - CROP_FADE[0]) / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
-        return Math.clamp(pixels / CROP_KEEP[crop.ordinal()], .001f, 1) * fade * fade * (3 - 2 * fade);
+        BoardQuality quality = BoardQuality.current;
+        // Plants stand on the detail levels their quality takes at larger hexes (TerrainLod.select): they fade there.
+        float fade = Math.clamp((pixels / quality.detailScale - CROP_FADE[0]) / (CROP_FADE[1] - CROP_FADE[0]), 0, 1);
+        return quality.cropShare * Math.clamp(pixels / CROP_KEEP[crop.ordinal()], .001f, 1) * fade * fade * (3 - 2 * fade);
     }
 
     /** Plant a marsh hex's reeds up to the share of the lattice its chunk's detail draws, as (x, y, z, seed). */
@@ -533,15 +534,6 @@ final class GpuBiomeVegetation implements Disposable {
         return new VertexAttribute(VertexAttributes.Usage.Generic, 4, "a_coverRoot");
     }
 
-    /** These batches are created at draw time, outside terrain chunks; prepare their real layout before editor cards draw. */
-    void prepareMaterials(BiConsumer<Material, Mesh> consumer) {
-        Mesh layout = template(0);
-        try {
-            layout.enableInstancedRendering(true, 1, instanceAttribute());
-            consumer.accept(material(0, sedge()), layout);
-        } finally { layout.dispose(); }
-    }
-
     /**
      * One terrain chunk's two nearer reed tiers. Its buffers persist, so panning selects chunks instead of rebuilding
      * instance data. The coarsest reed tier shares a board-wide batch instead.
@@ -754,8 +746,7 @@ final class GpuBiomeVegetation implements Disposable {
     }
 
     /**
-     * Drops one board's reeds. The sedge cutout is the same on every board and stays, so the one the editor's warm-up
-     * loads (prepareMaterials) is still there when a stroke paints the first marsh.
+     * Drops one board's reeds. The sedge cutout is the same on every board and stays.
      */
     private void forgetBoard() {
         for (Chunk chunk : chunks.values()) { chunk.dispose(); }

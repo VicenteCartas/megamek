@@ -78,7 +78,7 @@ class BoardTacticalGeometryTest {
 
     @Test
     void mines0708RoadRampDoesNotRaiseTheFlatMarkerPlane() throws Exception {
-        BoardScene scene = GpuRoadSourceTest.minesScene();
+        BoardScene scene = BoardScenes.minesScene();
         Coords coords = new Coords(6, 7);
         var tile = scene.tile(coords);
         assertEquals(-1, tile.elevation());

@@ -81,7 +81,7 @@ class GpuSmallObjectSmokeTest {
     }
 
     private static BoardScene scene(Board board) throws Exception {
-        var captured = GpuLegacyImportSmokeTest.scene(board);
+        var captured = BoardScenes.scene(board);
         return new BoardScene(0, captured.width(), captured.height(), captured.tiles(), List.of(), List.of(), -1, "",
               List.of(), new BoardScene.Light(-24, -30));
     }
@@ -184,10 +184,10 @@ class GpuSmallObjectSmokeTest {
 
     /** A unit's arrival or departure on the lone hex fades its car without rebuilding a page; the car packs nothing. */
     private static void checkOccupiedSmallChunk(GpuTerrain game, BoardCamera camera, GLProfiler profiler) throws Exception {
-        Object chunk = ((List<?>) field(game, "chunks")).get(1);
-        assertEquals(0, ((Array<?>) field(chunk, "shadowPropRenderables")).size, "The lone hex's chunk packs no prop");
-        assertTrue(((Array<?>) field(chunk, "decorationRenderables")).size > 0, "The lone car draws instanced");
-        var pages = (GpuPropBatch) field(game, "propBatch");
+        Object chunk = ((List<?>) GpuTestSupport.field(game, "chunks")).get(1);
+        assertEquals(0, ((Array<?>) GpuTestSupport.field(chunk, "shadowPropRenderables")).size, "The lone hex's chunk packs no prop");
+        assertTrue(((Array<?>) GpuTestSupport.field(chunk, "decorationRenderables")).size > 0, "The lone car draws instanced");
+        var pages = (GpuPropBatch) GpuTestSupport.field(game, "propBatch");
         var box = new ModelBuilder().createBox(4, 4, 12, new Material(), VertexAttributes.Usage.Position);
         try {
             var unit = new ModelInstance(box, BoardGeometry.center(LONE, 0).add(0, 0, 6));
@@ -197,7 +197,7 @@ class GpuSmallObjectSmokeTest {
             for (boolean occupied : new boolean[] { true, false, true, false }) {
                 game.animate(0, occupied ? List.of(unit) : List.of(), .5f);
                 opaque(game, camera, profiler);
-                assertEquals(occupied, !((java.util.Set<?>) field(chunk, "faded")).isEmpty(), "The unit fades the prop under it");
+                assertEquals(occupied, !((java.util.Set<?>) GpuTestSupport.field(chunk, "faded")).isEmpty(), "The unit fades the prop under it");
             }
             assertEquals(builds, pages.rebuilds(), "Occupancy changes repack no page");
         } finally { box.dispose(); }
@@ -272,9 +272,9 @@ class GpuSmallObjectSmokeTest {
     }
 
     private static Object carBounds(GpuTerrain terrain) throws Exception {
-        for (Object prop : (List<?>) field(((List<?>) field(terrain, "chunks")).getFirst(), "props")) {
-            var instance = (ModelInstance) field(prop, "instance");
-            if (CAR.equals(field(prop, "coords")) && instance.nodes.first().id.equals("car")) { return field(prop, "bounds"); }
+        for (Object prop : (List<?>) GpuTestSupport.field(((List<?>) GpuTestSupport.field(terrain, "chunks")).getFirst(), "props")) {
+            var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+            if (CAR.equals(GpuTestSupport.field(prop, "coords")) && instance.nodes.first().id.equals("car")) { return GpuTestSupport.field(prop, "bounds"); }
         }
         throw new AssertionError("No car prop");
     }
@@ -338,11 +338,5 @@ class GpuSmallObjectSmokeTest {
         for (NodePart part : node.parts) { total += part.meshPart.size; }
         for (Node child : node.getChildren()) { total += indices(child); }
         return total;
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

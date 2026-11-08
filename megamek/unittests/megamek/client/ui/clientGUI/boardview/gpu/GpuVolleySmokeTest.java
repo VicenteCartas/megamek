@@ -150,7 +150,7 @@ class GpuVolleySmokeTest {
                         events.add(new BoardScene.Combat(result, attacker, victim, victim.location()));
                     }
                     var playback = new UnitPlayback();
-                    playback.accept(events, UnitPlaybackTest.scene(attacker, victim), ignored -> false);
+                    playback.accept(events, UnitPlaybackFixture.scene(attacker, victim), ignored -> false);
                     for (int frame = 0; frame < 68; frame++) {
                         playback.advance(1.0 / 60, UnitMotion.Speed.DOUBLE);
                         animator.apply(body, source, attacker, UnitMotion.Sample.STILL, frame / 60f, 1f / 60, false, 0);

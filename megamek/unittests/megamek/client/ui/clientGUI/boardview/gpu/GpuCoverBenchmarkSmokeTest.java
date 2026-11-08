@@ -530,10 +530,10 @@ class GpuCoverBenchmarkSmokeTest {
     /** Installed terrain detail levels, all chunks and the ones in this view, to show what a sweep can change. */
     private static String detail(GpuTerrain terrain, BoardCamera camera) throws Exception {
         int[] counts = new int[TerrainLod.values().length], visible = new int[counts.length];
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            var lod = (TerrainLod) field(chunk, "lod");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            var lod = (TerrainLod) GpuTestSupport.field(chunk, "lod");
             counts[lod.ordinal()]++;
-            if (camera.camera.frustum.boundsInFrustum((com.badlogic.gdx.math.collision.BoundingBox) field(chunk, "bounds"))) {
+            if (camera.camera.frustum.boundsInFrustum((com.badlogic.gdx.math.collision.BoundingBox) GpuTestSupport.field(chunk, "bounds"))) {
                 visible[lod.ordinal()]++;
             }
         }
@@ -559,8 +559,8 @@ class GpuCoverBenchmarkSmokeTest {
             this.terrain = terrain;
             this.kind = kind;
             this.scene = scene;
-            grass = (GpuGroundCover) field(terrain, "groundCover");
-            plants = (GpuBiomeVegetation) field(terrain, "biomeVegetation");
+            grass = (GpuGroundCover) GpuTestSupport.field(terrain, "groundCover");
+            plants = (GpuBiomeVegetation) GpuTestSupport.field(terrain, "biomeVegetation");
             for (var tile : scene.tiles()) {
                 boolean covered = switch (kind) {
                     case FIELDS -> BoardBiome.plantKind(scene, tile) == BoardScene.Biome.FIELD;
@@ -580,7 +580,7 @@ class GpuCoverBenchmarkSmokeTest {
          */
         int[] coverage(BoardCamera camera) throws Exception {
             Set<Object> drawn = Collections.newSetFromMap(new IdentityHashMap<>());
-            for (Object batch : batches(renderer())) { drawn.addAll((List<?>) field(batch, "current")); }
+            for (Object batch : batches(renderer())) { drawn.addAll((List<?>) GpuTestSupport.field(batch, "current")); }
             int complete = 0, visible = 0;
             for (var tile : hexes) {
                 Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
@@ -619,17 +619,17 @@ class GpuCoverBenchmarkSmokeTest {
             else if (kind == Kind.FIELDS) {
                 // The fields' plants stand whatever the Grass blades option: a scene taken for one without fields hides them.
                 terrain.setGrass(false);
-                set(terrain, "fieldsScene", field(terrain, "coverScene"));
+                set(terrain, "fieldsScene", GpuTestSupport.field(terrain, "coverScene"));
                 set(terrain, "fields", false);
             }
             else if (kind == Kind.WOODS) {
-                for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                    Map<?, ?> stand = (Map<?, ?>) field(field(chunk, "stand"), "trees");
+                for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                    Map<?, ?> stand = (Map<?, ?>) GpuTestSupport.field(GpuTestSupport.field(chunk, "stand"), "trees");
                     trees.add(new java.util.LinkedHashMap<>(stand));
                     stand.clear();
                 }
             }
-            else { ((Set<?>) field(plants, "marshes")).clear(); set(plants, "view", null); }
+            else { ((Set<?>) GpuTestSupport.field(plants, "marshes")).clear(); set(plants, "view", null); }
         }
 
         void show() throws Exception {
@@ -639,10 +639,10 @@ class GpuCoverBenchmarkSmokeTest {
                 set(terrain, "fieldsScene", null);
             }
             else if (kind == Kind.WOODS) {
-                List<?> chunks = (List<?>) field(terrain, "chunks");
+                List<?> chunks = (List<?>) GpuTestSupport.field(terrain, "chunks");
                 for (int index = 0; index < chunks.size(); index++) {
                     @SuppressWarnings("unchecked")
-                    Map<Object, Object> stand = (Map<Object, Object>) field(field(chunks.get(index), "stand"), "trees");
+                    Map<Object, Object> stand = (Map<Object, Object>) GpuTestSupport.field(GpuTestSupport.field(chunks.get(index), "stand"), "trees");
                     stand.putAll(trees.get(index));
                 }
                 trees.clear();
@@ -664,15 +664,15 @@ class GpuCoverBenchmarkSmokeTest {
             int draws = 0, ranges = 0;
             long instances = 0, triangles = 0;
             for (Object batch : batches(renderer())) {
-                if (((List<?>) field(batch, "current")).isEmpty()) { continue; }
-                var mesh = (GpuInstancedMesh) field(batch, "mesh");
+                if (((List<?>) GpuTestSupport.field(batch, "current")).isEmpty()) { continue; }
+                var mesh = (GpuInstancedMesh) GpuTestSupport.field(batch, "mesh");
                 if (mesh == null) { continue; }
                 long count;
-                if (kind == Kind.MARSH) { count = ((FloatArray) field(batch, "data")).size / 4; }
+                if (kind == Kind.MARSH) { count = ((FloatArray) GpuTestSupport.field(batch, "data")).size / 4; }
                 else if (mesh.drawInstances >= 0) { count = mesh.drawInstances; }
                 else {
                     // One bound buffer per chunk, drawn as one base-instance call per hex range.
-                    var hexRanges = (com.badlogic.gdx.utils.IntArray) field(batch, "ranges");
+                    var hexRanges = (com.badlogic.gdx.utils.IntArray) GpuTestSupport.field(batch, "ranges");
                     count = 0;
                     for (int i = 1; i < hexRanges.size; i += 2) { if (hexRanges.items[i] > 0) { count += hexRanges.items[i]; ranges++; } }
                 }
@@ -700,12 +700,6 @@ class GpuCoverBenchmarkSmokeTest {
         private static List<Object> batches(Object renderer) throws Exception {
             return GpuBiomeSmokeTest.batches(renderer);
         }
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
     }
 
     private static void set(Object owner, String name, Object value) throws ReflectiveOperationException {

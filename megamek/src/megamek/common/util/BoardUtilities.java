@@ -1774,6 +1774,14 @@ public class BoardUtilities {
                 // A rail's junction layout turns with its exits.
                 appearance.computeIfPresent("rail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
                 appearance.computeIfPresent("bridgeRail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
+                for (String owner : new String[] { "water", "pavement" }) {
+                    int separated = HexAppearance.separated(appearance, owner);
+                    if (separated != 0) {
+                        Terrain sides = new Terrain(Terrains.WATER, 0, true, separated);
+                        sides.flipExits(horiz, vert);
+                        appearance.put(owner, HexAppearance.withSeparated(appearance.get(owner), sides.getExits()));
+                    }
+                }
                 if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;

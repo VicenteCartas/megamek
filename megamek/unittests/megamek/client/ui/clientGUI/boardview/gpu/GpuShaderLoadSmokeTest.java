@@ -46,14 +46,16 @@ import megamek.common.units.UnitLocation;
 import megamek.logging.MMLogger;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3 shows its overview, a close
+ * No shader compile holds a frame once the loading stage has gone. A game on Grassland 3, in either quality, shows its overview, a close
  * view, a pan, a volley of a laser, an autocannon and missiles and the Tactical View; then a tank and an infantry
  * platoon that were not on the board deploy, and SMAA, a 75% render resolution and the thermal view are switched on and
  * off. The Tactical View, the thermal (wireframe) view, SMAA and a render resolution below 100% are optional: they
  * link their own programs when they first show; their links are not counted, but no loading stage may come back. The 3D editor on the same board opens every Assets category and reveals each of its sections, searches, and
- * paints lava, water, ice, a car, scorch and the board's first building. It also switches specular anti-aliasing, waits for that lighting change's loading stage, and renders
+ * paints lava, water, ice, a car, scorch and the board's first building. It also switches Quality from Medium to High, waits for that lighting change's loading stage, and renders
  * fresh model and junction cards. Each phase reports the longest frame after its loading stage and asserts that no
  * program compiled or started a deferred link afterwards, and that no unexpected loading stage came back. With the
  * Tessellation switch on, a zoom from the fitted board to full-detail banks links nothing either.
@@ -67,11 +69,15 @@ class GpuShaderLoadSmokeTest {
     private static final File GRASSLAND = new File("data/boards/AGoAC Maps/16x17 Grassland 3.board");
     private static final File UNITS = new File("testresources/megamek/common/units");
 
-    @Test
-    void gameCompilesNothingAfterItsLoadingStage() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = { "MEDIUM", "HIGH" })
+    void gameCompilesNothingAfterItsLoadingStage(String quality) throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         AtomicReference<List<BoardScene.Animation>> pending = new AtomicReference<>(List.of());
-        Watch watch = new Watch("game");
+        Watch watch = new Watch("game " + quality);
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        String savedQuality = preferences.getBoardQuality();
+        float savedResolution = preferences.getBoardRenderResolution();
         var fixture = GpuBoardFixture.create(BoardFile.loadSheet(GRASSLAND, false, true));
         List<Entity> late = new ArrayList<>();
         try {
@@ -107,7 +113,8 @@ class GpuShaderLoadSmokeTest {
             // The spy holds a copy of the source's fields; the captures happen on the source.
             doAnswer(ignored -> fixture.source.reserveUnits()).when(source).reserveUnits();
             // The game loads at 100%: the switch to 75% below links FSR at its first use, an optional setting.
-            GUIPreferences.getInstance().setBoardRenderResolution(1);
+            preferences.setBoardQuality(quality);
+            preferences.setBoardRenderResolution(1);
             new Lwjgl3Application(new GpuBattleView(source) {
                 int step, links, programs;
 
@@ -118,9 +125,9 @@ class GpuShaderLoadSmokeTest {
                         super.render();
                         if (!watch.frame(GpuBoardTestUi.loading(this))) { return; }
                         double seconds = watch.seconds();
-                        var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                        var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                         BoardScene scene = step < 4 || step == 9 ? fixture.source.takeFrame().scene() : null;
-                        var tuning = (GpuBoardTuning) GpuMixedUnitBenchmarkSmokeTest.field(this, "tuning");
+                        var tuning = (GpuBoardTuning) GpuTestSupport.field(this, "tuning");
                         if (step == 0) {
                             boardCamera.setIsometric(true);
                             boardCamera.fit(scene);
@@ -153,7 +160,7 @@ class GpuShaderLoadSmokeTest {
                             step++;
                         } else if (step == 6 && seconds > 36) {
                             watch.optionalView(true);
-                            ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(1);
+                            ((SelectBox<?>) GpuTestSupport.field(tuning, "antiAliasing")).setSelectedIndex(1);
                             BoardCamera.renderScale = .75f;
                             step++;
                         } else if (step == 7 && seconds > 39) {
@@ -162,7 +169,7 @@ class GpuShaderLoadSmokeTest {
                         } else if (step == 8 && seconds > 43) {
                             watch.optionalView(false);
                             tuning.setWireframe(false);
-                            ((SelectBox<?>) GpuMixedUnitBenchmarkSmokeTest.field(tuning, "antiAliasing")).setSelectedIndex(0);
+                            ((SelectBox<?>) GpuTestSupport.field(tuning, "antiAliasing")).setSelectedIndex(0);
                             BoardCamera.renderScale = 1;
                             step++;
                         } else if (step == 9 && seconds > 45) {
@@ -188,6 +195,8 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
+            preferences.setBoardQuality(savedQuality);
+            preferences.setBoardRenderResolution(savedResolution);
             BoardCamera.renderScale = 1;
             // The view closed the spied source, which shares the fixture's state.
             SwingUtilities.invokeAndWait(fixture.view::close);
@@ -211,6 +220,8 @@ class GpuShaderLoadSmokeTest {
         boolean saved = GUIPreferences.getInstance().getBoardTessellation();
         String savedAntiAliasing = GUIPreferences.getInstance().getBoardAntiAliasing();
         float savedResolution = GUIPreferences.getInstance().getBoardRenderResolution();
+        String savedQuality = GUIPreferences.getInstance().getBoardQuality();
+        GUIPreferences.getInstance().setBoardQuality("HIGH");
         GUIPreferences.getInstance().setBoardTessellation(true);
         GUIPreferences.getInstance().setBoardAntiAliasing("SMAA");
         GUIPreferences.getInstance().setBoardRenderResolution(.75f);
@@ -242,15 +253,15 @@ class GpuShaderLoadSmokeTest {
                             boardCamera.center(BoardGeometry.center(bank, scene.tile(bank).elevation()));
                             step++;
                         } else if (step == 2 && watch.seconds() > 15) {
-                            var terrain = (GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain");
+                            var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                             boolean curved = false, coated = false;
-                            for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "opaque")) {
+                            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "opaque")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         curved |= GpuTessellation.curved(material);
                                     }
                                 }
-                                for (Object instance : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "overlays")) {
+                                for (Object instance : (List<?>) GpuTestSupport.field(chunk, "overlays")) {
                                     for (var material : ((ModelInstance) instance).materials) {
                                         coated |= GpuTessellation.curved(material) && material.has(GpuRoads.Mask.TYPE);
                                     }
@@ -270,6 +281,7 @@ class GpuShaderLoadSmokeTest {
             GUIPreferences.getInstance().setBoardTessellation(saved);
             GUIPreferences.getInstance().setBoardAntiAliasing(savedAntiAliasing);
             GUIPreferences.getInstance().setBoardRenderResolution(savedResolution);
+            GUIPreferences.getInstance().setBoardQuality(savedQuality);
             BoardCamera.renderScale = 1;
             SwingUtilities.invokeAndWait(fixture.view::close);
         }
@@ -288,11 +300,13 @@ class GpuShaderLoadSmokeTest {
     }
 
     @Test
-    void editorCompilesNothingAfterItsLoadingStage() throws Exception {
+    void editorLoadsOnDemandBehindItsSpinner() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Watch watch = new Watch("editor");
+        Watch watch = new Watch("editor").onDemand();
         AtomicReference<Watch> relight = new AtomicReference<>();
-        AtomicReference<Boolean> originalSpecular = new AtomicReference<>();
+        GUIPreferences preferences = GUIPreferences.getInstance();
+        String savedQuality = preferences.getBoardQuality();
+        preferences.setBoardQuality("MEDIUM");
         var setup = new FutureTask<GpuMapSource>(() -> {
             var editor = new BoardEditorSession();
             editor.game().setBoard(BoardFile.loadSheet(GRASSLAND, false, true));
@@ -315,7 +329,7 @@ class GpuShaderLoadSmokeTest {
         for (String text : List.of("tree", "lava")) {
             steps.add(() -> ((TextField) GpuBoardTestUi.stage().getRoot().findActor("editor-search")).setText(text));
         }
-        // The building is the board's first: its shell's program and depth twin come from the palette's warm-up.
+        // Nothing here was prepared at load: each links when asked for, with the board and its frames going on meanwhile.
         List<Coords> strokes = List.of(new Coords(3, 3), new Coords(7, 3), new Coords(11, 3), new Coords(5, 9),
               new Coords(9, 9), new Coords(13, 12));
         List<BoardEditorSession.Command> brushes = List.of(
@@ -344,7 +358,7 @@ class GpuShaderLoadSmokeTest {
                 int step = -1;
                 double stepAt;
                 long relightStarted;
-                boolean changedLighting, sawRelighting;
+                boolean changedLighting, sawRelighting, sawSpinner;
                 Image modelCard, railCard;
 
                 @Override
@@ -364,7 +378,7 @@ class GpuShaderLoadSmokeTest {
                                 if (loading) { return; }
                                 // Exclude only the intentional reload. Counters from before this frame still catch
                                 // programs first requested by the frame that dismisses its loading stage.
-                                active = new Watch("editor-AA", compilesBefore, deferredBefore);
+                                active = new Watch("editor-quality", compilesBefore, deferredBefore).onDemand();
                                 active.before(wasLoading);
                                 relight.set(active);
                             }
@@ -374,10 +388,10 @@ class GpuShaderLoadSmokeTest {
                             if (loading) { return; }
                             assertTrue(sawRelighting, "A changed shader flag gets a loading stage");
                             if (modelCard == null) {
-                                var hud = GpuMixedUnitBenchmarkSmokeTest.field(this, "ui");
-                                var editor = GpuMixedUnitBenchmarkSmokeTest.field(hud, "editor");
-                                var models = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "models");
-                                var junctions = (GpuEditorModelPreviews) GpuMixedUnitBenchmarkSmokeTest.field(editor, "junctions");
+                                var hud = GpuTestSupport.field(this, "ui");
+                                var editor = GpuTestSupport.field(hud, "editor");
+                                var models = (GpuEditorModelPreviews) GpuTestSupport.field(editor, "models");
+                                var junctions = (GpuEditorModelPreviews) GpuTestSupport.field(editor, "junctions");
                                 // Fresh image targets cannot reuse cards rendered before the lighting switch.
                                 modelCard = new Image(); railCard = new Image();
                                 modelCard.setBounds(10, 10, 128, 96); railCard.setBounds(148, 10, 128, 96);
@@ -393,8 +407,9 @@ class GpuShaderLoadSmokeTest {
                         }
                         var root = GpuBoardTestUi.stage().getRoot();
                         double seconds = watch.seconds();
+                        sawSpinner |= root.findActor("editor-preparing").isVisible();
                         if (step == -1) {
-                            noScarPrograms(GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain"));
+                            noScarPrograms(GpuTestSupport.field(this, "terrain"));
                             // An editor opened before in this JVM left its page: the start page first.
                             if (root.findActor("editor-back") != null) {
                                 GpuBoardTestUi.click("editor-back");
@@ -406,11 +421,13 @@ class GpuShaderLoadSmokeTest {
                         }
                         // Completed card renders and an idle board permit the next step without a long idle dwell.
                         boolean settled = GpuEditorMaglevSmokeTest.ready(root.findActor("editor-library"))
-                              && !((GpuTerrain) GpuMixedUnitBenchmarkSmokeTest.field(this, "terrain")).busy();
+                              && !((GpuTerrain) GpuTestSupport.field(this, "terrain")).busy();
                         if (step < steps.size() && seconds - stepAt > (settled ? .25 : 8)) {
                             steps.get(step++).run();
                             stepAt = seconds;
                         } else if (step == steps.size() && settled && seconds - stepAt > 4) {
+                            assertTrue(sawSpinner, "The spinner shows while something loads");
+                            assertFalse(root.findActor("editor-preparing").isVisible(), "The spinner goes once nothing does");
                             var scene = source.takeFrame().scene();
                             assertTrue(scene.tile(strokes.get(0)).liquid().molten(), "The lava stroke shows");
                             assertTrue(scene.tile(strokes.get(1)).liquid().present(), "The water stroke shows");
@@ -427,8 +444,8 @@ class GpuShaderLoadSmokeTest {
                             assertTrue(output.isDirectory() || output.mkdirs());
                             GpuBoardTestUi.capture(new File(output, "editor-scorch-gallery.png"));
                             watch.check();
-                            originalSpecular.set(GpuEnvironmentLighting.specularAntialiasing);
-                            GpuEnvironmentLighting.specularAntialiasing = !originalSpecular.get();
+                            SelectBox<BoardQuality> quality = GpuBoardTestUi.tuning(this, "tuning-quality");
+                            quality.setSelected(BoardQuality.HIGH);
                             changedLighting = true;
                             relightStarted = System.nanoTime();
                         } else if (seconds - stepAt > 60) {
@@ -441,8 +458,11 @@ class GpuShaderLoadSmokeTest {
                 }
             }, window());
         } finally {
-            if (originalSpecular.get() != null) { GpuEnvironmentLighting.specularAntialiasing = originalSpecular.get(); }
-            SwingUtilities.invokeAndWait(source::close);
+            // On the Swing thread, after the panel's own queued saves.
+            SwingUtilities.invokeAndWait(() -> {
+                source.close();
+                preferences.setBoardQuality(savedQuality);
+            });
         }
         if (failure.get() != null) { throw new AssertionError(failure.get()); }
         assertTrue(relight.get() != null, "The changed lighting must reach its presented phase");
@@ -451,16 +471,16 @@ class GpuShaderLoadSmokeTest {
 
     /** No program is prepared for scars: they draw with their receivers' programs. */
     private static void noScarPrograms(Object terrain) throws Exception {
-        for (Object sample : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "terrainMaterialSamples")) {
+        for (Object sample : (List<?>) GpuTestSupport.field(terrain, "terrainMaterialSamples")) {
             assertFalse(((Renderable) sample).material.has(GpuSurfaceScars.Marking.TYPE), "A scar program");
         }
     }
 
     /** The programs the shader provider of a renderer's {@code batch} holds: the terrain's, or an unlit overlay's. */
     static int programs(Object renderer) throws Exception {
-        var provider = ((ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(renderer, "batch")).getShaderProvider();
+        var provider = ((ModelBatch) GpuTestSupport.field(renderer, "batch")).getShaderProvider();
         if (provider instanceof GpuShaderProvider edited) { provider = edited.active(); }
-        return ((Array<?>) GpuMixedUnitBenchmarkSmokeTest.field(provider, "shaders")).size;
+        return ((Array<?>) GpuTestSupport.field(provider, "shaders")).size;
     }
 
     /** An autocannon hit on each of the board's three steepest walls, through the game's contact path. */
@@ -523,6 +543,10 @@ class GpuShaderLoadSmokeTest {
         private int frames, loadingAgain;
         // Links while an optional view shows (the Tactical View, the thermal view), which may link on first use.
         private int optionalCompiles, optionalDeferred, optionalStart = -1, optionalDeferredStart;
+        /** The editor links what it is asked for in the background: no link may hold a frame or bring a loading stage back. */
+        private boolean onDemand;
+
+        Watch onDemand() { onDemand = true; return this; }
 
         Watch(String name) { this(name, GpuGlsl.compilesAfterLoading(), GpuGlsl.deferredAfterLoading()); }
 
@@ -585,8 +609,10 @@ class GpuShaderLoadSmokeTest {
             LOGGER.info(report);
             System.out.println(report);
             assertEquals(0, after, name + ": shaders compiled on the render thread after the loading stage (see the timing log)");
-            assertEquals(0, deferredAfter,
-                  name + ": shader links were deferred until after the loading stage (see the timing log)");
+            if (!onDemand) {
+                assertEquals(0, deferredAfter,
+                      name + ": shader links were deferred until after the loading stage (see the timing log)");
+            }
             assertEquals(0, loadingAgain, name + ": a loading stage came back");
         }
     }

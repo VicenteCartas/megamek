@@ -525,11 +525,6 @@ final class GpuDrawCallAudit implements RenderableSorter, AutoCloseable {
                     addOrigin(((Renderable) value).meshPart.mesh, "props", index);
                 }
             }
-            // The Tactical View's packed props (Chunk#keptProps), null until its first draw of the chunk.
-            Object kept = field(chunk, "keptProps", true);
-            if (kept != null) {
-                for (Object value : (Array<?>) kept) { addOrigin(((Renderable) value).meshPart.mesh, "kept-props", index); }
-            }
             for (Object prop : (Set<?>) field(chunk, "faded")) {
                 for (Mesh mesh : ((ModelInstance) field(prop, "instance")).model.meshes) {
                     addOrigin(mesh, "faded-props", index);

@@ -18,9 +18,7 @@ import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
 import com.badlogic.gdx.Gdx;
@@ -125,7 +123,7 @@ class GpuHelpMenuPlayersSmokeTest {
                   ? new GpuBoardSource.Bind(bind.command(), bind.keyCode(), bind.modifiers(), "F12")
                   : bind.command() == KeyCommandBind.FORCES_GRID
                   ? new GpuBoardSource.Bind(bind.command(), 0, 0, "") : bind);
-            GpuBoardSource.UiPreferences changed = GpuHudInputTest.with(preferences, Map.of("binds", binds));
+            GpuBoardSource.UiPreferences changed = GpuHudFixtures.with(preferences, Map.of("binds", binds));
             help.update(inputs(hud, frame(List.of(), GpuPlayers.Snapshot.EMPTY), changed, false));
             lines = lines(root);
             assertPair(lines, "F12", "KeyBinds.cmdNames.toggleKeybinds");
@@ -391,8 +389,8 @@ class GpuHelpMenuPlayersSmokeTest {
                 float density = Gdx.graphics.getBackBufferWidth() / (float) Gdx.graphics.getWidth();
                 hud.resize(Math.round(harness.width() / density), Math.round(harness.height() / density),
                       1 / density);
-                GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(1, GamePhase.MOVEMENT,
-                      false, Entity.NONE, 0), GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY,
+                GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(1, GamePhase.MOVEMENT,
+                      false, Entity.NONE, 0), GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY,
                       GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
                 GpuBoardSource.UiPreferences preferences = GpuBoardSource.UiPreferences.capture();
                 hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
@@ -505,7 +503,7 @@ class GpuHelpMenuPlayersSmokeTest {
      * {@code ran} records the action command of every item the menu bar runs and the map item.
      */
     static List<BoardScene.Command> menuBar(GpuBoardFixture fixture, List<String> ran) throws Exception {
-        return onSwing(() -> {
+        return GpuTestSupport.onSwing(() -> {
             CommonMenuBar menus = CommonMenuBar.getMenuBarForGame();
             menus.setPhase(GamePhase.MOVEMENT);
             menus.addActionListener(event -> ran.add(event.getActionCommand()));
@@ -684,11 +682,5 @@ class GpuHelpMenuPlayersSmokeTest {
 
     private static String players() {
         return Messages.getString("GpuBoard.hud.players.title");
-    }
-
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 }

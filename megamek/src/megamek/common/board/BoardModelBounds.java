@@ -48,6 +48,7 @@ public final class BoardModelBounds {
     /** The model's bounds (min x, y, z, max x, y, z), read once per file; null when it is missing or unreadable. */
     public static float[] bounds(String asset) {
         if (BoardFlag.ASSET.equals(asset)) { return new float[] { 0, 0, 0, BoardFlag.WIDTH, 0, BoardFlag.HEIGHT }; }
+        if (BoardBillboard.ASSET.equals(asset)) { return BoardBillboard.DEFAULT.bounds(); }
         File file = file(new File(Configuration.dataDir(), "models/board"), asset).getAbsoluteFile();
         float[] bounds = BOUNDS.computeIfAbsent(file, BoardModelBounds::read);
         return bounds == NONE ? null : bounds;
@@ -59,7 +60,7 @@ public final class BoardModelBounds {
      * board units at hex scale 1. Null when the model's bounds are unknown.
      */
     public static List<ConcreteFit.Point> footprint(Coords at, BoardDecoration object) {
-        float[] bounds = bounds(object.asset());
+        float[] bounds = BoardBillboard.ASSET.equals(object.asset()) ? object.billboard().bounds() : bounds(object.asset());
         if (bounds == null) { return null; }
         double x = HexTile.centerX(at, HexTile.MODEL_WIDTH) + object.x() * HexTile.MODEL_WIDTH;
         double y = HexTile.centerY(at, HexTile.HEIGHT) + object.y() * HexTile.HEIGHT;

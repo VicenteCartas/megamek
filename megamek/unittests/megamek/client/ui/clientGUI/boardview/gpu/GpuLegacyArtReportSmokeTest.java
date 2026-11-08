@@ -555,7 +555,7 @@ class GpuLegacyArtReportSmokeTest {
     // ------------------------------------------------------------------------------------------------ drawing
 
     private static BoardScene scene(Board board) {
-        try { return GpuLegacyImportSmokeTest.scene(board); }
+        try { return BoardScenes.scene(board); }
         catch (Exception failure) { throw new AssertionError(failure); }
     }
 
@@ -640,7 +640,7 @@ class GpuLegacyArtReportSmokeTest {
                         camera.center(shot.getValue().focus());
                         camera.zoom(shot.getValue().zoom() / camera.camera.zoom);
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(folder, shot.getKey() + ".png"));
                     }

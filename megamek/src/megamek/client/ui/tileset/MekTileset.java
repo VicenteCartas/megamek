@@ -110,7 +110,11 @@ public class MekTileset {
     private static final String AERO_STRING = "default_aero";
     private static final String SMALL_CRAFT_AERO_STRING = "default_small_craft_aero";
     private static final String SMALL_CRAFT_SPHERE_STRING = "default_small_craft_sphere";
+    /** The position of a multi-hex unit's whole image, its hexes' sections stitched: mekset.txt's "_whole" entries. */
+    public static final int WHOLE = -2;
     private static final String DROPSHIP_AERO_STRING = "default_dropship_aero";
+    private static final String DROPSHIP_AERO_STRING_WHOLE = "default_dropship_aero_whole";
+    private static final String DROPSHIP_SPHERE_STRING_WHOLE = "default_dropship_sphere_whole";
     private static final String DROPSHIP_AERO_STRING_0 = "default_dropship_aero_0";
     private static final String DROPSHIP_AERO_STRING_1 = "default_dropship_aero_1";
     private static final String DROPSHIP_AERO_STRING_2 = "default_dropship_aero_2";
@@ -175,6 +179,8 @@ public class MekTileset {
     private MekEntry default_small_craft_aero;
     private MekEntry default_small_craft_sphere;
     private MekEntry default_dropship_aero;
+    private MekEntry default_dropship_aero_whole;
+    private MekEntry default_dropship_sphere_whole;
     private MekEntry default_dropship_aero_0;
     private MekEntry default_dropship_aero_1;
     private MekEntry default_dropship_aero_2;
@@ -247,7 +253,7 @@ public class MekTileset {
     public MekEntry entryFor(Entity entity, int secondaryPos) {
         // Some entities (QuadVees, LAMs) use different sprites depending on mode.
         String mode = entity.getTilesetModeString().toUpperCase(Locale.ROOT);
-        String addendum = (secondaryPos == -1) ? "" : "_" + secondaryPos;
+        String addendum = (secondaryPos == -1) ? "" : (secondaryPos == WHOLE) ? "_WHOLE" : "_" + secondaryPos;
 
         // first, check for exact matches
         if (exact.containsKey(entity.getShortNameRaw().toUpperCase(Locale.ROOT) + mode + addendum)) {
@@ -437,6 +443,7 @@ public class MekTileset {
                         case 4 -> ds.isSpheroid() ? default_dropship_sphere_4 : default_dropship_aero_4;
                         case 5 -> ds.isSpheroid() ? default_dropship_sphere_5 : default_dropship_aero_5;
                         case 6 -> ds.isSpheroid() ? default_dropship_sphere_6 : default_dropship_aero_6;
+                        case WHOLE -> ds.isSpheroid() ? default_dropship_sphere_whole : default_dropship_aero_whole;
                         default -> ds.isSpheroid() ? default_dropship_sphere : default_dropship_aero;
                     };
                 }
@@ -564,6 +571,8 @@ public class MekTileset {
         default_dropship_aero_4 = exact.get(DROPSHIP_AERO_STRING_4.toUpperCase(Locale.ROOT));
         default_dropship_aero_5 = exact.get(DROPSHIP_AERO_STRING_5.toUpperCase(Locale.ROOT));
         default_dropship_aero_6 = exact.get(DROPSHIP_AERO_STRING_6.toUpperCase(Locale.ROOT));
+        default_dropship_aero_whole = exact.get(DROPSHIP_AERO_STRING_WHOLE.toUpperCase(Locale.ROOT));
+        default_dropship_sphere_whole = exact.get(DROPSHIP_SPHERE_STRING_WHOLE.toUpperCase(Locale.ROOT));
         default_small_craft_sphere = exact.get(SMALL_CRAFT_SPHERE_STRING.toUpperCase(Locale.ROOT));
         default_dropship_sphere = exact.get(DROPSHIP_SPHERE_STRING.toUpperCase(Locale.ROOT));
         default_dropship_sphere_0 = exact.get(DROPSHIP_SPHERE_STRING_0.toUpperCase(Locale.ROOT));

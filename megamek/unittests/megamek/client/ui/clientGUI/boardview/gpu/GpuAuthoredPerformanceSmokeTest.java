@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import javax.swing.SwingUtilities;
 
-import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import jdk.jfr.Configuration;
 import jdk.jfr.Recording;
 import megamek.client.ui.boardeditor.BoardEditorSession;
@@ -49,9 +49,7 @@ class GpuAuthoredPerformanceSmokeTest {
         var positions = List.of(new Coords(8, 6), new Coords(14, 18), new Coords(26, 6));
         Path output = Path.of("build/gpu-board-review/authored-buildings/placement-"
               + System.getProperty("megamek.gpu.authoredRun", "review") + ".jfr");
-        try (var recording = new Recording(Configuration.getConfiguration("profile"));
-              var previews = org.mockito.Mockito.mockStatic(GpuEditorTerrainPreviews.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try (var recording = new Recording(Configuration.getConfiguration("profile"))) {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 180_000_000_000L;
                 long warm, started, first, revision, previousFrame;
@@ -74,7 +72,7 @@ class GpuAuthoredPerformanceSmokeTest {
                         }
                         assertTrue(System.nanoTime() < deadline, "Authored placement stalled at " + index + "/" + phase);
                         if (phase == 2 && ready == 0) {
-                            var tasks = ((GpuTerrain) field(this, "terrain")).buildDetails().stream()
+                            var tasks = ((GpuTerrain) GpuTestSupport.field(this, "terrain")).buildDetails().stream()
                                   .map(status -> status.step().task()).distinct().sorted().collect(Collectors.joining(","));
                             if (!tasks.equals(stage)) {
                                 stage = tasks;
@@ -84,8 +82,8 @@ class GpuAuthoredPerformanceSmokeTest {
                         if (GpuBoardTestUi.loading(this) || GpuBoardTestUi.busy(this)) { return; }
                         if (warm == 0) {
                             // Palette category thumbnails are startup work, independent of the measured placement.
-                            var samples = field(field(field(this, "ui"), "editor"), "samples");
-                            if (field(samples, "current") != null || !((Map<?, ?>) field(samples, "queue")).isEmpty()) { return; }
+                            var samples = GpuTestSupport.field(GpuTestSupport.field(GpuTestSupport.field(this, "ui"), "editor"), "samples");
+                            if (GpuTestSupport.field(samples, "current") != null || !((Map<?, ?>) GpuTestSupport.field(samples, "queue")).isEmpty()) { return; }
                         }
                         if (warm == 0) { warm = frames() + 60; return; }
                         if (frames() < warm) { return; }
@@ -97,9 +95,9 @@ class GpuAuthoredPerformanceSmokeTest {
                             source.editorHover(at, 0, 0, "ground");
                             started = System.nanoTime(); first = frames(); maximum = interval = 0; phase = 1;
                         } else if (phase == 1) {
-                            var preview = field(this, "editorPreview");
+                            var preview = GpuTestSupport.field(this, "editorPreview");
                             if (frames() < first + 15 || source.editorPreview().routes().isEmpty()
-                                  || field(preview, "comparing") != null || field(preview, "built") != source.editorPreview()) { return; }
+                                  || GpuTestSupport.field(preview, "comparing") != null || GpuTestSupport.field(preview, "built") != source.editorPreview()) { return; }
                             System.out.printf("AUTHORED preview asset=%s elapsed=%.1fms max-frame=%.1fms%n", assets.get(index), millis(started), maximum);
                             revision = source.editorState().revision(); first = frames(); maximum = interval = ready = 0;
                             started = System.nanoTime(); previousFrame = 0; phase = 2;
@@ -107,7 +105,7 @@ class GpuAuthoredPerformanceSmokeTest {
                             source.editorPointer(at, 0, 0, false, source.takeFrame().boardGeneration()); source.endEditorStroke();
                         } else {
                             if (source.editorState().revision() == revision) { return; }
-                            var installed = (BoardScene) field(field(this, "terrain"), "coverScene");
+                            var installed = (BoardScene) GpuTestSupport.field(GpuTestSupport.field(this, "terrain"), "coverScene");
                             if (installed == null || installed.tiles().stream().flatMap(t -> t.features().stream())
                                   .noneMatch(f -> assets.get(index).equals(f.asset()) && GpuAuthoredBuilding.supports(f))) { return; }
                             if (ready == 0) { ready = millis(started); timing.end(); timing.commit(); }
@@ -127,14 +125,6 @@ class GpuAuthoredPerformanceSmokeTest {
             }
         } finally { SwingUtilities.invokeAndWait(source::close); }
         if (failure.get() != null) { throw new AssertionError("Native authored placement timing", failure.get()); }
-    }
-
-    private static Object field(Object object, String name) throws Exception {
-        for (Class<?> type = object.getClass(); type != null; type = type.getSuperclass()) {
-            try { var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(object); }
-            catch (NoSuchFieldException ignored) { /* Inspect the view's superclass. */ }
-        }
-        throw new NoSuchFieldException(name);
     }
 
     @Test void timesPaintHoverPublication() throws Exception {

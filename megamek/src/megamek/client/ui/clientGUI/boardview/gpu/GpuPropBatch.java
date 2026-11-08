@@ -163,7 +163,9 @@ final class GpuPropBatch implements Disposable {
                 attributes = mesh.getVertexAttributes();
                 material = null;
             }
-            if (material == null || !material.same(value.material, true)) {
+            // Level tops keep their own program, though their attributes are the same (GpuFamilyPrograms.flat).
+            if (material == null || !material.same(value.material, true)
+                  || GpuFamilyPrograms.isFlat(material) != GpuFamilyPrograms.isFlat(value.material)) {
                 combined = new Renderable();
                 combined.material = material = value.material;
                 combined.meshPart.primitiveType = GL20.GL_TRIANGLES;

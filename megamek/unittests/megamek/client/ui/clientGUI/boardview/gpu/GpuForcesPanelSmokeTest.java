@@ -88,7 +88,7 @@ class GpuForcesPanelSmokeTest {
             state.history.advance(0, ignored -> true);
             state.update(frame.status(), GpuUnitRecord.Snapshot.EMPTY, false);
             frame.status().units().stream().map(UnitStatus::icon).forEach(hud.sprites::add);
-            forces.update(new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences(),
+            forces.update(new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences(),
                   GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
 
@@ -534,7 +534,7 @@ class GpuForcesPanelSmokeTest {
     /** A frame whose scene carries the phase commands and whose panels carry the fire orders. */
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire,
           GpuReportLog.Snapshot reports, List<BoardScene.Command> commands) {
-        return frame(status, reports, commands, GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire,
+        return frame(status, reports, commands, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 

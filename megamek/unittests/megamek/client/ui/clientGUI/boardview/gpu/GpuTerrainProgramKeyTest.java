@@ -18,10 +18,10 @@ import org.junit.jupiter.api.Test;
 class GpuTerrainProgramKeyTest {
     @Test
     void boardsWithAndWithoutBiomesNeverShareAProgram() {
-        var dry = BoardSurfaceBlendTest.scene(coords -> BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0));
-        var marsh = BoardSurfaceBlendTest.scene(coords -> coords.getX() < 4
-              ? BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0)
-              : BoardBiomeTest.tile(coords, BoardScene.Biome.MARSH, 0));
+        var dry = BoardScenes.scene(coords -> BoardScenes.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0));
+        var marsh = BoardScenes.scene(coords -> coords.getX() < 4
+              ? BoardScenes.tile(coords, BoardScene.Surface.DIRT, 0, 0, 0)
+              : BoardScenes.tile(coords, BoardScene.Biome.MARSH, 0));
         assertFalse(GpuBiomeSurface.active(dry));
         assertTrue(GpuBiomeSurface.active(marsh));
 

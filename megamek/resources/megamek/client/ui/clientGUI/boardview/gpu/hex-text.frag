@@ -40,7 +40,7 @@ vec4 glyph() {
 void main() {
     fragColor = v_color * glyph();
     if (v_ink >= 0.0) { fragColor.rgb = vec3(v_ink); }
-    if (u_topView != 0 && v_surface.y == 0.0) {
+    if (u_topView != 0) {
         DEPTH = 0.0;
         return;
     }

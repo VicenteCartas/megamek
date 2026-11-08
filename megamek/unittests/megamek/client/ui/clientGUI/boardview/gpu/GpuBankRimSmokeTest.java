@@ -39,10 +39,10 @@ class GpuBankRimSmokeTest {
 
     @Test
     void capturesGrassyBankRims() throws Exception {
-        var scenes = new BoardScene[] { GpuDepthPrepassBaselineSmokeTest.scene(
+        var scenes = new BoardScene[] { GpuCalibrationScenes.scene(
               new File("data/boards/AGoAC Maps/16x17 Grassland 2.board")),
-              GpuDepthPrepassBaselineSmokeTest.scene(new File("data/boards/AGoAC Maps/16x17 Grassland 3.board")) };
-        var output = new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT,
+              GpuCalibrationScenes.scene(new File("data/boards/AGoAC Maps/16x17 Grassland 3.board")) };
+        var output = new File(GpuCalibrationScenes.OUTPUT,
               "bank-rim/" + System.getProperty("megamek.gpu.bankRimLabel", "capture"));
         assertTrue(output.isDirectory() || output.mkdirs());
         var failure = new AtomicReference<Throwable>();
@@ -62,7 +62,7 @@ class GpuBankRimSmokeTest {
                         if (scene != built) {
                             if (terrain != null) { terrain.dispose(); }
                             terrain = new GpuTerrain();
-                            GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, new BoardCamera(), scene);
+                            GpuCalibrationScenes.prepare(terrain, frame, new BoardCamera(), scene);
                             built = scene;
                         }
                         Coords upper = bank.upper(), lower = bank.lower();

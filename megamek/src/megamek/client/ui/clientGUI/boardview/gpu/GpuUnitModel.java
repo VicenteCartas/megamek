@@ -165,6 +165,11 @@ final class GpuUnitModel implements Disposable {
         return new GpuUnitModel(MeepleVisual.build(pixels, region));
     }
 
+    /** The Tactical View's token: the unit's flat icon. */
+    static GpuUnitModel icon(BoardScene.Pixels pixels, TextureRegion region) {
+        return new GpuUnitModel(MeepleVisual.icon(pixels, region));
+    }
+
     boolean meeple() { return MeepleVisual.isMeeple(instance); }
 
     /** @return {@code true} if the upper body can turn on its own, so a torso twist leaves the legs where they are */

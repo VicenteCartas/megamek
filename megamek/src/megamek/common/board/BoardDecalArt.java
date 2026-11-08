@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +55,16 @@ public final class BoardDecalArt {
     /** The image of decal {@code id} by path convention; it need not exist. */
     public static File image(String id) {
         return new File(Configuration.dataDir(), "models/board/decals/" + id.substring(id.indexOf('/') + 1) + ".png");
+    }
+
+    /**
+     * The decal ids of the PNG files in one folder of decal art, in name order; {@code folder} is their id prefix, as
+     * {@code decal/billboards/3_1/}.
+     */
+    public static List<String> folder(String folder) {
+        File[] files = image(folder + "-").getParentFile().listFiles((directory, name) -> name.endsWith(".png"));
+        if (files == null) { return List.of(); }
+        return Arrays.stream(files).map(file -> folder + file.getName().replaceFirst("\\.png$", "")).sorted().toList();
     }
 
     public static Footprint footprint(String id) { return Holder.TABLE.footprints().getOrDefault(id, HEX); }

@@ -93,6 +93,15 @@ class WayLayerEditorTest {
         assertFalse(session.board().getHex(CENTRE).containsTerrain(Terrains.BRIDGE_ROAD));
     }
 
+    @Test void aBridgeDrawnFromARoadJoinsIt() {
+        var session = new BoardEditorSession();
+        session.board().setHex(CENTRE, new Hex(0, "water:2", ""));
+        road(session); stroke(session, CENTRE.translated(0));
+        send(session, Action.CHOOSE_BRUSH, "bridge", "bridge/built");
+        stroke(session, CENTRE.translated(0), CENTRE, CENTRE.translated(3));
+        assertTrue(session.board().getHex(CENTRE.translated(0)).containsTerrainExit(Terrains.ROAD, 3));
+    }
+
     @Test void aWayPaintedHalfwayAcrossAnExplicitBridgeDoesNotFillItsSpan() {
         var session = new BoardEditorSession();
         for (int y = 2; y <= 6; y++) { session.board().setHex(new Coords(4, y), bridge(0, 1, 9)); }
@@ -361,6 +370,18 @@ class WayLayerEditorTest {
 
     private static Hex bridge(int ground, int height, int exits) {
         return new Hex(ground, "bridge:1:" + exits + ";bridge_cf:40;bridge_elev:" + height, "");
+    }
+
+    @Test void aBridgeCardsHeightCountsFromTheGroundUnderWater() {
+        var session = new BoardEditorSession();
+        for (Coords at : List.of(CENTRE.translated(0), CENTRE, CENTRE.translated(3))) {
+            session.board().setHex(at, new Hex(0, "water:2", ""));
+        }
+        send(session, Action.CHOOSE_BRUSH, "bridge", "bridge/built");
+        height(session, false, 1);
+        stroke(session, CENTRE.translated(0), CENTRE, CENTRE.translated(3));
+        assertEquals(-1, BridgeSpan.deck(session.board().getHex(CENTRE)), "One level over a floor at -2, under the surface at 0");
+        assertTrue(session.board().getHex(CENTRE).isValid(null));
     }
 
     private static void road(BoardEditorSession session) { send(session, Action.CHOOSE_BRUSH, "road", "1"); }

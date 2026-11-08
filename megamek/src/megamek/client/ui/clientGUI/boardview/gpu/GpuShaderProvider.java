@@ -24,6 +24,11 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
     private final String name;
     private final Supplier<ShaderProvider> factory;
     private final List<Handle> handles = new ArrayList<>();
+    /**
+     * The handles of an exclusive provider, last chosen first; else {@link #handles}, whose order chooses among programs
+     * that can draw the same renderable. A board's thousand draws asking each of its many programs took a fifth of a frame.
+     */
+    private final List<Handle> scan;
     private GpuShaderManager.Captured<ShaderProvider> active;
     private ShaderProvider fallback;
     /** A draw whose program still links: it draws nothing and suits no other draw. Render thread only. */
@@ -38,7 +43,8 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
     };
     private static int unlinkedDraws;
 
-    GpuShaderProvider(GpuShaderManager session, String name, Supplier<ShaderProvider> factory) {
+    GpuShaderProvider(GpuShaderManager session, String name, Supplier<ShaderProvider> factory, boolean exclusive) {
+        scan = exclusive ? new ArrayList<>() : handles;
         this.session = session;
         this.name = name;
         this.factory = factory;
@@ -59,7 +65,13 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
     @Override
     public Shader getShader(Renderable renderable) {
         if (renderable.shader != null && renderable.shader.canRender(renderable)) { return renderable.shader; }
-        for (Handle handle : handles) { if (handle.canRender(renderable)) { return handle; } }
+        for (int i = 0; i < scan.size(); i++) {
+            Handle handle = scan.get(i);
+            if (handle.canRender(renderable)) {
+                if (i > 0 && scan != handles) { scan.add(0, scan.remove(i)); }
+                return handle;
+            }
+        }
         GpuGlsl.Preparation links = GpuGlsl.deferral();
         if (links != null && GpuGlsl.overBudget()) { unlinkedDraws++; return UNLINKED; }
         Shader[] created = new Shader[1];
@@ -84,6 +96,7 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
         } finally { renderable.shader = suggested; }
         var handle = new Handle(created[0], renderable);
         handles.add(handle);
+        if (scan != handles) { scan.add(0, handle); }
         if (created[0] instanceof BaseShader base) { session.configureInputs(variantName(handles.size()), base.program); }
         return handle;
     }
@@ -147,6 +160,7 @@ final class GpuShaderProvider implements ShaderProvider, GpuShaderManager.Target
         if (fallback != null) { fallback.dispose(); }
         handles.forEach(handle -> { handle.shader = null; handle.sample.meshPart.mesh.dispose(); });
         handles.clear();
+        scan.clear();
     }
 
     private static VertexAttribute[] attributes(VertexAttributes attributes) {

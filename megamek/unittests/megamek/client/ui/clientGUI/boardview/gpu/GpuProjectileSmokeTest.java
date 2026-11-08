@@ -141,8 +141,8 @@ class GpuProjectileSmokeTest {
 
     private static void verifyBallisticImpacts(FrameBuffer buffer) throws java.io.IOException {
         var effects = new GpuAttackEffects();
-        var attacker = UnitPlaybackTest.unit(1, 2);
-        var victim = UnitPlaybackTest.unit(2, 0);
+        var attacker = UnitPlaybackFixture.unit(1, 2);
+        var victim = UnitPlaybackFixture.unit(2, 0);
         var camera = new OrthographicCamera(32, 32);
         var center = UnitAttack.center(null, victim.location(), new Vector3());
         camera.position.set(center).add(14, -22, 28);
@@ -304,8 +304,8 @@ class GpuProjectileSmokeTest {
     }
 
     private static UnitAttack impactAttack(String weapon, ResolvedAttack.Shot profile, boolean infantry) {
-        var attacker = UnitPlaybackTest.unit(1, 2);
-        var victim = UnitPlaybackTest.unit(2, 0);
+        var attacker = UnitPlaybackFixture.unit(1, 2);
+        var victim = UnitPlaybackFixture.unit(2, 0);
         var result = new ResolvedAttack(new UUID(34, 91), ResolvedAttack.Kind.SHOT,
               new UnitLocation(attacker.id(), attacker.location().coords(), 0, 0, 0),
               new UnitLocation(victim.id(), victim.location().coords(), 0, 0, 0), Targetable.TYPE_ENTITY,

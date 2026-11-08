@@ -32,7 +32,7 @@ class GpuRubbleFitSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.8f, true);
+                    BoardScenes.tune(.8f, true);
                     var camera = new BoardCamera();
                     camera.resize(1280, 960);
                     for (int exits : new int[] { 0, 1, 63 }) {

@@ -19,7 +19,12 @@ import java.util.Set;
  */
 public record HexAppearance(String variant, String asset, String material, Double strength,
       BoardDecoration.Colours colours, Integer rotation, Integer tracks, Integer beside,
-      TrafficControl trafficControl, String uid, Double padding) implements Serializable {
+      TrafficControl trafficControl, String uid, Double padding, Integer separated) implements Serializable {
+    /** An appearance with no separated sides. */
+    public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
+          Integer rotation, Integer tracks, Integer beside, TrafficControl trafficControl, String uid, Double padding) {
+        this(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding, null);
+    }
     /** An appearance with no extra inset from the hex border. */
     public HexAppearance(String variant, String asset, String material, Double strength, BoardDecoration.Colours colours,
           Integer rotation, Integer tracks, Integer beside, TrafficControl trafficControl, String uid) {
@@ -36,7 +41,8 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         return new HexAppearance(variant, asset, material, strength, colours, rotation, tracks, beside, trafficControl, uid, padding);
     }
     public static final Set<String> OWNERS = Set.of("ground", "road", "building", "pavement", "fuelTank",
-          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile");
+          "vegetation", "rough", "bridge", "bridgeRoad", "rail", "bridgeRail", "scorch", "footprint", "kitVariant", "buildingProfile",
+          "water");
     /** Per-hex upper storeys step back above shorter neighbours; absent means keep the ground footprint. */
     public static final HexAppearance STEPPED_BUILDING = new HexAppearance("building/stepped", null, null, null);
 
@@ -162,6 +168,28 @@ public record HexAppearance(String variant, String asset, String material, Doubl
 
     /** The appearance that stores {@code footprint}; null for {@link Footprint#ANGLED}, which is stored as none. */
     public static HexAppearance of(Footprint footprint) { return footprint == Footprint.SQUARE ? SQUARE : null; }
+
+    /**
+     * The sides of a hex's {@code owner}, {@code "water"} or {@code "pavement"}, that the author parted from the same
+     * terrain beside them, as a mask of directions clockwise from north; none stored means every side joins. Cosmetic,
+     * like the pavement {@link Edges}: the 3D views draw a strip of ground along them; rules and the 2D views ignore it.
+     * A legacy file's exits on these terrains are not this: they choose 2D tiles.
+     */
+    public static int separated(Map<String, HexAppearance> appearance, String owner) {
+        HexAppearance stored = appearance.get(owner);
+        return stored == null || stored.separated() == null ? 0 : stored.separated();
+    }
+
+    /** {@code current} with {@code sides} separated (see {@link #separated}); null when nothing is left to store. */
+    public static HexAppearance withSeparated(HexAppearance current, int sides) {
+        Integer value = sides == 0 ? null : sides;
+        if (current == null) {
+            return value == null ? null : new HexAppearance(null, null, null, null, null, null, null, null, null, null, null, value);
+        }
+        if (value == null && current.variant() == null) { return null; }
+        return new HexAppearance(current.variant(), current.asset(), current.material(), current.strength(), current.colours(),
+              current.rotation(), current.tracks(), current.beside(), current.trafficControl(), current.uid(), current.padding(), value);
+    }
 
     /**
      * A generated building kit's variant (owner {@code "kitVariant"}): the name of one of the variants its JSON spec lists
@@ -319,8 +347,12 @@ public record HexAppearance(String variant, String asset, String material, Doubl
         colours = colours == null ? BoardDecoration.Colours.NONE : colours;
         rotation = rotation != null && rotation == 0 ? null : rotation;
         padding = padding == null || padding <= 0 ? null : Math.min(80, padding);
+        separated = separated != null && separated == 0 ? null : separated;
+        if (separated != null && (separated < 0 || separated > 63)) {
+            throw new IllegalArgumentException("Separated sides are a mask of the six directions");
+        }
         if (variant == null && asset == null && material == null && trafficControl == null && rotation == null && padding == null
-              && colours.slots().isEmpty()) {
+              && separated == null && colours.slots().isEmpty()) {
             throw new IllegalArgumentException("An appearance needs a variant, asset, material, rotation or traffic controls");
         }
         for (String key : new String[] { variant, asset, material }) {
@@ -354,7 +386,8 @@ public record HexAppearance(String variant, String asset, String material, Doubl
               || rotation != null && !owner.equals("building")
                     && (!owner.equals("vegetation") || variant == null || rotation % 30 != 0)
               || trafficControl != null && !owner.equals("road") && !owner.equals("bridgeRoad")
-              || (tracks != null || beside != null) && !owner.equals("rail") && !owner.equals("bridgeRail")) {
+              || (tracks != null || beside != null) && !owner.equals("rail") && !owner.equals("bridgeRail")
+              || separated != null && !owner.equals("water") && !owner.equals("pavement")) {
             throw new IllegalArgumentException("Appearance fields do not belong to " + owner);
         }
     }

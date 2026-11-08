@@ -84,7 +84,7 @@ class GpuWaterShaderSmokeTest {
                 camera.center(center);
                 frame.prepare(terrain, camera, scene);
                 terrain.update(scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.setWaterEffects(true);
                 // The independent physical current is sampled before byte packing, not reconstructed by a test decoder.
                 var pools = new GpuWaterShader.Pools(scene, BoardFlow.calculate(scene), Map.of());

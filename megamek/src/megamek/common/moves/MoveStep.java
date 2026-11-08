@@ -4179,9 +4179,9 @@ public class MoveStep implements Serializable {
         // A unit at bridge deck elevation is standing on the bridge, not in the terrain below it, so the
         // restrictions of the underlying terrain do not apply (TO:AR p.115). This also covers bridges without
         // approach roads, such as those raised by Bridge-Building Engineers (TO:AUE p.152), where the step onto the
-        // bridge does not qualify as a pavement step.
+        // bridge does not qualify as a pavement step. A vessel is never on a deck: one at its elevation stops it (TW p.62).
         if (entity.isLocationProhibited(dest, boardId, getElevation())
-            && !isOnBridgeDeck(game.getBoard(boardId).getHex(dest), getElevation())
+            && (nMove.isMarine() || !isOnBridgeDeck(game.getBoard(boardId).getHex(dest), getElevation()))
             // Units in prohibited terran should still be able to unload/disconnect
             &&
             (type != MoveStepType.UNLOAD) &&

@@ -2,13 +2,9 @@
 // Finite emitters: lava, burning hexes and fungi of the installed board, and each frame's fireballs and weapon fire.
 // They approximate area illumination, not obstacle shadows. GpuLavaLighting bins them on the board plane; a pixel
 // evaluates only the emitters listed for its grid cell. Beams and flamer streams are segments, the rest points.
-uniform sampler2D u_lavaLights; // RGBA32F, 1024 texels a row: per cell (first entry texel, end texel), then per point
-                                // world position + emitted power, linear emission RGB + source size; a segment
-                                // negates its power and adds its far end + its tube radius in sizes, and a spare texel
+// LAVA_LIGHTS
 uniform vec3 u_lavaGrid;        // world XY of the grid's corner, cells per world unit
 uniform ivec2 u_lavaCells;      // grid columns and rows; zero without emitters
-
-ivec2 lavaTexel(int index) { return ivec2(index & 1023, index >> 10); }
 
 // An emitter's strength at a receiver distanceSquared from its centre or axis, in units of its size: it ends at two
 // sizes, and falls off over the squared distance to its emitting surface.

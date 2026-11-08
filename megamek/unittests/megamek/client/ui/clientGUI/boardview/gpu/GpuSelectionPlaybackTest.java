@@ -14,8 +14,8 @@ import org.junit.jupiter.api.Test;
 class GpuSelectionPlaybackTest {
     @Test
     void selectionRingTravelsWithTheModelInsteadOfAppearingAtItsDestination() {
-        var start = UnitPlaybackTest.unit(1, 0);
-        var end = UnitPlaybackTest.unit(1, 4);
+        var start = UnitPlaybackFixture.unit(1, 0);
+        var end = UnitPlaybackFixture.unit(1, 4);
         var motion = new UnitMotion(start.location());
         motion.append(List.of(start.location(), end.location()), EntityMovementType.MOVE_WALK, 0);
         motion.advance(motion.remainingSeconds() * .4, 1);

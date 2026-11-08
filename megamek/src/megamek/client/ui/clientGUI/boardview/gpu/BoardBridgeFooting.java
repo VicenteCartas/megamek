@@ -423,7 +423,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
             if (curve != null) { bankCurves.put(d, curve); }
             // A bare bank gets a loose apron (GpuRoads.deckPatches), never over pavement.
             if (bare && next.surface() != BoardScene.Surface.CONCRETE) { bareExits |= 1 << d; }
-            if (next.elevation() < level) {
+            if (BoardRoadGrade.ground(next) < level) {
                 solidExits |= 1 << d;
                 lengths.add((half * .5f + block.size().y * scale) / scale);
                 var below = ground(scene, tile, lod, surfaces, columns);
@@ -457,7 +457,7 @@ record BoardBridgeFooting(BoardBridge.Shape shape, List<Float> lengths, int bare
                     stops[i] = MathUtils.clamp(clear - length, 0, reach);
                 }
             }
-            boolean ramp = !bare && next.elevation() != level;
+            boolean ramp = !bare && BoardRoadGrade.ground(next) != level;
             boolean concreteGrade = !bare && bank.ramps != 0 && next.surface() == BoardScene.Surface.CONCRETE;
             reach = Math.max(stops[0], stops[1]) + length;
             lengths.add(reach / scale);

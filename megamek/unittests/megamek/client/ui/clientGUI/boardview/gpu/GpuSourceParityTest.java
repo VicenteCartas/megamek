@@ -83,7 +83,7 @@ class GpuSourceParityTest {
             Hex hex = game.getHex(tile.coords());
             assertTrue(tile.roadExits() == 0 || hex.containsTerrain(Terrains.ROAD), tile.coords() + ": no road without ROAD");
             for (var feature : tile.features()) {
-                assertTrue(feature.kind() != BoardScene.FeatureKind.SCENERY || rows.contains(feature.asset()),
+                assertTrue(feature.kind() != BoardScene.FeatureKind.SCENERY || rows.contains(feature.asset().replaceFirst("-b$", "")),
                       tile.coords() + ": only terrain-owned art draws as rows, not " + feature.asset());
             }
             if (hex.containsTerrain(Terrains.BRIDGE)) {

@@ -6,9 +6,12 @@
 // KEEP IN SYNC with RigidGlb#recolour (the CPU copies of layout rows, truss decks and editor previews): the same packed
 // 0xRRGGBB decode (channel / 255), the same negative = own colour rule and shade * linear(replacement).
 // RigidGlbTest compares the two per vertex; GpuSceneryColourSmokeTest checks the drawn colours of placed objects.
+// v_slotGlow is what a replacement does to the vertex's colour, 1 without one: model.frag tints the vertex's glow by it.
+// The CPU copies keep the model's own glow.
 #ifdef colourSlotsFlag
 in vec4 a_colourSlot;
 uniform vec3 u_slotColours[4];
+out vec3 v_slotGlow;
 
 // Ordinary draws decode once during upload; instanced draws use the packed overload below.
 vec3 slotColour(vec3 colour, vec4 slot, vec3 colours[4]) {

@@ -1,10 +1,10 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared volcanic material evaluation for liquid sheets and terrain-boundary palettes.
-// One set's sRGB colour array and raw normal/surface/heat array (GpuAssets.magma).
-uniform sampler2DArray u_magmaColor, u_magmaMaps;
-const float MAGMA_NORMAL = 1.0;
-const float MAGMA_SURFACE = 2.0; // height, roughness, AO, relief UV / .1
-const float MAGMA_HEAT = 3.0; // molten: linear emission RGB, original heat A; crust: heat R, crack glow A
+// FULL_SIZE_MAPS
+uniform vec4 u_magmaLayers; // this set's layers (GpuAssets.magmaLayers): colour, then normal, surface and heat
+#define MAGMA_NORMAL u_magmaLayers.y
+#define MAGMA_SURFACE u_magmaLayers.z // height, roughness, AO, relief UV / .1
+#define MAGMA_HEAT u_magmaLayers.w // molten: linear emission RGB, original heat A; crust: heat R, crack glow A
 #ifdef magmaEmissionMapFlag
 uniform float u_magmaEmissionScale;
 #endif
@@ -31,7 +31,7 @@ float magmaRepeatMetres();
 // The metres one repeat of the actual texture covers.
 float magmaTileMetres() { return magmaRepeatMetres() * u_magmaCoverage; }
 
-vec4 magmaTexel(float map, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_magmaMaps, vec3(uv, map - 1.0), dx, dy); }
+vec4 magmaTexel(float layer, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(u_fullSizeData, vec3(uv, layer), dx, dy); }
 
 vec4 magmaField(vec2 world) {
     return texture(u_magmaField, world * u_magmaFieldMap.xy + u_magmaFieldMap.zw);
@@ -71,7 +71,7 @@ Volcanic magmaSample(vec2 uv, vec2 dx, vec2 dy, vec3 eye, bool relief) {
     vec2 coverage = heat.ra;
     vec3 emission = vec3(0.0);
 #endif
-    return Volcanic(textureGrad(u_magmaColor, vec3(uv, 0.0), dx, dy).rgb, normal, surface, coverage, emission);
+    return Volcanic(textureGrad(u_fullSizeColor, vec3(uv, u_magmaLayers.x), dx, dy).rgb, normal, surface, coverage, emission);
 }
 
 Volcanic magmaMix(Volcanic a, Volcanic b, float weight) {

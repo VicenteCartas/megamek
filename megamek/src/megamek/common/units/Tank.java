@@ -785,6 +785,26 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
     }
 
     /**
+     * Whether the deck of a bridge in the hex lies within this vessel at the elevation. It passes under a deck that clears its
+     * height (TW p.62) and over one lower than its hull reaches. Its levels above and below the surface follow its weight
+     * (Airship and Large Vessel Template Table, TO:AUE p.57); at least its height as a unit, a level for a vehicle (TW p.99,
+     * getHeight() being one less).
+     * <p>Only custom units reach the heavier rows. Large Naval Vessels are otherwise not implemented: running aground needs
+     * damage, a beached state and tractor recovery (TO:AUE p.22), not a refusal to enter; multi-hex templates (TO:AUE p.22)
+     * need footprints through movement, line of sight and targeting.
+     */
+    protected boolean deckCutsVessel(Hex hex, int elevation) {
+        if (!hex.containsTerrain(Terrains.BRIDGE)) {
+            return false;
+        }
+        int deck = hex.terrainLevel(Terrains.BRIDGE_ELEV);
+        double tons = getWeight();
+        int above = Math.max(getHeight() + 1, (tons > 30000) ? 3 : (tons > 12000) ? 2 : 1);
+        int below = (tons > 30000) ? 3 : (tons > 6000) ? 2 : 1;
+        return (elevation + above > deck) && (elevation - below < deck);
+    }
+
+    /**
      * Tanks have all sorts of prohibited terrain.
      */
     @Override
@@ -899,21 +919,12 @@ public class Tank extends Entity implements Fortifiable, RubbleClearer {
                 return isHoverTerrainProhibited(hex);
             case NAVAL:
             case HYDROFOIL:
-                // Can only deploy under a bridge if there is sufficient clearance.
-                if (hex.containsTerrain(Terrains.BRIDGE) &&
-                      (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.getLevel())) {
-                    return true;
-                }
                 // Naval vessels never enter a TacOps rail hex (TO:AR p.32).
-                return (hex.terrainLevel(Terrains.WATER) <= 0) || hex.containsTerrain(Terrains.ICE)
-                      || (RailRoute.rules(game) && RailRoute.intact(hex));
+                return deckCutsVessel(hex, currElevation) || (hex.terrainLevel(Terrains.WATER) <= 0)
+                      || hex.containsTerrain(Terrains.ICE) || (RailRoute.rules(game) && RailRoute.intact(hex));
             case SUBMARINE:
-                // Submarines get extra clearance equal to the depth of water.
-                if (hex.containsTerrain(Terrains.BRIDGE) &&
-                      (getHeight() >= hex.terrainLevel(Terrains.BRIDGE_ELEV) - hex.floor())) {
-                    return true;
-                }
-                return (hex.terrainLevel(Terrains.WATER) <= 0) || (RailRoute.rules(game) && RailRoute.intact(hex));
+                return deckCutsVessel(hex, currElevation) || (hex.terrainLevel(Terrains.WATER) <= 0)
+                      || (RailRoute.rules(game) && RailRoute.intact(hex));
             case WIGE:
                 return isLocationProhibitedWiGE(hex, currElevation);
             default:

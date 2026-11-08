@@ -33,12 +33,12 @@ import org.junit.jupiter.api.Test;
 /** Generated bridge geometry meets the actual road triangles without using level height for its dimensions. */
 @Tag("on-demand")
 class GpuBridgeSmokeTest {
-    private static final Coords CENTER = BoardSurfaceBlendTest.CENTER;
+    private static final Coords CENTER = BoardScenes.CENTER;
 
     /** The shipped Canals bridge turns on both banks before its concrete approaches meet the straight streets. */
     @Test
     void canalsCurvedBridgeEntrancesRenderInBothGraphicsModes() throws Exception {
-        var scene = GpuRoadSourceTest.scene("Templates/Canals.board");
+        var scene = BoardScenes.installedScene("Templates/Canals.board");
         var entrances = List.of(new Coords(10, 11), new Coords(7, 12));
         assertEquals(17, BoardBridge.feature(scene.tile(entrances.get(0))).bridgeExits(), "1112 turns onto bank 1111");
         assertEquals(10, BoardBridge.feature(scene.tile(entrances.get(1))).bridgeExits(), "0813 turns onto bank 0814");
@@ -68,14 +68,14 @@ class GpuBridgeSmokeTest {
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
                             terrain.animate(0, List.of());
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             assertEquals(classic, terrain.columns());
                             frame.render(terrain, camera, scene);
                             String mode = classic ? "classic" : "enhanced";
                             GpuReviewFrame.save(new File(output, "canals-" + mode + "-overview.png"));
-                            // Remove neighbouring buildings from the close inspection without altering the
-                            // installed bridge, approach solids, road paint or picking geometry.
-                            terrain.setFluffHidden(true);
+                            // Remove the scatter from the close inspection without altering the installed bridge,
+                            // approach solids, road paint or picking geometry.
+                            terrain.setScatterHidden(true);
                             for (var at : entrances) {
                                 int direction = at.equals(entrances.getFirst()) ? 0 : 3;
                                 var bank = scene.tile(at.translated(direction));
@@ -87,7 +87,7 @@ class GpuBridgeSmokeTest {
                                     if (view >= 0) { camera.orbit(view - camera.azimuth(), 0); }
                                     camera.camera.zoom = .085f;
                                     camera.center(focus);
-                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    GpuReviewFrame.settle(terrain, null, scene, camera);
                                     frame.render(terrain, camera, scene);
                                     String angle = view < 0 ? "top" : "side-" + view;
                                     GpuReviewFrame.save(new File(output, "canals-" + mode + "-"
@@ -106,7 +106,7 @@ class GpuBridgeSmokeTest {
 
     @Test
     void koziceRaisedBridgeApproachesRenderWithoutHoles() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Strategoslevel3/32x17 (CDS) Kozice Valley Grain Mills.board");
+        var scene = BoardScenes.installedScene("unofficial/Strategoslevel3/32x17 (CDS) Kozice Valley Grain Mills.board");
         var at = new Coords(19, 8);
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "bridges");
         Files.createDirectories(output.toPath());
@@ -131,7 +131,7 @@ class GpuBridgeSmokeTest {
                     terrain.animate(0, List.of());
                     for (int azimuth : new int[] { 70, 250 }) {
                         camera.orbit(azimuth - camera.azimuth(), 0);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "kozice-bridge-" + azimuth + ".png"));
                     }
@@ -139,7 +139,7 @@ class GpuBridgeSmokeTest {
                     camera.camera.zoom = .075f;
                     for (int y : new int[] { 7, 9 }) {
                         camera.center(BoardGeometry.center(new Coords(19, y), 0).lerp(BoardGeometry.center(at, 0), .5f));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "kozice-ramp-" + (y + 1) + ".png"));
                         for (float t : new float[] { .35f, .65f }) {
@@ -161,7 +161,7 @@ class GpuBridgeSmokeTest {
 
     @Test
     void forestsEndBridgeMeetsTheRoadsOnBothBanks() throws Exception {
-        var scene = GpuRoadSourceTest.scene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
+        var scene = BoardScenes.installedScene("unofficial/Strategoslevel3/32x17 (CW) Forests End  - Road.board");
         var at = new Coords(8, 8);
         File output = new File(System.getProperty("megamek.gpu.screenshots"), "bridges");
         Files.createDirectories(output.toPath());
@@ -184,7 +184,7 @@ class GpuBridgeSmokeTest {
                         camera.setIsometric(oblique);
                         camera.camera.zoom = .16f;
                         camera.center(BoardGeometry.center(at, 0));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "forests-end-" + (oblique ? "oblique" : "top") + ".png"));
                         checkMarkings(scene, camera, at);
@@ -269,10 +269,10 @@ class GpuBridgeSmokeTest {
                           List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL, BoardRoad.Kind.DIRT),
                           List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL))) {
                         var deck = kinds.getLast();
-                        var scene = BoardBridgeMaterialsTest.straight(CENTER, 2, 1, kinds.get(0), kinds.get(1), deck);
+                        var scene = BridgeScenes.straight(CENTER, 2, 1, kinds.get(0), kinds.get(1), deck);
                         terrain.update(scene);
                         terrain.animate(0, List.of());
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         String name = kinds.stream().distinct().map(kind -> kind.name().toLowerCase(java.util.Locale.ROOT))
                               .collect(java.util.stream.Collectors.joining("-"));
@@ -482,7 +482,7 @@ class GpuBridgeSmokeTest {
     void piersReachTheDrawnDeckOnEveryDeckKind() throws Exception {
         Board all = piers();
         Map<String, BoardScene> scenes = new java.util.LinkedHashMap<>();
-        for (Case shown : CASES) { scenes.put(shown.label(), GpuLegacyImportSmokeTest.scene(only(all, shown))); }
+        for (Case shown : CASES) { scenes.put(shown.label(), BoardScenes.scene(only(all, shown))); }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
         Files.createDirectories(output.toPath());
         AtomicReference<Throwable> failure = new AtomicReference<>();
@@ -517,7 +517,7 @@ class GpuBridgeSmokeTest {
                                     camera.camera.zoom = .14f;
                                     // The tall deck is six levels up: its side view frames the caps under the slab.
                                     camera.center(BoardGeometry.center(shown.view(), side && shown.label().equals("tall") ? 5 : 1));
-                                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                    GpuReviewFrame.settle(terrain, null, scene, camera);
                                     frame.render(terrain, camera, scene);
                                     GpuReviewFrame.save(new File(output, "piers-" + shown.label() + "-lh" + levelHeight
                                           + (side ? "-side" : "-iso") + ".png"));
@@ -575,7 +575,7 @@ class GpuBridgeSmokeTest {
     void trussSpansDrawOneJointOrEndPerExitInTheirColour() throws Exception {
         Board all = truss(piers());
         Map<String, BoardScene> scenes = new java.util.LinkedHashMap<>();
-        for (Case shown : CASES) { scenes.put(shown.label(), GpuLegacyImportSmokeTest.scene(only(all, shown))); }
+        for (Case shown : CASES) { scenes.put(shown.label(), BoardScenes.scene(only(all, shown))); }
         Files.createDirectories(TRUSS.toPath());
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -604,7 +604,7 @@ class GpuBridgeSmokeTest {
                                 if (side) { camera.orbit(45, 78 - camera.tilt()); }
                                 camera.camera.zoom = .14f;
                                 camera.center(BoardGeometry.center(shown.view(), side && shown.label().equals("tall") ? 5 : 1));
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(TRUSS, "truss-" + shown.label() + (side ? "-side" : "-iso") + ".png"));
                             }
@@ -687,7 +687,7 @@ class GpuBridgeSmokeTest {
                     camera.center(BoardGeometry.center(deck, 2));
                     camera.zoom(.3f / camera.camera.zoom);
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(TRUSS, "truss-trainjob-game.png"));
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -719,7 +719,7 @@ class GpuBridgeSmokeTest {
                 assertEquals(BoardBridge.connected(tile, scene.tile(at.translated(d)), d), (deck.joints() & (1 << d)) != 0,
                       name + ": a joint toward a joined deck only, " + d);
             }
-            var shape = (BoardBridge.Shape) field(tileMesh(terrain, at), "bridgeShape");
+            var shape = (BoardBridge.Shape) GpuTestSupport.field(tileMesh(terrain, at), "bridgeShape");
             assertNotNull(shape, name + ": a flat or sloped truss has one installed generated shape");
             var steel = shape.facets().stream().filter(f -> f.part() == BoardBridge.Part.STEEL).toList();
             assertFalse(steel.isEmpty(), name + ": a truss draws its steel");
@@ -758,8 +758,8 @@ class GpuBridgeSmokeTest {
     }
 
     private static Object tileMesh(GpuTerrain terrain, Coords at) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            Object mesh = ((Map<?, ?>) field(chunk, "tileMeshes")).get(at);
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            Object mesh = ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).get(at);
             if (mesh != null) { return mesh; }
         }
         throw new AssertionError("No tile mesh at " + at);
@@ -767,11 +767,11 @@ class GpuBridgeSmokeTest {
 
     /** The decal on the flat truss deck lies on its road surface, at the deck plane, never on the rails' or chords' tops. */
     private static void checkDeckPaint(BoardScene scene, GpuTerrain terrain) throws Exception {
-        var painted = (List<?>) field(tileMesh(terrain, DECAL), "paint");
+        var painted = (List<?>) GpuTestSupport.field(tileMesh(terrain, DECAL), "paint");
         assertEquals(1, painted.size(), "The deck carries its decal");
         float deck = BoardBridge.deckZ(scene.tile(DECAL));
         float highest = Float.NEGATIVE_INFINITY;
-        for (var face : (List<?>) field(painted.getFirst(), "faces")) {
+        for (var face : (List<?>) GpuTestSupport.field(painted.getFirst(), "faces")) {
             var surface = (BoardSurface.Face) face;
             highest = Math.max(highest, Math.max(surface.a().z, Math.max(surface.b().z, surface.c().z)));
         }
@@ -804,7 +804,7 @@ class GpuBridgeSmokeTest {
             javax.swing.SwingUtilities.invokeAndWait(() -> BoardSceneryLayouts.convert(imported));
             assertEquals(example.built(), megamek.common.board.HexAppearance.bridgeBuilt(
                   imported.getHex(example.coords()).getAppearance()), example.reason() + ": the type import stores");
-            scenes.put(example, List.of(GpuLegacyImportSmokeTest.scene(imported)));
+            scenes.put(example, List.of(BoardScenes.scene(imported)));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
         Files.createDirectories(output.toPath());
@@ -837,7 +837,7 @@ class GpuBridgeSmokeTest {
                                 camera.camera.zoom = .3f;
                                 camera.center(BoardGeometry.center(example.coords(),
                                       tile.elevation() + BoardBridge.feature(tile).elevation()));
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(output, name + ".png"));
                             } finally { terrain.dispose(); }
@@ -880,11 +880,11 @@ class GpuBridgeSmokeTest {
         float s = BoardGeometry.hexScale();
         Map<Coords, BoardBridge.Shape> shapes = new java.util.HashMap<>();
         Map<Coords, TerrainLod> lods = new java.util.HashMap<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (var entry : ((Map<?, ?>) field(chunk, "tileMeshes")).entrySet()) {
-                var shape = (BoardBridge.Shape) field(entry.getValue(), "bridgeShape");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (var entry : ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).entrySet()) {
+                var shape = (BoardBridge.Shape) GpuTestSupport.field(entry.getValue(), "bridgeShape");
                 if (shape != null) { shapes.put((Coords) entry.getKey(), shape); }
-                lods.put((Coords) entry.getKey(), (TerrainLod) field(chunk, "lod"));
+                lods.put((Coords) entry.getKey(), (TerrainLod) GpuTestSupport.field(chunk, "lod"));
             }
         }
         Map<Coords, com.badlogic.gdx.math.collision.BoundingBox> decks = new java.util.HashMap<>();
@@ -959,26 +959,12 @@ class GpuBridgeSmokeTest {
         }
     }
 
-    private static Object field(Object owner, String name) throws Exception {
-        var type = owner.getClass();
-        while (true) {
-            try {
-                var field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(owner);
-            } catch (NoSuchFieldException missing) {
-                type = type.getSuperclass();
-                if (type == null) { throw missing; }
-            }
-        }
-    }
-
     private static BoardScene scene(int exits) {
         Hex bridge = new Hex(-2);
         bridge.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 2));
         bridge.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             if (coords.equals(CENTER)) {
                 return new BoardScene.Tile(coords, -2, 1, false, 0, BoardScene.Surface.GRASS, null, null,
                       BoardFeatures.capture(bridge, coords, Map.of()), List.of(),
@@ -990,7 +976,7 @@ class GpuBridgeSmokeTest {
                     road = (1 << d) | (1 << ((d + 3) % 6));
                 }
             }
-            return BoardRoadTest.tile(coords, road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.ALLEY,
+            return BoardScenes.tile(coords, road == 0 ? BoardRoad.Kind.NONE : BoardRoad.Kind.ALLEY,
                   road, 0, BoardScene.Surface.GRASS);
         });
     }
@@ -1072,9 +1058,9 @@ class GpuBridgeSmokeTest {
      */
     @Test
     void aMuddyNaturalDeckShowsMudAndARoadLiesOnTheArch() throws Exception {
-        var dry = GpuLegacyImportSmokeTest.scene(naturalSpan(""));
-        var muddy = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_mud:1"));
-        var road = GpuLegacyImportSmokeTest.scene(naturalSpan(";bridge_road:3:9"));
+        var dry = BoardScenes.scene(naturalSpan(""));
+        var muddy = BoardScenes.scene(naturalSpan(";bridge_mud:1"));
+        var road = BoardScenes.scene(naturalSpan(";bridge_road:3:9"));
         Coords deck = new Coords(3, 2), field = new Coords(5, 5);
         assertTrue(muddy.tile(deck).deckMud() && !dry.tile(deck).deckMud());
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "bridges");
@@ -1150,7 +1136,7 @@ class GpuBridgeSmokeTest {
         frame.prepare(terrain, camera, scene);
         terrain.update(scene);
         terrain.animate(0, List.of());
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         frame.render(terrain, camera, scene);
         GpuReviewFrame.save(file);
         var pixels = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());

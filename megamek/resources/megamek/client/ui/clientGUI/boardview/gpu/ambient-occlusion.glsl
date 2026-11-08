@@ -3,6 +3,11 @@
 // for the ambient term only; y whether the sun reaches it past nearby depth (contact shadows). Both are computed from
 // the depth pre-pass at half resolution and upsampled here against the fragment's own depth, so a surface the pre-pass
 // does not hold (a unit, water) reads 1. Without ambientOcclusionFlag they are the constant 1, which folds away.
+#ifdef impostorFlag
+// The depth an impostor's texel writes, its surface's, which the pre-pass holds; its quad's lies at the plant's front
+// (terrain-foliage.frag sets it).
+float impostorDepth = 0.0;
+#endif
 #ifdef ambientOcclusionFlag
 // CAMERA_DEPTH
 uniform sampler2D u_ambientOcclusion; // half resolution: R visibility, G camera distance less z below, B contact
@@ -10,7 +15,11 @@ uniform sampler2D u_ambientOcclusion; // half resolution: R visibility, G camera
 uniform vec3 u_ambientOcclusionPixel;
 
 vec2 screenOcclusion() {
+#ifdef impostorFlag
+    float depth = cameraDepth(impostorDepth);
+#else
     float depth = cameraDepth(gl_FragCoord.z);
+#endif
     // The neighbouring half-resolution samples lie up to 1.5 scene pixels away; grazing surfaces change depth faster.
     float tolerance = 16.0 * (u_ambientOcclusionPixel.x + u_ambientOcclusionPixel.y * depth);
     float stored = depth - u_ambientOcclusionPixel.z;

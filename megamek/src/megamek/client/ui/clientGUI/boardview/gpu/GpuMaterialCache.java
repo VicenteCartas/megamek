@@ -1445,7 +1445,7 @@ final class GpuMaterialCache {
      * Direct terrain draws wherever pages are unfinished; cache baking never keeps a complete map behind loading
      * for more than {@link #PREWARM_LIMIT_NANOS}, plus the current fill step. Offline fixtures need no head start.
      */
-    void prewarm(Camera camera, boolean fill, boolean eligible, Tops tops, Runnable chunks) {
+    void prewarm(Camera camera, boolean fill, Tops tops, Runnable chunks) {
         if (prewarmed) { return; }
         long now = System.nanoTime();
         if (prewarmStarted == 0) { prewarmStarted = now; }
@@ -1453,7 +1453,7 @@ final class GpuMaterialCache {
             prewarmed = true;
             return;
         }
-        begin(camera, fill, eligible, tops);
+        begin(camera, fill, true, tops);
         chunks.run();
         prewarmed = end(PREWARM_NANOS, PREWARM_NANOS);
     }

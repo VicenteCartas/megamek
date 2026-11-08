@@ -64,7 +64,7 @@ class GpuMachineGunSmokeTest {
                                       ResolvedAttack.captureMounts(entity, gun.getEquipmentNum()), profile);
                                 var event = new BoardScene.Combat(result, attacker, target, target.location());
                                 var playback = new UnitPlayback();
-                                playback.accept(List.of(event), UnitPlaybackTest.scene(attacker, target), ignored -> false);
+                                playback.accept(List.of(event), UnitPlaybackFixture.scene(attacker, target), ignored -> false);
                                 playback.advance(0, UnitMotion.Speed.NORMAL);
                                 var attack = playback.attack();
                                 int previous = 0;

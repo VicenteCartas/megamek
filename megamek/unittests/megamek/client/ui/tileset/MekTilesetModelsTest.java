@@ -16,6 +16,7 @@ import megamek.common.equipment.GunEmplacement;
 import megamek.common.equipment.WeaponMounted;
 import megamek.common.units.BipedMek;
 import megamek.common.units.BuildingEntity;
+import megamek.common.units.Dropship;
 import megamek.common.weapons.lasers.innerSphere.medium.ISLaserMedium;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +46,24 @@ class MekTilesetModelsTest {
         mek.setChassis("Unknown");
         assertEquals("units/fallback/biped.json", tileset.modelFor(mek, -1));
         assertNull(new MekTileset(directory.toFile()).modelFor(mek, -1));
+    }
+
+    @Test
+    void aDropShipFindsItsOwnStitchedImageByChassisAndByVariant() throws Exception {
+        Files.writeString(directory.resolve("mekset.txt"), """
+              chassis "Long" "long-single.png"
+              chassis "Long_whole" "long-whole.png"
+              exact "Long B_whole" "variant-whole.png"
+              """);
+        MekTileset tileset = new MekTileset(directory.toFile());
+        tileset.loadFromFile("mekset.txt");
+        Dropship ship = new Dropship();
+        ship.setChassis("Long");
+        ship.setModel("A");
+        assertEquals("long-whole.png", tileset.entryFor(ship, MekTileset.WHOLE).getImageFile());
+        assertEquals("long-single.png", tileset.entryFor(ship, -1).getImageFile());
+        ship.setModel("B");
+        assertEquals("variant-whole.png", tileset.entryFor(ship, MekTileset.WHOLE).getImageFile());
     }
 
     @Test

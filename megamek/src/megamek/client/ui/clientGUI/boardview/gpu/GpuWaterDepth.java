@@ -16,7 +16,7 @@ import com.badlogic.gdx.utils.Disposable;
  * colour pass tests against it, so a crest hides the waves behind it at grazing angles and a section shows only where
  * it is the first water a ray meets; fog stops at it. The scene's own depth keeps the beds and units beneath: unit
  * outlines, tactical overlays and weather never see the moving waves. Sized like the viewport it is drawn for, so a
- * pixel's depth sits at that pixel's texel.
+ * pixel's depth sits at that pixel's texel. {@link GpuCutoutFade} keeps the nearest glass's depth in one too.
  */
 final class GpuWaterDepth implements Disposable {
     private final IntBuffer query = BufferUtils.newIntBuffer(16);

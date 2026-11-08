@@ -12,6 +12,75 @@ landscapes in the main renderer's top and isometric views and times settled
 terrain frames separately from loading and whole-game FPS.
 Older dated reports below apply to their recorded revisions and fixtures.
 
+## Quality: Low, Medium and High (2026-11-05)
+
+Display → Quality chooses the level; `BOARD_QUALITY` defaults to Medium and a saved choice stays. Each level is a row of
+the `BoardQuality` table and code reads its columns, never which level it is: whatever else comes to differ between levels
+gets a column there. Quality leaves the render resolution to its own slider. Low and Medium share their programs, so a
+switch between them links nothing; a switch to or from High rebuilds the shaders behind the loading stage. High's shaders
+are unchanged: `mediumQualityFlag` is off, and the only edits in its path rearrange the same arithmetic.
+
+Low is Medium without the meadow's grass and rims, and with 75% of a field's plants, each wider by the root of that; the
+Grass blades option keeps its choice, disabled. Medium, against High:
+
+- **Options off, choices kept:** high shadows, specular anti-aliasing, parallax, tessellation and AO
+  (`BoardDisplaySettings`). Their controls are disabled; High brings the player's choices back.
+- **Light:** no environment table reads (analytic split sum, mobile GGX, fallback sky at .9), reflection reusing the
+  face's sky unless wet or metallic, one bilinear sun shadow comparison, thin tissue's far side lit by the ground.
+  These pay together: reverted one at a time each looks free, reverted as a set they cost about 1 ms of 9.
+- **Ground:** first repeat alone except on desert, where a single repeat reads busy; first-repeat normals; mean finish;
+  the second role keeps the first's normal; only the strongest cover in full, the others one colour read; a family
+  program's blend folds the families outside its palette (`isFamily`) and reads a repeated slot once; a bank's second
+  cover reads one layer per role the first cover's bank shows there (ground at crest and foot, soil or rock on the face),
+  so it meets the level cover beside the bank, and a soil river bank's is one layer of the bank's soil; rim and
+  two-level arithmetic skipped where it is exactly zero (`IF_MEDIUM`); wetlands with two noise octaves and no warp.
+- **Geometry and animation:** `TerrainLod` takes each level at 3x the hex size; relief depth twins only below 96 px a
+  hex (`TreeLod.PREPASS_RELIEF`), needed because AO's pre-pass is gone and hidden relief would be shaded; 60% of the
+  meadow's blades, survivors by the root of that wider; waves every other frame, none while no water is in view;
+  terrain anisotropy x2.
+- **Plants on coarse chunks:** at 3x the hex size a chunk asks for medium detail at about 79 px, while grass shows from 120 and
+  takes a rebuild of 1-2 s per chunk to arrive. Coarse chunks therefore carry grass, rims, crops and medium's reeds
+  (`BoardPlants`, `BoardVegetation.carriesGrass`), with no grass on a level that draws none. A first zoom shows no bare ground
+  (without them 2.0-2.4 s on a 16x17 field board, 2.9-3.0 s on 64x34 Grasslands) and holds about the grass memory High does
+  (120 MB at load on 64x34). Load on a quiet machine, three runs each: 8.0-10.8 s against 9.8-11.2 s on the field board,
+  13.0-14.8 s against 11.5-15.3 s on 64x34. A level switch on an open board keeps each chunk's plants until it is rebuilt.
+- **Rocks on coarse chunks:** coarse chunks on such a level also carry the rim and fallen rocks, waterfall rocks and planting
+  pits (`TerrainLod.formations`), in the places every detail gives them, so a first close zoom shows them at once; the coarse
+  ground itself still refines about 3 s later. On Iris Xe at 1920x1080, terrain cache off: Kozice Valley's coarse surfaces
+  rise from 144,856 to 218,364 triangles with no measurable overview cost (20.6-21.6 ms against 20.8 ms), 48x48 The Trainjob's
+  from 1,029,131 to 1,169,240 with at most about 1 ms (23.9-25.2 ms against 25.2-25.8 ms); loads unchanged.
+
+Measured on an RTX 4070 Laptop at 3840x2160 and 100% render resolution, terrain cache off, Enhanced,
+`GpuBoardPerformanceSmokeTest` with `performanceCompareQuality` (`performanceComparedQuality` for Low): High, the level, the
+level, High in one process, 60 warm-up and 120 sampled frames per view. Median frame-interval gain against High, overview /
+close / moving:
+
+| Board | Medium | Low |
+| --- | ---: | ---: |
+| 32x17 Kozice Valley (CDS) | 1.69 / 1.85 / 1.79 | 1.73 / 1.93 / 1.91 |
+| 16x17 Fire And Ice 2 | 1.51 / 1.55 / 1.56 | 1.59 / 1.64 / 1.66 |
+| 48x48 The Trainjob | 1.62 / 1.63 / 1.69 | 1.69 / 1.65 / 1.68 |
+| 96x102 MesaCity1 | 1.16 / 1.58 / 1.59 | 1.20 / 1.56 / 1.67 |
+| 16x17 Grassland 2 | 1.58 / 1.70 / 1.75 | 1.69 / 1.89 / 1.91 |
+
+High there carries AO on and parallax on, a player's settings. Against the game's defaults (AO off), Medium gains: Kozice
+1.65 / 1.66 / 1.72, Fire And Ice 1.53 / 1.55 / 1.55, Trainjob 1.50 / 1.52 / 1.60, MesaCity 1.05 / 1.45 / 1.39.
+
+Limits:
+
+- Neither level reaches x2 at equal resolution. The table was measured before plants on coarse chunks and before cutouts' faded texels.
+- On a quiet machine MesaCity is GPU-limited in Medium: 7.7 ms overview, 7.6 close, 7.2 moving, gain 1.50 / 1.56 / 1.57, faded texels included. The CPU's share of the
+  overview is about 6.2 ms: 1.1 walking and sorting, 3.8 submitting 1,150 opaque draws and the pre-pass (about 35 GL calls a draw), 1.4 the rest. A loaded machine inflated those about 4x.
+- MesaCity's CPU limit, measured with the scene target at a quarter of 4K and the same draws: Medium 5.7-5.9 ms overview, 2.7 close, 3.3-3.5 moving; High 7.1, 3.3, 3.6. Moving frames in Medium spike: worst 1% 11-13 ms, slowest 21-25 ms, cause not established.
+- Cutouts' faded texels (`GpuCutoutFade`) cost 0.2-0.5 ms a frame at Medium on these boards: Kozice 5.25 to 5.6 ms overview, 8.15 to 8.6 close, 7.95 to 8.5 moving; MesaCity 7.55 to 7.7, 7.35 to 7.6, 6.9 to 7.2.
+  Their targets take 10 bytes a pixel (calculated: 83 MB at 4K), allocated with the first faded draw.
+- GPU time misleads on CPU-limited views: the GPU idles, its clocks drop and even untouched stages slow by up to 1.8x.
+  Normalise by the depth and composite stages, or trust only GPU-limited views. The first phase of an A/B runs slow.
+- Look: Medium's fields fade to their flat stand colour by 120-72 px a hex (High 40-24); COARSE also drops rim rocks below about 72 px a hex; meadows are sparser and up to 2.6% brighter
+  in mean display value; shadow edges are crisper. Cached tops keep High's material: fills take no lighting flag.
+- Not measured on Iris Xe. Texture reads cost little on this NVIDIA GPU and arithmetic costs more, so the mix may differ.
+- `TerrainLodTest.waterFieldDoesNotIntroduceASeamBetweenDetailLevels` fails identically at the prior commit.
+
 ## Citadel material cache diagnosis (2026-11-02)
 
 Display → Terrain cache has an inline **Debug** switch. It starts off for each view,
@@ -274,13 +343,20 @@ median frame interval. Opaque terrain submitted 907 draws and 4,762,731 indices
 measurements; changing an impassable flag, highlighted hex or terrain geometry
 can rebuild retained marker pages and is not covered by these pass medians.
 
-The screenshots' disappearing cache coverage had a concrete cause: increasing
-texture-array capacity discarded every existing page. Growth now copies every
+Increasing texture-array capacity reproduced the loss of cache coverage shown in
+the screenshots: it discarded every existing page. Growth now copies every
 layer and mip, retaining page ownership, content generations, stale pages and
 unfinished builds. The copy preserves encoded sRGB bytes and GL framebuffer,
 scissor, colour-mask and sRGB state. Shrinking after a real render-resolution
 change can still release storage. Memory-limited partial coverage remains valid:
 unadmitted terrain uses the direct renderer.
+The exact focus/unfocus sequence was not reproduced. Fluctuating driver memory
+reports can request the capacity growth whose destructive behavior was reproduced.
+The independent review also found that a failed growth allocation could close
+the view. A failed allocation or mip copy now keeps the old readable arrays and
+falls back to their capacity; the existing budget retry delay prevents retries
+every frame. A native injected out-of-memory test verifies continued rendering,
+the retry delay and later successful growth.
 
 Tidewater's initial CPU profile placed most terrain preparation work in repeated
 road-path sampling for road masks. Immutable bounds over consecutive segments
@@ -288,9 +364,21 @@ now let the shared `BoardRoad` sampler visit nearby branches first and discard
 branches unable to improve either centre-line distance or road-edge distance.
 Exact segment arithmetic and original ordering for equal-distance ties are
 retained, including variable widths and open ends. Both road masks and scenery
-clearance use this one implementation. The 24×24 Tidewater region at (80,56)
-retained checksums `038805db` (COARSE) and `047be856` (FULL), covering geometry
-and every generated mask pixel. A separate numerical regression compares bounded
+clearance use this one implementation. A chunk builds each road's paint
+(`GpuTerrain.roadPaint`) once and shares it between the hexes it reaches. A mask is
+told from every other before it is rendered by its outline and by its colours at a
+10x10 grid of points, from the code that renders it (`GpuRoads.maskKey`), so roads alike
+anywhere on a board share one rendered mask, and nothing has to keep track of what a
+mask reads. A difference falling wholly between the grid's points would go unseen. All
+1,192 corpus boards with roads were rendered mask by mask (945,802 masks, 8,605 keys):
+one key never gave two masks. Frames of 7 boards in both graphics and 5 views match the
+code before this within what that code differs from itself (at most 36 pixels of 1.6
+million, 10 of 255). Over whole boards in Classic the road stage runs 3.8-4.5 times faster
+(Valencia 25 s to 6 s); GL upload and a real load were not measured. Do not time this code under `:megamek:test`: JaCoCo,
+which that task attaches, makes the stage about 5-8 times slower. The 24×24 Tidewater region at (80,56)
+retained checksums `038805db` (COARSE) and `047be856` (FULL) before the distant
+wear-mask change below, covering geometry and every generated mask pixel.
+A separate numerical regression compares bounded
 and exhaustive sampling, including path endpoints and degenerate segments.
 The pavement wear mask now shares one finite-curve search between wheel heading
 and lane position. Endpoint projections are also shared, evaluating a second
@@ -302,6 +390,26 @@ shared result. The numerical and concurrent-sharing tests cover these boundaries
 Large masks split independent row groups within the existing terrain worker pool,
 with captured settings and a private colour scratch per group; they allocate no
 additional executor. Serial/parallel pixel parity is covered separately.
+
+Only the broad asphalt wheel-wear field now uses one sample per tile pixel at
+COARSE/DISTANT, instead of four in each axis. Paint, thin markings, other road
+materials, and MEDIUM/FULL retain their original resolution. Repeating albedo,
+normal and roughness maps keep their full resolution at every level. Mask density
+is part of the sharing key, so a distant mask cannot satisfy a close-detail build.
+The final regional COARSE checksum is intentionally different (`53a7c443`);
+FULL remains exactly `047be856`. Regional preparation measured 5.330/5.375 seconds
+for COARSE/FULL, against the original 18.089/14.916 seconds on four workers.
+
+Native road captures compare six exit patterns in top/isometric views at 26.3
+projected pixels per hex (near the default COARSE refinement boundary), with
+three subpixel pan positions, then refine to MEDIUM and zoom back. All twelve
+MEDIUM/return frames are pixel-identical to the full-mask reference. The six
+COARSE frames differ at road edges: their largest RGB-channel difference is
+27/255, with 84–224 pixels above 8/255 in each 960×720 image. These are small
+screen-space differences, not pixel parity or a guarantee for every lighting
+condition. Thin markings remain intact in the captures. The paired images and
+comparison are in `work/tidewater/masks-visual-{coarse,full}/` and
+`masks-visual-comparison.txt`.
 
 The map also waited behind the loading screen for optional cache baking after
 all geometry and shaders were ready. Cache prewarm now gets a 250 ms head start
@@ -316,6 +424,38 @@ still refine the same terrain and restore its detailed geometry.
 The cancellation/reopen smoke test also exposed `ForkJoinPool.close()` returning
 after termination started. Disposal now waits for actual worker termination
 before releasing the chunks and assets those workers borrow.
+
+The subsequent load profile exposed repeated scans of unchanged plant meshes:
+impostor material setup recalculated the source bounds for each placement, and
+each new placement scanned them again. Impostor setup now runs once per source
+material. A chunk build shares local bounds for fresh instances of the same
+model, copying the box before applying each placement transform. Building
+assemblies retain their instance-specific calculation. The cache dies with the
+chunk build; it owns no model resources. The native regression checks sixteen
+differently rotated/scaled plants against exhaustive vertex bounds and verifies
+that their world boxes are independent. The independent reviewer found no issue
+with either lifetime or the boundary before placement-specific node changes.
+
+Complete Tidewater opening now measures 58.366 / 59.060 / 64.848 seconds, compared
+with 149.369 / 149.939 / 152.359 seconds for the original control. The median
+falls from 149.939 to 59.060 seconds: **60.6% less loading time**. Each measurement
+starts before board loading and scene capture, and ends after the first actual
+map/HUD frame (`GpuBattleView.frames() > 0`), not merely `terrain.ready()` or a
+loading-screen frame. Gradle/JVM startup before capture is excluded. These are
+fresh JVMs with installed asset/shader caches, not deliberately cold filesystem
+runs. The control overrides the original road sampler, file lookup, road-mask
+builder, hidden startup view and unbounded cache prewarm; other production
+classes are shared with this working tree.
+
+The native runs use the RTX 4070 Laptop GPU at 3840×2259, ENHANCED, normals,
+tessellation and AO on, parallax off, VSync off, cache enabled. The first visible
+map is the initial isometric FIT view, span 8734.76, at 4978.05/-5038.17/-36;
+it precedes the benchmark's requested screenshot camera. Optional cache baking
+continues after that frame with the direct terrain fallback. This is an opening
+result, not a fully warmed cache or a close-view FPS measurement. Logs are
+`work/tidewater/visible-{before,control-before,isolated-original}.log` and
+`visible-bounds-final-{1,2,3}.log`; `final-opening-times.json` retains all six
+capture-to-visible durations. The first-map PNGs show the actual board and HUD.
 
 Building-file resolution is centralized in `TilesetScenery`, with one shared
 result per asset and data-directory/reload generation. It retains exact GLB,
@@ -342,17 +482,78 @@ and 1.359/1.095 seconds after. Sampling counts are diagnostic rather than exact
 time attribution. `urban/final-profile-summary.txt` retains both profiles;
 remaining capture costs include tree coverage work outside this change.
 
-Validation for this stage passed 20 focused tests: 12 native tests covering text,
-cache growth and GL state, startup and worker cancellation/reopening; eight CPU
+Validation for this stage passed 22 focused tests: 13 native tests covering text,
+cache growth and GL state, startup, placement bounds and worker cancellation/reopening; nine CPU
 tests covering exact road sampling, concurrent mask sharing, parallel pixel
-parity and asset lookup/reload. The final road-region comparison retained both
-geometry/pixel checksums, with COARSE preparation 18.089 → 9.138 seconds and FULL
-14.916 → 6.240 seconds on four workers. Scoped Checkstyle and Spotless passed.
+parity, distant mask coverage and asset lookup/reload. Before the distant-mask
+change, the exact-pixel road-region comparison measured COARSE preparation
+18.089 → 9.138 seconds and FULL 14.916 → 6.240 seconds on four workers.
+Scoped Checkstyle and Spotless passed.
 These are not an all-project test result. Two wider road fixtures fail equally
 with the original road implementation: the shared-roundabout curb assertion and
 the rough/woods tree-count assertion. Their original-code reproduction is in
 `work/tidewater/original-road-regressions.log`; focused results are in
-`final-tests.log`, `shared-ends-tests.log` and `roads-shared-ends.log`.
+`final-tests.log`, `shared-ends-tests.log`, `distant-wear-tests.log`,
+`cache-growth-failure-tests.log` and `placement-bounds-tests.log`.
+
+### Natural board-edge cuts (2026-11-02)
+
+The two additional Citadel reproductions use the supplied orthographic cameras
+at 3840 × 2259 on the RTX 4070 Laptop GPU, with the same Enhanced settings as
+above and a 2048 MiB cache cap (2048 physical layers, 2016 MiB page storage):
+
+| View | Azimuth / tilt | Span | At |
+| --- | --- | --- | --- |
+| Wide | 328.79 / 58.03 | 2373.90 | 1446.68, -2273.15, 94.80 |
+| Closer | 26.16 / 47.94 | 1073.83 | 2092.52, -2967.17, 54.00 |
+
+The original wide view reproduced all 1273 requested pages admitted, yet red
+board cuts, curved slopes and mud remained. This was an eligibility limit:
+charts skipped off-board neighbours, and wall admission rejected every fixed
+texture projection, including the natural board cut. The progress percentage
+counts requested eligible pages, not every visible terrain face or pixel.
+
+Natural board cuts now use the existing wall charts down to the renderer's
+actual board floor. Their fixed texture projections remain in the vertex data
+used by both the cache fill and direct fallback. Indexed chart vertices also
+include their complete shade in their sharing key, retaining distinct face
+normals and other shading attributes at coincident positions. Floor changes
+participate in the existing chart-layout/reuse check; chart layout remains
+independent of geometry detail. No terrain geometry or texture resolution is
+reduced by this addition.
+
+Cached and direct output is not pixel-identical. On the newly cached border
+interiors (one-pixel silhouette margins excluded), mean absolute RGB error was
+2.24/255 in the wide view and 1.53/255 in the closer view. The 95th percentile of
+the largest channel difference was 7/255 and 5/255 respectively; maxima were
+39/255 and 14/255. Native-resolution and enlarged side-by-side crops showed
+small fine-texture/shading variation without a noticeable detail loss or new
+seam in normal viewing. These are checks of the two supplied poses with parallax
+off under the fixed clear-day lighting, not a guarantee for every view and
+lighting condition. `board-cut-comparison.png` in each capture directory keeps
+the original pixels; the `-2x` image uses nearest-neighbour enlargement.
+
+The wide view admits 1632 pages with all 47 visible wall chunks using the cache,
+up from 1273 pages and 36 wall chunks. The closer view admits 1600 of 1677 pages,
+with 16 of 19 wall chunks cached. Its rectangular wall address table excludes
+77 pages (previously 4), leaving a small far-right border section direct despite
+available physical slots. This existing address-range limit is separate from
+VRAM capacity; adding more eligible walls does not remove it.
+
+Mud and other unsupported biome cover, including its neighbouring blend area,
+still draw directly. So do curved tessellated faces and concrete panels (whose
+evaluator modifies occlusion that the cache does not store). Chart overlap,
+footprint and water-clipping safeguards remain. These restrictions can still
+leave red portions of the border. Slope and mud GPU costs have not been isolated;
+the edge addition alone has not established a repeatable FPS improvement.
+
+Five focused CPU tests cover every edge orientation and detail, dry and
+underwater cuts, material-boundary subdivision, unsupported-material fallback,
+floor changes, and exact indexed vertex payloads on the CommCenter board's
+boundary. Scoped Checkstyle and Spotless pass. Native cached/direct captures for
+both camera poses are under `work/citadel-fps/board-cut-final-view-1/` and
+`work/citadel-fps/board-cut-view-2/`; test results are in
+`work/citadel-fps/board-cut-final-tests.log`.
 
 ## Preparation and replacement
 
@@ -360,6 +561,20 @@ the rough/woods tree-count assertion. Their original-code reproduction is in
 scene and `TerrainSettings` in a request, prepares CPU geometry on workers, and
 collects/uploads the result on the GL thread. Generation checks reject superseded
 requests. A worker must not read changing Swing state or allocate GL resources.
+
+Natural plants settle on full-detail support at every chunk level, so zooming moves
+none of them. Workers prepare that support with the chunk (`GpuTerrain.plantSupports`),
+and a full-detail chunk shares its own surfaces. Classic columns, a biodome's garden
+and a root past the prepared hexes build theirs on first use, on the GL thread. At
+most `BUILD_JOBS` chunks hold it at once: about 100 MB in the worst measured case
+(399 KB per hex). Against building it all on the GL thread, GL time in `refine` with
+no frames drawn (RTX 4070 machine, six alternating runs each, medians; the ranges
+overlap): loading `16x17 Sherwood Forest` fell from 842 to 529 ms, loading `45x45
+Moore Rainy Woods` from 2.16 to 1.85 s, and a zoomed-in walk across it from 1.95 to
+1.63 s. Calls over 4 ms fell from 75 to 25, 127 to 79 and 130 to 85. The longest
+single stall did not improve, and `32x17 Kozice Valley`, with few plants, did not
+change measurably. Captures of ten views, including rigid fungal and Mars colonies,
+are pixel-identical to building it on the GL thread. Iris Xe was not measured.
 
 An edit plan identifies changed tiles plus their geometric dependents. Shared
 corners, road/bridge spans, shore mouths and fields can reach beyond a single hex
@@ -851,9 +1066,9 @@ a 1080p window. A chunk replacement adds 3-6 ms there, the shadow map
 | `GpuOpaqueSorter` | Ordering of opaque renderables to keep compatible work together. |
 | `GpuPropBatch` | Static opaque prop ranges with compatible state. |
 | `GpuTerrainPages`, `GpuMeshPage` | Small ranges from nearby chunks in persistent page buffers. |
-| `GpuTreeInstances`, `GpuInstancedMesh` | Repeated models/transforms through instanced draws. Every chunk's trees stay uploaded per species and detail level in board order; a pass draws the visible chunks' ranges, so panning, zooming and detail changes upload nothing. Building parts still gather per pass. |
+| `GpuTreeInstances`, `GpuInstancedMesh` | Repeated models/transforms through instanced draws. Each tree takes the level its own projected diameter asks (`Stand.detail`); every chunk's trees stay uploaded per species and detail level in board order, and a pass draws the visible chunks' ranges, so panning uploads nothing and a zoom uploads only the species-level buffers in which a chunk's run changed (a dissolve changes them twice: when it begins and when its old level drops the tree). In the live view a tree that changes level dissolves into it over `TreeLod.DISSOLVE` (0.25 s of the terrain clock): meanwhile it draws at both levels, which keep complementary pixels of one screen pattern (`terrain-foliage.frag`, and the depth twin alike), and holds the level it takes, so a reversed or continued zoom starts the next dissolve only after this one (larger trees wait for it too, as none takes a coarser level than a smaller one). The run it left drops it once the last dissolve has ended. Captures and previews, whose clock stands still between frames, and the wireframe view switch at once; the shadow map keeps its own levels without a dissolve. At rest it costs nothing measurable: on an Iris Xe at Medium the forest, grassland and city views' frames and the trees' programs (their depth twins included) stayed within run-to-run noise of the build without it. Building parts still gather per pass. |
 | `TerrainLod` | Ground sampling per level, chosen by projected hex size (64/24/6 px) with hysteresis. `BoardRelief` already emits six-triangle fans for ordinary planar hex tops at every LOD. Shaped cliff/coast boundaries retain their shared samples; concave outlines use polygon triangulation. Rounded cliff tops refine interior shading samples at the same playing height, so the six-triangle budget applies to ordinary tops without those rims. Dressing, slopes and walls have separate geometry costs. The earlier 573-face flat-ground measurement predates this implementation and is not a current cost or a pending optimization. Measure the installed scene before changing sample counts or thresholds. |
-| `TreeLod` | Four plant levels by projected diameter (80/48/24 px, 10% hysteresis): the near mesh, two decimated meshes and, below 24 px, an impostor of 12 triangles: two crossed vertical cards and a cap through the crown, textured with unlit renders of the near mesh from the front, side and above (`mm-data/tools/prepare_tree_lods.py -- impostors`). The cards are ordinary alpha-tested geometry, so they shadow, write depth and pick like the meshes and read correctly from the top view, where only the cap shows. Far and middle views were primitive-bound (halving the window changed frame time little), so fewer triangles, not cheaper shading, is what pays there. A tree-only vertex shader without the scene shader's per-vertex light loops, shadow projection and fog was tried and measured identical (the driver already discards that unused work), so trees keep the shared vertex shader. |
+| `TreeLod` | Four plant levels by projected diameter (80/48/24 px, 10% hysteresis): the near mesh, two decimated meshes and, below 24 px, an impostor: one quad (2 triangles) turned toward each pass's own camera (colour, depth, shadow), each pixel showing the nearest of 32 renders of the far mesh it replaces (8 directions at 10, 35.26, 60 and 90 degrees above the horizon, `impostor-frames.glsl`): its unlit colour, and its surface's normal and depth, with which each texel is lit and takes its shadow at that surface (`mm-data/tools/prepare_tree_lods.py -- impostors`). The quad is alpha-tested, so it shadows and picks like the meshes; each texel writes its surface's depth, and the quad itself takes the depth of its plant's front (`impostorFrontZ`) with conservative depth (`depth_greater` from GLSL 4.20), so the early depth test stays on. Against the earlier crossed cards (12 triangles), measured on the Iris Xe at Medium before texels wrote their own depth (2026-11-08, cards/frames/frames/cards): every tree and city view within its run-to-run spread, e.g. far forest 16.9 vs 16.8 ms. Far and middle views were primitive-bound (halving the window changed frame time little), so fewer triangles, not cheaper shading, is what pays there. A tree-only vertex shader without the scene shader's per-vertex light loops, shadow projection and fog was tried and measured identical (the driver already discards that unused work), so trees keep the shared vertex shader. |
 | `GpuTerrainDepth` | Depth-only ranges borrowing finished chunk meshes and materials. |
 
 Pages receive the source ranges from invisible chunks as well as visible ones.
@@ -1505,3 +1720,627 @@ Checked by native tests (not timed), all in the game view unless named:
 - `GpuLegacyImportSmokeTest`: 84 object parts of the converted fixture, 81 instanced and 3 one by one (a
   tilted and a stretched table and the narrow glass roof; the mirrored table instanced); a unit inside the
   roof's building fades its roof objects; 48x48's roof cars stand on the roof.
+
+## Direct full-quality shader experiments (2026-11-02)
+
+Two shader-only experiments were tested on Citadel with the terrain cache disabled. Neither demonstrated a
+repeatable improvement, so both were removed. No production shader variants, quality reductions or shader changes
+from these experiments remain.
+
+The first explicitly reused the view's integrated GGX lookup and specular albedo across diffuse lighting,
+multiscatter, the finite sun and reflected sky. The second skipped side-projection texture reads on cliff shoulders
+where the existing top weight was exactly one, retaining the same top samples, normals, roughness, emission and AO.
+Static independent review found no equation/derivative mismatch; neither experiment was accepted for performance.
+The measurements do not establish whether the driver already reused the lighting calculations or whether changing
+their lifetime affected register use.
+
+Measurements use the RTX 4070 Laptop GPU, a 3840 x 2259 framebuffer, ENHANCED graphics, normal maps, tessellation,
+specular AA and AO on, parallax and VSync off, fixed clear daylight, and frozen Swing capture. The mid view is the
+reported azimuth 26.16, tilt 47.94, span 1073.83, at 2092.52,-2967.17,54.00. The close view retains those angles with
+span 451.80, at 1600.16,-1872.00,0.00. No cheaper material shader was substituted.
+
+Each comparison loads one scene and switches its installed shader programs in A/B/B/A order, with 120 warm-up
+frames and 360 measured frames per block. Shader compilation occurs before warm-up. Draw counts and geometry stay
+the same within each comparison. These are whole-frame GPU medians in milliseconds, with both blocks shown rather
+than selecting the fastest sample:
+
+| Experiment | View | Original A1 / A2 | Candidate B1 / B2 |
+| --- | --- | --- | --- |
+| Explicit lighting reuse | Mid | 21.96 / 22.32 | 21.22 / 22.06 |
+| Explicit lighting reuse | Close | 15.86 / 16.05 | 16.42 / 16.26 |
+| Skip zero-weight side projections | Mid | 17.77 / 17.89 | 17.05 / 18.08 |
+| Skip zero-weight side projections | Close | 16.47 / 16.49 | 16.34 / 16.79 |
+
+Lighting reuse's close opaque-terrain medians were 12.75 / 12.82 ms originally and 13.21 / 13.00 ms in the candidate
+(about 2.5% slower when averaging the two block medians). Other differences overlap the observed variation. These
+desktop runs included concurrent development activity and changing laptop load; compare within a row, not absolute
+times across experiments. No FPS gain or cross-GPU result is claimed. Animated full-view captures are diagnostic
+artifacts, not a claim of pixel-identical output. Since neither change was retained, no visual tradeoff was shipped.
+
+The retained benchmark option is `-Dmegamek.gpu.performanceCompareShaders=<absolute-folder>`: place the original
+shader files in that folder before editing, then run
+`GpuBoardPerformanceSmokeTest.measuresTheCompleteBoardViewWithLiveCapture` with the candidate in the checkout.
+Use `performanceOverviewOnly=true`, `performanceFrozenCapture=true`, explicit camera settings and
+`performanceMaterialCache=false` for the direct-rendering comparison. The benchmark waits for any enabled material
+cache to settle after a shader swap and rejects simultaneous graphics/cache/page comparisons. It uses the shader
+editor's in-memory replacement mechanism; it does not save or modify shader files. Existing
+`performanceShaderDirectory` overrides remain available for a single-source run.
+
+Artifacts are under `work/citadel-fps/lighting-abba-{mid,close}` and
+`work/citadel-fps/projection-abba-{mid,close}`, with matching logs. Original sources and rejected candidates are in
+`work/lighting-reuse`. All four native comparisons completed with the benchmark's GL/readiness checks. During later
+runs, unrelated in-progress lobby and UI changes prevented a full Java/test compilation; those runs used the already
+compiled renderer, and the final mid comparison compiled the benchmark against frozen test-helper sources. This is
+not a full-workspace build validation.
+
+## Authored finish specialization and direct-path diagnostics (2026-11-03)
+
+The sculpt shader now uses the material cache's existing authored-finish eligibility rule for direct rendering too.
+Only when every sculpt material has zero metallic/scattering and no emission map or constant glow does its existing
+program discard those channels before live effects. Volcanic programs remain excluded because their emission is
+procedural; nuclear scorch can still add emission afterward. Fungal props use the separate foliage program. Adding
+an active metallic, scattering or emission channel to any sculpt material and reloading assets retains the full
+program automatically. This replaces the program for that asset set, without adding another active program per
+material. Cache enablement is independent of this decision. The existing rock-role test explicitly opts out because
+it intentionally uses emission as a diagnostic data channel.
+
+A same-context original/candidate/candidate/original image comparison on the 32x34 terrain calibration board passed
+with **zero RGBA or depth differences** in fit, close, rain and hot nuclear-scorch views. The board includes lava and
+fungal ground. The hot comparison freezes only the wall-clock-dependent scorch heat in both source versions while
+retaining the real scorch mask. Main/test compilation and the native comparison succeeded. Files and the one-off
+comparison source are in `work/shader-workload/plain-parity` and
+`work/lighting-reuse/GpuLightingComparisonSmokeTest.java`; its original/candidate shader snapshots are in
+`work/shader-workload/plain-baseline` and `plain-production-candidate`.
+
+The corrected performance experiment retains live scorch emission. Same RTX 4070 Laptop settings and reported mid
+camera as above, cache off; 600 warm-up and 480 measured frames per block, with mid/close/moving in each ABBA block.
+Whole-view GPU medians in milliseconds:
+
+| View | Original A1 / A2 | Candidate B1 / B2 |
+| --- | --- | --- |
+| Mid | 15.9427 / 17.6671 | 15.5167 / 16.6390 |
+| Close | 15.0077 / 15.4214 | 14.5920 / 15.7686 |
+| Moving close | 15.8740 / 16.0850 | 15.6426 / 16.4321 |
+
+Mid opaque-terrain medians were 13.0877 / 14.6883 versus 12.5809 / 13.5168 ms. Close was 12.1733 / 12.5307
+versus 11.6777 / 12.7109 ms. The first close pair saved about 0.5 ms, but the complete run does **not** establish a
+meaningful whole-frame close-view gain; block variation is larger than that effect. This is not a demonstrated
+2 ms improvement or a solution to the direct-rendering bottleneck. An earlier cold-only prototype cleared emission
+too late and showed larger savings; it was replaced because it would erase live scorch glow. Raw corrected results
+are in `work/citadel-fps/plain-safe-abba-mid-close` and its matching log.
+
+Optional `performancePipelineStatistics=true` records one opaque pass after timing has finished. It reports submitted
+geometry, shader invocations, clipping and passing depth samples through ARB pipeline queries. Unsupported tessellation
+targets are skipped; query objects are disposed after capture. Counts are driver-dependent and not an exact overdraw
+ratio. In `work/citadel-fps/pipeline-mid-close`, mid/close opaque passes reported 8.34/9.19 million fragment invocations
+and almost the same passing-sample counts. This supports investigating the cost of visible terrain shading rather
+than assuming hidden-fragment work is dominant. `performanceAssertPlainGround=true` verifies authored metadata for
+source experiments; it is not proof that procedural live effects emit nothing.
+
+Hardware profiling setup is under `work/gpu-profiler`: NVIDIA Nsight Graphics 2026.4 was signature-verified and
+extracted there, without installing/changing a driver. After the user authorized an administrator launch, a visible
+`GpuProfilerMain` target produced an eight-frame GPU Trace of the steady Citadel close view. GPU clocks were left
+unaltered; system-wide counter permissions were not changed. The artifact is
+`work/gpu-profiler/cli-trace-close/java_2026_11_03_00_45_18.ngfx-gputrace`; the accompanying `.xls` exports are TSV.
+Across its 14.49–15.57 ms frames, average SM throughput was 46.0% of peak, DRAM throughput 18.0%, pixel active warps
+27.9% of peak and graphics register-file allocation 71.9%. L1 texture/L2 hit rates were 73.8%/94.9%. These whole-frame
+counters justify testing shorter register lifetimes, but do not establish a particular shader's register bottleneck
+or an Intel bottleneck. OpenGL source-line shader profiling was unavailable; no spill count was obtained.
+
+## Native Iris Xe validation and smaller-map probes (2026-11-03)
+
+The acceptance target is Iris Xe at native **3840×2259**, including close and moving views; lowering internal
+resolution is excluded. NVIDIA is used for initial prototypes. GPU timestamp totals and actual presentation frame
+intervals are distinct measurements: hidden `performanceNoFinish=true` runs on Intel queued work far ahead and are
+invalid as FPS evidence. Hidden experiments now use `glFinish` and report GPU cost, not pipelined FPS. Visible tests
+must remain unminimized; an occluded/minimized run that rendered nothing was rejected by the artwork check.
+
+Intel also exposed an existing instanced-label GL error: libGDX's ordinary `Mesh.unbind` unbound the VAO before
+disabling its instance attributes. `GpuHexText.Page` now uses the existing `GpuInstancedMesh`, as other live instance
+batches already did, to preserve unbind order. Subsequent native Iris runs passed GL and artwork checks. This is a
+correctness fix, not a claimed speed improvement. The benchmark configures a camera only once per logical frame,
+so detail-settle retries no longer repeatedly restart Fit and the camera transition. Cache/page controls and graphics
+selection also run once: looking up a tuning control reconstructs the tuning rows, which must not happen on every
+loading retry. Optional GL debug output stays off by default.
+
+A visible, non-serialized Citadel close run (span 451.80, azimuth 26.16, tilt 47.94, cache off, full quality) measured
+123.445 ms median frame interval and 8.00 average FPS, with whole GPU median 122.0716 ms and opaque terrain
+110.3022 ms. Its screenshot and 120-sample timestamps passed; this dense direct view does not represent the user's
+usual approximately 30 FPS Iris experience. Evidence: `work/citadel-fps/iris-visible-close-camera` and its log.
+
+At the user's request, subsequent small-map testing started with 32×17 Grasslands A BattleMat, then switched to
+**16×17 Fire And Ice 2** (`unofficial/Drewbacca`). `work/shader-workload/fire-ice.ps1` fixes its overview at span 1400,
+azimuth 45, tilt 54.7356, at 546,-612,162; close starts at the board centre with span 564.75. AO, normals, tessellation
+and specular antialiasing remain enabled; parallax, VSync and SMAA are off. All are native-resolution runs.
+
+Initial NVIDIA direct-path diagnostic runs on Fire And Ice 2, 60 warm-up and 120 samples per view, whole GPU medians:
+
+| View | Full rendering | Material-only diagnostic | Lighting-only diagnostic |
+| --- | ---: | ---: | ---: |
+| Overview | 9.0860 ms | 7.5438 ms | 4.6131 ms |
+| Close | 21.0442 ms | 16.5171 ms | 8.7429 ms |
+| Moving close | 20.6305 ms | 15.9283 ms | 9.0276 ms |
+
+The diagnostic substitutions retain geometry and other passes but deliberately change sculpt shading; they are
+not optimization candidates or acceptable visual results. Compiler dead-code elimination and interactions mean
+these totals cannot be added or interpreted as independent material/lighting timings. They show substantial cost
+remains without lighting. Raw results are under `work/citadel-fps/nvidia-fireice-{direct,material-only,lighting-only}`.
+
+A no-quality-change scheduling prototype moved the first role's `rockNormal` call before the second role's
+evaluation, shortening the relieved projection's lifetime. NVIDIA ABBA, 180 warm-up and 240 samples per view:
+
+| View | Original A1 / A2 | Earlier normal B1 / B2 |
+| --- | --- | --- |
+| Overview | 9.0552 / 9.0573 ms | 9.0696 / 9.0624 ms |
+| Close | 20.5978 / 21.3473 ms | 20.2793 / 21.3453 ms |
+| Moving close | 20.0868 / 20.8589 ms | 19.6946 / 20.6868 ms |
+
+This did not establish a substantial gain and was not applied to production. The prototype remains under
+`work/shader-workload/register-probes/early-primary-normal`; results are in
+`work/citadel-fps/nvidia-fireice-primary-abba`. Material construction needs a larger reduction in repeated work.
+
+A close-cache experiment is prepared only under `work/shader-workload/close-cache-java`: storage uses .05 m base
+texels while the .1 m direct-material reference and `GpuAssets.closeMip` remain unchanged. Using the existing
+`materialCacheClosePixel` override alone would change all three and would not be a controlled cache experiment.
+The prototype shifts the coarse-fill and wall level cutoffs to retain their physical thresholds, keeps the 544 MiB
+budget, and has a fixed-time off/on/off image probe prepared for .075, .1, .15 and .25 m pixel footprints. Finer
+storage still needs visual validation, particularly normal variance and roughness near the reference footprint.
+
+**No fine-cache speedup or visual-equivalence result is established.** Its three attempted runs
+(`nvidia-fireice-finecache`, `-fixed`, `-visible`) were stopped before obtaining valid comparisons. After the first
+attempt, the redundant per-scenario setup above was fixed and independently reviewed; the long native stalls
+persisted. Thread samples then found `glFinish` and `glGenBuffers`, with NVIDIA repeatedly reporting P8, 210 MHz and
+0% utilization. Visible-window capture also timed out. Do not infer a cache regression or gain from those aborted
+loads. The prototype is not installed, and the isolated build was restored to production Java sources.
+
+Fire And Ice 2's earlier Iris direct run (`iris-fireice-direct-cached`, despite its label) used cache off only: an
+incorrect comparison-property name was ignored. It measured 82.8410 / 207.6808 / 203.1657 ms whole-GPU medians for
+overview/close/moving. The following visible cache-enabled run (`iris-fireice-visible-cached`) passed artwork and
+GL checks: 57.2172 / 193.1053 / 186.1135 ms whole GPU and 17.06 / 5.12 / 5.32 average FPS. Its overview cached all
+eligible top/wall chunks; both close views reported the cache inactive because their pixel footprint was too fine.
+These unusually slow Iris figures remain provisional as representative user FPS: the subsequent native stalls and
+window-capture failures need resolution, and the user reports approximately 30 FPS in usual play. They do not
+establish the 60 FPS target or a successful optimization.
+
+### Direct material evaluation: underground-material control flow
+
+The user narrowed the work to direct opaque terrain; further cache experiments were stopped. All measurements
+below render the complete Fire And Ice 2 view at 3840 x 2259 with the terrain cache disabled.
+
+Skipping floor-contour noise above ground and on steep faces did not establish a gain. Its NVIDIA ABBA close GPU
+medians were 20.6612 / 20.5240 ms for the original and 21.0483 / 20.2209 ms for the bounds shortcut. It was not
+applied. A diagnostic that entirely removed underground-floor materials measured 19.1345 ms close and 18.2518 ms
+moving, but changes the appearance and is not an implementation candidate.
+
+The equivalent straight-line rewrite evaluates the selected ground/floor once, returns for a pure material, and
+evaluates the second material only inside the actual transition. The two evaluators, material maps, final height
+blend, authored finish channels and lighting remain unchanged. It removes the dynamic material-result loop from
+the common path; it does not add shader variants. NVIDIA ABBA, 120 warm-up / 180 measured frames per view:
+
+| View | Original A1 / A2 GPU median | Rewrite B1 / B2 GPU median |
+| --- | --- | --- |
+| Overview | 9.2570 / 9.2570 ms | 8.2964 / 8.3036 ms |
+| Close | 20.7094 / 21.1620 ms | 17.7705 / 18.0449 ms |
+| Moving close | 20.6029 / 20.9121 ms | 18.0296 / 18.4187 ms |
+
+The paired averages improve by 3.0280 ms (14.5%) close and 2.5334 ms (12.2%) moving. These are whole-view GPU
+timestamps, not serialized wall-time FPS. The same in-context edit replaced 82 existing programs in each
+direction. Results: `work/citadel-fps/nvidia-fireice-material-straight-abba`.
+
+Fixed-time captures of the same installed Fire And Ice 2 geometry at fit and .075 / .15 m pixel footprints have
+zero differing RGBA bytes and identical depth for original/rewrite/restored. The work-only integration probe is
+`work/shader-workload/GpuDirectMaterialProbeSmokeTest.java`; captures are in
+`work/shader-workload/direct-straight-parity/family-programs`. These establish equivalence for those views;
+additional underground/fungal/volcanic transitions, parallax and Intel remain separate validation requirements.
+The rewrite introduces two evaluator call sites in place of one loop call site, so Intel compilation cost must
+also be checked before treating it as the final design. Iris 60 FPS has not been established.
+
+The straight-line version was subsequently removed from production: its Iris full-window load reached the 300 s
+deadline with only 12/72 generic programs linked. The original shader was restored before testing the smaller
+material prototypes below. This straight-line experiment did not demonstrate an Intel rendering improvement.
+
+### Compact direct-material evaluation
+
+`compact-floor-roles` replaces the outer ordinary ground/floor evaluator loop with one evaluation. A floor becomes
+a composite cover role, leaving the other roles and their settlement calculation in that one evaluation. Ground
+and fully floored endpoints retain their behavior. Intermediate floors intentionally differ: that includes deep
+slopes whose normal Z remains between .55 and .85, not only the contour between levels 0 and -1. The legacy
+volcanic ordinary evaluator remains unchanged. Authored finish maps, emission, metallic and scattering remain
+supported. Family selection is scalar; mixed-palette compiler pruning needs separate attention.
+
+The work-only `GpuDirectMaterialProbeSmokeTest` compares identical installed geometry, camera, animation time and
+program counts. It now supports whole-scene GPU timestamp pairs and ABBA edits independently of the full window's
+loading UI. It includes terrain, vegetation, shadows, AO, water and atmospheric composition, but omits labels/UI
+and sun glare. Its timings therefore are not interchangeable with the earlier full-window measurements. Native
+NVIDIA results, cache disabled, parallax enabled, 100 warm-up / 120 measured frames:
+
+| View | Original A1 / A2 GPU median | Compact B1 / B2 GPU median |
+| --- | --- | --- |
+| Fit | 9.9748 / 9.9584 ms | 8.9661 / 9.0470 ms |
+| Close, .089285714 m/pixel | 19.4580 / 19.6803 ms | 17.3804 / 17.3906 ms |
+| Mid, .15 m/pixel | 12.8461 / 12.5635 ms | 11.2957 / 11.3183 ms |
+
+This saves 2.1837 ms close and 1.3978 ms mid on NVIDIA. Each edit replaced the same 73 programs, with 28/28 family
+programs ready. The largest native color-channel difference was 9/255; the close view had only 150 channel values
+differing by more than 1/255, and mean absolute RGBA difference was .00002568 byte. All depths were identical and
+restoring the original restored every pixel. Results: `work/shader-workload/direct-compact-native`.
+
+At 1600 x 1000 with parallax enabled, fit and .075/.15 m pixel footprints had maximum differences 1/0/4, respectively,
+and identical depth (`direct-compact-parity`). The underground multi-family check of the final source is below.
+The native Iris comparison is separate; neither these NVIDIA measurements nor a warm binary reload proves fast
+cold compilation or the Iris 60 FPS target.
+
+Iris Xe completed the same native, parallax-enabled comparison with 13/28 family programs ready throughout (58
+programs replaced); 60 warm-up / 90 measured frames per view. Fit GPU medians were original 94.9671/94.6050 ms versus
+compact 83.5473/83.2321 ms. Close was 187.4053/186.8238 ms versus 163.3240/164.5157 ms, saving 23.1947 ms (12.4%).
+These are isolated scene GPU timings, not normal window FPS, and remain far from 60 FPS. Intel had sparse
+non-repeatable pixel outliers even after restoring the original (48 channel values over 1/255 close, maximum
+100/255), with identical depth. Candidate close mean RGBA error was below .00006 byte. Results:
+`work/shader-workload/iris-direct-compact-native`.
+
+The first Intel edit took 292.46 s to replace 58 programs, followed by a long first draw in `glDrawElements`. This
+probe links replacements after drawing to the window, unlike production's initial shared-context preparation;
+the existing Intel framebuffer recompilation caveat applies. It nevertheless does not establish fast compilation.
+Restoring the already compiled original took .464 s; that is a warm-binary load, not a fair cold-compile comparison.
+
+The subsequent source-link check captured Fire And Ice 2's generic direct blended terrain program (`Terrain /
+variant 2`, 229,761 fragment-source characters before replacement). It disabled application program binaries and
+added a distinct unused uniform to each trial, giving the driver a previously unseen source key without changing
+the executable behavior. Iris ABBA links took 12.145/16.168 s for the original and 11.921/11.658 s for the final
+compact shader. This single-program check excludes the driver's possible first-draw preparation; it neither
+measures complete map startup nor establishes a reliable percentage improvement given the original's variance.
+Compilation is still slow. Source, log and warm-up capture: `work/shader-workload/iris-direct-source-compile`.
+
+The single-evaluation ordinary ground/floor path is now the production candidate, with `floorRoleWeight` shared
+with the unchanged legacy volcanic floor blend. It introduces no new programs, uniforms or resources. The
+following larger source rewrites remain only in `work/shader-workload/register-probes`:
+
+- `compact-deferred-surface`: shared projected sampling, with primary normal/finish reads moved after final role
+  weights. Fire And Ice images matched the compact evaluator byte-for-byte, but NVIDIA close GPU time regressed
+  from 17.4766 to 18.2400 ms (paired averages). Do not retain a smaller-looking source change that draws slower.
+- `compact-streamed-covers`: final cover weights estimated before sequential material completion, replacing four
+  simultaneously live complete materials. Native NVIDIA close paired averages were 17.5432 versus 17.8468 ms.
+  It also changes contact pixels (mean .00281565 RGBA byte, maximum 31), including tropical authored mixtures.
+  The existing volcanic evaluator remains. No NVIDIA benefit was established. Native Iris, parallax off, also
+  failed to improve close rendering: final production baseline 170.7414/171.4851 ms versus streamed
+  175.2192/173.7693 ms (60 warm-up / 90 samples, 4/28 family programs, 49 programs replaced). Fit medians drifted
+  from 85.7016 to 91.2850 ms for the baseline, with candidate 87.0270/88.1687 ms between them; no reliable fit gain
+  follows. This probe used production's shared-context preparation for offscreen hot edits, unlike the earlier
+  Intel comparison, but still needed 185.97 s for the candidate edit. Different source, program counts and warmed
+  binaries prevent a cold-compile comparison with the 292.46 s result above. Results: `iris-direct-streamed-native`.
+- `compact-unified-natural`: ordinary material at volcanic contacts goes through the two-role evaluator too.
+  Close GPU paired averages were 17.2053 versus 17.1864 ms, no meaningful improvement; maximum color difference
+  was 72/255 across the views. It is not part of the production change.
+
+The grass/dirt/fungus staircase fixture (levels -2 through +1, parallax enabled) first compared the deferred-surface
+prototype against the original (`direct-floor-fixture`). The exact final production source was then tested
+separately against the original at 1600 x 1000 (`work/shader-workload/direct-floor-production`). Both comparisons
+had maximum channel differences 4/9/5 at fit/close/mid, with means below .0003 byte and identical depth. The final
+source's close image had 271 of 6.4 million RGBA channel values differing by more than 1/255; restoring the original
+restored every pixel in all three views. Visual inspection retained the distinct underground grass, dirt and fungal
+surfaces. This bounds the tested transition differences; it is not proof for every map. Independent code review
+found no actionable correctness issue. Rejected source rewrites, their generators and captures remain diagnostic
+artifacts, not runtime configuration options.
+
+### Direct mud, swamp and ice (2026-11-03)
+
+The retained changes reduce work inside existing shaders; they add no shader variants, textures or cache behavior.
+The reference for these comparisons already includes the compact direct-material evaluation above.
+
+- Mud and non-sandy swamp interiors use the existing uniform-biome metadata to prove full coverage before
+  evaluating the buried substrate. They skip its overwritten finish/emission reads, normal direction and final
+  color treatment. Substrate height still supplies weathering and shadow receiver lift; filtered normal length
+  remains at wider footprints. Edges, mixed sand and submerged banks retain the original evaluation. The visible
+  material's authored finish/emission maps remain supported.
+- Pure mud does not evaluate unused field/wetland noise. Fine wetland noise stops where its existing fade already
+  reaches the constant value. A completely open swamp pool skips the soil/hummock normal that its ripple normal
+  entirely replaces. Partial pools keep the original blend.
+- Ice streams the nine neighboring hexes instead of retaining four nine-element arrays. A conservative bound on
+  the broken-edge displacement skips the two floe fields only beyond the wet rim or safely inside complete ice.
+  The interior proof includes the pixel footprint; broken edges, thickness, frost, reflection and authored detail
+  retain their existing calculations where they contribute.
+
+Native 3840 x 2259 Iris Xe ABBA measurements, cache disabled, normal maps enabled, parallax disabled:
+
+| Close-view stress fixture | Original A1 / A2 median | Optimized B1 / B2 median | Paired average saving |
+| --- | --- | --- | --- |
+| Mud | 97.8359 / 88.6704 ms | 82.1151 / 91.2868 ms | 6.5522 ms (7.0%) |
+| Swamp | 137.3756 / 149.9814 ms | 138.1356 / 118.6024 ms | 15.3095 ms (10.7%) |
+| Ice | 108.7480 / 116.8628 ms | 104.4923 / 105.6381 ms | 7.7402 ms (6.9%) |
+
+These are whole-scene GPU timestamps from the isolated probe described above, not normal window FPS or isolated
+shader timings. The synthetic boards are 16 x 17, with broad interior material regions and boundaries; mud/swamp
+use a .05 m/pixel camera setting and ice .089285714. Mud/swamp use 240 warm-up and 120 sampled frames per pass;
+ice uses 60/90. Timings vary substantially, especially for swamp, so these paired averages do not establish stable
+gains in every view or the 60 FPS target. Ice overview did not show a meaningful gain. NVIDIA ice close saved
+.5473 ms (13.0171 to 12.4698 ms paired averages).
+
+Mud and swamp comparisons differ by at most one 8-bit channel step, have identical depth, and restore exactly.
+NVIDIA ice fit/close comparisons are byte-identical with identical depth. Iris ice has sparse color outliers also
+present after restoring the original, with identical depth; it is not byte-identical on Intel. The mixed
+mud/swamp/sand regression with parallax enabled differs by at most one channel step and restores exactly.
+
+Results: `work/wet-terrain/iris-mud-proof-close.log`, `iris-swamp-production-close.log`, `iris-ice-stream.log`,
+`nvidia-ice-stream.log` and `nvidia-wet-proof-mixed.log`. The mud/mixed runs precede the final conservative shoreline
+guard, which does not affect their dry interiors. The final swamp run uses production sources. All GPU probes use
+the same installed geometry and fixed animation time. Ground-cover arrivals additionally grow over 500 ms of wall
+time; comparison captures now wait for that growth. A multi-view ice-boundary run changed grass/depth even with
+an original-to-original reload (zero programs changed), so it is not evidence of a shader regression; boundary
+validation uses separate single-view processes to avoid that camera-history confound.
+
+The final production ice boundary fixture (land ice, detected black ice on pavement, frozen water and an elevation
+step) passes those separate NVIDIA comparisons at .05 and 6 m/pixel: candidate and restored color/depth are exact.
+Results: `nvidia-ice-boundary-production-close.log` and `nvidia-ice-boundary-production-far.log`.
+The mixed wet-material fixture also passes with the final production shaders, parallax enabled and normal maps
+disabled: maximum channel difference 1/255, identical depth and exact restoration
+(`nvidia-wet-production-no-normals.log`).
+The combined five production shaders also pass native Fire And Ice 2 close-view integration with parallax enabled:
+candidate and restored images are byte-identical, depth is identical, and both edits replace the same 53 programs
+(`nvidia-wet-production-fireice.log`). This comparison validates appearance/integration, not performance on that map.
+
+Existing program counts are unchanged. Hot-edit compile times are not a controlled cold-start comparison, and no
+startup-time improvement is claimed. Independent source review found no actionable correctness issue.
+
+### Iris Xe: three maps at 1080p (2026-11-03)
+
+These runs use the full board window at a verified physical 1920 x 1080 framebuffer on Intel Iris Xe, render scale
+1, Enhanced graphics, terrain cache disabled, VSync disabled and no per-frame `glFinish`. Normal maps, tessellation,
+specular antialiasing and AO are enabled; parallax and SMAA are disabled. Lighting is fixed at clear 13:00. Labels,
+HUD, live scene capture and one fixture unit remain present. They measure actual window frame intervals as well as
+independent GPU timestamps, unlike the isolated material probes above.
+
+Each view has 120 warm-up and 240 sampled frames. The isometric camera uses azimuth 45 and tilt 54.74 degrees;
+overview fits the board, close centres on the board at span 270 world units, and moving pans from that close view.
+The exact inputs are `AGoAC Maps/16x17 Grassland 2.board`,
+`unofficial/Drewbacca/16x17 Fire And Ice 2.board` and
+`Battle of Tukayyid Pack/32x17 Kozice Valley (CDS).board`.
+
+Initial baseline, including the preceding compact and wet-material improvements:
+
+| Map | Fitted overview FPS | Close FPS | Moving FPS | Close GPU median | Close opaque median | Close depth pre-pass |
+| --- | --- | --- | --- | --- | --- | --- |
+| Grassland 2 | 35.95 | 23.31 | 25.21 | 42.2850 ms | 36.4084 ms | 2.1078 ms |
+| Fire And Ice 2 | 23.87 | 17.61 | 17.75 | 54.6706 ms | 47.6544 ms | 3.4709 ms |
+| Kozice Valley (CDS) | 33.47 | 25.92 | 27.15 | 38.2515 ms | 30.4421 ms | 4.3442 ms |
+
+FPS is the average from measured frame intervals, not the inverse of median GPU time. Close frame-interval p95 is
+46.771 / 64.278 / 41.195 ms respectively. Existing family programs available were 4/8, 4/40 and 8/8; the remainder
+use the existing generic shader. These reflect this run's warm-binary availability, not identical cold-start states.
+Terrain preparation took approximately 157, 408 and 40 seconds respectively; that difference is not a controlled
+comparison of map loading. All runs reached the completed phase without a renderer or framebuffer mismatch.
+
+A separate 24-frame family diagnostic follows each steady view. Grassland close spends about 18.57 ms in mixed
+grass/desert ground draws. Fire And Ice close spends about 15.23 ms in ordinary grass draws, 10.01 ms in mixed
+grass/dirt/rock/snow draws, 5.93 ms in curved ground overlays and 8.27 ms across two snow groups. Kozice close has
+about 6.17 ms of grass/desert blends and 6.09 ms in its largest ordinary grass group. These are grouped draws,
+including their vertex/raster work, not isolated material instruction timings. Timestamp instrumentation adds
+overhead, and stage/group percentiles must not be summed. Ordinary hex labels are around .06-.10 ms; AO is around
+1 ms. Mud, swamp and ice alone therefore do not explain the remaining cost on these maps.
+
+Results and screenshots: `work/iris-1080/grassland-baseline`, `fireice-baseline`, `kozice-baseline` and their adjacent
+`.log` files. `work/iris-1080/results.py` extracts frame intervals and GPU stages into `results.json`.
+
+A work-only experiment prioritized the same four specialized family programs by estimated material evaluations
+instead of index count. It did not provide a repeatable gain on Grassland: close FPS 24.95 versus 25.32, moving
+26.34 versus 25.72. It is not retained; program count was fixed, and no cold-compilation benefit was established.
+
+The useful material change skips `blendCovers`' first ordinary material when no retained coverage uses its family
+and no sand-to-substrate transfer can expose it. Previously that first material was always fully evaluated, even
+where another palette member completely replaced it. Active aliases and exposed sand substrate still evaluate it;
+constructed panels and the volcanic path are unchanged. Material derivatives are captured before the branch. The
+existing 2% coverage threshold is unchanged, and every contributing material retains its authored maps and detail.
+This shared path includes grass, desert, Mars, tropical, cold basalt and other ordinary families. A uniform surface
+still requires its own material; gains depend on otherwise unused work in mixed palettes, not the map's name.
+
+Full-window ABBA comparisons use 120 warm-up / 180 sampled frames per view. Original A1, candidate B1/B2 and restored
+original A2 share a GL context. Family-program capacity is fixed at 4 for Grassland and Fire And Ice, and 8 for Kozice,
+keeping availability at 4/8, 4/40 and 8/8 for every pass; warm binaries cannot silently add specializations.
+
+| Close view | Original A1 / A2 GPU median | Candidate B1 / B2 GPU median | Paired average saving | Mean of original / candidate run FPS |
+| --- | --- | --- | --- | --- |
+| Grassland 2 | 41.0526 / 39.5250 ms | 37.1542 / 37.0966 ms | 3.1634 ms (7.9%) | 24.43 / 26.40 |
+| Fire And Ice 2 | 53.7612 / 52.5894 ms | 52.0850 / 52.1211 ms | 1.0723 ms (2.0%) | 18.37 / 19.07 |
+| Kozice Valley (CDS) | 34.0309 / 33.4907 ms | 32.9163 / 32.6331 ms | .9861 ms (2.9%) | 29.25 / 30.21 |
+
+Moving paired GPU savings are 2.5278, .2326 and .7935 ms respectively; Fire And Ice's moving result does not
+establish a meaningful gain. Original runs also vary: comparing against the restored original alone gives close
+savings of 2.3996, .4864 and .7160 ms. These are measured incremental gains, not stable 60 FPS or a blanket terrain
+speedup. Do not compare the candidate directly with the earlier independent baseline to attribute a larger gain.
+
+Kozice initially fits with 12 medium chunks; its first close view has six full/six medium chunks, and it then retains
+eight full/four medium chunks after moving. Its overview ABBA average is therefore confounded by that geometry
+history and is not a shader regression/gain claim. The restored-original comparisons above also control the retained
+chunk detail. Grassland and Fire And Ice retain six full chunks throughout. Full logs, draw audits, stage
+timings and screenshots are under `work/iris-1080/{grassland,fireice,kozice}-absent-base-abba`.
+
+NVIDIA fixed-time image checks with parallax enabled compare the same installed scene, including original
+restoration. All three maps and the mixed grass/desert/sand/dirt fixture (including sublevel floors) are pixel- and
+depth-identical at fitted, close and mid views. Logs: `nvidia-{grassland,fireice,kozice}-absent-parity.log` and
+`nvidia-absent-sand-floor-parity.log`. Independent source review found no actionable correctness issue. The tested
+material change is retained in production, without new shader variants, resources or cache behavior. Hot recompiles
+still take time; unchanged program count does not establish improved startup latency.
+
+A second retained change skips sculpted-terrain shadow comparisons when the completed opaque surface has no
+directional-light contribution: its geometric support faces away from the sun, and it has neither thin-leaf
+transmission, positive scattering nor a volcanic contribution. The condition reads the actual completed material,
+so future authored scattering maps remain supported. Receiver-plane derivatives and shared shadow setup stay
+unconditional; the early return precedes only unused comparisons. Existing foliage/other callers retain their
+original five-argument `sculptShadow` entry. This changes no shadow filtering, material detail, geometry or program
+count on surfaces that receive directional light.
+
+The same full-window ABBA settings test this separately, with the unused-material fix present in both versions:
+
+| Close view | Original A1 / A2 GPU median | Shadow skip B1 / B2 GPU median | Paired average saving |
+| --- | --- | --- | --- |
+| Grassland 2 | 36.4196 / 35.8323 ms | 36.1436 / 36.1622 ms | -.0270 ms: no meaningful change |
+| Fire And Ice 2 | 52.9321 / 52.5078 ms | 51.2764 / 51.5916 ms | 1.2860 ms (2.4%) |
+| Kozice Valley (CDS) | 31.9506 / 31.8969 ms | 31.8926 / 31.7538 ms | .1006 ms: no meaningful change |
+
+Fire And Ice still saves 1.0738 ms against the restored original alone; moving saves 1.0688 ms in the paired
+average. This is a modest improvement, not the hoped-for 2 ms from this change alone. Kozice's overview retains
+the geometry-history limitation described above. Results: `work/iris-1080/{grassland,fireice,kozice}-shadow-abba`.
+Independent review found no actionable correctness issue. NVIDIA Fire And Ice checks with parallax enabled are
+pixel- and depth-identical at fit/close/mid under 13:00 lighting, and at close view under 06:15 lighting, including
+restoration: `nvidia-fireice-shadow-parity.log` and `nvidia-fireice-shadow-low-sun.log`.
+
+Latest full-window FPS, averaging the two candidate runs with both retained changes:
+
+| Map | Fitted overview FPS | Close FPS | Moving FPS |
+| --- | --- | --- | --- |
+| Grassland 2 | 40.2 | 27.4 | 29.3 |
+| Fire And Ice 2 | 27.4 | 19.3 | 20.0 |
+| Kozice Valley (CDS) | 33.6 | 31.1 | 29.1 |
+
+These remain far from stable 60 FPS. Different runs drift, so the separate ABBA comparisons, not subtraction from
+the first baseline table, establish the incremental savings. Source equality checks confirm that the three final
+production shader files match the measured candidates. No additional shader variants or terrain-cache changes
+are introduced; new changes remain unstaged.
+
+### Iris Xe shader compilation survey (2026-11-03)
+
+The current Fire And Ice 2 scene exported 93 distinct vertex/fragment program pairs, including tessellation
+stages where present. A work-only raw GL harness compiles and links each program on the verified Iris Xe renderer.
+It bypasses application program binaries and appends a unique unused uniform to each fragment source to avoid
+reusing the same source key. It does not clear driver caches, render the scene, or measure texture/geometry loading.
+Stage submissions, `glLinkProgram`, and final link-status waiting are timed separately; compile/link status is
+validated for every stage and program. This is source-compilation evidence, not a complete startup benchmark.
+
+| Exported program | Source compile/link time |
+| --- | --- |
+| General sculpted volcanic blend, cloud shadows | 83.255 s |
+| Ordinary sculpted blend, cloud shadows, tessellated | 11.416 s |
+| Ordinary sculpted blend, cloud shadows | 11.376 s |
+| Grass / dirt / rock plus volcanic blend specializations | 10.821-10.854 s each |
+| Existing blended wall / top material-fill programs | 6.651 / 6.590 s |
+| Plain sculpted ground, with / without tessellation | 4.121 / 4.198 s |
+| Unblended volcanic sculpted ground | 3.834 s |
+| Water surface | .600 s |
+| Ordinary model programs | .245-.446 s |
+| Shadow depth programs | .011-.015 s |
+
+Serial source-compilation total is 198.932 s, of which 198.691 s is inside `glLinkProgram`. That call includes the
+driver's deferred compilation and optimization; the timings do not identify individual optimizer passes. The
+general volcanic blend alone accounts for 41.85% of this total. Corresponding ordinary blended programs with and
+without tessellation both cost about 11.4 s, so tessellation is not the main compilation difference in this sample.
+These 93 exported programs are not every possible program in the game, nor do their serial timings equal startup
+wall time. Production can reuse program binaries and compile asynchronously; first-draw driver work is also
+outside this survey.
+
+The worst program has four separate calls to `naturalMaterialFor` in `blendCovers`. Each reaches the general
+material evaluator, including ground/sublevel blending and up to four material roles with their projection,
+parallax and authored channels. A prototype gives that general volcanic path one draw-uniform loop and one
+ordinary-evaluator call site. Its source text is slightly longer, yet compilation becomes much faster: source
+length alone does not explain the cost. Repeated original measurements are 83.255 / 84.439 s; the first loop
+prototype takes 19.448 / 21.078 s, about 76% less. This is a structural compiler improvement, not fewer texture
+maps, lower texture resolution, reduced lighting, or an added shader specialization.
+
+Survey sources, runner, raw timings and prototype snapshots are under `work/compile-survey`: `sources`,
+`CompileSurveyMain.java`, `run.ps1`, `iris-current/timings.csv`, `iris-generic-repeat/timings.csv`,
+`iris-loop/timings.csv` and `iris-loop-repeat/timings.csv`. The existing terrain cache is not modified.
+
+The loop was initially held out of production because faster compilation did not establish faster rendering;
+the deployment decision after the requested retest is recorded below. NVIDIA Fire And
+Ice 2 comparisons at 1920 x 1080, with parallax enabled, fixed scene time and family availability 4/28, are
+pixel- and depth-identical at fit/close/mid, including restoration. Its whole-scene GPU medians are effectively
+unchanged: original 3.722/3.726, 4.757/4.757, 4.816/4.789 ms versus candidate 3.681/3.669, 4.773/4.689,
+4.763/4.758 ms respectively (`work/iris-1080/nvidia-volcanic-loop.log`). These are isolated scene GPU timestamps,
+not window FPS.
+
+Iris comparisons use parallax off and the same fixed family availability. An occlusion-query audit explicitly
+excludes the depth shader and verifies that the general volcanic color program contributes 1,327 / 14,064 /
+4,989 samples in fit/close/mid. Color comparisons have isolated differences of a few pixels out of 2,073,600;
+differences also occur between repeated candidates and after original restoration. Depth remains identical, but
+Intel pixel identity is not claimed. The initial strict comparison aborted on those outliers; subsequent diagnostic
+runs record them without relaxing the depth assertion. Source review found no alias, concrete, floor, sand,
+derivative, authored-channel or evaluation-order mismatch.
+
+A single-mid-view control with fixed render ordering reproduces a small rendering cost for the one-call-site
+loop: original GPU medians 40.148 / 40.218 ms versus candidate 40.559 / 40.680 ms, about .437 ms more. Skipping
+redundant copies into inactive slots did not establish an improvement. A final work-only experiment keeps A's
+evaluation outside the secondary-slot loop, leaving two evaluator call sites. Per-draw GPU queries around the
+affected color program give original medians 1.4753 / 1.4997 ms versus 1.5469 / 1.5427 ms: about .0573 ms more.
+Whole-scene medians drift from 41.8012 to 40.4740 ms for the original, with candidate 42.0356 / 41.3345 ms between
+them; these do not establish an FPS gain. There is no isolated source-compilation measurement for that final
+two-call-site experiment, and its all-program hot-edit duration is not a cold-start comparison.
+
+Logs are `work/iris-1080/iris-volcanic-loop-diagnostic.log`, `iris-volcanic-loop-mid-control.log`,
+`iris-volcanic-loop-skip-mid.log` and `iris-volcanic-loop-peeled-mid.log`. The corresponding sources remain under
+`work/compile-survey`. At this stage no loop prototype was promoted; the earlier retained material improvements
+remained in place. The requested retest and subsequent deployment decision follow below.
+
+The next blending design should reduce the material work itself, rather than only rearrange its control flow.
+Current steep ordinary surfaces already choose two palette families, and ordinary material evaluation already
+limits internal roles and skips provably absent work. Tops can still construct up to four family results before
+final cover-height competition. The earlier `compact-streamed-covers` experiment, which estimated that competition
+before completing materials, was slower on both tested GPUs; it is not an established optimization.
+
+A larger visual approximation is to author compact surface profiles whose color/height, normal and finish maps
+already contain fine soil/rock/deposit weathering, leaving runtime masks to select and blend those surfaces across
+broad terrain contacts. This removes nested material recipes rather than just lowering a weight threshold.
+Coverage/height selection would precede expensive detail, with one surface in interiors, typically two at a contact,
+and meaningful junctions preserved. Animated lava, emission, scattering, metallic response and wetness must remain
+represented. This is a proposed material-representation change, not implemented or benchmarked; repetition,
+transition continuity, close-view detail, texture memory and Iris GPU cost need a focused before/after prototype.
+
+### Single shared material loop: requested retest (2026-11-03)
+
+This repeats the original one-call-site `loop-candidate`, not the later skip-copy or peeled-base experiments.
+At the start of the retest, production `terrain-materials.glsl` matched `loop-baseline`. Both versions run in the same application build,
+with the same installed scene and fixed family-program availability (4/28). Fire And Ice 2 renders on verified Iris
+Xe at 1920 x 1080, cache off, parallax off, normal maps and AO on, clear 13:00 lighting, fixed animation time and
+fixed render ordering. Close and mid views center on zero-based hex (10,13), at .089285714 and .15 m/pixel.
+
+Each reported value below is the median of four run medians. Mid uses order ABBABAAB, 200 warm-up / 240 measured
+frames per run. The final close comparison uses ABABABAB and shorter 60 / 90 frame blocks to reduce drift between
+versions. Full-scene GPU timestamps and 24-frame per-draw GPU queries for the general volcanic color program are
+separate measurements; their differences are not additive. The latter excludes the depth shader. Coverage queries
+confirm 4,989 and 14,064 samples respectively. These are isolated GPU timings, not normal window FPS.
+
+| Measurement | Original | Single loop | Change |
+| --- | --- | --- | --- |
+| Mid scene GPU | 40.21895 ms | 40.87145 ms | +.65250 ms (+1.62%) |
+| Close scene GPU | 39.49030 ms | 40.16050 ms | +.67020 ms (+1.70%) |
+| Mid affected color-program draws | 1.47805 ms | 1.59785 ms | +.11980 ms (+8.11%) |
+| Close affected color-program draws | 2.47255 ms | 2.82000 ms | +.34745 ms (+14.05%) |
+
+No runs are discarded from those reported groups. Mid original run medians range 40.1482-42.0919 ms and candidate
+40.5984-44.8225 ms; close original ranges 39.4169-39.5507 ms and candidate 40.0135-40.4508 ms. This supports a small
+rendering cost rather than treating the earlier .437 ms estimate as a universal constant. All captured depths are
+identical. Candidate images differ from the initial baseline at 1-8 pixels by more than 1/255 out of 2,073,600;
+restored-original captures also have 3-8 such pixels. Maximum channel differences reach 84/255 in both original
+controls and candidate captures, so Intel byte identity is not claimed.
+
+Two preliminary close tests are retained as diagnostics, not combined into the final table: the first overlapped
+image analysis, and the next suffered severe drift even after restoring the original (38.9891 to 58.9403 ms).
+The shorter alternating comparison above followed those failed controls with no concurrent image analysis or
+compilation. Runtime graphics-counter and battery queries were unavailable in this environment, so the source
+of the transient system-level variation was not identified.
+
+After rendering finished, a fresh sequential source compile/link pair used the same raw GL harness and unique
+unused source declarations as the survey. Application program binaries are bypassed; no driver cache is cleared.
+The original took 97.056349 s, and the single loop took 20.215884 s: 76.840465 s saved, or 79.17%. Earlier pairs were
+83.254717 -> 19.448018 s (76.64%) and 84.438943 -> 21.078295 s (75.04%). The large reduction is repeatable for this
+general volcanic blend program. It is not a 75-79% reduction in total map loading or compilation of every program.
+
+Results: `work/compile-survey/single-loop-retest-results.json`, `iris-single-loop-retest-before/timings.csv` and
+`iris-single-loop-retest-after/timings.csv`; rendering logs/captures are
+`work/iris-1080/iris-volcanic-single-loop-retest-mid` and `iris-volcanic-single-loop-retest-close-alternating` with
+adjacent `.log` files. The retest itself changed no production shader and staged no files.
+
+### Single shared material loop: retained implementation (2026-11-03)
+
+Following explicit acceptance of the measured compilation/rendering trade-off, production `terrain-materials.glsl`
+now contains the exact original one-call-site `loop-candidate` used in the comparisons above. The loop is limited
+to the general volcanic blend (`volcanicFlag` without `VOLCANIC_ORDINARY_FAMILY`). It shares the ordinary material
+evaluator call across palette slots, with a draw-uniform bound, while retaining the original slot order, aliases,
+texture/scale overrides, constructed concrete behavior, sand substrate exposure and complete material channels.
+Final blend weights and lighting remain unchanged. No shader variants or resources are added.
+
+The accepted benefit is 75-79% less source compile/link time for this program; total map loading was not measured.
+The measured Iris cost is approximately .65-.67 ms more whole-scene GPU time in the tested 1080p close/mid views.
+NVIDIA comparisons match color/depth exactly; Iris depths match exactly with the isolated pixel differences
+documented above. The skip-copy and peeled-base loop experiments remain work-only.
+
+Integration verification compares the production shader with the tested candidate and checks the patch for
+whitespace errors. The tested source is unchanged, so the completed native compilation, rendering, image and
+independent-review checks above apply to this implementation. Changes remain unstaged.

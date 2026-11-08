@@ -189,7 +189,7 @@ class GpuPhaseHeaderSmokeTest {
                     for (GpuBattleStatus.Snapshot status : List.of(initiative, moving)) {
                         String name = "g1-layout-" + (status == moving ? "movement-" : "initiative-") + size[0] + "x"
                               + size[1];
-                        GpuBoardSource.Frame frame = GpuHudInputTest.frame(status, panels(CONDITIONS));
+                        GpuBoardSource.Frame frame = GpuHudFixtures.frame(status, panels(CONDITIONS));
                         // Two frames: the initiative card flows its sides by the width of the previous layout.
                         hud.update(frame, GpuHud.HudView.EMPTY, null, preferences(true));
                         hud.update(frame, GpuHud.HudView.EMPTY, null, preferences(true));
@@ -340,7 +340,7 @@ class GpuPhaseHeaderSmokeTest {
     }
 
     private static GpuBoardSource.UiPreferences preferences(boolean conditions) {
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(),
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(),
               Map.of("conditionsVisible", conditions, "binds", List.of()));
     }
 
@@ -367,7 +367,7 @@ class GpuPhaseHeaderSmokeTest {
           GpuConditionsCard conditions, GpuInitiativeCard card, GpuBattleStatus.Snapshot status, List<String> lines,
           String name) {
         state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
-        GpuHud.Inputs inputs = inputs(hud, GpuHudInputTest.frame(status, panels(lines)), !lines.isEmpty());
+        GpuHud.Inputs inputs = inputs(hud, GpuHudFixtures.frame(status, panels(lines)), !lines.isEmpty());
         GpuHud.Metrics m = inputs.metrics();
         for (int pass = 0; pass < 2; pass++) {
             header.update(inputs);

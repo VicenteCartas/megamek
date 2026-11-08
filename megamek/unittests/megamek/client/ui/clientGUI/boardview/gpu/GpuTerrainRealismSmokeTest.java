@@ -603,7 +603,7 @@ class GpuTerrainRealismSmokeTest {
 
             private void settleView() throws Exception {
                 if (!CAPTURE_ONLY) {
-                    GpuTerrainLodSmokeTest.settle(terrain, null, installed.board, camera);
+                    GpuReviewFrame.settle(terrain, null, installed.board, camera);
                     return;
                 }
                 // A light-condition change can finish geometry while family programs still link. Pump the

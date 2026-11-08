@@ -18,12 +18,17 @@ import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
 import megamek.common.Hex;
+import megamek.common.board.Board;
+import megamek.common.board.BoardSceneryLayouts;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.HexTile;
 import megamek.common.board.TilesetScenery;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class BoardWallTest {
     static final Coords CENTER = new Coords(4, 4);
@@ -262,8 +267,8 @@ class BoardWallTest {
     }
 
     static BoardScene scene(Map<Coords, Integer> walls, int height, int elevation) {
-        return BoardSurfaceBlendTest.scene(coords -> {
-            var tile = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.GRASS, elevation, -1, 0);
+        return BoardScenes.scene(coords -> {
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.GRASS, elevation, -1, 0);
             var features = walls.containsKey(coords) ? List.of(new BoardScene.Feature(
                   "buildings/wall-" + walls.get(coords), 0, 0, 0, 1, height, 0, BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();
             return new BoardScene.Tile(coords, elevation, -1, false, 0, tile.surface(), null, null, features, List.of(),
@@ -277,4 +282,201 @@ class BoardWallTest {
     }
 
     private static Ray down(float x, float y) { return new Ray(new Vector3(x, y, 100), new Vector3(0, 0, -1)); }
+
+    private static final Coords ORIGIN = new Coords(0, 0);
+
+    @ParameterizedTest
+    @CsvSource({ "1,CIVILIAN", "10,CIVILIAN", "11,LIGHT", "15,LIGHT", "16,MEDIUM", "40,MEDIUM",
+          "41,HEAVY", "90,HEAVY", "91,HARDENED", "150,HARDENED", "151,CASTLE_BRIAN", "500,CASTLE_BRIAN" })
+    void capturedWallUsesCfBoundaries(int cf, BoardWall.Family expected) {
+        Board board = board(cf);
+        var tile = BoardTiles.captureAll(board).getFirst();
+        assertEquals(expected, layout(tile).family());
+    }
+
+    @Test
+    void damageNeverChangesThePristineWallFamilyOrItsGeometry() {
+        Board board = board(151);
+        Board received = board(151);
+        var before = BoardTiles.captureAll(board).getFirst();
+        assertEquals(BoardWall.Family.CASTLE_BRIAN, layout(before).family());
+        for (int remaining : new int[] { 150, 90, 40, 15, 10, 1 }) {
+            received.getBuildingAt(ORIGIN).setCurrentCF(remaining, ORIGIN);
+            board.updateBuilding(received.getBuildingAt(ORIGIN));
+            var after = BoardTiles.captureAll(board).getFirst();
+            assertEquals(remaining, after.cover().cf(), "Gameplay still tracks damage normally");
+            assertEquals(151, after.cover().pristineCF());
+            assertEquals(layout(before), layout(after), "Damage across every tier retains the original model");
+            assertTrue(before.sameGeometry(after));
+        }
+    }
+
+    @Test
+    void editorPreviewUsesPaintedCfThenCommittedEditUsesTheSameFamily() {
+        Board board = board(150);
+        Hex painted = new Hex(0, "building:5:0;bldg_elev:2;bldg_cf:11;bldg_basement_type:1", "");
+        painted.setCoords(ORIGIN);
+        try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
+            var preview = capture.preview(board, ORIGIN, painted);
+            assertEquals(BoardWall.Family.LIGHT, layout(preview).family(), "Preview ignores the old building's CF");
+            board.setHex(ORIGIN, painted);
+            var committed = BoardTiles.captureAll(board).getFirst();
+            assertEquals(layout(preview), layout(committed));
+            painted.addTerrain(new Terrain(Terrains.BLDG_CF, 15));
+            var sameTier = BoardTiles.captureAll(board).getFirst();
+            assertTrue(committed.sameGeometry(sameTier));
+            painted.addTerrain(new Terrain(Terrains.BLDG_CF, 16));
+            assertFalse(committed.sameGeometry(BoardTiles.captureAll(board).getFirst()));
+        }
+    }
+
+    @Test
+    void explicitWallModelKeepsItsAppearanceWhenCfChanges() {
+        Board board = board(151);
+        board.getHex(ORIGIN).setAppearance(Map.of("building",
+              new HexAppearance(null, "buildings/saxarba/building_hard/building_hard_04", null, null)));
+        var before = BoardTiles.captureAll(board).getFirst();
+        board.getHex(ORIGIN).addTerrain(new Terrain(Terrains.BLDG_CF, 10));
+        var after = BoardTiles.captureAll(board).getFirst();
+        assertNull(BoardWall.family(before));
+        assertTrue(before.sameGeometry(after));
+    }
+
+    @Test
+    void eachFamilyAssemblesBothLodsWithEmbeddedMaterialsAndFullHeightLayers() {
+        for (int cf : new int[] { 10, 15, 40, 90, 150, 151 }) {
+            for (int exits : new int[] { 0, 9, 63 }) {
+                int previous = Integer.MAX_VALUE;
+                for (int lod = 0; lod < BoardWall.LODS; lod++) {
+                    var model = (RigidGlb.Data) BoardWall.model(BoardWall.layout("buildings/wall-" + exits, 3, cf), lod);
+                    assertFalse(model.images.isEmpty());
+                    assertEquals(model.materials.size, model.surfaces.size());
+                    if (cf == 10) { assertFalse(model.alphaTests.isEmpty(), "Civilian wire cutouts retain their masks"); }
+                    int indices = 0;
+                    for (var mesh : model.meshes) {
+                        for (var part : mesh.parts) { indices += part.indices.length; }
+                        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+                        for (int vertex = 2; vertex < mesh.vertices.length; vertex += RigidGlb.STRIDE) {
+                            low = Math.min(low, mesh.vertices[vertex]);
+                            high = Math.max(high, mesh.vertices[vertex]);
+                        }
+                        if (mesh.id.contains("/roof0-")) {
+                            assertEquals(54, low, .001f, "The roof caps three complete rules levels");
+                            assertTrue(high > low && high <= 62.01f);
+                        } else {
+                            assertEquals(18, high - low, .001f, "Base and floors retain their authored height");
+                        }
+                    }
+                    assertTrue(indices < previous, "Both authored LODs must be loaded for CF " + cf);
+                    previous = indices;
+                }
+            }
+        }
+    }
+
+    private static BoardWall.Layout layout(BoardScene.Tile tile) {
+        var feature = tile.features().stream().filter(part -> BoardWall.supports(part.asset())).findFirst().orElseThrow();
+        var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
+        return BoardWall.layout(scene, tile, feature);
+    }
+
+    private static Board board(int cf) {
+        Board board = new Board();
+        board.newData(1, 1, new Hex[] { new Hex(0,
+              "building:5:0;bldg_elev:2;bldg_cf:" + cf + ";bldg_basement_type:1", "") }, null);
+        BoardSceneryLayouts.convert(board);
+        return board;
+    }
+
+    record Wall(int exits, int height, int elevation) { }
+
+    @Test
+    void cosmeticClearanceUsesTheShortArmHeightAndTheFullTowerHeight() {
+        var scene = scene(Map.of(CENTER, new Wall(1, 6, 0), CENTER.translated(0), new Wall(8, 2, 0)));
+        var obstacles = new BoardObstacles(scene, scene.tile(CENTER));
+        var edge = joint(0).scl(.94f * BoardGeometry.hexScale()).add(BoardGeometry.center(CENTER, 0));
+        assertTrue(obstacles.obstructs(new Vector3(edge).add(0, 0, BoardGeometry.level()), .1f, .1f));
+        assertFalse(obstacles.obstructs(new Vector3(edge).add(0, 0, 3 * BoardGeometry.level()), .1f, .1f),
+              "The tower does not reserve the empty space above its lower arm");
+        assertTrue(obstacles.obstructs(BoardGeometry.center(CENTER, 3), .1f, .1f));
+    }
+
+    @Test
+    void repeatedBodyJoinsRemainSolidAtAndImmediatelyAroundEverySeam() {
+        for (int levels : new int[] { 6, 30 }) {
+            var triangles = BoardWall.triangles("buildings/wall-9", levels);
+            for (int section = 1; section < levels; section++) {
+                float seam = section * HexTile.LEVEL_HEIGHT;
+                for (float offset : new float[] { -.001f, 0, .001f }) {
+                    var hit = new Vector3();
+                    assertTrue(Intersector.intersectRayTriangles(new Ray(new Vector3(40, 0, seam + offset),
+                          new Vector3(-1, 0, 0)), triangles, hit), "Every repeat meets a closed side surface");
+                    assertTrue(hit.x >= .7f * HexTile.ROAD_HALF_WIDTH - .01f);
+                }
+            }
+        }
+    }
+
+    @Test
+    void shortConnectionsMeetOnDifferentGroundLevelsWithoutChangingTheTowerHeight() {
+        for (int ground : new int[] { -1, 0, 1, 3 }) {
+            var scene = scene(Map.of(CENTER, new Wall(9, 6, 0), CENTER.translated(0), new Wall(8, 2, ground),
+                  CENTER.translated(3), new Wall(1, 2, 0)));
+            var own = scene.tile(CENTER);
+            var layout = BoardWall.layout(scene, own, own.features().getFirst());
+            var triangles = BoardWall.triangles(layout);
+            var bounds = new BoundingBox().inf();
+            triangles.forEach(bounds::ext);
+            assertEquals(6 * HexTile.LEVEL_HEIGHT + 6.2f, bounds.max.z, .001f,
+                  "The tower keeps six full levels and its barbed-wire crown");
+            for (int direction : new int[] { 0, 3 }) {
+                var neighbor = scene.neighbor(own, direction);
+                var next = BoardWall.layout(scene, neighbor, neighbor.features().getFirst());
+                var other = BoardWall.triangles(next);
+                var joint = joint(direction);
+                var hit = new Vector3();
+                assertTrue(Intersector.intersectRayTriangles(down(new Vector3(joint).scl(.999f)), triangles, hit));
+                float roof = hit.z;
+                assertTrue(roof < 6 * HexTile.LEVEL_HEIGHT - 6, "No tall blank connector end extends over the lower roof");
+                assertTrue(Intersector.intersectRayTriangles(down(new Vector3(joint).scl(-.999f)), other, hit));
+                assertEquals(roof, hit.z + neighbor.elevation() * HexTile.LEVEL_HEIGHT, .001f,
+                      "The connected roof recess meets in world space even when the ground levels differ");
+                var outward = new Vector3(joint).nor();
+                float above = Math.min(6 * HexTile.LEVEL_HEIGHT - 8, roof + 9);
+                var start = new Vector3(joint).mulAdd(outward, 2).add(0, 0, above);
+                assertTrue(Intersector.intersectRayTriangles(new Ray(start, new Vector3(outward).scl(-1)), triangles, hit));
+                assertTrue(start.dst(hit) > 3, "The exposed high face belongs to the tower, not a tall arm at the hex seam");
+            }
+        }
+    }
+
+    @Test
+    void separatedElevationsAndUnconnectedNeighborsDoNotInventAnArmConnection() {
+        for (Wall neighbor : List.of(new Wall(8, 2, 8), new Wall(8, 1, -3), new Wall(1, 2, 0))) {
+            var scene = scene(Map.of(CENTER, new Wall(1, 6, 0), CENTER.translated(0), neighbor));
+            var tile = scene.tile(CENTER);
+            var layout = BoardWall.layout(scene, tile, tile.features().getFirst());
+            assertEquals(BoardWall.layout("buildings/wall-1", 6), layout,
+                  "The layout only adjusts a reciprocal wall connection with overlapping vertical spans");
+        }
+    }
+
+    static BoardScene mixedScene() {
+        return scene(Map.of(CENTER, new Wall(39, 6, 0), CENTER.translated(0), new Wall(9, 2, 1),
+              CENTER.translated(0, 2), new Wall(8, 2, 1),
+              CENTER.translated(1), new Wall(16, 4, 0), CENTER.translated(2), new Wall(36, 2, -1),
+              CENTER.translated(2, 2), new Wall(32, 2, -1),
+              CENTER.translated(5), new Wall(4, 3, 0), new Coords(2, 6), new Wall(0, 1, 0)));
+    }
+
+    private static BoardScene scene(Map<Coords, Wall> walls) {
+        return BoardScenes.scene(coords -> {
+            Wall wall = walls.get(coords);
+            var tile = BoardScenes.tile(coords, BoardScene.Surface.GRASS, wall == null ? 0 : wall.elevation(), -1, 0);
+            return tile.withFeatures(wall == null ? List.of() : List.of(new BoardScene.Feature(
+                  "buildings/wall-" + wall.exits(), 0, 0, 0, 1, wall.height(), 0, BoardScene.FeatureKind.BUILDING)));
+        });
+    }
+
+    private static Ray down(Vector3 at) { return new Ray(at.add(0, 0, 1000), new Vector3(0, 0, -1)); }
 }

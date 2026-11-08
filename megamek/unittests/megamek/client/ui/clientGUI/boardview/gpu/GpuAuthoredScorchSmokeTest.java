@@ -54,7 +54,7 @@ class GpuAuthoredScorchSmokeTest {
         var file = output.toPath().resolve("severity-sweep.board2");
         BoardFile.save(board, file);
         Board loaded = BoardFile.read(file);
-        BoardScene scene = GpuLegacyImportSmokeTest.scene(loaded);
+        BoardScene scene = BoardScenes.scene(loaded);
         Files.writeString(output.toPath().resolve("layout.txt"),
               "Rows, north to south: grass, desert, snow, concrete (two hexes each).\n"
                     + "Columns, west to east: clean, singed, charred, ash, glass (two hexes each).\n"
@@ -105,12 +105,12 @@ class GpuAuthoredScorchSmokeTest {
                               ? Map.of("scorch", new HexAppearance("scorch/singed", null, null, null)) : Map.of());
                     }
                 }
-                BoardScene captured = GpuLegacyImportSmokeTest.scene(board);
+                BoardScene captured = BoardScenes.scene(board);
                 BoardScene scene = captured.withTiles(captured.tiles().stream().map(tile ->
                       tile.withFeatures(tile.coords().equals(dirt) ? samples : List.of())).toList());
                 if (phase.equals("nuclear")) {
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     assertEquals(samples, terrain.presentation(scene).tile(dirt).features(),
                           "Erasing authored scorch restores the existing decorative mesh before the nuclear hit");
                     assertTrue(fieldFaces(terrain.presentation(scene), fieldSurfaces, true) > 0,
@@ -134,7 +134,7 @@ class GpuAuthoredScorchSmokeTest {
                 camera.camera.update();
                 frame.prepare(terrain, camera, scene);
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 BoardScene shown = terrain.presentation(scene);
                 var surface = new BoardSurface(shown, shown.tile(dirt));
                 assertEquals(samples, scene.tile(dirt).features(), "Scorch must not mutate the source scene");
@@ -180,7 +180,7 @@ class GpuAuthoredScorchSmokeTest {
                 terrain.setGrass(true);
                 camera.fit(scene, List.of(scene.tile(dirt)));
                 frame.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 frame.render(terrain, camera, scene);
                 GpuReviewFrame.save(new File(output, "dry-grass-" + phase + ".png"));
                 if (!burned) { programs = GpuShaderLoadSmokeTest.programs(terrain); }
@@ -220,7 +220,7 @@ class GpuAuthoredScorchSmokeTest {
         try {
             frame.prepare(terrain, camera, scene);
             terrain.update(scene, camera.camera);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
             var damage = terrain.groundDamage();
             assertTrue(damage.scorchShown(), "The loaded appearance reaches the renderer");
@@ -234,7 +234,7 @@ class GpuAuthoredScorchSmokeTest {
                 camera.setIsometric(iso);
                 camera.fit(scene);
                 frame.prepare(terrain, camera, scene);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.setCombatScars(true);
                 frame.render(terrain, camera, scene);
                 int[] game = pixels();
@@ -304,7 +304,7 @@ class GpuAuthoredScorchSmokeTest {
                 for (int y = 0; y < board.getHeight(); y++) { board.getHex(x, y).setAppearance(Map.of()); }
             }
             // Preserve board identity, as an editor appearance edit does, while publishing a fresh immutable tile list.
-            damage.update(scene.withTiles(GpuLegacyImportSmokeTest.scene(board).tiles()));
+            damage.update(scene.withTiles(BoardScenes.scene(board).tiles()));
             damage.upload();
             int[] erased = directory(damage);
             for (int i = 0; i < erased.length; i++) {
@@ -372,7 +372,7 @@ class GpuAuthoredScorchSmokeTest {
         var at = new Coords(0, 3);
         var neighbour = new Coords(1, 3);
         board.getHex(at).setAppearance(Map.of("scorch", new HexAppearance("scorch/glass", null, null, null)));
-        damage.update(scene.withTiles(GpuLegacyImportSmokeTest.scene(board).tiles()));
+        damage.update(scene.withTiles(BoardScenes.scene(board).tiles()));
         int[] edited = directory(damage);
         int changedNeighbour = 0;
         for (int i = 0; i < edited.length; i++) {
@@ -387,7 +387,7 @@ class GpuAuthoredScorchSmokeTest {
         }
         assertTrue(changedNeighbour > 0, "Editing one hex refreshes the feather inside its unchanged neighbour");
         board.getHex(at).setAppearance(Map.of());
-        damage.update(scene.withTiles(GpuLegacyImportSmokeTest.scene(board).tiles()));
+        damage.update(scene.withTiles(BoardScenes.scene(board).tiles()));
         assertTrue(java.util.Arrays.equals(before, directory(damage)), "Erase restores the complete neighbouring field");
     }
 

@@ -60,7 +60,7 @@ class BoardFlowTest {
 
     @Test
     void domeVentInletsFeedAllThreeBranchesForLavaAndWater() {
-        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        BoardScene lava = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
         assertEquals(59, lava.tiles().stream().filter(tile -> tile.liquid().molten()).count());
         for (BoardScene scene : List.of(lava, BoardWaterfallTest.withWater(lava))) {
             var currents = BoardFlow.calculate(scene);

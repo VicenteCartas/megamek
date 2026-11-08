@@ -32,7 +32,7 @@ import org.lwjgl.opengl.GL11C;
 class GpuRoadSmokeTest {
     @Test
     void keepsMinesRoadsVisibleAcrossTheRealBoard() throws Exception {
-        BoardScene scene = GpuRoadSourceTest.minesScene();
+        BoardScene scene = BoardScenes.minesScene();
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "roads");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -45,7 +45,7 @@ class GpuRoadSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(weather(0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(false);
@@ -53,7 +53,7 @@ class GpuRoadSmokeTest {
                     camera.center(BoardGeometry.center(new Coords(7, 8), 0));
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     terrain.animate(.5f, List.of());
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-roads-top.png"));
@@ -61,7 +61,7 @@ class GpuRoadSmokeTest {
                     for (float zoom : new float[] { 2.5f, 1, .55f, 1 }) {
                         camera.camera.zoom = zoom;
                         camera.center(BoardGeometry.center(new Coords(7, 8), 0));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "mines-roads-zoom-" + zoom + ".png"));
                         // At distant zoom the asphalt/paint/shoulder can share one pixel; check when inspecting it again.
@@ -76,23 +76,23 @@ class GpuRoadSmokeTest {
                     var edited = new BoardScene(scene.boardId(), scene.width(), scene.height(), tiles,
                           List.of(), List.of(), -1, "", List.of());
                     terrain.update(edited, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     frame.render(terrain, camera, edited);
                     GpuReviewFrame.save(new File(output, "mines-roads-edited.png"));
                     checkMinesRoads(edited, camera);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     checkMinesRoads(scene, camera);
                     camera.camera.zoom = .2f;
                     camera.center(BoardGeometry.center(new Coords(7, 14), 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-top.png"));
                     checkMinesRoads(scene, camera);
                     camera.setIsometric(true);
                     camera.center(BoardGeometry.center(new Coords(7, 14), 0));
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "mines-road-fluff-sand-oblique.png"));
                     // This interior plateau fills the upper four fifths of the close view. Test actual scene
@@ -159,7 +159,7 @@ class GpuRoadSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(weather(0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(true);
@@ -189,7 +189,7 @@ class GpuRoadSmokeTest {
                         GpuTerrainPreparationSmokeTest.checkBlendedRoles(terrain, "concrete junction " + exits);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .21f;
-                        camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 2));
+                        camera.center(BoardGeometry.center(BoardScenes.CENTER, 2));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, "concrete-roundabout-" + exits + ".png"));
                         checkCoverage(frame, terrain, camera, scene, 0, Gdx.graphics.getBackBufferHeight(), true,
@@ -223,7 +223,7 @@ class GpuRoadSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(weather(0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     var scene = roads(false);
@@ -234,7 +234,7 @@ class GpuRoadSmokeTest {
                     for (boolean oblique : new boolean[] { false, true }) {
                         camera.setIsometric(oblique);
                         camera.camera.zoom = .43f;
-                        camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
+                        camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, oblique ? "roads-oblique.png" : "roads-top.png"));
                     }
@@ -271,7 +271,7 @@ class GpuRoadSmokeTest {
                     frame.configure(weather(0));
                     camera.setIsometric(false);
                     camera.camera.zoom = .115f;
-                    camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
+                    camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                     for (var kind : List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.ALLEY, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
                         var ends = ends(kind);
                         terrain.update(ends);
@@ -290,8 +290,8 @@ class GpuRoadSmokeTest {
                         frame.configure(weather(0));
                     }
                     camera.setIsometric(true);
-                    camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0)
-                          .lerp(BoardGeometry.center(BoardRoadTest.CENTER.translated(3), 0), .5f));
+                    camera.center(BoardGeometry.center(BoardScenes.CENTER, 0)
+                          .lerp(BoardGeometry.center(BoardScenes.CENTER.translated(3), 0), .5f));
                     for (var pair : List.of(List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.GRAVEL),
                           List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL), List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.PAVED))) {
                         var change = materialChange(pair.getFirst(), pair.getLast());
@@ -309,7 +309,7 @@ class GpuRoadSmokeTest {
                     }
                     camera.setIsometric(false);
                     camera.camera.zoom = .115f;
-                    camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
+                    camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                     for (var kind : List.of(BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
                         var unsealed = materialChange(kind, kind);
                         terrain.update(unsealed);
@@ -328,7 +328,7 @@ class GpuRoadSmokeTest {
                     terrain.animate(.5f, List.of());
                     camera.setIsometric(true);
                     camera.camera.zoom = .24f;
-                    camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
+                    camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                     frame.render(terrain, camera, bridge);
                     GpuReviewFrame.save(new File(output, "bridge-approaches.png"));
                     camera.camera.zoom = .13f;
@@ -356,31 +356,31 @@ class GpuRoadSmokeTest {
                     for (int layout = 0; layout < 3; layout++) {
                         int[] rises = layout == 0 ? new int[] { 2, 2, 2, 2, 2, 2 }
                               : layout == 1 ? new int[] { -2, -2, -2, -2, -2, -2 } : new int[] { -2, 1, 2, -1, 0, 2 };
-                        var junction = BoardRoadSlopeTest.junction(BoardRoadTest.CENTER, rises);
+                        var junction = BoardRoadSlopeTest.junction(BoardScenes.CENTER, rises);
                         terrain.update(junction);
                         terrain.animate(.5f, List.of());
                         camera.camera.zoom = .2f;
-                        camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 2));
+                        camera.center(BoardGeometry.center(BoardScenes.CENTER, 2));
                         frame.render(terrain, camera, junction);
                         GpuReviewFrame.save(new File(output, "road-six-way-" + layout + ".png"));
                     }
                     for (int exits : new int[] { 31, 63 }) {
                         for (var kind : List.of(BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT, BoardRoad.Kind.GRAVEL)) {
-                            var junction = BoardSurfaceBlendTest.scene(c -> {
-                                int mask = c.equals(BoardRoadTest.CENTER) ? exits : 0;
+                            var junction = BoardScenes.scene(c -> {
+                                int mask = c.equals(BoardScenes.CENTER) ? exits : 0;
                                 for (int d = 0; d < 6; d++) {
-                                    if ((exits & (1 << d)) != 0 && c.equals(BoardRoadTest.CENTER.translated(d))) {
+                                    if ((exits & (1 << d)) != 0 && c.equals(BoardScenes.CENTER.translated(d))) {
                                         mask = (1 << d) | (1 << ((d + 3) % 6));
                                     }
                                 }
-                                return BoardRoadTest.tile(c, mask == 0 ? BoardRoad.Kind.NONE : kind,
+                                return BoardScenes.tile(c, mask == 0 ? BoardRoad.Kind.NONE : kind,
                                       mask, 0, BoardScene.Surface.GRASS);
                             });
                             terrain.update(junction);
                             terrain.animate(.5f, List.of());
                             camera.setIsometric(false);
                             camera.camera.zoom = .16f;
-                            camera.center(BoardGeometry.center(BoardRoadTest.CENTER, 0));
+                            camera.center(BoardGeometry.center(BoardScenes.CENTER, 0));
                             frame.render(terrain, camera, junction);
                             GpuReviewFrame.save(new File(output, "roundabout-" + exits + "-" + kind + ".png"));
                             if (kind == BoardRoad.Kind.PAVED) { checkEveryApproach(camera, exits); }
@@ -406,10 +406,10 @@ class GpuRoadSmokeTest {
     }
 
     private static BoardScene ends(BoardRoad.Kind kind) {
-        return BoardSurfaceBlendTest.scene(c -> {
-            boolean road = c.getX() == BoardRoadTest.CENTER.getX() && c.getY() >= BoardRoadTest.CENTER.getY();
-            int exits = c.equals(BoardRoadTest.CENTER) ? 8 : 9;
-            return BoardRoadTest.tile(c, road ? kind : BoardRoad.Kind.NONE, road ? exits : 0, 0, BoardScene.Surface.GRASS);
+        return BoardScenes.scene(c -> {
+            boolean road = c.getX() == BoardScenes.CENTER.getX() && c.getY() >= BoardScenes.CENTER.getY();
+            int exits = c.equals(BoardScenes.CENTER) ? 8 : 9;
+            return BoardScenes.tile(c, road ? kind : BoardRoad.Kind.NONE, road ? exits : 0, 0, BoardScene.Surface.GRASS);
         });
     }
 
@@ -418,15 +418,15 @@ class GpuRoadSmokeTest {
     }
 
     private static BoardScene ramp(BoardRoad.Kind kind, BoardScene.Surface family, int level) {
-        return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() == 4 ? kind : BoardRoad.Kind.NONE, c.getX() == 4 ? 9 : 0,
               c.getY() >= 4 ? level : 0, family));
     }
 
     private static BoardScene materialChange(BoardRoad.Kind from, BoardRoad.Kind to) {
-        return BoardSurfaceBlendTest.scene(c -> {
-            boolean road = c.getX() == BoardRoadTest.CENTER.getX();
-            return BoardRoadTest.tile(c, road ? c.getY() <= BoardRoadTest.CENTER.getY() ? from : to : BoardRoad.Kind.NONE,
+        return BoardScenes.scene(c -> {
+            boolean road = c.getX() == BoardScenes.CENTER.getX();
+            return BoardScenes.tile(c, road ? c.getY() <= BoardScenes.CENTER.getY() ? from : to : BoardRoad.Kind.NONE,
                   road ? 9 : 0, 0, BoardScene.Surface.GRASS);
         });
     }
@@ -438,14 +438,14 @@ class GpuRoadSmokeTest {
         route(exits, kinds, new Coords(6, 1), BoardRoad.Kind.DIRT, 3, 3, 3, 3, 3, 3);
         route(exits, kinds, new Coords(1, 6), BoardRoad.Kind.GRAVEL, 1, 1, 1, 1, 1, 1);
         route(exits, kinds, new Coords(2, 4), BoardRoad.Kind.ALLEY, 2, 2, 1, 1);
-        return BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               edited && c.equals(new Coords(2, 4)) ? BoardRoad.Kind.GRAVEL : kinds.getOrDefault(c, BoardRoad.Kind.NONE),
               exits.getOrDefault(c, 0), c.getY() < 3 ? 1 : 0,
               c.getY() < 3 ? BoardScene.Surface.SNOW : c.getY() > 5 ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS));
     }
 
     private static BoardScene bridge() {
-        return BoardSurfaceBlendTest.scene(c -> {
+        return BoardScenes.scene(c -> {
             if (c.getY() == 4) {
                 Hex hex = new Hex(0);
                 hex.addTerrain(new Terrain(Terrains.WATER, 1));
@@ -453,11 +453,11 @@ class GpuRoadSmokeTest {
                     hex.addTerrain(new Terrain(Terrains.BRIDGE, 1, true, 9));
                     hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, 1));
                 }
-                var tile = BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, 1, 0);
+                var tile = BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, 1, 0);
                 return new BoardScene.Tile(c, 0, 1, false, 0, tile.surface(), null, null,
                       BoardFeatures.capture(hex, c, Map.of()), List.of(), BoardLiquid.WATER, null, true);
             }
-            return BoardRoadTest.tile(c, c.getX() == 4 ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+            return BoardScenes.tile(c, c.getX() == 4 ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   c.getX() == 4 ? 9 : 0, 0, BoardScene.Surface.GRASS);
         });
     }
@@ -550,12 +550,12 @@ class GpuRoadSmokeTest {
      */
     private static void checkDirtCarry(BoardCamera camera, BoardScene scene) {
         byte[] pixels = screen();
-        var dirt = BoardRoad.of(scene, scene.tile(BoardRoadTest.CENTER));
-        Vector3 center = BoardGeometry.center(BoardRoadTest.CENTER, 0);
-        Vector3 along = BoardGeometry.center(BoardRoadTest.CENTER.translated(3), 0).sub(center).nor();
+        var dirt = BoardRoad.of(scene, scene.tile(BoardScenes.CENTER));
+        Vector3 center = BoardGeometry.center(BoardScenes.CENTER, 0);
+        Vector3 along = BoardGeometry.center(BoardScenes.CENTER.translated(3), 0).sub(center).nor();
         float scale = BoardGeometry.hexScale(), traces = 0, between = 0;
         // Their border, half way between the hexes' centres.
-        float edge = BoardGeometry.center(BoardRoadTest.CENTER.translated(3), 0).dst(center) / (2 * scale);
+        float edge = BoardGeometry.center(BoardScenes.CENTER.translated(3), 0).dst(center) / (2 * scale);
         for (float onto : new float[] { .2f, .35f, .5f }) {
             Vector3 at = new Vector3(center).mulAdd(along, (edge + onto * GpuRoads.runOn()) * scale).add(0, 0, .1f);
             between += brightness(pixels, camera.camera.project(new Vector3(at)));
@@ -589,11 +589,11 @@ class GpuRoadSmokeTest {
     /** Repeated mask images may share an atlas slot, but every hex must still draw its own asphalt. */
     private static void checkEveryApproach(BoardCamera camera, int exits) {
         byte[] pixels = screen();
-        Vector3 center = BoardGeometry.center(BoardRoadTest.CENTER, 0);
+        Vector3 center = BoardGeometry.center(BoardScenes.CENTER, 0);
         float scale = BoardGeometry.hexScale();
         for (int direction = 0; direction < 6; direction++) {
             if ((exits & (1 << direction)) == 0) { continue; }
-            Vector3 along = BoardGeometry.center(BoardRoadTest.CENTER.translated(direction), 0).sub(center).nor();
+            Vector3 along = BoardGeometry.center(BoardScenes.CENTER.translated(direction), 0).sub(center).nor();
             Vector3 across = new Vector3(-along.y, along.x, 0);
             for (float distance : new float[] { 32, 55 }) {
                 Vector3 at = new Vector3(center).mulAdd(along, distance * scale);

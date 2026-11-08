@@ -53,7 +53,7 @@ class GpuOverlayPlaybackTest {
         var settled = snapshot("old");
         playback.present(settled);
         var latest = snapshot("new");
-        var combat = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 4), UnitPlaybackTest.unit(2, 4),
+        var combat = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4),
               ResolvedAttack.Kind.SHOT, true);
         playback.accept(List.of(move(1), combat, move(2)), latest, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
@@ -79,7 +79,7 @@ class GpuOverlayPlaybackTest {
     void combatAndSkippingKeepCurrentOverlaysAndClearingDropsOldBoardHistory() {
         var latest = snapshot("new");
         var playback = new UnitPlayback();
-        playback.accept(List.of(UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 4), UnitPlaybackTest.unit(2, 4),
+        playback.accept(List.of(UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4),
               ResolvedAttack.Kind.SHOT, true)), latest, ignored -> false);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         assertCurrent(playback.present(latest), latest);
@@ -127,12 +127,12 @@ class GpuOverlayPlaybackTest {
     }
 
     private static BoardScene.Movement move(int id) {
-        return new BoardScene.Movement(id, 0, List.of(UnitPlaybackTest.unit(id, 0).location(), UnitPlaybackTest.unit(id, 4).location()),
-              EntityMovementType.MOVE_WALK, 0, 4, UnitPlaybackTest.unit(id, 4));
+        return new BoardScene.Movement(id, 0, List.of(UnitPlaybackFixture.unit(id, 0).location(), UnitPlaybackFixture.unit(id, 4).location()),
+              EntityMovementType.MOVE_WALK, 0, 4, UnitPlaybackFixture.unit(id, 4));
     }
 
     private static BoardScene snapshot(String version) {
-        var scene = UnitPlaybackTest.scene(UnitPlaybackTest.unit(1, 4), UnitPlaybackTest.unit(2, 4));
+        var scene = UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4));
         var coords = new Coords(0, 0);
         BoardTacticalGraphics graphics = new BoardTacticalGraphics();
         BoardTactical tactical;
@@ -158,8 +158,8 @@ class GpuOverlayPlaybackTest {
               marker(BoardMarker.Kind.OBJECTIVE, version), marker(BoardMarker.Kind.PLAYER_NOTE, version),
               marker(version.equals("old") ? BoardMarker.Kind.MINEFIELD : BoardMarker.Kind.BRIDGE_BUILD, version));
         return new BoardScene(0, 1, 1, scene.tiles(), scene.units(), move(1).path(), 1, "MOVEMENT", List.of(), null,
-              List.of(new BoardScene.FiringLine(UnitPlaybackTest.unit(1, 0).location(),
-                    UnitPlaybackTest.unit(2, 4).location(), 0, false, 1, TargetKey.unit(2))),
+              List.of(new BoardScene.FiringLine(UnitPlaybackFixture.unit(1, 0).location(),
+                    UnitPlaybackFixture.unit(2, 4).location(), 0, false, 1, TargetKey.unit(2))),
               List.of(new BoardScene.RangeBorder(coords, 63, 0, "S")), markers, tactical,
               List.of(new BoardScene.RangeLabel(coords, 0, "S")),
               new BoardFieldOfView(1, 1, List.of(new BoardFieldOfView.Hex(BoardFieldOfView.Visibility.ORIGIN, 0x80008000)),

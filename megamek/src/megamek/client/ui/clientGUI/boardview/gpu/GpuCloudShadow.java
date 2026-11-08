@@ -41,6 +41,9 @@ final class GpuCloudShadow {
               + (lighting != null && lighting.crystals != null ? "#define crystalTransmissionFlag\n" : "")
               + (lighting != null && lighting.cloudShadow != null ? "#define cloudShadowFlag\n" : "")
               + (lighting != null && lighting.antialiasing ? "#define specularAntialiasingFlag\n" : "")
+              + (lighting != null && lighting.cheaperShading ? "#define mediumQualityFlag\n" : "")
+              // The sun's map's coarser levels, which High's widest penumbrae read (contactShadow).
+              + "#define SHADOW_LEVELS " + GpuShadowLight.LEVELS + "\n"
               + GpuAmbientOcclusion.prefix(renderable) + GpuSkyVisibility.prefix(renderable);
     }
 

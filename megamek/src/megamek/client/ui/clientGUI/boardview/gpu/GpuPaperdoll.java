@@ -207,6 +207,7 @@ final class GpuPaperdoll extends WidgetGroup {
         structure = Map.copyOf(nextStructure);
         clearChildren();
         figures.clear();
+        fittedWidth = -1;
         if (doll != null) {
             for (GpuPaperdolls.Region region : doll.regions()) {
                 Cell cell = cell(region);
@@ -268,6 +269,9 @@ final class GpuPaperdoll extends WidgetGroup {
         return linked;
     }
 
+    /** What the last layout fitted; a width of -1 fits again ({@link #show}). */
+    private float fittedWidth = -1, fittedHeight, fittedFont;
+
     /** The location at a local point: a region's code, "DC" + arm for either part of a shield, or null. */
     String pick(float x, float y) {
         validate();
@@ -309,6 +313,11 @@ final class GpuPaperdoll extends WidgetGroup {
 
     @Override
     public void layout() {
+        // Fitting sizes the labels, which invalidates this group and its parents again: only a new fit may run it.
+        if (getWidth() == fittedWidth && getHeight() == fittedHeight && maxFont == fittedFont) { return; }
+        fittedWidth = getWidth();
+        fittedHeight = getHeight();
+        fittedFont = maxFont;
         fills.clear();
         outlines.clear();
         shieldOutlines.clear();

@@ -53,7 +53,7 @@ class GpuVegetationEditSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     TerrainLod.tune(new TerrainLod.Tuning(1, 1));
                     var camera = new BoardCamera();
                     camera.resize(1536, 1024);
@@ -63,7 +63,7 @@ class GpuVegetationEditSmokeTest {
                     BoardScene scene = scene(0, editField);
                     terrain.update(scene);
                     // The grass engine draws the grass and the fields' plants.
-                    var grass = (GpuGroundCover) field(terrain, "groundCover");
+                    var grass = (GpuGroundCover) GpuTestSupport.field(terrain, "groundCover");
                     settle(terrain, frame, camera, scene);
                     GpuReviewFrame.save(new File(output, "before.png"));
                     // The direct cache checks use scene order rather than chunk order; normalize it before
@@ -145,7 +145,7 @@ class GpuVegetationEditSmokeTest {
     }
 
     private static BoardScene scene(int level, boolean editField) {
-        return BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+        return BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() >= (editField ? 4 : 5) ? BoardScene.Biome.FIELD : BoardScene.Biome.NONE, c.equals(EDIT) ? level : 0));
     }
 
@@ -167,7 +167,7 @@ class GpuVegetationEditSmokeTest {
     private static Map<Coords, Roots> submitted(GpuGroundCover cover, BoardScene scene, Function<Coords, BoardPlants> plants,
           boolean fields) throws Exception {
         var active = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (Object batch : GpuBiomeSmokeTest.batches(cover)) { active.addAll((List<?>) field(batch, "current")); }
+        for (Object batch : GpuBiomeSmokeTest.batches(cover)) { active.addAll((List<?>) GpuTestSupport.field(batch, "current")); }
         var result = new HashMap<Coords, Roots>();
         for (var tile : scene.tiles()) {
             var planted = plants.apply(tile.coords());
@@ -205,11 +205,5 @@ class GpuVegetationEditSmokeTest {
         assertEquals(expected.keySet(), actual.keySet(), "Visible planted hexes must match a clean build");
         expected.forEach((coords, roots) -> assertArrayEquals(roots.data(), actual.get(coords).data(),
               "Stale or incomplete roots at " + coords));
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var member = owner.getClass().getDeclaredField(name);
-        member.setAccessible(true);
-        return member.get(owner);
     }
 }

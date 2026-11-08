@@ -4,19 +4,18 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.util.Arrays;
 import java.util.List;
 
-import com.badlogic.gdx.graphics.Pixmap;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g3d.Environment;
 import com.badlogic.gdx.graphics.g3d.Renderable;
-import com.badlogic.gdx.utils.Disposable;
 import megamek.common.board.Coords;
 
-/** One nearest-filtered texel per board hex. GL ownership and publication stay on the terrain render thread. */
-final class GpuBiomeSurface implements Disposable {
+/** One texel per board hex, in the local lights' texture (GpuLavaLighting.setHexes), which owns its GL copy. */
+final class GpuBiomeSurface {
     /** The biome bits of a texel; R bits 4..7 above them flag the stencil quarters. */
     private static final int BIOME = 0x0f000000;
     /** G bit 4: a dry, same-biome/elevation two-ring neighbourhood; low G bits remain the aqueous palette. */
     private static final int UNIFORM_BIOME = 0x00100000;
+    /** B bit 7: frozen land at one level within two rings, so no ice border reaches this cell (terrain-ice.glsl). */
+    private static final int ICE_INTERIOR = 0x00008000;
     /**
      * In metres, as terrain-biome-mask.glsl: biome weights reach 14 m beyond a hex outline, a palette 5 m beyond it from
      * a position the noise moves up to 3 m along each axis. The margin covers float rounding at quarter edges.
@@ -24,11 +23,15 @@ final class GpuBiomeSurface implements Disposable {
     private static final float COVER_REACH = 14, LIQUID_REACH = 5, LIQUID_WANDER = 3, MARGIN = .05f;
     private List<BoardScene.Tile> previous;
     private int[] pixels;
-    private Texture texture;
     private int width, height;
+    private final GpuLavaLighting lights;
     private boolean active, iced;
 
-    Texture texture() { return texture; }
+    /** {@code lights} holds the table, in its texture. */
+    GpuBiomeSurface(GpuLavaLighting lights) { this.lights = lights; }
+
+    GpuLavaLighting lights() { return lights; }
+
     int width() { return active ? width : 0; }
     int height() { return active ? height : 0; }
     /** The board size where any hex shows ice, else zero: ice reads the texture without enabling the biomes. */
@@ -73,7 +76,7 @@ final class GpuBiomeSurface implements Disposable {
     }
 
     void update(BoardScene scene) {
-        if (texture != null && (scene == null || previous == scene.tiles())) { return; }
+        if (pixels != null && (scene == null || previous == scene.tiles())) { return; }
         int w = scene == null ? 1 : scene.width(), h = scene == null ? 1 : scene.height();
         int[] next = new int[w * h];
         boolean anyIce = false;
@@ -120,24 +123,19 @@ final class GpuBiomeSurface implements Disposable {
             for (int index = 0; index < next.length; index++) {
                 if (uniformBiome(next, w, h, new Coords(index % w, index / w))) { next[index] |= UNIFORM_BIOME; }
             }
+            if (anyIce) {
+                int[] kinds = next.clone();
+                for (int index = 0; index < next.length; index++) {
+                    if (iceInterior(kinds, w, h, new Coords(index % w, index / w))) { next[index] |= ICE_INTERIOR; }
+                }
+            }
         }
         previous = scene == null ? null : scene.tiles();
         active = scene != null && active(scene);
         iced = anyIce;
-        if (texture != null && w == width && h == height && Arrays.equals(next, pixels)) { return; }
-        var map = new Pixmap(w, h, Pixmap.Format.RGBA8888);
-        try {
-            map.setBlending(Pixmap.Blending.None);
-            for (int y = 0; y < h; y++) {
-                for (int x = 0; x < w; x++) { map.drawPixel(x, y, next[y * w + x]); }
-            }
-            if (texture == null || w != width || h != height) {
-                if (texture != null) { texture.dispose(); }
-                texture = new Texture(map);
-                texture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
-            } else { texture.draw(map, 0, 0); }
-            pixels = next; width = w; height = h;
-        } finally { map.dispose(); }
+        if (pixels != null && w == width && h == height && Arrays.equals(next, pixels)) { return; }
+        lights.setHexes(next, w);
+        pixels = next; width = w; height = h;
     }
 
     private static boolean uniformBiome(int[] colors, int w, int h, Coords hex) {
@@ -193,13 +191,18 @@ final class GpuBiomeSurface implements Disposable {
               Math.max(0, Math.max(bottom - grow - y, y - top - grow)));
     }
 
-    private static boolean inside(Coords coords, int w, int h) {
-        return coords.getX() >= 0 && coords.getY() >= 0 && coords.getX() < w && coords.getY() < h;
+    private static boolean iceInterior(int[] tiles, int w, int h, Coords coords) {
+        int own = tiles[coords.getY() * w + coords.getX()];
+        if (((own >>> 8) & 3) != 1) { return false; }
+        for (Coords near : coords.allAtDistanceOrLess(2)) {
+            if (!inside(near, w, h)) { continue; }
+            int tile = tiles[near.getY() * w + near.getX()];
+            if (((tile >>> 8) & 3) != 1 || (tile & 0xff) != (own & 0xff)) { return false; }
+        }
+        return true;
     }
 
-    @Override
-    public void dispose() {
-        if (texture != null) { texture.dispose(); }
-        texture = null; previous = null; pixels = null; active = false; iced = false;
+    private static boolean inside(Coords coords, int w, int h) {
+        return coords.getX() >= 0 && coords.getY() >= 0 && coords.getX() < w && coords.getY() < h;
     }
 }

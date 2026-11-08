@@ -8,8 +8,10 @@ import java.lang.reflect.Proxy;
 import java.nio.IntBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -91,6 +93,8 @@ final class GpuGlsl {
     private static final ThreadLocal<Preparation> PREPARING = new ThreadLocal<>();
     /** The render thread's program binaries, opened by {@link #detect()}; null caches nothing. Tests replace it. */
     static GpuProgramCache programCache;
+    /** Links programs in another process where a link here holds the render thread; null elsewhere. Set by {@link #detect()}. */
+    static GpuLinkHelper linkHelper;
     /** Whether Intel's own shader cache is full ({@link GpuProgramCache#INTEL_CACHE}): read once the context exists. */
     private static boolean intelCacheFull;
     /** Whether a board view shows its board rather than its loading stage (GpuBattleView). */
@@ -119,6 +123,9 @@ final class GpuGlsl {
         presenting = shown;
         deferralSpent = 0;
     }
+
+    /** Whether a board shows, rather than its loading stage: what's done now is done beside its frames. */
+    static boolean presenting() { return presenting; }
 
     static int compilesAfterLoading() { return AFTER_LOADING.get(); }
 
@@ -278,6 +285,12 @@ final class GpuGlsl {
         /** Links started that the program cache had no binary for; while {@code fresh} is off none may start. */
         private int freshLinks;
         private boolean fresh = true;
+        /** Whether this preparation may use the link helper: not one forced onto the shared context. */
+        private final boolean helperAllowed;
+        /** Programs asked of the helper and not yet taken; whether what's asked now is one a generic program covers. */
+        private final Set<String> askedElsewhere = new HashSet<>();
+        private boolean optional;
+        private String lastKey;
         /**
          * Native tests set this to put every preparation on the shared-context path: its links finish on another thread,
          * so one stays pending for at least a step even where the driver's own program cache finishes a parallel link at
@@ -291,6 +304,7 @@ final class GpuGlsl {
         Preparation(boolean sharedContext) {
             boolean khr = Gdx.graphics.supportsExtension("GL_KHR_parallel_shader_compile");
             boolean arb = Gdx.graphics.supportsExtension("GL_ARB_parallel_shader_compile");
+            helperAllowed = !sharedContext;
             worker = sharedContext || !(khr || arb) ? new SharedCompiler() : null;
             if (worker == null) {
                 if (khr) { KHRParallelShaderCompile.glMaxShaderCompilerThreadsKHR(-1); }
@@ -319,11 +333,80 @@ final class GpuGlsl {
             }
         }
 
+        /** As {@link #run(Runnable)}, for a program a generic one covers meanwhile: it waits behind every other. */
+        boolean runOptional(Runnable action) {
+            optional = true;
+            try { return run(action); }
+            finally { optional = false; }
+        }
+
         /** Links it started from source so far, which the program cache had no binary for. */
         int freshLinks() { return freshLinks; }
 
-        /** Whether the driver links in parallel off this thread; else one shared-context worker links one at a time. */
-        boolean parallel() { return worker == null; }
+        /** Whether links run off this thread at once: the driver's or the helper's; else one worker links one at a time. */
+        boolean parallel() { return worker == null || helper() != null; }
+
+        /** Whether the helper links for it: nothing it links holds a frame, so linking goes on beside them. */
+        boolean background() { return helper() != null; }
+
+        /** The cache key of the program asked for last. */
+        String lastKey() { return lastKey; }
+
+        /** Whether what the helper had for this key is over: {@link #run} now finds its binary, its failure, or its absence. */
+        boolean over(String key) {
+            GpuLinkHelper helper = helper();
+            return helper == null || !helper.waiting(key);
+        }
+
+        /** Forgets what the helper hadn't started of the optional programs: a lighting change wants others. */
+        void dropOptional() {
+            GpuLinkHelper helper = helper();
+            if (helper == null) { return; }
+            helper.clearOptional();
+            askedElsewhere.removeIf(this::over);
+        }
+
+        private GpuLinkHelper helper() {
+            return helperAllowed && linkHelper != null && linkHelper.usable() && linkHelper.serves(programCache) ? linkHelper : null;
+        }
+
+        /**
+         * A program the helper links: never here, so that no frame waits for it. A binary that fails to load is gone from
+         * the cache, so the next ask links it again, as after pruning. A program that doesn't compile fails here with the
+         * driver's message. Null when its binary can't reach the game this way: it must link here, unless optional.
+         */
+        private Linked elsewhere(GpuLinkHelper helper, GpuShaderManager.Sources source) {
+            String key = key(source);
+            lastKey = key;
+            if (programCache.has(key)) {
+                Linked linked = new Linked(source, true, key);
+                if (linked.loadBinary()) {
+                    askedElsewhere.remove(key);
+                    return linked;
+                }
+                linked.dispose();
+                helper.rejected(key);
+            }
+            if (helper.refused(key)) {
+                askedElsewhere.remove(key);
+                if (optional) { throw new Uncached(); }
+                return null;
+            }
+            String failure = helper.failure(key);
+            if (failure != null) {
+                askedElsewhere.remove(key);
+                throw new GdxRuntimeException(failure);
+            }
+            if (!helper.waiting(key)) {
+                if (!askedElsewhere.contains(key)) {
+                    if (!fresh) { throw new Uncached(); }
+                    freshLinks++;
+                    askedElsewhere.add(key);
+                }
+                helper.submit(key, source, optional);
+            }
+            throw new Pending();
+        }
 
         private Job submit(GpuShaderManager.Sources source, String key) {
             Linked linked = new Linked(source, true, key);
@@ -336,6 +419,7 @@ final class GpuGlsl {
         boolean linking() {
             for (Job job : working.values()) { if (!job.done().isDone()) { return true; } }
             for (Linked linked : pending.values()) { if (!linked.complete()) { return true; } }
+            for (String key : askedElsewhere) { if (!over(key)) { return true; } }
             return false;
         }
 
@@ -343,10 +427,19 @@ final class GpuGlsl {
         boolean finished() {
             for (Job job : working.values()) { if (job.done().isDone()) { return true; } }
             for (Linked linked : pending.values()) { if (linked.complete()) { return true; } }
+            for (String key : askedElsewhere) { if (over(key)) { return true; } }
             return false;
         }
 
         private Linked take(GpuShaderManager.Sources source) {
+            GpuLinkHelper helper = helper();
+            if (helper != null) {
+                Linked linked = elsewhere(helper, source);
+                if (linked != null) { return linked; }
+            } else if (optional && (programCache == null || !programCache.has(key(source)))) {
+                // The helper ended: nothing optional links in this process.
+                throw new Uncached();
+            }
             if (worker != null) {
                 Job job = working.computeIfAbsent(source, started -> submit(started, start(started)));
                 if (!job.done().isDone()) { throw new Pending(); }
@@ -386,6 +479,9 @@ final class GpuGlsl {
             working.clear();
             pending.values().forEach(Linked::dispose);
             pending.clear();
+            // A closed board's family programs aren't the next one's; what's linking still fills the cache.
+            dropOptional();
+            askedElsewhere.clear();
         }
     }
 
@@ -531,13 +627,17 @@ final class GpuGlsl {
             } catch (RuntimeException failure) { dispose(gl); throw failure; }
         }
 
+        /** Whether the program cache's binary loaded into this program; a rejected one leaves it unlinked. */
+        boolean loadBinary() {
+            if (cache == null || !cache.load(program, cacheKey)) { return false; }
+            binary = cached = true;
+            timing("binary-loaded");
+            return true;
+        }
+
         /** A rejected binary leaves this program unlinked; the source link below then replaces that state. */
         void link(GpuShaderManager.Sources source, GL20 gl) {
-            if (cache != null && cache.load(program, cacheKey)) {
-                binary = cached = true;
-                timing("binary-loaded");
-                return;
-            }
+            if (loadBinary()) { return; }
             if (afterLoading && !stalls) {
                 DEFERRED.incrementAndGet();
                 timing("after-loading-deferred");
@@ -786,6 +886,12 @@ final class GpuGlsl {
         // Machine-specific state belongs with MegaMek's other written settings.
         programCache = GpuProgramCache.open(
               GpuProgramCache.directory(new File(Configuration.configDir(), "gpu-program-cache").toPath()));
+        // Another board window in this run keeps the helper it has.
+        if (linkHelper == null || !linkHelper.serves(programCache)) {
+            var capabilities = GL.getCapabilities();
+            linkHelper = GpuLinkHelper.open(programCache, major, minor,
+                  capabilities.GL_KHR_parallel_shader_compile || capabilities.GL_ARB_parallel_shader_compile);
+        }
         String vendor = GL11.glGetString(GL11.GL_VENDOR);
         boolean intel = vendor != null && vendor.toLowerCase(Locale.ROOT).contains("intel");
         // Before any loading stage: one small folder's listing, about a millisecond.

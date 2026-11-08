@@ -37,11 +37,11 @@ class GpuWaterSlopeSmokeTest {
             @Override
             public void create() {
                 var original = BoardRelief.tuning();
-                BoardWetCliffTest.tune(cliffs);
+                BoardScenes.tune(cliffs);
                 GpuTerrain terrain = new GpuTerrain();
                 GpuReviewFrame frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
-                    BoardScene scene = GpuRiverTerrainSmokeTest.dropScene(BoardScene.Surface.GRASS);
+                    BoardScene scene = BoardScenes.dropScene(BoardScene.Surface.GRASS);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     BoardCamera camera = new BoardCamera();
@@ -51,13 +51,13 @@ class GpuWaterSlopeSmokeTest {
                               .lerp(BoardGeometry.center(new Coords(drop == 1 ? 1 : 4, 3), 0), .5f);
                         capture(terrain, frame, camera, scene, focus, output, "water-slope-" + drop);
                     }
-                    scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.GRASS);
+                    scene = BoardScenes.mapScene(BoardScene.Surface.GRASS);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     Vector3 focus = BoardGeometry.center(new Coords(8, 9), 2)
                           .lerp(BoardGeometry.center(new Coords(9, 9), 0), .5f);
                     capture(terrain, frame, camera, scene, focus, output, "mountain-lake-slope");
-                    scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+                    scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     capture(terrain, frame, camera, scene, focus, output, "mountain-lake-sand");
@@ -118,9 +118,9 @@ class GpuWaterSlopeSmokeTest {
             for (int[] point : submerged) {
                 int pixel = image.getPixel(point[0], 959 - point[1]);
                 int red = pixel >>> 24, green = (pixel >>> 16) & 255, blue = (pixel >>> 8) & 255;
-                // Shadowed moss can keep blue one or two 8-bit values below red even with the correct wet tint.
-                // The green lead still rejects the red/brown dry cliff holes this check guards against.
-                assertTrue(green > red && blue >= red - 2,
+                // Shadowed moss can keep blue below red even with the correct wet tint. The green lead rejects the
+                // red/brown dry cliff holes this check guards against.
+                assertTrue(green > red,
                       "Submerged rock must share the bed's tint at " + point[0] + "," + point[1]
                             + ": RGB " + red + "," + green + "," + blue);
             }

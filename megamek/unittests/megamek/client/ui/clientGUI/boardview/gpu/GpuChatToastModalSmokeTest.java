@@ -117,7 +117,7 @@ class GpuChatToastModalSmokeTest {
 
         /** One frame of the window: the snapshots and the pending dialog, then a draw, which lays the HUD out. */
         void show(GpuBoardSource.Frame frame, DialogRequest dialog) {
-            hud.update(frame, GpuHud.HudView.EMPTY, dialog, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, dialog, GpuHudFixtures.preferences());
             ScreenUtils.clear(.1f, .13f, .13f, 1, true);
             hud.draw();
         }
@@ -291,7 +291,7 @@ class GpuChatToastModalSmokeTest {
             GpuToasts service = new GpuToasts(source);
             GpuToastStack stack = toastStack(harness, source);
             List<ToastLevel> levels = List.of(ToastLevel.values());
-            GpuToasts.Snapshot five = GpuDialogRoutingTest.onSwing(() -> {
+            GpuToasts.Snapshot five = GpuTestSupport.onSwing(() -> {
                 levels.forEach(level -> service.add(level, level + " toast", null));
                 return service.capture();
             });
@@ -327,7 +327,7 @@ class GpuChatToastModalSmokeTest {
                   "presses pass through the toasts: " + pressed);
 
             // A sixth toast pushes the oldest out of the full stack at once.
-            GpuToasts.Snapshot six = GpuDialogRoutingTest.onSwing(() -> {
+            GpuToasts.Snapshot six = GpuTestSupport.onSwing(() -> {
                 service.add(ToastLevel.INFO, "sixth toast", null);
                 return service.capture();
             });
@@ -796,10 +796,10 @@ class GpuChatToastModalSmokeTest {
      */
     @Test
     void theControlPointEditorIsANativeFormThatFollowsItsScheme() throws Exception {
-        ClientGUI gui = GpuDialogRoutingTest.routingClient();
+        ClientGUI gui = GpuDialogFixture.routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            GpuDialogRoutingTest.present(gui, fixture.view, fixture.source);
-            JFrame owner = GpuChoiceRoutingTest.clientFrame(gui);
+            GpuDialogFixture.present(gui, fixture.view, fixture.source);
+            JFrame owner = GpuDialogFixture.clientFrame(gui);
             try {
                 ObjectiveMarker marker = new ObjectiveMarker();
                 marker.setName("Objective 0505");
@@ -838,7 +838,7 @@ class GpuChatToastModalSmokeTest {
                 assertEquals(VictoryHexPropertiesPane.Result.CANCELLED, edit.get(WAIT_SECONDS, SECONDS));
                 assertEquals(SchemePreset.STANDARD, marker.getScoringScheme().getPreset(), "Esc changes nothing");
             } finally {
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.dismiss();
             }
         }
     }
@@ -846,7 +846,7 @@ class GpuChatToastModalSmokeTest {
     /** N7c: while a bot order picks hexes, the hint line shows the pick's instructions, picked hexes and keys. */
     @Test
     void aBotOrdersHexPickShowsItsInstructionsAndKeysOnTheHintLine() throws Exception {
-        GpuBoardSource.UiPreferences preferences = GpuDialogRoutingTest.onSwing(GpuBoardSource.UiPreferences::capture);
+        GpuBoardSource.UiPreferences preferences = GpuTestSupport.onSwing(GpuBoardSource.UiPreferences::capture);
         GpuHudTestStage.run(harness -> {
             try (Hud hud = new Hud(harness)) {
                 String instructions = Messages.getString("BotCommandPanel.HexPicker.instructions",
@@ -857,7 +857,7 @@ class GpuChatToastModalSmokeTest {
                       GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
                       RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
                       new GpuPlayers.Pick(instructions, status)));
-                GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT,
+                GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT,
                       false, Entity.NONE, 0), picking);
                 for (int draw = 0; draw < 2; draw++) {
                     hud.hud.update(frame, GpuHud.HudView.EMPTY, null, preferences);
@@ -884,7 +884,7 @@ class GpuChatToastModalSmokeTest {
      */
     @Test
     void aBotOrdersHexPickShowsInItsChipOnTheDockWhereTheHintLineIsHidden() throws Exception {
-        GpuBoardSource.UiPreferences preferences = GpuDialogRoutingTest.onSwing(GpuBoardSource.UiPreferences::capture);
+        GpuBoardSource.UiPreferences preferences = GpuTestSupport.onSwing(GpuBoardSource.UiPreferences::capture);
         String instructions = Messages.getString("BotCommandPanel.HexPicker.instructions",
               Messages.getString("BotCommandPanel.StrategicTarget.title"));
         String status = Messages.getString("BotCommandPanel.HexPicker.status", 2, "0707, 0807");
@@ -893,7 +893,7 @@ class GpuChatToastModalSmokeTest {
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
               RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null,
               new GpuPlayers.Pick(instructions, status)));
-        GpuBoardSource.Frame frame = GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT, false,
+        GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false,
               Entity.NONE, 0), picking);
         GpuHudTestStage.run(harness -> {
             for (int[] size : new int[][] { { 1280, 720 }, { 900, 600 } }) {
@@ -954,13 +954,13 @@ class GpuChatToastModalSmokeTest {
 
     /** A frame of a movement turn without units, with the given chat lines. */
     private static GpuBoardSource.Frame frame(GpuChat.Snapshot chat) {
-        return GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0),
+        return GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0),
               panels(chat, GpuToasts.Snapshot.EMPTY));
     }
 
     /** A frame with the given toasts. */
     private static GpuBoardSource.Frame frame(GpuToasts.Snapshot toasts) {
-        return GpuHudInputTest.frame(GpuHudInputTest.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0),
+        return GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0),
               panels(GpuChat.Snapshot.EMPTY, toasts));
     }
 
@@ -971,7 +971,7 @@ class GpuChatToastModalSmokeTest {
     }
 
     private static GpuHud.Inputs inputs(GpuHudTestStage harness, GpuBoardSource.Frame frame, DialogRequest dialog) {
-        return new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, dialog, GpuHudInputTest.preferences(),
+        return new GpuHud.Inputs(frame, GpuHud.HudView.EMPTY, dialog, GpuHudFixtures.preferences(),
               GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
     }
 

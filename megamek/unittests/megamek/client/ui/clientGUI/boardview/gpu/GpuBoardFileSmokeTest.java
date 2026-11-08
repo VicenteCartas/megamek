@@ -84,7 +84,7 @@ class GpuBoardFileSmokeTest {
                 try {
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     for (int i = 0; i < scenes.size(); i++) {
                         BoardScene scene = scenes.get(i);
                         terrain.update(scene);

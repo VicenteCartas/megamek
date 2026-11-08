@@ -5,7 +5,7 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.peak;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.step;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBoardOverlaySmokeTest.unit;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -74,7 +74,7 @@ class GpuRoutePulseSmokeTest {
         colors.put(GpuMovePlan.Band.WALK, java.awt.Color.RED.getRGB());
         colors.put(GpuMovePlan.Band.RUN, java.awt.Color.GREEN.getRGB());
         colors.put(GpuMovePlan.Band.BOOST, java.awt.Color.BLUE.getRGB());
-        BoardSource.UiPreferences custom = GpuHudInputTest.with(preferences, Map.of("movementColors", colors));
+        BoardSource.UiPreferences custom = GpuHudFixtures.with(preferences, Map.of("movementColors", colors));
         GpuHudTestStage.run(hud -> {
             GpuBoardSpaceHarness board = new GpuBoardSpaceHarness(scene);
             GpuBoardOverlay overlay = new GpuBoardOverlay();

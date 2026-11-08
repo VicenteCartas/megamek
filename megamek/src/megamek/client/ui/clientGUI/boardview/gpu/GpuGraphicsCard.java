@@ -83,6 +83,9 @@ enum GpuGraphicsCard {
     /** The choice in effect for this run; null before the board first opens. */
     static GpuGraphicsCard applied() { return applied; }
 
+    /** The Optimus override this run asked for, for a process that must draw on the same card; else null. */
+    static String override() { return applied != null && supported() ? applied.override : null; }
+
     /**
      * Asks for the preferred card once per run. Call it before the process's first OpenGL context, with LWJGL's
      * natives loaded; later calls do nothing, because the driver has made its choice by then.

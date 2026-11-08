@@ -15,7 +15,10 @@ import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
+import megamek.common.Hex;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -148,7 +151,7 @@ class BoardRocksTest {
     @ParameterizedTest
     @EnumSource(value = TerrainLod.class, names = { "FULL", "MEDIUM" })
     void mountainLakeKeepsCliffFootBouldersOnWaterOwnedBanks(TerrainLod detail) {
-        var scene = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
+        var scene = BoardScenes.scene(new File("data/boards/Map Pack Savannahs/16x17 Mountain Lake (Savannah).board"));
         for (Coords coords : List.of(new Coords(7, 14), new Coords(8, 14))) {
             var tile = scene.tile(coords);
             assertEquals(1, tile.waterDepth(), "The visible dry toe belongs to a depth-one water hex");
@@ -228,7 +231,7 @@ class BoardRocksTest {
     @Test
     void deepRimsCarryMoreProminentFormationsThanShallowSteps() {
         // Without hex transitions, whose slopes shed fewer rim formations.
-        BoardSculptTest.withTransitions(false, this::compareRims);
+        BoardScenes.withTransitions(false, this::compareRims);
     }
 
     private void compareRims() {
@@ -306,5 +309,61 @@ class BoardRocksTest {
             }
         }
         assertEquals(copy, before, "Placement transforms copies, never the shared unit rocks");
+    }
+
+    @Test
+    void groupedRocksKeepTheirWholeFootprintsInsideTheHexAndClearOfRoutes() {
+        Coords coords = new Coords(2, 2);
+        for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DESERT, BoardScene.Surface.VOLCANO)) {
+            for (int type : new int[] { Terrains.ROAD, Terrains.BRIDGE }) {
+                for (int exits = 0; exits < 64; exits++) {
+                    Hex hex = BoardScenes.roughHex(family, 2);
+                    if (exits != 0) { hex.addTerrain(new Terrain(type, 1, true, exits)); }
+                    var route = BoardRoad.clearance(coords, exits);
+                    var features = BoardFeatures.capture(hex, coords, Map.of()).stream()
+                          .filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER).toList();
+                    assertTrue(features.size() <= 18, "Grouping does not add rock instances");
+                    for (int i = 0; i < features.size(); i++) {
+                        var feature = features.get(i);
+                        double turn = Math.toRadians(feature.rotation());
+                        float c = (float) Math.cos(turn), sine = (float) Math.sin(turn);
+                        float size = BoardFeatures.ROUGH_BOULDER_WIDTH * feature.scale();
+                        int variant = coords.getX() * 31 + coords.getY() * 17 + i;
+                        for (var polygon : BoardRocks.rock(family, variant, TerrainLod.FULL).polygons()) {
+                            for (Vector3 p : polygon.points()) {
+                                float x = feature.x() + size * (c * p.x - sine * p.y * .8f);
+                                float y = feature.y() + size * (sine * p.x + c * p.y * .8f);
+                                assertTrue(Math.abs(y) <= 36.001f && Math.abs(x) + Math.abs(y) * 21 / 36 <= 42.001f,
+                                      "Rock footprint leaves its hex: " + feature + " at " + x + "," + y);
+                                if (exits != 0) {
+                                    assertTrue(route.distance(x, y) >= BoardRoad.SHOULDER - .001f,
+                                          "Rock crosses the route shoulder: " + family + " exits=" + exits
+                                                + " " + feature + " at " + x + "," + y);
+                                    if (type == Terrains.BRIDGE && BoardRoad.roundabout(exits)) {
+                                        assertTrue(Math.hypot(x, y) >= BoardRoad.ROUNDABOUT_RADIUS,
+                                              "Bridge roundabout islands remain clear too");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void meteorRimBouldersDoNotStretchDownTheCliff() {
+        var scene = BoardScenes.scene(new File("data/boards/unofficial/Unknown/meteor.board"));
+        var tile = scene.tile(new Coords(11, 11));
+        var surface = new BoardSurface(scene, tile);
+        float height = (float) tile.features().stream().filter(f -> f.kind() == BoardScene.FeatureKind.BOULDER)
+              .mapToDouble(BoardScene.Feature::height).max().orElseThrow() * BoardGeometry.level();
+        assertTrue(surface.rough.size() > 20, "Rough still places rocks on hex 1212");
+        for (var face : surface.rough) {
+            var shade = surface.relief.shade(face.a());
+            float extent = (shade.rim() + shade.foot()) * BoardRelief.metres(1);
+            assertTrue(extent <= height * 2.2f, "A rim boulder must not become a cliff-height pillar: " + extent);
+        }
     }
 }

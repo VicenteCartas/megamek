@@ -325,13 +325,25 @@ class BoardFileTest {
         return output.toString(StandardCharsets.UTF_8);
     }
 
+    /** Water and pavement keep no derived sides: an older file's list is ignored and their sides derive on reading. */
+    @Test void waterAndPavementDeriveTheirSidesOnReading() throws Exception {
+        Board loaded = BoardFile.readNative("""
+              {"format":"megamek-board","version":3,"size":{"width":1,"height":2},
+               "hexes":[{"at":[1,1],"elevation":0,"components":{"water":{"depth":1,"connections":["n"]}}},
+                        {"at":[1,2],"elevation":0,"components":{"water":{"depth":1}}}]}
+              """);
+        var water = loaded.getHex(0, 0).getTerrain(Terrains.WATER);
+        assertFalse(water.hasExitsSpecified());
+        assertTrue(water.exitsTo(loaded.getHex(0, 1).getTerrain(Terrains.WATER)));
+        assertTrue(loaded.getHex(0, 0).containsTerrainExit(Terrains.WATER, 3), "Toward the water south of it");
+    }
+
     @Test void nativeRoundTripPreservesIndependentInstancesAndMetadata() throws Exception {
         Board board = Board.createEmptyBoard(2, 1);
         board.setDocumentName("Park \"A\"");
         board.setDescription("First paragraph.\n\nSecond paragraph.");
         board.setSourceHeader("# Original author\r\n# License\r\n");
         board.addTag("example");
-        board.setRoadsAutoExit(false);
         board.setAnnotations(new Coords(0, 0), List.of("Note one", "Note two"));
         board.setAnnotations(new Coords(5, 5), List.of("Keep an old out-of-bounds annotation"));
         Hex hex = new Hex(0, "bridge:1:9;bridge_cf:40;bridge_elev:4;fluff:2001", "CustomTheme");

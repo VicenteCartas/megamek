@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -20,7 +20,6 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.equipment.AmmoType;
@@ -29,10 +28,9 @@ import megamek.common.game.GameTurn;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.moves.MovePath;
 import megamek.common.units.Entity;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
 /**
@@ -41,22 +39,10 @@ import org.mockito.ArgumentCaptor;
  * without a route and sends the same move without steps as Skip; with a route Done moves, so there is no skip; and the
  * hold still ends when a prompt before the move is declined. A real MovementDisplay with a mocked Client.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuSkipCommandTest {
     private static final Coords NORTH = new Coords(11, 10);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void withSkipHiddenDoneHoldsAUnitWithoutARouteAsSkipDoes() throws Exception {
@@ -126,12 +112,12 @@ class GpuSkipCommandTest {
                 nagForNoAction(skipShown);
                 ownTurns(moving, raider);
                 GpuBoardSource source = moving.board.source;
-                GpuDialogRoutingTest.present(moving.gui, moving.board.view, source);
+                GpuDialogFixture.present(moving.gui, moving.board.view, source);
                 try {
                     assertEquals(skipShown ? GpuBoardActions.SKIP_ID : GpuBoardActions.DONE_ID,
                           frame(moving).panels().phase().skipId());
                     source.moves().holdAll();
-                    DialogRequest asked = GpuDialogRoutingTest.awaitDialog(source);
+                    DialogRequest asked = GpuDialogFixture.awaitDialog(source);
                     assertEquals(Messages.getString("MovementDisplay.ConfirmUnJamRACDlg.title"), asked.title());
                     // No: the answer ends the prompt's loop, and the hold's event goes on to end the hold.
                     source.answer(asked.id(), new DialogAnswer(1, List.of(), null, false, List.of()));
@@ -140,7 +126,7 @@ class GpuSkipCommandTest {
                           Messages.getString("GpuBoard.hud.move.holdStopped", raider.getShortName()));
                     verify(moving.client, never()).moveEntity(anyInt(), any(MovePath.class));
                 } finally {
-                    GpuDialogRoutingTest.dismiss();
+                    GpuDialogFixture.dismiss();
                     nagForNoAction(nag);
                 }
             }

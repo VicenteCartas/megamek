@@ -41,8 +41,6 @@ import megamek.common.board.Board;
 import megamek.common.board.Coords;
 import megamek.common.board.CubeCoords;
 import megamek.common.board.HexTile;
-import megamek.common.board.TilesetMatcher;
-import megamek.common.board.TilesetScenery;
 import megamek.common.enums.BasementType;
 import megamek.common.enums.BuildingType;
 import megamek.common.enums.GamePhase;
@@ -414,8 +412,11 @@ class GpuBoardSourceTest {
         }
     }
 
+    /** A generic building's kit follows its weight and class, whatever roof art a tileset has for it: here, level 4. */
+    private static final String HARDENED_KIT = "buildings/building_hard/building_hard";
+
     @Test
-    void buildingRoofUsesTheIndependentSaxarbaSelectionAndItsHeightLabelIsRaised() throws Exception {
+    void aBuildingsKitIgnoresTheTwoDTilesetAndItsHeightLabelIsRaised() throws Exception {
         var preferences = PreferenceManager.getClientPreferences();
         String originalTileset = preferences.getMapTileset();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
@@ -429,10 +430,8 @@ class GpuBoardSourceTest {
                 fixture.game.getBoard().setHex(coords, hex);
                 fixture.source.refresh();
                 var tile = fixture.source.takeFrame().scene().tile(coords);
-                var sources = TilesetScenery.tileset().select(fixture.game.getBoard().getHex(coords)).supers().stream()
-                      .map(TilesetMatcher.Pick::key).toList();
                 assertEquals(1, tile.features().size());
-                assertTrue(sources.contains(tile.features().getFirst().asset()));
+                assertEquals(HARDENED_KIT, tile.features().getFirst().asset());
                 assertTrue(tile.text().stream().anyMatch(label -> label.elevation() == 3));
             });
         } finally {
@@ -442,7 +441,7 @@ class GpuBoardSourceTest {
 
     @ParameterizedTest
     @ValueSource(strings = { "", "desert", "snow", "volcano", "dirt", "lunar" })
-    void coexistingStructuresUseTheirSelectedSaxarbaArtworkAndOwnHeights(String theme) throws Exception {
+    void coexistingStructuresUseTheirOwnKitsAndHeights(String theme) throws Exception {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             SwingUtilities.invokeAndWait(() -> {
                 Coords coords = new Coords(2, 2);
@@ -461,10 +460,7 @@ class GpuBoardSourceTest {
                 var tile = fixture.source.takeFrame().scene().tile(coords);
                 assertEquals(3, tile.features().size());
                 assertTrue(tile.detailedGround(), "Modeled structures must preserve native ground in theme: " + theme);
-                // Default single-hex buildings may select a prefab rather than the connected-building family.
-                var buildingSources = TilesetScenery.tileset().select(fixture.game.getBoard().getHex(coords)).supers().stream()
-                      .filter(pick -> pick.has(Terrains.BUILDING)).map(TilesetMatcher.Pick::key).toList();
-                assertTrue(tile.features().stream().anyMatch(feature -> buildingSources.contains(feature.asset())
+                assertTrue(tile.features().stream().anyMatch(feature -> HARDENED_KIT.equals(feature.asset())
                       && feature.height() == 4 && feature.kind() == BoardScene.FeatureKind.BUILDING));
                 assertTrue(tile.features().stream().anyMatch(feature -> feature.asset().contains("/fuel_tanks/fuel_tank_medium_")
                       && feature.height() == 2 && feature.kind() == BoardScene.FeatureKind.FUEL_TANK));

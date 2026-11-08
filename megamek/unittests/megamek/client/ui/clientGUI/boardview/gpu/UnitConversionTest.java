@@ -54,13 +54,13 @@ class UnitConversionTest {
 
     @Test
     void conversionKeepsItsCapturedFormThenDeploysOnTheSharedClockAtEverySpeed() {
-        var before = UnitPlaybackTest.unit(61, 0);
-        var after = UnitPlaybackTest.unit(61, 1);
+        var before = UnitPlaybackFixture.unit(61, 0);
+        var after = UnitPlaybackFixture.unit(61, 1);
         var change = new BoardScene.Conversion(0, before, after);
-        var latest = UnitPlaybackTest.scene(after);
+        var latest = UnitPlaybackFixture.scene(after);
         for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
             var playback = new UnitPlayback();
-            playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackTest.scene(before)), change,
+            playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(before)), change,
                   new BoardScene.SceneUpdate(latest)), latest, ignored -> false);
             playback.advance(.39 / speed.rate, speed);
             assertSame(before, playback.present(latest).units().getFirst());

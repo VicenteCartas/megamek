@@ -3,7 +3,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.io.File;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -12,18 +11,13 @@ import java.util.concurrent.Future;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.files.FileHandle;
-import com.badlogic.gdx.graphics.GL20;
-import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.PerspectiveCamera;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.VertexAttributes;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.graphics.g3d.Environment;
-import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
-import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.environment.DirectionalLight;
 import com.badlogic.gdx.graphics.g3d.model.data.ModelData;
@@ -34,9 +28,9 @@ import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Disposable;
 import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.common.board.BoardFlag;
 import megamek.common.Configuration;
-import megamek.common.board.RailRoute;
+import megamek.common.board.BoardBillboard;
+import megamek.common.board.BoardFlag;
 import megamek.logging.MMLogger;
 
 /** A page-sized, disposable preview queue: CPU model decoding off-thread; one upload/render per UI frame. */
@@ -56,52 +50,9 @@ final class GpuEditorModelPreviews implements Disposable {
     private Model model;
     private final Map<String, Texture> textures = new HashMap<>();
     private ModelBatch batch;
+    private GpuCutoutFade cutoutFade;
     private GpuSceneDisplay display;
     private final GpuEnvironmentLighting environmentLighting = new GpuEnvironmentLighting();
-    private final List<Renderable> warmup = new ArrayList<>();
-    private GpuGlsl.Preparation links;
-    private record Programs(GpuTerrain board, long lighting, int features) { }
-    /** The requested program set is ready once its retained warmup samples are empty. */
-    private Programs programs;
-
-    /** Asset cards use the imported-model layouts already found by the board's palette preparation. */
-    boolean prepare(GpuTerrain board) {
-        Environment light = lighting();
-        Programs requested = new Programs(board, light.getMask(), GpuEnvironmentLighting.flags(light));
-        if (requested.equals(programs) && warmup.isEmpty()) { return true; }
-        if (links == null) { links = new GpuGlsl.Preparation(); }
-        if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
-        if (!requested.equals(programs)) {
-            clearWarmup();
-            programs = requested;
-            board.previewModelMaterials((material, attributes) -> prepare(material, attributes, light));
-            // Junction cards use the raw generated route, before the board's linear-colour material conversion.
-            // Rail and maglev share this builder's single material/layout; their shape and colours are only data.
-            Model route = new Model(BoardRail.model(BoardRail.flat(RailRoute.Kind.RAIL,
-                  RailRoute.side(0) | RailRoute.side(3), 0)));
-            try {
-                Renderable part = new ModelInstance(route).getRenderable(new Renderable());
-                prepare(new Material(part.material), part.meshPart.mesh.getVertexAttributes(), light);
-            } finally { route.dispose(); }
-        }
-        boolean ready = true;
-        for (Renderable sample : warmup) { ready &= links.run(() -> batch.getShaderProvider().getShader(sample)); }
-        if (ready) { clearWarmup(); }
-        return ready;
-    }
-
-    private void clearWarmup() {
-        warmup.forEach(sample -> sample.meshPart.mesh.dispose());
-        warmup.clear();
-    }
-
-    private void prepare(Material material, VertexAttributes attributes, Environment light) {
-        Renderable sample = new Renderable();
-        sample.material = material;
-        sample.environment = light;
-        sample.meshPart.set("editor-model-warmup", new Mesh(true, 0, 0, attributes), 0, 0, GL20.GL_TRIANGLES);
-        warmup.add(sample);
-    }
 
     private Environment lighting() {
         var lighting = BoardAtmosphere.lighting(BoardAtmosphere.DEFAULTS);
@@ -114,7 +65,7 @@ final class GpuEditorModelPreviews implements Disposable {
         return light;
     }
 
-    /** Its display program links with the editor, behind the loading stage, for framebuffer objects. */
+    /** Its display program links with the editor's first frames, for framebuffer objects. */
     GpuEditorModelPreviews() { GpuGlsl.offscreen(() -> display = new GpuSceneDisplay()); }
 
     void add(String asset, Image target) { add(asset, megamek.common.board.BoardDecoration.Colours.NONE, target); }
@@ -129,6 +80,9 @@ final class GpuEditorModelPreviews implements Disposable {
     void add(megamek.common.board.RailRoute.Kind kind, int sides, int tracks, Image target) {
         queue.add(new Request(kind.asset, megamek.common.board.BoardDecoration.Colours.NONE, sides, tracks, true, target));
     }
+
+    /** The previews still to draw. */
+    int pending() { return queue.size() + (current == null ? 0 : 1); }
 
     void update() {
         queue.removeIf(request -> request.target().getStage() == null);
@@ -165,6 +119,7 @@ final class GpuEditorModelPreviews implements Disposable {
                 // A route is generated, not a file: the builder lays its pieces on a flat carrier.
                 var route = megamek.common.board.RailRoute.Kind.of(asset);
                 if (BoardFlag.ASSET.equals(asset)) { return GpuFlag.data(); }
+                if (BoardBillboard.ASSET.equals(asset)) { return BoardBillboardMesh.preview(); }
                 if (route != null) { return BoardRail.model(BoardRail.flat(route, sides, tracks)); }
                 if (asset.startsWith("buildings/")) {
                     if (megamek.common.board.BuildingVolumes.of(asset).present()) { return GpuAuthoredBuilding.preview(asset); }
@@ -197,7 +152,10 @@ final class GpuEditorModelPreviews implements Disposable {
             float exposure = lighting.adaptation();
             float backdropScale = GpuSceneRadiance.SCALE / exposure;
             Environment light = lighting();
-            if (batch == null) { batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider)); }
+            if (batch == null) {
+                batch = new ModelBatch(GpuShaderManager.provider("Editor model previews", GpuUnitShader::provider));
+                cutoutFade = new GpuCutoutFade();
+            }
             scene = GpuHeatGlow.buffer(128, 96, true);
             image = GpuAtmosphere.buffer(128, 96, true);
             int skipped = GpuShaderProvider.unlinkedDraws();
@@ -209,6 +167,7 @@ final class GpuEditorModelPreviews implements Disposable {
                       GpuColor.linear(.065f) * backdropScale, 1, true);
                 batch.begin(camera);
                 try { batch.render(instance, light); } finally { batch.end(); }
+                cutoutFade.render(batch, camera, light, List.of(instance), bounds);
             } finally { scene.end(); }
             if (GpuShaderProvider.unlinkedDraws() != skipped) { return false; }
             try { display.render(scene, image, exposure); } finally { image.end(); }
@@ -236,9 +195,7 @@ final class GpuEditorModelPreviews implements Disposable {
     }
     @Override public void dispose() {
         clear(); worker.shutdownNow();
-        if (links != null) { links.dispose(); }
-        clearWarmup();
-        if (batch != null) { batch.dispose(); }
+        if (batch != null) { batch.dispose(); cutoutFade.dispose(); }
         if (display != null) { display.dispose(); }
         environmentLighting.dispose();
     }

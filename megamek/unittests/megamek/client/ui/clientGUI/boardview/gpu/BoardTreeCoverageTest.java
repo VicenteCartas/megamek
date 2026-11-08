@@ -37,26 +37,26 @@ class BoardTreeCoverageTest {
         File original = Configuration.dataDir();
         Path source = original.toPath().resolve("models/board/vegetation");
         Path model = directory.resolve("models/board/vegetation/tree-coverage-reload.glb");
-        Path atlas = directory.resolve("models/board/textures/vegetation/impostors/tree-coverage-reload.png");
+        Path mask = directory.resolve("models/board/textures/vegetation/impostors/tree-coverage-reload_crown.png");
         Files.createDirectories(model.getParent());
-        Files.createDirectories(atlas.getParent());
+        Files.createDirectories(mask.getParent());
         Files.copy(source.resolve("birch-young.glb"), model);
-        var pixels = new BufferedImage(96, 32, BufferedImage.TYPE_INT_ARGB);
+        var pixels = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 32; y++) {
-            for (int x = 64; x < 96; x++) { pixels.setRGB(x, y, 0xffffffff); }
+            for (int x = 0; x < 32; x++) { pixels.setRGB(x, y, 0xffffffff); }
         }
-        ImageIO.write(pixels, "png", atlas.toFile());
+        ImageIO.write(pixels, "png", mask.toFile());
         var plant = new BoardScene.Feature("vegetation/tree-coverage-reload", 0, 0, 0, .9f, 2, 0, BoardScene.FeatureKind.TREE);
         try {
             Configuration.setDataDir(directory.toFile());
             float first = coverage(List.of(plant));
             assertTrue(first > 0);
-            ImageIO.write(new BufferedImage(96, 32, BufferedImage.TYPE_INT_ARGB), "png", atlas.toFile());
+            ImageIO.write(new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB), "png", mask.toFile());
             assertEquals(first, coverage(List.of(plant)), "An existing scene keeps its cached source until reload");
             BoardTreeCoverage.reload();
             assertEquals(0, coverage(List.of(plant)));
             Files.copy(source.resolve("willow-broad.glb"), model, StandardCopyOption.REPLACE_EXISTING);
-            ImageIO.write(pixels, "png", atlas.toFile());
+            ImageIO.write(pixels, "png", mask.toFile());
             BoardTreeCoverage.reload();
             assertTrue(coverage(List.of(plant)) > first * 5, "Reload also picks up changed GLB bounds");
         } finally {

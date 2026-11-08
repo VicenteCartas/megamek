@@ -150,7 +150,7 @@ final class BoardConcrete {
               || tile.features().stream().anyMatch(feature -> fitFeature(feature) && feature.decoration() == null);
         return new ConcreteFit.Cell(tile.coords(), tile.elevation(), tile.surface() == BoardScene.Surface.CONCRETE,
               tile.liquid().present(), tile.liquid().molten(), tile.frozen(), tile.ultraSublevel(), fixed, tile.wayExits(),
-              BoardSurface.ramps(scene, tile));
+              BoardSurface.ramps(scene, tile), tile.pavementSides());
     }
 
     /**

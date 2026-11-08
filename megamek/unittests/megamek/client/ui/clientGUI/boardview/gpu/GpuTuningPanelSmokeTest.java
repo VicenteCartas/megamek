@@ -92,9 +92,9 @@ class GpuTuningPanelSmokeTest {
         final GpuBoardSource source = mock(GpuBoardSource.class);
         final BoardCamera camera = new BoardCamera();
         final SpriteBatch batch = new SpriteBatch();
-        final GpuBoardSource.Frame frame = GpuHudInputTest.frame(
-              GpuHudInputTest.status(1, GamePhase.MOVEMENT, false, Entity.NONE, 0),
-              GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
+        final GpuBoardSource.Frame frame = GpuHudFixtures.frame(
+              GpuHudFixtures.status(1, GamePhase.MOVEMENT, false, Entity.NONE, 0),
+              GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY,
                     GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
         final GpuBoardTuning tuning;
         final GpuHud hud;
@@ -119,7 +119,7 @@ class GpuTuningPanelSmokeTest {
 
         /** One frame: the snapshots, then a draw, which lays the HUD out. */
         void show() {
-            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
             ScreenUtils.clear(.1f, .13f, .13f, 1, true);
             hud.draw();
         }

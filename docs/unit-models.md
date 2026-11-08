@@ -76,8 +76,8 @@ and preserves linear material factors and vertex colors. Preserve node and part 
 damage and animation use them to find rigid geometry.
 
 The importer rejects skins, animation clips, morph targets, external geometry
-buffers, required extensions and blended materials. Opaque and alpha-tested
-materials are supported; double-sided faces get reversed geometry and normals.
+buffers, required extensions and blended materials other than board glass (a board material whose `.tres`
+blends). Opaque and alpha-tested materials are supported; double-sided faces get reversed geometry and normals.
 Textures may be embedded PNG/JPEG data or local relative images inside the
 permitted model directory. `ModelTextures` shares them by image, sampler and color/data role;
 color images decode from sRGB during sampling, while numerical maps remain linear data.

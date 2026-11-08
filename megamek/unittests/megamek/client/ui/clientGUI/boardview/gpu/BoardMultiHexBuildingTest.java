@@ -924,8 +924,8 @@ class BoardMultiHexBuildingTest {
 
     private static BoardScene scene(Map<Coords, Integer> heights, String asset, Map<Coords, Integer> rails,
           Set<Coords> fallen, Set<Set<Coords>> apart, Map<Coords, Integer> elevations, Map<Coords, Integer> roads) {
-        return BoardSurfaceBlendTest.scene(coords -> {
-            var base = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.LUNAR, 0, -1, 0);
+        return BoardScenes.scene(coords -> {
+            var base = BoardScenes.tile(coords, BoardScene.Surface.LUNAR, 0, -1, 0);
             int exits = 0;
             for (int direction = 0; direction < 6; direction++) {
                 Coords next = coords.translated(direction);

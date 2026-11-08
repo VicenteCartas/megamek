@@ -93,14 +93,14 @@ class GpuRoadControlSmokeTest {
                             camera.center(BoardGeometry.center(AT, level));
                             frame.prepare(terrain, camera, scene);
                             terrain.update(scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             var installed = installedControls(terrain, asset);
                             assertEquals(4, installed.size(), "Every junction approach loads a GLB after an edit");
                             for (var prop : installed) {
-                                assertEquals(null, field(prop, "decorationId"), "Terrain controls are not independently editable objects");
+                                assertEquals(null, GpuTestSupport.<Object>field(prop, "decorationId"), "Terrain controls are not independently editable objects");
                                 if (level == 2) {
-                                    var bounds = (BoundingBox) field(prop, "bounds");
+                                    var bounds = (BoundingBox) GpuTestSupport.field(prop, "bounds");
                                     assertTrue(bounds.min.z >= 1.9f * BoardGeometry.level(), "Deck signals stand on the deck");
                                 }
                             }
@@ -119,7 +119,7 @@ class GpuRoadControlSmokeTest {
                                       BoardGeometry.centerX(AT) + (signal.x() + across * (float) Math.cos(rotation)) * BoardGeometry.hexScale(),
                                       BoardGeometry.centerY(AT) + (signal.y() + across * (float) Math.sin(rotation)) * BoardGeometry.hexScale(),
                                       (i == 4 ? 9 : 7.6f) * BoardGeometry.hexScale()));
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 assertSignalLod(terrain, asset, 0);
                                 captureBlink(terrain, frame, camera, scene, output, names.get(i) + "-lod0");
@@ -136,10 +136,10 @@ class GpuRoadControlSmokeTest {
 
     private static List<Object> installedControls(GpuTerrain terrain, String asset) throws Exception {
         List<Object> result = new ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                var feature = (BoardScene.Feature) field(prop, "decorationFeature");
-                if (AT.equals(field(prop, "coords")) && feature != null && feature.asset().equals(asset)) { result.add(prop); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                var feature = (BoardScene.Feature) GpuTestSupport.field(prop, "decorationFeature");
+                if (AT.equals(GpuTestSupport.field(prop, "coords")) && feature != null && feature.asset().equals(asset)) { result.add(prop); }
             }
         }
         return result;
@@ -149,21 +149,15 @@ class GpuRoadControlSmokeTest {
         var controls = installedControls(terrain, asset);
         assertEquals(4, controls.size());
         for (Object prop : controls) {
-            var instance = (ModelInstance) field(prop, "instance");
-            var levels = (List<?>) field(prop, "levels");
+            var instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+            var levels = (List<?>) GpuTestSupport.field(prop, "levels");
             assertNotNull(levels, "Actual GLB levels must load, not the missing-model fallback");
             assertEquals(2, levels.size());
-            assertEquals(level, field(prop, "lod"), asset + ": the ordinary prop thresholds select the captured LOD");
+            assertEquals(level, GpuTestSupport.<Object>field(prop, "lod"), asset + ": the ordinary prop thresholds select the captured LOD");
             assertSame(levels.get(level), instance.model);
             assertNotNull(instance.getMaterial("Amber"));
             assertTrue(instance.getMaterial("Amber").has(GpuModelLight.TYPE));
         }
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static void captureBlink(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera,

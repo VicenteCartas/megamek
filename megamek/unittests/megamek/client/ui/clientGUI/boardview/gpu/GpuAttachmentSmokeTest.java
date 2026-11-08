@@ -135,7 +135,7 @@ class GpuAttachmentSmokeTest {
             if (carrier instanceof BipedMek) {
                 String torso = hostModel.rigs().getFirst().joints().get("torso");
                 Matrix4 relative = world(host, torso).inv().mul(world(ba, "trooper-3"));
-                var failed = new UnitAttack(UnitPlaybackTest.attack(hostUnit, passenger, megamek.common.ResolvedAttack.Kind.BRUSH_OFF, false));
+                var failed = new UnitAttack(UnitPlaybackFixture.attack(hostUnit, passenger, megamek.common.ResolvedAttack.Kind.BRUSH_OFF, false));
                 failed.seconds = .35f;
                 hostAnimator.attack(hostModel, hostUnit, failed);
                 reset(baAnimator, baModel, ba, passenger, camera, Vector3.Zero, 2);

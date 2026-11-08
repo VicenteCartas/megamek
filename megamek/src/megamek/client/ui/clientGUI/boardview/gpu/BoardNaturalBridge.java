@@ -90,7 +90,7 @@ final class BoardNaturalBridge {
             boolean joined = BoardBridge.connected(tile, next, d);
             // Only walkable landings need the extra flare; tall cliffs receive the full-width span itself.
             float width = mouthWidth(center.x + gate.x, center.y + gate.y, bank && BoardBridge.bank(tile, next, d));
-            levelBanks[d] = bank && next.elevation() == level;
+            levelBanks[d] = bank && BoardRoadGrade.ground(next) == level;
             var across = new Vector3(-along.y, along.x, 0);
             var ground = bank ? surfaces.computeIfAbsent(next.coords(), c -> new BoardSurface(scene, next, lod)) : null;
             if (bank) {
@@ -513,8 +513,8 @@ final class BoardNaturalBridge {
         }
         for (int side : new int[] { 1, 5 }) {
             var beside = scene.tile(tile.coords().translated((direction + side) % 6));
-            if (beside != null && !beside.liquid().present() && BoardBridge.feature(beside) == null
-                  && beside.elevation() >= deck(tile) - 1) { return false; }
+            if (beside != null && BoardRoad.groundShown(beside) && BoardBridge.feature(beside) == null
+                  && beside.floor() >= deck(tile) - 1) { return false; }
         }
         return true;
     }
@@ -569,8 +569,8 @@ final class BoardNaturalBridge {
 
     /** Solid ground beyond, rising above the deck: a cliff whose wall an overhang may enter below its top. */
     private static boolean wall(BoardScene.Tile tile, BoardScene.Tile beyond) {
-        return beyond != null && !beyond.liquid().present() && BoardBridge.feature(beyond) == null
-              && beyond.elevation() > deck(tile);
+        return beyond != null && BoardRoad.groundShown(beyond) && BoardBridge.feature(beyond) == null
+              && beyond.floor() > deck(tile);
     }
 
     /**
@@ -586,9 +586,9 @@ final class BoardNaturalBridge {
         boolean rooted = false;
         for (int side : new int[] { 5, 1 }) {
             int e = (d + side) % 6;
-            rooted |= anchors(scene, tile, e) && scene.tile(tile.coords().translated(e)).elevation() >= deck(tile);
+            rooted |= anchors(scene, tile, e) && scene.tile(tile.coords().translated(e)).floor() >= deck(tile);
         }
-        return rooted && (beyond == null || beyond.elevation() <= deck(tile))
+        return rooted && (beyond == null || beyond.floor() <= deck(tile))
               || drops(scene, tile, d, (d + 5) % 6) && drops(scene, tile, d, (d + 1) % 6) ? .8f + .18f * wander
               : .62f + .18f * wander;
     }
@@ -712,7 +712,7 @@ final class BoardNaturalBridge {
         var low = scene.tile(tile.coords().translated(open));
         var next = scene.tile(tile.coords().translated(beside));
         return low != null && supported(scene, tile, beside)
-              && low.elevation() < (joined(tile, next, beside) ? deck(next) : next.elevation());
+              && low.floor() < (joined(tile, next, beside) ? deck(next) : next.floor());
     }
 
     /**
@@ -798,8 +798,9 @@ final class BoardNaturalBridge {
         // marking a cliff top towards either span is a wall both enter at the joint's height.
         if (BoardBridge.bank(tile, ground, towards) && BoardBridge.bank(span, ground, across)
               && !cliff(ground, towards) && !cliff(ground, across)) {
-            boolean level = deck(tile) == ground.elevation() && deck(span) == ground.elevation();
-            vertex.z = ground.elevation() * BoardGeometry.level() - (level ? 0 : BoardRelief.metres(.025f));
+            float bed = BoardRoadGrade.ground(ground);
+            boolean level = deck(tile) == bed && deck(span) == bed;
+            vertex.z = bed * BoardGeometry.level() - (level ? 0 : BoardRelief.metres(.025f));
         } else {
             vertex.z = BoardBridge.edgeElevation(tile, span, joinsFirst ? d : e) * BoardGeometry.level();
         }
@@ -896,7 +897,8 @@ final class BoardNaturalBridge {
         if (!BoardBridge.bank(tile, next, direction) || cliff(next, direction)) {
             return deck(tile) * BoardGeometry.level();
         }
-        return next.elevation() * BoardGeometry.level() - (next.elevation() == deck(tile) ? 0 : BoardRelief.metres(.025f));
+        float bed = BoardRoadGrade.ground(next);
+        return bed * BoardGeometry.level() - (bed == deck(tile) ? 0 : BoardRelief.metres(.025f));
     }
 
     private static float mouthWidth(float x, float y, boolean bank) {
@@ -921,13 +923,13 @@ final class BoardNaturalBridge {
         var span = scene.tile(bank.coords().translated(direction));
         if (!BoardBridge.bank(span, bank, (direction + 3) % 6)
               || BoardBridge.family(span) != BoardBridge.Family.NATURAL
-              || span.elevation() + BoardBridge.feature(span).elevation() != bank.elevation()) { return null; }
+              || span.elevation() + BoardBridge.feature(span).elevation() != BoardRoadGrade.ground(bank)) { return null; }
         var center = BoardGeometry.center(bank.coords(), 0);
         var along = BoardGeometry.center(span.coords(), 0).sub(center);
         float width = mouthWidth(center.x + along.x * .5f, center.y + along.y * .5f, true);
         along.nor();
         var passage = new BoardBridge.Approach(center.x, center.y, along.x, along.y, BoardGeometry.height(), width,
-              bank.elevation() * BoardGeometry.level(), false);
+              BoardRoadGrade.ground(bank) * BoardGeometry.level(), false);
         // The bank's edge runs from the corner clockwise of the span (the span's corner between its directions two and
         // three on from this one) to the counter-clockwise corner (three and four on).
         float whole = BoardGeometry.width();

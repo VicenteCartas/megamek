@@ -157,7 +157,7 @@ class GpuBuildingMaterialsSmokeTest {
                     // A geometry-scale change invalidates material pages; fill them before testing runtime picking.
                     draw();
                     terrain.update(scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     assertTrue(terrain.ready(scene), "Catalog rendering and picking require the completed loading stage");
                 }
 

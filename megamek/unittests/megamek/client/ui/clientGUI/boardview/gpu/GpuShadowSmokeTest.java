@@ -72,7 +72,7 @@ class GpuShadowSmokeTest {
 
     private static void runCliffLighting(String board, String name, Coords focus, float level, float hour,
           float shadows) throws Exception {
-        BoardScene scene = GpuRoadSourceTest.scene(board);
+        BoardScene scene = BoardScenes.installedScene(board);
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1058, 1234);
@@ -95,12 +95,14 @@ class GpuShadowSmokeTest {
         String renderer = Gdx.gl.glGetString(GL20.GL_RENDERER);
         assertTrue(renderer.contains(System.getProperty("megamek.gpu.expectedRenderer", "")), renderer);
         String original = GpuShaderSource.readDisk("terrain-sculpt.frag");
-        // The sculpt chooses the face whose side the sun must reach; shadeSurface (surface-shading.glsl) gates on it.
+        // The sculpt chooses the face whose side the sun must reach; shadeSurface (surface-shading.glsl) gates on it,
+        // and so does receivesSun, which skips the shadow lookup on the far side: a variant changes both.
         String incidentFace = "smoothSupport ? face : geometric";
         String viewGuard = "normal = shadingNormal(normal, geometric, view);";
         String output = "fragColor = vec4(result, 1.0);";
-        for (String anchor : List.of(incidentFace, viewGuard, output)) {
-            assertEquals(1, original.split(java.util.regex.Pattern.quote(anchor), -1).length - 1);
+        for (String anchor : List.of(incidentFace, viewGuard, output)) { assertTrue(original.contains(anchor), anchor); }
+        for (String anchor : List.of(viewGuard, output)) {
+            assertEquals(1, original.split(java.util.regex.Pattern.quote(anchor), -1).length - 1, anchor);
         }
         // These are causal review probes, not proposed fixes. Real opaque back-side rejection stays in production.
         var variants = new java.util.LinkedHashMap<String, String>();
@@ -420,8 +422,13 @@ class GpuShadowSmokeTest {
         assertEquals(GL30.GL_COMPARE_REF_TO_TEXTURE, value.get(0));
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_COMPARE_FUNC, value);
         assertEquals(GL20.GL_LEQUAL, value.get(0));
+        // Lookups name their level: the finest compares bilinearly, the coarser ones (GpuShadowLight.levels) as well.
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, value);
-        assertEquals(GL20.GL_LINEAR, value.get(0));
+        assertEquals(GL20.GL_LINEAR_MIPMAP_NEAREST, value.get(0));
+        Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_BASE_LEVEL, value);
+        assertEquals(0, value.get(0));
+        Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, value);
+        assertEquals(GpuShadowLight.LEVELS, value.get(0));
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, value);
         assertEquals(GL20.GL_LINEAR, value.get(0));
         assertEquals(GL30.GL_DEPTH_COMPONENT16, org.lwjgl.opengl.GL11.glGetTexLevelParameteri(

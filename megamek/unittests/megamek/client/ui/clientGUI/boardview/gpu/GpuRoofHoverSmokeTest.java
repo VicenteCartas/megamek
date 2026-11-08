@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuMixedUnitBenchmarkSmokeTest.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -44,8 +44,8 @@ class GpuRoofHoverSmokeTest {
     }
 
     private static void check(String asset) throws Exception {
-        var scene = BoardSurfaceBlendTest.scene(coords -> {
-            var ground = BoardSurfaceBlendTest.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
+        var scene = BoardScenes.scene(coords -> {
+            var ground = BoardScenes.tile(coords, BoardScene.Surface.CONCRETE, 0, -1, 0);
             var features = coords.distance(CENTER) <= 1
                   ? List.of(new BoardScene.Feature(asset, 0, 0, 0, 1, coords.equals(CENTER) ? 5 : 4, 0,
                         BoardScene.FeatureKind.BUILDING)) : List.<BoardScene.Feature>of();

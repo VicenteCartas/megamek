@@ -40,6 +40,13 @@ final class GpuModelMaterial extends Attribute {
     final boolean occluder;
     /** Godot's premultiplied alpha (a .tres's blend_mode 4): only the diffuse share fades with the opacity (model.frag). */
     final boolean premultiplied;
+    /** 0 a plain cutout; 1 a cutout's solid texels, whose faded ones blend later; 2 those faded ones (cutout-fade.glsl). */
+    final float fade;
+    /** The nearest depth in view and the fade weight lost per unit of depth beyond it, for one flush (GpuTerrain). */
+    static final float[] fadeDepth = new float[2];
+    /** The nearest glass's depth while glass splits a fade flush, and the side it draws: -1 behind it, 1 in front, 0 all (GpuCutoutFade). */
+    static Texture fadeGlass;
+    static float fadeSide;
     /**
      * Units a texture repeat along the board's axes (RigidGlb.Data#boardUVs), 0 for the authored UVs: the vertex stage
      * maps every texture from the board position (GpuUnitShader#linearVertex), so turned and repeated pieces join.
@@ -57,16 +64,16 @@ final class GpuModelMaterial extends Attribute {
 
     GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
           boolean board, float[] relief, boolean paintMask) {
-        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, 0);
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, 0, 0);
     }
 
     GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
           boolean board, float[] relief, boolean paintMask, float boardUV) {
-        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, boardUV);
+        this(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, false, false, boardUV, 0);
     }
 
     private GpuModelMaterial(float roughness, float metallic, float scatter, Texture map, float[] tint, float[] glow,
-          boolean board, float[] relief, boolean paintMask, boolean occluder, boolean premultiplied, float boardUV) {
+          boolean board, float[] relief, boolean paintMask, boolean occluder, boolean premultiplied, float boardUV, float fade) {
         super(TYPE);
         this.roughness = roughness;
         this.metallic = metallic;
@@ -80,18 +87,31 @@ final class GpuModelMaterial extends Attribute {
         this.occluder = occluder;
         this.premultiplied = premultiplied;
         this.boardUV = boardUV;
+        this.fade = fade;
     }
 
     /** This surface, a building shell's or not ({@link #occluder}). */
     GpuModelMaterial occluder(boolean shell) {
         return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, shell,
-              premultiplied, boardUV);
+              premultiplied, boardUV, fade);
     }
 
     /** This surface drawn with premultiplied alpha ({@link #premultiplied}). */
     GpuModelMaterial premultiplied() {
         return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, occluder, true,
-              boardUV);
+              boardUV, fade);
+    }
+
+    /** This surface as a cutout that follows its albedo's alpha, drawing its solid texels. */
+    GpuModelMaterial fading() {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, occluder,
+              premultiplied, boardUV, 1);
+    }
+
+    /** This cutout's faded texels (GpuCutoutFade#fadeMaterial). */
+    GpuModelMaterial fadePass() {
+        return new GpuModelMaterial(roughness, metallic, scatter, map, tint, glow, board, relief, paintMask, occluder,
+              premultiplied, boardUV, 2);
     }
 
     static void register(DefaultShader shader) {
@@ -145,6 +165,32 @@ final class GpuModelMaterial extends Attribute {
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var height = attributes.get(TextureAttribute.class, TextureAttribute.Bump);
                 if (height != null) { target.set(id, height.textureDescription); }
+            }
+        });
+        shader.register("u_modelFade", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, attributes.get(GpuModelMaterial.class, TYPE).fade);
+            }
+        });
+        shader.register("u_modelFadeDepth", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, fadeDepth[0], fadeDepth[1]);
+            }
+        });
+        shader.register("u_modelFadeSide", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                target.set(id, fadeSide);
+            }
+        });
+        shader.register("u_modelFadeGlass", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                // Without glass it stays unread, but a sampler needs a unit its type may use: the colour map's.
+                if (fadeGlass != null) { target.set(id, fadeGlass); }
+                else { target.set(id, attributes.get(TextureAttribute.class, TextureAttribute.Diffuse).textureDescription); }
             }
         });
         shader.register("u_modelBoard", new BaseShader.LocalSetter() {
@@ -239,6 +285,7 @@ final class GpuModelMaterial extends Attribute {
         result = 31 * result + Boolean.hashCode(occluder);
         result = 31 * result + Boolean.hashCode(premultiplied);
         result = 31 * result + Float.floatToIntBits(boardUV);
+        result = 31 * result + Float.floatToIntBits(fade);
         return 31 * result + (map == null ? 0 : map.getTextureObjectHandle());
     }
 
@@ -249,6 +296,7 @@ final class GpuModelMaterial extends Attribute {
         int order = Float.compare(roughness, surface.roughness);
         if (order == 0) { order = Float.compare(metallic, surface.metallic); }
         if (order == 0) { order = Float.compare(scatter, surface.scatter); }
+        if (order == 0) { order = Float.compare(fade, surface.fade); }
         if (order == 0) { order = Arrays.compare(tint, surface.tint); }
         if (order == 0) { order = Arrays.compare(glow, surface.glow); }
         if (order == 0) { order = Boolean.compare(board, surface.board); }

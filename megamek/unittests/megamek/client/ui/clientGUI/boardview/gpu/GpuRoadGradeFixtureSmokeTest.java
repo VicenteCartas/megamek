@@ -50,7 +50,7 @@ class GpuRoadGradeFixtureSmokeTest {
                         if (!surfaces.isEmpty() && !surfaces.contains(surface)) { continue; }
                         var board = BoardFile.read(Path.of("data/boards/fixtures",
                               RoadGradeFixture.filename(concrete)));
-                        var scene = GpuLegacyImportSmokeTest.scene(board);
+                        var scene = BoardScenes.scene(board);
                         for (boolean classic : new boolean[] { false, true }) {
                             String mode = classic ? "classic" : "enhanced";
                             var terrain = new GpuTerrain();
@@ -105,7 +105,7 @@ class GpuRoadGradeFixtureSmokeTest {
         if (view >= 0) { camera.orbit(view - camera.azimuth(), 0); }
         camera.camera.zoom = zoom;
         camera.center(focus);
-        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+        GpuReviewFrame.settle(terrain, null, scene, camera);
         terrain.animate(0, List.of());
         frame.render(terrain, camera, scene);
         GpuReviewFrame.save(new File(output, name + (view < 0 ? "-top" : "-side-" + view) + ".png"));

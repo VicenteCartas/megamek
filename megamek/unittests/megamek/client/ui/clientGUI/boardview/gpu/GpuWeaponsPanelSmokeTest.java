@@ -1,8 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuHudFixtures.ATLAS;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -15,7 +15,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +39,6 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiPopover;
 import megamek.client.ui.gdx.UiTestStage;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.equipment.WeaponMounted;
@@ -48,10 +46,9 @@ import megamek.common.rolls.TargetRoll;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
 import megamek.common.units.Targetable;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The weapons panel and the solution card (G10) in the component harness: beside the hud-v3 shots 05, 06, 13 and 15
@@ -61,6 +58,7 @@ import org.junit.jupiter.api.Test;
  * stay, and the ammunition select, which picks the second of two bins with one label. The mock orders are display
  * values read off the shots, as E3b would publish them.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Tag("on-demand")
 class GpuWeaponsPanelSmokeTest {
     private static final GpuBattleStatus.Snapshot MOCK = GpuHudFixtures.status();
@@ -88,8 +86,6 @@ class GpuWeaponsPanelSmokeTest {
     /** The HUD's minimap above the column: right gap, top 90, 208 tall (178 at a height of 800 or less). */
     private static final int MINIMAP_TOP = 90;
     private static final String DASH = "—";
-
-    private static File originalDataDir;
 
     /** The panel and the card in their HUD slots, with the HUD state, the services and the context menu. */
     private static final class Column {
@@ -169,17 +165,6 @@ class GpuWeaponsPanelSmokeTest {
         UiPopover popover() {
             return ((Group) menu.actor()).findActor("context-menu-popover");
         }
-    }
-
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
     }
 
     @Test
@@ -540,13 +525,13 @@ class GpuWeaponsPanelSmokeTest {
      */
     @Test
     void ordersThroughTheFiringDisplay() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
-            Entity crab = GpuFireOrdersTest.enemy(firing, "Crab CRB-20.mtf", 44, GpuFireOrdersTest.NORTH);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            Entity crab = GpuFiringFixture.enemy(firing, "Crab CRB-20.mtf", 44, GpuFiringFixture.NORTH);
             int archer = firing.ahead.getId();
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
-            int right = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
-            int left = GpuFireOrdersTest.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
-            int missiles = GpuFireOrdersTest.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int right = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_RIGHT_ARM);
+            int left = GpuFiringFixture.eqNum(firing, "Medium Laser", Mek.LOC_LEFT_ARM);
+            int missiles = GpuFiringFixture.eqNum(firing, "LRM 20", Mek.LOC_LEFT_TORSO);
             WeaponMounted gun = GpuFiringFixture.weapon(firing.attacker, "AC/20", Mek.LOC_RIGHT_TORSO);
             GpuHudTestStage.run(hud -> {
                 Column column = new Column(hud, firing.board.source);
@@ -556,7 +541,7 @@ class GpuWeaponsPanelSmokeTest {
                 assertEquals(List.of("+", "Archer ARC-2R"), column.texts("weapons-pills"));
                 click(hud, column.find("weapons-slot-" + cannon));
                 show(hud, column, settled(firing));
-                assertEquals(List.of("AC/20 RT@42"), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of("AC/20 RT@42"), GpuFiringFixture.queue(firing));
                 assertEquals(List.of("A", "Archer ARC-2R"), column.texts("weapons-pills"));
 
                 // Weapon-first (H16): the right arm's laser is armed by its name and assigned by the Archer's pill.
@@ -571,7 +556,7 @@ class GpuWeaponsPanelSmokeTest {
                 GpuContextMenu.focusTarget(firing.board.source, column.state, TargetKey.unit(crab.getId()));
                 show(hud, column, settled(firing));
                 assertEquals(List.of("AC/20 RT@42", "Medium Laser RA@42", "Medium Laser LA@44"),
-                      GpuFireOrdersTest.queue(firing));
+                      GpuFiringFixture.queue(firing));
                 assertEquals(List.of("A", "Archer ARC-2R", "B", "Crab CRB-20"), column.texts("weapons-pills"));
 
                 // H12: the Crab made primary keeps its letter; the star moves to it.
@@ -585,10 +570,10 @@ class GpuWeaponsPanelSmokeTest {
                 assertEquals("Retarget to Crab CRB-20", tooltip(column.find("weapons-slot-" + cannon)));
                 click(hud, column.find("weapons-slot-" + cannon));
                 show(hud, column, settled(firing));
-                assertTrue(GpuFireOrdersTest.queue(firing).contains("AC/20 RT@44"));
+                assertTrue(GpuFiringFixture.queue(firing).contains("AC/20 RT@44"));
                 click(hud, column.find("weapons-slot-" + left));
                 show(hud, column, settled(firing));
-                assertFalse(GpuFireOrdersTest.queue(firing).contains("Medium Laser LA@44"));
+                assertFalse(GpuFiringFixture.queue(firing).contains("Medium Laser LA@44"));
                 // The Hachiwara behind the woods: no shot, and the slot says why.
                 firing.board.source.fire().focusTarget(TargetKey.unit(firing.left.getId()));
                 show(hud, column, settled(firing));
@@ -616,9 +601,9 @@ class GpuWeaponsPanelSmokeTest {
      */
     @Test
     void aClickedWoodedHexIsAssignedAsAUnitIs() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             Coords woods = new Coords(7, 2);
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             GpuHudTestStage.run(hud -> {
                 Column column = new Column(hud, firing.board.source);
                 show(hud, column, settled(firing));
@@ -630,7 +615,7 @@ class GpuWeaponsPanelSmokeTest {
                 assertEquals("Assign weapon \u2192 " + hex.getDisplayName(), column.line("weapons-assign"));
                 click(hud, column.find("weapons-slot-" + cannon));
                 show(hud, column, settled(firing));
-                assertEquals(List.of("AC/20 RT@" + hex.getId()), GpuFireOrdersTest.queue(firing));
+                assertEquals(List.of("AC/20 RT@" + hex.getId()), GpuFiringFixture.queue(firing));
                 assertEquals(List.of("A", hex.getDisplayName()), column.texts("weapons-pills"));
                 click(hud, column.find("weapons-alpha-strike"));
                 GpuBoardSource.Frame assigned = settled(firing);
@@ -646,8 +631,8 @@ class GpuWeaponsPanelSmokeTest {
 
     @Test
     void draggingWeaponsSavesTheirOrderWithoutSelectingOrAssigningThem() throws Exception {
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
-            int cannon = GpuFireOrdersTest.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
+            int cannon = GpuFiringFixture.eqNum(firing, "AC/20", Mek.LOC_RIGHT_TORSO);
             firing.board.source.fire().assign(cannon, TargetKey.unit(firing.ahead.getId()));
             GpuBoardSource.Frame initial = settled(firing);
             List<Integer> before = initial.panels().fire().weapons().stream()
@@ -882,7 +867,7 @@ class GpuWeaponsPanelSmokeTest {
     }
 
     private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuFireOrders.Snapshot fire) {
-        return GpuHudInputTest.frame(status, GpuHudInputTest.panels(GpuMovePlan.Snapshot.EMPTY, fire,
+        return GpuHudFixtures.frame(status, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, fire,
               GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
     }
 

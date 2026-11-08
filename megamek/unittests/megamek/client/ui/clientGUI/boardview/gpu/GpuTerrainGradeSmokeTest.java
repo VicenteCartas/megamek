@@ -146,7 +146,7 @@ class GpuTerrainGradeSmokeTest {
             for (String material : MATERIALS) {
                 for (int level : LEVELS) {
                     terrain.update(scene(material, level));
-                    camera.position.set(BoardGeometry.center(BoardSurfaceBlendTest.CENTER, level)).add(0, 0, 5000);
+                    camera.position.set(BoardGeometry.center(BoardScenes.CENTER, level)).add(0, 0, 5000);
                     camera.update();
                     output.draw(terrain, camera, false);
                     float[][] channels = gradeFrames(terrain, output, camera);
@@ -329,7 +329,7 @@ class GpuTerrainGradeSmokeTest {
     }
 
     private static BoardScene scene(String material, int level) {
-        return BoardSurfaceBlendTest.scene(coords -> {
+        return BoardScenes.scene(coords -> {
             var family = switch (material) {
                 case "snow" -> BoardScene.Surface.SNOW;
                 case "grass" -> BoardScene.Surface.GRASS;
@@ -337,7 +337,7 @@ class GpuTerrainGradeSmokeTest {
                 case "mixed" -> coords.getX() < 4 ? BoardScene.Surface.FUNGUS : BoardScene.Surface.DIRT;
                 default -> BoardScene.Surface.DIRT;
             };
-            return BoardSurfaceBlendTest.tile(coords, family, level, -1, 0);
+            return BoardScenes.tile(coords, family, level, -1, 0);
         });
     }
 

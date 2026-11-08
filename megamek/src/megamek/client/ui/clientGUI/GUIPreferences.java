@@ -333,6 +333,8 @@ public class GUIPreferences extends PreferenceStoreProxy {
     public static final String SHOW_OBJECTIVE_OVERLAYS = "ShowObjectiveOverlays";
     public static final String GUI_SCALE = "GUIScale";
     public static final String BOARD_VIEW_3D_GRAPHICS_CARD = "BoardView3DGraphicsCard";
+    /** The 3D board's quality, a choice of its Tuning panel: NORMAL (cheaper shading, GpuBoardTuning) or HIGH. */
+    public static final String BOARD_QUALITY = "BoardQuality";
     /** The 3D board's anti-aliasing, a choice of its Tuning panel: OFF or SMAA. */
     public static final String BOARD_ANTI_ALIASING = "BoardAntiAliasing";
     /** The 3D board's shadow detail: NORMAL (the map's texels follow the scene's pixels) or HIGH (twice as many). */
@@ -910,6 +912,7 @@ public class GUIPreferences extends PreferenceStoreProxy {
         store.setDefault(CONSTRUCTOR_FACTOR_WARNING, true);
         store.setDefault(GUI_SCALE, 1);
         store.setDefault(BOARD_VIEW_3D_GRAPHICS_CARD, "DISCRETE");
+        store.setDefault(BOARD_QUALITY, "MEDIUM");
         store.setDefault(BOARD_ANTI_ALIASING, "OFF");
         store.setDefault(BOARD_SHADOWS, "NORMAL");
         store.setDefault(BOARD_SPECULAR_ANTI_ALIASING, true);
@@ -1935,6 +1938,15 @@ public class GUIPreferences extends PreferenceStoreProxy {
     }
 
     /** The 3D board's shadow detail, NORMAL or HIGH. */
+    /** The 3D board's quality: NORMAL or HIGH. */
+    public String getBoardQuality() {
+        return store.getString(BOARD_QUALITY);
+    }
+
+    public void setBoardQuality(String quality) {
+        store.setValue(BOARD_QUALITY, quality);
+    }
+
     public String getBoardShadows() {
         return store.getString(BOARD_SHADOWS);
     }

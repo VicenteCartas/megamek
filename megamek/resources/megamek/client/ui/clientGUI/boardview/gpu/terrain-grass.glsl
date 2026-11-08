@@ -6,6 +6,8 @@
 #endif
 layout(location = 14) in vec4 a_coverRoot;
 uniform float u_coverPixels;
+// The shares its quality draws of a meadow's blades and of a field's plants (BoardQuality).
+uniform vec2 u_coverShare;
 uniform float u_coverHexWidth;
 uniform float u_levelHeight;
 uniform float u_metre;
@@ -36,9 +38,12 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     // A field's plants thin out as they shrink, each survivor widening by as much, until they fade into the ground's
     // crop colour (terrain-crops.glsl); so does a rim's fringe once it has stood up. Grass only thins out, over the
     // ground's own grass.
-    float share = crop ? cropShare(!wheat, pixels) : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : 1.0;
+    float kept = crop ? cropShare(!wheat, pixels) : 1.0;
+    float share = crop ? u_coverShare.y * kept : rim ? clamp(pixels / GRASS_RIM_KEEP, .001, 1.0) : u_coverShare.x;
+    // Survivors widen by a far plant's or a rim's whole thinning, and by the root of what a level (or a meadow) leaves out.
+    float widening = crop ? kept * sqrt(u_coverShare.y) : rim ? share : sqrt(share);
     float density = (crop ? share * cropPlants(pixels) : rim ? share * smoothstep(GRASS_RIM_START, GRASS_RIM_STAND, pixels)
-          : smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
+          : share * smoothstep(GRASS_START_PIXELS, GRASS_FULL_PIXELS, pixels)) * GRASS_ROOTS_PER_HEX;
     if (density <= a_coverRoot.w) { return false; }
     uint seed = floatBitsToUint(root.x) ^ (floatBitsToUint(root.y) * 1664525u) ^ uint(a_coverRoot.w);
     // Reject the whole rooted blade, not fragments of a swaying tip. Buffers remain unchanged after an impact.
@@ -48,8 +53,8 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
     if (rim && rimCode >= 2048) {
         // The middle shoulder grows only the broken turf its ground draws (terrain-materials.glsl, cliffMaterial).
         vec3 metres = root / u_metre;
-        float pockets = textureLod(u_rainNoise, (metres.xy + metres.z * vec2(.43, .27)) / 92.0 + .57, 0.0).g;
-        float fine = textureLod(u_rainNoise, metres.xy / 160.0 + .41, 0.0).b;
+        float pockets = textureLod(u_surfaceNoise, rainNoiseAt((metres.xy + metres.z * vec2(.43, .27)) / 92.0 + .57), 0.0).g;
+        float fine = textureLod(u_surfaceNoise, rainNoiseAt(metres.xy / 160.0 + .41), 0.0).b;
         if (smoothstep(.22, .55, pockets * .7 + fine * .3) < grassRandom(seed + 97u)) { return false; }
     }
     // A rim's blades fan out within some 40 degrees of their heading down the bank.
@@ -63,7 +68,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
         // drooping at their tips, which flutter in the wind. A plant this size grows in over its last 512 ranks,
         // widening rather than appearing.
         float plant = u_levelHeight * CROP_HEIGHT * mix(.92, 1.06, variation) * (1.0 - scar * .5);
-        float growth = clamp((density - a_coverRoot.w) / 512.0, 0.0, 1.0) / share;
+        float growth = clamp((density - a_coverRoot.w) / 512.0, 0.0, 1.0) / widening;
         float gust = vegetationGust(root.xy);
         vec3 up = normalize(vec3(u_wind.xy * u_wind.z * (.04 + .04 * gust), 1.0));
         float t = samplePoint.y;
@@ -102,7 +107,7 @@ bool grassBlade(vec3 samplePoint, out vec3 position, out vec3 normal, out vec4 c
                 * mix(.85, 1.15, grassRandom(seed + 37u))
           : u_coverHexWidth * mix(.0015, .0028, grassRandom(seed + 37u)) * mix(.75, 1.0, meadow) * (1.0 - t);
     // Fractional growth of the last blade keeps density transitions continuous, without shading invisible blades.
-    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / share;
+    float growth = clamp(density - a_coverRoot.w, 0.0, 1.0) / widening;
     float gust = vegetationGust(root.xy);
     vec3 tip, control;
     if (rim) {

@@ -65,6 +65,13 @@ final class GpuUnitVisibility implements Disposable {
                       this.config.vertexShader, this.config.fragmentShader)) {
                     private final int outlineColor = register("u_outlineColor");
 
+                    /** This program captures depth, also of what writes none in the scene (MeepleVisual.ICON_DEPTH). */
+                    @Override
+                    protected void bindMaterial(Attributes attributes) {
+                        super.bindMaterial(attributes);
+                        context.setDepthMask(true);
+                    }
+
                     @Override
                     public void render(Renderable part, Attributes attributes) {
                         set(outlineColor, part.userData instanceof Color color ? color : Color.LIGHT_GRAY);
@@ -73,6 +80,19 @@ final class GpuUnitVisibility implements Disposable {
                 };
             }
         };
+    }
+
+    /** Adds the units' depth to the current target without colour: what draws after it lies under the Tactical View's icons. */
+    void renderDepth(Camera camera, List<ModelInstance> units) {
+        Gdx.gl.glColorMask(false, false, false, false);
+        drawUnits(camera, units);
+        Gdx.gl.glColorMask(true, true, true, true);
+    }
+
+    private void drawUnits(Camera camera, List<ModelInstance> units) {
+        colorBatch.begin(camera);
+        units.forEach(unit -> GpuUnitInstance.renderDepth(colorBatch, unit));
+        colorBatch.end();
     }
 
     void render(Camera camera, List<ModelInstance> units, Texture sceneDepth, int bottom, float intensity, float scale) {
@@ -112,9 +132,7 @@ final class GpuUnitVisibility implements Disposable {
         unitColors.begin();
         Gdx.gl.glDepthMask(true);
         ScreenUtils.clear(0, 0, 0, 0, true);
-        colorBatch.begin(camera);
-        units.forEach(unit -> GpuUnitInstance.renderDepth(colorBatch, unit));
-        colorBatch.end();
+        drawUnits(camera, units);
         unitColors.end();
         depthCurrent = true;
 

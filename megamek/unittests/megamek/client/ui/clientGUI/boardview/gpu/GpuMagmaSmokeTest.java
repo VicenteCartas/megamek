@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -28,10 +29,12 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
+import com.badlogic.gdx.graphics.GL30;
 import com.badlogic.gdx.graphics.Mesh;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
+import com.badlogic.gdx.graphics.TextureArray;
 import com.badlogic.gdx.graphics.g3d.Attribute;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
@@ -94,14 +97,16 @@ class GpuMagmaSmokeTest {
                     camera.near = .01f;
                     camera.far = 200;
                     camera.update();
-                    var batch = (ModelBatch) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "batch");
+                    var batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
                     var part = new Renderable();
                     part.meshPart.set("authored-emission", mesh, 0, mesh.getNumVertices(), GL20.GL_TRIANGLES);
                     part.environment = terrain.environment();
+                    var maps = ((GpuAssets) GpuTestSupport.field(terrain, "assets")).fullSizeMaps();
                     float firstDepth = -1;
                     float[] firstTwo = null;
                     for (int mode : new int[] { GpuMagmaShader.LAVA, GpuMagmaShader.FALL }) {
                         for (int index = 0; index < owners.size(); index++) {
+                            installLava(maps, roots.get(index));
                             part.material = GpuMagmaShader.material(owners.get(index), mode, null);
                             // Camera/time/weather stay fixed; mode, maps and scale are actual per-draw setters.
                             output.begin(0, 0, 0, 0);
@@ -460,6 +465,35 @@ class GpuMagmaSmokeTest {
         }
         System.out.println(label + " maximum half steps=" + maximum);
         assertTrue(maximum <= 1.01, label + ": complete material channels must match, half steps=" + maximum);
+    }
+
+    /**
+     * A terrain draws its own owner's maps, and the owners here hold lava alone: an owner's authored lava goes in the
+     * terrain's arrays, every level, its maps being flat.
+     */
+    private static void installLava(GpuAssets.MaterialArrays maps, Path root) throws Exception {
+        Path textures = root.resolve("models/board/textures");
+        var lava = GodotMaterial.read(textures.resolve("terrain/lava/lava-flow.tres").toFile(), textures.toFile());
+        float[] layers = GpuAssets.magmaLayers(true);
+        fillLayer(maps.color(), (int) layers[0], lava, GpuMaterialMaps.Layout.COLOR);
+        fillLayer(maps.data(), (int) layers[1], lava, GpuMaterialMaps.Layout.NORMAL);
+        fillLayer(maps.data(), (int) layers[2], lava, GpuMaterialMaps.Layout.RELIEF);
+        fillLayer(maps.data(), (int) layers[3], lava, GpuMaterialMaps.Layout.MOLTEN_HEAT);
+    }
+
+    private static void fillLayer(TextureArray array, int layer, GodotMaterial material, GpuMaterialMaps.Layout layout) {
+        Pixmap map = GpuMaterialMaps.pack(material, layout);
+        int texel = map.getPixel(0, 0);
+        map.dispose();
+        Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
+        array.bind();
+        for (int level = 0, w = array.getWidth(), h = array.getHeight(); ; level++, w = Math.max(1, w >> 1), h = Math.max(1, h >> 1)) {
+            var pixels = BufferUtils.newByteBuffer(w * h * 4).order(ByteOrder.BIG_ENDIAN);
+            for (int i = 0; i < w * h; i++) { pixels.putInt(i * 4, texel); }
+            Gdx.gl30.glTexSubImage3D(GL30.GL_TEXTURE_2D_ARRAY, level, 0, 0, layer, w, h, 1, GL20.GL_RGBA,
+                  GL20.GL_UNSIGNED_BYTE, pixels);
+            if (w == 1 && h == 1) { return; }
+        }
     }
 
     /** A zero-weight plateau meets positive coverage inside a derivative quad, not on its even-pixel edge. */
@@ -1032,7 +1066,7 @@ class GpuMagmaSmokeTest {
             }
             for (int view = 0; view < (context || dome ? 2 : 1); view++) {
                 frame.prepare(terrains[view], cameras[view], scenes[view]);
-                GpuTerrainLodSmokeTest.settle(terrains[view], null, scenes[view], cameras[view]);
+                GpuReviewFrame.settle(terrains[view], null, scenes[view], cameras[view]);
                 for (int warmup = 0; warmup < 8; warmup++) {
                     frame.render(terrains[view], cameras[view], scenes[view]);
                 }
@@ -1198,7 +1232,7 @@ class GpuMagmaSmokeTest {
         terrain.animate(.5f, List.of());
         for (BoardCamera camera : List.of(top, angled)) {
             frame.prepare(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             for (int warmup = 0; warmup < 8; warmup++) { frame.render(terrain, camera, scene); }
         }
         frame.render(terrain, top, scene);
@@ -1528,7 +1562,7 @@ class GpuMagmaSmokeTest {
 
     /** Retain the established winding-river geometry and all metadata; change only its liquid kind. */
     private static BoardScene moltenBendScene() {
-        BoardScene river = GpuRiverTerrainSmokeTest.scene(BoardScene.Surface.VOLCANO);
+        BoardScene river = BoardScenes.scene(BoardScene.Surface.VOLCANO);
         return river.withTiles(river.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(), tile.elevation(),
               tile.waterDepth(), tile.frozen(), tile.roadExits(), tile.surface(),
               tile.decals(), tile.decalsWithoutLimbs(), tile.features(), tile.text(),
@@ -1861,7 +1895,7 @@ class GpuMagmaSmokeTest {
     /** The original molten material remains finite, bounded and visibly emissive in canonical radiance. */
     private static void checkMoltenMaterial(GpuShaderManager manager, GpuSceneTestOutput surface,
           GpuTerrain terrain, BoardCamera camera) throws Exception {
-        var assets = (GpuAssets) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "assets");
+        var assets = (GpuAssets) GpuTestSupport.field(terrain, "assets");
         float sourceScale = assets.lavaEmission().scale();
         String fragment = GpuShaderSource.readDisk("terrain-magma-flow.frag");
         String output = "fragColor = magmaOutput(magmaChill(material, shore), geometric, bank, 1.0);";

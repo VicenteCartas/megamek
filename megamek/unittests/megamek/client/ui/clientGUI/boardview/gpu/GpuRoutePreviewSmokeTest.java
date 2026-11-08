@@ -63,7 +63,7 @@ class GpuRoutePreviewSmokeTest {
                             camera.camera.zoom = .32f;
                             camera.center(BoardGeometry.center(join, 1));
                             frame.prepare(terrain, camera, scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             var chunks = new ArrayList<>((List<?>) field(terrain, "chunks"));
                             GpuRoutePreviewTest.drag(session, List.of(start, start.translated(3), join));
                             try (var capture = new BoardTiles(new BoardScene.PixelPool())) {
@@ -141,7 +141,7 @@ class GpuRoutePreviewSmokeTest {
                                 assertEquals(replaced ? pending.get(at) : committed.get(at), installed.get(at), kind
                                       + (replaced ? " world triangles at " : " unchanged pieces at ") + at + (classic ? " (Classic)" : ""));
                             }
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, kind + (classic ? "-classic" : "") + "-committed.png"));
                             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -227,7 +227,7 @@ class GpuRoutePreviewSmokeTest {
     }
 
     private static Object field(Object owner, String name) throws Exception {
-        return GpuMixedUnitBenchmarkSmokeTest.field(owner, name);
+        return GpuTestSupport.field(owner, name);
     }
 
     private static Map<Coords, Map<String, Integer>> installed(GpuTerrain terrain, java.util.Set<Coords> scope) throws Exception {

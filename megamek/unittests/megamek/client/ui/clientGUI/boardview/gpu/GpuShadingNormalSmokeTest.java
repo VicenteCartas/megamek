@@ -142,7 +142,7 @@ class GpuShadingNormalSmokeTest {
         var originalLod = TerrainLod.tuning();
         var terrain = new GpuTerrain();
         try (var output = new GpuSceneTestOutput(128, 128)) {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            BoardScenes.tune(.94f, true);
             TerrainLod.tune(new TerrainLod.Tuning(1, 1));
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
@@ -162,7 +162,7 @@ class GpuShadingNormalSmokeTest {
                 camera.camera.zoom = BoardGeometry.width() * dpi / 560;
                 camera.center(BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0));
                 if (grass || bank) {
-                    scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+                    scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                           BoardScene.Surface.GRASS, bank ? (c.getX() < 4 ? 3 : 1) : 0, -1, 0));
                     if (bank) {
                         var center = BoardGeometry.center(new megamek.common.board.Coords(3, 4), 3);
@@ -174,12 +174,12 @@ class GpuShadingNormalSmokeTest {
                     }
                 } else {
                     var biome = kind.equals("crop") ? BoardScene.Biome.FIELD : BoardScene.Biome.MARSH;
-                    scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                    scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                           c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
                                 ? biome : BoardScene.Biome.MUD, 0));
                 }
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
                 Runnable draw = () -> terrain.render(camera.camera);
@@ -841,7 +841,7 @@ class GpuShadingNormalSmokeTest {
                             }
                         } else {
                             assertTrue(GpuTreeInstances.placeable(placement), "Positive tree placement");
-                            stand.add(species, placement);
+                            stand.add(species, placement, 0);
                         }
                         tuft.transform.set(placement);
                         var bounds = grass ? new com.badlogic.gdx.math.collision.BoundingBox(
@@ -1021,7 +1021,7 @@ class GpuShadingNormalSmokeTest {
         var terrain = new GpuTerrain();
         var rows = new java.util.ArrayList<Object>();
         try (var output = new GpuSceneTestOutput(128, 128)) {
-            GpuRiverTerrainSmokeTest.tune(.94f, true);
+            BoardScenes.tune(.94f, true);
             TerrainLod.tune(new TerrainLod.Tuning(1, 1)); // Same fully installed ground as the existing biome fixture.
             terrain.setAtmosphere(BoardAtmosphere.lighting(new BoardAtmosphere.Settings(13, 0, 0,
                   BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0)));
@@ -1039,7 +1039,7 @@ class GpuShadingNormalSmokeTest {
                 float pixels = near ? 560 : 48;
                 camera.camera.zoom = BoardGeometry.width() * dpi / pixels;
                 // Exact real MARSH construction used by GpuBiomeLodSmokeTest.
-                BoardScene scene = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c,
+                BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                       c.getX() >= 3 && c.getX() <= 5 && c.getY() >= 3 && c.getY() <= 5
                             ? BoardScene.Biome.MARSH : BoardScene.Biome.MUD, 0));
                 Vector3 focus = BoardGeometry.center(new megamek.common.board.Coords(4, 4), 0);
@@ -1049,7 +1049,7 @@ class GpuShadingNormalSmokeTest {
                 assertEquals(projected, BoardGeometry.width() * BoardCamera.pixelsPerUnit(camera.camera, focus), .001f,
                       "Actual FBO footprint and production LOD selection agree");
                 terrain.update(scene, camera.camera);
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 terrain.animate(0, java.util.List.of());
                 terrain.renderShadows(camera.camera, java.util.List.of());
                 Runnable draw = () -> terrain.render(camera.camera);

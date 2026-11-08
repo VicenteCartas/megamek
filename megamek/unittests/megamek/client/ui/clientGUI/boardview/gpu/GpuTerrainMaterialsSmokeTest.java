@@ -60,7 +60,7 @@ class GpuTerrainMaterialsSmokeTest {
                                 + ratio(bank) + ", cliff " + ratio(cliff));
 
                     // The same point on a cast face keeps its material when the wall grows taller.
-                    BoardSculptTest.withTransitions(false, () -> {
+                    BoardScenes.withTransitions(false, () -> {
                         BoardScene lowWall = step(BoardScene.Surface.CONCRETE, 2);
                         float[] low = sample(outputFrame, terrain, camera, lowWall,
                               facePoint(lowWall, 1.1f), output, "concrete-wall");

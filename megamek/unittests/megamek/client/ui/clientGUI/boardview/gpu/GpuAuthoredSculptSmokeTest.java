@@ -81,7 +81,7 @@ class GpuAuthoredSculptSmokeTest {
         environment.add(new DirectionalLight().set(1, .96f, .90f, -.4f, .6f, -1));
         GpuEnvironmentLighting.applyAntialiasing(environment);
         try (var output = new GpuSceneTestOutput(SIZE, SIZE)) {
-            GpuRiverTerrainSmokeTest.tune(1, true);
+            BoardScenes.tune(1, true);
             BoardRelief.tune(BoardRelief.DEFAULTS);
             specimens.add(specimen(BoardScene.Surface.SNOW, environment));
             specimens.add(specimen(BoardScene.Surface.CONCRETE, environment));

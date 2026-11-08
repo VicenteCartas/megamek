@@ -20,21 +20,19 @@ import megamek.common.battleArmor.BattleArmor;
 import megamek.common.board.Coords;
 import megamek.common.units.EntityMovementType;
 import megamek.common.units.ProneCause;
-import megamek.common.units.Targetable;
-import megamek.common.units.UnitLocation;
 import org.junit.jupiter.api.Test;
 
 class UnitPlaybackTest {
     @Test
     void scheduledStrikeReleasesItsFinalTerrainAtFlashBeforeFollowingCasualties() {
-        var victim = unit(2, 0);
-        var before = scene(victim);
+        var victim = UnitPlaybackFixture.unit(2, 0);
+        var before = UnitPlaybackFixture.scene(victim);
         var after = new BoardScene(0, 1, 1, List.of(new BoardScene.Tile(new Coords(0, 0), -3, -1,
               false, 0, null, null, List.of(), List.of())), List.of(), List.of(), -1, "FIRING", List.of());
         var strike = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 10000, 109, 184, 3);
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), new BoardScene.Detonation(strike),
-              new BoardScene.SceneUpdate(after), attack(victim, victim, ResolvedAttack.Kind.DEATH, true)), after, ignored -> false);
+              new BoardScene.SceneUpdate(after), UnitPlaybackFixture.attack(victim, victim, ResolvedAttack.Kind.DEATH, true)), after, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         assertNull(playback.attack(), "A scheduled strike has no invented attacker");
         assertEquals(0, playback.present(after).tiles().getFirst().elevation());
@@ -56,7 +54,7 @@ class UnitPlaybackTest {
     void instantScheduledStrikesKeepOrderAndClearDiscardsUnplayedEffects() {
         var first = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), 0, 1000, 23, 86, 1);
         var second = new megamek.common.NuclearDetonation(UUID.randomUUID(), 0, new Coords(0, 0), -1, 1234, 31, 93, 2);
-        var unchanged = scene();
+        var unchanged = UnitPlaybackFixture.scene();
         var playback = new UnitPlayback();
         var events = List.<BoardScene.Animation>of(new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(first),
               new BoardScene.SceneUpdate(unchanged), new BoardScene.Detonation(second), new BoardScene.SceneUpdate(unchanged));
@@ -72,32 +70,32 @@ class UnitPlaybackTest {
 
     @Test
     void movementPresentationRetainsTheCapturedHeat() {
-        var start = unit(1, 0);
-        var target = unit(1, 4);
+        var start = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(1, 4);
         var hot = new BoardScene.Unit(target.id(), target.part(), target.name(), target.location(), target.image(), false,
               target.annotations(), target.height(), target.airborne(), target.model(), target.outlineRgb(),
               target.footprint(), target.attachment(), 23);
         var move = new BoardScene.Movement(1, 0, List.of(start.location(), hot.location()), EntityMovementType.MOVE_WALK, 0, 4, hot);
         var playback = new UnitPlayback();
-        playback.accept(List.of(move), scene(hot), ignored -> false);
-        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+        playback.accept(List.of(move), UnitPlaybackFixture.scene(hot), ignored -> false);
+        assertEquals(23, playback.present(UnitPlaybackFixture.scene(hot)).units().getFirst().heat());
         playback.advance(.1, UnitMotion.Speed.NORMAL);
-        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+        assertEquals(23, playback.present(UnitPlaybackFixture.scene(hot)).units().getFirst().heat());
         playback.finish();
-        assertEquals(23, playback.present(scene(hot)).units().getFirst().heat());
+        assertEquals(23, playback.present(UnitPlaybackFixture.scene(hot)).units().getFirst().heat());
     }
 
     @Test
     void cameraHoldStopsEveryShotAndSoundAtEachVolleyBoundaryEvenWithALargeFastFrame() {
-        var attacker = unit(1, 0);
-        var firstTarget = unit(2, 8);
-        var secondTarget = unit(3, 12);
-        var first = attack(attacker, firstTarget, ResolvedAttack.Kind.SHOT, true);
-        var second = attack(attacker, secondTarget, ResolvedAttack.Kind.SHOT, true);
-        var reply = attack(firstTarget, attacker, ResolvedAttack.Kind.SHOT, true);
+        var attacker = UnitPlaybackFixture.unit(1, 0);
+        var firstTarget = UnitPlaybackFixture.unit(2, 8);
+        var secondTarget = UnitPlaybackFixture.unit(3, 12);
+        var first = UnitPlaybackFixture.attack(attacker, firstTarget, ResolvedAttack.Kind.SHOT, true);
+        var second = UnitPlaybackFixture.attack(attacker, secondTarget, ResolvedAttack.Kind.SHOT, true);
+        var reply = UnitPlaybackFixture.attack(firstTarget, attacker, ResolvedAttack.Kind.SHOT, true);
         List<UnitAttack> sounds = new ArrayList<>();
         var playback = new UnitPlayback(ignored -> { }, (shot, contact) -> sounds.add(shot));
-        playback.accept(List.of(first, second, reply), scene(attacker, firstTarget, secondTarget), ignored -> false);
+        playback.accept(List.of(first, second, reply), UnitPlaybackFixture.scene(attacker, firstTarget, secondTarget), ignored -> false);
         playback.advance(10, UnitMotion.Speed.QUADRUPLE, state -> {
             assertEquals(2, state.attacks().size(), "The camera receives every target before any shot advances");
             return false;
@@ -116,21 +114,21 @@ class UnitPlaybackTest {
 
     @Test
     void movementUsesConstantAccelerationAndJumpUsesCapturedGravity() {
-        var start = unit(1, 0).location();
-        var end = unit(1, 40);
+        var start = UnitPlaybackFixture.unit(1, 0).location();
+        var end = UnitPlaybackFixture.unit(1, 40);
         var walk = new BoardScene.Movement(1, 0, List.of(start, end.location()), EntityMovementType.MOVE_WALK, 0, 4, end);
         var playback = new UnitPlayback();
-        playback.accept(List.of(walk), scene(end), ignored -> false);
+        playback.accept(List.of(walk), UnitPlaybackFixture.scene(end), ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         double duration = playback.motions.get(1).remainingSeconds();
         var expected = new UnitMotion(start);
         expected.append(walk.path(), walk.type(), walk.jumpMP(), false, walk.movementMP(), 0);
         assertEquals(expected.remainingSeconds(), duration, "Playback must use UnitMotion's constant acceleration");
         for (float gravity : new float[] { 0, .5f, 1, 2 }) {
-            var landing = unit(2, 1);
+            var landing = UnitPlaybackFixture.unit(2, 1);
             var jump = new BoardScene.Movement(2, 0, List.of(start, landing.location()), EntityMovementType.MOVE_JUMP, 6, 6, landing, gravity);
             var flight = new UnitPlayback();
-            flight.accept(List.of(jump), scene(landing), ignored -> false);
+            flight.accept(List.of(jump), UnitPlaybackFixture.scene(landing), ignored -> false);
             flight.advance(0, UnitMotion.Speed.NORMAL);
             var motion = flight.motions.get(2);
             double step = motion.remainingSeconds() / 1000 / UnitMotion.Speed.NORMAL.rate;
@@ -152,17 +150,17 @@ class UnitPlaybackTest {
         var air = aircraft(4, BoardScene.AeroState.AIRBORNE);
         var completions = new ArrayList<BoardScene.Movement>();
         var playback = new UnitPlayback(completions::add);
-        playback.accept(List.of(), scene(ground), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(ground), ignored -> false);
         assertFalse(playback.busy());
 
-        playback.accept(List.of(), scene(air), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(air), ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         var motion = playback.motions.get(ground.id());
         assertNotNull(motion.sample().gear(), "An observed takeoff must play its landing-gear transition");
         double takeoffSeconds = motion.remainingSeconds();
-        playback.accept(List.of(), scene(air), ignored -> false);
-        playback.accept(List.of(), scene(ground), ignored -> false);
-        playback.accept(List.of(), scene(ground), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(air), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(ground), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(ground), ignored -> false);
         assertEquals(takeoffSeconds, motion.remainingSeconds(), "New snapshots must not restart the active takeoff");
 
         playback.advance(takeoffSeconds / UnitMotion.Speed.NORMAL.rate + UnitPlayback.COMPLETION_HOLD_SECONDS,
@@ -175,11 +173,11 @@ class UnitPlaybackTest {
         assertEquals(2, completions.size(), "Repeated snapshots must not enqueue duplicate transitions");
         assertEquals(List.of(air.location(), ground.location()), completions.getLast().path());
         assertEquals(BoardGeometry.center(ground.location().coords(), 0), motion.position());
-        playback.accept(List.of(), scene(ground), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(ground), ignored -> false);
         assertFalse(playback.busy());
 
         var revealed = new UnitPlayback();
-        revealed.accept(List.of(), scene(air), ignored -> false);
+        revealed.accept(List.of(), UnitPlaybackFixture.scene(air), ignored -> false);
         revealed.advance(0, UnitMotion.Speed.NORMAL);
         assertFalse(revealed.busy(), "First seeing an airborne unit must not invent a takeoff");
         assertTrue(revealed.motions.isEmpty());
@@ -192,16 +190,16 @@ class UnitPlaybackTest {
         var end = aircraft(2, BoardScene.AeroState.AIRBORNE);
         var completions = new ArrayList<BoardScene.Movement>();
         var playback = new UnitPlayback(completions::add);
-        playback.accept(List.of(), scene(ground), ignored -> false);
-        playback.accept(List.of(), scene(air), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(ground), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(air), ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         var motion = playback.motions.get(ground.id());
         double takeoffSeconds = motion.remainingSeconds();
         var flight = new BoardScene.Movement(air.id(), 0,
               List.of(air.location().withFootprint(List.of()), end.location()),
               EntityMovementType.MOVE_SAFE_THRUST, 0, 0, end);
-        playback.accept(List.of(flight), scene(end), ignored -> false);
-        playback.accept(List.of(), scene(end), ignored -> false);
+        playback.accept(List.of(flight), UnitPlaybackFixture.scene(end), ignored -> false);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(end), ignored -> false);
         playback.advance(takeoffSeconds / UnitMotion.Speed.NORMAL.rate + UnitPlayback.COMPLETION_HOLD_SECONDS,
               UnitMotion.Speed.NORMAL);
         assertEquals(1, completions.size());
@@ -225,15 +223,15 @@ class UnitPlaybackTest {
 
     @Test
     void visualGravityChangesNewJumpArcsAndTimingWithoutChangingCapturedMoves() {
-        var start = unit(1, 0).location();
-        var landing = unit(1, 1);
+        var start = UnitPlaybackFixture.unit(1, 0).location();
+        var landing = UnitPlaybackFixture.unit(1, 1);
         var jump = new BoardScene.Movement(1, 0, List.of(start, landing.location()), EntityMovementType.MOVE_JUMP, 6, 6, landing, 1);
         double lowDuration = 0;
         float lowApex = 0;
         for (float gravity : new float[] { 0.5f, 2 }) {
             var flight = new UnitPlayback();
             flight.gravityOverride = gravity;
-            flight.accept(List.of(jump), scene(landing), ignored -> false);
+            flight.accept(List.of(jump), UnitPlaybackFixture.scene(landing), ignored -> false);
             flight.advance(0, UnitMotion.Speed.NORMAL);
             var motion = flight.motions.get(1);
             double duration = motion.remainingSeconds();
@@ -256,7 +254,7 @@ class UnitPlaybackTest {
             assertEquals(landing.location(), jump.path().getLast());
             flight.finish();
             flight.gravityOverride = Float.NaN;
-            flight.accept(List.of(jump), scene(landing), ignored -> false);
+            flight.accept(List.of(jump), UnitPlaybackFixture.scene(landing), ignored -> false);
             flight.advance(0, UnitMotion.Speed.NORMAL);
             var captured = new UnitMotion(start);
             captured.append(jump.path(), jump.type(), jump.jumpMP(), false, jump.movementMP(), 0);
@@ -267,16 +265,16 @@ class UnitPlaybackTest {
 
     @Test
     void pushUsesObservedDisplacementForBothParticipantsAndNeverInventsAMove() {
-        var attacker = unit(1, 0);
-        var victim = unit(2, 1);
-        var advanced = unit(1, 1);
-        var pushed = unit(2, 2);
+        var attacker = UnitPlaybackFixture.unit(1, 0);
+        var victim = UnitPlaybackFixture.unit(2, 1);
+        var advanced = UnitPlaybackFixture.unit(1, 1);
+        var pushed = UnitPlaybackFixture.unit(2, 2);
         for (boolean moved : List.of(true, false)) {
-            var after = moved ? scene(advanced, pushed) : scene(attacker, victim);
+            var after = moved ? UnitPlaybackFixture.scene(advanced, pushed) : UnitPlaybackFixture.scene(attacker, victim);
             for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.QUADRUPLE)) {
                 var playback = new UnitPlayback();
-                playback.accept(List.of(new BoardScene.SceneUpdate(scene(attacker, victim)),
-                      attack(attacker, victim, ResolvedAttack.Kind.PUSH, true), new BoardScene.SceneUpdate(after)), after, ignored -> false);
+                playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(attacker, victim)),
+                      UnitPlaybackFixture.attack(attacker, victim, ResolvedAttack.Kind.PUSH, true), new BoardScene.SceneUpdate(after)), after, ignored -> false);
                 playback.advance((.65 + UnitAttack.RECOVERY_SECONDS * .5) / speed.rate, speed);
                 var visible = playback.present(after);
                 for (var unit : visible.units()) {
@@ -295,15 +293,15 @@ class UnitPlaybackTest {
     @Test
     void aTargetChargedOffTheBoardShowsUntilItsFallEndsLiveAndInItsReplay() {
         // Facing north from (0, 1), the charge shoves its target at (0, 0) off the one-hex board; MegaMek removes it.
-        var charger = unit(1, 1);
-        var target = unit(2, 0);
-        var after = scene(charger);
-        var charge = attack(charger, target, ResolvedAttack.Kind.CHARGE, true);
+        var charger = UnitPlaybackFixture.unit(1, 1);
+        var target = UnitPlaybackFixture.unit(2, 0);
+        var after = UnitPlaybackFixture.scene(charger);
+        var charge = UnitPlaybackFixture.attack(charger, target, ResolvedAttack.Kind.CHARGE, true);
         var clock = new UnitAttack(charge);
         float fall = clock.contactSeconds + UnitAttack.SHOVE_SECONDS + UnitAttack.PUSHED_OFF_FALL_SECONDS;
         var speed = UnitMotion.Speed.NORMAL;
         var playback = new UnitPlayback();
-        playback.accept(List.of(new BoardScene.SceneUpdate(scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
               after, ignored -> false);
         playback.advance((clock.contactSeconds + .05) / speed.rate, speed);
         assertTrue(playback.present(after).units().contains(target), "The target goes over the edge after the contact");
@@ -322,7 +320,7 @@ class UnitPlaybackTest {
 
         // Skipped to the results, the push off never played: its replay tips the target off all the same.
         var skipped = new UnitPlayback();
-        skipped.accept(List.of(new BoardScene.SceneUpdate(scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
+        skipped.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(charger, target)), charge, new BoardScene.SceneUpdate(after)),
               after, ignored -> false);
         skipped.advance(0, UnitMotion.Speed.INSTANT);
         assertFalse(skipped.busy());
@@ -336,15 +334,15 @@ class UnitPlaybackTest {
     void aDeathFromAboveShovesOffTheBoardAsMegamekDisplacesIt() {
         // From (0, 2) facing north, the shove's own hex (0, 0) is on the two-hex board. MegaMek removed the target, so a
         // death from above took the next hex in its order, off the board; a charge shoves only along its facing.
-        var attacker = unit(1, 2);
-        var target = unit(2, 1);
+        var attacker = UnitPlaybackFixture.unit(1, 2);
+        var target = UnitPlaybackFixture.unit(2, 1);
         var tiles = List.of(new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of()),
               new BoardScene.Tile(new Coords(0, 1), 0, -1, false, 0, null, null, List.of(), List.of()));
         var before = new BoardScene(0, 1, 2, tiles, List.of(attacker, target), List.of(), -1, "PHYSICAL", List.of());
         var after = before.withUnits(List.of(attacker));
         var speed = UnitMotion.Speed.NORMAL;
         for (var kind : List.of(ResolvedAttack.Kind.DFA, ResolvedAttack.Kind.CHARGE)) {
-            var event = attack(attacker, target, kind, true);
+            var event = UnitPlaybackFixture.attack(attacker, target, kind, true);
             var playback = new UnitPlayback();
             playback.accept(List.of(new BoardScene.SceneUpdate(before), event, new BoardScene.SceneUpdate(after)), after,
                   ignored -> false);
@@ -355,12 +353,12 @@ class UnitPlaybackTest {
 
     @Test
     void destructionFinishesBeforeRemovalAtEverySpeedAndCanBePausedOrSkipped() {
-        var victim = unit(2, 5);
-        var removed = scene();
+        var victim = UnitPlaybackFixture.unit(2, 5);
+        var removed = UnitPlaybackFixture.scene();
         for (var speed : UnitMotion.Speed.values()) {
             var playback = new UnitPlayback();
-            playback.accept(List.of(new BoardScene.SceneUpdate(scene(victim)),
-                  attack(victim, victim, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(removed)),
+            playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(victim)),
+                  UnitPlaybackFixture.attack(victim, victim, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(removed)),
                   removed, ignored -> false);
             playback.advance(0, speed);
             if (speed != UnitMotion.Speed.INSTANT) {
@@ -384,13 +382,13 @@ class UnitPlaybackTest {
 
     @Test
     void aUnitThatDiesInItsFallDiesAsItLands() {
-        var victim = unit(2, 5);
+        var victim = UnitPlaybackFixture.unit(2, 5);
         var down = victim.at(victim.location().withProneCause(ProneCause.FORCED));
         var fall = new BoardScene.Movement(victim.id(), 0, List.of(victim.location().withProneCause(ProneCause.NONE),
               down.location()), EntityMovementType.MOVE_NONE, 0, 0, down);
         var playback = new UnitPlayback();
-        playback.accept(List.of(new BoardScene.SceneUpdate(scene(victim)), fall,
-              attack(down, down, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(scene())), scene(), ignored -> false);
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(victim)), fall,
+              UnitPlaybackFixture.attack(down, down, ResolvedAttack.Kind.DEATH, true), new BoardScene.SceneUpdate(UnitPlaybackFixture.scene())), UnitPlaybackFixture.scene(), ignored -> false);
         var speed = UnitMotion.Speed.NORMAL;
         playback.advance(0, speed);
         assertNull(playback.attack(), "The fall plays first");
@@ -400,21 +398,21 @@ class UnitPlaybackTest {
 
     @Test
     void concealmentClearsCapturedPassengersAttacksAndHistoryWithoutReplayingOnReveal() {
-        var original = unit(1, 4);
-        var victim = unit(2, 5);
+        var original = UnitPlaybackFixture.unit(1, 4);
+        var victim = UnitPlaybackFixture.unit(2, 5);
         var playback = new UnitPlayback();
-        playback.accept(List.of(new BoardScene.SceneUpdate(scene(original, victim)), move(1),
-              attack(original, victim, ResolvedAttack.Kind.SHOT, true)), scene(original, victim), ignored -> true);
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(original, victim)), move(1),
+              UnitPlaybackFixture.attack(original, victim, ResolvedAttack.Kind.SHOT, true)), UnitPlaybackFixture.scene(original, victim), ignored -> true);
         playback.advance(.2, UnitMotion.Speed.NORMAL);
         assertNotNull(playback.motions.get(1).sample().boarding());
         playback.togglePaused();
-        playback.accept(List.of(new BoardScene.Concealed(1, 0), new BoardScene.SceneUpdate(scene(victim))),
-              scene(victim), ignored -> true);
+        playback.accept(List.of(new BoardScene.Concealed(1, 0), new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(victim))),
+              UnitPlaybackFixture.scene(victim), ignored -> true);
         assertTrue(playback.paused());
         assertTrue(playback.motions.isEmpty());
         assertTrue(playback.attacks().isEmpty());
-        assertEquals(List.of(victim), playback.present(scene(victim)).units());
-        playback.accept(List.of(new BoardScene.SceneUpdate(scene(original, victim))), scene(original, victim), ignored -> true);
+        assertEquals(List.of(victim), playback.present(UnitPlaybackFixture.scene(victim)).units());
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(original, victim))), UnitPlaybackFixture.scene(original, victim), ignored -> true);
         playback.togglePaused();
         playback.advance(10, UnitMotion.Speed.NORMAL);
         assertFalse(playback.busy());
@@ -424,8 +422,8 @@ class UnitPlaybackTest {
     @Test
     void pauseFreezesTravelAttacksAndTheRealTimeCompletionHoldWhileInstantStillSkips() {
         var playback = new UnitPlayback();
-        playback.accept(List.of(move(1), attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.SHOT, true)),
-              scene(unit(1, 4), unit(2, 5)), ignored -> false);
+        playback.accept(List.of(move(1), UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.SHOT, true)),
+              UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5)), ignored -> false);
         playback.advance(.5, UnitMotion.Speed.NORMAL);
         var motion = playback.motions.get(1);
         var position = motion.position().cpy();
@@ -455,16 +453,16 @@ class UnitPlaybackTest {
         var completions = new ArrayList<BoardScene.Movement>();
         var playback = new UnitPlayback(completions::add);
         var first = move(1);
-        var second = new BoardScene.Movement(1, 0, List.of(unit(1, 4).location(), unit(1, 0).location()),
-              EntityMovementType.MOVE_WALK, 0, 4, unit(1, 0));
-        playback.accept(List.of(first, second), scene(unit(1, 0)), ignored -> true);
+        var second = new BoardScene.Movement(1, 0, List.of(UnitPlaybackFixture.unit(1, 4).location(), UnitPlaybackFixture.unit(1, 0).location()),
+              EntityMovementType.MOVE_WALK, 0, 4, UnitPlaybackFixture.unit(1, 0));
+        playback.accept(List.of(first, second), UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 0)), ignored -> true);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         playback.advance(0, UnitMotion.Speed.INSTANT);
         assertEquals(List.of(first, second), completions);
         assertEquals(BoardGeometry.center(second.path().getLast().coords(), 0), playback.motions.get(1).position());
         assertEquals(UnitMotion.Stage.UNLOAD, playback.motions.get(1).sample().boarding().stage());
         assertEquals(1, playback.motions.get(1).sample().boarding().progress());
-        playback.accept(List.of(first), scene(unit(1, 4)), ignored -> true);
+        playback.accept(List.of(first), UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4)), ignored -> true);
         playback.clear();
         assertEquals(2, completions.size(), "A board switch discards its old playback instead of re-creating old models");
         assertTrue(playback.motions.isEmpty());
@@ -472,17 +470,17 @@ class UnitPlaybackTest {
 
     @Test
     void stepOnceWhilePausedPresentsExactlyOneMoreAction() {
-        var first = attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.SHOT, true);
-        var second = attack(unit(3, 6), unit(2, 5), ResolvedAttack.Kind.SHOT, false);
-        var third = attack(unit(1, 4), unit(3, 6), ResolvedAttack.Kind.KICK, true);
+        var first = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.SHOT, true);
+        var second = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(3, 6), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.SHOT, false);
+        var third = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(3, 6), ResolvedAttack.Kind.KICK, true);
         var playback = new UnitPlayback();
-        playback.accept(List.of(first, second, third), scene(unit(1, 4), unit(2, 5), unit(3, 6)), ignored -> false);
+        playback.accept(List.of(first, second, third), UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), UnitPlaybackFixture.unit(3, 6)), ignored -> false);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         playback.stepOnce();
         playback.advance(100, UnitMotion.Speed.NORMAL);
         assertFalse(playback.busy(), "Without a pause the queue plays on");
 
-        playback.accept(List.of(first, second, third), scene(unit(1, 4), unit(2, 5), unit(3, 6)), ignored -> false);
+        playback.accept(List.of(first, second, third), UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), UnitPlaybackFixture.unit(3, 6)), ignored -> false);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         playback.togglePaused();
         assertEquals(Set.of(first.result().id(), second.result().id(), third.result().id()), playback.waiting(),
@@ -509,12 +507,12 @@ class UnitPlaybackTest {
 
     @Test
     void reviewPlaysARetainedAttackAloneOverTheLiveSceneAndAppliesNothing() {
-        var attacker = unit(1, 4);
-        var target = unit(2, 5);
+        var attacker = UnitPlaybackFixture.unit(1, 4);
+        var target = UnitPlaybackFixture.unit(2, 5);
         var hit = new BoardScene.Unit(2, -1, "Unit 2 hit", target.location(), null, false, null, 2, false);
-        var retained = attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
-        var queued = attack(unit(3, 6), hit, ResolvedAttack.Kind.SHOT, false);
-        var live = scene(attacker, hit, unit(3, 6));
+        var retained = UnitPlaybackFixture.attack(attacker, target, ResolvedAttack.Kind.SHOT, true);
+        var queued = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(3, 6), hit, ResolvedAttack.Kind.SHOT, false);
+        var live = UnitPlaybackFixture.scene(attacker, hit, UnitPlaybackFixture.unit(3, 6));
         var playback = new UnitPlayback();
         playback.accept(List.of(queued), live, ignored -> false);
         playback.togglePaused();
@@ -542,31 +540,14 @@ class UnitPlaybackTest {
         assertFalse(playback.busy());
     }
 
-    static BoardScene.Unit unit(int id, int row) {
-        return new BoardScene.Unit(id, -1, "Unit " + id, new BoardScene.Waypoint(new Coords(0, row), 0, 0),
-              null, false, null, 2, false);
-    }
-
-    static BoardScene scene(BoardScene.Unit... units) {
-        var tile = new BoardScene.Tile(new Coords(0, 0), 0, -1, false, 0, null, null, List.of(), List.of());
-        return new BoardScene(0, 1, 1, List.of(tile), List.of(units), List.of(), -1, "MOVEMENT", List.of());
-    }
-
-    static BoardScene.Combat attack(BoardScene.Unit attacker, BoardScene.Unit target, ResolvedAttack.Kind kind, boolean hit) {
-        var result = new ResolvedAttack(UUID.randomUUID(), kind,
-              new UnitLocation(attacker.id(), attacker.location().coords(), 0, 0, 0),
-              new UnitLocation(target.id(), target.location().coords(), 0, 0, 0), Targetable.TYPE_ENTITY, 0, "ISMediumLaser", 4, hit);
-        return new BoardScene.Combat(result, attacker, target, target.location());
-    }
-
     private static BoardScene.Movement move(int id) {
-        return new BoardScene.Movement(id, 0, List.of(unit(id, 0).location(), unit(id, 4).location()),
-              EntityMovementType.MOVE_WALK, 0, 4, unit(id, 4));
+        return new BoardScene.Movement(id, 0, List.of(UnitPlaybackFixture.unit(id, 0).location(), UnitPlaybackFixture.unit(id, 4).location()),
+              EntityMovementType.MOVE_WALK, 0, 4, UnitPlaybackFixture.unit(id, 4));
     }
 
     private static BoardScene withRanges(BoardScene scene, String label) {
         Coords coords = new Coords(0, 0);
-        var line = new BoardScene.FiringLine(unit(1, 0).location(), unit(2, 4).location(), 0x44FF88, false, 1,
+        var line = new BoardScene.FiringLine(UnitPlaybackFixture.unit(1, 0).location(), UnitPlaybackFixture.unit(2, 4).location(), 0x44FF88, false, 1,
               TargetKey.unit(2));
         return new BoardScene(scene.boardId(), scene.width(), scene.height(), scene.tiles(), scene.units(),
               scene.plannedPath(), scene.selectedId(), scene.phase(), scene.commands(), scene.light(), List.of(line),
@@ -578,7 +559,7 @@ class UnitPlaybackTest {
     void rangesWaitForMovementAndThenUseTheLatestSnapshotAtEverySpeed() {
         for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
             var playback = new UnitPlayback();
-            var initial = withRanges(scene(unit(1, 4)), "S");
+            var initial = withRanges(UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4)), "S");
             playback.accept(List.of(move(1)), initial, ignored -> false);
             assertTrue(playback.present(initial).rangeBorders().isEmpty(), "Queued movement must already suppress ranges");
             assertTrue(playback.present(initial).rangeLabels().isEmpty());
@@ -604,8 +585,8 @@ class UnitPlaybackTest {
     @Test
     void rangesStayHiddenAcrossQueuedMovesAndInterveningHoldsAndAttacks() {
         var playback = new UnitPlayback();
-        var scene = withRanges(scene(unit(1, 4), unit(2, 4)), "S");
-        playback.accept(List.of(move(1), attack(unit(1, 4), unit(2, 4), ResolvedAttack.Kind.SHOT, true), move(2)),
+        var scene = withRanges(UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4)), "S");
+        playback.accept(List.of(move(1), UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4), ResolvedAttack.Kind.SHOT, true), move(2)),
               scene, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         playback.advance(playback.motions.get(1).remainingSeconds() / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
@@ -626,9 +607,9 @@ class UnitPlaybackTest {
 
     @Test
     void combatAloneKeepsRangesAndSkippingOrClearingMovementRestoresThem() {
-        var scene = withRanges(scene(unit(1, 4), unit(2, 5)), "S");
+        var scene = withRanges(UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5)), "S");
         var playback = new UnitPlayback();
-        playback.accept(List.of(attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.SHOT, true)), scene, ignored -> false);
+        playback.accept(List.of(UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.SHOT, true)), scene, ignored -> false);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         assertTrue(playback.busy());
         assertEquals(scene.rangeBorders(), playback.present(scene).rangeBorders());
@@ -648,7 +629,7 @@ class UnitPlaybackTest {
     void movementHoldsOneRealSecondBeforeTheNextUnitsMoveAtEverySpeed() {
         for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
             var playback = new UnitPlayback();
-            var scene = scene(unit(1, 4), unit(2, 4));
+            var scene = UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 4));
             playback.accept(List.of(move(1), move(2)), scene, id -> false);
             playback.advance(0, speed);
             assertEquals(0, playback.present(scene).units().get(1).location().coords().getY(), "Waiting unit stays at departure");
@@ -665,8 +646,8 @@ class UnitPlaybackTest {
     @Test
     void attacksShareTheQueueAndHoldAfterRecovery() {
         var playback = new UnitPlayback();
-        var scene = scene(unit(1, 4), unit(2, 5));
-        var attack = attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.SHOT, true);
+        var scene = UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5));
+        var attack = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.SHOT, true);
         playback.accept(List.of(move(1), attack, move(2)), scene, id -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         playback.advance(playback.motions.get(1).remainingSeconds() / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
@@ -686,9 +667,9 @@ class UnitPlaybackTest {
     @Test
     void instantAndBoardChangesCancelEffectsAndHolds() {
         var playback = new UnitPlayback();
-        var scene = scene(unit(1, 4), unit(2, 5));
+        var scene = UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5));
         for (var kind : ResolvedAttack.Kind.values()) {
-            playback.accept(List.of(attack(unit(1, 4), unit(2, 5), kind, true), move(1)), scene, id -> false);
+            playback.accept(List.of(UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), kind, true), move(1)), scene, id -> false);
             playback.advance(.5, UnitMotion.Speed.NORMAL);
             assertNotNull(playback.attack());
             playback.advance(0, UnitMotion.Speed.INSTANT);
@@ -708,8 +689,8 @@ class UnitPlaybackTest {
         var low = new UnitPlayback();
         var high = new UnitPlayback();
         var once = new UnitPlayback();
-        var scene = scene(unit(1, 4), unit(2, 5));
-        List<BoardScene.Animation> events = List.of(move(1), attack(unit(1, 4), unit(2, 5), ResolvedAttack.Kind.KICK, false), move(2));
+        var scene = UnitPlaybackFixture.scene(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5));
+        List<BoardScene.Animation> events = List.of(move(1), UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 4), UnitPlaybackFixture.unit(2, 5), ResolvedAttack.Kind.KICK, false), move(2));
         for (var playback : List.of(low, high, once)) {
             playback.accept(events, scene, id -> false);
             playback.advance(0, UnitMotion.Speed.NORMAL);
@@ -731,11 +712,11 @@ class UnitPlaybackTest {
 
     @Test
     void queuedAttacksKeepOnlyTheAlreadyKnownVictimUntilPlaybackFinishes() {
-        var attacker = unit(1, 4);
-        var victim = unit(2, 5);
+        var attacker = UnitPlaybackFixture.unit(1, 4);
+        var victim = UnitPlaybackFixture.unit(2, 5);
         var playback = new UnitPlayback();
-        var removed = scene(attacker);
-        playback.accept(List.of(attack(attacker, victim, ResolvedAttack.Kind.SHOT, true)), removed, id -> false);
+        var removed = UnitPlaybackFixture.scene(attacker);
+        playback.accept(List.of(UnitPlaybackFixture.attack(attacker, victim, ResolvedAttack.Kind.SHOT, true)), removed, id -> false);
         playback.advance(.5, UnitMotion.Speed.NORMAL);
         assertTrue(playback.present(removed).units().contains(victim));
         playback.advance(10, UnitMotion.Speed.NORMAL);
@@ -748,10 +729,10 @@ class UnitPlaybackTest {
         armor.setSquadSize(6);
         for (int i = 1; i <= 6; i++) { armor.initializeInternal(1, i); }
         var appearance = new BoardScene.UnitModel("", "", "", 6, 0, BoardScene.LocationDamage.NONE, UnitModelState.capture(armor));
-        var unit = new BoardScene.Unit(10, -1, "Battle Armor", unit(10, 4).location(), null, false, null, 1, false, appearance, 0);
+        var unit = new BoardScene.Unit(10, -1, "Battle Armor", UnitPlaybackFixture.unit(10, 4).location(), null, false, null, 1, false, appearance, 0);
         var playback = new UnitPlayback();
-        var scene = withRanges(scene(unit), "S");
-        playback.accept(List.of(new BoardScene.Movement(10, 0, List.of(unit(10, 0).location(), unit.location()),
+        var scene = withRanges(UnitPlaybackFixture.scene(unit), "S");
+        playback.accept(List.of(new BoardScene.Movement(10, 0, List.of(UnitPlaybackFixture.unit(10, 0).location(), unit.location()),
               EntityMovementType.MOVE_JUMP, 3, 3, unit)), scene, id -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         var motion = playback.motions.get(10);
@@ -774,10 +755,10 @@ class UnitPlaybackTest {
 
     @Test
     void queuedTransportDecisionUsesItsCapturedUnitInsteadOfTheLatestFormation() {
-        var original = unit(1, 4);
-        var changed = unit(1, 5);
-        var target = unit(2, 6);
-        var movement = new BoardScene.Movement(1, 0, List.of(unit(1, 0).location(), original.location()),
+        var original = UnitPlaybackFixture.unit(1, 4);
+        var changed = UnitPlaybackFixture.unit(1, 5);
+        var target = UnitPlaybackFixture.unit(2, 6);
+        var movement = new BoardScene.Movement(1, 0, List.of(UnitPlaybackFixture.unit(1, 0).location(), original.location()),
               EntityMovementType.MOVE_WALK, 0, 4, original);
         var playback = new UnitPlayback();
         AtomicReference<BoardScene.Unit> used = new AtomicReference<>();
@@ -785,10 +766,10 @@ class UnitPlaybackTest {
             used.set(captured);
             return captured == original;
         };
-        playback.accept(List.of(attack(original, target, ResolvedAttack.Kind.SHOT, true), movement), scene(original, target), transports);
+        playback.accept(List.of(UnitPlaybackFixture.attack(original, target, ResolvedAttack.Kind.SHOT, true), movement), UnitPlaybackFixture.scene(original, target), transports);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         float duration = playback.attack().duration;
-        playback.accept(List.of(), scene(changed, target), transports);
+        playback.accept(List.of(), UnitPlaybackFixture.scene(changed, target), transports);
         playback.advance(duration / UnitMotion.Speed.NORMAL.rate + 1, UnitMotion.Speed.NORMAL);
         assertSame(original, used.get());
         assertNotNull(playback.motions.get(1).sample().boarding());

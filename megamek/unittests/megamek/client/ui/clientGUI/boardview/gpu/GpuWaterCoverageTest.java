@@ -292,8 +292,8 @@ class GpuWaterCoverageTest {
     void verticalWaterbedWallsKeepTheirWaterMaterialAndBlendIntoTheBedAtTheirFoot() {
         var original = BoardRelief.tuning();
         try {
-            BoardWetCliffTest.tune(true);
-            BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            BoardScenes.tune(true);
+            BoardScene scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
             int feet = 0, high = 0, rubble = 0, sheer = 0;
             for (Coords coords : List.of(new Coords(7, 14), new Coords(8, 14), new Coords(9, 13))) {
                 var surface = new BoardSurface(scene, scene.tile(coords));
@@ -339,8 +339,8 @@ class GpuWaterCoverageTest {
     void clippingPreservesTheWallAndTintsOnlyRockCoveredByTheStream(boolean cliffs) {
         var original = BoardRelief.tuning();
         try {
-            BoardWetCliffTest.tune(cliffs);
-            BoardScene scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            BoardScenes.tune(cliffs);
+            BoardScene scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
             BoardSurface water = new BoardSurface(scene, scene.tile(new Coords(9, 9)));
             BoardSurface upper = new BoardSurface(scene, scene.tile(new Coords(8, 9)));
             BoardSurface land = new BoardSurface(scene, scene.tile(new Coords(8, 10)));

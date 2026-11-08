@@ -1,6 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared by the terrain surface and the turf growing from it. All material colors are linear reflectance.
 // COLOR_SPACE
+// SURFACE_NOISE
 // The second repeat of every map is 2.37 times larger and turned by 34 degrees.
 const mat2 TURN = mat2(.8253, .5646, -.5646, .8253);
 
@@ -13,9 +14,9 @@ vec3 authoredPigmentGain(vec3 gain) {
     return 1.0 + change * (2.2 + change * (1.32 + .088 * change));
 }
 
-vec3 groundFields(sampler2D noiseMap, vec3 world) {
-    return vec3(texture(noiseMap, world.xy / 700.0).g * .6 + texture(noiseMap, world.xy / 430.0 + .19).b * .4,
-          texture(noiseMap, world.xy / 160.0 + .41).b, texture(noiseMap, world.xy / 2600.0 + .73).r);
+vec3 groundFields(vec3 world) {
+    return vec3(texture(u_surfaceNoise, rainNoiseAt(world.xy / 700.0)).g * .6 + texture(u_surfaceNoise, rainNoiseAt(world.xy / 430.0 + .19)).b * .4,
+          texture(u_surfaceNoise, rainNoiseAt(world.xy / 160.0 + .41)).b, texture(u_surfaceNoise, rainNoiseAt(world.xy / 2600.0 + .73)).r);
 }
 
 // The intentional elevation cue operates on completed linear reflectance in [0,1]. It is a presentation

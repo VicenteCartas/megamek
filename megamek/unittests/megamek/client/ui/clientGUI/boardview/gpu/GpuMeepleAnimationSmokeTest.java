@@ -340,7 +340,7 @@ class GpuMeepleAnimationSmokeTest {
             var controller = new UnitAttachments();
             var instances = Map.<String, ModelInstance>of(unit.id() + ":-1", host, "2:-1", ba);
             String member = wholeToken ? MeepleVisual.ROOT : baModel.rigs().getFirst().container();
-            var scene = UnitPlaybackTest.scene(unit, passenger);
+            var scene = UnitPlaybackFixture.scene(unit, passenger);
             Matrix4 previous = null;
             for (int frame = 0; frame < 3; frame++) {
                 var posture = frame == 2 ? unit.at(unit.location().withProneCause(ProneCause.FORCED).withFallSide(FallSide.FRONT)) : unit;
@@ -360,7 +360,7 @@ class GpuMeepleAnimationSmokeTest {
             var release = new UnitAttachmentMotion(new BoardScene.AttachmentChange(0, passenger, landed, unit, BoardScene.Release.THROWN));
             if (!wholeToken) { animator.apply(visual, ba, landed, UnitMotion.Sample.STILL, 0, 0, true, 0); }
             else { MeepleAnimator.place(visual, ba, landed, UnitMotion.Sample.STILL, renderer.camera, ground, 0); }
-            controller.place(UnitPlaybackTest.scene(unit, landed), library, instances, Map.of(), release, renderer.camera, new HashMap<>(), 0);
+            controller.place(UnitPlaybackFixture.scene(unit, landed), library, instances, Map.of(), release, renderer.camera, new HashMap<>(), 0);
             assertArrayEquals(previous.val, ba.transform.cpy().mul(ba.getNode(member).globalTransform).val, .002f,
                   "Release starts from the actual posed token surface");
             release.seconds = UnitAttachmentMotion.DURATION;
@@ -370,7 +370,7 @@ class GpuMeepleAnimationSmokeTest {
                 visual.place(ba, renderer.camera, ground, 0, landed);
             }
             var resting = ba.transform.cpy().mul(ba.getNode(member).globalTransform);
-            controller.place(UnitPlaybackTest.scene(unit, landed), library, instances, Map.of(), release, renderer.camera, new HashMap<>(), 0);
+            controller.place(UnitPlaybackFixture.scene(unit, landed), library, instances, Map.of(), release, renderer.camera, new HashMap<>(), 0);
             assertArrayEquals(resting.val, ba.transform.cpy().mul(ba.getNode(member).globalTransform).val, .002f);
             var boarding = new UnitAttachmentMotion(new BoardScene.AttachmentChange(0, landed, passenger, unit, BoardScene.Release.BOARD));
             controller.place(scene, library, instances, Map.of(), boarding, renderer.camera, new HashMap<>(), 0);
@@ -411,7 +411,7 @@ class GpuMeepleAnimationSmokeTest {
         Map<String, ModelInstance> instances = Map.of(unit.id() + ":-1", source, "3:-1", target);
         for (var kind : List.of(ResolvedAttack.Kind.PUSH, ResolvedAttack.Kind.CHARGE, ResolvedAttack.Kind.DFA,
               ResolvedAttack.Kind.RAM, ResolvedAttack.Kind.PUNCH, ResolvedAttack.Kind.KICK, ResolvedAttack.Kind.CLUB)) {
-            var attack = new UnitAttack(UnitPlaybackTest.attack(unit, victim, kind, true));
+            var attack = new UnitAttack(UnitPlaybackFixture.attack(unit, victim, kind, true));
             for (float seconds : new float[] { 0, attack.approachSeconds * .5f, attack.contactSeconds, attack.duration }) {
                 attack.seconds = seconds;
                 MeepleAnimator.place(model, source, unit, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
@@ -427,7 +427,7 @@ class GpuMeepleAnimationSmokeTest {
               new UnitLocation(unit.id(), unit.location().coords(), 0, 0, 0),
               new UnitLocation(victim.id(), victim.location().coords(), 3, 0, 0), Targetable.TYPE_ENTITY, 0, "Lance", 4, true);
         var lance = new UnitAttack(new BoardScene.Combat(lanceResult, unit, victim, victim.location()));
-        var club = new UnitAttack(UnitPlaybackTest.attack(unit, victim, ResolvedAttack.Kind.CLUB, true));
+        var club = new UnitAttack(UnitPlaybackFixture.attack(unit, victim, ResolvedAttack.Kind.CLUB, true));
         lance.seconds = lance.contactSeconds;
         club.seconds = club.contactSeconds;
         MeepleAnimator.place(model, source, unit, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
@@ -440,7 +440,7 @@ class GpuMeepleAnimationSmokeTest {
         renderer.frame(List.of(source, target), origin, null, "meeple-lance", 0);
         MeepleAnimator.place(model, source, prone, UnitMotion.Sample.STILL, renderer.camera, origin, 0);
         var lowered = source.transform.cpy();
-        var physical = new UnitAttack(UnitPlaybackTest.attack(prone, victim, ResolvedAttack.Kind.PUNCH, true));
+        var physical = new UnitAttack(UnitPlaybackFixture.attack(prone, victim, ResolvedAttack.Kind.PUNCH, true));
         physical.seconds = physical.contactSeconds;
         MeepleAnimator.attacks(prone, source, List.of(physical), instances, false);
         assertArrayEquals(lowered.val, source.transform.val, .001f, "Prone tokens cannot approach or swing for physical attacks");

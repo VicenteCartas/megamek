@@ -381,9 +381,9 @@ class GroundDamagePlaybackTest {
     }
 
     private static UnitAttack shot(UUID id, String weapon, boolean hit, ResolvedAttack.Shot profile) {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var original = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, hit).result();
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var original = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, hit).result();
         var event = new ResolvedAttack(id, original.kind(), original.attacker(), original.target(), original.targetType(),
               0, weapon, 4, hit, original.mounts(), profile);
         var shot = new UnitAttack(new BoardScene.Combat(event, source, target, target.location()));
@@ -397,11 +397,11 @@ class GroundDamagePlaybackTest {
 
     @Test
     void aFrameCrossingTheEntireAnimationRetainsItsImpactOnce() {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var event = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, false);
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var event = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, false);
         var playback = new UnitPlayback();
-        playback.accept(List.of(event), UnitPlaybackTest.scene(source, target), ignored -> false);
+        playback.accept(List.of(event), UnitPlaybackFixture.scene(source, target), ignored -> false);
         playback.advance(60, UnitMotion.Speed.NORMAL);
         assertTrue(playback.attacks().isEmpty());
         var completed = playback.takeCompletedAttacks();
@@ -413,17 +413,17 @@ class GroundDamagePlaybackTest {
 
     @Test
     void instantPlaybackIncludesQueuedShotsAndClearsThemOnBoardChange() {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var first = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, false);
-        var second = UnitPlaybackTest.attack(target, source, ResolvedAttack.Kind.SHOT, false);
-        var punch = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.PUNCH, false);
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var first = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, false);
+        var second = UnitPlaybackFixture.attack(target, source, ResolvedAttack.Kind.SHOT, false);
+        var punch = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.PUNCH, false);
         var playback = new UnitPlayback();
-        playback.accept(List.of(first, second, punch), UnitPlaybackTest.scene(source, target), ignored -> false);
+        playback.accept(List.of(first, second, punch), UnitPlaybackFixture.scene(source, target), ignored -> false);
         playback.advance(0, UnitMotion.Speed.INSTANT);
         assertEquals(List.of(first.result().id(), second.result().id()),
               playback.takeCompletedAttacks().stream().map(shot -> shot.event.result().id()).toList());
-        playback.accept(List.of(first), UnitPlaybackTest.scene(source, target), ignored -> false);
+        playback.accept(List.of(first), UnitPlaybackFixture.scene(source, target), ignored -> false);
         playback.finish();
         playback.clear();
         assertTrue(playback.takeCompletedAttacks().isEmpty());
@@ -431,11 +431,11 @@ class GroundDamagePlaybackTest {
 
     @Test
     void finishingDuringRecoveryKeepsTheOriginalCapturedEndpoints() {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var event = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, false);
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var event = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, false);
         var playback = new UnitPlayback();
-        playback.accept(List.of(event), UnitPlaybackTest.scene(source, target), ignored -> false);
+        playback.accept(List.of(event), UnitPlaybackFixture.scene(source, target), ignored -> false);
         playback.advance(.1, UnitMotion.Speed.NORMAL);
         var presented = playback.attack();
         playback.finish();

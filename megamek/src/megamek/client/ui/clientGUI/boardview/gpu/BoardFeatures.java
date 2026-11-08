@@ -126,7 +126,7 @@ final class BoardFeatures {
                 case Terrains.FUEL_TANK, Terrains.FUEL_TANK_CF, Terrains.FUEL_TANK_ELEV, Terrains.FUEL_TANK_MAGN ->
                       structureModels.containsKey(Terrains.FUEL_TANK);
                 case Terrains.INDUSTRIAL -> structureModels.containsKey(Terrains.INDUSTRIAL);
-                // A road through water lies on its bed, or out of sight under deeper water (BoardRoad#submerged).
+                // A road through water lies on its bed (BoardRoad#groundShown).
                 case Terrains.ROAD -> BoardRoad.capture(hex) != BoardRoad.Kind.NONE;
                 // Fluff 1 selects the standard road bend, already represented by the captured road exits.
                 case Terrains.ROAD_FLUFF -> hex.terrainLevel(Terrains.ROAD_FLUFF) == 1
@@ -214,6 +214,13 @@ final class BoardFeatures {
     static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
           Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
           boolean natural, Set<String> buildingReferences) {
+        return capture(hex, coords, structureModels, blankTerrains, board, scenery, natural, buildingReferences, null);
+    }
+
+    /** {@code searched}: the hex's woods if its capture ran their search ahead (BoardTiles), else null to search here. */
+    static List<BoardScene.Feature> capture(Hex hex, Coords coords, Map<Integer, String> structureModels,
+          Set<Integer> blankTerrains, Function<Coords, Hex> board, TilesetScenery.Scenery scenery,
+          boolean natural, Set<String> buildingReferences, List<BoardScene.Feature> searched) {
         if (hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) {
             // A chasm keeps its placed objects and a bridge across it, whose deck stands on the hex's own level.
             List<BoardScene.Feature> chasm = new ArrayList<>(decorations(hex, coords, board, buildingReferences));
@@ -293,7 +300,7 @@ final class BoardFeatures {
             result.addAll(roadControls(hex, coords, board, true));
             return List.copyOf(result);
         }
-        result.addAll(woods(hex, coords, board, natural));
+        result.addAll(searched != null ? searched : woods(hex, coords, board, natural));
         rough(hex, coords, result, board);
         BoardScatter.capture(hex, coords, result);
         result.addAll(decorations(hex, coords, board, buildingReferences));
@@ -301,8 +308,11 @@ final class BoardFeatures {
         return List.copyOf(result);
     }
 
-    /** Woods and jungle fill a crown-coverage target; orchards retain their authored rows. */
-    private static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural) {
+    /**
+     * Woods and jungle fill a crown-coverage target; orchards retain their authored rows. Reads the board and builds
+     * nothing shared, so any thread may search while the board holds still (BoardTiles).
+     */
+    static List<BoardScene.Feature> woods(Hex hex, Coords coords, Function<Coords, Hex> board, boolean natural) {
         Hex vegetation = hex.getAppearance().containsKey("vegetation")
               ? megamek.common.board.BoardEditorBlueprint.get().artwork(hex, "vegetation") : hex;
         if (BoardTreeDistribution.noTrees(hex)
@@ -617,7 +627,7 @@ final class BoardFeatures {
             Coords at = direction < 0 ? coords : coords.translated(direction);
             Hex source = direction < 0 ? hex : board.apply(at);
             // A graded road's ramp and corridor reach a neighbour of another level too.
-            if (source == null || HexTile.liquid(source)) { continue; }
+            if (source == null || HexTile.liquid(source) && !BoardRoad.rendered(source)) { continue; }
             int rails = RailRoute.groundSides(source);
             if (BoardRoad.capture(source) == BoardRoad.Kind.NONE && rails == 0) { continue; }
             BoardRoad road = BoardRoad.clearance(at, source, board, rails);
@@ -632,7 +642,8 @@ final class BoardFeatures {
         List<BoardScene.Feature> result = new ArrayList<>();
         for (boolean deck : new boolean[] { false, true }) {
             if (deck ? !hex.containsTerrain(Terrains.BRIDGE)
-                  : !groundVisible || HexTile.liquid(hex) || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
+                  : !groundVisible || HexTile.liquid(hex) && !BoardRoad.rendered(hex)
+                        || hex.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
             BoardRoad.Kind kind = deck ? BoardRoad.deck(hex) : BoardRoad.capture(hex);
             if (kind != BoardRoad.Kind.PAVED) { continue; }
             int exits = hex.getTerrain(deck ? Terrains.BRIDGE_ROAD : Terrains.ROAD).getExits() & 63;
@@ -734,10 +745,17 @@ final class BoardFeatures {
         if (tile.features().stream().noneMatch(feature -> groundControl(feature) >= 0)) { return tile.features(); }
         var road = BoardRoad.of(scene, tile);
         var approaches = road.stopApproaches(tile.roadExits(), road.crossing(tile, false));
+        // Ice hides the road under it, whose furniture would stand through the sheet.
+        boolean iced = tile.liquid().present() && tile.frozen();
         return tile.features().stream().filter(feature -> {
             int direction = groundControl(feature);
-            return direction < 0 || approaches.stream().anyMatch(approach -> approach.direction() == direction);
+            return direction < 0 || !iced && approaches.stream().anyMatch(approach -> approach.direction() == direction);
         }).toList();
+    }
+
+    /** A ground road's furniture on a liquid hex, which Classic leaves out with the road's paint. */
+    static boolean submergedControl(BoardScene.Tile tile, BoardScene.Feature feature) {
+        return tile.liquid().present() && groundControl(feature) >= 0;
     }
 
     private static int groundControl(BoardScene.Feature feature) {
@@ -842,7 +860,10 @@ final class BoardFeatures {
         return null;
     }
 
-    /** A shoulder can overhang the grid; ground furniture still needs dry ground at the road's height. */
+    /**
+     * A shoulder can overhang the grid; ground furniture still needs ground at the road's height: dry ground for a dry
+     * road, and for a submerged road any ground as low as its bed.
+     */
     private static boolean controlSupported(Hex hex, Coords coords, Function<Coords, Hex> board,
           boolean deck, float x, float y) {
         if (deck) { return true; }
@@ -853,8 +874,8 @@ final class BoardFeatures {
             if (!HexTile.contains(at.getX(), at.getY(), worldX, worldY, BoardGeometry.TILE_WIDTH,
                   BoardGeometry.TILE_HEIGHT)) { continue; }
             Hex support = direction < 0 ? hex : board.apply(at);
-            if (support != null && support.getLevel() == hex.getLevel() && !HexTile.liquid(support)
-                  && !support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { return true; }
+            if (support == null || support.containsTerrain(Terrains.ULTRA_SUBLEVEL)) { continue; }
+            if (support.floor() == hex.floor() && !BoardLiquid.capture(support).molten()) { return true; }
         }
         return false;
     }
@@ -879,10 +900,10 @@ final class BoardFeatures {
     /** The road and deck must expose matching sides before their shared layer-choice predicate applies. */
     private static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
         int reverse = (direction + 3) % 6;
-        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
+        if (HexTile.liquid(road) && !BoardRoad.rendered(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
               || (groundWays(road) & (1 << direction)) == 0) { return false; }
         boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
-        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+        return HexTile.bridgeApproach(road.floor(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
     }
 
     private static int groundWays(Hex hex) {
@@ -1056,11 +1077,6 @@ final class BoardFeatures {
      * stores: never selected.
      */
     static boolean terrainOwned(megamek.common.board.BoardDecoration object) { return object.id().startsWith(TERRAIN_OWNED); }
-
-    /** A row of a woods cover's skin (a container yard, {@link #decorations}): the cover's look, kept in the Tactical View. */
-    static boolean coverSkin(megamek.common.board.BoardDecoration object) {
-        return terrainOwned(object) && object.id().contains(SKIN_ROW);
-    }
 
     /** The id infix of a skin's rows ({@link #decorations}). */
     private static final String SKIN_ROW = ":skin#";

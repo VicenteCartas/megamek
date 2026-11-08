@@ -33,11 +33,15 @@ uniform vec4 u_emissiveColor;
 #ifdef normalTextureFlag
 uniform sampler2D u_normalTexture;
 #endif
+#ifdef colourSlotsFlag
+in vec3 v_slotGlow;
+#endif
 // Enabled, emission multiplier, diffuse multiplier. Zero leaves authored materials unchanged, including in renderers
 // that do not register this control. Light timing and intensity belong to the material's draw setter.
 uniform vec3 u_modelLight;
 // The heightmap parallax's shift of every map read (model-surface.glsl), zero without one.
 vec2 modelShift = vec2(0.0);
+// CUTOUT_FADE
 
 void main() {
 #ifdef lightingFlag
@@ -74,6 +78,9 @@ void main() {
 #else
     vec4 emissive = vec4(0.0);
 #endif
+#ifdef colourSlotsFlag
+    emissive.rgb *= v_slotGlow;
+#endif
 #if defined(blendedFlag) && defined(modelSurfaceFlag)
     // Godot's premultiplied alpha (a .tres's blend_mode 4): the albedo fades with the opacity before lighting, so the
     // diffuse light does and the specular reflection, which the dielectric's own reflectance sets, does not.
@@ -85,12 +92,18 @@ void main() {
 #ifdef lightingFlag
     fragColor.rgb = modelSurface(diffuse.rgb, emissive.rgb, modelShading, modelFace, modelView);
 #else
+#ifdef modelSurfaceFlag
+    emissive.rgb *= u_modelEmission;
+    if (u_modelLight.x > 0.0) { emissive.rgb += u_modelGlow; }
+#endif
     if (u_modelLight.x > 0.0) { emissive.rgb *= u_modelLight.y; }
     fragColor.rgb = diffuse.rgb + emissive.rgb;
 #endif
 #ifdef blendedFlag
     fragColor.a = diffuse.a * v_opacity;
-#ifdef alphaTestFlag
+#ifdef cutoutFadeFlag
+    if (fragColor.a <= cutoutFadeCut(v_alphaTest, v_diffuseUV + modelShift)) discard;
+#elif defined(alphaTestFlag)
     if (fragColor.a <= v_alphaTest) discard;
 #endif
 #else
@@ -100,5 +113,8 @@ void main() {
     // and factors are linear too, but their destination is already display encoded.
 #if defined(displayOutputFlag) || (!defined(lightingFlag) && !defined(sceneUnlitFlag) && (defined(linearTextureFlag) || defined(linearColorsFlag)))
     fragColor.rgb = toDisplay(fragColor.rgb);
+#endif
+#ifdef cutoutFadeFlag
+    cutoutFadeWrite(fragColor);
 #endif
 }

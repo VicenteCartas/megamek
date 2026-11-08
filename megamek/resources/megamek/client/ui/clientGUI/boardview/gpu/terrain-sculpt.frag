@@ -33,8 +33,6 @@ uniform vec2 u_scorchedMaterial; // colour/height layer and metres per repeat; d
 uniform float u_metre;      // world units per metre
 // How deep the ground's visible grain (its height map) stands, in metres, for the shadow lookup (sculptShadow).
 const float RELIEF_METRES = .2;
-// How far, in metres, what grows and lies along a natural shadow's edge frays it (sculptShadow).
-const float FRAY_METRES = .25;
 uniform float u_normalMaps;
 uniform float u_terrainParallax; // the GPU tuning panel's Terrain Parallax switch (terrain-materials.glsl)
 uniform vec4 u_materialCacheDebug; // draw-path tint; alpha is zero unless the session's Debug switch is on
@@ -287,6 +285,13 @@ vec3 groundTone(vec3 albedo, vec3 world, float broad, float fine, float region, 
     return groundToneFor(sculptFamily, albedo, world, broad, fine, region, rim, foot);
 }
 
+// A level top's family program (GpuFamilyPrograms.flat) draws only ground on gentle slopes, proven per triangle.
+#ifdef SCULPT_TOPS
+#define unlessTops(condition) false
+#else
+#define unlessTops(condition) (condition)
+#endif
+
 // sculpt-material-functions
 void main() {
     vec2 surfaceUV = v_diffuseUV;
@@ -294,7 +299,7 @@ void main() {
     float occlusion = v_color.r;
     float level = floor(v_color.g * 255.0 + .5) - 64.0;
     float kind = v_color.b;
-    bool ground = kind < .125, plant = kind >= .125 && kind < .375, cliff = kind >= .375 && kind < .625;
+    bool ground = !unlessTops(kind >= .125), plant = unlessTops(kind >= .125 && kind < .375), cliff = unlessTops(kind >= .375 && kind < .625);
     bool leaf = plant && kind > .325; // Explicit authored tissue; legacy shrubs and wood remain opaque.
     bool panel = cliff && kind < .475;
     float projectionAngle = (v_color.a - .5) * 6.2831853;
@@ -304,17 +309,17 @@ void main() {
     bool abyss = cliff && kind > .55;
     bool mudShell = cliff && !panel && !abyss && kind > 139.0 / 255.0;
     if (mudShell) occlusion = 1.0;
-    bool pit = kind >= .625 && kind < .875;
+    bool pit = unlessTops(kind >= .625 && kind < .875);
     bool shore = ground && v_color.a < .25;
     bool zeroDepth = shore && surfaceUV.y < 0.0;
     if (zeroDepth) surfaceUV.y = -1.0 - surfaceUV.y;
     // Rock-kind bytes 224..254 carry the fractional water level; 255 remains ordinary dry rock.
-    bool wetRock = kind >= .875 && kind < .999;
+    bool wetRock = unlessTops(kind >= .875 && kind < .999);
     bool waterCovered = shore || wetRock;
     // Without gravity nothing lies loose: the dry rock kit stands as bedrock outcrops (BoardScene.Tile.lunar), exposed
     // rock of the ground it breaks through, in that ground's natural material like a rock cliff. Its bedding planes
     // lie as open to the sky as the plain they continue; only its scarps keep the kit's occlusion toward the root.
-    bool bedrock = kind >= .999 && u_gravity <= 0.0;
+    bool bedrock = unlessTops(kind >= .999 && u_gravity <= 0.0);
     if (bedrock) occlusion = mix(occlusion, 1.0, smoothstep(.55, .85, face.z));
     // Without gravity the water is gone: its bed keeps its stones, sediment and wet look, but neither the water's
     // colour nor its light, and draws its own grid.
@@ -360,7 +365,7 @@ void main() {
     mat2 wallYGradient = mat2(vec2(-worldDx.x * sign(projection.y), -worldDx.z),
           vec2(-worldDy.x * sign(projection.y), -worldDy.z));
     // Smooth value fields from the shared 64-texel noise: broad has ~11 m cells, fine ~2.5 m, and region ~40 m.
-    vec3 fields = groundFields(u_rainNoise, world);
+    vec3 fields = groundFields(world);
     float broad = fields.x, fine = fields.y, region = fields.z;
     // Keep the walking surface fully muddy. Deposits continue over its caprock edge and drain down the shell,
     // with the existing world fields varying their reach. The shell carries drop from its local TOP edge, so
@@ -406,7 +411,7 @@ void main() {
 #ifdef volcanicFlag
     bool rocky = false;
 #else
-    bool rocky = natural && (cliff || bedrock || (ground && face.z < .6));
+    bool rocky = unlessTops(natural && (cliff || bedrock || (ground && face.z < .6)));
 #endif
     // Reuse the material's world fields for a broken soil/gravel margin. Keep it below the dry rim so the
     // neighbouring land agrees at the seam; no new noise reads or shoreline mesh are needed.
@@ -556,7 +561,7 @@ void main() {
     } else if (plant) {
         // The bush GLB supplies distinct woody stems and leaves; UV/alpha carry its linear RGB.
         // Live shader reload can still encounter .25-kind meshes from the earlier height-based format.
-        float leaf = texture(u_rainNoise, world.xy / 7.0 + world.z * .13).r;
+        float leaf = texture(u_surfaceNoise, rainNoiseAt(world.xy / 7.0 + world.z * .13)).r;
         vec3 pigment = kind > .275 ? vec3(surfaceUV, v_color.a)
               : family(0.0) ? toLinear(vec3(.27, .35, .12)) : toLinear(vec3(.40, .42, .26));
         albedo = pigment * mix(.92, 1.06, leaf);
@@ -884,16 +889,11 @@ void main() {
     // catch the light at a shadow's edge. Hollows stay on the mesh: pushed into it they would shade themselves under
     // any sun; shadeSurface shades them by the cavity (micro-shadowing).
     float lift = max(materialHeight - .5, 0.0) * RELIEF_METRES * u_metre;
-    // The grass, clods and stones along a natural edge fray its shadow, up to a quarter metre either way, in tufts of
-    // 0.1 to 0.3 m. The noise's mipmaps take the fray out with distance, where it would only shimmer.
-    vec2 tufts = world.xy + world.z * vec2(.6, -.4);
-    vec2 fray = (texture(u_rainNoise, tufts / 19.2 + .31).gb - .5 + .5 * (texture(u_rainNoise, tufts / 6.4 + .67).rg - .5))
-          * (2.0 * FRAY_METRES / 1.5);
     // shadeSurface has no directional lobe on this hemisphere unless it transmits or scatters light.
     bool receivesSun = leaf || volcanic > 0.0 || finish.scatter > 0.0
           || dot(smoothSupport ? face : geometric, light) > 0.0;
     Surface surface = opaqueSurface(albedo, normal, smoothSupport ? face : geometric, finish.roughness, film,
-          sculptShadow(receiver, light, u_metre, lift, fray, receivesSun)
+          sculptShadow(receiver, light, u_metre, lift, receivesSun)
                 * sunOnRelief(relief, dot(face, light))
                 * (smoothSupport && finish.scatter <= 0.0 ? terminatorShadow(face, normal, light) : 1.0));
     // Bounded like the albedo and roughness: a degenerate projection's sample must not reach the light model.

@@ -6,7 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.badlogic.gdx.math.Vector2;
+import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 
 class GpuGroundWeatherTest {
@@ -101,5 +105,103 @@ class GpuGroundWeatherTest {
 
     private static Vector2 signed(Vector2 wrapped) {
         return new Vector2(wrapped.x > 128 ? wrapped.x - 256 : wrapped.x, wrapped.y > 128 ? wrapped.y - 256 : wrapped.y);
+    }
+
+    @Test
+    void weatherStartsAtTheLowestHexLevelRegardlessOfDepthOrBoardElevation() {
+        for (int base : new int[] { -3, 0, 4 }) {
+            for (int wetLevel : new int[] { base, base + 2 }) {
+                var wet = new BoardScene.Tile(new Coords(0, 0), wetLevel, 12, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of());
+                var dry = new BoardScene.Tile(new Coords(1, 0), base, -1, false, 0, BoardScene.Surface.GRASS, null,
+                      List.of(), List.of());
+                BoardScene scene = new BoardScene(0, 2, 1, List.of(wet, dry), List.of(), List.of(), -1, "", List.of());
+                assertEquals(base * BoardGeometry.LEVEL, BoardGeometry.weatherBase(scene));
+                assertEquals(base * BoardGeometry.LEVEL, BoardGeometry.sandBase(scene));
+                assertTrue(BoardGeometry.floor(scene) < BoardGeometry.weatherBase(scene),
+                      "The carved board floor must not pull atmosphere below the hex surfaces");
+            }
+        }
+    }
+
+    @Test
+    void sandUsesNonnegativeGroundAtExactlyThreeQuartersOfTheBorder() {
+        var board = weatherScene(new int[][] {
+              { -1, -1, -1, -1, 0 },
+              { 0, -3, -3, -3, 0 },
+              { 0, -3, -3, -3, 0 },
+              { 0, -3, -3, -3, 0 },
+              { 0, 0, 0, 0, 0 }
+        });
+        assertEquals(0, BoardGeometry.sandBase(board),
+              "12 of 16 border hexes qualify, even though fewer than half of all hexes do");
+        assertEquals(-3 * BoardGeometry.level(), BoardGeometry.weatherBase(board),
+              "Fog and precipitation retain the original minimum");
+        assertEquals(0, BoardGeometry.sandBase(BoardScenes.raisedScene(-3)), "An interior depression cannot lower sand on a level-0 rim");
+    }
+
+    @Test
+    void sandKeepsNegativeGroundBelowTheBorderThresholdEvenWithAMostlyNonnegativeMap() {
+        var board = weatherScene(new int[][] {
+              { -2, -2, -2, -2, -2 },
+              { 0, 0, 0, 0, 0 },
+              { 0, 0, 0, 0, 0 },
+              { 0, 0, 0, 0, 0 },
+              { 0, 0, 0, 0, 0 }
+        });
+        assertEquals(-2 * BoardGeometry.level(), BoardGeometry.sandBase(board),
+              "Only 11 of 16 border hexes qualify, despite 80% of the whole map being nonnegative");
+    }
+
+    @Test
+    void sandFindsTheLowestNonnegativeLevelAnywhereOnTheMap() {
+        for (int lowest : new int[] { 0, 2 }) {
+            var board = weatherScene(new int[][] {
+                  { 4, 4, 4, 4 },
+                  { 4, -3, lowest, 4 },
+                  { 4, 4, 4, 4 }
+            });
+            assertEquals(lowest * BoardGeometry.level(), BoardGeometry.sandBase(board),
+                  "Select an actual eligible level, including zero, rather than clamping the old minimum");
+        }
+    }
+
+    @Test
+    void sandNeverUsesUltraSublevelsAsEitherMinimum() {
+        for (int ground : new int[] { -2, 3 }) {
+            for (int pit : new int[] { -20, 0 }) {
+                var board = weatherScene(new int[][] {
+                      { ground, ground, ground },
+                      { ground, pit, ground },
+                      { ground, ground, ground }
+                }, new Coords(1, 1));
+                assertEquals(ground * BoardGeometry.level(), BoardGeometry.sandBase(board));
+            }
+        }
+        assertEquals(0, BoardGeometry.sandBase(weatherScene(new int[][] { { -20 } }, new Coords(0, 0))),
+              "A board with only ultra-sublevels falls back to level zero");
+    }
+
+    @Test
+    void sandCountsThinBoardBordersOnce() {
+        assertEquals(0, BoardGeometry.sandBase(weatherScene(new int[][] { { -2, 0, 0, 0 } })));
+        assertEquals(0, BoardGeometry.sandBase(weatherScene(new int[][] { { -2 }, { 0 }, { 0 }, { 0 } })));
+        assertEquals(-2 * BoardGeometry.level(), BoardGeometry.sandBase(weatherScene(new int[][] { { -2, 0, 0 } })));
+        assertEquals(-2 * BoardGeometry.level(), BoardGeometry.sandBase(weatherScene(new int[][] { { -2 } })));
+    }
+
+    private static BoardScene weatherScene(int[][] levels, Coords... pits) {
+        int height = levels.length, width = levels[0].length;
+        var tiles = new ArrayList<BoardScene.Tile>();
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                var at = new Coords(x, y);
+                tiles.add(new BoardScene.Tile(at, levels[y][x], -1, false, 0, BoardScene.Surface.GRASS,
+                      null, null, List.of(), List.of(), BoardLiquid.NONE, null, false, BoardRoad.Kind.NONE,
+                      BoardFireSmoke.NONE, BoardScene.Biome.NONE, false, false, 0, false,
+                      BoardSurfaceBlend.solid(BoardScene.Surface.GRASS), List.of(pits).contains(at)));
+            }
+        }
+        return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
     }
 }

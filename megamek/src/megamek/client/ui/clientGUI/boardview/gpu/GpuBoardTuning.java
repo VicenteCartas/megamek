@@ -126,6 +126,7 @@ final class GpuBoardTuning {
     private final List<Control> uiScale;
     /** The UI scale last saved: the slider's value once no button is held (see {@link #saveUiScale()}). */
     private float uiScaleSaved;
+    private final SelectBox<BoardQuality> quality;
     private final SelectBox<String> antiAliasing;
     private final SelectBox<String> shadows;
     private final CheckBox specularAntialiasing;
@@ -245,6 +246,16 @@ final class GpuBoardTuning {
         // The Display page: the window's output, from its mode to the graphics card.
         display = rows = new Table();
         rows.top().defaults().pad(0, 3, 0, 3);
+        quality = choice(skin, "Quality", "tuning-quality", BoardQuality.values(), this::applyQuality);
+        // The saved choice; like anti-aliasing, Defaults leaves it alone.
+        syncing = true;
+        quality.setSelected(BoardQuality.parse(GUIPreferences.getInstance().getBoardQuality()));
+        syncing = false;
+        quality.addListener(new TextTooltip("Medium shades the board with cheaper light and materials, coarser distant "
+              + "terrain and fewer grass blades, for a higher frame rate on a similar look. Low does the same with no "
+              + "grass blades at all and a quarter fewer plants in fields. Both leave out high shadows, specular "
+              + "anti-aliasing, terrain parallax, tessellation and ambient occlusion; High brings your choices back. "
+              + "Switching to or from High rebuilds the board's shaders. The choice is saved for the next session.", skin, "menu"));
         displayMode = choice(skin, "Display mode", "tuning-display-mode", new String[] { "Windowed", "Fullscreen" },
               this::applyDisplayMode);
         vsync = checkbox(skin, "VSync", "tuning-vsync");
@@ -826,6 +837,7 @@ final class GpuBoardTuning {
             }
         });
         restoreDefaults();
+        updateQualityOptions();
         // The Display page's saved choices; Defaults leaves them alone.
         GUIPreferences preferences = GUIPreferences.getInstance();
         setValues(uiScale, new float[] { preferences.getBoardUiScale() * 100 });
@@ -1241,9 +1253,14 @@ final class GpuBoardTuning {
 
     /** The Display page's effective rendering choices. */
     BoardDisplaySettings displaySettings() {
-        return new BoardDisplaySettings(BoardCamera.renderScale, antiAliasing(), highShadows(),
+        return new BoardDisplaySettings(quality(), BoardCamera.renderScale, antiAliasing(), highShadows(),
               specularAntialiasing.isChecked(), normalMaps(), terrainParallax(), tessellation(), ambientOcclusion(),
               depthCues(), vignette());
+    }
+
+    /** The chosen Quality level. */
+    BoardQuality quality() {
+        return quality.getSelected();
     }
 
     /** SMAA on the window's 3D scene. */
@@ -1284,6 +1301,23 @@ final class GpuBoardTuning {
     }
 
     /** The view reads the choice each frame; it is also saved for later sessions, on the Swing thread as the card is. */
+    private void applyQuality() {
+        updateQualityOptions();
+        String choice = quality().name();
+        SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardQuality(choice));
+    }
+
+    /** What a level leaves out keeps its choice, disabled, until a level that has it brings the choice back. */
+    private void updateQualityOptions() {
+        BoardQuality level = quality();
+        shadows.setDisabled(!level.costlyOptions);
+        specularAntialiasing.setDisabled(!level.costlyOptions);
+        terrainParallax.setDisabled(!level.costlyOptions);
+        tessellation.setDisabled(!level.costlyOptions || !GpuTessellation.available());
+        ambientOcclusion.setDisabled(!level.costlyOptions);
+        grass.setDisabled(level.meadowShare == 0);
+    }
+
     private void applyAntiAliasing() {
         String choice = antiAliasing.getSelected().toUpperCase(Locale.ROOT);
         SwingUtilities.invokeLater(() -> GUIPreferences.getInstance().setBoardAntiAliasing(choice));

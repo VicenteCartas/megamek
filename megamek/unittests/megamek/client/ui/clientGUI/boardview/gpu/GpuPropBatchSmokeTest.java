@@ -79,6 +79,7 @@ class GpuPropBatchSmokeTest {
 
     private static void check(boolean textured) throws Exception {
         sparseIndexedRangesKeepUnsignedVertices();
+        levelTopsKeepTheirOwnDraw();
         Pixmap image = new Pixmap(4, 4, Pixmap.Format.RGBA8888);
         image.setColor(Color.CORAL);
         image.fill();
@@ -355,6 +356,31 @@ class GpuPropBatchSmokeTest {
             assertEquals(vertices(source), vertices(copied), "Sparse and reversed ranges keep every unsigned index and vertex");
             assertEquals(12, copied.first().meshPart.size);
             assertEquals(12, copied.first().meshPart.mesh.getNumVertices(), "Unused vertices must not enter the copied mesh");
+        } finally {
+            GpuPropBatch.disposeMeshes(copied);
+            mesh.dispose();
+        }
+    }
+
+    /** A level top's material differs from its twin only by id, and its program has no walls: a merge keeps them apart. */
+    private static void levelTopsKeepTheirOwnDraw() {
+        Mesh mesh = new Mesh(true, 6, 6, VertexAttribute.Position(), VertexAttribute.Normal(), VertexAttribute.ColorPacked());
+        Array<Renderable> source = new Array<>(), copied = new Array<>();
+        try {
+            mesh.setVertices(new float[6 * 7]);
+            mesh.setIndices(new short[] { 0, 1, 2, 3, 4, 5 });
+            Material walls = new Material(ColorAttribute.createDiffuse(Color.WHITE));
+            for (Material material : List.of(walls, GpuFamilyPrograms.flat(walls))) {
+                Renderable part = new Renderable();
+                part.material = material;
+                part.meshPart.set("range", mesh, source.size * 3, 3, GL20.GL_TRIANGLES);
+                source.add(part);
+            }
+            var merge = new GpuPropBatch.Merge(source);
+            assertTrue(merge.step(Long.MAX_VALUE));
+            copied.addAll(merge.merged);
+            assertEquals(2, copied.size, "Level tops must not join their twin's draw");
+            assertTrue(GpuFamilyPrograms.isFlat(copied.get(1).material));
         } finally {
             GpuPropBatch.disposeMeshes(copied);
             mesh.dispose();

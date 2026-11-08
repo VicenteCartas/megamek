@@ -130,7 +130,15 @@ final class GpuShaderManager {
     }
 
     static ShaderProvider provider(String name, Supplier<ShaderProvider> factory) {
-        return current() == null ? factory.get() : new GpuShaderProvider(current(), name, factory);
+        return current() == null ? factory.get() : new GpuShaderProvider(current(), name, factory, false);
+    }
+
+    /**
+     * {@link #provider} for programs of which at most one can draw any renderable, as those of the terrain: a draw then
+     * tries the programs last chosen first (GpuShaderProvider#getShader).
+     */
+    static ShaderProvider exclusiveProvider(String name, Supplier<ShaderProvider> factory) {
+        return current() == null ? factory.get() : new GpuShaderProvider(current(), name, factory, true);
     }
 
     /** Called once at the frame boundary; pending keystrokes coalesce to the newest complete editor snapshot. */

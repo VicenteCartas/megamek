@@ -25,19 +25,24 @@ import megamek.common.units.Terrains;
 public record BoardDecoration(String id, String kind, String asset, String name, double x, double y,
       double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
       double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours,
-      int tracks, boolean pillars, String uid, int levels, BoardFlag flag) implements Serializable {
+      int tracks, boolean pillars, String uid, int levels, BoardFlag flag, BoardBillboard billboard) implements Serializable {
     /** Compatibility constructor for ordinary objects and older callers. */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
           double rotation, boolean mirror, double scale, Placement placement, int drawOrder, boolean clipToHex,
           double rotationX, double rotationY, String group, boolean bare, int connections, Stretch stretch, Colours colours,
           int tracks, boolean pillars, String uid, int levels) {
         this(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY,
-              group, bare, connections, stretch, colours, tracks, pillars, uid, levels, BoardFlag.DEFAULT);
+              group, bare, connections, stretch, colours, tracks, pillars, uid, levels, BoardFlag.DEFAULT, BoardBillboard.DEFAULT);
     }
 
     public BoardDecoration withFlag(BoardFlag flag) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex,
-              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
+    }
+
+    public BoardDecoration withBillboard(BoardBillboard billboard) {
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex,
+              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
     /** An ordinary object; authored building modules may additionally specify their assembled level count. */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
@@ -50,7 +55,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
 
     public BoardDecoration withLevels(int levels) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex,
-              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
     /** An object's asset identity normally comes from the installed catalog. */
     public BoardDecoration(String id, String kind, String asset, String name, double x, double y,
@@ -64,7 +69,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
     /** Retains an asset pack's identity even while its catalog entry is unavailable. */
     public BoardDecoration withUid(String uid) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex,
-              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
     /**
      * An object without pillars. {@code pillars}: a maglev route marker's Pillars toggle, concrete piers under the joints
@@ -260,6 +265,13 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         if (!BoardFlag.ASSET.equals(asset) && !flag.equals(BoardFlag.DEFAULT)) {
             throw new IllegalArgumentException("Only flags have flag settings");
         }
+        if (billboard == null) { billboard = BoardBillboard.DEFAULT; }
+        if (BoardBillboard.ASSET.equals(asset) && !"prop".equals(kind)) {
+            throw new IllegalArgumentException("A billboard is a prop");
+        }
+        if (!BoardBillboard.ASSET.equals(asset) && !billboard.equals(BoardBillboard.DEFAULT)) {
+            throw new IllegalArgumentException("Only billboards have billboard settings");
+        }
         if (uid != null && uid.isBlank()) { throw new IllegalArgumentException("An asset UID cannot be blank"); }
         if (id == null || id.isBlank() || !Set.of("prop", "decal").contains(kind)) {
             throw new IllegalArgumentException("An object requires an ID and supported kind");
@@ -317,7 +329,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
      */
     public boolean twin(BoardDecoration other) {
         return kind.equals(other.kind) && asset.equals(other.asset) && Objects.equals(name, other.name)
-              && flag.equals(other.flag) && colours.equals(other.colours) && stretch.equals(other.stretch) && mirror == other.mirror && bare == other.bare
+              && flag.equals(other.flag) && billboard.equals(other.billboard) && colours.equals(other.colours) && stretch.equals(other.stretch) && mirror == other.mirror && bare == other.bare
               && connections == other.connections && tracks == other.tracks && pillars == other.pillars
               && levels == other.levels && drawOrder == other.drawOrder && clipToHex == other.clipToHex && placement.equals(other.placement)
               && sameAngle(rotation, other.rotation) && sameAngle(rotationX, other.rotationX)
@@ -330,48 +342,49 @@ public record BoardDecoration(String id, String kind, String asset, String name,
     /** A copy with a fresh ID that belongs to no group. */
     public BoardDecoration duplicate() {
         return new BoardDecoration(UUID.randomUUID().toString(), kind, asset, name, x, y, rotation, mirror,
-              scale, placement, drawOrder, clipToHex, rotationX, rotationY, null, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              scale, placement, drawOrder, clipToHex, rotationX, rotationY, null, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     public BoardDecoration withGroup(String group) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     /** These sides; the stored track layout stays only while it is still a layout of them, else the default is laid. */
     public BoardDecoration withConnections(int connections) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
               clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours,
-              RailRoute.valid(connections, tracks) ? tracks : 0, pillars, uid, levels, flag);
+              RailRoute.valid(connections, tracks) ? tracks : 0, pillars, uid, levels, flag, billboard);
     }
 
     /** This route marker with these track pieces ({@link RailRoute}); its default layout is stored as none. */
     public BoardDecoration withTracks(int tracks) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
               clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours,
-              tracks == RailRoute.pieces(connections) ? 0 : tracks, pillars, uid, levels, flag);
+              tracks == RailRoute.pieces(connections) ? 0 : tracks, pillars, uid, levels, flag, billboard);
     }
 
     /** This maglev route marker with its Pillars toggle on or off. */
     public BoardDecoration withPillars(boolean pillars) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     public BoardDecoration withStretch(Stretch stretch) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     public BoardDecoration withAsset(String asset) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
               clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars,
-              asset.equals(this.asset) ? uid : null, levels, BoardFlag.ASSET.equals(asset) ? flag : BoardFlag.DEFAULT);
+              asset.equals(this.asset) ? uid : null, levels, BoardFlag.ASSET.equals(asset) ? flag : BoardFlag.DEFAULT,
+              BoardBillboard.ASSET.equals(asset) ? billboard : BoardBillboard.DEFAULT);
     }
 
     public BoardDecoration withColours(Colours colours) {
         return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder,
-              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+              clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     /** Fresh IDs; members that shared a group share one fresh group, ungrouped objects stay ungrouped. */
@@ -383,7 +396,7 @@ public record BoardDecoration(String id, String kind, String asset, String name,
 
     public BoardDecoration transform(double x, double y, double rotation, boolean mirror, double scale,
           Placement placement) {
-        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag);
+        return new BoardDecoration(id, kind, asset, name, x, y, rotation, mirror, scale, placement, drawOrder, clipToHex, rotationX, rotationY, group, bare, connections, stretch, colours, tracks, pillars, uid, levels, flag, billboard);
     }
 
     /** Right-handed XYZ Euler angles in degrees: apply X, then Y, then Z (the board's up axis). */
@@ -405,10 +418,12 @@ public record BoardDecoration(String id, String kind, String asset, String name,
         boolean reflected = mirror;
         if (horizontal) { angle = -angle; reflected = !reflected; }
         if (vertical) { angle = 180 - angle; reflected = !reflected; }
+        // A billboard's structure is symmetric: only its turn reflects, so its art stays readable.
+        if (BoardBillboard.ASSET.equals(asset)) { reflected = false; }
         return new BoardDecoration(id, kind, asset, name, horizontal ? -x : x, vertical ? -y : y,
               angle, reflected, scale, placement, drawOrder, clipToHex, rotationX,
               horizontal != vertical ? -rotationY : rotationY, group, bare, flipSides(connections, horizontal, vertical),
-              stretch, colours, RailRoute.flip(tracks, sides -> flipSides(sides, horizontal, vertical)), pillars, uid, levels, flag);
+              stretch, colours, RailRoute.flip(tracks, sides -> flipSides(sides, horizontal, vertical)), pillars, uid, levels, flag, billboard);
     }
 
     static int flipSides(int sides, boolean horizontal, boolean vertical) {

@@ -15,7 +15,8 @@ import megamek.logging.MMLogger;
 
 /**
  * Visual cover of the chosen plants, measured once when a scene is captured, independent of camera and LOD.
- * The existing impostor's third panel is an unlit top projection baked from LOD0. Its alpha retains large crown gaps;
+ * A plant's crown mask ({@code <name>_crown.png}, mm-data's tools/prepare_tree_lods.py) is its far mesh's coverage
+ * from straight above, framed like its XY bounds here. Its alpha retains large crown gaps;
  * closing two-percent gaps groups tiny leaf holes into a crown. Cacti use 85% of their XY box dimensions,
  * allowing some space between arms without treating that entire empty rectangle as foliage.
  * Bare trees contribute about fifteen percent visual cover at their normal width; neither twig pixels nor their
@@ -24,7 +25,7 @@ import megamek.logging.MMLogger;
 final class BoardTreeCoverage {
     private static final MMLogger LOGGER = MMLogger.create(BoardTreeCoverage.class);
     private static final int GRID = 32;
-    /** Matches the panel margin in tools/prepare_tree_lods.py; dimensions come from the same LOD0 model. */
+    /** Matches the crown mask's margin in tools/prepare_tree_lods.py, about the plant's bounds. */
     private static final float PANEL_MARGIN = 1.04f;
     private static final Map<File, Crown> CROWNS = new ConcurrentHashMap<>();
     private final BitSet available = new BitSet(GRID * GRID);
@@ -129,7 +130,7 @@ final class BoardTreeCoverage {
 
     private static Crown crown(String asset) {
         File image = new File(Configuration.dataDir(), "models/board/textures/vegetation/impostors/"
-              + asset.substring(asset.lastIndexOf('/') + 1) + ".png").getAbsoluteFile();
+              + asset.substring(asset.lastIndexOf('/') + 1) + "_crown.png").getAbsoluteFile();
         return CROWNS.computeIfAbsent(image, file -> read(asset, file));
     }
 
@@ -140,12 +141,12 @@ final class BoardTreeCoverage {
         if (asset.startsWith("vegetation/cactus")) { return new Crown(bounds, null, span); }
         try {
             var image = ImageIO.read(file);
-            if (image == null || image.getWidth() != image.getHeight() * 3) { throw new IOException("Expected three square panels"); }
+            if (image == null || image.getWidth() != image.getHeight()) { throw new IOException("Expected a square mask"); }
             int size = image.getHeight();
             boolean[][] mask = new boolean[size][size];
             for (int y = 0; y < size; y++) {
                 for (int x = 0; x < size; x++) {
-                    int alpha = image.getRGB(x + size * 2, y) >>> 24;
+                    int alpha = image.getRGB(x, y) >>> 24;
                     mask[y][x] = alpha >= 128;
                 }
             }

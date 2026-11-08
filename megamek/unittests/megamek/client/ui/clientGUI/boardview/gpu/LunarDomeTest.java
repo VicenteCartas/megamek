@@ -4,8 +4,8 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.awt.BasicStroke;
-import java.awt.geom.Area;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Area;
 import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Rectangle2D;
@@ -16,8 +16,8 @@ import java.util.Map;
 import java.util.concurrent.FutureTask;
 import javax.swing.SwingUtilities;
 
-import com.badlogic.gdx.utils.GdxNativesLoader;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Configuration;
 import megamek.common.board.BoardFile;

@@ -32,9 +32,15 @@ import megamek.logging.MMLogger;
  * live material of its variant
  * gains the {@link Constants} marker, and the shader provider, through the shader manager's handles, resolves those
  * draws to it; a chunk installed later is marked as it is installed. Variants that appear after the load keep the
- * generic program until the next load. A terrain builds at most {@link #CAPACITY} family programs for each lighting
+ * generic program until the next load. With the link helper (GpuLinkHelper) a fresh link holds no frame, so the loading
+ * stage waits only for what the program cache holds, every variant asks once behind it, and the links go on beside the
+ * frames, each adopted when it is ready, one a frame: a generic program draws the same pixels meanwhile. A terrain builds at most {@link #CAPACITY} family programs for each lighting
  * configuration and twice that in all; once it holds that many, a configuration without programs stays generic. The
  * provider keeps every program it built, and returning to a configuration finds its programs there.
+ * <p>
+ * A chunk's level tops ({@link #flat}) draw apart from the rest of their material, in a family program of their own
+ * without walls, rocks, plants or pits (SCULPT_TOPS): the most-drawn programs, and much the cheapest. A generic program
+ * draws them like any other draw of their material.
  */
 final class GpuFamilyPrograms {
     private static final MMLogger LOGGER = MMLogger.create(GpuFamilyPrograms.class);
@@ -55,9 +61,8 @@ final class GpuFamilyPrograms {
      * Family programs one load (a board, graphics or lighting change behind the loading stage) compiles from source,
      * the most-drawn first; programs the program cache holds load beside them at no such cost. The other variants keep
      * the generic program until a later load, which takes these from the cache and compiles the next ones; without a
-     * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one costs about 15 s on
-     * Iris Xe, its link and the driver's compile at its first draw: with nothing cached, Fire and Ice 2's first load
-     * took 693 s with all 28, 367 s with four (RTX 4070: 112 s and 45 s).
+     * cache (a driver with no binary formats) every load compiles the first ones. Uncached, one links on Iris Xe in
+     * 1.1 to 4 s at Medium, 1.6 to 5.6 s at High. The link helper's links aren't counted: they hold nothing.
      */
     static final int FRESH = 4;
 
@@ -80,7 +85,7 @@ final class GpuFamilyPrograms {
     }
 
     /** The families, proven base aliases, vertex layout and generic variant a program is for. */
-    private record Key(List<Float> families, int aliases, VertexAttributes attributes, Object variant) { }
+    private record Key(List<Float> families, int aliases, boolean tops, VertexAttributes attributes, Object variant) { }
 
     /** A material installed by a chunk and the indices it draws; the chunk owns it, so it is held weakly. */
     private record Use(WeakReference<Material> material, int indices) { }
@@ -94,6 +99,8 @@ final class GpuFamilyPrograms {
         List<Object> sampleConfiguration;
         /** Deferred: no cached program, and this configuration compiled its {@link #FRESH} share already. */
         boolean ready, failed, deferred;
+        /** Its program's cache key, while the link helper links it. */
+        String linkKey;
 
         Variant(Key key, float[] families) {
             this.key = key;
@@ -148,6 +155,9 @@ final class GpuFamilyPrograms {
     private boolean waiting;
     /** Links this configuration started from source. */
     private int freshLinks;
+    /** The preparation of the last step, and whether its links run in the link helper. */
+    private GpuGlsl.Preparation links;
+    private boolean background;
     private long environmentMask = -1;
     private int environmentFlags;
     private boolean shadows;
@@ -172,7 +182,7 @@ final class GpuFamilyPrograms {
         if (families == null) { return; }
         List<Float> boxed = new ArrayList<>(families.length);
         for (float family : families) { boxed.add(family); }
-        Variant variant = variants.computeIfAbsent(new Key(boxed, baseAliases(material), attributes, variantOf.apply(material)),
+        Variant variant = variants.computeIfAbsent(new Key(boxed, baseAliases(material), isFlat(material), attributes, variantOf.apply(material)),
               key -> new Variant(key, families));
         variant.uses.removeIf(use -> use.material().get() == null);
         variant.uses.add(new Use(new WeakReference<>(material), indices));
@@ -198,6 +208,10 @@ final class GpuFamilyPrograms {
             variant.mark(false);
             variant.ready = variant.failed = variant.deferred = false;
         }
+        if (background) {
+            links.dropOptional();
+            forgetLinks();
+        }
         // A link still running finishes into the provider for its own configuration; nothing marks it (prepare).
         waiting = true;
         freshLinks = 0;
@@ -212,6 +226,16 @@ final class GpuFamilyPrograms {
      */
     boolean prepare(GpuGlsl.Preparation preparation, ShaderProvider provider, Environment environment) {
         if (!enabled || preparation == null) { return false; }
+        links = preparation;
+        boolean elsewhere = preparation.background();
+        if (background && !elsewhere) {
+            // The helper ended: nothing links in this process beside the frames. Until the next load, these stay generic.
+            forgetLinks();
+            background = false;
+            return false;
+        }
+        background = elsewhere;
+        if (elsewhere) { return prepareElsewhere(preparation, provider, environment); }
         int limit = preparation.parallel() ? IN_FLIGHT : 1;
         if (limit == 1 && preparation.linking()) { return false; }
         boolean changed = false;
@@ -232,6 +256,46 @@ final class GpuFamilyPrograms {
     }
 
     /**
+     * With the link helper. Behind the loading stage every variant asks once, which assembles its sources, and those the
+     * cache holds are adopted at once. Then a finished link is adopted when its binary is there: while the board shows,
+     * one a frame within the frame's budget for links, and asking only then, since asking assembles the sources again.
+     */
+    private boolean prepareElsewhere(GpuGlsl.Preparation preparation, ShaderProvider provider, Environment environment) {
+        boolean changed = false, showing = GpuGlsl.presenting();
+        while (!showing && waiting) {
+            Variant variant = next(environment);
+            waiting = variant != null;
+            if (variant == null) { break; }
+            Boolean marked = finish(variant, preparation, provider);
+            if (marked == null) { compiling.add(variant); } else { changed |= marked; }
+        }
+        for (var unfinished = compiling.iterator(); unfinished.hasNext(); ) {
+            Variant variant = unfinished.next();
+            if (!preparation.over(variant.linkKey)) { continue; }
+            if (showing && GpuGlsl.overBudget()) { break; }
+            long start = System.nanoTime();
+            Boolean marked = finish(variant, preparation, provider);
+            GpuGlsl.spent(System.nanoTime() - start);
+            if (marked == null) { continue; }
+            unfinished.remove();
+            changed |= marked;
+            if (showing) { break; }
+        }
+        return changed;
+    }
+
+    /** The helper's links are no one's any more: their variants may ask again, and their binaries still fill the cache. */
+    private void forgetLinks() {
+        for (Variant variant : compiling) {
+            List<Object> program = new ArrayList<>(List.of(variant.key));
+            program.addAll(variant.sampleConfiguration);
+            built.remove(program);
+            variant.release();
+        }
+        compiling.clear();
+    }
+
+    /**
      * Requests the variant's program: null while its link runs; otherwise the variant is released, and the result is
      * whether any material changed program.
      */
@@ -239,7 +303,9 @@ final class GpuFamilyPrograms {
         boolean current = variant.sampleConfiguration.equals(configuration()), changed = false;
         int started = preparation.freshLinks();
         try {
-            if (!preparation.run(() -> variant.sample.shader = provider.getShader(variant.sample), freshLinks < FRESH)) {
+            Runnable ask = () -> variant.sample.shader = provider.getShader(variant.sample);
+            if (!(background ? preparation.runOptional(ask) : preparation.run(ask, freshLinks < FRESH))) {
+                variant.linkKey = preparation.lastKey();
                 return null;
             }
             // A program of an earlier configuration stays in the provider for a return to it; it marks nothing.
@@ -314,8 +380,13 @@ final class GpuFamilyPrograms {
             if (built.contains(List.of(variant.key, environmentMask, environmentFlags, shadows))) { free++; }
             else { others++; }
         }
-        return compiling.size() + free + Math.min(others, Math.max(0, room()));
+        // The loading stage doesn't wait for the helper's links, only to adopt the finished ones.
+        long linking = background ? compiling.stream().filter(variant -> links.over(variant.linkKey)).count() : compiling.size();
+        return (int) linking + free + Math.min(others, Math.max(0, room()));
     }
+
+    /** Whether links in the helper go on: the terrain keeps taking steps while the board shows. */
+    boolean adopting() { return background && !compiling.isEmpty(); }
 
     /** Programs this configuration may still build: its own capacity, within twice the capacity over all of them. */
     private int room() {
@@ -361,6 +432,40 @@ final class GpuFamilyPrograms {
         return new float[] { sculpt.value, slots[0], slots[1], slots[2], slots[3] };
     }
 
+    /** A marker in the id, as the material cache's and tessellation's, whose suffixes follow it (isTop, curved). */
+    private static final String FLAT = "#flat";
+    /**
+     * The height every vertex normal of a level top reaches. Between such unit normals a pixel's normal stays this
+     * high, so terrain-sculpt.frag's wall test (rocky) is false throughout the triangle.
+     */
+    static final float FLAT_Z = .601f;
+
+    /** Whether a draw in this material divides off its level tops: concrete and crust have no natural ground to lose. */
+    static boolean divides(Material material, long sculptType) {
+        float[] families = families(material, sculptType);
+        return families != null && families[0] != BoardScene.Surface.CONCRETE.ordinal()
+              && !material.has(GpuMagmaShader.TYPE);
+    }
+
+    /** The material a chunk's level tops draw in: the same attributes, so the same generic program, under its own id. */
+    static Material flat(Material material) {
+        Material copy = new Material(material);
+        copy.id = material.id + FLAT;
+        return copy;
+    }
+
+    static boolean isFlat(Material material) { return material.id.contains(FLAT); }
+
+    /** The material without the level tops' marker: what those tops' ground draws as where it curves. */
+    static Material unflat(Material material) {
+        Material copy = new Material(material);
+        copy.id = material.id.replace(FLAT, "");
+        return copy;
+    }
+
+    /** Whether this terrain builds family programs at all: previews and prints don't. */
+    boolean enabled() { return enabled; }
+
     /** Reuse proven from this material's owned uniform values, never family identity alone. */
     static int baseAliases(Material material) {
         var blend = material.get(GpuSurfaceBlend.class, GpuSurfaceBlend.TYPE);
@@ -374,10 +479,10 @@ final class GpuFamilyPrograms {
 
     /**
      * Whether a program compiled with these families (null: a generic program) may draw the material: a generic program
-     * no marked material, a family program only marked materials with its families and aliases. The shader provider's
-     * scan rejects other programs first.
+     * no marked material, a family program only marked materials with its families, aliases and level tops. The shader
+     * provider's scan rejects other programs first.
      */
-    static boolean draws(float[] families, int aliases, Material material, long sculptType) {
+    static boolean draws(float[] families, int aliases, boolean tops, Material material, long sculptType) {
         boolean marked = material.has(Constants.TYPE);
         if (families == null || !marked) { return families == null && !marked; }
         var sculpt = (FloatAttribute) material.get(sculptType);
@@ -388,14 +493,14 @@ final class GpuFamilyPrograms {
         for (int i = 1; i < families.length; i++) {
             if (blend.families[i - 1] != families[i]) { return false; }
         }
-        return aliases == baseAliases(material);
+        return aliases == baseAliases(material) && tops == isFlat(material);
     }
 
     /** The defines that make a family program's families constant; none for a generic program. */
     static String defines(Material material, long sculptType) {
         float[] families = constants(material, sculptType);
         if (families == null) { return ""; }
-        String sculpt = "#define SCULPT_FAMILY " + families[0] + "\n";
+        String sculpt = "#define SCULPT_FAMILY " + families[0] + "\n" + (isFlat(material) ? "#define SCULPT_TOPS\n" : "");
         int aliases = baseAliases(material);
         String reuse = ((aliases & 1) != 0 ? "#define COVER_B_IS_BASE\n" : "")
               + ((aliases & 2) != 0 ? "#define COVER_C_IS_BASE\n" : "");
@@ -406,6 +511,6 @@ final class GpuFamilyPrograms {
     /** The program name's suffix, as the shader editor and the compile log show it. */
     static String name(Material material, long sculptType) {
         float[] families = constants(material, sculptType);
-        return families == null ? "" : " families " + Arrays.toString(families) + " aliases " + baseAliases(material);
+        return families == null ? "" : " families " + Arrays.toString(families) + " aliases " + baseAliases(material) + (isFlat(material) ? " tops" : "");
     }
 }

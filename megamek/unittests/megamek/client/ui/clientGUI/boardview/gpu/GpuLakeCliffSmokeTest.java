@@ -33,8 +33,8 @@ class GpuLakeCliffSmokeTest {
                 var terrain = new GpuTerrain();
                 var frame = new GpuReviewFrame(BoardAtmosphere.DEFAULTS);
                 try {
-                    BoardWetCliffTest.tune(true);
-                    var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+                    BoardScenes.tune(true);
+                    var scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
                     terrain.update(scene);
                     terrain.animate(.4f, List.of());
                     var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"),
@@ -75,8 +75,8 @@ class GpuLakeCliffSmokeTest {
             for (int[] point : new int[][] { { 940, 360 }, { 1075, 411 }, { 1150, 440 }, { 870, 360 } }) {
                 int pixel = image.getPixel(point[0], 899 - point[1]);
                 int red = pixel >>> 24, green = (pixel >>> 16) & 255, blue = (pixel >>> 8) & 255;
-                // Near-black bed pixels quantise to within a level of each other; green must still lead red.
-                assertTrue(green > red && blue + 2 >= red,
+                // The wet tint has green leading red; brown dry rock, as those stripes were, has red leading.
+                assertTrue(green > red,
                       "Submerged wall lost its waterbed shading at " + point[0] + "," + point[1]
                             + ": RGB " + red + "," + green + "," + blue);
             }

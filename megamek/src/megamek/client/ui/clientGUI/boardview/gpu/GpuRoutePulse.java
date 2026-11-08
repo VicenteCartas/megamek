@@ -11,7 +11,6 @@ import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Renderable;
 import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
-import com.badlogic.gdx.graphics.g3d.attributes.DepthTestAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.IntAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.math.MathUtils;
@@ -626,7 +625,7 @@ final class GpuRoutePulse implements Disposable {
         mesh.setIndices(indices);
         renderable.material = new Material(TextureAttribute.createDiffuse(glow),
               new BlendingAttribute(GL20.GL_ONE, GL20.GL_ONE_MINUS_SRC_ALPHA),
-              new DepthTestAttribute(GL20.GL_ALWAYS, false),
+              MeepleVisual.overScene(),
               IntAttribute.createCullFace(GL20.GL_NONE));
         renderable.meshPart.set("route-pulse", mesh, 0, 0, GL20.GL_TRIANGLES);
     }

@@ -22,9 +22,9 @@ class GpuScenePlaybackTest {
     @Test
     void eachArrivalReleasesItsOwnTerrainArtworkAndContactsAtEverySpeed() {
         for (var speed : List.of(UnitMotion.Speed.HALF, UnitMotion.Speed.NORMAL, UnitMotion.Speed.DOUBLE, UnitMotion.Speed.QUADRUPLE)) {
-            var start = UnitPlaybackTest.unit(1, 0);
-            var middle = UnitPlaybackTest.unit(1, 2);
-            var end = UnitPlaybackTest.unit(1, 4);
+            var start = UnitPlaybackFixture.unit(1, 0);
+            var middle = UnitPlaybackFixture.unit(1, 2);
+            var end = UnitPlaybackFixture.unit(1, 4);
             var before = snapshot(0, start, contact(2, 1));
             var arrived = snapshot(1, middle, contact(2, 3), contact(3, 2));
             var latest = snapshot(2, end, contact(3, 4));
@@ -52,16 +52,16 @@ class GpuScenePlaybackTest {
     @Test
     void eachAttackAppliesDestructionAndVisibilityAtImpactBeforeRecoveryOrTheNextAttack() {
         for (var kind : List.of(ResolvedAttack.Kind.SHOT, ResolvedAttack.Kind.KICK)) {
-            var attacker = UnitPlaybackTest.unit(1, 0);
+            var attacker = UnitPlaybackFixture.unit(1, 0);
             // Two attacks by one unit from one pose play as a single volley; a second attacker keeps them separate.
-            var second = UnitPlaybackTest.unit(5, 0);
-            var victim = UnitPlaybackTest.unit(2, 4);
+            var second = UnitPlaybackFixture.unit(5, 0);
+            var victim = UnitPlaybackFixture.unit(2, 4);
             var before = snapshot(0, attacker, second, victim, contact(3, 1));
             var firstImpact = snapshot(1, attacker, second, victim, contact(3, 3));
             var latest = snapshot(2, attacker, second, contact(4, 2));
             var playback = new UnitPlayback();
-            playback.accept(List.of(new BoardScene.SceneUpdate(before), UnitPlaybackTest.attack(attacker, victim, kind, true),
-                  new BoardScene.SceneUpdate(firstImpact), UnitPlaybackTest.attack(second, victim, kind, true),
+            playback.accept(List.of(new BoardScene.SceneUpdate(before), UnitPlaybackFixture.attack(attacker, victim, kind, true),
+                  new BoardScene.SceneUpdate(firstImpact), UnitPlaybackFixture.attack(second, victim, kind, true),
                   new BoardScene.SceneUpdate(latest)), latest, ignored -> false);
             playback.advance(0, UnitMotion.Speed.NORMAL);
             assertWorld(before, playback.present(latest));
@@ -83,9 +83,9 @@ class GpuScenePlaybackTest {
 
     @Test
     void lateCheckpointsWaitWhilePausedAndReleaseWithoutAnotherGameFrame() {
-        var start = UnitPlaybackTest.unit(1, 0);
-        var end = UnitPlaybackTest.unit(1, 4);
-        var before = snapshot(0, start, UnitPlaybackTest.unit(2, 1));
+        var start = UnitPlaybackFixture.unit(1, 0);
+        var end = UnitPlaybackFixture.unit(1, 4);
+        var before = snapshot(0, start, UnitPlaybackFixture.unit(2, 1));
         var latest = snapshot(1, end, contact(2, 3));
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), move(start, end)), before, ignored -> false);
@@ -103,8 +103,8 @@ class GpuScenePlaybackTest {
 
     @Test
     void instantLargeFramesAndBoardResetDoNotStrandCheckpoints() {
-        var start = UnitPlaybackTest.unit(1, 0);
-        var end = UnitPlaybackTest.unit(1, 4);
+        var start = UnitPlaybackFixture.unit(1, 0);
+        var end = UnitPlaybackFixture.unit(1, 4);
         var before = snapshot(0, start);
         var latest = snapshot(1, end);
         for (var speed : List.of(UnitMotion.Speed.NORMAL, UnitMotion.Speed.INSTANT)) {
@@ -123,8 +123,8 @@ class GpuScenePlaybackTest {
 
     @Test
     void designationOnlyChangesRequirePlaybackCheckpoints() {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
         var before = snapshot(0, source, target);
         var designation = new BoardScene.Designation(source.id(), source.location(), target.id(), target.location());
         var tagged = withDesignations(before, List.of(designation));
@@ -132,7 +132,7 @@ class GpuScenePlaybackTest {
         assertFalse(tagged.samePlaybackState(before), "Removing only the line must also release a checkpoint");
         assertTrue(tagged.samePlaybackState(withDesignations(before, List.of(designation))),
               "An equivalent designation snapshot does not create another checkpoint");
-        var other = UnitPlaybackTest.unit(3, 2);
+        var other = UnitPlaybackFixture.unit(3, 2);
         var retargeted = withDesignations(before, List.of(new BoardScene.Designation(
               source.id(), source.location(), other.id(), other.location())));
         assertFalse(tagged.samePlaybackState(retargeted), "The same number of lines can mark a different target");
@@ -143,9 +143,9 @@ class GpuScenePlaybackTest {
 
     @Test
     void anElevatorMovesAsOneActionFromItsCheckpointOnceTheBoardShowsItsEnd() {
-        var rider = UnitPlaybackTest.unit(1, 0);
-        var start = UnitPlaybackTest.unit(2, 4);
-        var end = UnitPlaybackTest.unit(2, 2);
+        var rider = UnitPlaybackFixture.unit(1, 0);
+        var start = UnitPlaybackFixture.unit(2, 4);
+        var end = UnitPlaybackFixture.unit(2, 2);
         var lowered = elevator(0, rider, start);
         var raised = elevator(2, rider, start);
         var latest = elevator(2, rider, end);

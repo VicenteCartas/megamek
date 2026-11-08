@@ -61,7 +61,7 @@ class GpuMirroredObjectSmokeTest {
             place(board, MORE_CARS.get(1), "scenery/vehicles/car", variant, BoardDecoration.Colours.of("#b8b014"));
             place(board, CORAL, "mars/brain-lobes", variant, BoardDecoration.Colours.NONE);
         }
-        var captured = GpuLegacyImportSmokeTest.scene(board);
+        var captured = BoardScenes.scene(board);
         return new BoardScene(0, captured.width(), captured.height(), captured.tiles(), List.of(), List.of(), -1, "",
               List.of(), new BoardScene.Light(-24, -30));
     }
@@ -101,7 +101,7 @@ class GpuMirroredObjectSmokeTest {
                             camera.center(BoardGeometry.center(new Coords(3, 2), 0));
                             camera.camera.zoom = .5f;
                             camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             parts.put(entry.getKey(), parts(terrain));
                             profiler.enable();
@@ -114,7 +114,7 @@ class GpuMirroredObjectSmokeTest {
                                 camera.center(BoardGeometry.center(at, 0));
                                 camera.camera.zoom = .1f;
                                 camera.update();
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(OUTPUT, name(entry.getKey(), at)));
                             }
@@ -175,24 +175,18 @@ class GpuMirroredObjectSmokeTest {
     /** Placed object parts: instanced, one by one, instanced mirror images, and the instanced parts of the car at CAR. */
     private static int[] parts(GpuTerrain terrain) throws ReflectiveOperationException {
         int[] result = new int[4];
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            var instanced = (Array<?>) field(chunk, "decorationRenderables");
-            var owners = (Array<?>) field(chunk, "decorationOwners");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            var instanced = (Array<?>) GpuTestSupport.field(chunk, "decorationRenderables");
+            var owners = (Array<?>) GpuTestSupport.field(chunk, "decorationOwners");
             result[0] += instanced.size;
-            result[1] += ((Array<?>) field(chunk, "looseDecorations")).size;
+            result[1] += ((Array<?>) GpuTestSupport.field(chunk, "looseDecorations")).size;
             for (int i = 0; i < instanced.size; i++) {
                 if (GpuTreeInstances.mirrored(((com.badlogic.gdx.graphics.g3d.Renderable) instanced.get(i)).worldTransform)) {
                     result[2]++;
                 }
-                if (CAR.getBoardNum().equals(field(owners.get(i), "decorationId"))) { result[3]++; }
+                if (CAR.getBoardNum().equals(GpuTestSupport.field(owners.get(i), "decorationId"))) { result[3]++; }
             }
         }
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws ReflectiveOperationException {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

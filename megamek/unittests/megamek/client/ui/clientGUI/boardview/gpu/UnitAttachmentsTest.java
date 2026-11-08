@@ -69,17 +69,17 @@ class UnitAttachmentsTest {
 
     @Test
     void jumpArrivalFlowsDirectlyIntoReleaseAndPauseFreezesTheFall() {
-        var carrier = UnitPlaybackTest.unit(1, 0);
-        var arrival = UnitPlaybackTest.unit(1, 4);
-        var riding = UnitPlaybackTest.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
-        var landed = UnitPlaybackTest.unit(2, 4);
-        var before = UnitPlaybackTest.scene(carrier, riding);
-        var latest = UnitPlaybackTest.scene(arrival, landed);
+        var carrier = UnitPlaybackFixture.unit(1, 0);
+        var arrival = UnitPlaybackFixture.unit(1, 4);
+        var riding = UnitPlaybackFixture.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
+        var landed = UnitPlaybackFixture.unit(2, 4);
+        var before = UnitPlaybackFixture.scene(carrier, riding);
+        var latest = UnitPlaybackFixture.scene(arrival, landed);
         var release = new BoardScene.AttachmentChange(0, riding, landed, arrival, BoardScene.Release.JUMP);
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), new BoardScene.Movement(1, 0,
                     List.of(carrier.location(), arrival.location()), EntityMovementType.MOVE_JUMP, 4, 4, arrival),
-              new BoardScene.SceneUpdate(UnitPlaybackTest.scene(arrival, riding)), release,
+              new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(arrival, riding)), release,
               new BoardScene.SceneUpdate(latest)), latest, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         playback.advance(playback.motions.get(1).remainingSeconds() / UnitMotion.Speed.NORMAL.rate, UnitMotion.Speed.NORMAL);
@@ -99,15 +99,15 @@ class UnitAttachmentsTest {
     @Test
     void brushReleasesAtContactOnSuccessAndKeepsTheBindingOnFailure() {
         for (boolean hit : List.of(false, true)) {
-            var carrier = UnitPlaybackTest.unit(1, 0);
-            var riding = UnitPlaybackTest.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
-            var friendly = UnitPlaybackTest.unit(3, 0).withAttachment(new BoardScene.Attachment(1, false));
+            var carrier = UnitPlaybackFixture.unit(1, 0);
+            var riding = UnitPlaybackFixture.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
+            var friendly = UnitPlaybackFixture.unit(3, 0).withAttachment(new BoardScene.Attachment(1, false));
             var after = riding.withAttachment(hit ? null : riding.attachment());
-            var before = UnitPlaybackTest.scene(carrier, riding, friendly);
-            var latest = UnitPlaybackTest.scene(carrier, after, friendly);
+            var before = UnitPlaybackFixture.scene(carrier, riding, friendly);
+            var latest = UnitPlaybackFixture.scene(carrier, after, friendly);
             var events = new java.util.ArrayList<BoardScene.Animation>();
             events.add(new BoardScene.SceneUpdate(before));
-            events.add(UnitPlaybackTest.attack(carrier, riding, ResolvedAttack.Kind.BRUSH_OFF, hit));
+            events.add(UnitPlaybackFixture.attack(carrier, riding, ResolvedAttack.Kind.BRUSH_OFF, hit));
             if (hit) { events.add(new BoardScene.AttachmentChange(0, riding, after, carrier, BoardScene.Release.THROWN)); }
             events.add(new BoardScene.SceneUpdate(latest));
             var playback = new UnitPlayback();
@@ -128,10 +128,10 @@ class UnitAttachmentsTest {
 
     @Test
     void removedPassengersFinishFallingAndInstantOrConcealmentClearsTheTransition() {
-        var carrier = UnitPlaybackTest.unit(1, 0);
-        var passenger = UnitPlaybackTest.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
-        var latest = UnitPlaybackTest.scene(carrier);
-        List<BoardScene.Animation> events = List.of(new BoardScene.SceneUpdate(UnitPlaybackTest.scene(carrier, passenger)),
+        var carrier = UnitPlaybackFixture.unit(1, 0);
+        var passenger = UnitPlaybackFixture.unit(2, 0).withAttachment(new BoardScene.Attachment(1, true));
+        var latest = UnitPlaybackFixture.scene(carrier);
+        List<BoardScene.Animation> events = List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(carrier, passenger)),
               new BoardScene.AttachmentChange(0, passenger, null, carrier, BoardScene.Release.WATER), new BoardScene.SceneUpdate(latest));
         for (boolean conceal : List.of(false, true)) {
             var playback = new UnitPlayback();
@@ -147,14 +147,14 @@ class UnitAttachmentsTest {
 
     @Test
     void consecutiveReleasesDoNotRestoreThePassengerThatAlreadyLanded() {
-        var carrier = UnitPlaybackTest.unit(1, 0);
-        var first = UnitPlaybackTest.unit(2, 0).withAttachment(new BoardScene.Attachment(1, false));
-        var second = UnitPlaybackTest.unit(3, 0).withAttachment(new BoardScene.Attachment(1, true));
-        var firstEnd = UnitPlaybackTest.unit(2, 1);
-        var secondEnd = UnitPlaybackTest.unit(3, 2);
-        var latest = UnitPlaybackTest.scene(carrier, firstEnd, secondEnd);
+        var carrier = UnitPlaybackFixture.unit(1, 0);
+        var first = UnitPlaybackFixture.unit(2, 0).withAttachment(new BoardScene.Attachment(1, false));
+        var second = UnitPlaybackFixture.unit(3, 0).withAttachment(new BoardScene.Attachment(1, true));
+        var firstEnd = UnitPlaybackFixture.unit(2, 1);
+        var secondEnd = UnitPlaybackFixture.unit(3, 2);
+        var latest = UnitPlaybackFixture.scene(carrier, firstEnd, secondEnd);
         var playback = new UnitPlayback();
-        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackTest.scene(carrier, first, second)),
+        playback.accept(List.of(new BoardScene.SceneUpdate(UnitPlaybackFixture.scene(carrier, first, second)),
               new BoardScene.AttachmentChange(0, first, firstEnd, carrier, BoardScene.Release.CLIMB_DOWN),
               new BoardScene.AttachmentChange(0, second, secondEnd, carrier, BoardScene.Release.THROWN),
               new BoardScene.SceneUpdate(latest)), latest, ignored -> false);

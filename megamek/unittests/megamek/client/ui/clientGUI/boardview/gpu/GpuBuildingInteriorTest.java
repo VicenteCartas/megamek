@@ -8,21 +8,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.GdxNativesLoader;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class GpuBuildingInteriorTest {
+    @BeforeAll
+    static void loadNatives() {
+        GdxNativesLoader.load();
+    }
+
     @Test
-    void lightBuildingWallsEncloseItsCentreWithoutTheRoofBorder() {
+    void lightBuildingFloorsAndRoofCoverItsCentre() {
         var kit = GpuBuilding.kit("buildings/saxarba/building_light/building_light_00");
-        // Alone, its storeys' walls close round its centre and its roof covers it; connected, its walls stay open
-        // towards its neighbours (GpuBuilding#volume then takes the roof) and its roof still covers the centre.
+        // Its floor caps hold the occupied area (GpuBuilding#volumes), as its closed panels are wall strips, not rooms.
+        // Alone, every storey's cap and its roof cover its centre; connected, its roof still does.
         for (int[] reach : List.of(new int[6], new int[] { 2, 0, 0, 2, 0, 0 }, new int[] { 2, 0, 2, 0, 2, 0 })) {
             boolean alone = java.util.Arrays.stream(reach).allMatch(levels -> levels == 0);
             for (var entry : storeys(kit, reach).entrySet()) {
                 if (!alone && !entry.getKey().startsWith("roof")) { continue; }
-                var area = entry.getKey().startsWith("roof") ? GpuBuildingInterior.area(entry.getValue())
-                      : GpuBuildingInterior.walls(entry.getValue(), entry.getKey().endsWith("@0") ? 9 : 27);
-                assertTrue(area.contains(0, 0), entry.getKey() + " " + java.util.Arrays.toString(reach));
+                assertTrue(GpuBuildingInterior.area(entry.getValue()).contains(0, 0),
+                      entry.getKey() + " " + java.util.Arrays.toString(reach));
             }
         }
     }
@@ -98,6 +104,22 @@ class GpuBuildingInteriorTest {
         assertTrue(footprint.contains(45, 5));
         assertFalse(footprint.contains(20, 20));
         assertFalse(footprint.contains(35, 5));
+    }
+
+    @Test
+    void floorsKeepClearOfWallFacesButReachAnOpenEnd() {
+        // A room whose walls stand on three sides; its north end stands open.
+        List<Vector3> walls = new ArrayList<>();
+        wall(walls, -12, -25, 12, -25);
+        wall(walls, 12, -25, 12, 25);
+        wall(walls, -12, 25, -12, -25);
+        var floor = GpuBuildingInterior.keepClear(new java.awt.geom.Area(new java.awt.geom.Rectangle2D.Float(-12, -25, 24, 50)),
+              GpuBuildingInterior.faces(walls, 18));
+        assertTrue(floor.contains(0, 0));
+        assertFalse(floor.contains(11.9, 0), "A floor edge on a wall's face flickers through it");
+        assertFalse(floor.contains(0, -24.9));
+        assertTrue(floor.contains(11.7, 0));
+        assertTrue(floor.contains(0, 24.9), "The open end keeps its floor to the edge");
     }
 
     private static void rectangle(List<Vector3> triangles, float x1, float y1, float x2, float y2) {

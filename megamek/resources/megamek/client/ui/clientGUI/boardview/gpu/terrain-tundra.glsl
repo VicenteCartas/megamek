@@ -3,8 +3,8 @@
 // Preserve actual image pigments and internal detail instead of thresholding them into flat coloured spots.
 // earth (dry fell-field), fungus, mineral, wet earth (autumn sedge); normal/AO at colour layer + 1
 uniform vec4 u_tundraLayers, u_tundraTiles;
-// The earth carpets at their own full size (GpuAssets.tundraCarpets): colour/height and normal/AO, dry 0 and wet 1.
-uniform sampler2DArray u_tundraCarpets, u_tundraCarpetData;
+// The earth carpets at their own full size: colour/height and normal/AO, dry layer 0 and wet layer 1.
+// FULL_SIZE_MAPS
 
 // The ground's distance in metres to the nearest drop (x) and rise (y), set by the sculpt before biomeSurface.
 vec2 tundraLandform = vec2(99.0);
@@ -88,7 +88,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
     // fine-mixed earth carpets blend their two scales by a quicker field, as ordinary ground does, so their repeat
     // never shows.
     float variation = biomeNoise(world.xy / 80.0 + 29.0);
-    float scaleMix = variation * .6 + texture(u_rainNoise, world.xy / 92.0 + .57).g * .4;
+    float scaleMix = variation * .6 + texture(u_surfaceNoise, rainNoiseAt(world.xy / 92.0 + .57)).g * .4;
     vec3 treated = vec3(0.0), mappedNormal = vec3(0.0);
     float mappedCavity = 0.0;
     Finish mappedFinish = Finish(0.0, 0.0, 0.0, vec3(0.0));
@@ -97,8 +97,10 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
         if (kinds[i] < .0001) continue;
         bool carpet = i == 0 || i == 3;
         // The earth carpets keep their own repeat foremost, for their crisp detail, the larger read only varying it.
-        float mixer = carpet ? scaleMix * .5 : variation, carpetLayer = i == 0 ? 0.0 : 1.0;
-        vec4 source = carpet ? tundraTexel(u_tundraCarpets, carpetLayer, u_tundraTiles[i], projection, mixer, true)
+        float mixer = carpet ? scaleMix * .5 : variation;
+        vec2 carpetLayers = i == 0 ? vec2(FULL_SIZE_CARPET_COLOR.x, FULL_SIZE_CARPET_DATA.x)
+              : vec2(FULL_SIZE_CARPET_COLOR.y, FULL_SIZE_CARPET_DATA.y);
+        vec4 source = carpet ? tundraTexel(u_fullSizeColor, carpetLayers.x, u_tundraTiles[i], projection, mixer, true)
               : tundraTexel(u_terrainLayers, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, false);
         float light = dot(source.rgb, vec3(.2126, .7152, .0722));
         vec3 pigment = source.rgb;
@@ -125,7 +127,7 @@ void tundraSurface(vec3 world, vec3 face, float amount, inout vec3 color, inout 
         mappedFinish = addFinish(mappedFinish,
               tundraFinish(u_tundraLayers[i], u_tundraTiles[i], projection, mixer, carpet), kinds[i]);
         if (u_normalMaps > .5) {
-            vec4 n = carpet ? tundraTexel(u_tundraCarpetData, carpetLayer, u_tundraTiles[i], projection, mixer, true)
+            vec4 n = carpet ? tundraTexel(u_fullSizeData, carpetLayers.y, u_tundraTiles[i], projection, mixer, true)
                   : tundraTexel(u_terrainData, u_tundraLayers[i] * .5, u_tundraTiles[i], projection, mixer, false);
             vec3 relief = upNormal(n.rgb * 2.0 - 1.0, face);
 #ifdef volcanicFlag

@@ -46,7 +46,7 @@ class GpuTerrainAsyncSmokeTest {
         var original = BoardGeometry.tuning();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {
-                try { ((Timer) field(fixture.source, "timer")).stop(); }
+                try { ((Timer) GpuTestSupport.field(fixture.source, "timer")).stop(); }
                 catch (Exception error) { throw new IllegalStateException(error); }
             });
             var config = GpuBoardWindow.configuration(false);
@@ -186,11 +186,5 @@ class GpuTerrainAsyncSmokeTest {
         System.out.printf("ASYNC %s median=%.3f ms p95=%.3f ms p99=%.3f ms max=%.3f ms%n", label,
               values.get(values.size() / 2), values.get((int) (values.size() * .95)),
               values.get((int) (values.size() * .99)), values.getLast());
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

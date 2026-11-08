@@ -100,6 +100,8 @@ final class GpuBoardOverlay implements Disposable {
     private static final float DRIFT_DASH_HEXES = .16f;
     private static final float DRIFT_GAP_HEXES = .1f;
     private static final float DRIFT_HEAD_HEXES = .24f;
+    /** The sides of a multi-hex unit's oval mark. */
+    private static final int OVAL_STEPS = 96;
 
     private final ModelBatch batch = new ModelBatch(GpuShaderManager.provider("Route markers", GpuUnitShader::unlitProvider),
           (camera, renderables) -> { });
@@ -277,7 +279,7 @@ final class GpuBoardOverlay implements Disposable {
      * Draws the marks where the units stand this frame and on their hexes, level as selection bands, half
      * a unit above the unit's base ({@code poses} gives each scene unit's as the view placed it; a unit without one
      * shows none) or on a hex's floating plane: in 3D first the hidden bands faintly where the terrain or a model hides
-     * them, then every band depth-tested; in the Tactical View flat over the board and the units' bases.
+     * them, then every band depth-tested; in the Tactical View flat over the board, the units' bases and their icons.
      */
     void renderMarks(Camera camera, Function<BoardScene.Unit, UnitFootprint.Pose> poses) {
         if (scene == null || unitMarks.isEmpty() && hexMarks.isEmpty() && incomingTargets.isEmpty()
@@ -316,9 +318,17 @@ final class GpuBoardOverlay implements Disposable {
             if (pose == null) {
                 continue;
             }
-            for (Coords occupied : pose.unit().footprint()) {
+            List<Coords> marked = UnitFootprint.markedHexes(scene, pose.unit());
+            if (marked.size() > 1) {
+                var oval = UnitFootprint.oval(pose.unit(), marked);
                 for (Band band : bands) {
-                    band((corner, inset) -> pose.outlinePoint(occupied, corner, inset), band, opacity);
+                    band((step, inset) -> pose.ovalPoint(oval, MathUtils.PI2 * step / OVAL_STEPS, inset), OVAL_STEPS, band, opacity);
+                }
+            } else {
+                for (Coords occupied : marked) {
+                    for (Band band : bands) {
+                        band((corner, inset) -> pose.outlinePoint(occupied, corner, inset), 6, band, opacity);
+                    }
                 }
             }
         }
@@ -328,7 +338,7 @@ final class GpuBoardOverlay implements Disposable {
             float z = BoardTacticalGeometry.floatingZ(scene, hex);
             for (Band band : entry.getValue()) {
                 band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
-                      .add(0, 0, z), band, opacity);
+                      .add(0, 0, z), 6, band, opacity);
             }
         }
         List<Band> incoming = incomingBands();
@@ -337,7 +347,7 @@ final class GpuBoardOverlay implements Disposable {
             float planeHeight = BoardTacticalGeometry.floatingZ(scene, hex);
             for (Band band : incoming) {
                 band((corner, inset) -> BoardGeometry.inset(BoardGeometry.corner(hex, 0, corner), center, inset)
-                      .add(0, 0, planeHeight), band, opacity);
+                      .add(0, 0, planeHeight), 6, band, opacity);
             }
         }
         // The Tactical View draws its own drift arrows, with the rest of the flat board's art.
@@ -430,24 +440,24 @@ final class GpuBoardOverlay implements Disposable {
               new Band(.74f, .26f, alpha(INCOMING_RED, .35f + .45f * pulse)));
     }
 
-    /** A point of a mark's outline: the hex corner {@code corner} moved {@code inset} hex radii toward the centre. */
+    /** A point of a mark's outline: its corner {@code corner} moved {@code inset} hex radii toward the centre. */
     private interface Outline {
         Vector3 point(int corner, float inset);
     }
 
-    /** A band as two triangles a side; one that reaches the centre as one. */
-    private void band(Outline outline, Band band, float opacity) {
+    /** A band round an outline of {@code corners} points, as two triangles a side; one that reaches the centre as one. */
+    private void band(Outline outline, int corners, Band band, float opacity) {
         Color color = band.color();
         float bits = Color.toFloatBits(color.r, color.g, color.b, color.a * opacity);
         float reach = Math.min(1, band.inset() + band.width());
-        Vector3[] outer = new Vector3[6];
-        Vector3[] inner = new Vector3[6];
-        for (int corner = 0; corner < 6; corner++) {
+        Vector3[] outer = new Vector3[corners];
+        Vector3[] inner = new Vector3[corners];
+        for (int corner = 0; corner < corners; corner++) {
             outer[corner] = outline.point(corner, band.inset());
             inner[corner] = outline.point(corner, reach);
         }
-        for (int corner = 0; corner < 6; corner++) {
-            int next = (corner + 1) % 6;
+        for (int corner = 0; corner < corners; corner++) {
+            int next = (corner + 1) % corners;
             triangle(outer[corner], outer[next], inner[next], bits);
             if (reach < 1) {
                 triangle(outer[corner], inner[next], inner[corner], bits);
@@ -498,7 +508,7 @@ final class GpuBoardOverlay implements Disposable {
     /**
      * The plotted route's ghost (rebuild plan A.7 G4): a copy of the instance the view draws for the moving unit
      * ({@code shown} gives it for a scene unit, or null), sharing its meshes, at the route's destination in the final
-     * facing: a translucent cyan copy of the model, or of the meeple in the Tactical View. It shows through scenery
+     * facing: a translucent cyan copy of the model, or of the icon in the Tactical View. It shows through scenery
      * without writing scene depth, drawn after the route and the units.
      * When the route's pulse lands, the ghost surges. Nothing without a plotted route of the planner.
      */
@@ -598,7 +608,8 @@ final class GpuBoardOverlay implements Disposable {
     /** The prototype's layers that lie on hexes, in its drawing order; the batch keeps that order. */
     private ModelInstance build() {
         Sink sink = new Sink(material(tactical));
-        Sink markers = new Sink(material(true));
+        // What a step says about its hex stays readable over the Tactical View's unit icons.
+        Sink markers = new Sink(markerMaterial());
         Map<Integer, BoardScene.Unit> shown = new HashMap<>();
         scene.units().forEach(unit -> shown.putIfAbsent(unit.id(), unit));
         BoardScene.Unit moving = shown.get(move.entityId());
@@ -1101,10 +1112,16 @@ final class GpuBoardOverlay implements Disposable {
      * Unlit vertex colours blended in drawing order, without writing depth: depth-tested against the terrain and
      * models by default, or always visible for movement previews and the flat Tactical View.
      */
+    private static Material markerMaterial() {
+        Material marker = material(true);
+        marker.set(new DepthTestAttribute(GL20.GL_ALWAYS, false));
+        return marker;
+    }
+
     private static Material material(boolean alwaysVisible) {
         return new Material(ColorAttribute.createDiffuse(Color.WHITE),
               new BlendingAttribute(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA),
-              new DepthTestAttribute(alwaysVisible ? GL20.GL_ALWAYS : GL20.GL_LEQUAL, false),
+              alwaysVisible ? MeepleVisual.overScene() : new DepthTestAttribute(GL20.GL_LEQUAL, false),
               IntAttribute.createCullFace(GL20.GL_NONE));
     }
 

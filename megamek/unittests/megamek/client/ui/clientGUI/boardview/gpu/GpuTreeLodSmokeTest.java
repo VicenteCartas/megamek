@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -39,10 +38,7 @@ import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.math.collision.Ray;
-import com.badlogic.gdx.utils.BufferUtils;
-import com.badlogic.gdx.utils.JsonReader;
 import com.badlogic.gdx.utils.ScreenUtils;
-import megamek.common.Configuration;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -62,12 +58,6 @@ class GpuTreeLodSmokeTest {
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
-                if (Boolean.getBoolean("megamek.gpu.reviewImpostorMaterials")) {
-                    try { reviewImpostorMaterials(); }
-                    catch (Throwable error) { failure.set(error); }
-                    finally { Gdx.app.exit(); }
-                    return;
-                }
                 GpuAssets assets = new GpuAssets();
                 GpuTerrain terrain = new GpuTerrain();
                 ModelBatch depth = new ModelBatch(GpuTreeInstances.depthProvider(new DepthShader.Config()));
@@ -75,10 +65,6 @@ class GpuTreeLodSmokeTest {
                 Model occupant = new ModelBuilder().createBox(4, 4, 40, new Material(), VertexAttributes.Usage.Position);
                 try {
                     profiler.enable();
-                    if (Boolean.getBoolean("megamek.gpu.reviewAllImpostors")) {
-                        reviewAllImpostors(assets);
-                        return;
-                    }
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     camera.setIsometric(true);
@@ -131,6 +117,7 @@ class GpuTreeLodSmokeTest {
                         int nearDepthCount = 0;
                         int shadowLevel = 0;
                         float shadowZoom = 0;
+                        int[] fadeCounts = new int[PIXELS.length];
                         for (int level : new int[] { 0, 1, 2, 3, 0, 3, 2, 1, 0 }) {
                             camera.camera.zoom = level == 0 ? 0.1f : zoomForSize(diameter, PIXELS[level]);
                             camera.update();
@@ -166,8 +153,10 @@ class GpuTreeLodSmokeTest {
                             shadowZoom = camera.camera.zoom;
                             assertEquals(nearHit, terrain.hit(scene, new Ray(new Vector3(center).add(0, 0, 1000),
                                   new Vector3(0, 0, -1))), "Picking remains stable across detail levels");
+                            // The transparent pass holds the crowns' faded texels (GpuCutoutFade), the same before and after.
+                            fadeCounts[level] = count(profiler, () -> terrain.renderTransparent(camera.camera));
                             terrain.animate(0, List.of(unit), 0);
-                            assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)),
+                            assertEquals(fadeCounts[level], count(profiler, () -> terrain.renderTransparent(camera.camera)),
                                   "Trees must stay in the opaque pass when a unit enters");
                             assertEquals(colorCount, colour(profiler, terrain, camera));
                             assertEquals(depthCount,
@@ -181,7 +170,7 @@ class GpuTreeLodSmokeTest {
                             terrain.refreshShadows();
                             assertTrue(drawnLevel(nearShadowCount
                                   - count(profiler, () -> terrain.renderShadows(camera.camera, List.of())), triangles) >= 0);
-                            assertEquals(0, count(profiler, () -> terrain.renderTransparent(camera.camera)));
+                            assertEquals(fadeCounts[level], count(profiler, () -> terrain.renderTransparent(camera.camera)));
                             assertEquals(nearDepthCount - 3 * (triangles[0] - triangles[level]),
                                   count(profiler, () -> terrain.renderDepth(camera.camera, List.of(), depth)));
                             assertEquals(0, count(profiler, () -> terrain.renderShadows(camera.camera, List.of())),
@@ -209,339 +198,6 @@ class GpuTreeLodSmokeTest {
     private static boolean authoredForest(String name) {
         return name.startsWith("vegetation/tree") && !name.startsWith("vegetation/tree-dead")
               || name.startsWith("vegetation/willow") || name.startsWith("vegetation/birch");
-    }
-
-    /** Opt-in external pilot: reuse the complete review with selected immutable assets/source drafts. */
-    private static void reviewImpostorMaterials() throws Exception {
-        File previousData = Configuration.dataDir();
-        boolean previousSpecularAA = GpuEnvironmentLighting.specularAntialiasing;
-        var drafts = new java.util.LinkedHashMap<String, String>();
-        String sourceRoot = System.getProperty("megamek.gpu.impostorSources");
-        if (sourceRoot != null) {
-            for (String name : List.of("terrain-foliage.frag", "tree-instances.glsl")) {
-                drafts.put(name, Files.readString(java.nio.file.Path.of(sourceRoot, name)));
-            }
-        }
-        var manager = new GpuShaderManager();
-        try {
-            String dataRoot = System.getProperty("megamek.gpu.impostorData");
-            if (dataRoot != null) { Configuration.setDataDir(new File(dataRoot)); }
-            GpuEnvironmentLighting.specularAntialiasing = !Boolean.getBoolean("megamek.gpu.impostorAAOff");
-            var applied = manager.apply(drafts);
-            assertTrue(applied.success(), applied.message());
-            manager.run(() -> {
-                var assets = new GpuAssets();
-                try {
-                    reviewAllImpostors(assets);
-                } catch (Exception error) { throw new IllegalStateException(error); }
-                finally { assets.dispose(); }
-            });
-        } finally {
-            try { manager.close(); }
-            finally {
-                Configuration.setDataDir(previousData);
-                GpuEnvironmentLighting.specularAntialiasing = previousSpecularAA;
-            }
-        }
-    }
-
-    /** Optional authored-material review: every effective impostor, at one matched native footprint. */
-    private static void reviewAllImpostors(GpuAssets assets) throws Exception {
-        String expectedRenderer = System.getProperty("megamek.gpu.expectedRenderer");
-        if (expectedRenderer != null) {
-            assertTrue(Gdx.gl.glGetString(GL20.GL_RENDERER).contains(expectedRenderer), "Requested review GPU");
-        }
-        String diagnosticSources = System.getProperty("megamek.gpu.impostorSources");
-        boolean frameDiagnostic = diagnosticSources != null && Files.readString(
-              java.nio.file.Path.of(diagnosticSources, "terrain-foliage.frag")).contains("Diagnostic: mapped frame validity");
-        boolean scaledMirrored = Boolean.getBoolean("megamek.gpu.impostorScaledMirrored");
-        var root = new File(Configuration.dataDir(), "models/board");
-        // Tool data beside the game's sources: mm-data/tools/board-models, never shipped.
-        var manifest = java.nio.file.Path.of("../../mm-data/tools/board-models/manifest.json");
-        var catalog = new JsonReader().parse(Files.readString(manifest));
-        List<String> names = new java.util.ArrayList<>();
-        for (var entry = catalog.child; entry != null; entry = entry.next) {
-            var lods = entry.get("lods");
-            if (lods != null && lods.size == 4) { names.add(entry.name); }
-        }
-        assertEquals(84, names.size(), "Review the complete effective four-LOD catalog, including snow and shrub variants");
-        names.sort(String::compareTo);
-        String selected = System.getProperty("megamek.gpu.impostorNames");
-        if (selected != null) {
-            List<String> requested = java.util.Arrays.stream(selected.split(",")).map(String::trim).toList();
-            assertTrue(!requested.isEmpty() && names.containsAll(requested), "Requested actual catalog entries");
-            assertEquals(requested.size(), new java.util.HashSet<>(requested).size(), "No repeated specimen names");
-            names.retainAll(requested);
-        }
-        var destination = new File(System.getProperty("megamek.gpu.screenshots"), "impostor-all62").toPath();
-        assertTrue(Files.notExists(destination), "Preserve previous review evidence");
-        Files.createDirectories(destination);
-        var preview = new GpuTerrain();
-        var batchField = GpuTerrain.class.getDeclaredField("batch");
-        batchField.setAccessible(true);
-        ModelBatch batch = (ModelBatch) batchField.get(preview);
-        var prepare = GpuTerrain.class.getDeclaredMethod("foliage", Model.class);
-        prepare.setAccessible(true);
-        var instances = new GpuTreeInstances((name, level) -> {
-            try { return (Model) prepare.invoke(null, assets.lodModel(name, level)); }
-            catch (ReflectiveOperationException error) { throw new IllegalStateException(error); }
-        });
-        List<Object> rows = new java.util.ArrayList<>();
-        List<Object> repairControls = new java.util.ArrayList<>();
-        List<String> invalidFrameFailures = new java.util.ArrayList<>();
-        var floats = BufferUtils.newFloatBuffer(128 * 128 * 4);
-        try (var output = new GpuSceneTestOutput()) {
-            for (float hour : new float[] { 13, 6.5f }) {
-                var lighting = BoardAtmosphere.lighting(new BoardAtmosphere.Settings(hour, 0, 0,
-                      BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
-                preview.setAtmosphere(lighting);
-                if (Boolean.getBoolean("megamek.gpu.reviewImpostorMaterials")) {
-                    preview.setNormalMaps(!Boolean.getBoolean("megamek.gpu.impostorMicroOff"));
-                    preview.setWetness(Float.parseFloat(System.getProperty("megamek.gpu.impostorWetness", "0")));
-                }
-                // Borrow the production light/IBL attributes, without a shadow-map target. These isolated
-                // specimen captures intentionally have no ground or shadow casters; no uninitialised depth read.
-                var environment = new Environment();
-                for (var attribute : preview.environment()) { environment.set(attribute); }
-                assertNull(environment.shadowMap);
-                for (String name : names) {
-                    Model reference = assets.lodModel(name, 0);
-                    var placement = new Matrix4();
-                    if (scaledMirrored) { placement.rotate(Vector3.Z, 23).scale(1.7f, -1.7f, .6f); }
-                    BoundingBox bounds = reference.calculateBoundingBox(new BoundingBox()).mul(placement);
-                    Vector3 dimensions = bounds.getDimensions(new Vector3());
-                    float diameter = dimensions.len();
-                    assertTrue(Float.isFinite(diameter) && diameter > 0, "Finite real bounds: " + name);
-                    var stand = new GpuTreeInstances.Stand();
-                    stand.add(name, placement);
-                    var camera = new BoardCamera();
-                    camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    camera.setIsometric(true);
-                    camera.orbit(Float.parseFloat(System.getProperty("megamek.gpu.impostorYawDelta", "0")),
-                          Float.parseFloat(System.getProperty("megamek.gpu.impostorTiltDelta", "0")));
-                    camera.center(bounds.getCenter(new Vector3()));
-                    camera.camera.zoom = zoomForSize(diameter, 26.4f);
-                    camera.update();
-                    float physicalDiameter = diameter * Gdx.graphics.getBackBufferHeight()
-                          / Gdx.graphics.getHeight() / camera.camera.zoom;
-                    assertEquals(26.4f, physicalDiameter, .001f, "Same real reference bounds and footprint for both LODs");
-                    var source = RigidGlb.source(root, name);
-                    // The authored-normal repair also affects forked LOD1. Keep its one daylight
-                    // control separate from the unchanged62-entry LOD2/3 review matrix.
-                    int[] levels = name.equals("vegetation/tree-volcano-forked") && hour == 13
-                          ? new int[] { 1, 2, 3 } : new int[] { 2, 3 };
-                    for (int level : levels) {
-                        // Warm once to populate actual program/texture bindings; the animation clock stays zero.
-                        foliageFrame(output, preview, instances, stand, level, batch, environment, camera);
-                        BufferedImage frame = foliageFrame(output, preview, instances, stand, level, batch, environment, camera);
-                        BufferedImage repeat = foliageFrame(output, preview, instances, stand, level, batch, environment, camera);
-                        assertEquals(frame.getWidth(), repeat.getWidth());
-                        assertEquals(frame.getHeight(), repeat.getHeight());
-                        assertTrue(java.util.Arrays.equals(frame.getRGB(0, 0, frame.getWidth(), frame.getHeight(), null, 0,
-                                    frame.getWidth()), repeat.getRGB(0, 0, repeat.getWidth(), repeat.getHeight(), null, 0,
-                                    repeat.getWidth())), "Frozen whole-frame repeat: " + name + " LOD" + level);
-                        int x = frame.getWidth() / 2 - 64, y = frame.getHeight() / 2 - 64;
-                        output.scene().begin();
-                        floats.clear();
-                        Gdx.gl.glReadPixels(x, y, 128, 128, GL20.GL_RGBA, GL20.GL_FLOAT, floats);
-                        float maximum = 0;
-                        boolean[] invalidFrames = frameDiagnostic ? new boolean[128 * 128] : null;
-                        for (int i = 0; i < floats.capacity(); i++) {
-                            float value = floats.get(i);
-                            if (!Float.isFinite(value)) {
-                                var failure = new java.util.LinkedHashMap<String, Object>();
-                                int pixel = i / 4;
-                                failure.put("name", name);
-                                failure.put("lod", level);
-                                failure.put("hour", hour);
-                                failure.put("channel", "RGBA".substring(i % 4, i % 4 + 1));
-                                failure.put("storedValue", Float.toString(value));
-                                failure.put("cropPixelFromBottomLeft", List.of(pixel % 128, pixel / 128));
-                                failure.put("framePixelFromBottomLeft", List.of(x + pixel % 128, y + pixel / 128));
-                                failure.put("framePixelFromTopLeft", List.of(x + pixel % 128,
-                                      frame.getHeight() - 1 - y - pixel / 128));
-                                failure.put("framebufferStatus", Gdx.gl.glCheckFramebufferStatus(GL20.GL_FRAMEBUFFER));
-                                failure.put("sceneAttachmentContract", "GpuHeatGlow.buffer: RGBA16F color, DEPTH_COMPONENT24 depth");
-                                failure.put("sceneRadianceScale", GpuSceneRadiance.SCALE);
-                                failure.put("renderer", Gdx.gl.glGetString(GL20.GL_RENDERER));
-                                failure.put("physicalGlb", source.file().getName());
-                                failure.put("physicalGlbSha256", reviewHash(source.file().toPath()));
-                                failure.put("completedFrames", rows.size());
-                                ImageIO.write(frame, "png", destination.resolve("failure-frame.png").toFile());
-                                new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
-                                      .writeValue(destination.resolve("failure.json").toFile(), failure);
-                                assertTrue(Float.isFinite(value), "Finite scene sample: " + name + " LOD" + level
-                                      + " hour " + hour + " channel " + i % 4 + " sample " + i / 4 + " value " + value);
-                            }
-                            if (i % 4 != 3) { maximum = Math.max(maximum, value / GpuSceneRadiance.SCALE); }
-                            if (frameDiagnostic && i % 4 == 0) { invalidFrames[i / 4] = value / GpuSceneRadiance.SCALE > .5f; }
-                        }
-                        floats.clear();
-                        floats.limit(128 * 128);
-                        Gdx.gl.glReadPixels(x, y, 128, 128, GL20.GL_DEPTH_COMPONENT, GL20.GL_FLOAT, floats);
-                        int covered = 0, invalidFramePixels = 0;
-                        byte[] coveredDepthMask = new byte[128 * 128];
-                        for (int i = 0; i < 128 * 128; i++) {
-                            float depth = floats.get(i);
-                            assertTrue(Float.isFinite(depth) && depth >= 0 && depth <= 1, "Valid specimen depth");
-                            if (depth < 1) {
-                                covered++;
-                                coveredDepthMask[i] = 1;
-                                if (frameDiagnostic && invalidFrames[i]) { invalidFramePixels++; }
-                            }
-                        }
-                        assertTrue(covered > 0, "The actual cutout must cover pixels: " + name + " LOD" + level);
-                        output.scene().end();
-                        output.pixels().begin();
-                        String filename = name.substring(name.lastIndexOf('/') + 1) + "-" + (hour == 13 ? "day" : "low-sun") + "-lod" + level + ".png";
-                        var image = destination.resolve(filename);
-                        ImageIO.write(frame.getSubimage(x, y, 128, 128), "png", image.toFile());
-                        var row = new java.util.LinkedHashMap<String, Object>();
-                        row.put("name", name);
-                        row.put("lod", level);
-                        row.put("hour", hour);
-                        row.put("image", filename);
-                        row.put("pngSha256", reviewHash(image));
-                        row.put("physicalGlb", source.file().getName());
-                        row.put("physicalGlbSha256", reviewHash(source.file().toPath()));
-                        row.put("variant", source.variant());
-                        row.put("referenceBoundsCenter", reviewVector(bounds.getCenter(new Vector3())));
-                        row.put("referenceBoundsDimensions", reviewVector(dimensions));
-                        row.put("lodBoundsDimensions", reviewVector(assets.lodModel(name, level)
-                              .calculateBoundingBox(new BoundingBox()).mul(placement).getDimensions(new Vector3())));
-                        row.put("lodProjectedBoundsPhysicalPixels", reviewProjectedBounds(assets.lodModel(name, level)
-                              .calculateBoundingBox(new BoundingBox()).mul(placement), camera));
-                        row.put("referenceDiameterPhysicalPixels", physicalDiameter);
-                        row.put("cameraZoom", camera.camera.zoom);
-                        row.put("mirroredScaled", scaledMirrored);
-                        if (frameDiagnostic) { row.put("invalidFramePixels", invalidFramePixels); }
-                        row.put("cameraPosition", reviewVector(camera.camera.position));
-                        row.put("cameraDirection", reviewVector(camera.camera.direction));
-                        row.put("directLinear", List.of(lighting.direct().r, lighting.direct().g, lighting.direct().b));
-                        row.put("ambientLinear", List.of(lighting.ambient().r, lighting.ambient().g, lighting.ambient().b));
-                        row.put("lightDirection", reviewVector(lighting.direction()));
-                        row.put("coveredDepthPixels", covered);
-                        row.put("coveredDepthMaskSha256", java.util.HexFormat.of().formatHex(
-                              java.security.MessageDigest.getInstance("SHA-256").digest(coveredDepthMask)));
-                        row.put("maximumSceneRadiance", maximum);
-                        row.put("displayAdaptation", Boolean.getBoolean("megamek.gpu.reviewImpostorMaterials")
-                              ? preview.lightAdaptation() : 1);
-                        row.put("microNormalMaps", !Boolean.getBoolean("megamek.gpu.impostorMicroOff"));
-                        row.put("specularAntialiasing", GpuEnvironmentLighting.specularAntialiasing);
-                        row.put("wetness", Float.parseFloat(System.getProperty("megamek.gpu.impostorWetness", "0")));
-                        if (level == 3) {
-                            var material = assets.lodModel(name, level).getMaterial("impostor");
-                            assertTrue(material != null, "Actual card material");
-                            row.put("cardNormalMap", material.has(TextureAttribute.Normal));
-                            row.put("cardSurfaceMap", material.has(TextureAttribute.Ambient));
-                            if (frameDiagnostic && invalidFramePixels > 0) {
-                                invalidFrameFailures.add(name + " LOD3 hour " + hour + ": " + invalidFramePixels);
-                            }
-                            if (System.getProperty("megamek.gpu.impostorData") != null) {
-                                boolean expectedMaps = Boolean.parseBoolean(System.getProperty(
-                                      "megamek.gpu.impostorExpectedMaps", "true"));
-                                row.put("expectedCardMaterialMaps", expectedMaps);
-                                assertEquals(expectedMaps, material.has(TextureAttribute.Normal),
-                                      "Actual external card normal map for " + name);
-                                assertEquals(expectedMaps, material.has(TextureAttribute.Ambient),
-                                      "Actual external card surface map for " + name);
-                            }
-                        }
-                        if (Boolean.getBoolean("megamek.gpu.impostorTiming")) {
-                            row.put("specimenDrawTimings", specimenTimings(output, preview, instances, stand,
-                                  level, batch, environment, camera));
-                        }
-                        if (level == 1) { repairControls.add(row); } else { rows.add(row); }
-                    }
-                }
-            }
-            assertEquals(names.size() * 4, rows.size());
-            assertEquals(names.contains("vegetation/tree-volcano-forked") ? 1 : 0, repairControls.size(),
-                  "One repaired forked LOD1 daylight control when that specimen is selected");
-            String selectedSource = System.getProperty("megamek.gpu.impostorSources");
-            if (selectedSource != null) {
-                // Draft construction can fall back on an unsupported variant: reject that silently wrong control.
-                var targetsField = GpuShaderManager.class.getDeclaredField("targets");
-                targetsField.setAccessible(true);
-                @SuppressWarnings("unchecked")
-                var targets = (List<GpuShaderManager.Target>) targetsField.get(GpuShaderManager.current());
-                boolean materialDraft = Files.readString(java.nio.file.Path.of(selectedSource, "terrain-foliage.frag"))
-                      .contains("#define impostorMaterialFlag");
-                boolean noSelfOcclusion = Files.readString(java.nio.file.Path.of(selectedSource, "terrain-foliage.frag"))
-                      .contains("Diagnostic: remove only the unaccepted affine occlusion estimate");
-                boolean commonCactus = Files.readString(java.nio.file.Path.of(selectedSource, "terrain-foliage.frag"))
-                      .contains("Shared material lighting also covers waxy stems");
-                int checked = 0;
-                for (var target : targets) {
-                    if (!target.files().contains("terrain-foliage.frag")) { continue; }
-                    for (var linked : target.sources()) {
-                        if (!linked.fragment().contains("uniform float u_foliage;")) { continue; }
-                        assertEquals(materialDraft, linked.fragment().contains("#define impostorMaterialFlag"),
-                              "Actual linked foliage source must use the requested material representation");
-                        assertEquals(noSelfOcclusion, linked.fragment().contains(
-                              "Diagnostic: remove only the unaccepted affine occlusion estimate"),
-                              "Actual linked source must use the requested visibility control");
-                        assertTrue(linked.fragment().contains(
-                              "surfaceVariance = normalVariance(dFdx(baseNormal), dFdy(baseNormal));"),
-                              "Actual foliage program retains geometric specular AA");
-                        assertEquals(frameDiagnostic, linked.fragment().contains("Diagnostic: mapped frame validity"),
-                              "Actual linked program must use requested frame diagnostic");
-                        assertEquals(commonCactus, linked.fragment().contains("Shared material lighting also covers waxy stems"),
-                              "Cactus cleanup must remain an explicit independent control");
-                        checked++;
-                    }
-                }
-                assertTrue(checked > 0, "Actual foliage programs were checked");
-            }
-            var report = new java.util.LinkedHashMap<String, Object>();
-            report.put("renderer", Gdx.gl.glGetString(GL20.GL_RENDERER));
-            report.put("manifestSha256", reviewHash(manifest));
-            report.put("physicalFramebuffer", List.of(Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight()));
-            report.put("animationClock", 0);
-            report.put("placement", scaledMirrored ? "yaw23 scale(1.7,-1.7,.6)" : "identity");
-            report.put("invalidFrameFailures", invalidFrameFailures);
-            report.put("selectedNames", names);
-            report.put("dataRoot", Configuration.dataDir().getAbsolutePath());
-            report.put("sourceRoot", System.getProperty("megamek.gpu.impostorSources"));
-            var sourceHashes = new java.util.LinkedHashMap<String, String>();
-            String sourceRoot = System.getProperty("megamek.gpu.impostorSources");
-            if (sourceRoot != null) {
-                for (String name : List.of("terrain-foliage.frag", "tree-instances.glsl")) {
-                    sourceHashes.put(name, reviewHash(java.nio.file.Path.of(sourceRoot, name)));
-                }
-            }
-            report.put("sourceSha256", sourceHashes);
-            report.put("timingScope", "Optional single-specimen draw including submission, excluding clear/display/readback; not board FPS or aggregate preparation cost.");
-            report.put("scope", names.size() + " effective entries, actual production foliage shader, recorded model placement, matched LOD0 bounding-sphere diameter26.4physicalpx; LOD2/3, clear13:00/06:30. Shadowless specimens; no ground, fog or self-shadow equivalence claim. Native128px crops are unscaled. Source/runtime freeze belongs to the runner.");
-            report.put("frames", rows);
-            report.put("repairControls", repairControls);
-            new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter()
-                  .writeValue(destination.resolve("review.json").toFile(), report);
-            assertTrue(invalidFrameFailures.isEmpty(), "No visible carrier fallback: " + invalidFrameFailures);
-            assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-        } finally {
-            instances.dispose();
-            preview.dispose();
-        }
-    }
-
-    private static List<Float> reviewVector(Vector3 vector) { return List.of(vector.x, vector.y, vector.z); }
-
-    private static List<Float> reviewProjectedBounds(BoundingBox bounds, BoardCamera camera) {
-        float lowX = Float.POSITIVE_INFINITY, lowY = Float.POSITIVE_INFINITY;
-        float highX = Float.NEGATIVE_INFINITY, highY = Float.NEGATIVE_INFINITY;
-        for (int corner = 0; corner < 8; corner++) {
-            Vector3 point = new Vector3((corner & 1) == 0 ? bounds.min.x : bounds.max.x,
-                  (corner & 2) == 0 ? bounds.min.y : bounds.max.y, (corner & 4) == 0 ? bounds.min.z : bounds.max.z);
-            camera.camera.project(point, 0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-            lowX = Math.min(lowX, point.x); highX = Math.max(highX, point.x);
-            lowY = Math.min(lowY, point.y); highY = Math.max(highY, point.y);
-        }
-        return List.of(highX - lowX, highY - lowY);
-    }
-
-    private static String reviewHash(java.nio.file.Path path) throws Exception {
-        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
     }
 
 
@@ -650,8 +306,8 @@ class GpuTreeLodSmokeTest {
 
     /** Native pixel scale at the largest size each coarse mesh can retain through hysteresis. */
     private static void compareDistantLevels(GpuAssets assets, Environment environment, List<String> names) throws Exception {
-        // Impostor vertex colors encode lighting, not pigment. Use the actual instanced foliage shader here;
-        // the default ModelBatch used for silhouette comparisons would tint these cards purple.
+        // Impostor vertex colors encode surface data, not pigment. Use the actual instanced foliage shader here;
+        // the default ModelBatch used for silhouette comparisons would tint these cards.
         var preview = new GpuTerrain();
         var batchField = GpuTerrain.class.getDeclaredField("batch");
         batchField.setAccessible(true);
@@ -676,7 +332,7 @@ class GpuTreeLodSmokeTest {
             for (int row = 0; row < names.size(); row++) {
                 String name = names.get(row);
                 var stand = new GpuTreeInstances.Stand();
-                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
+                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f), 0);
                 BoundingBox bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 float diameter = bounds.getDimensions(new Vector3()).scl(1, 1, 36 / bounds.getDepth()).len();
                 graphics.drawString(name, 12, row * 132 + 94);
@@ -733,7 +389,7 @@ class GpuTreeLodSmokeTest {
             }
             for (String name : materialPlants) {
                 var stand = new GpuTreeInstances.Stand();
-                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f));
+                stand.add(name, new Matrix4().setToScaling(1, 1, 36 / 30f), 0);
                 var bounds = assets.model(name).calculateBoundingBox(new BoundingBox());
                 var detail = new BufferedImage(1152, 416, BufferedImage.TYPE_INT_RGB);
                 var paint = detail.createGraphics();
@@ -782,43 +438,16 @@ class GpuTreeLodSmokeTest {
         assertTrue(continuityErrors.isEmpty(), String.join("\n", continuityErrors));
     }
 
-    private static String specimenTimings(GpuSceneTestOutput output, GpuTerrain preview, GpuTreeInstances instances,
-          GpuTreeInstances.Stand stand, int level, ModelBatch batch, Environment environment, BoardCamera camera) {
-        try (var timings = new GpuStageTimings()) {
-            for (int frame = 0; frame < 80; frame++) {
-                output.scene().begin();
-                newShadingPass(preview);
-                Gdx.gl.glDepthMask(true);
-                ScreenUtils.clear(0, 0, 0, 1, true);
-                timings.beginFrame(frame >= 20);
-                timings.stage("specimen");
-                drawFoliage(instances, stand, level, batch, environment, camera);
-                timings.stage(null);
-                Gdx.gl.glFinish();
-                timings.poll();
-                output.scene().end();
-            }
-            var report = new StringBuilder();
-            timings.appendReport(report, "matched-footprint LOD" + level);
-            String result = report.toString();
-            assertTrue(result.contains("GPU timestamps: supported; dropped samples: 0"), result);
-            assertTrue(result.contains("specimen,60,"), result);
-            return result;
-        }
-    }
-
     private static BufferedImage foliageFrame(GpuSceneTestOutput output, GpuTerrain preview, GpuTreeInstances instances,
           GpuTreeInstances.Stand stand, int level, ModelBatch batch, Environment environment, BoardCamera camera) {
         output.scene().begin();
         // Start a real frame: shader globals are cached within one terrain pass, including the normal-map toggle.
         newShadingPass(preview);
         Gdx.gl.glDepthMask(true);
-        float adaptation = Boolean.getBoolean("megamek.gpu.reviewImpostorMaterials") ? preview.lightAdaptation() : 1;
-        ScreenUtils.clear(GpuColor.linear(.035f) * GpuSceneRadiance.SCALE / adaptation,
-              GpuColor.linear(.055f) * GpuSceneRadiance.SCALE / adaptation,
-              GpuColor.linear(.075f) * GpuSceneRadiance.SCALE / adaptation, 1, true);
+        ScreenUtils.clear(GpuColor.linear(.035f) * GpuSceneRadiance.SCALE, GpuColor.linear(.055f) * GpuSceneRadiance.SCALE,
+              GpuColor.linear(.075f) * GpuSceneRadiance.SCALE, 1, true);
         drawFoliage(instances, stand, level, batch, environment, camera);
-        output.display(adaptation);
+        output.display();
         return pixels();
     }
 

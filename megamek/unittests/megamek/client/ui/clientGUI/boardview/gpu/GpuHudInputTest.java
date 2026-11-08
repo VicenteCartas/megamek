@@ -26,12 +26,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.awt.event.KeyEvent;
-import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -63,7 +60,6 @@ import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Layout;
 import com.badlogic.gdx.scenes.scene2d.utils.UIUtils;
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import megamek.client.ui.clientGUI.BoardGraphics;
 import megamek.client.ui.clientGUI.MapMenu;
 import megamek.client.ui.clientGUI.boardview.NameplateMode;
 import megamek.client.ui.clientGUI.boardview.RulerModel;
@@ -73,7 +69,6 @@ import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.gdx.UiMenuList;
 import megamek.client.ui.gdx.UiModal;
 import megamek.client.ui.util.KeyCommandBind;
-import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.units.Entity;
@@ -88,13 +83,11 @@ import org.junit.jupiter.api.Test;
  * source and its services are mocks, so every command the HUD posts is recorded and nothing reaches Swing.
  */
 class GpuHudInputTest {
-    private static final int FIRST = 1;
     private static final int SECOND = 2;
     private static final int THIRD = 3;
     private static final int FOE = 7;
     private static final int BLIP = 8;
-    private static final Coords HEX = new Coords(4, 6);
-    private static final GpuMovePlan.Step STEP = new GpuMovePlan.Step(HEX, 0, 0, 0, GpuMovePlan.Band.WALK, false);
+    private static final GpuMovePlan.Step STEP = new GpuMovePlan.Step(GpuHudFixtures.HEX, 0, 0, 0, GpuMovePlan.Band.WALK, false);
 
     /** A key as the board view passes it: the libGDX code and the AWT code and modifiers. */
     private record Key(int gdx, int awt, int modifiers) { }
@@ -170,9 +163,9 @@ class GpuHudInputTest {
 
     @Test
     void escapeWithTheOverviewOpenClosesOnlyTheOverviewThenWalksTheChain() {
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(FOE, ENEMY, false, false));
-        update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(FOE, ENEMY, false, false));
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         hud.state.overview = true;
         hud.state.chatOpen = true;
         hud.state.inspected = FOE;
@@ -189,7 +182,7 @@ class GpuHudInputTest {
         verify(moves, times(1)).clearRoute();
         assertEquals(FOE, hud.state.inspected);
         // The EDT publishes the cleared route.
-        update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertTrue(escape());
         assertEquals(Entity.NONE, hud.state.inspected);
         assertFalse(escape(), "the last Esc of the movement phase goes to the phase display as CANCEL");
@@ -197,7 +190,7 @@ class GpuHudInputTest {
         // OFFBOARD runs the targeting display, whose CANCEL clears the declared attacks as well.
         for (GamePhase phase : List.of(GamePhase.FIRING, GamePhase.TARGETING, GamePhase.OFFBOARD,
               GamePhase.PHYSICAL)) {
-            update(status(3, phase, true, FIRST, 0, unit(FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
+            update(GpuHudFixtures.status(3, phase, true, GpuHudFixtures.FIRST, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
             assertTrue(escape(), "CANCEL would clear declared attacks, so " + phase + " never forwards it");
         }
         verify(moves, times(1)).clearRoute();
@@ -205,10 +198,10 @@ class GpuHudInputTest {
 
     @Test
     void theSharedSelectMenuRestoresTheSameActorAfterTheCardClearsSelection() {
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1,
-              unit(FIRST, OWN, true, true));
-        GpuHudData panels = panels(move(true, List.of(STEP)), GpuFireOrders.Snapshot.EMPTY,
-              GpuPhysicalOptions.Snapshot.EMPTY, record(FIRST));
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true));
+        GpuHudData panels = GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuFireOrders.Snapshot.EMPTY,
+              GpuPhysicalOptions.Snapshot.EMPTY, record(GpuHudFixtures.FIRST));
         update(moving, panels, null);
         hud.stage.getRoot().findActor("unit-card-close").fire(new ChangeListener.ChangeEvent());
         assertTrue(hud.state.turnLocked(moving));
@@ -216,31 +209,31 @@ class GpuHudInputTest {
         update(moving, panels, null);
         clearInvocations(source);
 
-        hud.boardClick(HEX, FIRST, Input.Buttons.RIGHT, 0, 100, 100, Float.NaN);
-        verify(source).inspect(HEX, FIRST, true);
+        hud.boardClick(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, Input.Buttons.RIGHT, 0, 100, 100, Float.NaN);
+        verify(source).inspect(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, true);
         BoardScene.Command select = new BoardScene.Command("select-current", "Select current unit", "", true,
               false, false, List.of(), () -> {
                   throw new AssertionError("The shared Select must route through the HUD selection controller");
-              }, "", null, new MapMenu.UnitAction(MapMenu.UnitActionType.SELECT, FIRST));
+              }, "", null, new MapMenu.UnitAction(MapMenu.UnitActionType.SELECT, GpuHudFixtures.FIRST));
         BoardScene scene = mock(BoardScene.class);
-        BoardScene.Context stale = new BoardScene.Context(HEX, FIRST, List.of(select));
+        BoardScene.Context stale = new BoardScene.Context(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, List.of(select));
         hud.update(new GpuBoardSource.Frame(scene, List.of(), stale, List.of(), "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, preferences());
+              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         Actor menu = hud.stage.getRoot().findActor("context-menu-popover");
         assertTrue(menu.isVisible());
         assertNull(menuButton(menu, select.label()), "A capture made before selection cleared stays masked");
 
-        BoardScene.Context cleared = new BoardScene.Context(HEX, FIRST, List.of(select), true);
+        BoardScene.Context cleared = new BoardScene.Context(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, List.of(select), true);
         hud.update(new GpuBoardSource.Frame(scene, List.of(), cleared, List.of(), "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, preferences());
+              GpuReportLog.Snapshot.EMPTY, moving, panels), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         UiButton item = menuButton(menu, select.label());
         assertNotNull(item, "The menu captured without an actor can restore the cleared selection");
         assertFalse(item.isDisabled());
         item.fire(new ChangeListener.ChangeEvent());
 
         assertFalse(hud.state.turnLocked(moving));
-        assertEquals(FIRST, hud.state.cardUnit());
-        verify(source).selectUnit(FIRST);
+        assertEquals(GpuHudFixtures.FIRST, hud.state.cardUnit());
+        verify(source).selectUnit(GpuHudFixtures.FIRST);
     }
 
     private static UiButton menuButton(Actor actor, String label) {
@@ -258,23 +251,23 @@ class GpuHudInputTest {
 
     @Test
     void theUnitDisplayKeysOpenTheUnitSheetOnTheirTabs() {
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, true)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         int[] keys = { KeyEvent.VK_F1, KeyEvent.VK_F2, KeyEvent.VK_F3, KeyEvent.VK_F4, KeyEvent.VK_F5, KeyEvent.VK_F6 };
         for (int index = 0; index < keys.length; index++) {
             assertTrue(press(Input.Keys.F1 + index, keys[index], 0), "F" + (index + 1) + " is the HUD's");
             assertEquals(GpuHudState.SheetTab.values()[index], hud.state.sheetTab);
             assertTrue(hud.state.recordOpen);
         }
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, true)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         verify(record).setSheetOpen(true);
         assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
         assertFalse(hud.state.recordOpen, "Ctrl+D toggles the sheet");
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, true)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         verify(record).setSheetOpen(false);
         hud.state.overview = true;
         assertTrue(press(Input.Keys.D, KeyEvent.VK_D, CTRL_DOWN_MASK));
         assertTrue(hud.state.recordOpen && !hud.state.overview, "over the overview it closes it and shows the sheet");
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, true)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true)));
         assertTrue(press(Input.Keys.G, KeyEvent.VK_G, 0));
         assertTrue(hud.state.forcesGrid && !hud.state.recordOpen, "one wide left panel at a time: G shows the grid");
         assertEquals(GpuHudState.SheetTab.EXTRAS, hud.state.sheetTab, "the tab stays for the next opening");
@@ -283,8 +276,8 @@ class GpuHudInputTest {
     @Test
     void nonPlannerMovementKeepsMegaMeksOwnKeys() {
         // An aerospace or vector route is MegaMek's own (plan A.7 G20): its keys and CANCEL reach the phase display.
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true)),
-              panels(move(false, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         for (Key key : List.of(new Key(Input.Keys.A, KeyEvent.VK_A, SHIFT_DOWN_MASK),
               new Key(Input.Keys.D, KeyEvent.VK_D, SHIFT_DOWN_MASK),
               new Key(Input.Keys.BACKSPACE, KeyEvent.VK_BACK_SPACE, 0),
@@ -297,7 +290,7 @@ class GpuHudInputTest {
 
     @Test
     void aFocusedGripReordersOnAltUpAndLeavesOtherKeysToTheHotkeys() {
-        update(status(3, GamePhase.FIRING, true, FIRST, 0, unit(FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
+        update(GpuHudFixtures.status(3, GamePhase.FIRING, true, GpuHudFixtures.FIRST, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudData.EMPTY, null);
         Table grip = new Table();
         grip.addListener(new InputListener() {
             @Override
@@ -331,8 +324,8 @@ class GpuHudInputTest {
 
     @Test
     void aFocusedTextFieldTakesTheDigitThatWouldOtherwiseSetTheMovementMode() {
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true)),
-              panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         TextField field = textField();
         hud.stage.addActor(field);
         hud.stage.setKeyboardFocus(field);
@@ -357,7 +350,7 @@ class GpuHudInputTest {
 
     @Test
     void theEnterThatOpensTheChatIsNotTypedIntoIt() {
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
         assertTrue(press(Input.Keys.ENTER, KeyEvent.VK_ENTER, 0));
         assertTrue(hud.state.chatOpen);
         // GLFW follows Enter with a typed newline, which reaches the chat's input focused by then (G15).
@@ -374,7 +367,7 @@ class GpuHudInputTest {
 
     @Test
     void releasingTheNameplateKeyEndsTheNameplates() {
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
         assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
         assertTrue(hud.state.allNameplates);
         // The release carries the key only, so a Shift or Ctrl still held does not keep the plates.
@@ -384,8 +377,8 @@ class GpuHudInputTest {
 
     @Test
     void theToggleSettingKeepsTheNameplatesUntilTheNextPress() {
-        hud.update(frame(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0), GpuHudData.EMPTY),
-              GpuHud.HudView.EMPTY, null, with(preferences(), Map.of("nameplates", NameplateMode.TOGGLE)));
+        hud.update(GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0), GpuHudData.EMPTY),
+              GpuHud.HudView.EMPTY, null, GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("nameplates", NameplateMode.TOGGLE)));
         assertTrue(press(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT, ALT_DOWN_MASK));
         hud.keyUp(Input.Keys.ALT_LEFT, KeyEvent.VK_ALT);
         hud.focusLost();
@@ -396,9 +389,9 @@ class GpuHudInputTest {
 
     @Test
     void aPendingDialogTakesEveryKeyAndClickAndPostsNoCommand() {
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(FOE, ENEMY, false, false));
-        GpuHudData planned = panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY);
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(FOE, ENEMY, false, false));
+        GpuHudData planned = GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY);
         update(moving, planned, null);
         hud.state.overview = true;
         hud.state.inspected = FOE;
@@ -433,7 +426,7 @@ class GpuHudInputTest {
         }
         assertTrue(hud.hit(10, 10), "the scrim takes every press");
         hud.boardPress();
-        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, 0, 10, 10, Float.NaN);
+        hud.boardClick(GpuHudFixtures.HEX, Entity.NONE, Input.Buttons.LEFT, 0, 10, 10, Float.NaN);
         assertSame(modal, hud.stage.getKeyboardFocus());
 
         assertTrue(modalKeys.containsAll(List.of(Input.Keys.ENTER, Input.Keys.UP, Input.Keys.DOWN, Input.Keys.LEFT,
@@ -458,10 +451,10 @@ class GpuHudInputTest {
 
     @Test
     void aGameDialogStillUsesTheConfiguredCancelKey() {
-        var waiting = status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
-        var preferences = with(preferences(), Map.of("binds", List.of(
+        var waiting = GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
+        var preferences = GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("binds", List.of(
               new GpuBoardSource.Bind(KeyCommandBind.CANCEL, KeyEvent.VK_Q, CTRL_DOWN_MASK, "Ctrl+Q"))));
-        hud.update(frame(waiting, GpuHudData.EMPTY), GpuHud.HudView.EMPTY, message(), preferences);
+        hud.update(GpuHudFixtures.frame(waiting, GpuHudData.EMPTY), GpuHud.HudView.EMPTY, message(), preferences);
         clearInvocations(source);
         assertTrue(press(Input.Keys.Q, KeyEvent.VK_Q, CTRL_DOWN_MASK));
         verify(source).answer(message().id(), GpuBoardWindow.DialogAnswer.cancelled(message()));
@@ -469,7 +462,7 @@ class GpuHudInputTest {
 
     @Test
     void anOverlayKeepsItsTextFocusWhenAGameDialogArrivesUnderneath() {
-        var waiting = status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
+        var waiting = GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 1);
         update(waiting);
         UiModal overlay = new UiModal(new UiKit(theme.skin), () -> { }, false);
         TextField field = textField();
@@ -491,96 +484,96 @@ class GpuHudInputTest {
     @Test
     void theFocusFollowsPhaseStartCommitAndTheBeginningOfTheLocalTurn() {
         // Phase start, the opponent's turn: the first pending own unit by id.
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(THIRD, OWN, false, true),
-              unit(FIRST, OWN, false, true), unit(SECOND, OWN, false, true), unit(FOE, ENEMY, false, true)));
-        assertEquals(FIRST, hud.state.focus());
-        verify(source).setFocusUnit(FIRST);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(THIRD, OWN, false, true),
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true), GpuHudFixtures.unit(SECOND, OWN, false, true), GpuHudFixtures.unit(FOE, ENEMY, false, true)));
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
+        verify(source).setFocusUnit(GpuHudFixtures.FIRST);
 
         // The local turn begins with a dialog pending and the phase display on the third unit: the HUD selects the
         // focus once, as soon as no dialog would drop the command.
-        GpuBattleStatus.Snapshot begun = status(3, GamePhase.MOVEMENT, true, THIRD, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, true, true));
+        GpuBattleStatus.Snapshot begun = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, THIRD, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, true, true));
         update(begun, GpuHudData.EMPTY, message());
         verify(source, never()).selectUnit(anyInt());
         update(begun);
-        update(status(3, GamePhase.MOVEMENT, true, THIRD, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, true, true)));
-        verify(source, times(1)).selectUnit(FIRST);
-        assertEquals(FIRST, hud.state.focus());
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, true, true)));
-        assertEquals(FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, THIRD, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, true, true)));
+        verify(source, times(1)).selectUnit(GpuHudFixtures.FIRST);
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, true, true)));
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
 
         // A selection during the local turn moves the focus.
-        update(status(3, GamePhase.MOVEMENT, true, THIRD, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, true, true)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, THIRD, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, true, true)));
         assertEquals(THIRD, hud.state.focus());
 
         // The actor commits: its update arrives before the turn ends, and the focus moves once, to the next pending
         // unit after it, wrapping around to the first.
-        update(status(3, GamePhase.MOVEMENT, true, Entity.NONE, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, false, false)));
-        update(status(3, GamePhase.MOVEMENT, false, THIRD, 2, unit(FIRST, OWN, false, true),
-              unit(SECOND, OWN, false, true), unit(THIRD, OWN, false, false)));
-        assertEquals(FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, Entity.NONE, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, false, false)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, THIRD, 2, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true),
+              GpuHudFixtures.unit(SECOND, OWN, false, true), GpuHudFixtures.unit(THIRD, OWN, false, false)));
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
 
         // A turn for one unit only: the focus cannot act, so the HUD adopts the display's actor and selects nothing.
-        update(status(3, GamePhase.MOVEMENT, true, SECOND, 4, unit(FIRST, OWN, false, true),
-              unit(SECOND, OWN, true, true), unit(THIRD, OWN, false, false)));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, SECOND, 4, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(THIRD, OWN, false, false)));
         assertEquals(SECOND, hud.state.focus());
 
         // Its commit leaves the first unit as the only candidate.
-        update(status(3, GamePhase.MOVEMENT, false, SECOND, 5, unit(FIRST, OWN, false, true),
-              unit(SECOND, OWN, false, false), unit(THIRD, OWN, false, false)));
-        assertEquals(FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, SECOND, 5, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true),
+              GpuHudFixtures.unit(SECOND, OWN, false, false), GpuHudFixtures.unit(THIRD, OWN, false, false)));
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
 
         // The next phase starts at the first pending unit again.
-        update(status(3, GamePhase.FIRING, false, Entity.NONE, 0, unit(FIRST, OWN, false, true),
-              unit(SECOND, OWN, false, true), unit(THIRD, OWN, false, true)));
-        assertEquals(FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.FIRING, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true),
+              GpuHudFixtures.unit(SECOND, OWN, false, true), GpuHudFixtures.unit(THIRD, OWN, false, true)));
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
         verify(source, times(1)).selectUnit(anyInt());
     }
 
     @Test
     void theLogOpensForTheReportPhasesAndKeepsALogThePlayerOpened() {
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
-        update(status(3, GamePhase.MOVEMENT_REPORT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT_REPORT, false, Entity.NONE, 0));
         assertTrue(hud.state.logOpen(), "the report phase opens the log");
-        update(status(3, GamePhase.FIRING, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.FIRING, false, Entity.NONE, 0));
         assertFalse(hud.state.logOpen(), "and the next phase closes it again");
 
         assertTrue(press(Input.Keys.R, KeyEvent.VK_R, CTRL_DOWN_MASK));
-        update(status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0));
-        update(status(3, GamePhase.PHYSICAL, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(3, GamePhase.PHYSICAL, false, Entity.NONE, 0));
         assertTrue(hud.state.logOpen(), "a log the player opened stays open after the report phase");
 
         assertTrue(press(Input.Keys.R, KeyEvent.VK_R, CTRL_DOWN_MASK));
-        update(status(4, GamePhase.INITIATIVE_REPORT, false, Entity.NONE, 0));
+        update(GpuHudFixtures.status(4, GamePhase.INITIATIVE_REPORT, false, Entity.NONE, 0));
         assertFalse(hud.state.logOpen(), "the initiative report does not open it");
     }
 
     @Test
     void unitsStayPresentedUntilThePlaybackHasShownTheirEvents() {
-        GpuBattleStatus.UnitStatus before = unit(FIRST, OWN, false, false);
-        GpuBattleStatus.UnitStatus after = unit(FIRST, OWN, false, false, .4);
-        GpuUnitRecord.Snapshot record = record(FIRST);
-        GpuUnitRecord.Snapshot damaged = record(FIRST);
-        hud.update(frame(status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, before),
-              panels(record)), GpuHud.HudView.EMPTY, null, preferences());
+        GpuBattleStatus.UnitStatus before = GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, false);
+        GpuBattleStatus.UnitStatus after = GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, false, .4);
+        GpuUnitRecord.Snapshot record = record(GpuHudFixtures.FIRST);
+        GpuUnitRecord.Snapshot damaged = record(GpuHudFixtures.FIRST);
+        hud.update(GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, before),
+              GpuHudFixtures.panels(record)), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
 
-        GpuBattleStatus.Snapshot newer = status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, after);
-        hud.update(frame(newer, panels(damaged)), playing, null, preferences());
+        GpuBattleStatus.Snapshot newer = GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0, after);
+        hud.update(GpuHudFixtures.frame(newer, GpuHudFixtures.panels(damaged)), playing, null, GpuHudFixtures.preferences());
         assertEquals(List.of(before), hud.state.presentedUnits());
         assertSame(record, hud.state.presentedRecord());
         GpuUnitRecord.Snapshot other = record(SECOND);
-        hud.update(frame(newer, panels(other)), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(newer, GpuHudFixtures.panels(other)), playing, null, GpuHudFixtures.preferences());
         assertSame(record, hud.state.presentedRecord(), "an automatic next-unit record must wait for playback");
         hud.state.inspected = SECOND;
-        hud.update(frame(newer, panels(record(SECOND))), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(newer, GpuHudFixtures.panels(record(SECOND))), playing, null, GpuHudFixtures.preferences());
         assertEquals(SECOND, hud.state.presentedRecord().unitId(), "explicit inspection is still available");
 
-        hud.update(frame(newer, panels(damaged)), GpuHud.HudView.EMPTY, null, preferences());
+        hud.update(GpuHudFixtures.frame(newer, GpuHudFixtures.panels(damaged)), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         assertEquals(List.of(after), hud.state.presentedUnits());
         assertSame(damaged, hud.state.presentedRecord());
     }
@@ -588,33 +581,33 @@ class GpuHudInputTest {
     @Test
     void enemyAndAllyInspectionsKeepTheOwnCardAndClosingThemKeepsTheTurn() {
         for (GpuBattleStatus.Side side : List.of(ENEMY, GpuBattleStatus.Side.ALLY)) {
-            GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 0,
-                  unit(FIRST, OWN, true, true), unit(FOE, side, false, false));
-            GpuUnitRecord.Snapshot own = record(FIRST);
-            GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of()),
+            GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 0,
+                  GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true), GpuHudFixtures.unit(FOE, side, false, false));
+            GpuUnitRecord.Snapshot own = record(GpuHudFixtures.FIRST);
+            GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuHudFixtures.move(true, List.of()),
                   GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, record(FOE),
                   GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
                   RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY, own);
             update(moving, panels, null);
             hud.select(FOE);
             update(moving, panels, null);
-            assertEquals(FIRST, hud.state.ownCardUnit());
+            assertEquals(GpuHudFixtures.FIRST, hud.state.ownCardUnit());
             assertEquals(FOE, hud.state.otherCardUnit());
-            assertSame(own, hud.state.presentedRecord(FIRST));
+            assertSame(own, hud.state.presentedRecord(GpuHudFixtures.FIRST));
             assertTrue(shown(hud.stage.getRoot().findActor("unit-card")));
             assertTrue(shown(hud.stage.getRoot().findActor("other-unit-card")));
             hud.stage.getRoot().findActor("other-unit-card-close").fire(new ChangeListener.ChangeEvent());
             update(moving, panels, null);
             assertEquals(Entity.NONE, hud.state.otherCardUnit());
-            assertEquals(FIRST, hud.state.ownCardUnit());
+            assertEquals(GpuHudFixtures.FIRST, hud.state.ownCardUnit());
             assertFalse(hud.state.turnLocked(moving));
         }
     }
 
     @Test
     void bothInspectorRecordsWaitForPlaybackAndOwnInspectionSurvivesAForeignClick() {
-        GpuBattleStatus.Snapshot report = status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0,
-              unit(FIRST, OWN, false, false), unit(SECOND, OWN, false, false), unit(FOE, ENEMY, false, false));
+        GpuBattleStatus.Snapshot report = GpuHudFixtures.status(3, GamePhase.FIRING_REPORT, false, Entity.NONE, 0,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, false), GpuHudFixtures.unit(SECOND, OWN, false, false), GpuHudFixtures.unit(FOE, ENEMY, false, false));
         GpuUnitRecord.Snapshot own = record(SECOND);
         GpuUnitRecord.Snapshot enemy = record(FOE);
         GpuHudData panels = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuMovePlan.Snapshot.EMPTY,
@@ -623,38 +616,38 @@ class GpuHudInputTest {
               RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY, own);
         update(report, panels, null);
         GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
-        hud.update(frame(report, panels), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(report, panels), playing, null, GpuHudFixtures.preferences());
         hud.select(SECOND);
-        hud.update(frame(report, panels), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(report, panels), playing, null, GpuHudFixtures.preferences());
         hud.select(FOE);
         GpuHudData inspected = new GpuHudData(panels.phase(), panels.move(), panels.fire(), panels.physical(),
               enemy, panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players(), own);
-        hud.update(frame(report, inspected), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(report, inspected), playing, null, GpuHudFixtures.preferences());
         assertEquals(SECOND, hud.state.ownCardUnit());
         assertEquals(FOE, hud.state.otherCardUnit());
         GpuUnitRecord.Snapshot changedOwn = record(SECOND);
         GpuUnitRecord.Snapshot changedEnemy = record(FOE);
         GpuHudData changed = new GpuHudData(panels.phase(), panels.move(), panels.fire(), panels.physical(),
               changedEnemy, panels.preview(), panels.chat(), panels.toasts(), panels.los(), panels.players(), changedOwn);
-        hud.update(frame(report, changed), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(report, changed), playing, null, GpuHudFixtures.preferences());
         assertSame(own, hud.state.presentedRecord(SECOND));
         assertSame(enemy, hud.state.presentedRecord(FOE));
-        hud.update(frame(report, changed), GpuHud.HudView.EMPTY, null, preferences());
+        hud.update(GpuHudFixtures.frame(report, changed), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         assertSame(changedOwn, hud.state.presentedRecord(SECOND));
         assertSame(changedEnemy, hud.state.presentedRecord(FOE));
     }
 
     @Test
     void escSkipsARunningPlaybackOnceNothingIsLeftToClose() {
-        BoardScene.Waypoint from = new BoardScene.Waypoint(HEX, 0, 0);
+        BoardScene.Waypoint from = new BoardScene.Waypoint(GpuHudFixtures.HEX, 0, 0);
         BoardScene.Unit mover = new BoardScene.Unit(FOE, -1, "Unit " + FOE, from, null, false, null, 1, false);
         hud.state.history.accept(List.of(new BoardScene.Movement(FOE, 0,
               List.of(from, new BoardScene.Waypoint(new Coords(5, 6), 0, 0)), EntityMovementType.MOVE_WALK, 0, 4,
               mover)), mock(BoardScene.class), GpuReportLog.Snapshot.EMPTY, ignored -> false);
         assertTrue(hud.state.history.running());
         GpuHud.HudView playing = new GpuHud.HudView(false, true, Map.of(), Map.of(), Map.of(), null, Entity.NONE, 0);
-        hud.update(frame(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, unit(FIRST, OWN, false, false),
-              unit(FOE, ENEMY, false, false)), GpuHudData.EMPTY), playing, null, preferences());
+        hud.update(GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 0, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, false),
+              GpuHudFixtures.unit(FOE, ENEMY, false, false)), GpuHudData.EMPTY), playing, null, GpuHudFixtures.preferences());
 
         assertTrue(press(Input.Keys.SPACE, KeyEvent.VK_SPACE, 0));
         assertEquals(UnitMotion.Speed.NORMAL, hud.state.history.speed(), "Space keeps its own binds");
@@ -668,67 +661,67 @@ class GpuHudInputTest {
 
     @Test
     void boardClicksFollowThePhaseAndTheLocalTurn() {
-        GpuBattleStatus.UnitStatus actor = unit(FIRST, OWN, true, true);
-        GpuBattleStatus.UnitStatus ready = unit(SECOND, OWN, true, true);
-        GpuBattleStatus.UnitStatus foe = unit(FOE, ENEMY, false, false);
-        GpuBattleStatus.UnitStatus blip = unit(BLIP, ENEMY, false, false, 1, true);
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, actor, ready, foe);
-        update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, Entity.NONE, CTRL_DOWN_MASK);
-        verify(moves).planTo(HEX, 0, true, Float.NaN);
-        click(HEX, SECOND, 0);
+        GpuBattleStatus.UnitStatus actor = GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true);
+        GpuBattleStatus.UnitStatus ready = GpuHudFixtures.unit(SECOND, OWN, true, true);
+        GpuBattleStatus.UnitStatus foe = GpuHudFixtures.unit(FOE, ENEMY, false, false);
+        GpuBattleStatus.UnitStatus blip = GpuHudFixtures.unit(BLIP, ENEMY, false, false, 1, true);
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, actor, ready, foe);
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        click(GpuHudFixtures.HEX, Entity.NONE, CTRL_DOWN_MASK);
+        verify(moves).planTo(GpuHudFixtures.HEX, 0, true, Float.NaN);
+        click(GpuHudFixtures.HEX, SECOND, 0);
         verify(source).selectUnit(SECOND);
-        click(HEX, FOE, 0);
+        click(GpuHudFixtures.HEX, FOE, 0);
         assertEquals(FOE, hud.state.inspected);
         // Selecting the acting unit again would reset its path (MovementDisplay.selectEntity clears it).
-        click(HEX, FIRST, 0);
+        click(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, 0);
         assertEquals(Entity.NONE, hud.state.inspected, "selecting ends the inspection");
-        click(HEX, Entity.NONE, CTRL_DOWN_MASK);
-        verify(source, never()).measure(HEX, CTRL_DOWN_MASK, Float.NaN);
+        click(GpuHudFixtures.HEX, Entity.NONE, CTRL_DOWN_MASK);
+        verify(source, never()).measure(GpuHudFixtures.HEX, CTRL_DOWN_MASK, Float.NaN);
         // At the height the pointer shows, ser's decision of 2026-10-03), the terrain hit's world height.
-        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, ALT_DOWN_MASK, 100, 100, 3.5f);
-        verify(source).measure(HEX, ALT_DOWN_MASK, 3.5f);
+        hud.boardClick(GpuHudFixtures.HEX, Entity.NONE, Input.Buttons.LEFT, ALT_DOWN_MASK, 100, 100, 3.5f);
+        verify(source).measure(GpuHudFixtures.HEX, ALT_DOWN_MASK, 3.5f);
         // Ctrl on an own unit pins a waypoint in its hex instead of selecting it.
-        update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, SECOND, CTRL_DOWN_MASK);
-        verify(moves, times(3)).planTo(HEX, 0, true, Float.NaN);
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        click(GpuHudFixtures.HEX, SECOND, CTRL_DOWN_MASK);
+        verify(moves, times(3)).planTo(GpuHudFixtures.HEX, 0, true, Float.NaN);
         verify(source, times(1)).selectUnit(anyInt());
 
-        update(status(3, GamePhase.FIRING, true, FIRST, 1, actor, ready, foe, blip), GpuHudData.EMPTY, null);
-        click(HEX, FOE, 0);
+        update(GpuHudFixtures.status(3, GamePhase.FIRING, true, GpuHudFixtures.FIRST, 1, actor, ready, foe, blip), GpuHudData.EMPTY, null);
+        click(GpuHudFixtures.HEX, FOE, 0);
         verify(fire).focusTarget(TargetKey.unit(FOE));
-        click(HEX, BLIP, 0);
+        click(GpuHudFixtures.HEX, BLIP, 0);
         // The fire orders refuse a sensor contact with their toast (H19).
         verify(fire).focusTarget(TargetKey.unit(BLIP));
-        click(HEX, SECOND, 0);
-        click(HEX, FIRST, 0);
+        click(GpuHudFixtures.HEX, SECOND, 0);
+        click(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, 0);
         verify(fire, times(1)).selectUnit(anyInt());
         verify(fire).selectUnit(SECOND);
         verify(fire, times(2)).focusTarget(any(TargetKey.class));
 
-        GpuPhysicalOptions.Snapshot adjacent = new GpuPhysicalOptions.Snapshot(true, FIRST, Entity.NONE, List.of(FOE),
+        GpuPhysicalOptions.Snapshot adjacent = new GpuPhysicalOptions.Snapshot(true, GpuHudFixtures.FIRST, Entity.NONE, List.of(FOE),
               List.of());
-        update(status(3, GamePhase.PHYSICAL, true, FIRST, 1, actor, foe), panels(move(false, List.of()), adjacent),
+        update(GpuHudFixtures.status(3, GamePhase.PHYSICAL, true, GpuHudFixtures.FIRST, 1, actor, foe), GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of()), adjacent),
               null);
-        click(HEX, FOE, 0);
+        click(GpuHudFixtures.HEX, FOE, 0);
         verify(physical).target(FOE);
 
-        update(status(3, GamePhase.DEPLOYMENT, true, FIRST, 1, actor), GpuHudData.EMPTY, null);
-        click(HEX, Entity.NONE, 0);
-        verify(source).hover(HEX, 0);
-        verify(source).click(HEX, false, 0);
+        update(GpuHudFixtures.status(3, GamePhase.DEPLOYMENT, true, GpuHudFixtures.FIRST, 1, actor), GpuHudData.EMPTY, null);
+        click(GpuHudFixtures.HEX, Entity.NONE, 0);
+        verify(source).hover(GpuHudFixtures.HEX, 0);
+        verify(source).click(GpuHudFixtures.HEX, false, 0);
 
         // Outside the local turn an own unit becomes the shown unit, the focus:
         // MegaMek selects nothing then, and the orders stay as they are.
-        update(status(3, GamePhase.MOVEMENT, false, Entity.NONE, 2, unit(FIRST, OWN, false, true),
-              unit(SECOND, OWN, false, true)), panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        assertEquals(FIRST, hud.state.focus());
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, false, Entity.NONE, 2, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true),
+              GpuHudFixtures.unit(SECOND, OWN, false, true)), GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
         clearInvocations(moves, source);
-        click(HEX, SECOND, 0);
+        click(GpuHudFixtures.HEX, SECOND, 0);
         assertEquals(Entity.NONE, hud.state.inspected);
         assertEquals(SECOND, hud.state.focus());
         verify(source, never()).selectUnit(anyInt());
-        hud.boardClick(HEX, SECOND, Input.Buttons.RIGHT, 0, 30, 40, Float.NaN);
+        hud.boardClick(GpuHudFixtures.HEX, SECOND, Input.Buttons.RIGHT, 0, 30, 40, Float.NaN);
         verifyNoInteractions(moves);
     }
 
@@ -742,20 +735,20 @@ class GpuHudInputTest {
     void repeatedClicksOnAStackTakeItsUnitsInTurn() {
         Coords enemies = new Coords(9, 9);
         Coords alone = new Coords(3, 3);
-        GpuBattleStatus.Snapshot waiting = status(3, GamePhase.FIRING, false, Entity.NONE, 2,
-              unit(FIRST, OWN, false, true), unit(SECOND, OWN, false, true), unit(THIRD, OWN, false, true),
-              unit(FOE, ENEMY, false, false), unit(BLIP, ENEMY, false, false, 1, true));
-        BoardScene scene = scene(Map.of(HEX, List.of(FIRST, SECOND), enemies, List.of(FOE, BLIP), alone,
+        GpuBattleStatus.Snapshot waiting = GpuHudFixtures.status(3, GamePhase.FIRING, false, Entity.NONE, 2,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, false, true), GpuHudFixtures.unit(SECOND, OWN, false, true), GpuHudFixtures.unit(THIRD, OWN, false, true),
+              GpuHudFixtures.unit(FOE, ENEMY, false, false), GpuHudFixtures.unit(BLIP, ENEMY, false, false, 1, true));
+        BoardScene scene = scene(Map.of(GpuHudFixtures.HEX, List.of(GpuHudFixtures.FIRST, SECOND), enemies, List.of(FOE, BLIP), alone,
               List.of(THIRD)));
-        hud.update(frame(waiting, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, preferences());
-        assertEquals(FIRST, hud.state.focus());
-        assertEquals(SECOND, hud.clickedUnit(HEX, FIRST), "the hover shows the unit the click takes");
+        hud.update(GpuHudFixtures.frame(waiting, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
+        assertEquals(GpuHudFixtures.FIRST, hud.state.focus());
+        assertEquals(SECOND, hud.clickedUnit(GpuHudFixtures.HEX, GpuHudFixtures.FIRST), "the hover shows the unit the click takes");
         List<Integer> taken = new ArrayList<>();
         for (int count = 0; count < 3; count++) {
-            click(HEX, FIRST, 0);
+            click(GpuHudFixtures.HEX, GpuHudFixtures.FIRST, 0);
             taken.add(hud.state.focus());
         }
-        assertEquals(List.of(SECOND, FIRST, SECOND), taken, "the focus stands in the hex: the next unit first");
+        assertEquals(List.of(SECOND, GpuHudFixtures.FIRST, SECOND), taken, "the focus stands in the hex: the next unit first");
         taken.clear();
         for (int count = 0; count < 3; count++) {
             click(enemies, BLIP, 0);
@@ -778,11 +771,11 @@ class GpuHudInputTest {
         int other = 9;
         int wreck = 10;
         Coords enemies = new Coords(9, 9);
-        GpuBattleStatus.Snapshot firing = status(3, GamePhase.FIRING, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(FOE, ENEMY, false, false), unit(BLIP, ENEMY, false, false, 1, true),
-              unit(other, ENEMY, false, false));
-        BoardScene scene = scene(Map.of(HEX, List.of(FIRST), enemies, List.of(FOE, BLIP, wreck, other)));
-        hud.update(frame(firing, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, preferences());
+        GpuBattleStatus.Snapshot firing = GpuHudFixtures.status(3, GamePhase.FIRING, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(FOE, ENEMY, false, false), GpuHudFixtures.unit(BLIP, ENEMY, false, false, 1, true),
+              GpuHudFixtures.unit(other, ENEMY, false, false));
+        BoardScene scene = scene(Map.of(GpuHudFixtures.HEX, List.of(GpuHudFixtures.FIRST), enemies, List.of(FOE, BLIP, wreck, other)));
+        hud.update(GpuHudFixtures.frame(firing, GpuHudData.EMPTY, scene), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         hud.state.inspected = FOE;
         for (int next : List.of(other, FOE, other)) {
             assertEquals(next, hud.clickedUnit(enemies, BLIP), "the hover shows the unit the click takes");
@@ -790,21 +783,21 @@ class GpuHudInputTest {
             verify(fire).focusTarget(any(TargetKey.class));
             verify(fire).focusTarget(TargetKey.unit(next));
             clearInvocations(fire);
-            hud.update(frame(firing, panels(GpuMovePlan.Snapshot.EMPTY, focused(next), GpuPhysicalOptions.Snapshot.EMPTY,
-                  GpuUnitRecord.Snapshot.EMPTY), scene), GpuHud.HudView.EMPTY, null, preferences());
+            hud.update(GpuHudFixtures.frame(firing, GpuHudFixtures.panels(GpuMovePlan.Snapshot.EMPTY, focused(next), GpuPhysicalOptions.Snapshot.EMPTY,
+                  GpuUnitRecord.Snapshot.EMPTY), scene), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
         }
         verify(fire, never()).clickHex(any(), anyInt(), anyInt());
     }
 
     @Test
     void shiftClickOrientsThePlannedEndpointWithoutSelectingUnitsOrAddingWaypoints() {
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true), unit(FOE, ENEMY, false, false)),
-              panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true), GpuHudFixtures.unit(FOE, ENEMY, false, false)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         for (int target : new int[] { Entity.NONE, SECOND, FOE }) {
-            click(HEX, target, SHIFT_DOWN_MASK);
+            click(GpuHudFixtures.HEX, target, SHIFT_DOWN_MASK);
         }
-        verify(moves, times(3)).faceToward(HEX, 0);
+        verify(moves, times(3)).faceToward(GpuHudFixtures.HEX, 0);
         verify(moves, never()).planTo(any(), anyInt(), anyBoolean(), anyFloat());
         verify(source, never()).selectUnit(anyInt());
         verify(source, never()).measure(any(), anyInt(), anyFloat());
@@ -812,13 +805,13 @@ class GpuHudInputTest {
 
     @Test
     void movementClicksCarryThePickedFloorForRoutesAndWaypoints() {
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true)),
-              panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
         float floor = 21 * BoardGeometry.level();
-        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, 0, 100, 100, floor);
-        verify(moves).planTo(HEX, 0, false, floor);
-        hud.boardClick(HEX, Entity.NONE, Input.Buttons.LEFT, CTRL_DOWN_MASK, 100, 100, floor);
-        verify(moves).planTo(HEX, 0, true, floor);
+        hud.boardClick(GpuHudFixtures.HEX, Entity.NONE, Input.Buttons.LEFT, 0, 100, 100, floor);
+        verify(moves).planTo(GpuHudFixtures.HEX, 0, false, floor);
+        hud.boardClick(GpuHudFixtures.HEX, Entity.NONE, Input.Buttons.LEFT, CTRL_DOWN_MASK, 100, 100, floor);
+        verify(moves).planTo(GpuHudFixtures.HEX, 0, true, floor);
     }
 
     /**
@@ -827,11 +820,11 @@ class GpuHudInputTest {
      */
     @Test
     void aMovementClickTheHudDoesNotPlanGoesToMegaMeksBoardTool() {
-        update(status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true)),
-              panels(move(false, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, Entity.NONE, 0);
-        verify(source).hover(HEX, 0);
-        verify(source).click(HEX, false, 0);
+        update(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)),
+              GpuHudFixtures.panels(GpuHudFixtures.move(false, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        click(GpuHudFixtures.HEX, Entity.NONE, 0);
+        verify(source).hover(GpuHudFixtures.HEX, 0);
+        verify(source).click(GpuHudFixtures.HEX, false, 0);
         verifyNoInteractions(moves);
     }
 
@@ -846,16 +839,16 @@ class GpuHudInputTest {
         when(source.players()).thenReturn(players);
         GpuPlayers.Pick pick = new GpuPlayers.Pick("Click hexes on the board: Strategic Target",
               "1 hex(es) selected: 0507");
-        GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
+        GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuHudFixtures.move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
               RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true),
-              unit(SECOND, OWN, true, true));
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true),
+              GpuHudFixtures.unit(SECOND, OWN, true, true));
         update(moving, picking, null);
-        click(HEX, Entity.NONE, 0);
-        click(HEX, SECOND, 0);
-        verify(source, times(2)).click(HEX, false, 0);
+        click(GpuHudFixtures.HEX, Entity.NONE, 0);
+        click(GpuHudFixtures.HEX, SECOND, 0);
+        verify(source, times(2)).click(GpuHudFixtures.HEX, false, 0);
         verify(source, never()).hover(any(), anyInt());
         verify(source, never()).selectUnit(anyInt());
 
@@ -866,7 +859,7 @@ class GpuHudInputTest {
         verifyNoInteractions(moves);
         assertEquals(List.of(UiKit.text("GpuBoard.hud.mouse.leftClick"), pick.instructions() + " · " + pick.status(),
               "", UiKit.text("BotCommandPanel.HexPicker.done"), "", UiKit.text("BotCommandPanel.HexPicker.cancel")),
-              GpuHintLine.items(new GpuHud.Inputs(frame(moving, picking), GpuHud.HudView.EMPTY, null, preferences(),
+              GpuHintLine.items(new GpuHud.Inputs(GpuHudFixtures.frame(moving, picking), GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences(),
                     GpuHud.Metrics.of(1920, 1080), List.of())), "the pick's line; this test's keys have no text");
     }
 
@@ -877,23 +870,23 @@ class GpuHudInputTest {
      */
     @Test
     void aPlainClickEndsAMeasurementWaitingForItsSecondPoint() {
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true));
         for (int pending : new int[] { ALT_DOWN_MASK }) {
-            GpuHudData waiting = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of()),
+            GpuHudData waiting = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuHudFixtures.move(true, List.of()),
                   GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
                   GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
                   new RulerModel.Snapshot(true, pending, null, null, 0, "", "", "", "", true, false, null, List.of()), GpuPlayers.Snapshot.EMPTY);
             update(moving, waiting, null);
-            click(HEX, Entity.NONE, 0);
-            verify(source).measure(HEX, pending, Float.NaN);
+            click(GpuHudFixtures.HEX, Entity.NONE, 0);
+            verify(source).measure(GpuHudFixtures.HEX, pending, Float.NaN);
             assertEquals(UiKit.text("GpuBoard.hud.hint.completeLos"),
-                  GpuHintLine.items(new GpuHud.Inputs(frame(moving, waiting), GpuHud.HudView.EMPTY, null,
-                        preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1));
+                  GpuHintLine.items(new GpuHud.Inputs(GpuHudFixtures.frame(moving, waiting), GpuHud.HudView.EMPTY, null,
+                        GpuHudFixtures.preferences(), GpuHud.Metrics.of(1920, 1080), List.of())).get(1));
         }
         verifyNoInteractions(moves);
-        update(moving, panels(move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
-        click(HEX, Entity.NONE, 0);
-        verify(moves).planTo(HEX, 0, false, Float.NaN);
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of()), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        click(GpuHudFixtures.HEX, Entity.NONE, 0);
+        verify(moves).planTo(GpuHudFixtures.HEX, 0, false, Float.NaN);
     }
 
     /**
@@ -908,11 +901,11 @@ class GpuHudInputTest {
         when(source.players()).thenReturn(players);
         GpuPlayers.Pick pick = new GpuPlayers.Pick("Click hexes on the board: Strategic Target",
               "1 hex(es) selected: 0507");
-        GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
+        GpuHudData picking = new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuHudFixtures.move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
               RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, pick));
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true));
         Actor chip = hud.stage.getRoot().findActor("pick-chip");
         Actor hint = hud.stage.getRoot().findActor("hint-line");
 
@@ -927,7 +920,7 @@ class GpuHudInputTest {
         hud.stage.getRoot().findActor("pick-cancel").fire(new ChangeListener.ChangeEvent());
         verify(players).endPick(false);
         GpuPlayers.Pick started = new GpuPlayers.Pick(pick.instructions(), "");
-        update(moving, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move(true, List.of(STEP)),
+        update(moving, new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, GpuHudFixtures.move(true, List.of(STEP)),
               GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY,
               GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
               RulerModel.Snapshot.NONE, new GpuPlayers.Snapshot(List.of(), null, started)), null);
@@ -938,13 +931,13 @@ class GpuHudInputTest {
         assertFalse(shown(chip), "the hint line shows the pick");
         assertTrue(shown(hint));
         hud.resize(1280, 720, 1);
-        update(moving, panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
+        update(moving, GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), null);
         assertFalse(shown(chip), "no pick, no chip");
     }
 
     @Test
     void boardGuidesStayAlignedWhenUiScaleShrinksAndReturns() {
-        GpuBattleStatus.Snapshot moving = status(3, GamePhase.MOVEMENT, true, FIRST, 1, unit(FIRST, OWN, true, true));
+        GpuBattleStatus.Snapshot moving = GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true));
         Actor guides = hud.stage.getRoot().findActor("board-fx");
         for (float uiScale : new float[] { 1, .5f, 1, .5f, 1 }) {
             hud.resize(1920, 1080, uiScale);
@@ -969,20 +962,20 @@ class GpuHudInputTest {
 
     @Test
     void anAssignedOrClearedWeaponIsDisarmed() {
-        update(status(3, GamePhase.FIRING, true, FIRST, 1, unit(FIRST, OWN, true, true), unit(FOE, ENEMY, false,
+        update(GpuHudFixtures.status(3, GamePhase.FIRING, true, GpuHudFixtures.FIRST, 1, GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true), GpuHudFixtures.unit(FOE, ENEMY, false,
               false)), GpuHudData.EMPTY, null);
         hud.state.armedWeapon = 4;
-        click(HEX, FOE, 0);
+        click(GpuHudFixtures.HEX, FOE, 0);
         verify(fire).assign(4, TargetKey.unit(FOE));
         assertEquals(-1, hud.state.armedWeapon);
-        click(HEX, FOE, 0);
+        click(GpuHudFixtures.HEX, FOE, 0);
         verify(fire, times(2)).focusTarget(TargetKey.unit(FOE));
         verify(fire, times(1)).assign(anyInt(), any(TargetKey.class));
         // A hex: MegaMek's click chooses the target there, a wooded hex or a building too, and the armed weapon fires
         // at it (the user's report of 2026-10-03: terrain kept "Hold fire").
         hud.state.armedWeapon = 6;
-        click(HEX, Entity.NONE, 0);
-        verify(fire).clickHex(HEX, 0, 6);
+        click(GpuHudFixtures.HEX, Entity.NONE, 0);
+        verify(fire).clickHex(GpuHudFixtures.HEX, 0, 6);
         assertEquals(-1, hud.state.armedWeapon);
         verify(source, never()).click(any(), anyBoolean(), anyInt());
 
@@ -1111,7 +1104,7 @@ class GpuHudInputTest {
     @Test
     void moreStaysClearOfTheMinimapWhenContactsAreHidden() {
         hud.resize(1280, 720, 1);
-        GpuBoardSource.UiPreferences prefs = with(preferences(), Map.of("contactsEnabled", false));
+        GpuBoardSource.UiPreferences prefs = GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("contactsEnabled", false));
         for (int count : new int[] { 4, 12, 40 }) {
             List<BoardScene.Command> commands = IntStream.range(0, count)
                   .mapToObj(index -> extra("extra" + index, () -> { })).toList();
@@ -1206,14 +1199,14 @@ class GpuHudInputTest {
 
     /** A movement frame with the supplied overflow commands, settled as after the HUD's layout and draw. */
     private void updateMore(List<BoardScene.Command> commands) {
-        updateMore(commands, preferences());
+        updateMore(commands, GpuHudFixtures.preferences());
     }
 
     private void updateMore(List<BoardScene.Command> commands, GpuBoardSource.UiPreferences prefs) {
         BoardScene scene = mock(BoardScene.class);
         when(scene.commands()).thenReturn(commands);
-        GpuBoardSource.Frame frame = frame(status(3, GamePhase.MOVEMENT, true, FIRST, 0,
-              unit(FIRST, OWN, true, true)), panels(move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
+        GpuBoardSource.Frame frame = GpuHudFixtures.frame(GpuHudFixtures.status(3, GamePhase.MOVEMENT, true, GpuHudFixtures.FIRST, 0,
+              GpuHudFixtures.unit(GpuHudFixtures.FIRST, OWN, true, true)), GpuHudFixtures.panels(GpuHudFixtures.move(true, List.of(STEP)), GpuPhysicalOptions.Snapshot.EMPTY), scene);
         for (int pass = 0; pass < 3; pass++) {
             hud.update(frame, GpuHud.HudView.EMPTY, null, prefs);
             validateLayout(hud.stage.getRoot());
@@ -1252,22 +1245,12 @@ class GpuHudInputTest {
     }
 
     private void update(GpuBattleStatus.Snapshot status, GpuHudData panels, GpuBoardWindow.DialogRequest dialog) {
-        hud.update(frame(status, panels), GpuHud.HudView.EMPTY, dialog, preferences());
-    }
-
-    /** A frame of the given status and panels; the scene is a mock, so board clicks are routed. */
-    static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels) {
-        return frame(status, panels, mock(BoardScene.class));
-    }
-
-    private static GpuBoardSource.Frame frame(GpuBattleStatus.Snapshot status, GpuHudData panels, BoardScene scene) {
-        return new GpuBoardSource.Frame(scene, List.of(), null, List.of(), "", null, 0, "", null,
-              GpuReportLog.Snapshot.EMPTY, status, panels);
+        hud.update(GpuHudFixtures.frame(status, panels), GpuHud.HudView.EMPTY, dialog, GpuHudFixtures.preferences());
     }
 
     /** The local actor's orders, focused on the unit {@code id}. */
     private static GpuFireOrders.Snapshot focused(int id) {
-        return new GpuFireOrders.Snapshot(true, true, FIRST, new GpuFireOrders.Focus(TargetKey.unit(id), "Unit " + id,
+        return new GpuFireOrders.Snapshot(true, true, GpuHudFixtures.FIRST, new GpuFireOrders.Focus(TargetKey.unit(id), "Unit " + id,
               null), -1, List.of(), List.of(), List.of(), 0, false, false, "", null, null, null, List.of(), null,
               Map.of(), 0, 0, null);
     }
@@ -1280,92 +1263,6 @@ class GpuHudInputTest {
         BoardScene scene = mock(BoardScene.class);
         when(scene.units()).thenReturn(units);
         return scene;
-    }
-
-    /**
-     * MegaMek's default key of every bind, so the user's own key bindings do not change the test; no report keywords,
-     * the minimap and contacts panels on, the conditions and turn details off, the Enhanced graphics, the overlays'
-     * defaults, the client's movement colours and every nameplate shown while its key is held.
-     */
-    static GpuBoardSource.UiPreferences preferences() {
-        return preferences(1);
-    }
-
-    /** {@link #preferences()} with the GUI scale {@code scale}. */
-    static GpuBoardSource.UiPreferences preferences(float scale) {
-        List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
-              .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault, "")).toList();
-        return new GpuBoardSource.UiPreferences(scale, "", "", true, true, false, false, binds,
-              BoardGraphics.ENHANCED, GpuBoardSource.UiPreferences.Overlays.DEFAULTS,
-              GpuBoardSource.UiPreferences.capture().movementColors(), NameplateMode.HOLD,
-              GpuBoardSource.UiPreferences.capture().display());
-    }
-
-    /**
-     * {@code preferences} with the record components named in {@code changes} replaced and the others kept, so a test
-     * names only the preferences it changes; an unknown name fails.
-     */
-    static GpuBoardSource.UiPreferences with(GpuBoardSource.UiPreferences preferences, Map<String, ?> changes) {
-        RecordComponent[] components = GpuBoardSource.UiPreferences.class.getRecordComponents();
-        List<String> names = Arrays.stream(components).map(RecordComponent::getName).toList();
-        assertTrue(names.containsAll(changes.keySet()), "UiPreferences has no " + changes.keySet());
-        Object[] values = new Object[components.length];
-        try {
-            for (int i = 0; i < components.length; i++) {
-                values[i] = changes.containsKey(names.get(i)) ? changes.get(names.get(i))
-                      : components[i].getAccessor().invoke(preferences);
-            }
-            return GpuBoardSource.UiPreferences.class.getDeclaredConstructor(Arrays.stream(components)
-                  .map(RecordComponent::getType).toArray(Class<?>[]::new)).newInstance(values);
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    static GpuBattleStatus.Snapshot status(int round, GamePhase phase, boolean myTurn, int actor, int turnIndex,
-          GpuBattleStatus.UnitStatus... units) {
-        return new GpuBattleStatus.Snapshot(round, phase, myTurn, 1, actor, List.of(), turnIndex, List.of(units),
-              List.of(), false);
-    }
-
-    /** The panel bundle of the given snapshots, with the others empty. */
-    static GpuHudData panels(GpuMovePlan.Snapshot move, GpuFireOrders.Snapshot fire,
-          GpuPhysicalOptions.Snapshot physical, GpuUnitRecord.Snapshot record) {
-        return new GpuHudData(GpuBoardActions.PhaseInfo.EMPTY, move, fire, physical, record,
-              GpuFirePreview.Snapshot.NONE, GpuChat.Snapshot.EMPTY, GpuToasts.Snapshot.EMPTY,
-              RulerModel.Snapshot.NONE, GpuPlayers.Snapshot.EMPTY);
-    }
-
-    private static GpuHudData panels(GpuMovePlan.Snapshot move, GpuPhysicalOptions.Snapshot physical) {
-        return panels(move, GpuFireOrders.Snapshot.EMPTY, physical, GpuUnitRecord.Snapshot.EMPTY);
-    }
-
-    private static GpuHudData panels(GpuUnitRecord.Snapshot record) {
-        return panels(GpuMovePlan.Snapshot.EMPTY, GpuFireOrders.Snapshot.EMPTY, GpuPhysicalOptions.Snapshot.EMPTY,
-              record);
-    }
-
-    static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
-          boolean pending) {
-        return unit(id, side, canActNow, pending, 1);
-    }
-
-    private static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
-          boolean pending, double armor) {
-        return unit(id, side, canActNow, pending, armor, false);
-    }
-
-    static GpuBattleStatus.UnitStatus unit(int id, GpuBattleStatus.Side side, boolean canActNow,
-          boolean pending, double armor, boolean contact) {
-        return new GpuBattleStatus.UnitStatus(id, side, contact, "Unit " + id, "", "", 0, "", "", "", 0, 0, armor, 1,
-              0, 0, "", 0, "", 0, "", 0, 0, 0, 0, canActNow, pending, !pending, false, Entity.DMG_NONE, List.of(), "",
-              new Coords(id, id), 0, null, List.of(), 0, 0, Player.PLAYER_NONE, List.of());
-    }
-
-    static GpuMovePlan.Snapshot move(boolean planner, List<GpuMovePlan.Step> route) {
-        return new GpuMovePlan.Snapshot(true, planner, false, FIRST, GpuMovePlan.Mode.AUTO, false, "", route,
-              List.of(), List.of(), route.isEmpty() ? null : HEX, 0, route.size(), 4, EntityMovementType.MOVE_WALK, "",
-              true, 0, 0, true, List.of(), !route.isEmpty(), !route.isEmpty(), true, Map.of(), Set.of(), 0);
     }
 
     private static GpuUnitRecord.Snapshot record(int unitId) {

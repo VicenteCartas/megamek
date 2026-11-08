@@ -10,7 +10,7 @@ is present. Rules for discovery, movement and breaking ice stay in the game code
 | --- | --- |
 | `GpuIceShader`, `terrain-ice.glsl` | Floes, snow, joints, transmission, reflection and the jagged land-ice edge. |
 | `BoardSurface.freeze`, `GpuTerrain` | Lake slab, its edges, ragged margin and floes; iced banks; mesh batching. |
-| `GpuBiomeSurface` | Per-hex ice flags (texture B channel) for the land-ice edge. |
+| `GpuBiomeSurface` | Per-hex ice flags (texture B channel) for the land-ice edge; bit 7 marks land ice with no border within reach. |
 | `Terrain`, `ServerHelper.checkEnteringBlackIce`, `MovePathHandler` | Store discovery, reveal black ice during movement and publish the changed hex. |
 | `BoardEditorTerrain` | Authoring markers for hidden flags, independently of gameplay appearance. |
 | `data/models/board/textures/terrain/ice` | Chromatic scattering-tint input, normal and packed optical controls. |
@@ -19,13 +19,17 @@ The Material Maker project `mm-data/tools/materials/terrain/ice/ice-sheet` expor
 `terrain/ice/ice-sheet` material, a Godot 4 `ShaderMaterial` of its preview shader `ice-sheet.gdshader`
 ([board materials](gpu-board-materials.md#shadermaterials)): `ice-sheet_albedo`, `_normal`,
 `_heightmap`, `_orm` (roughness), `_sss` (cloudiness) and `ice-sheet_cracks` (`texture_cracks`).
+A second Export node writes `ice-sheet_floes`, which only the game reads, repeating over 102 m (six plates,
+16 floes): R joints, G where snow settles first, B the cracks between a broken border's shards,
+A each shard's value, flat up to its edge.
 Run `python tools/materials/export.py` from the `mm-data` root.
-Exported wider than its catalogued 1024 pixels, the sheet covers proportionally more
-ground before it repeats (`u_iceCoverage`).
+`u_iceCoverage` scales its repeat by its exported width against the catalogued 1024 pixels.
+Its maps share arrays with the other full-size maps (`GpuAssets.fullSizeMaps`), which take the
+largest layer's size: a wider export would enlarge every layer.
 
 The albedo is a chromatic input to the optical coat, not a final diffuse albedo
-or measured transmission coefficient. The shader blends two filtered RGB samples,
-divides by their mean (with a .05 floor), and uses 35% of that tint around its
+or measured transmission coefficient. The shader divides a filtered RGB sample
+by its mean (with a .05 floor), and uses 35% of that tint around its
 bare-ice scattering color. Changing hue affects the coat; uniformly scaling RGB
 largely cancels above the floor. Snow, cloudy ice, cracks and joints have separate
 optical controls. Their light response and transmission still depend on the coat
@@ -36,7 +40,7 @@ mip and repeat blending and is not an equivalent optimization. The generator's
 separate mean subtraction centers the engineered height field; it does not
 normalize color brightness. The renderer packs height, roughness, cracks and
 cloudiness into one surface map, and uploads it with the aligned normal as the
-layers of one array (`u_iceMaps`). These
+layers of one array (`u_fullSizeData`, with the other full-size maps). These
 are artistic control maps, not measured ice samples. Rebuilding from a changed
 source can also change those numeric maps; a color-only revision must explicitly
 preserve and verify them.
@@ -61,41 +65,32 @@ ground's blended cover, so neighbouring materials still fade across the edge ben
 Costs: lake ice stays one transparent draw per chunk, blended after open water;
 land ice is a shader variant of existing ground draws, and so is its border on
 dry neighbours. Detail, cracks and joints fade with projected size; there is no
-geometric LOD or reflection capture. The October 12 paired review at 1200×900
-on Intel Iris Xe measured the lake transparent stage at 1.33–2.05 ms after unused
-base/floe work was removed, versus 1.71–2.67 ms before, depending on view. Those
-are scene-stage measurements, not the marginal cost of one ice fragment or a
-complete-game frame rate. Paired images differed by at most one display code;
-black-ice opaque timings did not establish a gain. See the
-[complete shader audit](gpu-shader-audit.md) for later experiments and limitations.
+geometric LOD or reflection capture. The floes are one read of a baked map, and
+each of the sheet's maps is read once. Cut faces skip floe and snow work that
+cannot contribute to an exposed edge.
 
-Fixed material modes now specialize only the programs actually drawn. A second
-eight-view comparison against the deferred-work implementation was byte-exact;
-the perspective transparent stage measured 1.366/1.387 ms versus 1.995/2.006 ms
-in alternating blocks. Other views had substantial clock variation, and the
-overview's opaque stage slightly regressed. This fixture used five distinct ice
-programs, compared with four distinct source pairs after removing the mode prefix.
-That source count is not a measurement of the former provider's compilation cost.
-The first source replacements took 35–38 seconds on this driver; later reloads
-took about .33 seconds. Driver-cache state was not controlled. These preparation
-costs are outside the reported GPU timings.
+Inside an iced area (`GpuBiomeSurface`, B bit 7: a hex and all within two hexes
+are land ice at one level) no border is searched and no ground is shaded beneath:
+the constant `ICE_GROUND` stands in for it where bare ice lets it show.
 
-Cut faces use their authored clear/cloudy ice roughness and skip floe and snow
-work that cannot contribute to an exposed edge. Offline sheet-color resizing
-and periodic seam filtering operate in linear RGB and encode once on output;
-the aligned normal and surface maps remain byte-identical.
+`GpuIceShader.variant` folds the modes on the ground into two programs: land ice
+with its dry border, black ice with its paved border. Slabs and waterfalls compile
+their own, as they need no border or base shading.
 
-The final original/current comparison includes those cut-face changes while
-holding texture assets and shared lighting fixed. Its stable overhead transparent
-stage measured 2.4386/2.4346 ms before and 1.7957/1.7890 ms after, about 26.4%
-lower. Opaque terrain and the unchanged composite remained stable in that view.
-Every block collected 20 GPU samples without drops; all 16 frozen repeats across
-eight views were byte-exact. Other views have substantial clock variation, so
-this is not a universal speedup. The current edge material intentionally differs
-from the saved shader. First source replacements took 19.4–22.2 seconds; later
-rebuilds .195–.733 seconds, with uncontrolled driver-cache state. Per-view
-preparation excludes the initial terrain update and is not total startup time.
-Evidence: `build/shader-audit/final-benchmarks-10/ice-benchmark/`.
+The map holds no outline of a shore, so a shore can cut a shard straight.
+
+Baked floes against the procedural ones they replaced: Iris Xe at 1080p, terrain
+cache off, median frame ms over a palindrome of eight runs at Medium and four at High.
+Plain ground, which neither changes, stays at 8.7 and 14.6 ms.
+
+| View | Medium before | Medium after | High before | High after |
+| --- | ---: | ---: | ---: | ---: |
+| All land ice | 19.8 | 11.0 | 28.3 | 21.4 |
+| Dry borders throughout | 18.7 | 13.9 | 24.7 | 21.9 |
+| One land border | 12.9 | 10.2 | 17.8 | 16.5 |
+| Black ice | 14.3 | 12.8 | 22.8 | 22.1 |
+| Lake slabs | 17.8 | 16.3 | 31.7 | 31.6 |
+| 16x17 Frozen Lake | 23.0 | 19.9 | 35.4 | 34.4 |
 
 ## Discovery and editor visibility
 

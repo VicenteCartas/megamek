@@ -1,10 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.button;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.button;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
@@ -41,27 +41,25 @@ import megamek.client.ui.clientGUI.boardview.BoardClientState;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BotCommands.BotCommandsPanel;
 import megamek.client.ui.dialogs.BotCommands.BotMoveOrderDialog;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.board.Coords;
 import megamek.common.enums.GamePhase;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * A bot order that picks target hexes (HexTargetPicker), over the GPU battle window: no Swing control dialog, the
  * pick in the frame for the HUD, the board's clicks picking the hexes, and the HUD's Done and Esc ending it, with the
  * same order the Legacy 2D board's picker sends.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(180)
 class GpuHexPickTest {
     private static final Coords FIRST = new Coords(6, 6);
     private static final Coords SECOND = new Coords(7, 6);
-    private static File originalDataDir;
 
     /** The fixture's game with an allied bot, a client recording its chat and toasts, and a source over its board. */
     private record Session(ClientGUI gui, BoardClientState view, GpuBoardSource source, Player princess,
@@ -75,18 +73,6 @@ class GpuHexPickTest {
                 return null;
             });
         }
-    }
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
     }
 
     @Test

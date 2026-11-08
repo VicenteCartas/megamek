@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -164,5 +166,24 @@ final class GpuReviewFrame implements Disposable {
         ambientOcclusion.dispose();
         skyVisibility.dispose();
         atmosphere.dispose();
+    }
+
+    static void settle(GpuTerrain terrain, GpuTactical tactical, BoardScene scene, BoardCamera camera) throws Exception {
+        long deadline = System.nanoTime() + 60_000_000_000L;
+        double maximum = 0;
+        while (true) {
+            long start = System.nanoTime();
+            boolean changed = terrain.refine(camera.camera);
+            double elapsed = (System.nanoTime() - start) / 1e6;
+            maximum = Math.max(maximum, elapsed);
+            if (changed) { System.out.printf("LOD install %.3f ms%n", elapsed); }
+            if (tactical != null && terrain.ready(scene)) { tactical.update(terrain.presentation(scene), changed); }
+            if (!changed && !terrain.busy() && terrain.ready(scene)) {
+                System.out.printf("LOD maximum render-thread handoff %.3f ms%n", maximum);
+                return;
+            }
+            assertTrue(System.nanoTime() < deadline, () -> "Visible terrain detail must settle: " + terrain.buildDetails());
+            Thread.sleep(5);
+        }
     }
 }

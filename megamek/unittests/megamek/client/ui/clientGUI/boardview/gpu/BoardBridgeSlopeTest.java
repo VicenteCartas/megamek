@@ -5,27 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.Ray;
 import com.badlogic.gdx.utils.GdxNativesLoader;
-import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
-import megamek.common.units.Terrain;
-import megamek.common.units.Terrains;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardBridgeSlopeTest {
-    /** How far the mesh may stray from the ease it follows in rows. */
-    static final float EASED = .06f;
 
     @BeforeAll
     static void natives() { GdxNativesLoader.load(); }
@@ -35,9 +28,9 @@ class BoardBridgeSlopeTest {
         var at = new Coords(4, 4);
         for (int d = 0; d < 6; d++) {
             int reverse = (d + 3) % 6;
-            var a = bridge(at, -2, 3, 1 << d);
+            var a = BridgeScenes.bridge(at, -2, 3, 1 << d);
             for (int step = -2; step <= 2; step++) {
-                var b = bridge(at.translated(d), -1, 2 + step, 1 << reverse);
+                var b = BridgeScenes.bridge(at.translated(d), -1, 2 + step, 1 << reverse);
                 assertEquals(Math.abs(step) <= 1, BoardBridge.connected(a, b, d));
                 assertEquals(BoardBridge.connected(a, b, d), BoardBridge.connected(b, a, reverse));
                 if (Math.abs(step) <= 1) {
@@ -45,7 +38,7 @@ class BoardBridgeSlopeTest {
                     assertEquals(BoardBridge.edgeElevation(a, b, d), BoardBridge.edgeElevation(b, a, reverse));
                 }
             }
-            assertFalse(BoardBridge.connected(a, bridge(at.translated(d), 0, 2, 1 << d), d));
+            assertFalse(BoardBridge.connected(a, BridgeScenes.bridge(at.translated(d), 0, 2, 1 << d), d));
             assertFalse(BoardBridge.connected(a, null, d));
         }
     }
@@ -55,7 +48,7 @@ class BoardBridgeSlopeTest {
     void manufacturedTurnsAndJunctionsJoinTheirDecksRailsAndSoffits(int exits) {
         for (int x : new int[] { 3, 4 }) {
             var at = new Coords(x, 4);
-            var scene = scene(at, exits, true);
+            var scene = BridgeScenes.routeScene(at, exits, true);
             var tile = scene.tile(at);
             var deck = BoardBridge.deck(scene, tile);
             assertEquals(BoardRoad.Kind.PAVED, deck.kind(), "The road material traverses the stepped span");
@@ -73,17 +66,17 @@ class BoardBridgeSlopeTest {
                 var gate = BoardGeometry.center(next.coords(), 2).sub(center).scl(.5f);
                 int edge = Math.floorMod(1 - d, 6);
                 var across = BoardGeometry.corner(at, 0, edge + 1).sub(BoardGeometry.corner(at, 0, edge)).nor();
-                float joint = (2 + step(d) / 2f) * BoardGeometry.level() + lift;
+                float joint = (2 + BridgeScenes.step(d) / 2f) * BoardGeometry.level() + lift;
                 for (float offset : new float[] { -16.5f, -12, 0, 12, 16.5f }) {
                     var p = new Vector3(center).add(gate).mulAdd(across, offset * BoardGeometry.hexScale());
                     var inside = new Vector3(p).mulAdd(gate, -.0001f);
                     var outside = new Vector3(p).mulAdd(gate, .0001f);
                     boolean rail = Math.abs(offset) > BoardRoad.Kind.PAVED.halfWidth;
                     float top = joint + (rail ? 2.5f * BoardGeometry.hexScale() : 0);
-                    assertEquals(top, height(shape, inside, false), .005f, "First mouth, exit " + d);
-                    assertEquals(top, height(other, outside, false), .005f, "Opposite mouth, exit " + d);
-                    assertEquals(joint - 1.5f * BoardGeometry.hexScale(), height(shape, inside, true), .005f);
-                    assertEquals(height(shape, inside, true), height(other, outside, true), .01f);
+                    assertEquals(top, BridgeScenes.height(shape, inside, false), .005f, "First mouth, exit " + d);
+                    assertEquals(top, BridgeScenes.height(other, outside, false), .005f, "Opposite mouth, exit " + d);
+                    assertEquals(joint - 1.5f * BoardGeometry.hexScale(), BridgeScenes.height(shape, inside, true), .005f);
+                    assertEquals(BridgeScenes.height(shape, inside, true), BridgeScenes.height(other, outside, true), .01f);
                 }
                 // Check the incline wherever the curved slab crosses these stations, including its rails.
                 // The broad bend needs a small sampling inset from the kerb's 0.1-unit authoring approximation.
@@ -92,7 +85,7 @@ class BoardBridgeSlopeTest {
                     for (float offset : new float[] { -reach, 0, reach }) {
                         var p = new Vector3(center).mulAdd(gate, t).mulAdd(across, offset * BoardGeometry.hexScale());
                         float px = (p.x - center.x) / BoardGeometry.hexScale(), py = (p.y - center.y) / BoardGeometry.hexScale();
-                        float actual = height(shape, p, false);
+                        float actual = BridgeScenes.height(shape, p, false);
                         if (!slab.contains(px, py)) {
                             assertEquals(Float.NEGATIVE_INFINITY, actual, "No bridge outside the curved slab at " + p);
                             continue;
@@ -101,7 +94,7 @@ class BoardBridgeSlopeTest {
                         // Widened adjacent arms overlap in plan and cannot both impose their independent planes.
                         // The centre line retains the authored approach grade; off-axis junction points use the
                         // shared continuous profile (whose partition and seams are checked by WideProfileTest).
-                        float rise = offset == 0 ? step(d) * BoardGeometry.level() * (t - .5f)
+                        float rise = offset == 0 ? BridgeScenes.step(d) * BoardGeometry.level() * (t - .5f)
                               : BoardSurface.sampleHeight(grade, p.x, p.y, Float.NaN);
                         assertTrue(Float.isFinite(rise), "The entire widened crossing has a grade");
                         float expected = center.z + lift + rise
@@ -118,7 +111,7 @@ class BoardBridgeSlopeTest {
                     var p = new Vector3(face.a()).add(face.b()).add(face.c()).scl(1f / 3);
                     if (!carriageway.contains((p.x - center.x) / BoardGeometry.hexScale(),
                           (p.y - center.y) / BoardGeometry.hexScale()) || !BoardGeometry.contains(at, p.x, p.y)) { continue; }
-                    assertEquals(height(shape, p, false) + offset, p.z, .005f,
+                    assertEquals(BridgeScenes.height(shape, p, false) + offset, p.z, .005f,
                           "Road material and markings must follow the physical deck at " + p + " on " + face);
                 }
             }
@@ -129,11 +122,11 @@ class BoardBridgeSlopeTest {
     void naturalStepsShareTheirEntireOpenMouthAtMixedLods() {
         for (int x : new int[] { 3, 4 }) {
             var at = new Coords(x, 4);
-            var scene = scene(at, 63, false);
+            var scene = BridgeScenes.routeScene(at, 63, false);
             var tile = scene.tile(at);
             var shape = BoardNaturalBridge.build(scene, tile, BoardBridge.deck(scene, tile), TerrainLod.FULL, new HashMap<>());
             var center = BoardGeometry.center(at, 2);
-            assertEquals(center.z, height(shape, center, false), .001f);
+            assertEquals(center.z, BridgeScenes.height(shape, center, false), .001f);
             for (int d = 0; d < 6; d++) {
                 var next = scene.tile(at.translated(d));
                 var gate = BoardGeometry.center(next.coords(), 2).sub(center).scl(.5f);
@@ -143,7 +136,7 @@ class BoardBridgeSlopeTest {
                       .flatMap(f -> List.of(f.a(), f.b(), f.c()).stream())
                       .filter(p -> Math.abs(new Vector3(p).sub(seam).dot(along)) < .001f).distinct().toList();
                 assertEquals(4, points.size());
-                assertEquals((2 + step(d) / 2f) * BoardGeometry.level(),
+                assertEquals((2 + BridgeScenes.step(d) / 2f) * BoardGeometry.level(),
                       points.stream().mapToDouble(p -> p.z).max().orElseThrow(), .001f);
                 for (var lod : TerrainLod.values()) {
                     var other = BoardNaturalBridge.build(scene, next, BoardBridge.deck(scene, next), lod, new HashMap<>());
@@ -167,8 +160,8 @@ class BoardBridgeSlopeTest {
             var roadAt = at.translated(direction);
             int exits = (1 << direction) | (1 << ((direction + 3) % 6));
             for (int roadLevel : new int[] { 0, 2 }) {
-                var scene = BoardSurfaceBlendTest.scene(c -> c.equals(at) ? bridge(c, -1, 2, exits)
-                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                var scene = BoardScenes.scene(c -> c.equals(at) ? BridgeScenes.bridge(c, -1, 2, exits)
+                      : BoardScenes.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                             c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS));
                 var tile = scene.tile(at);
                 var center = BoardGeometry.center(at, 1);
@@ -183,7 +176,7 @@ class BoardBridgeSlopeTest {
                     assertEquals(roadLevel == 0, (footing.solidExits() & (1 << direction)) != 0,
                           "A raised bridge owns a solid approach over the unchanged bank");
                     var road = surfaces.get(roadAt);
-                    assertEquals(center.z + lift, height(shape, center, false), .01f);
+                    assertEquals(center.z + lift, BridgeScenes.height(shape, center, false), .01f);
                     assertEquals(roadCenter.z, road.height(roadCenter.x, roadCenter.y), .01f);
                     // One line from one inset to the other must describe both actual meshes; a solid ramp eases.
                     for (float t : new float[] { .3f, .4f, .499f, .501f, .6f, .7f }) {
@@ -191,9 +184,9 @@ class BoardBridgeSlopeTest {
                             var p = new Vector3(center).lerp(roadCenter, t)
                                   .mulAdd(across, lateral * BoardGeometry.hexScale());
                             float expected = center.z
-                                  + (roadCenter.z - center.z) * (roadLevel == 0 ? eased(t) : 2 * t - .5f);
+                                  + (roadCenter.z - center.z) * (roadLevel == 0 ? BridgeScenes.eased(t) : 2 * t - .5f);
                             if (t < .5f || roadLevel == 0) {
-                                assertEquals(expected + lift, height(shape, p, false), roadLevel == 0 ? EASED : .015f,
+                                assertEquals(expected + lift, BridgeScenes.height(shape, p, false), roadLevel == 0 ? BridgeScenes.EASED : .015f,
                                       "Solid approach: " + lod);
                             } else {
                                 assertEquals(expected, road.height(p.x, p.y), .015f, "Road inset: " + lod + " x=" + x
@@ -215,10 +208,10 @@ class BoardBridgeSlopeTest {
                               "The entrance wedge starts at the road inset and finishes on its flat hub");
                         for (float t : new float[] { .3f, .49f, .51f, .7f }) {
                             var p = new Vector3(center).lerp(roadCenter, t);
-                            float grade = center.z + (roadCenter.z - center.z) * eased(t) + lift;
+                            float grade = center.z + (roadCenter.z - center.z) * BridgeScenes.eased(t) + lift;
                             for (int side : new int[] { -1, 1 }) {
                                 var rail = new Vector3(p).mulAdd(across, side * 16.5f * BoardGeometry.hexScale());
-                                assertEquals(grade + 2.5f * BoardGeometry.hexScale(), height(shape, rail, false), EASED,
+                                assertEquals(grade + 2.5f * BoardGeometry.hexScale(), BridgeScenes.height(shape, rail, false), BridgeScenes.EASED,
                                       "Both rails continue along the ramp without a terminal interrupting the grade");
                                 var origin = new Vector3(p).mulAdd(outward, side * 30 * BoardGeometry.hexScale());
                                 origin.z = (grade - BoardGeometry.level()) / 2;
@@ -231,7 +224,7 @@ class BoardBridgeSlopeTest {
                             var cap = new Vector3(base).mulAdd(along,
                                         BoardBridgeFooting.terminalLength() * BoardGeometry.hexScale() - BoardRelief.metres(1.38f))
                                   .mulAdd(outward, side * (18 * BoardGeometry.hexScale() + BoardRelief.metres(.15f)));
-                            assertTrue(height(shape, cap, false) > roadCenter.z + lift + 2.5f * BoardGeometry.hexScale(),
+                            assertTrue(BridgeScenes.height(shape, cap, false) > roadCenter.z + lift + 2.5f * BoardGeometry.hexScale(),
                                   "The authored entrance block is beyond the ramp, on the flat road");
                         }
                     } else {
@@ -271,7 +264,7 @@ class BoardBridgeSlopeTest {
             float lift = GpuRoads.SURFACE_LIFT * scale;
             for (var lod : TerrainLod.values()) {
                 for (boolean paved : new boolean[] { false, true }) {
-                    var scene = lowerBank(at, direction, paved);
+                    var scene = BridgeScenes.lowerBank(at, direction, paved);
                     var tile = scene.tile(at);
                     var surfaces = new HashMap<Coords, BoardSurface>();
                     var footing = BoardBridgeFooting.build(scene, tile, lod, surfaces);
@@ -282,10 +275,10 @@ class BoardBridgeSlopeTest {
                     for (float t : new float[] { .3f, .4f, .499f, .501f, .6f, .7f }) {
                         for (float lateral : new float[] { -3, 0, 3 }) {
                             var p = new Vector3(center).lerp(bankCenter, t).mulAdd(across, lateral * scale);
-                            float expected = (1 - eased(t)) * BoardGeometry.level() + lift;
-                            assertEquals(expected, BoardBridge.top(shape, p.x, p.y), EASED,
+                            float expected = (1 - BridgeScenes.eased(t)) * BoardGeometry.level() + lift;
+                            assertEquals(expected, BoardBridge.top(shape, p.x, p.y), BridgeScenes.EASED,
                                   "Continuous deck over both hexes: paved=" + paved + " lod=" + lod + " t=" + t);
-                            assertEquals(expected, height(shape, p, false), EASED,
+                            assertEquals(expected, BridgeScenes.height(shape, p, false), BridgeScenes.EASED,
                                   "Picking must use the same sloping top as drawing");
                         }
                         var p = new Vector3(center).lerp(bankCenter, t);
@@ -312,35 +305,22 @@ class BoardBridgeSlopeTest {
     void bareBankRampsDoNotInventConnectionsOrAlterNaturalAndHigherBanks() {
         var at = new Coords(4, 4);
         int direction = 3;
-        var bridge = bridge(at, -1, 2, 9);
+        var bridge = BridgeScenes.bridge(at, -1, 2, 9);
         var bankAt = at.translated(direction);
         for (int level : new int[] { -2, -1, 1, 2, 3 }) {
-            var bank = BoardRoadTest.tile(bankAt, BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS);
+            var bank = BoardScenes.tile(bankAt, BoardRoad.Kind.NONE, 0, level, BoardScene.Surface.GRASS);
             assertEquals(1, BoardBridge.edgeElevation(bridge, bank, direction),
                   "Only a one-level drop to an otherwise bare bank changes the deck grade");
         }
-        var lower = BoardRoadTest.tile(bankAt, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS);
-        var water = BoardSurfaceBlendTest.tile(bankAt, BoardScene.Surface.GRASS, 0, 1, 0);
+        var lower = BoardScenes.tile(bankAt, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS);
+        var water = BoardScenes.tile(bankAt, BoardScene.Surface.GRASS, 0, 1, 0);
         assertEquals(1, BoardBridge.edgeElevation(bridge, water, direction), "Water cannot support a new ramp");
         assertEquals(1, BoardBridge.edgeElevation(bridge, null, direction), "The board edge cannot support a new ramp");
-        assertEquals(1, BoardBridge.edgeElevation(bridge(at, -1, 2, 1), lower, direction),
+        assertEquals(1, BoardBridge.edgeElevation(BridgeScenes.bridge(at, -1, 2, 1), lower, direction),
               "A side without a bridge exit remains closed");
-        var scene = BoardBridgeTypeTest.typed(lowerBank(at, direction, false), HexAppearance.NATURAL_BRIDGE);
+        var scene = BridgeScenes.typed(BridgeScenes.lowerBank(at, direction, false), HexAppearance.NATURAL_BRIDGE);
         assertEquals(1, BoardBridge.edgeElevation(scene.tile(at), scene.tile(bankAt), direction),
               "Natural bridges retain their existing bank geometry");
-    }
-
-    static BoardScene lowerBank(Coords at, int direction, boolean paved) {
-        var bankAt = at.translated(direction);
-        int exits = (1 << direction) | (1 << ((direction + 3) % 6));
-        return BoardSurfaceBlendTest.scene(c -> {
-            if (c.equals(at)) {
-                var tile = bridge(c, -1, 2, exits);
-                return paved ? BoardBridgeMaterialsTest.withDeckRoad(tile, BoardRoad.Kind.PAVED, exits) : tile;
-            }
-            return BoardRoadTest.tile(c, paved && c.equals(bankAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
-                  paved && c.equals(bankAt) ? exits : 0, c.equals(bankAt) ? 0 : -1, BoardScene.Surface.GRASS);
-        });
     }
 
     @ParameterizedTest
@@ -352,9 +332,9 @@ class BoardBridgeSlopeTest {
             var roadAt = at.translated(direction);
             int exits = (1 << direction) | (1 << ((direction + 3) % 6));
             for (int roadLevel : new int[] { 0, 2 }) {
-                var scene = BoardBridgeTypeTest.typed(BoardSurfaceBlendTest.scene(c -> c.equals(at)
-                      ? bridge(c, -1, 2, exits)
-                      : BoardRoadTest.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
+                var scene = BridgeScenes.typed(BoardScenes.scene(c -> c.equals(at)
+                      ? BridgeScenes.bridge(c, -1, 2, exits)
+                      : BoardScenes.tile(c, c.equals(roadAt) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                             c.equals(roadAt) ? exits : 0, c.equals(roadAt) ? roadLevel : -1, BoardScene.Surface.GRASS)),
                       HexAppearance.TRUSS);
                 var tile = scene.tile(at);
@@ -401,61 +381,5 @@ class BoardBridgeSlopeTest {
     static BoardBridge.Shape manufactured(BoardScene scene, BoardScene.Tile tile) {
         var footing = BoardBridgeFooting.build(scene, tile, TerrainLod.FULL, new HashMap<>());
         return BoardBridgeSlope.build(tile, BoardBridge.deck(scene, tile), footing);
-    }
-
-    static float height(BoardBridge.Shape shape, Vector3 point, boolean underside) {
-        var ray = new Ray(new Vector3(point.x, point.y, underside ? -200 : 200),
-              new Vector3(0, 0, underside ? 1 : -1));
-        float distance = (float) Math.sqrt(shape.hit(ray));
-        return ray.origin.z + ray.direction.z * distance;
-    }
-
-    static int step(int direction) { return direction % 3 - 1; }
-
-    /**
-     * The share of its drop an Enhanced solid ramp has made at {@code t} of the way from the deck's centre to the
-     * bank's: one ease from one inset to the other, level at both.
-     */
-    static float eased(float t) {
-        float s = Math.clamp(2 * t - .5f, 0, 1);
-        return s * s * (3 - 2 * s);
-    }
-
-    static BoardScene scene(Coords center, int exits, boolean roads) {
-        var route = new HashMap<Coords, BoardScene.Tile>();
-        // Roads meet the span, whose decks carry a paved road over their exits (as a legacy board's conversion writes).
-        java.util.function.UnaryOperator<BoardScene.Tile> paved = tile -> roads ? BoardBridgeMaterialsTest.withDeckRoad(tile,
-              BoardRoad.Kind.PAVED, BoardBridge.feature(tile).bridgeExits()) : tile;
-        route.put(center, paved.apply(bridge(center, -1, 3, exits)));
-        for (int d = 0; d < 6; d++) {
-            if ((exits & (1 << d)) == 0) { continue; }
-            var at = center.translated(d);
-            int straight = (1 << d) | (1 << ((d + 3) % 6));
-            // Vary the supporting ground too: connectivity uses absolute deck elevation.
-            route.put(at, paved.apply(bridge(at, -2, 4 + step(d), straight)));
-            if (roads) {
-                at = at.translated(d);
-                route.put(at, BoardRoadTest.tile(at, BoardRoad.Kind.PAVED, straight, 2 + step(d), BoardScene.Surface.ROCK));
-            }
-        }
-        var tiles = new ArrayList<BoardScene.Tile>();
-        int width = Math.max(9, center.getX() + 4), height = Math.max(9, center.getY() + 4);
-        for (int x = 0; x < width; x++) {
-            for (int y = 0; y < height; y++) {
-                var at = new Coords(x, y);
-                tiles.add(route.getOrDefault(at, BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, -2, BoardScene.Surface.ROCK)));
-            }
-        }
-        return new BoardScene(0, width, height, tiles, List.of(), List.of(), -1, "", List.of());
-    }
-
-    static BoardScene.Tile bridge(Coords at, int ground, int height, int exits) {
-        var tile = BoardRoadTest.tile(at, BoardRoad.Kind.NONE, 0, ground, BoardScene.Surface.ROCK);
-        var hex = new Hex(ground);
-        hex.addTerrain(new Terrain(Terrains.BRIDGE, 2, true, exits));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_ELEV, height));
-        hex.addTerrain(new Terrain(Terrains.BRIDGE_CF, 40));
-        return new BoardScene.Tile(at, ground, -1, false, 0, tile.surface(), null, null,
-              BoardFeatures.capture(hex, at, Map.of()), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE);
     }
 }

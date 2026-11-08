@@ -22,7 +22,11 @@ void main() {
     waterHabitat(habitat, mixture);
     vec3 tint = waterTint(mixture);
     bool procedural = u_waterMaterial.y > 0.5;
+#ifdef authoredWaterFlag
     vec3 authored = procedural ? vec3(0.0) : texture(u_diffuseTexture, v_diffuseUV).rgb;
+#else
+    vec3 authored = vec3(0.0);
+#endif
     WaterLighting illumination = waterLighting(false);
     vec3 noSheet;
     waterOutput(waterPool(false, geometric, habitat, mixture, tint, authored, illumination, face, 1.0, noSheet));

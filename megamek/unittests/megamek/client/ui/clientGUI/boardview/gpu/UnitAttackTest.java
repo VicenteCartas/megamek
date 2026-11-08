@@ -31,7 +31,7 @@ class UnitAttackTest {
     }
 
     private static UnitAttack hit(String name, int dealt) {
-        var base = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var base = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var raw = base.result();
         var weapon = Mounted.createMounted(new Tank(), EquipmentType.get(name));
         var result = new ResolvedAttack(raw.id(), raw.kind(), raw.attacker(), raw.target(), raw.targetType(),
@@ -101,7 +101,7 @@ class UnitAttackTest {
     }
 
     private static UnitAttack attack(ResolvedAttack.Shot... profiles) {
-        var combat = UnitPlaybackTest.attack(UnitPlaybackTest.unit(1, 1), UnitPlaybackTest.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
+        var combat = UnitPlaybackFixture.attack(UnitPlaybackFixture.unit(1, 1), UnitPlaybackFixture.unit(2, 2), ResolvedAttack.Kind.SHOT, true);
         var raw = combat.result();
         var mounts = java.util.stream.IntStream.range(0, profiles.length)
               .mapToObj(index -> new ResolvedAttack.Mount(1, index, profiles[index])).toList();

@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,7 +55,7 @@ import org.mockito.MockedStatic;
 final class GpuTargetingFixture implements AutoCloseable {
     private static final String UNITS = "testresources/megamek/common/units/";
     final GpuBoardFixture board;
-    final ClientGUI gui = GpuDialogRoutingTest.routingClient();
+    final ClientGUI gui = GpuDialogFixture.routingClient();
     final Client client = mock(Client.class);
     final MegaMekController controller = mock(MegaMekController.class);
     final Player enemy = new Player(2, "Enemy");
