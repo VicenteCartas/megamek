@@ -506,6 +506,15 @@ The 44 draws are the board's 41 road chunks plus mesh overflows. The road array 
 48 MiB of GPU memory (nine RGBA8 1024-pixel layers with mipmaps), against about 41 MiB
 for the separate maps, which now load only for the kinds that decks and tunnel floors use.
 
+A road's outline (`BoardRoad.footprint`, at the few margins its paint asks for) is shared between roads alike: it is
+kept by everything it is made of, its courses with their widths, margin, termini, borders and square joins, so the
+same junction anywhere on a board, and the same road built again for its paint, its furniture or a neighbour's
+clearance, outline once (`BoardRoad.SHARED_OUTLINES`, the 1,024 most recently used). Each caller still gets its own
+copy. Valencia City (128x192, 3,327 road hexes) has 641 distinct outlines among 13,207. With cold outlines (median of
+five runs, each preparing every road's `BoardRoad.of` and paint patches once), preparing its roads went from 6,815 to
+2,939 ms. With a quarter of its straight roads narrowed to single lanes, whose arms widen along their courses and so
+are outlined disc by disc, it went from 15,510 to 4,678 ms, a two-lane hex that a single lane joins from 10 to 2.2 ms.
+
 ## Physical ramps and joins
 
 `BoardRoadGrade` reserves each carriageway's ground and gives its height; `BoardRoadCut` removes the

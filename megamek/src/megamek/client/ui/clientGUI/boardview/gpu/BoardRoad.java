@@ -1541,7 +1541,38 @@ final class BoardRoad {
     /** Union before tessellation: junctions have one surface, without overlapping translucent road arms. */
     Area footprint(float margin) {
         // Road patches reuse several margins; callers subtract their own masks from a fresh copy.
-        return new Area(outlines.computeIfAbsent(margin, this::outline));
+        return new Area(outlines.computeIfAbsent(margin, this::sharedOutline));
+    }
+
+    /** Everything an {@link #outline} is made of: its courses, margin, termini, borders and square joins. */
+    private record OutlineKey(List<List<Point>> paths, float margin, List<End> ends, List<Point> borders, List<Join> joins,
+          int squared) { }
+
+    /** How many outlines {@link #SHARED_OUTLINES} keeps: a large board has some hundreds of distinct ones. */
+    private static final int OUTLINES_KEPT = 1024;
+
+    /**
+     * Recent outlines by what they are made of ({@link OutlineKey}): roads alike anywhere on a board, and the same road
+     * built again for its paint, its furniture or a neighbour's clearance, share one. An outline is only ever copied
+     * ({@link #footprint}), never changed. Least recently used go first.
+     */
+    private static final Map<OutlineKey, Area> SHARED_OUTLINES = new java.util.LinkedHashMap<>(256, .75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<OutlineKey, Area> eldest) { return size() > OUTLINES_KEPT; }
+    };
+
+    private Area sharedOutline(float margin) {
+        var key = new OutlineKey(paths.stream().map(List::copyOf).toList(), margin, List.copyOf(ends), List.copyOf(borders),
+              List.copyOf(joins), squared);
+        synchronized (SHARED_OUTLINES) {
+            Area shared = SHARED_OUTLINES.get(key);
+            if (shared != null) { return shared; }
+        }
+        Area built = outline(margin);
+        synchronized (SHARED_OUTLINES) {
+            Area shared = SHARED_OUTLINES.putIfAbsent(key, built);
+            return shared != null ? shared : built;
+        }
     }
 
     private Area outline(float margin) {
