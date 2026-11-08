@@ -1,6 +1,8 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -8,7 +10,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ratgenerator.FactionRecord;
@@ -40,14 +44,24 @@ final class ReadoutAvailability {
 
     /**
      * {@code entity}'s availability, read only once its page is first shown: the first read loads every Force
-     * Generator era, which takes a while, so it runs on a thread of its own.
+     * Generator era, which takes a while, so it runs on a thread of its own. Asked while the Force Generator is still
+     * loading, the page keeps saying it is reading until the generator is ready.
      */
     static LobbyReadoutView.LaterRows later(Entity entity) {
         String chassis = entity.getFullChassis();
         String model = entity.getModel();
-        String key = chassis + '\n' + model;
+        return later(chassis + '\n' + model, RATGenerator::getInstance, () -> of(chassis, model));
+    }
+
+    /**
+     * The rows kept under {@code key}, read by {@code reader} once {@code generators}' Force Generator has loaded.
+     */
+    static LobbyReadoutView.LaterRows later(String key, Supplier<RATGenerator> generators,
+          Supplier<List<Row>> reader) {
         return new LobbyReadoutView.LaterRows() {
             private volatile @Nullable List<Row> read;
+            /** What to run once the Force Generator has loaded, if the page asked while it was still loading. */
+            private final AtomicReference<Runnable> waiting = new AtomicReference<>();
 
             @Override
             public @Nullable List<Row> rows() {
@@ -60,15 +74,40 @@ final class ReadoutAvailability {
                 READER.execute(() -> {
                     List<Row> rows = READ.get(key);
                     if (rows == null) {
-                        rows = of(chassis, model);
-                        // Not kept while the Force Generator is still loading: a later readout reads it again
-                        if (RATGenerator.getInstance().isInitialized()) {
-                            READ.put(key, rows);
+                        RATGenerator generator = generators.get();
+                        if (!generator.isInitialized()) {
+                            // Still loading: the page keeps saying so and is read once the generator is ready
+                            afterLoading(generator, done);
+                            return;
                         }
+                        rows = reader.get();
+                        READ.put(key, rows);
                     }
                     read = rows;
                     done.run();
                 });
+            }
+
+            private void afterLoading(RATGenerator generator, Runnable done) {
+                if (waiting.getAndSet(done) != null) {
+                    // Already waiting: only the latest page to ask is told
+                    return;
+                }
+                ActionListener loaded = new ActionListener() {
+                    @Override
+                    public void actionPerformed(ActionEvent event) {
+                        if (generator.isInitialized()) {
+                            generator.removeListener(this);
+                            Runnable next = waiting.getAndSet(null);
+                            if (next != null) {
+                                read(next);
+                            }
+                        }
+                    }
+                };
+                generator.registerListener(loaded);
+                // It may have finished between the check and the registration
+                loaded.actionPerformed(null);
             }
         };
     }
