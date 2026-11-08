@@ -427,45 +427,9 @@ public class LobbyCommands {
         client().sendMapDimensions(mapSettings);
     }
 
-    /**
-     * Sets the number of boards across when it is within {@link #MIN_MAP_SIZE} and {@link #MAX_MAP_SIZE}.
-     *
-     * @return {@code true} when the width was changed and sent
-     */
-    public boolean changeMapWidth(MapSettings mapSettings, int width) {
-        if ((width < MIN_MAP_SIZE) || (width > MAX_MAP_SIZE)) {
-            return false;
-        }
-        resizeMap(mapSettings, width, mapSettings.getMapHeight());
-        return true;
-    }
 
-    /**
-     * Sets the number of boards down when it is within {@link #MIN_MAP_SIZE} and {@link #MAX_MAP_SIZE}.
-     *
-     * @return {@code true} when the height was changed and sent
-     */
-    public boolean changeMapHeight(MapSettings mapSettings, int height) {
-        if ((height < MIN_MAP_SIZE) || (height > MAX_MAP_SIZE)) {
-            return false;
-        }
-        resizeMap(mapSettings, mapSettings.getMapWidth(), height);
-        return true;
-    }
 
-    /** Removes a column of boards unless only one is left. */
-    public void shrinkMapWidth(MapSettings mapSettings) {
-        if (mapSettings.getMapWidth() > MIN_MAP_SIZE) {
-            resizeMap(mapSettings, mapSettings.getMapWidth() - 1, mapSettings.getMapHeight());
-        }
-    }
 
-    /** Removes a row of boards unless only one is left. */
-    public void shrinkMapHeight(MapSettings mapSettings) {
-        if (mapSettings.getMapHeight() > MIN_MAP_SIZE) {
-            resizeMap(mapSettings, mapSettings.getMapWidth(), mapSettings.getMapHeight() - 1);
-        }
-    }
 
     /** Sets the size of each board and sends the map settings. */
     public void resizeBoards(MapSettings mapSettings, int width, int height) {
@@ -473,31 +437,7 @@ public class LobbyCommands {
         sendMapSettings(mapSettings);
     }
 
-    /**
-     * Sets the width of each board when it is within {@link #MIN_BOARD_SIZE} and {@link #MAX_BOARD_SIZE}.
-     *
-     * @return {@code true} when the width was changed and sent
-     */
-    public boolean changeBoardWidth(MapSettings mapSettings, int width) {
-        if ((width < MIN_BOARD_SIZE) || (width > MAX_BOARD_SIZE)) {
-            return false;
-        }
-        resizeBoards(mapSettings, width, mapSettings.getBoardHeight());
-        return true;
-    }
 
-    /**
-     * Sets the height of each board when it is within {@link #MIN_BOARD_SIZE} and {@link #MAX_BOARD_SIZE}.
-     *
-     * @return {@code true} when the height was changed and sent
-     */
-    public boolean changeBoardHeight(MapSettings mapSettings, int height) {
-        if ((height < MIN_BOARD_SIZE) || (height > MAX_BOARD_SIZE)) {
-            return false;
-        }
-        resizeBoards(mapSettings, mapSettings.getBoardWidth(), height);
-        return true;
-    }
 
     /** Applies a saved map setup's map size, board size and boards and sends the map settings. */
     public void applyMapSetup(MapSettings mapSettings, MapSetup setup) {

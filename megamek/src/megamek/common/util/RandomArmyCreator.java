@@ -38,9 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.Predicate;
 
-import jakarta.annotation.Nullable;
 import megamek.client.ui.dialogs.advancedsearch.ASAdvancedSearchPanel;
 import megamek.client.ui.dialogs.advancedsearch.MekSearchFilter;
 import megamek.common.TechConstants;
@@ -110,16 +108,20 @@ public class RandomArmyCreator {
         public boolean padWithInfantry;
 
         /**
+         * The most infantry padding adds; a large budget would otherwise pad with hundreds
+         */
+        public int maxPadding = Integer.MAX_VALUE;
+
+        /**
+         * Set by {@link #generateArmy}: whether padding stopped at {@link #maxPadding} short of the budget
+         */
+        public boolean paddingLimited;
+
+        /**
          * Advanced options for search
          */
         public MekSearchFilter advancedSearchFilter = null;
         public ASAdvancedSearchPanel asPanel = null;
-
-        /**
-         * A filter of a view without the Swing search panels, applied as the advanced search filters are: not to
-         * infantry, battle armor or ProtoMeks
-         */
-        public @Nullable Predicate<MekSummary> filter = null;
     }
 
     /**
@@ -294,13 +296,6 @@ public class RandomArmyCreator {
                 continue;
             }
 
-            if (!m.getUnitType().equals(UnitType.getTypeName(UnitType.INFANTRY))
-                  && !m.getUnitType().equals(UnitType.getTypeName(UnitType.PROTOMEK))
-                  && !m.getUnitType().equals(UnitType.getTypeName(UnitType.BATTLE_ARMOR))
-                  && (p.filter != null && !p.filter.test(m))) {
-                continue;
-            }
-
             // Unit accepted, add to the appropriate list
             if (m.getUnitType().equals(UnitType.getTypeName(UnitType.MEK))) {
                 allMeks.add(m);
@@ -325,24 +320,25 @@ public class RandomArmyCreator {
         int averageTankBV = countBV(allTanks) / Math.max(1, allTanks.size());
         int averageInfBV = countBV(allInfantry) / Math.max(1, allInfantry.size());
         int averageBaBV = countBV(allBA) / Math.max(1, allBA.size());
-        int helpWeight = Math.max(1, p.meks * averageMekBV + p.tanks
-              * averageTankBV + p.infantry * averageInfBV + p.ba * averageBaBV);
+        long helpWeight = Math.max(1, (long) p.meks * averageMekBV + (long) p.tanks
+              * averageTankBV + (long) p.infantry * averageInfBV + (long) p.ba * averageBaBV);
 
-        int baBV = (p.ba * averageBaBV * p.maxBV) / helpWeight;
+        // long arithmetic: a dozen heavy units against a large budget overflows an int
+        int baBV = (int) (((long) p.ba * averageBaBV * p.maxBV) / helpWeight);
         if ((p.ba > 0) && !allBA.isEmpty()) {
             baBV = Math.max(baBV, p.ba * allBA.getFirst().getBV());
             baBV = Math.min(baBV, p.ba * allBA.getLast().getBV());
         } else {
             baBV = 0;
         }
-        int mekBV = (p.meks * averageMekBV * p.maxBV) / helpWeight;
+        int mekBV = (int) (((long) p.meks * averageMekBV * p.maxBV) / helpWeight);
         if ((p.meks > 0) && !allMeks.isEmpty()) {
             mekBV = Math.max(mekBV, p.meks * allMeks.getFirst().getBV());
             mekBV = Math.min(mekBV, p.meks * allMeks.getLast().getBV());
         } else {
             mekBV = 0;
         }
-        int tankBV = (p.tanks * averageTankBV * p.maxBV) / helpWeight;
+        int tankBV = (int) (((long) p.tanks * averageTankBV * p.maxBV) / helpWeight);
         if ((p.tanks > 0) && !allTanks.isEmpty()) {
             tankBV = Math.max(tankBV, p.tanks * allTanks.getFirst().getBV());
             tankBV = Math.min(tankBV, p.tanks * allTanks.getLast().getBV());
@@ -357,10 +353,15 @@ public class RandomArmyCreator {
         units.addAll(generateArmy(allMeks, p.meks, mekBV + tankBV + baBV
               - countBV(units), allowedVariance));
 
+        p.paddingLimited = false;
         if (p.padWithInfantry) {
             int inf = 0;
             if (averageInfBV != 0) {
                 inf = (p.maxBV - countBV(units)) / averageInfBV;
+            }
+            if (inf > p.maxPadding) {
+                inf = Math.max(0, p.maxPadding);
+                p.paddingLimited = true;
             }
 
             units.addAll(generateArmy(allInfantry, inf, p.maxBV

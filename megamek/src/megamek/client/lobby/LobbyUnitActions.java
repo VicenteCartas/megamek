@@ -1,10 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
-package megamek.client.ui.panels.phaseDisplay.lobby;
+package megamek.client.lobby;
 
 import static megamek.client.lobby.LobbyUnitMenu.*;
 
-import java.awt.Image;
-import java.awt.image.BufferedImage;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -13,22 +12,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.StringTokenizer;
-import javax.imageio.ImageIO;
-import javax.swing.JFrame;
+import java.util.function.Consumer;
 
+import jakarta.annotation.Nullable;
+import megamek.client.Client;
 import megamek.client.generator.ReconfigurationParameters;
 import megamek.client.generator.TeamLoadOutGenerator;
-import megamek.client.lobby.LobbyCommands;
-import megamek.client.lobby.LobbyFiles;
-import megamek.client.lobby.LobbyUnitMenu;
 import megamek.client.ratgenerator.FactionRecord;
-import megamek.client.ui.clientGUI.ClientGUI;
-import megamek.client.ui.dialogs.BotCommands.BotFormationsMenuBuilder;
-import megamek.client.ui.dialogs.BotCommands.BotOrderFacingDialog;
-import megamek.client.ui.dialogs.iconChooser.CamoChooserDialog;
-import megamek.client.ui.enums.DialogResult;
-import megamek.client.ui.tileset.EntityImage;
-import megamek.client.ui.tileset.MMStaticDirectoryManager;
+import megamek.client.ui.dialogs.BotCommands.MoveOrderCommands;
+import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.Team;
 import megamek.common.containers.MunitionTree;
@@ -38,7 +30,10 @@ import megamek.common.game.Game;
 import megamek.common.icons.Camouflage;
 import megamek.common.net.packets.InvalidPacketDataException;
 import megamek.common.options.OptionsConstants;
+import megamek.common.orders.FormationOrder;
 import megamek.common.orders.FormationShape;
+import megamek.common.orders.LanceRole;
+import megamek.common.orders.LanceRoles;
 import megamek.common.orders.UnitOrderAction;
 import megamek.common.units.Entity;
 import megamek.common.units.IBomber;
@@ -48,40 +43,55 @@ import megamek.server.commands.UnitOrderCommand;
 
 /**
  * Runs the items of the lobby's unit and formation menu ({@link LobbyUnitMenu}), given as their command strings
- * {@code COMMAND|info|unit ids}, through the lobby commands; the few that need a Swing dialog of their own (the C3
- * manager, the sprite camouflage and the bot orders) open it on the client's frame, and the loadout and sprite files
- * are asked through the lobby's {@link LobbyFiles}.
+ * {@code COMMAND|info|unit ids}, through the lobby commands. The few items that ask something of their own (the bot
+ * facing and lance role, the sprite's camouflage) ask it through the {@link Host}, and the loadout and sprite files
+ * through the lobby's {@link LobbyFiles}. The readout, BV, cost and C3 manager items are the lobby's own views and do
+ * not come here.
+ * <p>
+ * Swing thread.
  */
-public final class SwingLobbyUnitActions {
-    private static final MMLogger LOGGER = MMLogger.create(SwingLobbyUnitActions.class);
+public final class LobbyUnitActions {
+    private static final MMLogger LOGGER = MMLogger.create(LobbyUnitActions.class);
 
-    private final ClientGUI clientGUI;
+    /** What the unit actions need of the lobby's window. Each call is on the Swing thread, as are its answers. */
+    public interface Host {
+        /** Shows the facing card; {@code confirmed} runs once it is confirmed with the form's facings. */
+        void chooseFacing(BotFacingForm form, Runnable confirmed);
+
+        /** Shows the lance role card; {@code confirmed} runs once it is confirmed with the form's role. */
+        void chooseLanceRole(LanceRoleForm form, Runnable confirmed);
+
+        /** Asks the camouflage to draw the unit's sprite in; {@code chosen} gets it once it is chosen. */
+        void chooseCamo(Entity unit, Consumer<Camouflage> chosen);
+
+        /** Draws the unit's lobby sprite in the camouflage, damaged or not, into the PNG file. */
+        void writeSprite(Entity unit, Camouflage camouflage, boolean damage, File file);
+    }
+
+    private final Client client;
     private final LobbyCommands commands;
     private final LobbyFiles files;
+    private final Host host;
 
-    /** @param files the lobby's file routes, which the loadout and sprite items ask their files through */
-    public SwingLobbyUnitActions(ClientGUI clientGUI, LobbyFiles files) {
-        this.clientGUI = clientGUI;
-        this.commands = clientGUI.lobbyCommands();
+    public LobbyUnitActions(Client client, LobbyCommands commands, LobbyFiles files, Host host) {
+        this.client = client;
+        this.commands = commands;
         this.files = files;
+        this.host = host;
     }
 
     private Game game() {
-        return clientGUI.getClient().getGame();
+        return client.getGame();
     }
 
-    private JFrame frame() {
-        return clientGUI.getFrame();
-    }
-
-    /** EDT: runs the menu item with this command string. */
+    /** Runs the menu item with this command string. */
     public void run(String commandString) {
         StringTokenizer st = new StringTokenizer(commandString, "|");
         String command = st.nextToken();
         // info need not be an int; loading uses the format "##:##"
         String info = st.nextToken();
         // The entities list may be empty
-        Set<Entity> entities = LobbyUtility.getEntities(game(), st.nextToken());
+        Set<Entity> entities = units(game(), st.hasMoreTokens() ? st.nextToken() : "");
 
         switch (command) {
             case LMP_CONFIGURE, LMP_TOW -> {
@@ -108,9 +118,40 @@ public final class SwingLobbyUnitActions {
         }
     }
 
+    /** The units with these comma-separated ids, leaving out those not in the game. */
+    public static Set<Entity> units(Game game, String idList) {
+        Set<Entity> result = new HashSet<>();
+        for (int id : ids(idList)) {
+            Entity entity = game.getEntity(id);
+            if (entity != null) {
+                result.add(entity);
+            }
+        }
+        return result;
+    }
+
+    /** The forces with these comma-separated ids, leaving out those not in the game. */
+    public static Set<Force> forces(Game game, String idList) {
+        Set<Force> result = new HashSet<>();
+        for (int id : ids(idList)) {
+            Force force = game.getForces().getForce(id);
+            if (force != null) {
+                result.add(force);
+            }
+        }
+        return result;
+    }
+
+    private static List<Integer> ids(String idList) {
+        List<Integer> ids = new ArrayList<>();
+        StringTokenizer st = new StringTokenizer(idList, ",");
+        while (st.hasMoreTokens()) {
+            ids.add(Integer.parseInt(st.nextToken().trim()));
+        }
+        return ids;
+    }
+
     private void forceAction(String command, Set<Entity> entities, String info) {
-        StringTokenizer stringTokenizer;
-        int newOwnerId;
         switch (command) {
             case LMP_F_CREATE_SUB -> commands.forceCreateSub(StringUtil.toInt(info, Force.NO_FORCE));
             case LMP_F_ADD_TO -> commands.forceAddEntity(entities, StringUtil.toInt(info, Force.NO_FORCE));
@@ -120,24 +161,24 @@ public final class SwingLobbyUnitActions {
             case LMP_F_CREATE_FROM -> commands.forceCreateFrom(entities);
             case LMP_F_REMOVE -> commands.forceRemoveEntity(entities);
             case LMP_F_PROMOTE -> {
-                StringTokenizer fst = new StringTokenizer(info, ",");
                 Set<Integer> forceIds = new HashSet<>();
+                StringTokenizer fst = new StringTokenizer(info, ",");
                 while (fst.hasMoreTokens()) {
                     forceIds.add(StringUtil.toInt(fst.nextToken(), Force.NO_FORCE));
                 }
                 commands.forcePromote(forceIds);
             }
-            case LMP_F_ASSIGN -> {
-                stringTokenizer = new StringTokenizer(info, ":");
-                newOwnerId = StringUtil.toInt(stringTokenizer.nextToken(), Player.PLAYER_NONE);
-                commands.forceAssignFull(LobbyUtility.getForces(game(), stringTokenizer.nextToken()), newOwnerId);
+            case LMP_F_ASSIGN, LMP_F_ASSIGN_ONLY -> {
+                StringTokenizer st = new StringTokenizer(info, ":");
+                int newOwnerId = StringUtil.toInt(st.nextToken(), Player.PLAYER_NONE);
+                Set<Force> forces = forces(game(), st.nextToken());
+                if (command.equals(LMP_F_ASSIGN)) {
+                    commands.forceAssignFull(forces, newOwnerId);
+                } else {
+                    commands.forceAssignOnly(forces, newOwnerId);
+                }
             }
-            case LMP_F_ASSIGN_ONLY -> {
-                stringTokenizer = new StringTokenizer(info, ":");
-                newOwnerId = StringUtil.toInt(stringTokenizer.nextToken(), Player.PLAYER_NONE);
-                commands.forceAssignOnly(LobbyUtility.getForces(game(), stringTokenizer.nextToken()), newOwnerId);
-            }
-            case LMP_SBF_FORMATION -> commands.showSbfView(LobbyUtility.getForces(game(), info));
+            case LMP_SBF_FORMATION -> commands.showSbfView(forces(game(), info));
             default -> LOGGER.warn("Unknown lobby force command {}", command);
         }
     }
@@ -148,7 +189,7 @@ public final class SwingLobbyUnitActions {
             switch (command) {
                 case LMP_INDI_CAMO -> commands.individualCamo(entities);
                 case LMP_CONFIGURE_ALL -> commands.customizeMeks(entities);
-                case LMP_DELETE -> commands.delete(LobbyUtility.getForces(game(), info), entities, true);
+                case LMP_DELETE -> commands.delete(forces(game(), info), entities, true);
                 case LMP_SKILLS -> commands.setRandomSkills(entities);
                 case LMP_NAME -> commands.setRandomNames(entities);
                 case LMP_CALLSIGN -> commands.setRandomCallSigns(entities);
@@ -168,7 +209,7 @@ public final class SwingLobbyUnitActions {
                 case LMP_ASSIGN -> {
                     StringTokenizer st = new StringTokenizer(info, ":");
                     int newOwnerId = Integer.parseInt(st.nextToken());
-                    commands.changeOwner(entities, LobbyUtility.getForces(game(), st.nextToken()), newOwnerId);
+                    commands.changeOwner(entities, forces(game(), st.nextToken()), newOwnerId);
                 }
                 case LMP_DETACH_TRAILER -> {
                     commands.detachTrailers(entities, updateCandidates);
@@ -184,10 +225,6 @@ public final class SwingLobbyUnitActions {
                 case LMP_HIDDEN -> commands.applyHidden(entities, info.equals(LMP_HIDE));
                 case LMP_SCAN_TARGET -> commands.applyScanTarget(entities, info.equals(LMP_SCAN_WANTED));
                 case LMP_STAND -> commands.applyProne(entities, stance(info));
-                case LMP_VIEW -> LobbyUtility.liveEntityReadoutAction(entities.stream().map(Entity::getId).toList(),
-                      commands.canSeeAll(entities), frame(), game());
-                case LMP_BV -> LobbyUtility.mekBVAction(entities, commands.canSeeAll(entities), false, frame());
-                case LMP_COST -> LobbyUtility.mekCostAction(entities, commands.canSeeAll(entities), false, frame());
                 case LMP_DAMAGE -> commands.configureDamage(entities);
                 case LMP_SWAP -> commands.swapPilots(entities, Integer.parseInt(info));
                 case LMP_C3DISCONNECT -> commands.c3DisconnectFromNetwork(entities);
@@ -197,10 +234,9 @@ public final class SwingLobbyUnitActions {
                 case LMP_C3CONNECT -> commands.c3Connect(entities, Integer.parseInt(info), false);
                 case LMP_C3_FORM_C3 -> commands.c3Connect(entities, Integer.parseInt(info), true);
                 case LMP_C3_FORM_NHC3 -> commands.c3JoinNh(entities, Integer.parseInt(info), true);
-                case LMP_C3_MANAGER -> new C3NetworkManagerDialog(clientGUI, entities).setVisible(true);
                 case LMP_UNLOAD_ALL_FROM_BAY -> commands.unloadFromBay(entities, Integer.parseInt(info));
-                case LMP_MOVE_DOWN -> commands.forceMove(LobbyUtility.getForces(game(), info), entities, false);
-                case LMP_MOVE_UP -> commands.forceMove(LobbyUtility.getForces(game(), info), entities, true);
+                case LMP_MOVE_DOWN -> commands.forceMove(forces(game(), info), entities, false);
+                case LMP_MOVE_UP -> commands.forceMove(forces(game(), info), entities, true);
                 case LMP_PRIORITY_TARGET -> commands.setPriorityTarget(info, entities);
                 case LMP_ALPHA_STRIKE -> commands.showAlphaStrikeView(entities);
                 case LMP_AUTOCONFIG, LMP_RANDOM_CONFIG, LMP_SAVE_CONFIG, LMP_APPLY_CONFIG ->
@@ -261,13 +297,13 @@ public final class SwingLobbyUnitActions {
             case LMP_AUTOCONFIG -> {
                 munitionTree = TeamLoadOutGenerator.generateMunitionTree(reconfigurationParameters, entityArrayList,
                       "");
-                resetBombChoices(clientGUI, game(), entityArrayList);
+                resetBombChoices(commands, game(), entityArrayList);
                 tlg.reconfigureEntities(entityArrayList, faction, munitionTree, reconfigurationParameters, null);
                 reconfigured = true;
             }
             case LMP_RANDOM_CONFIG -> {
                 munitionTree = TeamLoadOutGenerator.generateRandomizedMT();
-                resetBombChoices(clientGUI, game(), entityArrayList);
+                resetBombChoices(commands, game(), entityArrayList);
                 tlg.reconfigureEntities(entityArrayList, faction, munitionTree, reconfigurationParameters, null);
                 reconfigured = true;
             }
@@ -278,7 +314,7 @@ public final class SwingLobbyUnitActions {
             case LMP_APPLY_CONFIG -> files.loadLoadout(loaded -> {
                 if (loaded != null) {
                     // Use the unlimited availability map (all munitions allowed in any amount)
-                    resetBombChoices(clientGUI, game(), entityArrayList);
+                    resetBombChoices(commands, game(), entityArrayList);
                     HashMap<String, Object> availMap = TeamLoadOutGenerator.createUnlimitedAllMunitionsMap();
                     tlg.reconfigureEntities(entityArrayList, faction, loaded, reconfigurationParameters, availMap);
                     commands.sendProxyUpdates(entityArrayList,
@@ -295,9 +331,9 @@ public final class SwingLobbyUnitActions {
     }
 
     /** Clears the bomb choices of the bombers among the units and sends them as their owner's. */
-    public static void resetBombChoices(ClientGUI clientgui, Game game, List<Entity> el) {
-        ArrayList<Entity> resetBombers = new ArrayList<>();
-        for (Entity entity : el) {
+    public static void resetBombChoices(LobbyCommands commands, Game game, List<Entity> units) {
+        List<Entity> resetBombers = new ArrayList<>();
+        for (Entity entity : units) {
             if (entity.isBomber() && !entity.isVehicle()) {
                 IBomber bomber = (IBomber) entity;
                 bomber.setIntBombChoices(new BombLoadout());
@@ -306,13 +342,15 @@ public final class SwingLobbyUnitActions {
             }
         }
         if (!resetBombers.isEmpty()) {
-            clientgui.lobbyCommands().sendProxyUpdates(resetBombers, game.getPlayer(el.getFirst().getOwnerId()));
+            commands.sendProxyUpdates(resetBombers, game.getPlayer(units.getFirst().getOwnerId()));
         }
     }
 
+    // ---- Bot orders
+
     /**
-     * Opens the turret-style facing dialog for bot units: the "when stopped" facing is the one each unit deploys in
-     * and holds whenever it stops, the "while moving" one it keeps on the move.
+     * Asks the facings for bot units: the "when stopped" facing is the one each unit deploys in and holds whenever it
+     * stops, the "while moving" one it keeps on the move. The first unit by id shows its facings.
      */
     private void botFacing(Collection<Entity> selectedUnits) {
         if (selectedUnits.isEmpty()) {
@@ -321,18 +359,17 @@ public final class SwingLobbyUnitActions {
         List<Entity> units = new ArrayList<>(selectedUnits);
         units.sort(Comparator.comparingInt(Entity::getId));
         Entity first = units.getFirst();
-        BotOrderFacingDialog dialog = new BotOrderFacingDialog(frame(), clientGUI, first,
-              first.getUnitOrders().getFacingWhileMoving(), first.getUnitOrders().getFacingWhenStopped());
-        if (dialog.showDialog() != DialogResult.CONFIRMED) {
-            return;
-        }
-        for (Entity unit : units) {
-            clientGUI.getClient().sendChat(UnitOrderCommand.commandText(unit.getId(), UnitOrderAction.FACING,
-                  UnitOrderCommand.FACING_WHILE_MOVING + '=' + dialog.getFacingWhileMoving(),
-                  UnitOrderCommand.FACING_WHEN_STOPPED + '=' + dialog.getFacingWhenStopped()));
-        }
-        LOGGER.info("[BotOrders] lobby facing: moving {}, stopped {} for {} unit(s)",
-              dialog.getFacingWhileMoving(), dialog.getFacingWhenStopped(), units.size());
+        BotFacingForm form = new BotFacingForm(first.getDisplayName(), first.getUnitOrders().getFacingWhileMoving(),
+              first.getUnitOrders().getFacingWhenStopped());
+        host.chooseFacing(form, () -> {
+            for (Entity unit : units) {
+                client.sendChat(UnitOrderCommand.commandText(unit.getId(), UnitOrderAction.FACING,
+                      UnitOrderCommand.FACING_WHILE_MOVING + '=' + form.whileMoving(),
+                      UnitOrderCommand.FACING_WHEN_STOPPED + '=' + form.whenStopped()));
+            }
+            LOGGER.info("[BotOrders] lobby facing: moving {}, stopped {} for {} unit(s)", form.whileMoving(),
+                  form.whenStopped(), units.size());
+        });
     }
 
     /** The Formation and Role items of a bot lance; the info is {@code [choice:]forceId}. */
@@ -344,20 +381,101 @@ public final class SwingLobbyUnitActions {
             return;
         }
         switch (command) {
-            case LMP_BOT_FORMATION -> BotFormationsMenuBuilder.sendFormation(clientGUI.getClient(), force,
-                  lance.unitIds(), FormationShape.valueOf(parts[0]));
-            case LMP_BOT_FORMATION_OFF -> BotFormationsMenuBuilder.sendFormationOff(clientGUI.getClient(),
-                  lance.unitIds());
-            case LMP_BOT_ROLE -> BotFormationsMenuBuilder.chooseLobbyRole(clientGUI.getClient(), frame(), game(),
-                  lance.owner(), force, lance.unitIds(), switch (parts[0]) {
-                      case ROLE_CONVOY -> Boolean.TRUE;
-                      case ROLE_ESCORT -> Boolean.FALSE;
-                      default -> null;
-                  });
+            case LMP_BOT_FORMATION -> sendFormation(force, lance.unitIds(), FormationShape.valueOf(parts[0]));
+            case LMP_BOT_FORMATION_OFF -> {
+                for (int unitId : lance.unitIds()) {
+                    client.sendChat(UnitOrderCommand.commandText(unitId, UnitOrderAction.FORMATION_OFF));
+                }
+            }
+            case LMP_BOT_ROLE -> chooseRole(lance, force, switch (parts[0]) {
+                case ROLE_CONVOY -> Boolean.TRUE;
+                case ROLE_ESCORT -> Boolean.FALSE;
+                default -> null;
+            });
             default -> {
             }
         }
     }
+
+    /**
+     * Puts a bot lance in formation: spacing {@link FormationOrder#DEFAULT_SPACING}, the lance's first unit leading
+     * and keeping together.
+     */
+    private void sendFormation(Force lance, List<Integer> unitIds, FormationShape shape) {
+        for (int slot = 0; slot < unitIds.size(); slot++) {
+            client.sendChat(UnitOrderCommand.commandText(unitIds.get(slot), UnitOrderAction.FORMATION,
+                  UnitOrderCommand.SHAPE + '=' + shape.name(),
+                  UnitOrderCommand.LEADER + '=' + unitIds.get(0),
+                  UnitOrderCommand.SPACING + '=' + FormationOrder.DEFAULT_SPACING,
+                  UnitOrderCommand.SLOT + '=' + slot,
+                  UnitOrderCommand.TOGETHER + "=true"));
+        }
+        LOGGER.info("[BotOrders] lobby formation {} for {} ({} units)", shape, lance.getName(), unitIds.size());
+    }
+
+    /**
+     * Sets a bot lance's role: {@code null} clears it, and a convoy or escort role asks the role card on that choice
+     * first. An escort needs a lance on its side to guard.
+     *
+     * @param convoy {@code null} for None, else whether the lance is to be a convoy ({@code true}) or an escort
+     */
+    private void chooseRole(LobbyUnitMenu.BotLance lance, Force force, @Nullable Boolean convoy) {
+        List<Entity> units = new ArrayList<>();
+        for (int unitId : lance.unitIds()) {
+            Entity unit = game().getEntity(unitId);
+            if (unit != null) {
+                units.add(unit);
+            }
+        }
+        if (convoy == null) {
+            sendRole(force, units, null);
+            return;
+        }
+        LanceRole current = LanceRoles.roleOf(units);
+        OffBoardDirection defaultExitEdge = LanceRoles.defaultExitEdge(units.isEmpty() ? null : units.get(0));
+        LanceRoleForm form;
+        if (convoy) {
+            form = new LanceRoleForm(force.getName(), List.of(), defaultExitEdge,
+                  ((current != null) && current.isConvoy()) ? current : LanceRole.convoy(defaultExitEdge));
+        } else {
+            List<LanceRoles.ConvoyChoice> convoys = LanceRoles.convoyChoices(game(), lance.owner(), force.getId());
+            if (convoys.isEmpty()) {
+                return;
+            }
+            form = new LanceRoleForm(force.getName(), convoys, defaultExitEdge,
+                  ((current != null) && current.isEscort()) ? current
+                        : LanceRole.defaultEscort(convoys.get(0).forceId()));
+        }
+        host.chooseLanceRole(form, () -> {
+            if (!form.complete()) {
+                return;
+            }
+            form.lanceToMakeConvoy().ifPresent(guarded -> {
+                // the lance given an escort that was not a convoy yet becomes one
+                for (String command : MoveOrderCommands.makeConvoyCommands(
+                      LanceRoles.unitsOf(game(), guarded.forceId()), guarded.newExitEdge())) {
+                    client.sendChat(command);
+                }
+                LOGGER.info("[BotOrders] lobby: {} made a convoy, leaving by the {} edge, to be escorted by {}",
+                      guarded.name(), guarded.newExitEdge(), force.getName());
+            });
+            sendRole(force, units, form.role());
+        });
+    }
+
+    private void sendRole(Force lance, List<Entity> units, @Nullable LanceRole role) {
+        for (String command : MoveOrderCommands.roleCommands(units, role)) {
+            client.sendChat(command);
+        }
+        List<String> columnCommands = MoveOrderCommands.convoyColumnCommands(units, role);
+        for (String command : columnCommands) {
+            client.sendChat(command);
+        }
+        LOGGER.info("[BotOrders] lobby role {} for {} ({} units){}", (role == null) ? LanceRole.NONE_TEXT : role,
+              lance.getName(), units.size(), columnCommands.isEmpty() ? "" : ", put in a Column to travel");
+    }
+
+    // ---- Sprites
 
     /** Exports the unit's sprite; {@code kind} is one of the {@code SPRITE_} kinds. */
     private void exportSprite(Entity entity, String kind) {
@@ -365,31 +483,13 @@ public final class SwingLobbyUnitActions {
             case SPRITE_CAMO -> exportSprite(entity, entity.getCamouflageOrElseOwners(), false);
             case SPRITE_DAMAGE -> exportSprite(entity, new Camouflage(), true);
             case SPRITE_CAMO_DAMAGE -> exportSprite(entity, entity.getCamouflageOrElseOwners(), true);
-            case SPRITE_CHOSEN_CAMO, SPRITE_CHOSEN_CAMO_DAMAGE -> {
-                CamoChooserDialog camoChooserDialog = new CamoChooserDialog(frame(),
-                      entity.getCamouflageOrElseOwners());
-                try {
-                    if (camoChooserDialog.showDialog().isConfirmed()) {
-                        exportSprite(entity, camoChooserDialog.getSelectedItem(),
-                              kind.equals(SPRITE_CHOSEN_CAMO_DAMAGE));
-                    }
-                } finally {
-                    camoChooserDialog.dispose();
-                }
-            }
+            case SPRITE_CHOSEN_CAMO, SPRITE_CHOSEN_CAMO_DAMAGE -> host.chooseCamo(entity,
+                  camo -> exportSprite(entity, camo, kind.equals(SPRITE_CHOSEN_CAMO_DAMAGE)));
             default -> LOGGER.warn("Unknown sprite export {}", kind);
         }
     }
 
     private void exportSprite(Entity entity, Camouflage camouflage, boolean showDamage) {
-        files.exportSprite(entity.getDisplayName(), file -> {
-            Image base = MMStaticDirectoryManager.getMekTileset().imageFor(entity);
-            Image sprite = EntityImage.createLobbyIcon(base, camouflage, entity).loadPreviewImage(showDamage);
-            try {
-                ImageIO.write((BufferedImage) sprite, "png", file);
-            } catch (Exception ex) {
-                LOGGER.error(ex, "Failed to export to file");
-            }
-        });
+        files.exportSprite(entity.getDisplayName(), file -> host.writeSprite(entity, camouflage, showDamage, file));
     }
 }

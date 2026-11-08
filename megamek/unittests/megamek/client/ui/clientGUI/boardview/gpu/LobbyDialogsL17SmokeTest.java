@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -384,18 +385,70 @@ class LobbyDialogsL17SmokeTest {
             List<EntityReadout.Row> rows = List.of(
                   new EntityReadout.Row(EntityReadout.Row.Kind.LABELED, List.of("Tonnage", "80")),
                   new EntityReadout.Row(EntityReadout.Row.Kind.TEXT, List.of("A line")));
-            LobbyReadoutView.Dossier first = new LobbyReadoutView.Dossier("First", "80 t", null,
-                  List.of(rows, rows, rows, rows));
-            LobbyReadoutView.Dossier second = new LobbyReadoutView.Dossier("Second", "80 t", null,
-                  List.of(rows, rows, rows, rows));
+            LobbyReadoutView.Dossier first = new LobbyReadoutView.Dossier(1, "First", "80 t", null,
+                  List.of(rows, rows, rows, rows, rows, rows), new BufferedImage(64, 90, BufferedImage.TYPE_INT_ARGB));
+            LobbyReadoutView.Dossier second = new LobbyReadoutView.Dossier(2, "Second", "80 t", null,
+                  List.of(rows, rows, rows, rows, rows, rows), new BufferedImage(64, 90, BufferedImage.TYPE_INT_ARGB));
             LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
             LobbyReadoutView view = dialogs.readout(List.of(first, second));
             ui.draw();
             assertNotNull(view.tabs());
             click(ui, find(ui, "readout-next"));
             assertEquals(1, view.shown(), "Next shows the next unit");
+            view.page(LobbyReadoutView.Page.ALPHA_STRIKE);
+            ui.draw();
+            assertNotNull(find(ui, "readout-card"), "the Alpha Strike page shows the card");
+
+            LobbyReadoutView.Dossier renamed = new LobbyReadoutView.Dossier(2, "Renamed", "85 t", null,
+                  List.of(rows, rows, rows, rows, rows, rows), null);
+            view.update(List.of(first, renamed));
+            ui.draw();
+            assertEquals(1, view.shown(), "an update stays on the unit that shows");
+            assertEquals(LobbyReadoutView.Page.ALPHA_STRIKE.ordinal(), view.tabs().getSelectedIndex(),
+                  "and on its tab");
+            assertEquals("Renamed", ((Label) find(ui, "readout-name")).getText().toString());
+            view.update(List.of(first));
+            assertEquals(0, view.shown(), "a unit that has gone gives way to the first");
             click(ui, find(ui, "readout-close"));
             assertFalse(dialogs.isOpen());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theFactionsPageIsReadOnlyWhenItFirstShows() {
+        UiTestStage.run(ui -> {
+            List<EntityReadout.Row> rows = List.of(
+                  new EntityReadout.Row(EntityReadout.Row.Kind.TEXT, List.of("A line")));
+            List<Runnable> asked = new ArrayList<>();
+            List<List<EntityReadout.Row>> factions = new ArrayList<>();
+            LobbyReadoutView.LaterRows later = new LobbyReadoutView.LaterRows() {
+                @Override
+                public List<EntityReadout.Row> rows() {
+                    return factions.isEmpty() ? null : factions.get(0);
+                }
+
+                @Override
+                public void read(Runnable done) {
+                    asked.add(done);
+                }
+            };
+            LobbyReadoutView.Dossier unit = new LobbyReadoutView.Dossier(1, "Unit", "80 t", null,
+                  List.of(rows, rows, rows, rows, rows), null, later);
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyReadoutView view = dialogs.readout(List.of(unit, unit));
+            ui.draw();
+            assertTrue(asked.isEmpty(), "nothing is read before the page shows");
+            view.page(LobbyReadoutView.Page.FACTIONS);
+            ui.draw();
+            assertNotNull(find(ui, "readout-loading"), "the page says it is reading");
+            assertEquals(1, asked.size());
+
+            factions.add(List.of(new EntityReadout.Row(EntityReadout.Row.Kind.TEXT, List.of("Davion"))));
+            view.page(LobbyReadoutView.Page.FACTIONS);
+            ui.draw();
+            assertNull(ui.stage.getRoot().findActor("readout-loading"), "the read rows replace the note");
+            assertEquals(1, asked.size(), "rows once read are not read again");
             dialogs.dispose();
         });
     }

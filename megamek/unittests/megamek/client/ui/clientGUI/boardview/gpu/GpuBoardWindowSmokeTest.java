@@ -80,8 +80,8 @@ import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.Configuration;
 import megamek.common.Hex;
@@ -539,8 +539,8 @@ class GpuBoardWindowSmokeTest {
                 var conditions = new PlanetaryConditions();
                 conditions.setLight(Light.FULL_MOON);
                 game.setPlanetaryConditions(conditions);
-                SwingLobbyServices.of(gui);
-                MapSetupDialog.preview3D(gui);
+                LobbyServices.of(gui);
+                LobbyBoardPreviews.preview3D(gui);
                 return null;
             });
             await(() -> Gdx.app != null && Gdx.app != previous);
@@ -590,7 +590,7 @@ class GpuBoardWindowSmokeTest {
             });
         } finally {
             onSwing(() -> {
-                SwingLobbyServices.forget(gui);
+                LobbyServices.forget(gui);
                 owner.dispose();
                 return null;
             });
@@ -853,56 +853,38 @@ class GpuBoardWindowSmokeTest {
     }
 
     /**
-     * The lobby's 2D and 3D previews side by side (A/B comparison): the lobby's 2D preview is kept above its 3D preview
-     * in both opening orders (the native window opens maximized by default and would cover it), closing the 2D preview
-     * leaves the 3D preview open and releases the 2D preview, a lobby update replaces the 3D preview's board, and the
-     * lobby closes its 3D preview, which returns the 2D preview's stacking.
+     * The lobby's 3D preview is 3D only: its View > Renderer has no Legacy 2D, a lobby update replaces its board, and the
+     * lobby closes it.
      */
     @Test
-    void lobbyPreviewsStayOpenTogetherAndCloseOnTheirOwn() throws Exception {
+    void lobbyPreviewIsThreeDOnlyAndFollowsTheLobby() throws Exception {
         JFrame lobby = onSwing(() -> { var frame = new JFrame("Lobby"); frame.setSize(800, 600); frame.setVisible(true); return frame; });
         Board board = Board.createEmptyBoard(8, 10);
         try {
-            JDialog first = onSwing(() -> lobbyPreview2D(lobby));
             Application previous = Gdx.app;
-            onSwing(() -> { GpuBoardWindow.openPreview(lobby, board); return null; });
+            onSwing(() -> { GpuBoardWindow.openLobbyPreview(lobby, board, new PlanetaryConditions()); return null; });
             await(() -> Gdx.app != null && Gdx.app != previous);
             await(() -> previewSource() != null);
-            // The source attaches once the window is presented, so the presentation has run.
-            await(() -> previewReady(previewSource()));
+            BoardSource source = previewSource();
+            await(() -> previewReady(source)); awaitNavigation();
             assertTrue(onSwing(() -> GpuBoardWindow.showsPreview(lobby, board)));
-            assertTrue(onSwing(first::isAlwaysOnTop), "2D, then 3D: the 2D preview is not hidden behind the 3D preview");
+            input(() -> GpuBoardTestUi.click("utility-menu"));
+            input(() -> GpuBoardTestUi.click("/view"));
+            input(() -> GpuBoardTestUi.click("/view/viewRenderer"));
+            assertNull(onGl(() -> GpuBoardTestUi.stage().getRoot().findActor("/view/viewRenderer/viewLegacy2D")),
+                  "The lobby's preview offers no Legacy 2D");
+            assertNotNull(onGl(() -> GpuBoardTestUi.stage().getRoot()
+                  .findActor("/view/viewRenderer/" + ClientGUI.VIEW_GRAPHICS_CLASSIC)));
 
-            onSwing(() -> { first.dispose(); return null; });
-            onSwing(() -> null);
-            assertTrue(onSwing(() -> GpuBoardWindow.showsPreview(lobby, board)), "Closing the 2D preview keeps the 3D");
-            assertFalse(onSwing(first::isAlwaysOnTop), "A closed 2D preview is released with its own stacking");
-
-            JDialog second = onSwing(() -> lobbyPreview2D(lobby));
-            onSwing(() -> { GpuBoardWindow.openPreview(lobby, board); return null; });
-            assertTrue(onSwing(second::isAlwaysOnTop), "3D, then 2D: the 2D preview stays over the focused 3D preview");
             Board update = Board.createEmptyBoard(6, 6);
             onSwing(() -> { GpuBoardWindow.updatePreview(lobby, update); return null; });
             assertTrue(onSwing(() -> GpuBoardWindow.showsPreview(lobby, update)), "A lobby update replaces the board");
-
             onSwing(() -> { GpuBoardWindow.closePreview(lobby); return null; });
             await(() -> !GpuBoardWindow.isActiveFor(null));
-            assertTrue(onSwing(second::isShowing), "The 3D preview's close leaves the 2D preview open");
-            assertFalse(onSwing(second::isAlwaysOnTop), "The 2D preview returns to its own stacking");
-            onSwing(() -> { second.dispose(); return null; });
         } finally {
             onSwing(() -> { GpuBoardWindow.closeFor((ClientGUI) null); lobby.dispose(); return null; });
         }
     }
-
-    /** A stand-in for the lobby's 2D preview: a modeless dialog of the lobby window. */
-    private static JDialog lobbyPreview2D(JFrame lobby) {
-        JDialog dialog = new JDialog(lobby, "2D preview", false);
-        dialog.setBounds(lobby.getX() + 100, lobby.getY() + 100, 300, 200);
-        dialog.setVisible(true);
-        return dialog;
-    }
-
     /**
      * The editor's 2D Preview is one live window beside the running editor, owned by the editor's owner window: it shows
      * the session's board as the 2D board draws it, repaints what the session paints and undoes and follows a replaced

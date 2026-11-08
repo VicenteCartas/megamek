@@ -108,6 +108,8 @@ class RandomArmyFormTest {
         boolean whole;
         boolean counts = true;
         boolean deals = true;
+        boolean shortHand;
+        int dealt = 3;
         GenerationContext context;
         final List<Integer> asked = new ArrayList<>();
 
@@ -119,7 +121,7 @@ class RandomArmyFormTest {
         @Override
         public List<MekSummary> deal(int count, List<MekSummary> kept) {
             asked.add(count);
-            return roll(counts ? count : 3, "dealer");
+            return roll(counts ? count : dealt, "dealer");
         }
 
         @Override
@@ -141,6 +143,24 @@ class RandomArmyFormTest {
         public GenerationContext context() {
             return context;
         }
+
+        @Override
+        public boolean cutShort() {
+            return shortHand;
+        }
+    }
+
+    @Test
+    void aHandCutShortIsReportedUntilCleared() {
+        Stub dealer = new Stub();
+        form.dealer(dealer);
+        form.roll();
+        assertFalse(form.cutShort());
+        dealer.shortHand = true;
+        form.roll();
+        assertTrue(form.cutShort());
+        form.clear();
+        assertFalse(form.cutShort(), "nothing dealt, nothing cut short");
     }
 
     @Test
@@ -189,21 +209,58 @@ class RandomArmyFormTest {
     }
 
     @Test
-    void theContextIsWhatAGeneratorLastDealtFor() {
+    void theContextIsWhatTheHandsGeneratorCardsWereDealtFor() {
         Stub dealer = new Stub();
         dealer.context = new GenerationContext("FS", 3050, "A", GenerationContext.Source.RAT_GENERATOR);
         form.dealer(dealer);
+        form.count(2);
         form.roll();
         assertEquals(dealer.context, form.context());
+        form.keep(0, true);
         form.dealer(null);
         form.roll();
-        assertEquals(dealer.context, form.context(), "a table's roll keeps the generator's note");
-        form.clear();
-        assertNull(form.context(), "cleared with the hand");
-        MekSummary unit = new MekSummary();
+        assertEquals(dealer.context, form.context(), "a kept generator card keeps its note");
+        form.keep(0, false);
+        form.roll();
+        assertNull(form.context(), "replacing every generator card drops its note");
         form.dealer(dealer);
+        form.roll();
+        form.discard(1);
+        form.discard(0);
+        assertNull(form.context(), "discarding every generator card drops its note");
+        MekSummary unit = new MekSummary();
         assertTrue(form.take(unit));
         assertSame(unit, form.cards().get(form.cards().size() - 1).unit());
         assertEquals(dealer.context, form.context(), "a taken unit notes the dealer's context");
+        form.clear();
+        assertNull(form.context(), "cleared with the hand");
+    }
+
+    @Test
+    void theNewestGeneratorNoteWins() {
+        GenerationContext first = new GenerationContext("FS", 3050, "A", GenerationContext.Source.RAT_GENERATOR);
+        GenerationContext later = new GenerationContext("DC", 3050, "B", GenerationContext.Source.RAT_GENERATOR);
+        Stub dealer = new Stub();
+        dealer.context = first;
+        form.dealer(dealer);
+        form.count(2);
+        form.roll();
+        form.keep(0, true);
+        dealer.context = later;
+        form.roll();
+        assertEquals(later, form.context());
+        dealer.context = null;
+        form.reroll(1);
+        assertEquals(first, form.context(), "back to the kept card's note once the later card is replaced");
+    }
+
+    @Test
+    void aGeneratorDealsEverythingItWasAskedFor() {
+        Stub dealer = new Stub();
+        dealer.counts = false;
+        dealer.dealt = RandomArmyForm.MAX_UNITS + 6;
+        form.dealer(dealer);
+        form.roll();
+        assertEquals(RandomArmyForm.MAX_UNITS + 6, form.cards().size(), "no dealt unit is silently dropped");
     }
 }

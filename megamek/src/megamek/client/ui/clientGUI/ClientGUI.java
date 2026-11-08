@@ -81,6 +81,7 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.commands.*;
 import megamek.client.event.BoardViewEvent;
 import megamek.client.event.BoardViewListener;
+import megamek.client.lobby.DecliningLobbyPrompts;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.MegaMekLabPrint;
 import megamek.client.ratgenerator.GenerationContext;
@@ -140,10 +141,9 @@ import megamek.client.ui.panels.ReceivingGameDataPanel;
 import megamek.client.ui.panels.StartingScenarioPanel;
 import megamek.client.ui.panels.WaitingForServerPanel;
 import megamek.client.ui.panels.phaseDisplay.*;
-import megamek.client.ui.panels.phaseDisplay.lobby.MapSetupDialog;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyBoardPreviews;
+import megamek.client.ui.panels.phaseDisplay.lobby.LobbyServices;
 import megamek.client.ui.panels.phaseDisplay.lobby.PlayerSettingsDialog;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyServices;
 import megamek.client.ui.tileset.EntityImage;
 import megamek.client.ui.tileset.MMStaticDirectoryManager;
 import megamek.client.ui.tileset.TilesetManager;
@@ -1525,13 +1525,13 @@ public class ClientGUI extends AbstractClientGUI
             case GAME_ALL_MG_BURST_ON:
             case GAME_ALL_MG_BURST_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
+                    LobbyServices.of(this).setAllBurstMg(event.getActionCommand().equals(GAME_ALL_MG_BURST_ON));
                 }
                 break;
             case GAME_ALL_HOT_LOAD_ON:
             case GAME_ALL_HOT_LOAD_OFF:
                 if (client.getGame().getPhase().isLounge()) {
-                    SwingLobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
+                    LobbyServices.of(this).setAllHotLoad(event.getActionCommand().equals(GAME_ALL_HOT_LOAD_ON));
                 }
                 break;
             case VIEW_NETWORK_INFORMATION:
@@ -1813,7 +1813,7 @@ public class ClientGUI extends AbstractClientGUI
         // Tell all the displays to remove themselves as listeners.
         GpuBoardWindow.closeFor(this);
         GpuLobbyWindow.closeFor(this);
-        SwingLobbyServices.forget(this);
+        LobbyServices.forget(this);
         client.getGame().removeGameListener(gameListener);
         boolean reportHandled = false;
         boardViews().forEach(IBoardView::dispose);
@@ -2062,7 +2062,7 @@ public class ClientGUI extends AbstractClientGUI
                 panMain.add(component, main);
                 break;
             case EXCHANGE:
-                MapSetupDialog.closePreviews(this);
+                LobbyBoardPreviews.closePreviews(this);
                 component = new ReceivingGameDataPanel();
                 main = CG_EXCHANGE;
                 component.setName(main);
@@ -3193,22 +3193,6 @@ public class ClientGUI extends AbstractClientGUI
         return Toolkit.getDefaultToolkit().getScreenSize();
     }
 
-    /**
-     * Pops up a dialog box giving the player information on a subject. It also includes a checkbox if they don't want
-     * to be bothered again by it.
-     *
-     * @param title           the <code>String</code> title of the dialog box.
-     * @param message         the <code>String</code> message to display.
-     * @param includeCheckBox if <code>true</code>, a checkbox will be included in the dialog box
-     *
-     * @return {@link InformDialog} containing the player's responses. The dialog will already have been shown
-     */
-    public InformDialog doInformBotherDialog(String title, String message, boolean includeCheckBox) {
-        InformDialog informDialog = new InformDialog(frame, title, message, includeCheckBox);
-        informDialog.setVisible(true);
-        informDialog.dispose();
-        return informDialog;
-    }
 
     /**
      * Pops up a dialog box asking a yes/no question
@@ -4476,10 +4460,10 @@ public class ClientGUI extends AbstractClientGUI
         return client;
     }
 
-    /** @return the lobby's commands for this client, with their Swing dialogs */
+    /** @return the lobby's commands for this client; the lobby attaches its own dialogs while it shows */
     public LobbyCommands lobbyCommands() {
         if (lobbyCommands == null) {
-            lobbyCommands = new LobbyCommands(this::getClient, new SwingLobbyPrompts(this));
+            lobbyCommands = new LobbyCommands(this::getClient, new DecliningLobbyPrompts());
         }
         return lobbyCommands;
     }
@@ -4489,7 +4473,7 @@ public class ClientGUI extends AbstractClientGUI
      * the map settings take the saved board, as the map setup's own Edit Board does.
      */
     public void boardEditorClosed(@Nullable Path savedFile, boolean savedAssembledPreview) {
-        MapSetupDialog.boardEditorClosed(this, savedFile, savedAssembledPreview);
+        LobbyBoardPreviews.boardEditorClosed(this, savedFile, savedAssembledPreview);
     }
     @Override
     public JComponent turnTimerComponent() {
