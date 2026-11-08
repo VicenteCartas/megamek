@@ -108,7 +108,7 @@ final class GpuBiomeVegetation implements Disposable {
     static final float[] CROP_KEEP = { 550, 160 };
     /**
      * Projected pixels per hex over which a field's plants fade into the ground's crop colour: they stand on medium and
-     * full terrain detail only (BoardPlants), which a chunk keeps down to TerrainLod's 24.
+     * full terrain detail (BoardPlants), which a chunk keeps down to TerrainLod's 24, and on a late level's coarse.
      */
     static final float[] CROP_FADE = { 24, 40 };
 

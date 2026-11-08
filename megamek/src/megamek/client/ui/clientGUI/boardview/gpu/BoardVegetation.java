@@ -32,7 +32,7 @@ final class BoardVegetation {
     static Map<Coords, BoardSurface> prepare(BoardScene scene, List<BoardScene.Tile> owners, TerrainLod lod,
           float floor, Map<Coords, BoardSurface> finished) {
         Map<Coords, BoardSurface> sources = new HashMap<>(finished);
-        if (lod == TerrainLod.COARSE || lod == TerrainLod.DISTANT) { return sources; }
+        if (!carriesGrass(lod)) { return sources; }
         var needed = new LinkedHashSet<BoardSurface>();
         for (var tile : owners) {
             if (!GpuGroundCover.grows(scene, tile)) { continue; }
@@ -51,9 +51,26 @@ final class BoardVegetation {
         return sources;
     }
 
+    /**
+     * Whether a chunk at this detail carries grass (BoardPlants): from medium, or coarse where a level draws meadows
+     * but takes detail late.
+     */
+    static boolean carriesGrass(TerrainLod lod) {
+        return switch (lod) {
+            case FULL, MEDIUM -> true;
+            case COARSE -> lateDetail() && BoardQuality.current.meadowShare > 0;
+            case DISTANT -> false;
+        };
+    }
+
+    /** Whether the level asks for medium detail late ({@link BoardQuality#detailScale}): coarse chunks plant as medium. */
+    static boolean lateDetail() {
+        return BoardQuality.current.detailScale > 1;
+    }
+
     /** Whether a hex's sculpted support carries ground cover at this detail. */
     static boolean covers(BoardScene scene, BoardScene.Tile tile, TerrainLod lod) {
-        return lod != TerrainLod.COARSE && lod != TerrainLod.DISTANT && GpuGroundCover.grows(scene, tile);
+        return carriesGrass(lod) && GpuGroundCover.grows(scene, tile);
     }
 
     /** A root belongs to its hex, even where a neighbour's finished slope or shallow bank extends over it. */
