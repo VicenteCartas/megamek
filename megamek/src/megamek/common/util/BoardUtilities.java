@@ -1777,6 +1777,14 @@ public class BoardUtilities {
                 appearance.computeIfPresent("bridgeRail", (owner, rail) -> RailRoute.flip(rail, horiz, vert));
                 // So does a single lane's direction of travel.
                 appearance.computeIfPresent(SingleLane.OWNER, (owner, road) -> SingleLane.flip(road, horiz, vert));
+                for (String owner : new String[] { "water", "pavement" }) {
+                    int separated = HexAppearance.separated(appearance, owner);
+                    if (separated != 0) {
+                        Terrain sides = new Terrain(Terrains.WATER, 0, true, separated);
+                        sides.flipExits(horiz, vert);
+                        appearance.put(owner, HexAppearance.withSeparated(appearance.get(owner), sides.getExits()));
+                    }
+                }
                 if (!appearance.equals(hex.getAppearance())) { hex.setAppearance(appearance); }
                 int nx = horiz ? width - x - 1 : x, ny = vert ? height - y - 1 : y;
                 transformed[ny * width + nx] = hex;

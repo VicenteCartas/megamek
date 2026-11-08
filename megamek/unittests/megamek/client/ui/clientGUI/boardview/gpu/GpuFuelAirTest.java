@@ -91,9 +91,9 @@ class GpuFuelAirTest {
 
     /** Seconds of the attack's own clock after the round lands before the terrain it changed shows. */
     private static float terrainShownAfterContact(ResolvedAttack.Shot shot) {
-        var attacker = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var before = UnitPlaybackTest.scene(attacker, target);
+        var attacker = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var before = UnitPlaybackFixture.scene(attacker, target);
         var tile = new BoardScene.Tile(new Coords(0, 0), 3, -1, false, 0, null, null, List.of(), List.of());
         var after = new BoardScene(0, 1, 1, List.of(tile), List.of(attacker, target), List.of(), -1, "OFFBOARD",
               List.of());

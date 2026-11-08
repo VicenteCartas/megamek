@@ -19,7 +19,6 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.math.Rectangle;
@@ -33,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.gdx.UiButton;
+import megamek.client.ui.gdx.UiCursorCapture;
 import megamek.client.ui.gdx.UiTheme;
 import megamek.client.ui.util.KeyCommandBind;
 import megamek.common.ResolvedAttack;
@@ -97,7 +97,7 @@ class GpuUtilityMinimapSmokeTest {
             state.history.advance(0, playback -> true);
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             GpuBoardSource.Frame frame = new GpuBoardSource.Frame(scene, List.of(), null, global, "", null, 0,
-                  "", null, reports, status, GpuHudInputTest.panels(move, GpuFireOrders.Snapshot.EMPTY,
+                  "", null, reports, status, GpuHudFixtures.panels(move, GpuFireOrders.Snapshot.EMPTY,
                         GpuPhysicalOptions.Snapshot.EMPTY, GpuUnitRecord.Snapshot.EMPTY));
             GpuHud.Inputs inputs = new GpuHud.Inputs(frame, new GpuHud.HudView(tactical, false, Map.of(), Map.of(),
                   Map.of(), null, Entity.NONE, 0), null, preferences, GpuHud.Metrics.of(width, height), List.of());
@@ -258,7 +258,7 @@ class GpuUtilityMinimapSmokeTest {
 
     /** The preferences with the contacts panel shown or hidden. */
     private static GpuBoardSource.UiPreferences contacts(GpuBoardSource.UiPreferences p, boolean enabled) {
-        return GpuHudInputTest.with(p, Map.of("contactsEnabled", enabled));
+        return GpuHudFixtures.with(p, Map.of("contactsEnabled", enabled));
     }
 
     /** The utilities run the camera's Tactical View, the View menu's minimap item and the HUD's panel toggles. */
@@ -366,10 +366,10 @@ class GpuUtilityMinimapSmokeTest {
             assertEquals(azimuth, board.camera.azimuth(), "The drag pans only");
             assertEquals(tilt, board.camera.tilt(), "The drag pans only");
             assertEquals(z, board.camera.focus.z, "The drag keeps the focus plane");
-            assertFalse(Gdx.input.isCursorCatched(), "The left drag follows the visible pointer");
+            assertFalse(UiCursorCapture.active(), "The left drag follows the visible pointer");
             // A middle drag rotates both views, with inclination only in 3D, as the board's does.
             assertTrue(hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE), "The canvas takes the middle press");
-            assertTrue(Gdx.input.isCursorCatched(), "An orbit holds the cursor");
+            assertTrue(UiCursorCapture.active(), "An orbit holds the cursor");
             assertTrue(hud.stage.touchDragged(x + 40, y + 20, 0), "The canvas consumes the orbit drag");
             assertNotEquals(azimuth, board.camera.azimuth(), "A middle drag rotates in both views");
             if (tactical) {
@@ -379,7 +379,23 @@ class GpuUtilityMinimapSmokeTest {
             }
             assertEquals(tactical, board.camera.tactical(), "Orbiting keeps the renderer mode");
             hud.stage.touchUp(x + 40, y + 20, 0, Input.Buttons.MIDDLE);
-            assertFalse(Gdx.input.isCursorCatched(), "Releasing the orbit shows the cursor again");
+            assertFalse(UiCursorCapture.active(), "Releasing the orbit shows the cursor again");
+            // One gesture at a time: a second button neither starts an orbit nor outlives the first.
+            float orbited = board.camera.azimuth();
+            hud.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE);
+            assertFalse(UiCursorCapture.active(), "A middle press during a left drag does not orbit");
+            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            hud.stage.touchDragged(x + 40, y, 0);
+            assertEquals(orbited, board.camera.azimuth(), "The left drag stays a pan");
+            hud.stage.touchUp(x + 40, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.MIDDLE);
+            hud.stage.touchDown(x, y, 0, Input.Buttons.LEFT);
+            hud.stage.touchUp(x, y, 0, Input.Buttons.MIDDLE);
+            assertFalse(UiCursorCapture.active(), "Releasing the middle button ends the orbit");
+            hud.stage.touchDragged(x + 40, y, 0);
+            assertEquals(orbited, board.camera.azimuth(), "Nothing orbits after the release");
+            hud.stage.touchUp(x + 40, y, 0, Input.Buttons.LEFT);
             // The wheel over the map zooms the camera by the board's step, about the view's centre (the user's
             // decision of 2026-10-03); off the map the wheel is not the map's.
             // The stage fires enter and exit in act, as each frame does.
@@ -707,7 +723,7 @@ class GpuUtilityMinimapSmokeTest {
         BoardScene.Unit enemy = scene.units().stream().filter(unit -> unit.id() == 7).findFirst().orElseThrow();
         List<BoardScene.Combat> shots = new ArrayList<>();
         for (int shot = 0; shot < count; shot++) {
-            shots.add(UnitPlaybackTest.attack(atlas, enemy, ResolvedAttack.Kind.SHOT, shot % 2 == 0));
+            shots.add(UnitPlaybackFixture.attack(atlas, enemy, ResolvedAttack.Kind.SHOT, shot % 2 == 0));
         }
         return shots;
     }
@@ -717,7 +733,7 @@ class GpuUtilityMinimapSmokeTest {
         List<GpuBoardSource.Bind> binds = Stream.of(KeyCommandBind.values())
               .map(bind -> new GpuBoardSource.Bind(bind, bind.keyDefault, bind.modifiersDefault,
                     KeyCommandBind.getDesc(bind.keyDefault, bind.modifiersDefault))).toList();
-        return GpuHudInputTest.with(GpuHudInputTest.preferences(), Map.of("binds", binds));
+        return GpuHudFixtures.with(GpuHudFixtures.preferences(), Map.of("binds", binds));
     }
 
     private static String text(String key) {

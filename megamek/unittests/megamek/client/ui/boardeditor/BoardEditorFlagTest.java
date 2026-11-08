@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
 import java.util.List;
+
 import megamek.common.board.BoardDecoration;
 import megamek.common.board.BoardFile;
 import megamek.common.board.BoardFlag;

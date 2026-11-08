@@ -113,7 +113,11 @@ therefore use their intersection rather than allowing full-height columns to ext
 Supports require their center and all four corners to lie inside the footprint. The roof cap's furniture does
 not increase occupied floor height. Generated floors and struts enter the render/depth passes only while that
 building is faded because of an occupant or an interior-floor hover. Leaving, or disabling transparency, hides them
-again. They do not enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways
+again. A building that stands open (`ConnectedKit#open`: a hex, or a hex it joins, has an exit with nothing connecting
+back, such as a collapsed neighbour) always draws its floors, under a hover the hovered one and those below. A floor's
+edge keeps 0.2 units off any outward wall face beside its slab (`GpuBuildingInterior#keepClear`), in kit and authored
+buildings, so it never lies on a facade or a wall's cut end and flickers through it. Each kit caches its storey outlines by the placements of the
+pieces that shape them; repeated storeys cost a lookup. They do not enter the exterior shadow pass, which retains the authored opaque shell. Existing occupancy cutaways
 fade walls and upper slabs while the occupied/lower floors and struts remain opaque. Hover cutaways reveal the selected
 interior floor and fade its walls; the top storey's cutaway also fades the entire roof cap and trim. Hovering the roof
 itself does not start a cutaway.

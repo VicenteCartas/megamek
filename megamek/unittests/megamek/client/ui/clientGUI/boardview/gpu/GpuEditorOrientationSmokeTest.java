@@ -210,12 +210,8 @@ class GpuEditorOrientationSmokeTest {
                                     command(Action.COMPONENT, "", "road");
                                 }
                                 case 11 -> { assertEquals(9, edges("road").selected()); side(edges("road"), 1); }
-                                case 12 -> {
-                                    assertEquals(11, source.editorState().property("road").exits());
-                                    GpuBoardTestUi.clickText("USE AUTOMATIC CONNECTIONS");
-                                }
+                                case 12 -> assertEquals(11, source.editorState().property("road").exits());
                                 case 13 -> {
-                                    assertFalse(source.editorState().property("road").explicit());
                                     command(Action.COMPONENT, "", "ground");
                                     boardCamera.setPerspective(false); boardCamera.setIsometric(true);
                                     after = frames() + 8; step++;

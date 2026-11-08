@@ -116,9 +116,9 @@ class GpuTagDesignatorTest {
 
     /** A shot from one unit at another with the named weapon, as the shared playback fixture builds one. */
     private static UnitAttack shot(String weaponName, boolean hit) {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 4);
-        var original = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, hit).result();
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 4);
+        var original = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, hit).result();
         var event = new ResolvedAttack(UUID.randomUUID(), original.kind(), original.attacker(), original.target(),
               original.targetType(), 0, weaponName, 4, hit, original.mounts(), original.shot());
         return new UnitAttack(new BoardScene.Combat(event, source, target, target.location()));

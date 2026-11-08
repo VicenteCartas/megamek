@@ -1,6 +1,6 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // Shared by puddles and horizontal water. No scene capture, marching, or per-drop geometry.
-uniform sampler2D u_rainNoise;
+// SURFACE_NOISE
 uniform float u_wetness;
 uniform float u_rainScale;
 uniform float u_rainTime;
@@ -69,8 +69,8 @@ vec2 rainRipples(vec2 position) { return rainRippleField(position).xy; }
 
 float rainPuddle(vec2 position, float wet, float response) {
     // Broad basins keep a stable shape as rain enlarges their edges and joins nearby patches.
-    float field = texture(u_rainNoise, position / 72.0).r * 0.75
-          + texture(u_rainNoise, position / 24.0 + 0.37).r * 0.25;
+    float field = texture(u_surfaceNoise, rainNoiseAt(position / 72.0)).r * 0.75
+          + texture(u_surfaceNoise, rainNoiseAt(position / 24.0 + 0.37)).r * 0.25;
     float threshold = mix(0.80, 0.34, wet * mix(0.35, 1.0, response));
     return smoothstep(threshold, threshold + 0.08, field) * wet;
 }

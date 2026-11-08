@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
@@ -43,7 +43,7 @@ import org.mockito.MockedStatic;
 final class GpuMovementFixture implements AutoCloseable {
     static final Coords START = new Coords(11, 11);
     final GpuBoardFixture board;
-    final ClientGUI gui = GpuDialogRoutingTest.routingClient();
+    final ClientGUI gui = GpuDialogFixture.routingClient();
     final Client client = mock(Client.class);
     final Entity unit;
     final MovementDisplay display;

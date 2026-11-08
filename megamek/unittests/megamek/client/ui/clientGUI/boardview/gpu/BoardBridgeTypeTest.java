@@ -8,13 +8,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.FloatArray;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.common.Hex;
@@ -189,21 +187,7 @@ class BoardBridgeTypeTest {
         var t = new BoardScene.Tile(at, 0, water ? 1 : -1, false, 0, BoardScene.Surface.GRASS, null, null,
               BoardFeatures.capture(bridge, at, Map.of()), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE, null, true,
               BoardRoad.Kind.NONE);
-        return type == null ? t : appearance(t, Map.of("bridge", type));
-    }
-
-    /** {@code scene} with every bridge tile storing {@code type}, as a converted board's bridges do. */
-    static BoardScene typed(BoardScene scene, HexAppearance type) {
-        var tiles = scene.tiles().stream()
-              .map(t -> BoardBridge.feature(t) == null ? t : appearance(t, Map.of("bridge", type))).toList();
-        return new BoardScene(0, scene.width(), scene.height(), tiles, List.of(), List.of(), -1, "", List.of());
-    }
-
-    static BoardScene.Tile appearance(BoardScene.Tile t, Map<String, HexAppearance> appearance) {
-        return new BoardScene.Tile(t.coords(), t.elevation(), t.waterDepth(), t.frozen(), t.roadExits(), t.surface(),
-              t.decals(), t.decalsWithoutLimbs(), t.features(), t.text(), t.liquid(), t.tileset(),
-              t.detailedGround(), t.road(), t.fireSmoke(), t.biome(), t.impassable(), t.blackIce(), t.cliffTopExits(), t.bare(),
-              t.groundCover(), t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), appearance);
+        return type == null ? t : BridgeScenes.appearance(t, Map.of("bridge", type));
     }
 
     private static final Coords AT = new Coords(4, 4);
@@ -211,16 +195,16 @@ class BoardBridgeTypeTest {
     @Test
     void theRenderDrawsTheStoredTypeAndAPlainBuiltDeckWithoutMarkings() {
         // A stored natural span keeps its rock arch between paved roads.
-        var paved = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED);
+        var paved = BridgeScenes.straight(AT, 3, 1, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED, BoardRoad.Kind.PAVED);
         assertEquals(BoardRoad.Kind.PAVED, BoardBridge.deck(paved, paved.tile(AT)).kind());
-        var natural = BoardNaturalBridgeTest.replace(paved, appearance(paved.tile(AT), Map.of("bridge", HexAppearance.NATURAL_BRIDGE)));
+        var natural = BoardScenes.replace(paved, BridgeScenes.appearance(paved.tile(AT), Map.of("bridge", HexAppearance.NATURAL_BRIDGE)));
         assertTrue(BoardBridge.deck(natural, natural.tile(AT)).natural());
         // A built deck without a road is clean (bare concrete); an Alley road is plain asphalt, unmarked; markings come
         // with a paved road.
-        var bare = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
+        var bare = BridgeScenes.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE);
         assertFalse(BoardBridge.deck(bare, bare.tile(AT)).natural(), "An untyped span is built, as the editor's stroke types a new bridge");
         assertFalse(BoardBridge.deck(bare, bare.tile(AT)).paved());
-        var alley = BoardBridgeMaterialsTest.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.ALLEY);
+        var alley = BridgeScenes.straight(AT, 3, 1, BoardRoad.Kind.NONE, BoardRoad.Kind.NONE, BoardRoad.Kind.ALLEY);
         var deck = BoardBridge.deck(alley, alley.tile(AT));
         assertTrue(deck.paved());
         assertTrue(GpuRoads.deckPatches(alley.tile(AT), deck, deck.road(AT)).stream()
@@ -238,8 +222,8 @@ class BoardBridgeTypeTest {
     void lookSpansJoinOnlyDecksOfOneFamily() {
         // A N-S run of decks a level up over water: natural, implicit (standard), truss, truss.
         var types = List.of(HexAppearance.NATURAL_BRIDGE, HexAppearance.IMPLICIT_BRIDGE, HexAppearance.TRUSS, HexAppearance.TRUSS);
-        var scene = BoardSurfaceBlendTest.scene(at -> at.getX() == 4 && at.getY() >= 2 && at.getY() <= 5
-              ? deck(at, 9, true, 1, types.get(at.getY() - 2)) : BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
+        var scene = BoardScenes.scene(at -> at.getX() == 4 && at.getY() >= 2 && at.getY() <= 5
+              ? deck(at, 9, true, 1, types.get(at.getY() - 2)) : BoardScenes.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
         var natural = BoardBridge.deck(scene, scene.tile(new Coords(4, 2)));
         var implicit = BoardBridge.deck(scene, scene.tile(new Coords(4, 3)));
         var truss = BoardBridge.deck(scene, scene.tile(new Coords(4, 4)));
@@ -254,25 +238,25 @@ class BoardBridgeTypeTest {
     @Test
     void piersStandOnlyUnderBuiltDecksAndTheApronStaysOffPavement() {
         // The Pillars toggle is a built type: its span is a built deck with piers even without a road.
-        var pillared = BoardBridgeFootingTest.span(3, false, 2, Set.of(0, 1, 2));
-        for (Coords end : List.of(BoardBridgeFootingTest.START.translated(0), BoardBridgeFootingTest.START.translated(3, 3))) {
-            pillared = BoardNaturalBridgeTest.replace(pillared, BoardRoadTest.tile(end, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
+        var pillared = BridgeScenes.span(3, false, 2, Set.of(0, 1, 2));
+        for (Coords end : List.of(BridgeScenes.START.translated(0), BridgeScenes.START.translated(3, 3))) {
+            pillared = BoardScenes.replace(pillared, BoardScenes.tile(end, BoardRoad.Kind.NONE, 0, 0, BoardScene.Surface.GRASS));
         }
-        var middle = BoardBridgeFootingTest.START.translated(3);
+        var middle = BridgeScenes.START.translated(3);
         assertFalse(BoardBridge.deck(pillared, pillared.tile(middle)).natural());
-        assertFalse(BoardBridgeFootingTest.piers(pillared, middle).isEmpty());
+        assertFalse(BridgeScenes.piers(pillared, middle).isEmpty());
         // Switched to natural, the same span is a rock arch without piers.
         var arch = pillared;
         for (int i = 0; i < 3; i++) {
-            Coords at = BoardBridgeFootingTest.START.translated(3, i);
-            arch = BoardNaturalBridgeTest.replace(arch, appearance(arch.tile(at), Map.of("bridge", HexAppearance.NATURAL_BRIDGE)));
+            Coords at = BridgeScenes.START.translated(3, i);
+            arch = BoardScenes.replace(arch, BridgeScenes.appearance(arch.tile(at), Map.of("bridge", HexAppearance.NATURAL_BRIDGE)));
         }
         assertTrue(BoardBridge.deck(arch, arch.tile(middle)).natural());
-        assertTrue(BoardBridgeFootingTest.piers(arch, middle).isEmpty());
+        assertTrue(BridgeScenes.piers(arch, middle).isEmpty());
 
         // A built deck between a pavement bank (north) and a grass bank (south): the loose apron only on the grass.
-        var scene = BoardSurfaceBlendTest.scene(at -> at.equals(AT) ? deck(at, 9, false, 0, HexAppearance.BUILT_BRIDGE)
-              : BoardSurfaceBlendTest.tile(at, at.equals(AT.translated(0)) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
+        var scene = BoardScenes.scene(at -> at.equals(AT) ? deck(at, 9, false, 0, HexAppearance.BUILT_BRIDGE)
+              : BoardScenes.tile(at, at.equals(AT.translated(0)) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.GRASS,
                     0, -1, 0));
         var footing = BoardBridgeFooting.build(scene, scene.tile(AT), TerrainLod.FULL, new java.util.HashMap<>());
         assertEquals(1 << 3, footing.bareExits(), "No dirt apron over pavement");
@@ -286,8 +270,8 @@ class BoardBridgeTypeTest {
     void noBladeGrowsThroughALowDeck() {
         float half = BoardBridge.PASSAGE_HALF_WIDTH * BoardGeometry.hexScale();
         for (int level : new int[] { 0, 2 }) {
-            var scene = BoardSurfaceBlendTest.scene(at -> at.equals(AT) ? deck(at, 9, false, level, HexAppearance.BUILT_BRIDGE)
-                  : BoardSurfaceBlendTest.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
+            var scene = BoardScenes.scene(at -> at.equals(AT) ? deck(at, 9, false, level, HexAppearance.BUILT_BRIDGE)
+                  : BoardScenes.tile(at, BoardScene.Surface.GRASS, 0, -1, 0));
             FloatArray roots = GpuGroundCover.plant(scene, scene.tile(AT), support(scene, AT), null);
             int under = 0;
             for (int i = 0; i < roots.size; i += 4) {
@@ -297,40 +281,5 @@ class BoardBridgeTypeTest {
             if (level == 0) { assertEquals(0, under, "No blade through a ground-level deck"); }
             else { assertTrue(under > 50, "Grass grows beneath a raised deck: " + under); }
         }
-    }
-
-    @Test
-    void reedsAndCropsAvoidPlacedObjects() {
-        var fountain = new BoardDecoration("fountain", "prop", "scenery/parks/fountain", null, 0, 0, 0, false, 1,
-              BoardDecoration.Placement.ground(), 0);
-        var feature = new BoardScene.Feature(fountain.asset(), 0, 0, 0, 1, 1, 0, BoardScene.FeatureKind.PROP, 0, false, fountain);
-        for (var kind : List.of(BoardScene.Biome.MARSH, BoardScene.Biome.FIELD)) {
-            // Crops stand only in a field of wheat or maize.
-            var at = kind == BoardScene.Biome.FIELD ? BoardBiomeTest.CROPS : AT;
-            var plain = BoardSurfaceBlendTest.scene(c -> BoardBiomeTest.tile(c, kind, 0));
-            var base = plain.tile(at);
-            var placed = BoardNaturalBridgeTest.replace(plain, new BoardScene.Tile(at, 0, -1, false, 0, base.surface(),
-                  null, null, List.of(feature), List.of(), BoardLiquid.NONE, null, true, BoardRoad.Kind.NONE,
-                  BoardFireSmoke.NONE, kind));
-            var obstacles = new BoardObstacles(placed, placed.tile(at));
-            FloatArray bare = roots(plain, kind, at), around = roots(placed, kind, at);
-            Set<List<Float>> kept = new HashSet<>(), all = new HashSet<>();
-            for (int i = 0; i < bare.size; i += 4) { all.add(List.of(bare.get(i), bare.get(i + 1))); }
-            int inside = 0;
-            for (int i = 0; i < around.size; i += 4) {
-                kept.add(List.of(around.get(i), around.get(i + 1)));
-                if (obstacles.obstructs(new Vector3(around.get(i), around.get(i + 1), around.get(i + 2)), .01f, .01f)) { inside++; }
-            }
-            System.out.printf("COVER %s: %d plants, %d beside the fountain%n", kind, bare.size / 4, around.size / 4);
-            assertEquals(0, inside, kind + ": no plant through the fountain");
-            assertTrue(around.size > 0, kind + ": the rest of the hex still grows");
-            // Reeds and plants are points that keep their places.
-            assertTrue(around.size < bare.size && all.containsAll(kept), kind + ": the fountain clears its plants; the others stay");
-        }
-    }
-
-    private static FloatArray roots(BoardScene scene, BoardScene.Biome kind, Coords at) {
-        return kind == BoardScene.Biome.MARSH ? GpuBiomeVegetation.plantReeds(scene, scene.tile(at), support(scene, at), 1, null)
-              : BoardBiomeTest.cropPlants(scene, scene.tile(at), support(scene, at), null);
     }
 }

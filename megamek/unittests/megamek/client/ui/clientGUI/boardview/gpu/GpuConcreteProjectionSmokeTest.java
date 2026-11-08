@@ -52,7 +52,9 @@ class GpuConcreteProjectionSmokeTest {
         pixels.dispose();
         // Optional historical source proves that the regression check detects the old axis projection.
         String source = System.getProperty("megamek.gpu.concreteProjectionSource", "");
-        String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl") : Files.readString(Path.of(source))
+        // The flat noise of a texture this harness binds, in the shipped concrete's one read of the surface noise.
+        String concrete = source.isBlank() ? GpuShaderSource.read("terrain-concrete.glsl")
+              .replace("texture(u_surfaceNoise, rainNoiseAt(vec2(u / 3.1 + window.x * 7.0, z / 45.0))).r", ".5") : Files.readString(Path.of(source))
               .replace("mapTexel(u_sculptLayers.w + 1.0,", "normalTexel(u_sculptLayers.w + 1.0,");
         String roughness = source.isBlank() ? "#define FINISH_COUNT 1\n#define ROAD_FINISH 1\n"
               + GpuShaderSource.read("material-finish.glsl") + GpuShaderSource.read("finish-arrays.glsl") : "";
@@ -106,7 +108,7 @@ class GpuConcreteProjectionSmokeTest {
             shader.bind();
             shader.setUniformi("u_terrainLayers", 0);
             if (shader.hasUniform("u_terrainData")) { shader.setUniformi("u_terrainData", 3); }
-            shader.setUniformi("u_rainNoise", 1);
+            if (shader.hasUniform("u_rainNoise")) { shader.setUniformi("u_rainNoise", 1); }
             if (source.isBlank()) {
                 shader.setUniformi("u_surfaceLayers", 2);
                 shader.setUniformf("u_finishSurface[0]", .9f, 0, 0, -1);

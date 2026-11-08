@@ -87,7 +87,7 @@ class LobbyFilesTest {
         LobbyFiles.Ask loadout = files.ask(LobbyFiles.Route.LOAD_LOADOUT, null);
         assertEquals(Paths.get(MMConstants.USER_LOADOUTS_DIR).toAbsolutePath().toFile(), loadout.directory());
         assertEquals(Messages.getString("ClientGui.LoadoutLoadDialog.title"), loadout.title());
-        assertEquals("adf files (*.adf)", loadout.filterName());
+        assertEquals(Messages.getString("Lobby.files.loadoutFiles"), loadout.filterName());
         assertEquals(List.of("adf"), loadout.extensions());
 
         LobbyFiles.Ask list = files.ask(LobbyFiles.Route.SAVE_UNIT_LIST, "Kai");
@@ -95,6 +95,13 @@ class LobbyFilesTest {
         assertEquals(Messages.getString("ClientGUI.saveUnitListFileDialog.title"), list.title());
         assertEquals("Kai.mul", list.name());
         assertEquals(List.of("mul", "mmu"), files.ask(LobbyFiles.Route.LOAD_UNIT_LIST, null).extensions());
+        assertEquals(Messages.getString("Lobby.files.unitListFiles"),
+              files.ask(LobbyFiles.Route.LOAD_UNIT_LIST, null).filterName());
+
+        LobbyFiles.Ask stats = files.ask(LobbyFiles.Route.EXPORT_STATS, "Lance");
+        assertEquals(Messages.getString("Lobby.files.mmuFiles"), stats.filterName());
+        assertEquals(List.of("mmu"), stats.extensions());
+        assertEquals("Lance.mmu", stats.name());
 
         LobbyFiles.Ask sprite = files.ask(LobbyFiles.Route.EXPORT_SPRITE, "Atlas AS7-D");
         assertNull(sprite.directory());

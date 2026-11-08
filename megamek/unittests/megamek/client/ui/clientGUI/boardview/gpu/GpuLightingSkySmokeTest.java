@@ -34,7 +34,7 @@ class GpuLightingSkySmokeTest {
         Files.createDirectories(OUTPUT.toPath());
         var panorama = GpuLightingEnvironment.load(GpuLightingControlsTest.constantPng(directory.resolve("red.png"),
               0xC02020));
-        BoardScene scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
+        BoardScene scene = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0));
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(960, 640);
@@ -52,7 +52,7 @@ class GpuLightingSkySmokeTest {
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
                     terrain.animate(.5f, List.of());
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     var atmosphere = frame.atmosphere();
                     // The transparent export's coverage separates the board from the sky.
                     atmosphere.setTransparentBackground(true);

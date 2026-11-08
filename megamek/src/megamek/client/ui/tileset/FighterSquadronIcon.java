@@ -40,9 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import megamek.common.icons.Camouflage;
 import megamek.common.units.Entity;
 import megamek.common.units.FighterSquadron;
-import megamek.common.icons.Camouflage;
 import megamek.common.util.ImageUtil;
 
 /**
@@ -142,6 +142,11 @@ public class FighterSquadronIcon extends EntityImage {
 
     @Override
     public Image loadPreviewImage(boolean showDamage) {
+        return compose(NO_FACING);
+    }
+
+    /** The fighters together in the base image, each with the shadows and highlights of {@code facing}. */
+    private Image compose(int facing) {
         base = ImageUtil.createAcceleratedImage(84, 72);
         Graphics2D g = (Graphics2D) getBase().getGraphics();
         int index = 0;
@@ -149,7 +154,7 @@ public class FighterSquadronIcon extends EntityImage {
         for (Entity fighter : squadron.getActiveSubEntities()) {
             final Image base = MMStaticDirectoryManager.getMekTileset().imageFor(fighter);
             var ei = EntityImage.createIcon(base, fighter.getCamouflageOrElseOwners(), fighter)
-                  .loadPreviewImage(true);
+                  .loadPreviewImage(true, facing);
             int height = getSize(totalUnitCount);
             if ((ei.getHeight(null) > 0) && (ei.getWidth(null) > 0)) {
                 int width = height * ei.getWidth(null) / ei.getHeight(null);
@@ -195,14 +200,14 @@ public class FighterSquadronIcon extends EntityImage {
 
     @Override
     public void loadFacings() {
-        loadPreviewImage(false);
-
-        // Save a small icon (without damage decals) for the unit overview
-        icon = ImageUtil.getScaledImage(base, 56, 48);
-
+        Image composed = compose(0);
         for (int i = 0; i < 6; i++) {
             // Generate rotated images for the unit and for a wreck
-            facings[i] = rotateImage(getBase(), i);
+            facings[i] = rotateImage(composed, i);
         }
+
+        // Save a small icon (without damage decals) for the unit overview
+        compose(NO_FACING);
+        icon = ImageUtil.getScaledImage(base, 56, 48);
     }
 }

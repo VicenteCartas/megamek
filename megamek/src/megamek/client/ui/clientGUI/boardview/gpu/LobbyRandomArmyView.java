@@ -173,6 +173,8 @@ final class LobbyRandomArmyView {
     }
 
     /** Deals nothing while the RAT Generator loads. */
+    /** How faded the generator's choices show while a roll reads them. */
+    private static final float BUSY_ALPHA = .6f;
     private static final RandomArmyForm.Dealer LOADING = new RandomArmyForm.Dealer() {
         @Override
         public boolean canDeal() {
@@ -227,6 +229,8 @@ final class LobbyRandomArmyView {
     private final float handWidth;
     private @Nullable LobbyForceGeneratorPane forcePane;
     private @Nullable ScrollPane forceScroll;
+    private @Nullable UiSelect handPlayer;
+    private @Nullable UiSelect forcePlayer;
     private final UiButton roll;
     private final UiButton clear;
     private final List<Image> images = new ArrayList<>();
@@ -363,7 +367,8 @@ final class LobbyRandomArmyView {
             UiSelect player = kit.tokenSelect(true, form.players().toArray(String[]::new));
             player.setName("army-player");
             player.select(form.player());
-            UiKit.onChange(player, () -> form.player(player.getSelectedIndex()));
+            UiKit.onChange(player, () -> choosePlayer(player.getSelectedIndex()));
+            handPlayer = player;
             controls.add(kit.formField(strip("RandomArmyDialog.Player"), player)).padRight(gap)
                   .width(size("control.lg") * 5);
         }
@@ -498,10 +503,8 @@ final class LobbyRandomArmyView {
             UiSelect select = kit.tokenSelect(true, form.players().toArray(String[]::new));
             select.setName("army-force-player");
             select.select(form.player());
-            UiKit.onChange(select, () -> {
-                form.player(select.getSelectedIndex());
-                refresh();
-            });
+            UiKit.onChange(select, () -> choosePlayer(select.getSelectedIndex()));
+            forcePlayer = select;
             player = kit.formField(strip("RandomArmyDialog.Player"), select);
         }
         return new LobbyForceGeneratorPane(kit, force, handWidth - space("lg"), player,
@@ -539,10 +542,31 @@ final class LobbyRandomArmyView {
                   @Override
                   public void busy(boolean next) {
                       busy = next;
-                      leftPane.setTouchable(next ? Touchable.disabled : Touchable.enabled);
                       refresh();
                   }
               });
+    }
+
+    /**
+     * Chooses the player the units go to; the hand's and the force generator's selectors show the same one, as both
+     * set it.
+     */
+    private void choosePlayer(int index) {
+        if (syncing) {
+            return;
+        }
+        form.player(index);
+        syncing = true;
+        try {
+            for (UiSelect select : new UiSelect[] { handPlayer, forcePlayer }) {
+                if (select != null && select.getSelectedIndex() != form.player()) {
+                    select.select(form.player());
+                }
+            }
+        } finally {
+            syncing = false;
+        }
+        refresh();
     }
 
     /** Empties the force generator's command, on the Swing thread its edits run on. */
@@ -903,6 +927,14 @@ final class LobbyRandomArmyView {
         images.clear();
         cardControls.clear();
         List<RandomArmyForm.Card> cards = form.cards();
+        if (form.cutShort()) {
+            Label limited = kit.typeLabel(Messages.getString("Lobby.randomArmy.paddingLimited",
+                  BattleValueArmy.MAX_PADDING), "small", "text.secondary");
+            limited.setName("army-cut-short");
+            limited.setWrap(true);
+            hand.add(limited).colspan(Math.max(1, columns)).width(cardWidth * columns).left()
+                  .padBottom(space("md")).row();
+        }
         if (cards.isEmpty()) {
             Label empty = kit.typeLabel(Messages.getString(emptyKey()), "body", "text.muted");
             empty.setName("army-empty");
@@ -1016,6 +1048,15 @@ final class LobbyRandomArmyView {
         }
         for (UiButton tile : tiles.values()) {
             tile.setDisabled(busy);
+        }
+        // A roll reads the generator's choices on the Swing thread: none may change until it is dealt
+        leftPane.setTouchable(busy ? Touchable.disabled : Touchable.enabled);
+        leftPane.getColor().a = busy ? BUSY_ALPHA : 1f;
+        countField.setTouchable(busy ? Touchable.disabled : Touchable.enabled);
+        for (UiSelect select : new UiSelect[] { handPlayer, forcePlayer }) {
+            if (select != null) {
+                select.setDisabled(busy);
+            }
         }
     }
 

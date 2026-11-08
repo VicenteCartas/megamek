@@ -221,6 +221,7 @@ public final class GpuBoardWindow {
     private final BoardClientState initialView;
     private final Supplier<JComponent> panel;
     private final Timer startupTimer;
+    private java.util.concurrent.CompletableFuture<?> plantsAhead;
     private volatile BoardSource source;
     private volatile String previewTitle;
     /** EDT-owned source of the current preview; null for a generated or assembled lobby map. */
@@ -232,6 +233,8 @@ public final class GpuBoardWindow {
     private final BoardEditorSession editor;
     /** The editor's open 2D Preview ({@link #showPreview2D}), or null. EDT. */
     private JDialog preview2D;
+    /** Whether View > Renderer offers Legacy 2D; the lobby's preview is 3D only. */
+    private boolean offersLegacy2D = true;
     private final Game mapGame;
     private final Map<Dialog, Boolean> dialogOnTop = new IdentityHashMap<>();
     /** Natively owned raised dialogs (Windows, macOS, Linux on X11) instead of floating them on top. Else {@code null}. */
@@ -357,7 +360,17 @@ public final class GpuBoardWindow {
         openPreview(owner, board, null, conditions);
     }
 
+    /** The lobby's map preview: as {@link #openPreview(Window, Board, PlanetaryConditions)}, but 3D only. */
+    public static synchronized void openLobbyPreview(Window owner, Board board, PlanetaryConditions conditions) {
+        openPreview(owner, board, null, conditions, false);
+    }
+
     private static synchronized void openPreview(Window owner, Board board, File file, PlanetaryConditions conditions) {
+        openPreview(owner, board, file, conditions, true);
+    }
+
+    private static synchronized void openPreview(Window owner, Board board, File file, PlanetaryConditions conditions,
+          boolean legacy2D) {
         if (!SwingUtilities.isEventDispatchThread()) {
             throw new IllegalStateException("Open the GPU preview on the Swing event thread");
         }
@@ -371,7 +384,7 @@ public final class GpuBoardWindow {
                 active.close(false);
                 active.afterClose = () -> {
                     if (owner.isShowing()) {
-                        openPreview(owner, board, file, snapshot);
+                        openPreview(owner, board, file, snapshot, legacy2D);
                     }
                 };
             } else {
@@ -387,6 +400,7 @@ public final class GpuBoardWindow {
             game.setPlanetaryConditions(snapshot);
             GpuBoardWindow window = new GpuBoardWindow(null, null, () -> null, owner, null, game);
             window.previewFile = file;
+            window.offersLegacy2D = legacy2D;
             start(window);
         } catch (RuntimeException | LinkageError failure) {
             reportPreviewFailure(owner, failure);
@@ -869,8 +883,8 @@ public final class GpuBoardWindow {
             }
         }
         if (preview) {
-            // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so the lobby's 2D
-            // preview is not hidden behind its 3D preview.
+            // The owner's open dialogs stay in front, as those it opens later do (dialogListener), so a preview does not
+            // hide them.
             for (Window window : Window.getWindows()) {
                 if (window != swingWindow && window.isShowing() && window instanceof Dialog dialog
                       && !(dialog instanceof FileDialog) && belongsToSwingWindow(dialog)) {
@@ -902,9 +916,13 @@ public final class GpuBoardWindow {
         BoardClientState view = gui == null ? initialView : gui.getCurrentBoardState().orElse(null);
         if (mapGame == null && view == null) { return; }
         if (mapGame != null && (mapGame.getBoard().getWidth() < 1 || mapGame.getBoard().getHeight() < 1)) { return; }
+        // The board's first capture finds its plants searched: the search leaves this thread free, and the timer looks again.
+        if (mapGame != null && plantsAhead == null) { plantsAhead = BoardTiles.searchAhead(mapGame.getBoard()); }
+        if (plantsAhead != null && !plantsAhead.isDone()) { return; }
         try {
             source = mapGame == null ? new GpuBoardSource(view, panel)
-                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit, this::requestLegacy2D,
+                  : new GpuMapSource(mapGame, swingWindow, editor, this::requestExit,
+                        offersLegacy2D ? this::requestLegacy2D : null,
                         preview ? this::requestEditor : null);
             startupTimer.stop();
         } catch (RuntimeException | LinkageError failure) {

@@ -2,11 +2,10 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.awaitDialog;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.set;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.awaitDialog;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -22,7 +21,6 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Window;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Base64;
@@ -45,37 +43,23 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.dialogs.MMDialogs.MMNarrativeStoryDialog;
 import megamek.client.ui.dialogs.unitDisplay.UnitDisplayPanel;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.event.GameScriptedMessageEvent;
 import megamek.common.game.Game;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * A scenario's story message (MMNarrativeStoryDialog) over the GPU battle window: a native message with its image
  * beside its text, which waits while another request is pending, as the client queues stories behind a modal dialog.
  * The test thread answers as the render thread would; the client is a real ClientGUI.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuStoryDialogTest {
     private static final String TEXT = "<p>The convoy is <b>in sight</b>.</p><p>Hold the ridge.</p>";
     private static final String SHOWN = "The convoy is in sight.\nHold the ridge.";
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void aStoryShowsItsImageAndTextNativelyOnceThePendingRequestIsAnswered() throws Exception {
@@ -128,7 +112,7 @@ class GpuStoryDialogTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             ClientGUI gui = onSwing(GpuStoryDialogTest::client);
             try {
-                set(present(gui, fixture.view, fixture.source), "presented", false);
+                GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
                 AtomicBoolean swing = new AtomicBoolean();
                 AtomicBoolean asked = new AtomicBoolean();
                 onSwing(() -> {

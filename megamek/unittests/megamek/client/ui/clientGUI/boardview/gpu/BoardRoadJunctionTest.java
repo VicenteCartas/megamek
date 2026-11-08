@@ -4,8 +4,12 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.awt.geom.Area;
+import java.util.List;
+import java.util.Map;
 
 import com.badlogic.gdx.math.Vector2;
 import megamek.common.board.Coords;
@@ -16,7 +20,7 @@ import org.junit.jupiter.api.Test;
 class BoardRoadJunctionTest {
     @Test
     void junctionApproachesHaveSolidChannelsThenDashesBeyondTheFinalRoadWidth() {
-        var at = BoardRoadTest.CENTER;
+        var at = BoardScenes.CENTER;
         var road = BoardRoad.clearance(at, 27).extended(java.util.Collections.nCopies(6, 50f));
         var paint = road.markings(at, 27);
         for (var stop : road.stopApproaches(27)) {
@@ -82,7 +86,7 @@ class BoardRoadJunctionTest {
             for (int branch = 0; branch < 6; branch++) {
                 if (branch == axis || branch == axis + 3) { continue; }
                 int exits = (1 << axis) | (1 << (axis + 3)) | (1 << branch);
-                var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+                var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
                 var stops = road.stopApproaches(exits);
                 assertEquals(1, stops.size());
                 assertEquals(branch, stops.getFirst().direction());
@@ -104,13 +108,13 @@ class BoardRoadJunctionTest {
     void signalControlledTsStopAllApproachesWithoutChangingTheirClearTurningArea() {
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) != 3) { continue; }
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
-            var priorityPaint = road.markings(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
+            var priorityPaint = road.markings(BoardScenes.CENTER, exits);
             for (var control : java.util.List.of(HexAppearance.TrafficControl.SIGNALS, HexAppearance.TrafficControl.GANTRY)) {
                 road.control(control);
                 var stops = road.stopApproaches(exits);
                 assertEquals(3, stops.size(), "Signals control each incoming approach");
-                var paint = road.markings(BoardRoadTest.CENTER, exits);
+                var paint = road.markings(BoardScenes.CENTER, exits);
                 paint.exclusiveOr(priorityPaint);
                 assertTrue(paint.isEmpty(), "Stop priority never changes the divider's clear crossing area");
                 for (var stop : stops) {
@@ -125,7 +129,7 @@ class BoardRoadJunctionTest {
     void fiveAndSixArmRailHubsStopIncomingRoadLanesWithoutPaintingTheMedian() {
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) < 5) { continue; }
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits)
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits)
                   .corridor(new RailRoute.Corridor(exits, 0, 0)).control(HexAppearance.TrafficControl.GANTRY);
             assertEquals(Integer.bitCount(exits), road.stopApproaches(exits).size(),
                   "A rail corridor replaces circulation with a controlled solid hub");
@@ -133,7 +137,7 @@ class BoardRoadJunctionTest {
             assertFalse(stops.isEmpty());
             stops.intersect(road.medianBand());
             assertTrue(stops.isEmpty(), "Stop bars keep the central railway clear");
-            assertFalse(road.markings(BoardRoadTest.CENTER, exits).intersects(-6, -6, 12, 12));
+            assertFalse(road.markings(BoardScenes.CENTER, exits).intersects(-6, -6, 12, 12));
         }
     }
 
@@ -142,7 +146,7 @@ class BoardRoadJunctionTest {
         for (int axis = 0; axis < 3; axis++) {
             int first = axis, second = (axis + 1) % 6;
             int exits = (1 << first) | (1 << second) | (1 << ((first + 3) % 6)) | (1 << ((second + 3) % 6));
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             float[] a = RailRoute.border(first), b = RailRoute.border(second);
             var corner = new Vector2(a[0], a[1]).nor().add(new Vector2(b[0], b[1]).nor()).nor().scl(17);
             assertTrue(road.footprint(0).contains(corner.x, corner.y), "The tight X corner has a rounded turning apron");
@@ -156,7 +160,7 @@ class BoardRoadJunctionTest {
 
     @Test
     void unmarkedMaterialJoinsDoNotAcquireStopPaintAndOnlyPavedRoadsRenderIt() {
-        Coords at = BoardRoadTest.CENTER;
+        Coords at = BoardScenes.CENTER;
         var road = BoardRoad.layout(at, 27, BoardRoad.Kind.PAVED,
               direction -> direction == 1 ? BoardRoad.Kind.ALLEY : direction == 4 ? BoardRoad.Kind.DIRT : BoardRoad.Kind.PAVED);
         assertEquals(java.util.List.of(0, 3), road.stopApproaches(27).stream().map(BoardRoad.StopApproach::direction).toList());
@@ -165,7 +169,7 @@ class BoardRoadJunctionTest {
         float x = sample.x() - sample.ny() * across, y = sample.y() + sample.nx() * across;
         for (var kind : BoardRoad.Kind.values()) {
             if (kind == BoardRoad.Kind.NONE) { continue; }
-            var tile = BoardRoadTest.tile(at, kind, 27, 0, BoardScene.Surface.GRASS);
+            var tile = BoardScenes.tile(at, kind, 27, 0, BoardScene.Surface.GRASS);
             var patches = GpuRoads.patches(tile, BoardRoad.layout(at, 27, kind, direction -> kind));
             assertEquals(kind == BoardRoad.Kind.PAVED,
                   patches.stream().anyMatch(patch -> patch.texture().equals("concrete-ground") && patch.shape().contains(x, y)),
@@ -176,7 +180,7 @@ class BoardRoadJunctionTest {
     @Test
     void stopBarsFollowWidenedOrOffsetRailCorridorsAndLeaveTheirBallastClear() {
         for (var corridor : java.util.List.of(new RailRoute.Corridor(9, 0, 0), new RailRoute.Corridor(9, 9, 9))) {
-            var road = BoardRoad.layout(BoardRoadTest.CENTER, 27, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED)
+            var road = BoardRoad.layout(BoardScenes.CENTER, 27, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED)
                   .corridor(corridor);
             Area paint = road.stopLines(27);
             assertEquals(4, road.stopApproaches(27).size());
@@ -187,6 +191,79 @@ class BoardRoadJunctionTest {
             }
             paint.intersect(road.medianBand());
             assertTrue(paint.isEmpty(), "Road markings leave the railway's ballast clear");
+        }
+    }
+
+    private static final Coords AT = new Coords(3, 3);
+
+    @Test
+    void skewBoxesAndTheirStopsClearBothHalvesOfTheCrossing() {
+        for (int axis = 0; axis < 3; axis++) {
+            int first = 9 << axis, second = 9 << ((axis + 1) % 3), exits = first | second;
+            for (var control : List.of(HexAppearance.TrafficControl.SIGNALS, HexAppearance.TrafficControl.GANTRY)) {
+                var road = BoardRoad.layout(AT, exits, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED).control(control);
+                for (var stop : road.stopApproaches(exits)) {
+                    int crossing = ((1 << stop.direction()) & first) != 0 ? second : first;
+                    var through = BoardRoad.layout(AT, crossing, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED);
+                    for (float across = -stop.outer(); across <= stop.outer(); across += .5f) {
+                        assertFalse(through.footprint(0).contains(stop.x() - stop.ny() * across,
+                                    stop.y() + stop.nx() * across),
+                              "The whole box entrance must clear the crossing, including the outgoing lane: "
+                                    + exits + " approach " + stop.direction());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void fourArmBoxesStayInsideTheRoadClearOfStopBarsAndRailReservations() {
+        for (int exits = 0; exits < 64; exits++) {
+            if (Integer.bitCount(exits) != 4) { continue; }
+            for (var corridor : List.of(RailRoute.Corridor.NONE,
+                  new RailRoute.Corridor(exits, 0, 0), new RailRoute.Corridor(exits, exits, exits))) {
+                var road = BoardRoad.layout(AT, exits, BoardRoad.Kind.PAVED, d -> BoardRoad.Kind.PAVED)
+                      .corridor(corridor).control(HexAppearance.TrafficControl.GANTRY);
+                var paint = GpuRoads.keepClear(road, exits);
+                assertFalse(paint.isEmpty(), "Four-arm crossing " + exits + " " + corridor);
+                var outside = new Area(paint);
+                outside.subtract(road.footprint(0));
+                assertTrue(outside.isEmpty(), "The box cannot leave the actual carriageway");
+                var conflict = new Area(paint);
+                conflict.intersect(road.stopLines(exits));
+                assertTrue(conflict.isEmpty(), "White stop bars stay separate from the yellow box");
+                conflict = new Area(paint);
+                conflict.intersect(road.medianBand());
+                assertTrue(conflict.isEmpty(), "The railway reserve must not receive road paint: " + exits + " " + corridor);
+                int painted = 0, clear = 0;
+                for (float x = -8; x <= 8; x += .5f) {
+                    for (float y = -8; y <= 8; y += .5f) {
+                        if (paint.contains(x, y)) { painted++; } else { clear++; }
+                    }
+                }
+                assertTrue(clear > painted, "A box is an open lattice, never a filled diamond");
+            }
+        }
+    }
+
+    @Test
+    void onlySignalControlledPavedFourArmJunctionsReceiveYellowBoxes() {
+        for (int exits : new int[] { 9, 11, 27, 63 }) {
+            for (var control : HexAppearance.TrafficControl.values()) {
+                for (var kind : new BoardRoad.Kind[] { BoardRoad.Kind.PAVED, BoardRoad.Kind.DIRT }) {
+                    var tile = mock(BoardScene.Tile.class);
+                    when(tile.coords()).thenReturn(AT);
+                    when(tile.surface()).thenReturn(BoardScene.Surface.GRASS);
+                    when(tile.road()).thenReturn(kind);
+                    when(tile.roadExits()).thenReturn(exits);
+                    when(tile.appearance()).thenReturn(Map.of("road", HexAppearance.withTrafficControl(null, control)));
+                    var road = BoardRoad.layout(AT, exits, kind, d -> kind).control(control);
+                    boolean yellow = GpuRoads.patches(tile, road).stream()
+                          .anyMatch(patch -> patch.texture().equals("concrete-ground") && patch.tint().b < .2f);
+                    assertEquals(exits == 27 && kind == BoardRoad.Kind.PAVED && control != HexAppearance.TrafficControl.STOPS,
+                          yellow, "Only an actual signal-controlled paved crossing receives the box");
+                }
+            }
         }
     }
 }

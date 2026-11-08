@@ -257,9 +257,9 @@ public class SupportTank extends Tank {
                   || (hex.terrainLevel(Terrains.MAGMA) > 1)
                   || (hex.terrainLevel(Terrains.ROUGH) > 1)
                   || (hex.terrainLevel(Terrains.RUBBLE) > 5);
-            case NAVAL, HYDROFOIL -> (hex.terrainLevel(Terrains.WATER) <= 0)
+            case NAVAL, HYDROFOIL -> deckCutsVessel(hex, currElevation) || (hex.terrainLevel(Terrains.WATER) <= 0)
                   || hex.containsTerrain(Terrains.ICE);
-            case SUBMARINE -> (hex.terrainLevel(Terrains.WATER) <= 0);
+            case SUBMARINE -> deckCutsVessel(hex, currElevation) || (hex.terrainLevel(Terrains.WATER) <= 0);
             // Combat and support WiGEs share one rule, including hover restrictions while grounded (TW p.55)
             case WIGE -> isLocationProhibitedWiGE(hex, currElevation);
             default -> false;

@@ -165,7 +165,7 @@ class GpuUnitVisibilitySmokeTest {
                 Vector3 center = BoardGeometry.center(new Coords(3, 2), 1);
                 sprite.instance.transform.setToTranslation(center).scale(.2f, .2f, .2f);
                 draw(terrain, atmosphere, visibility, batch, camera, scene, List.of(sprite.instance), .75f, captures);
-                var target = (FrameBuffer) GpuMixedUnitBenchmarkSmokeTest.field(visibility, "unitColors");
+                var target = (FrameBuffer) GpuTestSupport.field(visibility, "unitColors");
                 target.begin();
                 Pixmap colors = Pixmap.createFromFrameBuffer(0, 0, target.getWidth(), target.getHeight());
                 try {

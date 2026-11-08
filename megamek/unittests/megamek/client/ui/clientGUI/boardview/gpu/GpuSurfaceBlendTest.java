@@ -32,14 +32,16 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @ValueSource(booleans = { false, true })
     void tessellationContactsPreserveMaterialsAfterSubdivision(boolean blended) throws Exception {
-        var scene = GpuRoadSourceTest.scene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
+        var scene = BoardScenes.installedScene("AGoAC Maps/16x17 Grassland 2 (Low Bridges).board");
         // Dry ground beside the ford: its edge shared with the water stays fixed, its own bank curves.
         var tile = scene.tile(7, 6);
         var surface = new BoardSurface(scene, tile);
         var plan = GpuTerrain.prepareSculpt(scene, tile, surface, BoardGeometry.floor(scene), TerrainLod.FULL,
               new java.util.HashMap<>());
         int pinned = 0, curved = 0;
-        for (var group : plan.blended().entrySet()) {
+        var groups = new ArrayList<>(plan.blended().entrySet());
+        groups.addAll(plan.blendedTops().entrySet());
+        for (var group : groups) {
             var plain = new MeshBuilder();
             var tessellated = new MeshBuilder();
             var attributes = blended ? GpuSurfaceBlend.VERTICES : MeshBuilder.createAttributes(
@@ -79,8 +81,8 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @ValueSource(ints = { 0, 1, 2, 4 })
     void submergedBanksRetainTheAdjacentLandsGeology(int level) {
-        var center = BoardSurfaceBlendTest.CENTER;
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var center = BoardScenes.CENTER;
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(center) ? BoardScene.Surface.GRASS : BoardScene.Surface.LUNAR,
               c.equals(center) ? 0 : level, c.equals(center) ? 1 : -1, 0));
         var water = scene.tile(center);
@@ -88,7 +90,7 @@ class GpuSurfaceBlendTest {
         var plan = GpuTerrain.prepareSculpt(scene, water, surface, -BoardGeometry.level(), TerrainLod.FULL,
               new java.util.HashMap<>());
         int checked = 0;
-        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+        for (var triangle : BoardScenes.blendedTriangles(plan)) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
                 assertEquals(1, point.cover().lunar(), .00001f,
                       "The land's geology must continue across its banks and bed below the waterline");
@@ -101,9 +103,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @CsvSource({ "0, false", "0, true", "1, false", "1, true" })
     void authoredWaterMixturesKeepTheAdjacentLandsCoverOnTheirBanks(int depth, boolean adjacentWater) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         var tropical = center.translated(2);
-        var scene = BoardSurfaceBlendTest.scene(c -> {
+        var scene = BoardScenes.scene(c -> {
             boolean wet = c.equals(center) || adjacentWater && c.equals(center.translated(5));
             var hex = new Hex(0, wet ? "water:" + depth + ";ground_fluff:3:2"
                   : c.equals(tropical) ? "ground_fluff:1:3" : "",
@@ -118,7 +120,7 @@ class GpuSurfaceBlendTest {
               new java.util.HashMap<>());
         assertTrue(plan.bed().isEmpty(), "Every natural bed sector must use the shared field, including water-to-water edges");
         int checked = 0;
-        for (var triangles : plan.blended().values()) for (var triangle : triangles) {
+        for (var triangle : BoardScenes.blendedTriangles(plan)) {
             for (var point : List.of(triangle.a(), triangle.b(), triangle.c())) {
                 if (point.vertex().color.b >= .125f) { continue; }
                 var p = point.vertex().position;
@@ -138,8 +140,8 @@ class GpuSurfaceBlendTest {
     void homogeneousFlatTopsKeepSixTrianglesThroughMaterialPreparation(TerrainLod lod) {
         for (var family : List.of(BoardScene.Surface.GRASS, BoardScene.Surface.DIRT, BoardScene.Surface.SAND,
               BoardScene.Surface.ROCK, BoardScene.Surface.SNOW)) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, family, 0, -1, 0));
-            var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c, family, 0, -1, 0));
+            var tile = scene.tile(BoardScenes.CENTER);
             var center = BoardGeometry.center(tile.coords(), 0);
             var faces = new ArrayList<BoardSurface.Face>();
             for (int edge = 0; edge < 6; edge++) {
@@ -161,9 +163,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void concreteSlabsKeepTheirTopAndPanelTriangleBudgetAfterMaterialSampling(TerrainLod lod) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         for (int level : new int[] { 0, 4 }) {
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   c.equals(center) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND,
                   c.equals(center) ? level : 4 - level, -1, 0));
             var tile = scene.tile(center);
@@ -191,9 +193,9 @@ class GpuSurfaceBlendTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void steepContactsKeepTheirMaterialsAndSurfaceAreaAtEveryLod(TerrainLod lod) {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         var neighbour = center.translated(BoardGeometry.edgeDirection(0));
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.equals(neighbour) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS,
               c.equals(center) || c.equals(neighbour) ? 4 : 0, -1, 0));
         var tile = scene.tile(center);
@@ -218,9 +220,9 @@ class GpuSurfaceBlendTest {
 
     @Test
     void coincidentCliffAndGroundVerticesKeepTheirDistinctShadingRoles() {
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               c.getX() < 4 ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
-        var tile = scene.tile(BoardSurfaceBlendTest.CENTER);
+        var tile = scene.tile(BoardScenes.CENTER);
         var a = BoardGeometry.center(tile.coords(), 0);
         var b = BoardGeometry.corner(tile.coords(), 0, 0);
         var c = BoardGeometry.corner(tile.coords(), 0, 1);
@@ -243,7 +245,7 @@ class GpuSurfaceBlendTest {
     @Test
     void authoredTransitionsAtCrowdedCliffsKeepABoundedMesh() {
         var themes = List.of("grass", "snow", "dirt", "rock", "lunar");
-        var scene = BoardSurfaceBlendTest.scene(c -> {
+        var scene = BoardScenes.scene(c -> {
             var hex = new Hex(c.getY() < 4 ? 4 : 0, "ground_fluff:1:3",
                   themes.get(Math.floorMod(c.getX() + 2 * c.getY(), themes.size())), c);
             var artwork = new BoardArtwork.HexImage(c, null, null, List.of(), Map.of(), null);
@@ -270,7 +272,7 @@ class GpuSurfaceBlendTest {
     void crowdedCliffsKeepEveryContributingFamilyInTheirPalettes() {
         var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
               BoardScene.Surface.DIRT, BoardScene.Surface.ROCK);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), c.getY() < 4 ? 4 : 0, -1, 0));
         for (int x = 2; x <= 6; x++) {
             var tile = scene.tile(new Coords(x, 3));
@@ -303,14 +305,14 @@ class GpuSurfaceBlendTest {
     void crowdedBoundariesPreserveAreaHeightAndEveryContributingMaterial() {
         var families = List.of(BoardScene.Surface.GRASS, BoardScene.Surface.SAND, BoardScene.Surface.SNOW,
               BoardScene.Surface.DIRT, BoardScene.Surface.ROCK);
-        var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+        var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
               families.get(Math.floorMod(c.getX() + 2 * c.getY(), families.size())), 0, -1, 0));
         int original = 0, refined = 0;
         float maximumError = 0;
         double totalError = 0;
         int samples = 0;
         for (int direction = -1; direction < 6; direction++) {
-            var coords = direction < 0 ? BoardSurfaceBlendTest.CENTER : BoardSurfaceBlendTest.CENTER.translated(direction);
+            var coords = direction < 0 ? BoardScenes.CENTER : BoardScenes.CENTER.translated(direction);
             var tile = scene.tile(coords);
             var surface = new BoardSurface(scene, tile);
             var faces = surface.faces.stream().filter(f -> f.finish() == BoardSurface.Finish.TOP).toList();
@@ -366,10 +368,10 @@ class GpuSurfaceBlendTest {
 
     @Test
     void materialBordersKeepTheirSampledWidthAndPureTileCentres() {
-        var center = BoardSurfaceBlendTest.CENTER;
+        var center = BoardScenes.CENTER;
         for (int direction = 0; direction < 6; direction++) {
             var neighbor = center.translated(direction);
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   c.equals(neighbor) ? BoardScene.Surface.SAND : BoardScene.Surface.GRASS, 0, -1, 0));
             var tile = scene.tile(center);
             var surface = new BoardSurface(scene, tile);
@@ -441,17 +443,26 @@ class GpuSurfaceBlendTest {
             programs.request(override, 3, vertices);
             programs.request(anotherOverride, 3, vertices);
             assertEquals(2, programs.requested(), "An override needs a different proof, not a program for each uniform value");
-            assertTrue(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
-            assertTrue(GpuFamilyPrograms.draws(null, 0, override, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(null, 0, false, base, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(null, 0, false, override, FloatAttribute.Shininess));
             assertEquals("", GpuFamilyPrograms.defines(base, FloatAttribute.Shininess), "Generic programs keep runtime dispatch");
             base.set(new GpuFamilyPrograms.Constants()); override.set(new GpuFamilyPrograms.Constants());
             float[] families = GpuFamilyPrograms.constants(base, FloatAttribute.Shininess);
-            assertTrue(GpuFamilyPrograms.draws(families, 3, base, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(families, 3, override, FloatAttribute.Shininess),
+            assertTrue(GpuFamilyPrograms.draws(families, 3, false, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 3, false, override, FloatAttribute.Shininess),
                   "A program that eliminated slot B must reject its actual map/scale override");
-            assertTrue(GpuFamilyPrograms.draws(families, 2, override, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(families, 2, base, FloatAttribute.Shininess));
-            assertFalse(GpuFamilyPrograms.draws(null, 0, base, FloatAttribute.Shininess));
+            assertTrue(GpuFamilyPrograms.draws(families, 2, false, override, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 2, false, base, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(null, 0, false, base, FloatAttribute.Shininess));
+            Material tops = GpuFamilyPrograms.flat(base);
+            assertTrue(GpuFamilyPrograms.draws(families, 3, true, tops, FloatAttribute.Shininess));
+            assertFalse(GpuFamilyPrograms.draws(families, 3, false, tops, FloatAttribute.Shininess),
+                  "A wall's program never draws level tops: only the tops' program folds them");
+            assertFalse(GpuFamilyPrograms.draws(families, 3, true, base, FloatAttribute.Shininess),
+                  "A level top's program has no walls: it must reject its material's other draws");
+            assertTrue(GpuFamilyPrograms.defines(tops, FloatAttribute.Shininess).contains("#define SCULPT_TOPS"));
+            assertFalse(GpuFamilyPrograms.defines(base, FloatAttribute.Shininess).contains("#define SCULPT_TOPS"));
+            assertFalse(GpuFamilyPrograms.isFlat(GpuFamilyPrograms.unflat(tops)));
             String reused = GpuFamilyPrograms.defines(base, FloatAttribute.Shininess);
             String changed = GpuFamilyPrograms.defines(override, FloatAttribute.Shininess);
             assertTrue(reused.contains("#define COVER_B_IS_BASE") && reused.contains("#define COVER_C_IS_BASE"));

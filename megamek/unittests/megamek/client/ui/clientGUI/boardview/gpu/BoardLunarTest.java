@@ -21,6 +21,8 @@ import megamek.client.ui.clientGUI.boardview.BoardHexText;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
+import megamek.common.units.Terrain;
+import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -314,5 +316,20 @@ class BoardLunarTest {
         labels.add(new BoardHexText(Messages.getString("BoardView1.LowFoliage"), 66, font, -1, false, 0));
         return new BoardScene.Tile(ORIGIN, elevation, depth, frozen, 0, family, PIXELS, PIXELS, features, labels, liquid, PIXELS, false, BoardRoad.Kind.PAVED, BoardFireSmoke.NONE,
               BoardScene.Biome.MARSH, true, true);
+    }
+
+    @Test
+    void lunarThemeKeepsItsOwnGeologyWithoutReplacingExplicitSurfaceTerrain() {
+        Hex hex = new Hex(0);
+        hex.setTheme("lunar");
+        assertEquals(BoardScene.Surface.LUNAR, BoardFeatures.surface(hex));
+        hex.setTheme("rock");
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        hex.setTheme("lunar");
+        hex.addTerrain(new Terrain(Terrains.MAGMA, 1));
+        assertEquals(BoardScene.Surface.ROCK, BoardFeatures.surface(hex));
+        hex.removeTerrain(Terrains.MAGMA);
+        hex.addTerrain(new Terrain(Terrains.PAVEMENT, 1));
+        assertEquals(BoardScene.Surface.CONCRETE, BoardFeatures.surface(hex));
     }
 }

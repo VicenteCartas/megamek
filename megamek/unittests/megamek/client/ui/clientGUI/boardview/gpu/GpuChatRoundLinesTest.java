@@ -3,42 +3,27 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.io.File;
 import java.util.List;
 import javax.swing.SwingUtilities;
 
 import megamek.client.ui.Messages;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.Report;
 import megamek.common.enums.GamePhase;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The source's capture writes the chat's two round lines (plan O6, I1a acceptance A6) from the status and the report
  * log it captures: the initiative result once per round while the initiative report shows two sides, and the round's
  * weapon hits once when the end report starts, however often the client captures in between.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuChatRoundLinesTest {
     /** The server's initiative line "{name} rolls a {roll}." (TWGameManager.writeInitiativeReport). */
     private static final int INITIATIVE_REPORT = 1015;
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void theCaptureWritesTheInitiativeAndResolvedLinesOncePerRound() throws Exception {

@@ -91,7 +91,7 @@ class GpuContactsPanelSmokeTest {
             state.update(status, GpuUnitRecord.Snapshot.EMPTY, false);
             status.units().stream().map(UnitStatus::icon).forEach(hud.sprites::add);
             contacts.update(new GpuHud.Inputs(frame(status, preview), GpuHud.HudView.EMPTY, null,
-                  GpuHudInputTest.preferences(), GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
+                  GpuHudFixtures.preferences(), GpuHud.Metrics.of(hud.width(), hud.height()), List.of()));
         }
 
         /**

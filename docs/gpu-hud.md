@@ -295,7 +295,8 @@ whether the nameplate key shows every nameplate, the log's open state and the pl
   and ammunition stay as the client reports them. Live events that arrive during a review play after it, in order.
   A report card's Replay plays only that event and keeps its actor inspected and its camera framing afterwards.
   The dock's Replay and explicit Play transport still traverse the sequence. Historical review never sends a live
-  movement-completed notification to the client.
+  movement-completed notification to the client. While a firing, physical or end report still plays, the dock shows its
+  transport under the latest phase, although the presented phase holds back with the units.
 
 ### Scheduled nuclear effects
 
@@ -325,9 +326,9 @@ add a scheduled-strike replay card to the report log.
    drags pan and middle drags orbit; Shift held at the press swaps the two. A drag starts past 6 pixels times the layout scale. A left drag moves nothing and cancels its
    click. A middle drag on the minimap's map orbits the camera as well, by the same `GpuBattleView.ORBIT_DEGREES` per
    unit. An orbit (in free flight a look) hides the
-   cursor and holds it in place (`UiCursorCapture`), so the screen's edge
-   never stops it: the board's from the drag's start, so a click keeps the cursor, the minimap's from the press. The
-   cursor reappears where it was held on release, focus loss, a modal dialog or a new board. A pan keeps the visible
+   cursor and wraps it inside the window (`UiCursorCapture`), so the screen's edge
+   never stops it: the board's hides at the drag's start, so a click keeps the cursor, the minimap's at the press. The
+   cursor reappears at the press on release, focus loss, a modal dialog or a new board. A pan keeps the visible
    cursor, which the board follows.
 3. A short release (not the middle button) on the board of its press picks the nearest of the unit models, location
    markers and terrain along the pointer's ray. In both views a unit model or icon wins over the ground, and the
@@ -621,8 +622,8 @@ handler runs.
 ## 5. The Tactical View
 
 The Tactical View is the board seen straight down. The scene, picking and animation
-timeline stay the 3D view's own; every unit is its meeple on a base. The terrain is the 3D Graphics setting's (Classic
-the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has no gameplay value.
+timeline stay the 3D view's own; every unit is its flat icon on a base. The terrain is the 3D Graphics setting's (Classic
+the tileset columns, Enhanced the shaded 3D terrain), without the scatter.
 
 - **Switch it** with `TOGGLE_ISO` (T), the "Tactical view" utility, the Menu's "Tactical view" item, or the chip's
   "Back to 3D". Entering it ends Free Flight; switching Free Flight on leaves it. The chip ("Tactical view" with "Back to 3D") shows centred at the top when the top row has room, and
@@ -658,35 +659,37 @@ the tileset columns, Enhanced the shaded 3D terrain), without the fluff that has
   3D view's limits.
   Leaving restores the saved pose exactly; after a board change it fits the new board from the saved angle. The flag
   is render-thread state and is never saved.
-- **Units: meeples on bases** (`GpuUnitBases`). T forces the All Meeples display (`GpuBattleView.displayMode`), and
-  the units are recreated live; leaving brings the chosen display back. Each listed unit gets a base model drawn
+- **Units: icons on bases** (`GpuUnitBases`, `MeepleVisual.icon`). T forces the token display (`GpuBattleView.displayMode`) with
+  each unit's flat icon, unlit and casting no shadow, over the board and its markers; the units are recreated live, and
+  leaving brings the chosen display back. Each listed unit gets a base model drawn
   before the units (a ring in its side colour, mint own and allied, coral enemy; an acting or focus glow; a pulsing
   outer ring while it can act now; a facing notch and a thin twist notch that turn with the animated pose) and a badge
   model after them (heat pip, elevation or altitude pill, damage tile and armour/structure bars, TMM chevrons in the
   movement colour, the two most severe condition icons, the E(C)CM source badge, a destroyed unit's cross). Sizes are
-  in apothems of the hex; badges fade between 40 and 20 px per hex. A unit's models are rebuilt only when its
-  `BaseSpec` changes; each frame moves them with the pose. Labels hang from the ring's north point, the nameplates
-  show tags only, and picking is the meeple's.
+  in apothems of the hex; badges fade between 40 and 20 px per hex. A multi-hex unit has one base: `UnitFootprint.oval`
+  fits a ring around a stitched ship's opaque art, nearly round for a Union and long for an Aurora, and without a stitched
+  image around its hexes. The notches and badges lie on its rim, the wreck's cross across it, and the selection marks of
+  `GpuBoardOverlay` follow the same oval. A unit's models are
+  rebuilt only when its `BaseSpec` or oval changes; each frame moves them with the pose. Labels hang from the ring's north
+  point, the nameplates show tags only, and picking is the icon's.
 - **Ground layer** (`GpuHexGrid`, `hex-grid.vert/.frag`), drawn right after the opaque terrain: cliff strokes with
   hachures (`BoardRim.high`, Cliff Top exits included), 1- and 2-level step lines, woods and jungle tints, roofs with
   their outline and the "CF n" chip, water shaded by depth with its depth number, smoke and fire, and the hovered or
   focused enemy's rear arcs. Liquids lie a hair under their surface and the rest on a plane above the board, so a
   bridge deck covers the water fill.
 - **Terrain.** The 3D Graphics setting chooses the terrain, not the view ([GPU board](gpu-board.md#graphics-classic-and-enhanced)),
-  and `GpuTerrain.setFluffHidden` hides what has no gameplay value at draw time: scatter trees, placed plants, grass,
-  building and placed object models, decals and paint, scars, water, spores and geysers
-  ([GPU board](gpu-board.md#tactical-view)). A woods cover keeps its trees and its skin (a container yard) under the
-  cover overlay.
+  and `GpuTerrain.setScatterHidden` hides the scatter, grass and biome vegetation at draw time
+  ([GPU board](gpu-board.md#tactical-view)).
   Picking is unchanged by that rule. The wireframe view and the Tactical View exclude each other: turning one on turns
   the other off. The minimap shows the tileset art.
-- **Board overlay.** One palette serves both views; the route's ghost is the translucent meeple, and the front arc and
+- **Board overlay.** One palette serves both views; the route's ghost is the translucent icon, and the front arc and
   the selected weapon's wedge show as in 3D. Cliff strokes belong to the ground layer.
 - **Tests.** `BoardCameraTacticalTest` covers the camera, `GpuUnitBasesTest` the bases' spec and fade rules,
   `GpuHexGridTest` the ground layer's codes. `GpuTacticalViewSmokeTest` renders a 12 x 10 board with woods, jungle,
   buildings, a fuel tank, an industrial hex and a bridged river at 1920 x 1080 and enters and leaves through the real T
-  bind. It checks the restored pose, the meeples and their bases, the fixed light, that one frame submits no tree, placed
-  object, building module, scatter, grass or water draw while a click on every hex picks the same hex and floor as with
-  the fluff shown, in Enhanced and Classic, picking on the columns' art and the meeples, and field-of-view dimming;
+  bind. It checks the restored pose, the icons and their bases, the fixed light, that the icons cast no shadow, that one
+  frame submits no scatter or grass draw while a click on every hex picks the same hex and floor as with the scatter
+  shown, in Enhanced and Classic, picking on the columns' art and the icons, and field-of-view dimming;
   it captures the mock-up battle in both graphics. `GpuGraphicsModeSmokeTest` checks that T starts no rebuild.
 
 ## 6. Zoom-out unit scaling
@@ -784,7 +787,7 @@ classes).
 | `UiList` | a vertical list of any rows; `reorderable(moved)` turns on drag-to-reorder by each row's handle (`add(row, handle)`): the lifted row follows the pointer above everything with a shadow, bounded to the list (and a scroll pane's view of it), a slot opens where it would drop and the other rows slide (springs), a scroll pane scrolls near its edges; `move(index, delta)` flies a row as the keyboard asks; `cancel()` (Esc) sends a dragged row home; `busy()` while a row moves. The view hears one `moved(from, to)` once the rows rest; the list keeps that order until the view gives it new rows and glides back after a second when none come |
 | `UiTree` | a tree of list rows (`hud-plain`, the editor's Layers look) to any depth. A `Node(id, label)` (a record: the id is unique and is also the row button's actor name) has an optional second line, icon, tooltip, search `keywords`, trailing `Action`s (a red delete × or a quiet icon button, heard by `onAction(id, name)`) and children. `nodes(model)` shows a model: an equal model changes nothing, and a row whose node did not change is kept with its hover and tooltip. A chevron expands or collapses a node with children (nodes start expanded); `expandAll`, `collapseAll`, `expand(id, open)`. Single selection: a click, or Enter, selects and `onSelect` hears it; the view's `select(id)` is silent, expands the ancestors (also of a node the next model brings) and scrolls the row into view in the surrounding scroll pane at the next layout (no frame late). `onHover` hears the row under the pointer; `highlight(ids)` shows another view's hover on rows. While the tree holds the keyboard focus (a click gives it), Up/Down/Home/End move the keyboard's row (the hover look), Left collapses it or goes to its parent, Right expands it or goes to its first child, Enter selects it. `filter(text)` shows the nodes whose label, second line or keywords contain the text, with their ancestors, expanded, and restores the expansion from before when cleared; `empty(text)` shows when no row does. `reorderable(tip, moved)` makes siblings next to each other with the same `stack` one `UiList` whose rows (with their descendants) drag by a grip, `moved(id, target, before)`. `controls(placeholder)` is the Client Settings sidebar's tool row: a search field and Expand all/Collapse all (`unfold-more`, `unfold-less`). Expansion, selection and the keyboard's row are kept by id; nothing runs per frame. No virtualisation (no list of the kit has one to reuse; `UiCardGrid`'s is for equal cards) |
 | `UiFlow` | wrapped runs of differently styled text |
-| `UiCursorCapture` | hides and holds the cursor for a relative drag (`UiNumber`'s caption scrub, `UiAngleDial`, the board's and the minimap's orbits); the desktop backend reports unbounded coordinates meanwhile and restores the cursor where it was held on `release()`. The drag reads its pointer through `trusted(x, y)`, which drops the first frame delivering motion after capture, even if intervening frames had no input: on Windows, GLFW's first poll after it can report the pointer from before GLFW centred it, a jump of about the distance to the window's centre that never comes back (glfw/glfw#1523, open). Events already queued in the capture frame are kept; following frames preserve relative movement. |
+| `UiCursorCapture` | hides the cursor for a relative drag (`UiNumber`'s caption scrub, `UiAngleDial`, the board's, the minimap's and the lobby preview's orbits) and wraps it at the window's border, a tenth of its size inside so a fast move cannot carry it into view. `release()` puts it back where the press began (`beganAt`) and only then shows it. The drag reads its pointer through `trusted(x, y)`, which reads the live cursor and makes any jump in the same step, so no jump reaches the drag; once the button is up the pointer stops, so nothing moves the drag after the release. While the cursor is hidden (`pointerHidden()`) the HUD and the hover ignore it, and its return move refreshes the hover after the release. Wayland cannot move the cursor, so there it stays visible and the drag stops at the screen edge. |
 | `UiChoiceGrid` | equal-size visual choice cards, created with `UiKit.choiceGrid(cardWidth, gap)`; `fit(availableWidth, availableHeight)` chooses columns from the content and viewport, allows up to 50% growth when the complete grid fits, and adds columns before vertical scrolling. `UiKit.fitChoices(dialog, scroll, grid, width, height)` also measures dialog chrome. Reflow preserves the original actors, actions, keyboard focus and loaded previews. Used by the editor's library, material cards and theme gallery |
 | `UiKit.fitSearch` | collapses an optional search row and its vertical padding when no choices are hidden; keeps an active filter visible until cleared. Measure choices without search first, then pass actual paging/overflow so the search bar cannot cause its own overflow |
 | `DisplayScale` | the one scale rule (1.7) |
@@ -967,15 +970,10 @@ completes the second endpoint. These gestures also work with an editor tool acti
 `GpuMapSource` uses the same `RulerModel` and `GpuLosPanel` as battle mode.
 Changing maps clears the measurement and rejects commands from an older board generation.
 
-The lobby's 2D Preview and 3D Preview stay open together for an A/B comparison (`MapSetupDialog`). Both show one board,
-the lobby preview game's: the 3D buttons (the lobby's and the 2D preview's) show the open 2D preview's board, and the
-2D button shows the open 3D preview's board. Once the 2D preview is open its button rolls the map settings again, and
-the open 3D preview follows; that, a map change and a server-built battlefield update whichever is open without
-opening the other or bringing the 3D preview to the front (`GpuBoardWindow.updatePreview`). The 3D preview belongs to
-the lobby window, not to the 2D preview, so each closes on its own; the lobby's end (Done, the game's start, leaving)
-closes both. Swing dialogs of a preview's owner that are open when the preview appears are kept above it, as those
-opened while it runs are, so the 2D preview is not hidden behind a maximized 3D preview; a raised dialog that closes is
-released. The 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
+The lobby's 3D Preview (`LobbyBoardPreviews`) shows the lobby preview game's board. A roll of the map settings, a map
+change and a server-built battlefield update it without bringing it to the front (`GpuBoardWindow.updatePreview`). It
+belongs to the lobby window, and the lobby's end (Done, the game's start, leaving) closes it. It is 3D only: its View >
+Renderer offers Classic and Enhanced, not Legacy 2D (`GpuBoardWindow.openLobbyPreview`). A file or start-screen 3D preview's View > Renderer > Legacy 2D still switches: it closes the 3D preview and opens a separate 2D
 window of the same board, whose Renderer menu returns to 3D.
 
 
@@ -1076,7 +1074,7 @@ checkout. `test` excludes `@Tag("on-demand")`, runs `checkstyleMain` first and s
 | Board overlay | `GpuBoardOverlaySmokeTest` (beside the mock's shots; envelopes, route, hover preview, ghost, rebuilds), `GpuRoutePulseSmokeTest` (the route's pulse frame by frame: the head from the unit to the destination, the surge, the rhythm across rebuilds, a jump's arc, a turn in place, none without a plotted route or switched off, the Tactical View, and the real view's own frames moving it on without a rebuild; `pulse-*.png` and its measured cost in `pulse-cost.txt`) |
 | Services | `GpuHudServicesTest`, `GpuMovePlanTest`, `GpuFireOrdersTest`, `GpuFireDraftsTest`, `GpuOffBoardTargetsTest` (the Legacy 2D off-board arrows pinned; the dock's command sends the same attack; the native choice and its Esc), `GpuPhysicalOptionsTest`, `GpuUnitRecordTest`, `GpuFirePreviewTest`, `GpuLosResultTest`, `GpuHudMessagesTest`, `GpuChatRoundLinesTest`, `GpuBattleStatusTest`, `GpuReportLogTest`, `GpuPlaybackHistoryTest`, `GpuBotCommandsTest` |
 | Components | one smoke test per component, e.g. `GpuPhaseHeaderSmokeTest`, `GpuForcesPanelSmokeTest`, `GpuCommandDockSmokeTest`, `GpuWeaponsPanelSmokeTest`, `GpuTargetCardsSmokeTest`, `GpuLogPanelSmokeTest`, `GpuUnitCardSmokeTest`, `GpuTuningPanelSmokeTest`; `GpuCardPlacementTest`, `GpuContextMenuTest` |
-| Toolkit and skin | `UiGallerySmokeTest`, `UiListSmokeTest`, `UiTreeSmokeTest`, `DisplayScaleTest`, `GpuHudKitSmokeTest`, `GpuHudSkinSmokeTest`, `GpuPaperdollTest`, `GpuPaperdollsTest`, `GpuPaperdollSmokeTest` |
+| Toolkit and skin | `UiGallerySmokeTest`, `UiListSmokeTest`, `UiTreeSmokeTest`, `DisplayScaleTest`, `GpuHudKitSmokeTest`, `GpuHudSkinSmokeTest`, `GpuPaperdollsTest`, `GpuPaperdollSmokeTest` |
 
 ## 12. Known limits
 

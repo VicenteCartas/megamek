@@ -185,6 +185,12 @@ final class GodotMaterial {
 
     boolean has(String property) { return properties.containsKey(property); }
 
+    /** A string property's value, or null when the property is absent. */
+    String text(String property) {
+        String value = properties.get(property);
+        return value == null ? null : unquote(value);
+    }
+
     /** The file a texture (or shader) property names, or null when the property is absent. */
     File texture(String property) {
         String value = properties.get(property);
@@ -397,6 +403,12 @@ final class GodotMaterial {
 
     float subsurfaceStrength() {
         return kind == Kind.SHADER ? parameterNumber("subsurface_scattering_strength", 0) : number("subsurf_scatter_strength", 0);
+    }
+
+    /** A map baked for the game beside this material's own, which neither its .tres nor its shader names: {@code <name>_<map>.png}. */
+    File beside(String map) {
+        String name = file.getName();
+        return new File(file.getParentFile(), name.substring(0, name.lastIndexOf('.')) + "_" + map + ".png");
     }
 
     /**

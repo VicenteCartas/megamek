@@ -574,10 +574,15 @@ public final class BoardSceneryLayouts {
               && (HexTile.liquid(bridge) || !bridge.containsTerrainExit(Terrains.ROAD, direction));
     }
 
-    /** Ground a road leads along to a deck: dry, or a ford's depth-0 water, whose road lies on its bed in 3D. */
+    /** Ground a road leads along to a deck for the game's exits: dry, or a ford's depth-0 water. */
     private static boolean roadGround(Hex hex) {
+        return wayGround(hex) && (!HexTile.liquid(hex) || hex.terrainLevel(Terrains.WATER) == 0);
+    }
+
+    /** Ground the 3D board lays a way on: dry, or under water at any depth, on its bed. */
+    private static boolean wayGround(Hex hex) {
         return !HexTile.liquid(hex) || hex.terrainLevel(Terrains.MAGMA) != 2
-              && !hex.containsTerrain(Terrains.HAZARDOUS_LIQUID) && hex.terrainLevel(Terrains.WATER) == 0;
+              && !hex.containsTerrain(Terrains.HAZARDOUS_LIQUID);
     }
 
     /**
@@ -596,8 +601,9 @@ public final class BoardSceneryLayouts {
      * draws the rail sprite in 2D; art without sides joins the rails beside it ({@link #railJoins}) or lays nothing. On a
      * legacy (not native) board only, converted maglevs a level up or beside a row of pillar art stand on Pillars
      * ({@link #maglevPillars}) and a rail bridge carries its rail across its span ({@link #carryRails}), a crane tip that a
-     * converted crane's boom reaches places nothing ({@link #reachedTips}), minor objects step clear of the fitted
-     * concrete walls ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
+     * converted crane's boom reaches places nothing ({@link #reachedTips}), a building without connections is Square
+     * ({@link #squareIsolatedBuildings}), minor objects step clear of the fitted concrete walls
+     * ({@link #clearOfConcreteWalls}), and, once the bridges are typed, every deck gets the road the 3D
      * board drew on it ({@link #deckRoads}). Road junctions inherit the default overhead traffic lights. A token that a hex
      * design draws gets that design ({@link #design}): seaport container yards and cranes on woods become the woods'
      * container yard look at their rotation (a skin, {@link #skin}). A hex that already holds a twin of every object its art
@@ -805,6 +811,7 @@ public final class BoardSceneryLayouts {
             clearOfConcreteWalls(board, scanned);
             roadLinks(board);
             legacyBuildingSelectors(board, scanned);
+            squareIsolatedBuildings(board, scanned);
             themedBuildings(board, scanned);
         }
         design(board, scanned);
@@ -839,6 +846,22 @@ public final class BoardSceneryLayouts {
             board.setHexes(changed);
             board.initializeAll(null);
         }
+    }
+
+    /** A legacy board's building hex without connections, its own or a neighbour's, gets the Square footprint. */
+    private static void squareIsolatedBuildings(Board board, List<Coords> hexes) {
+        Map<BoardLocation, Hex> changed = new HashMap<>();
+        for (Coords at : hexes) {
+            Hex hex = board.getHex(at);
+            if (!hex.containsTerrain(Terrains.BUILDING) || hex.getAppearance().containsKey("footprint")
+                  || TilesetScenery.buildingConnected(hex, at, board::getHex)) { continue; }
+            Hex next = replacement(hex);
+            Map<String, HexAppearance> appearance = new HashMap<>(next.getAppearance());
+            appearance.put("footprint", HexAppearance.SQUARE);
+            next.setAppearance(appearance);
+            changed.put(BoardLocation.of(at, board.getBoardId()), next);
+        }
+        if (!changed.isEmpty()) { board.setHexes(changed); }
     }
 
     /** The lunar theme's building designs, generated over whole buildings (the 3D board's BoardMultiHexBuilding). */
@@ -1003,16 +1026,16 @@ public final class BoardSceneryLayouts {
 
     /**
      * Whether a road or ground rail of {@code way} leaves by {@code direction} onto the deck of the bridge hex
-     * {@code bridge}, as the 3D board joins a way to a deck: on road ground ({@link #roadGround}), the deck exiting
-     * back within a level, and the bridge hex not continuing the way on its own ground at the same level.
+     * {@code bridge}, as the 3D board joins a way to a deck: on its ground ({@link #wayGround}), the deck exiting back
+     * within a level of that ground, and the bridge hex not continuing the way on its own ground at the same level.
      */
     private static boolean meets(Hex way, Hex bridge, int direction) {
-        if (!roadGround(way) || (ways(way) & (1 << direction)) == 0) { return false; }
+        if (!wayGround(way) || (ways(way) & (1 << direction)) == 0) { return false; }
         int back = (direction + 3) % 6;
         boolean continued = !HexTile.liquid(bridge) && (ways(bridge) & (1 << back)) != 0;
         int deck = BridgeSpan.deck(bridge);
-        return !(continued && way.getLevel() == bridge.getLevel()) && Math.abs(deck - way.getLevel()) <= 1
-              && (!continued || deck == way.getLevel()) && (RailRoute.bridgeExits(bridge) & (1 << back)) != 0;
+        return !(continued && way.floor() == bridge.getLevel()) && Math.abs(deck - way.floor()) <= 1
+              && (!continued || deck == way.floor()) && (RailRoute.bridgeExits(bridge) & (1 << back)) != 0;
     }
 
     /** The sides of a hex's road and of its rails on the ground ({@link RailRoute#groundSides}). */

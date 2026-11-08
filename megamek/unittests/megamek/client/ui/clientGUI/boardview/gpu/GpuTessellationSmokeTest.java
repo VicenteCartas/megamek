@@ -32,11 +32,11 @@ import org.lwjgl.opengl.GL11;
 class GpuTessellationSmokeTest {
     @Test
     void lowBridgeContacts() throws Exception {
-        BoardScene scene = GpuDepthPrepassBaselineSmokeTest.scene(
+        BoardScene scene = GpuCalibrationScenes.scene(
               new File("data/boards/AGoAC Maps/16x17 Grassland 2 (Low Bridges).board"));
         AtomicBoolean available = new AtomicBoolean();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
+        Files.createDirectories(GpuCalibrationScenes.OUTPUT.toPath());
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 900);
         config.setInitialVisible(false);
@@ -44,12 +44,12 @@ class GpuTessellationSmokeTest {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+                var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
                 var camera = new BoardCamera();
                 try {
                     available.set(GpuTessellation.available());
                     if (!available.get()) { return; }
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                     camera.setIsometric(false);
                     camera.orbit(67.18f - camera.azimuth(), 58.35f - camera.tilt());
                     camera.camera.zoom = 112.95f / camera.camera.viewportHeight;
@@ -60,7 +60,7 @@ class GpuTessellationSmokeTest {
                         terrain.setTessellation(enabled);
                         terrain.update(scene);
                         byte[] pixels = GpuAmbientOcclusionSmokeTest.draw(terrain, frame, camera, scene,
-                              new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT,
+                              new File(GpuCalibrationScenes.OUTPUT,
                                     "tessellation-low-bridge" + (enabled ? "-on.png" : "-off.png")));
                         if (!enabled) {
                             reference = pixels;
@@ -122,23 +122,23 @@ class GpuTessellationSmokeTest {
 
     @Test
     void fireAndIceContacts() throws Exception {
-        BoardScene scene = GpuDepthPrepassBaselineSmokeTest.scene(
+        BoardScene scene = GpuCalibrationScenes.scene(
               new File("data/boards/unofficial/Drewbacca/16x17 Fire And Ice 2.board"));
         AtomicBoolean available = new AtomicBoolean();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
+        Files.createDirectories(GpuCalibrationScenes.OUTPUT.toPath());
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 900);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+                var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
                 var camera = new BoardCamera();
                 try {
                     available.set(GpuTessellation.available());
                     if (!available.get()) { return; }
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                     byte[] roadReference = null;
                     for (boolean enabled : new boolean[] { false, true }) {
                         terrain.setTessellation(enabled);
@@ -151,7 +151,7 @@ class GpuTessellationSmokeTest {
                             camera.camera.zoom = view[2] / camera.camera.viewportHeight;
                             camera.center(new Vector3(view[3], view[4], view[5]));
                             byte[] pixels = GpuAmbientOcclusionSmokeTest.draw(terrain, frame, camera, scene,
-                                  new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT,
+                                  new File(GpuCalibrationScenes.OUTPUT,
                                         "tessellation-fire-ice-" + (view[3] > 500 ? "cliff" : "road")
                                               + (enabled ? "-on.png" : "-off.png")));
                             if (view[3] < 500) {
@@ -220,34 +220,34 @@ class GpuTessellationSmokeTest {
 
     @Test
     void switchesOnAndBackAtRuntime() throws Exception {
-        BoardScene scene = GpuDepthPrepassBaselineSmokeTest.scene(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"));
+        BoardScene scene = GpuCalibrationScenes.scene(new File("data/boards/AGoAC Maps/16x17 Grassland 2.board"));
         AtomicBoolean available = new AtomicBoolean();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
+        Files.createDirectories(GpuCalibrationScenes.OUTPUT.toPath());
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1280, 800);
         new Lwjgl3Application(new ApplicationAdapter() {
             @Override
             public void create() {
                 var terrain = new GpuTerrain();
-                var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+                var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
                 var camera = new BoardCamera();
                 try {
                     available.set(GpuTessellation.available());
                     if (!available.get()) { return; }
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
                     // Close enough for full detail, the only chunks that tessellate.
                     camera.setIsometric(false);
                     camera.orbit(15, 55);
                     camera.camera.zoom = .09f;
                     camera.center(BoardGeometry.center(new Coords(12, 8), scene.tile(new Coords(12, 8)).elevation()));
                     byte[] off = GpuAmbientOcclusionSmokeTest.draw(terrain, frame, camera, scene,
-                          new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, "tessellation-off.png"));
+                          new File(GpuCalibrationScenes.OUTPUT, "tessellation-off.png"));
                     // As the battle view does each frame: the switch, then the update that rebuilds for it.
                     terrain.setTessellation(true);
                     terrain.update(scene);
                     byte[] on = GpuAmbientOcclusionSmokeTest.draw(terrain, frame, camera, scene,
-                          new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, "tessellation-on.png"));
+                          new File(GpuCalibrationScenes.OUTPUT, "tessellation-on.png"));
                     terrain.setTessellation(false);
                     terrain.update(scene);
                     byte[] again = GpuAmbientOcclusionSmokeTest.draw(terrain, frame, camera, scene, null);

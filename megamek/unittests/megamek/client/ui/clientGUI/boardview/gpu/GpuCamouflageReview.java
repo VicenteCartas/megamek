@@ -153,17 +153,17 @@ final class GpuCamouflageReview {
                 GpuBoardTestUi.<SelectBox<UnitDisplayMode>>tuning(view, "tuning-unit-display")
                       .setSelected(UnitDisplayMode.MODELS);
                 renderReady(view);
-                var instances = (Map<?, ?>) field(view, "unitInstances");
+                var instances = (Map<?, ?>) GpuTestSupport.field(view, "unitInstances");
                 var before = (ModelInstance) instances.get("1:-1");
                 assertNotNull(before);
-                var turns = (Map<?, ?>) field(view, "upperBodyTurns");
+                var turns = (Map<?, ?>) GpuTestSupport.field(view, "upperBodyTurns");
                 Object turn = turns.get("1:-1");
                 assertNotNull(turn);
                 view.boardCamera.center(UnitBounds.world(before).getCenter(new Vector3()));
                 view.boardCamera.zoom(.12f);
                 var beforeTexture = parts(before.nodes).stream().map(GpuCamouflageReview::texture)
                       .filter(java.util.Objects::nonNull).findFirst().orElseThrow();
-                var paints = (GpuUnitCamouflage) field(view, "camouflage");
+                var paints = (GpuUnitCamouflage) GpuTestSupport.field(view, "camouflage");
                 assertEquals(1, paints.textureCount());
                 SwingUtilities.invokeAndWait(() -> {
                     fixture.entity.getCamouflage().setRotationAngle(70);
@@ -204,20 +204,14 @@ final class GpuCamouflageReview {
               Integer.getInteger("megamek.gpu.prepareSeconds", 120));
         do {
             view.render();
-            var terrain = (GpuTerrain) field(view, "terrain");
-            var scene = (BoardScene) field(view, "scene");
+            var terrain = (GpuTerrain) GpuTestSupport.field(view, "terrain");
+            var scene = (BoardScene) GpuTestSupport.field(view, "scene");
             if (scene != null && terrain.ready(scene) && !terrain.busy()) { return; }
             Thread.sleep(1);
         } while (System.nanoTime() < deadline);
-        var terrain = (GpuTerrain) field(view, "terrain");
+        var terrain = (GpuTerrain) GpuTestSupport.field(view, "terrain");
         throw new AssertionError("Board did not finish preparing for unit appearance review: "
               + terrain.buildDetails() + "; busy=" + terrain.busy());
-    }
-
-    static Object field(Object object, String name) throws Exception {
-        var field = object.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(object);
     }
 
     static Texture texture(NodePart part) {

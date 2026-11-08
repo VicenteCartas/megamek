@@ -74,7 +74,7 @@ class GpuTerrainBenchmarkSmokeTest {
                         fixture.game.addEntity(entity, false);
                     }
                     fixture.source.refresh();
-                    ((Timer) GpuMixedUnitBenchmarkSmokeTest.field(fixture.source, "timer")).stop();
+                    ((Timer) GpuTestSupport.field(fixture.source, "timer")).stop();
                 } catch (Exception error) { throw new IllegalStateException(error); }
             });
             var config = GpuBoardWindow.configuration(false);

@@ -18,8 +18,8 @@ class UnitDefensePlaybackTest {
     @Test
     void missilesStopAtTheNearerInterceptionPointAndKeepHitsSeparateFromMisses() {
         for (int distance : new int[] { 1, 2, 4, 10 }) {
-            var source = UnitPlaybackTest.unit(1, 0);
-            var target = UnitPlaybackTest.unit(2, distance);
+            var source = UnitPlaybackFixture.unit(1, 0);
+            var target = UnitPlaybackFixture.unit(2, distance);
             var shot = new ResolvedAttack.Shot("", Set.of(), false, false, 1, 20, true, 8)
                   .withInterception(UUID.randomUUID(), 6);
             var attack = new UnitAttack(combat(source, target, shot));
@@ -46,16 +46,16 @@ class UnitDefensePlaybackTest {
 
     @Test
     void neighboringDefensePairsWithItsActualSalvoEvenWhenAnotherRackFiresAtTheSameTarget() {
-        var source = UnitPlaybackTest.unit(1, 0);
-        var target = UnitPlaybackTest.unit(2, 8);
-        var neighbor = UnitPlaybackTest.unit(3, 7);
+        var source = UnitPlaybackFixture.unit(1, 0);
+        var target = UnitPlaybackFixture.unit(2, 8);
+        var neighbor = UnitPlaybackFixture.unit(3, 7);
         var id = UUID.randomUUID();
         var incoming = combat(source, target, new ResolvedAttack.Shot("", Set.of(), false, false, 1, 20, false, 8).withInterception(id, 6));
         var unrelated = combat(source, target, new ResolvedAttack.Shot("", Set.of(), false, false, 1, 20, false, 8)
               .withInterception(UUID.randomUUID(), 4));
         var counter = combat(neighbor, source, new ResolvedAttack.Shot("", Set.of(), false, true, 1, 0, false).withInterception(id, 0));
         var playback = new UnitPlayback();
-        playback.accept(List.of(counter, unrelated, incoming), UnitPlaybackTest.scene(source, target, neighbor), ignored -> false);
+        playback.accept(List.of(counter, unrelated, incoming), UnitPlaybackFixture.scene(source, target, neighbor), ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
         var defense = playback.attacks().getFirst();
         assertSame(incoming, defense.incoming.event);
@@ -67,10 +67,10 @@ class UnitDefensePlaybackTest {
         var source = unit(1, 0, 0, ProneCause.NONE);
         var target = unit(2, 1, 0, ProneCause.NONE);
         var displaced = unit(2, 2, 0, ProneCause.NONE);
-        var push = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.PUSH, true);
+        var push = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.PUSH, true);
         var move = new BoardScene.Movement(2, 0, List.of(target.location(), displaced.location()), EntityMovementType.MOVE_NONE, 0, 0, displaced);
-        var before = UnitPlaybackTest.scene(source, target);
-        var after = UnitPlaybackTest.scene(source, displaced);
+        var before = UnitPlaybackFixture.scene(source, target);
+        var after = UnitPlaybackFixture.scene(source, displaced);
         var playback = new UnitPlayback();
         playback.accept(List.of(new BoardScene.SceneUpdate(before), push, move, new BoardScene.SceneUpdate(after)), after, ignored -> false);
         playback.advance(0, UnitMotion.Speed.NORMAL);
@@ -119,7 +119,7 @@ class UnitDefensePlaybackTest {
     }
 
     static BoardScene.Combat combat(BoardScene.Unit source, BoardScene.Unit target, ResolvedAttack.Shot shot) {
-        var raw = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, true).result();
+        var raw = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, true).result();
         var result = new ResolvedAttack(raw.id(), raw.kind(), raw.attacker(), raw.target(), raw.targetType(), 0,
               shot.defensive() ? "ISLaserAMS" : "ISLRM20", 0, true, List.of(new ResolvedAttack.Mount(source.id(), 0, shot)), shot);
         return new BoardScene.Combat(result, source, target, target.location());

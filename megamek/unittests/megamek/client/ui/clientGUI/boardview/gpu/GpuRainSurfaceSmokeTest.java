@@ -325,8 +325,8 @@ class GpuRainSurfaceSmokeTest {
                 BoardScene.Biome biome = kind == 1 ? BoardScene.Biome.MUD
                       : kind == 2 ? BoardScene.Biome.QUICKSAND : BoardScene.Biome.MARSH;
                 boolean sand = kind == 3;
-                var scene = BoardSurfaceBlendTest.scene(coords -> {
-                    var tile = BoardBiomeTest.tile(coords, coords.getX() < 5 ? biome : BoardScene.Biome.NONE, 0);
+                var scene = BoardScenes.scene(coords -> {
+                    var tile = BoardScenes.tile(coords, coords.getX() < 5 ? biome : BoardScene.Biome.NONE, 0);
                     if (!sand) { return tile; }
                     return new BoardScene.Tile(coords, 0, -1, false, 0, BoardScene.Surface.SAND, null, null, List.of(),
                           List.of(), BoardLiquid.NONE, null, true,
@@ -340,7 +340,7 @@ class GpuRainSurfaceSmokeTest {
                     camera.setIsometric(false);
                     camera.fit(scene);
                     terrain.update(scene, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     float[][] frames = new float[3][];
                     for (int step = 0; step < frames.length; step++) {
                         terrain.setWetness(step * .5f);

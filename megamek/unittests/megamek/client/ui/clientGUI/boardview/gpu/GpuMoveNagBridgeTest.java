@@ -19,7 +19,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.Component;
-import java.io.File;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.concurrent.FutureTask;
@@ -35,11 +34,10 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.unitDisplay.UnitDisplayState;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
 import megamek.common.game.GameTurn;
@@ -48,10 +46,9 @@ import megamek.common.moves.MoveStep;
 import megamek.common.units.Entity;
 import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 
@@ -59,30 +56,18 @@ import org.mockito.MockedStatic;
  * A real MovementDisplay whose piloting nag is answered through the native modal bridge: the move sent is exactly
  * the path the player confirmed, and board input or plan commands arriving while the nag waits are dropped.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuMoveNagBridgeTest {
     private static final Coords RUBBLE = new Coords(5, 4);
     private static final Coords BEYOND = new Coords(5, 3);
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void aPilotingNagAnsweredNativelySendsExactlyTheConfirmedPath() throws Exception {
         GUIPreferences preferences = GUIPreferences.getInstance();
         boolean nagForPsr = preferences.getNagForPSR();
         Client client = mock(Client.class);
-        ClientGUI gui = GpuDialogRoutingTest.routingClient();
+        ClientGUI gui = GpuDialogFixture.routingClient();
         CommonMenuBar menu = mock(CommonMenuBar.class);
         MegaMekController controller = mock(MegaMekController.class);
         UnitDisplayState unitDisplay = mock(UnitDisplayState.class);
@@ -101,7 +86,7 @@ class GpuMoveNagBridgeTest {
             when(gui.getBoardState(any(Entity.class))).thenReturn(fixture.view);
             when(gui.getBoardState(anyInt())).thenReturn(fixture.view);
             gui.controller = controller;
-            MovementDisplay movement = GpuDialogRoutingTest.onSwing(() -> {
+            MovementDisplay movement = GpuTestSupport.onSwing(() -> {
                 keys.set(mockStatic(MegaMekGUI.class, CALLS_REAL_METHODS));
                 keys.get().when(MegaMekGUI::getKeyDispatcher).thenReturn(controller);
                 preferences.setNagForPSR(true);
@@ -112,9 +97,9 @@ class GpuMoveNagBridgeTest {
                 display.selectEntity(fixture.entity.getId());
                 return display;
             });
-            GpuBoardSource source = GpuDialogRoutingTest.onSwing(() -> new GpuBoardSource(fixture.view,
+            GpuBoardSource source = GpuTestSupport.onSwing(() -> new GpuBoardSource(fixture.view,
                   () -> movement));
-            GpuDialogRoutingTest.present(gui, fixture.view, source);
+            GpuDialogFixture.present(gui, fixture.view, source);
             try {
                 // Without the refresh timer, only a command that runs republishes the scene.
                 SwingUtilities.invokeAndWait(() -> timer(source).stop());
@@ -122,8 +107,8 @@ class GpuMoveNagBridgeTest {
                 SwingUtilities.invokeAndWait(() -> { });
 
                 // No, with the box ticked: nothing is sent, and as with ConfirmDialog the box only counts with Yes.
-                GpuDialogRoutingTest.swingYesNo("OS yes", "OS no");
-                Asked<Boolean> declined = GpuDialogRoutingTest.ask(source, () -> {
+                GpuDialogFixture.swingYesNo("OS yes", "OS no");
+                Asked<Boolean> declined = GpuDialogFixture.ask(source, () -> {
                     movement.ready();
                     return true;
                 }, 1, true);
@@ -143,7 +128,7 @@ class GpuMoveNagBridgeTest {
                     return null;
                 });
                 SwingUtilities.invokeLater(ready);
-                DialogRequest shown = GpuDialogRoutingTest.awaitDialog(source);
+                DialogRequest shown = GpuDialogFixture.awaitDialog(source);
                 assertEquals(declined.request().message(), shown.message());
                 // While the nag waits, a board drag, a click and a plan command arrive from the GL side.
                 BoardScene before = source.takeFrame().scene();
@@ -172,8 +157,8 @@ class GpuMoveNagBridgeTest {
                 verify(client, times(2)).moveEntity(eq(fixture.entity.getId()), both.capture());
                 assertEquals(BEYOND, both.getAllValues().get(1).getFinalCoords());
             } finally {
-                GpuDialogRoutingTest.swingYesNo(null, null);
-                GpuDialogRoutingTest.dismiss();
+                GpuDialogFixture.swingYesNo(null, null);
+                GpuDialogFixture.dismiss();
                 SwingUtilities.invokeAndWait(() -> {
                     source.close();
                     fixture.view.removeBoardViewListener(movement);

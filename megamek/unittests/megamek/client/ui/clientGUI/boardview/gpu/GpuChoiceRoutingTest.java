@@ -1,11 +1,11 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,16 +32,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Vector;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.IntStream;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
-import javax.swing.Timer;
 import javax.swing.UIManager;
 
 import megamek.client.Client;
 import megamek.client.ui.Messages;
-import megamek.client.ui.clientGUI.AbstractClientGUI;
 import megamek.client.ui.clientGUI.ClientGUI;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.GifRecordingMode;
@@ -50,7 +47,7 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.clientGUI.unitDisplay.UnitEquipmentActions;
 import megamek.client.ui.dialogs.ChoiceDialog;
 import megamek.client.ui.dialogs.SliderDialog;
@@ -61,7 +58,6 @@ import megamek.client.ui.dialogs.phaseDisplay.EntityChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.ManeuverChoiceDialog;
 import megamek.client.ui.dialogs.phaseDisplay.TeleMissileSettingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.VibrabombSettingDialog;
-import megamek.common.Configuration;
 import megamek.common.ManeuverType;
 import megamek.common.board.Board;
 import megamek.common.equipment.EquipmentType;
@@ -72,10 +68,9 @@ import megamek.common.moves.MovePath;
 import megamek.common.options.OptionsConstants;
 import megamek.common.units.Entity;
 import megamek.common.units.Mek;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
@@ -83,21 +78,9 @@ import org.mockito.MockedStatic;
  * dialog returns for the same answer, and Swing stays in use while no native window draws dialogs. The test thread
  * plays the GL thread; no GL is used. Tests that build Swing dialogs need a display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuChoiceRoutingTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void inputReturnsTheChosenValueOrTheTypedTextLikeJOptionPane() throws Exception {
@@ -108,30 +91,30 @@ class GpuChoiceRoutingTest {
                 Object[] targets = { "Atlas AS7-D", "Hunchback HBK-4G", "Locust LCT-1V" };
                 Callable<Object> tagTarget = () -> gui.input("Choose a TAG target", "TAG target",
                       JOptionPane.QUESTION_MESSAGE, targets, targets[0]);
-                Asked<Object> tagged = ask(fixture.source, tagTarget, pick(0, 2));
+                Asked<Object> tagged = ask(fixture.source, tagTarget, GpuDialogFixture.pick(0, 2));
                 DialogRequest request = tagged.request();
                 assertEquals(DialogKind.CHOICE, request.kind());
                 assertEquals("TAG target", request.title());
                 assertEquals("Choose a TAG target", request.message());
-                assertEquals(List.of("Atlas AS7-D", "Hunchback HBK-4G", "Locust LCT-1V"), labels(request));
+                assertEquals(List.of("Atlas AS7-D", "Hunchback HBK-4G", "Locust LCT-1V"), GpuDialogFixture.labels(request));
                 assertEquals(List.of(0), request.initiallySelected(), "The initial value is selected");
                 assertEquals(List.of(UIManager.getString("OptionPane.okButtonText"),
                       UIManager.getString("OptionPane.cancelButtonText")), request.buttons());
                 assertEquals(0, request.defaultButton());
                 assertEquals(1, request.cancelButton());
                 assertEquals("Locust LCT-1V", tagged.result());
-                assertNull(ask(fixture.source, tagTarget, pick(1, 2)).result(), "Cancel returns null");
+                assertNull(ask(fixture.source, tagTarget, GpuDialogFixture.pick(1, 2)).result(), "Cancel returns null");
 
                 // Without an initial value, JOptionPane's combo box (fewer than 20 values) starts on the first value
                 Object[] apds = { "None", "LRM 20 from Archer ARC-2R (distance 2)" };
                 Asked<Object> none = ask(fixture.source, () -> gui.input("Assign the APDS", "APDS",
-                      JOptionPane.QUESTION_MESSAGE, apds, null), pick(0, 0));
+                      JOptionPane.QUESTION_MESSAGE, apds, null), GpuDialogFixture.pick(0, 0));
                 assertEquals(List.of(0), none.request().initiallySelected());
                 assertEquals("None", none.result());
                 // ... and its list for 20 or more values starts without a selection, so OK alone returns null
                 Object[] many = IntStream.range(0, 20).mapToObj(index -> "Target " + index).toArray();
                 Asked<Object> unselected = ask(fixture.source, () -> gui.input("Pick one", "Targets",
-                      JOptionPane.QUESTION_MESSAGE, many, null), pick(0));
+                      JOptionPane.QUESTION_MESSAGE, many, null), GpuDialogFixture.pick(0));
                 assertEquals(List.of(), unselected.request().initiallySelected());
                 assertNull(unselected.result());
 
@@ -156,7 +139,7 @@ class GpuChoiceRoutingTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Builds Swing dialogs");
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             present(gui, fixture.view, fixture.source);
             try {
                 // Units dropping from a bay with two usable doors: any units, but at most two
@@ -167,20 +150,20 @@ class GpuChoiceRoutingTest {
                     dialog.setVisible(true);
                     return dialog.getChoices();
                 };
-                Asked<int[]> dropped = ask(fixture.source, drop, pick(0, 3, 0));
+                Asked<int[]> dropped = ask(fixture.source, drop, GpuDialogFixture.pick(0, 3, 0));
                 DialogRequest request = dropped.request();
                 assertEquals(DialogKind.MULTI, request.kind());
                 assertEquals("Drop units", request.title());
                 assertEquals("Which units drop?", request.message());
-                assertEquals(List.of(units), labels(request));
+                assertEquals(List.of(units), GpuDialogFixture.labels(request));
                 assertEquals(List.of(), request.initiallySelected());
                 assertEquals(2, request.max());
                 assertEquals(List.of(Messages.getString("Okay"), Messages.getString("Cancel")), request.buttons());
                 assertEquals(1, request.cancelButton());
                 assertArrayEquals(new int[] { 0, 3 }, dropped.result());
-                assertNull(ask(fixture.source, drop, pick(0, 0, 2, 3)).result(),
+                assertNull(ask(fixture.source, drop, GpuDialogFixture.pick(0, 0, 2, 3)).result(),
                       "More units than the dialog allows are refused, not trimmed to the first ones");
-                assertNull(ask(fixture.source, drop, pick(1, 0)).result(), "Cancel chooses nothing");
+                assertNull(ask(fixture.source, drop, GpuDialogFixture.pick(1, 0)).result(), "Cancel chooses nothing");
 
                 // One of a slot's two mounts: a single choice that starts on the first
                 Asked<int[]> mount = ask(fixture.source, () -> {
@@ -188,13 +171,13 @@ class GpuChoiceRoutingTest {
                           new String[] { "Medium Laser", "Small Laser" }, true);
                     dialog.setVisible(true);
                     return dialog.getAnswer() ? dialog.getChoices() : null;
-                }, pick(0, 1));
+                }, GpuDialogFixture.pick(0, 1));
                 assertEquals(DialogKind.CHOICE, mount.request().kind());
                 assertEquals(List.of(0), mount.request().initiallySelected());
                 assertArrayEquals(new int[] { 1 }, mount.result());
 
                 assertNull(ask(fixture.source, () -> gui.doChoiceDialog("Unload", "Unload stranded units?",
-                      "Harasser", "Savannah Master"), pick(0)).result(), "OK without a tick chooses nothing");
+                      "Harasser", "Savannah Master"), GpuDialogFixture.pick(0)).result(), "OK without a tick chooses nothing");
             } finally {
                 dismiss();
                 onSwing(() -> {
@@ -212,7 +195,7 @@ class GpuChoiceRoutingTest {
         Client client = mock(Client.class);
         when(gui.getClient()).thenReturn(client);
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             when(gui.getFrame()).thenReturn(frame);
             when(client.getGame()).thenReturn(fixture.game);
             Entity atlas = fixture.entity;
@@ -233,14 +216,14 @@ class GpuChoiceRoutingTest {
             try {
                 // Switching the second suite back on would put two suites into use: the player keeps one of them
                 Asked<Boolean> kept = ask(fixture.source,
-                      () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(1), 0), pick(0, 1));
+                      () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(1), 0), GpuDialogFixture.pick(0, 1));
                 DialogRequest request = kept.request();
                 assertEquals(DialogKind.CHOICE, request.kind());
                 assertEquals(Messages.getString("EcmSuiteChoiceDialog.title"), request.title());
                 assertEquals("Atlas AS7-D may only use one ECM suite at a time (TM p.213).\nWhich one do you want to"
                       + " leave on? The others will be switched off.", request.message());
                 assertEquals(List.of("ECM Suite (Guardian) #1 (Left Arm)\nECM",
-                      "ECM Suite (Guardian) #2 (Right Arm)\nECM"), labels(request),
+                      "ECM Suite (Guardian) #2 (Right Arm)\nECM"), GpuDialogFixture.labels(request),
                       "The suite in use and the one switched, each with the mode it would have");
                 assertEquals(List.of(), request.initiallySelected());
                 assertEquals(List.of(Messages.getString("Ok.text"), Messages.getString("Cancel.text")),
@@ -252,9 +235,9 @@ class GpuChoiceRoutingTest {
 
                 // Back on the first suite: keeping the second, or cancelling, abandons the switch
                 assertFalse(ask(fixture.source, () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(0), 0),
-                      pick(0, 1)).result());
+                      GpuDialogFixture.pick(0, 1)).result());
                 assertFalse(ask(fixture.source, () -> UnitEquipmentActions.changeMode(gui, atlas, suites.get(0), 0),
-                      pick(1)).result());
+                      GpuDialogFixture.pick(1)).result());
                 verify(client, never()).sendModeChange(atlas.getId(), firstNum, 0);
                 assertEquals(dialogs, ecmDialogs(), "No Swing dialog was built for the question");
             } finally {
@@ -275,7 +258,7 @@ class GpuChoiceRoutingTest {
         MovePath path = mock(MovePath.class);
         when(path.getStepVector()).thenReturn(new Vector<>());
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             present(gui, fixture.view, fixture.source);
             try {
                 // Velocity 3 at altitude 5 over open sky: too slow for a loop, and not a VSTOL for a VIFF
@@ -285,12 +268,12 @@ class GpuChoiceRoutingTest {
                     dialog.setVisible(true);
                     return dialog.getChoice();
                 };
-                Asked<Integer> immelman = ask(fixture.source, maneuver, pick(0, ManeuverType.MAN_IMMELMAN));
+                Asked<Integer> immelman = ask(fixture.source, maneuver, GpuDialogFixture.pick(0, ManeuverType.MAN_IMMELMAN));
                 DialogRequest request = immelman.request();
                 assertEquals(DialogKind.CHOICE, request.kind());
                 assertEquals("Maneuver", request.title());
                 assertEquals(List.of("None", "Loop", "Immelman", "Split S", "Hammerhead", "Half Roll", "Barrel Roll",
-                      "Side Slip (Left)", "Side Slip (Right)", "VIFF"), labels(request));
+                      "Side Slip (Left)", "Side Slip (Right)", "VIFF"), GpuDialogFixture.labels(request));
                 assertEquals(List.of(true, false, true, true, true, true, true, true, true, false),
                       request.rows().stream().map(DialogRow::enabled).toList());
                 String loop = request.rows().get(ManeuverType.MAN_LOOP).detail();
@@ -298,9 +281,9 @@ class GpuChoiceRoutingTest {
                 assertEquals(List.of(ManeuverType.MAN_NONE), request.initiallySelected());
                 assertEquals(ManeuverType.MAN_IMMELMAN, immelman.result());
 
-                assertEquals(ManeuverType.MAN_NONE, ask(fixture.source, maneuver, pick(0, ManeuverType.MAN_LOOP))
+                assertEquals(ManeuverType.MAN_NONE, ask(fixture.source, maneuver, GpuDialogFixture.pick(0, ManeuverType.MAN_LOOP))
                       .result(), "A maneuver the unit cannot perform is never chosen");
-                assertEquals(-1, ask(fixture.source, maneuver, pick(1, ManeuverType.MAN_IMMELMAN)).result(),
+                assertEquals(-1, ask(fixture.source, maneuver, GpuDialogFixture.pick(1, ManeuverType.MAN_IMMELMAN)).result(),
                       "Cancel chooses nothing");
             } finally {
                 dismiss();
@@ -325,13 +308,13 @@ class GpuChoiceRoutingTest {
                 fixture.game.addEntity(archer, false);
                 return null;
             });
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             present(gui, fixture.view, fixture.source);
             try {
                 Callable<Entity> load = () -> EntityChoiceDialog.showSingleChoiceDialog(frame,
                       "DeploymentDisplay.loadUnitDialog.title", "<html>Which unit do you want to load?</html>",
                       List.of(fixture.entity, archer));
-                Asked<Entity> loaded = ask(fixture.source, load, pick(0, 1));
+                Asked<Entity> loaded = ask(fixture.source, load, GpuDialogFixture.pick(0, 1));
                 DialogRequest request = loaded.request();
                 assertEquals(DialogKind.CHOICE, request.kind());
                 assertEquals("Load Unit", request.title());
@@ -345,8 +328,8 @@ class GpuChoiceRoutingTest {
                 assertTrue(request.rows().get(0).label().contains("Atlas"), request.rows().get(0).label());
                 assertTrue(request.rows().get(1).label().contains("Archer"), request.rows().get(1).label());
                 assertSame(archer, loaded.result());
-                assertNull(ask(fixture.source, load, pick(1, 1)).result(), "Cancel chooses no unit");
-                assertNull(ask(fixture.source, load, pick(0)).result(), "OK without a row chooses no unit");
+                assertNull(ask(fixture.source, load, GpuDialogFixture.pick(1, 1)).result(), "Cancel chooses no unit");
+                assertNull(ask(fixture.source, load, GpuDialogFixture.pick(0)).result(), "OK without a row chooses no unit");
             } finally {
                 dismiss();
                 onSwing(() -> {
@@ -362,7 +345,7 @@ class GpuChoiceRoutingTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Builds Swing dialogs");
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             present(gui, fixture.view, fixture.source);
             try {
                 Callable<Integer> vibrabomb = () -> {
@@ -480,12 +463,12 @@ class GpuChoiceRoutingTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "Shows Swing dialogs");
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
-            JFrame frame = clientFrame(gui);
+            JFrame frame = GpuDialogFixture.clientFrame(gui);
             JFrame lobbyFrame = onSwing(JFrame::new);
             GpuBoardWindow window = present(gui, fixture.view, fixture.source);
             try {
-                GpuDialogRoutingTest.set(window, "presented", false);
-                GpuDialogRoutingTest.set(window, "closing", true);
+                GpuDialogFixture.set(window, "presented", false);
+                GpuDialogFixture.set(window, "closing", true);
                 assertEquals("Hunchback", onSwing(() -> {
                     try (MockedStatic<JOptionPane> swing = mockStatic(JOptionPane.class)) {
                         swing.when(() -> JOptionPane.showInputDialog(any(), any(), any(), anyInt(), any(), any(),
@@ -494,7 +477,7 @@ class GpuChoiceRoutingTest {
                               new Object[] { "Atlas", "Hunchback" }, "Atlas");
                     }
                 }), "The facade returns the Swing dialog's value");
-                assertTrue(onSwing(() -> closedAfterShowing(ChoiceDialog.class, () -> {
+                assertTrue(onSwing(() -> GpuDialogFixture.closedAfterShowing(ChoiceDialog.class, () -> {
                     ChoiceDialog dialog = new ChoiceDialog(frame, "Drop", "Which?", new String[] { "A", "B" });
                     dialog.setVisible(true);
                     return dialog.getChoices() == null;
@@ -502,18 +485,18 @@ class GpuChoiceRoutingTest {
                 // The tooltip cannot format the details of a unit outside the game, which Swing shows only on request
                 Entity outside = new MekFileParser(new File("testresources/megamek/common/units/Archer ARC-2R.mtf"))
                       .getEntity();
-                assertTrue(onSwing(() -> closedAfterShowing(EntityChoiceDialog.class,
+                assertTrue(onSwing(() -> GpuDialogFixture.closedAfterShowing(EntityChoiceDialog.class,
                       () -> EntityChoiceDialog.showSingleChoiceDialog(frame, "DeploymentDisplay.loadUnitDialog.title",
                             "Which?", List.of(fixture.entity, outside)) == null)),
                       "The unit choice shows as before, without formatting the native rows");
-                assertTrue(onSwing(() -> closedAfterShowing(VibrabombSettingDialog.class, () -> {
+                assertTrue(onSwing(() -> GpuDialogFixture.closedAfterShowing(VibrabombSettingDialog.class, () -> {
                     VibrabombSettingDialog dialog = new VibrabombSettingDialog(frame);
                     dialog.setVisible(true);
                     return dialog.getSetting() == 0;
                 })));
 
-                GpuDialogRoutingTest.set(window, "presented", true);
-                assertTrue(onSwing(() -> closedAfterShowing(ChoiceDialog.class, () -> {
+                GpuDialogFixture.set(window, "presented", true);
+                assertTrue(onSwing(() -> GpuDialogFixture.closedAfterShowing(ChoiceDialog.class, () -> {
                     ChoiceDialog dialog = new ChoiceDialog(lobbyFrame, "Drop", "Which?", new String[] { "A" });
                     dialog.setVisible(true);
                     return dialog.getChoices() == null;
@@ -530,58 +513,13 @@ class GpuChoiceRoutingTest {
         }
     }
 
-    /**
-     * EDT: runs a chokepoint while a timer closes its Swing dialog of the given type as soon as it shows. True when the
-     * dialog showed and the chokepoint's own check holds afterwards.
-     */
-    static boolean closedAfterShowing(Class<? extends Window> type, Callable<Boolean> chokepoint)
-          throws Exception {
-        AtomicBoolean shown = new AtomicBoolean();
-        Timer closer = new Timer(50, event -> {
-            for (Window window : Window.getWindows()) {
-                if (type.isInstance(window) && window.isShowing()) {
-                    shown.set(true);
-                    window.setVisible(false);
-                }
-            }
-        });
-        closer.start();
-        try {
-            return chokepoint.call() && shown.get();
-        } finally {
-            closer.stop();
-        }
-    }
-
     /** The ECM suite choice dialogs among the application's windows. */
     private static long ecmDialogs() {
         return Arrays.stream(Window.getWindows()).filter(EcmSuiteChoiceDialog.class::isInstance).count();
     }
 
-    /** A CHOICE or MULTI answer: the button (-1 is Esc) and the selected rows. */
-    static DialogAnswer pick(int button, Integer... rows) {
-        return new DialogAnswer(button, List.of(rows), null, false, List.of());
-    }
-
     /** An INPUT answer: the button (-1 is Esc) and the typed text. */
     private static DialogAnswer typed(int button, String text) {
         return new DialogAnswer(button, List.of(), text, false, List.of());
-    }
-
-    static List<String> labels(DialogRequest request) {
-        return request.rows().stream().map(DialogRow::label).toList();
-    }
-
-    /** The client's frame, carrying the client as its constructor puts it there for the dialogs it owns. */
-    static JFrame clientFrame(ClientGUI gui) throws Exception {
-        JFrame frame = onSwing(JFrame::new);
-        onSwing(() -> {
-            frame.getRootPane().putClientProperty(ClientGUI.class, gui);
-            return null;
-        });
-        Field field = AbstractClientGUI.class.getDeclaredField("frame");
-        field.setAccessible(true);
-        field.set(gui, frame);
-        return frame;
     }
 }

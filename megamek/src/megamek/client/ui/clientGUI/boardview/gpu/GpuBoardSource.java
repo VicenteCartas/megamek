@@ -1310,7 +1310,7 @@ final class GpuBoardSource implements BoardSource {
         if (entity == null) {
             return null;
         }
-        Image image = view.getTilesetManager().imageFor(entity);
+        Image image = view.getTilesetManager().textureFor(entity, -1);
         return image == null ? null : BoardScene.Pixels.copy(image);
     }
 
@@ -1494,7 +1494,9 @@ final class GpuBoardSource implements BoardSource {
 
     /** The tileset artwork of a unit or part, or the radar blip that stands for a sensor contact. */
     private BoardScene.Pixels unitImage(Entity entity, int part, boolean sensor, Map<Image, Boolean> usedImages) {
-        return retained(sensor ? view.getRadarBlipImage() : view.getTilesetManager().textureFor(entity, part), usedImages);
+        var tileset = view.getTilesetManager();
+        return retained(sensor ? view.getRadarBlipImage()
+              : part < 0 ? tileset.wholeTextureFor(entity) : tileset.textureFor(entity, part), usedImages);
     }
 
     /**

@@ -69,8 +69,37 @@ final class GpuLavaLighting implements Disposable {
     // Owned GL copy of the list, uploaded at the first draw after a change.
     private Texture texture;
     private long uploaded = -1;
+    /**
+     * The board's hex table (GpuBiomeSurface) in whole rows, one RGBA texel per hex row after row: the texture's last rows,
+     * so ground and water read it and the lights through one texture unit, and the list's growth leaves it where it is.
+     */
+    private float[] hexes = new float[ROW * 4];
+    private int hexWidth = 1, hexRow;
+    private boolean hexesUploaded;
 
     GpuLavaLighting(GpuAssets assets) { this.assets = assets; }
+
+    /** A new hex table: per hex, row after row, its RGBA bytes in one int (R highest). */
+    void setHexes(int[] colors, int width) {
+        float[] table = new float[(colors.length + ROW - 1) / ROW * ROW * 4];
+        for (int i = 0; i < colors.length; i++) {
+            for (int channel = 0; channel < 4; channel++) {
+                table[i * 4 + channel] = (colors[i] >>> (24 - 8 * channel) & 255) / 255f;
+            }
+        }
+        hexes = table;
+        hexWidth = width;
+        hexesUploaded = false;
+    }
+
+    /** The board's width in hexes, for the table's addresses (terrain-hexes.glsl). */
+    int hexWidth() { return hexWidth; }
+
+    /** The table's first row (terrain-hexes.glsl); the texture holds it from now on. */
+    int hexRow() {
+        texture();
+        return hexRow;
+    }
 
     /** Chunk installation replaces the whole derived prop-light snapshot together with its rendered meshes. */
     void setFungus(List<Source> sources) { fungus = List.copyOf(sources); }
@@ -100,7 +129,7 @@ final class GpuLavaLighting implements Disposable {
         if (nightShare != night) {
             nightShare = night;
             nightBuildings = night == 0 ? List.of() : buildings.stream().map(source -> new Source(source.tile(),
-                  source.position(), source.power() * nightShare, source.color(), source.size())).toList();
+                  source.position(), source.power() * nightShare, source.color(), source.size(), source.end(), source.radius())).toList();
         }
         if (tiles != scene.tiles() || width != BoardGeometry.width() || level != BoardGeometry.level()) {
             tiles = scene.tiles();
@@ -183,7 +212,10 @@ final class GpuLavaLighting implements Disposable {
         // Entries start on an even texel and take whole pairs, so each pair shares a row.
         int start = cells + (cells & 1);
         texels += start;
-        if (texels > MAX_TEXELS) { throw new IllegalStateException("Local light list exceeds " + MAX_TEXELS + " texels"); }
+        // With the hex table's whole rows after it (setHexes).
+        if ((texels + ROW - 1) / ROW * ROW + hexes.length / 4 > MAX_TEXELS) {
+            throw new IllegalStateException("Local light list and hex table exceed " + MAX_TEXELS + " texels");
+        }
         float[] packed = new float[(int) ((texels + ROW - 1) / ROW) * ROW * 4];
         for (int at = 0, first = start; at < cells; at++) {
             int size = next[at];
@@ -297,25 +329,39 @@ final class GpuLavaLighting implements Disposable {
      * The list texture, uploaded at the first draw after a change. Uploads use texture unit 0, which ModelBatch's
      * texture binder never assigns (its units start at 1), so the draw's tracked sampler bindings stay intact.
      */
-    private Texture texture() {
-        if (texture != null && uploaded == revision) { return texture; }
-        int height = list.length / (ROW * 4);
+    Texture texture() {
+        if (texture != null && uploaded == revision && hexesUploaded) { return texture; }
+        int height = list.length / (ROW * 4), hexHeight = hexes.length / (ROW * 4);
         Gdx.gl.glActiveTexture(GL20.GL_TEXTURE0);
-        if (texture == null || texture.getHeight() < height) {
+        if (texture == null || texture.getHeight() < height + hexHeight) {
             if (texture != null) { texture.dispose(); }
             int capacity = 1;
-            while (capacity < height) { capacity <<= 1; }
+            while (capacity < height + hexHeight) { capacity <<= 1; }
             texture = new Texture(new GLOnlyTextureData(ROW, capacity, 0, GL30.GL_RGBA32F, GL20.GL_RGBA, GL20.GL_FLOAT));
+            uploaded = -1;
+            hexesUploaded = false;
         }
         texture.bind();
-        var pixels = BufferUtils.newFloatBuffer(list.length);
-        pixels.put(list).flip();
-        Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, ROW, height, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
-        uploaded = revision;
+        if (uploaded != revision) {
+            upload(list, 0, height);
+            uploaded = revision;
+        }
+        if (!hexesUploaded) {
+            hexRow = texture.getHeight() - hexHeight;
+            upload(hexes, hexRow, hexHeight);
+            hexesUploaded = true;
+        }
         return texture;
     }
 
-    static void register(DefaultShader shader) {
+    private static void upload(float[] rows, int first, int count) {
+        var pixels = BufferUtils.newFloatBuffer(rows.length);
+        pixels.put(rows).flip();
+        Gdx.gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, first, ROW, count, GL20.GL_RGBA, GL20.GL_FLOAT, pixels);
+    }
+
+    /** {@code tables}: the lights whose texture holds the hex table a draw without lighting still reads; or null. */
+    static void register(DefaultShader shader, GpuLavaLighting tables) {
         int grid = shader.register("u_lavaGrid");
         shader.register("u_lavaCells", new BaseShader.LocalSetter() {
             private GpuLavaLighting previous;
@@ -336,9 +382,20 @@ final class GpuLavaLighting implements Disposable {
             @Override
             public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
                 // Without the lights nothing is fetched, but a stale unit may now hold another sampler type and
                 // invalidate the draw. Unit 0 is outside ModelBatch's binder.
                 if (field != null) { target.set(id, field.texture()); } else { target.set(id, 0); }
+            }
+        });
+        // After u_lavaLights' setter, as local setters run in registration order: the table's row is that of the texture
+        // the draw just bound, even when this draw's upload grew it.
+        shader.register("u_hexTable", new BaseShader.LocalSetter() {
+            @Override
+            public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
+                var field = GpuEnvironmentLighting.lavaLighting(attributes);
+                if (field == null) { field = tables; }
+                if (field != null) { target.set(id, field.hexRow(), field.hexWidth()); }
             }
         });
     }
@@ -347,5 +404,6 @@ final class GpuLavaLighting implements Disposable {
     public void dispose() {
         if (texture != null) { texture.dispose(); texture = null; }
         uploaded = -1;
+        hexesUploaded = false;
     }
 }

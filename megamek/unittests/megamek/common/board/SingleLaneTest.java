@@ -204,9 +204,9 @@ class SingleLaneTest {
     @Test
     void appearanceValidatesAndRoundTripsLanes() {
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, null, null, null, null, null, null,
-              null, null, null, 2, null, null), "Two lanes are the default, stored as none");
+              null, null, null, null, 2, null, null), "Two lanes are the default, stored as none");
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
-              null, null, null, null, null, 1, null), "A direction needs a single lane");
+              null, null, null, null, null, null, 1, null), "A direction needs a single lane");
         assertThrows(IllegalArgumentException.class, () -> HexAppearance.withLanes(null, true, 64));
         assertThrows(IllegalArgumentException.class, () -> HexAppearance.withLanes(null, true, 1).validateOwner("bridgeRoad"),
               "Bridge decks keep two lanes");
@@ -277,9 +277,9 @@ class SingleLaneTest {
         assertEquals(0, SingleLane.closedTurns(entrance.get(J), J, entrance::get), "Its stored approaches wait unused");
         var asphalt = new HexAppearance(null, null, "asphalt", null);
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
-              null, null, null, null, 1, null, 1L), "A single lane has no approaches of its own");
+              null, null, null, null, null, 1, null, 1L), "A single lane has no approaches of its own");
         assertThrows(IllegalArgumentException.class, () -> new HexAppearance(null, null, "asphalt", null, null, null, null,
-              null, null, null, null, null, null, 1L << 36), "Six exits of six sides each");
+              null, null, null, null, null, null, null, 1L << 36), "Six exits of six sides each");
         assertNull(HexAppearance.withExitFrom(null, 0L), "None stored is no appearance");
         assertEquals(Long.valueOf(4), HexAppearance.withExitFrom(null, 4L).exitFrom(), "They alone are an appearance");
         assertEquals(Long.valueOf(4), HexAppearance.withTrafficControl(HexAppearance.withExitFrom(asphalt, 4L), null).exitFrom(),

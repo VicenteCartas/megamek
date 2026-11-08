@@ -87,9 +87,9 @@ class GpuGroundTransitionSmokeTest {
                         assertEquals(x / 6f, fraction, .18f,
                               "Lit color must follow the authored strength despite normals, roughness and display encoding");
                     }
-                    var rock = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.ROCK,
+                    var rock = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.ROCK,
                           c.getX() < 4 ? 3 : 0, -1, 0));
-                    var lunar = BoardSurfaceBlendTest.scene(c -> BoardSurfaceBlendTest.tile(c, BoardScene.Surface.LUNAR,
+                    var lunar = BoardScenes.scene(c -> BoardScenes.tile(c, BoardScene.Surface.LUNAR,
                           c.getX() < 4 ? 3 : 0, -1, 0));
                     camera.setIsometric(true);
                     camera.fit(rock);

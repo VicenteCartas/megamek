@@ -39,7 +39,7 @@ final class GpuInfantryPlaybackReview {
                 var first = unit(infantry, tileset, firstEnd);
                 infantry.setInternal(9, ConvInfantry.LOC_INFANTRY);
                 var last = unit(infantry, tileset, origin);
-                var scene = UnitPlaybackTest.scene(last);
+                var scene = UnitPlaybackFixture.scene(last);
                 List<BoardScene.Animation> events = List.of(
                       new BoardScene.Movement(9400, 0, List.of(origin, bend, firstEnd),
                             EntityMovementType.MOVE_WALK, 0, 4, first),

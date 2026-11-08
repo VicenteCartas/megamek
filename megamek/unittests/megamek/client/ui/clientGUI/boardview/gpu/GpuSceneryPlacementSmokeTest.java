@@ -74,7 +74,7 @@ class GpuSceneryPlacementSmokeTest {
                 var frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (int i = 0; i < SAMPLES.size(); i++) {
@@ -152,31 +152,25 @@ class GpuSceneryPlacementSmokeTest {
               + (sample.structure().isEmpty() ? "" : ";" + sample.structure())
               + (scenery ? ";" + sample.fluff() : ""), ""));
         BoardSceneryLayouts.convert(board);
-        return GpuLegacyImportSmokeTest.scene(board);
+        return BoardScenes.scene(board);
     }
 
     private static ModelInstance instance(GpuTerrain terrain, String asset) throws Exception {
         String name = asset.substring(asset.lastIndexOf('/') + 1);
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                ModelInstance instance = (ModelInstance) field(prop, "instance");
-                if (CENTER.equals(field(prop, "coords")) && instance.nodes.first().id.equals(name)) { return instance; }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                ModelInstance instance = (ModelInstance) GpuTestSupport.field(prop, "instance");
+                if (CENTER.equals(GpuTestSupport.field(prop, "coords")) && instance.nodes.first().id.equals(name)) { return instance; }
             }
         }
         throw new AssertionError("Missing installed scenery: " + asset);
     }
 
     private static GpuGeysers.Emitter geyser(GpuTerrain terrain) throws Exception {
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            var sources = (List<?>) field(chunk, "geysers");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            var sources = (List<?>) GpuTestSupport.field(chunk, "geysers");
             if (!sources.isEmpty()) { return (GpuGeysers.Emitter) sources.getFirst(); }
         }
         throw new AssertionError("Missing installed geyser emitter");
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

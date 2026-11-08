@@ -53,10 +53,10 @@ class BoardObstaclesTest {
 
     @Test
     void aBridgePierKeepsGroundCoverOutOfItsFootingAtAnyHeight() {
-        Coords near = BoardBridgeFootingTest.START, far = near.translated(3);
+        Coords near = BridgeScenes.START, far = near.translated(3);
         var joint = BoardGeometry.center(near, 0).lerp(BoardGeometry.center(far, 0), .5f);
         for (boolean toggled : new boolean[] { true, false }) {
-            var scene = BoardBridgeFootingTest.span(2, true, 0, toggled ? java.util.Set.of(0, 1) : java.util.Set.of());
+            var scene = BridgeScenes.span(2, true, 0, toggled ? java.util.Set.of(0, 1) : java.util.Set.of());
             for (Coords at : List.of(near, far)) {
                 var obstacles = new BoardObstacles(scene, scene.tile(at));
                 for (float z : new float[] { -60, -18 }) {
@@ -71,10 +71,10 @@ class BoardObstaclesTest {
 
     @Test
     void aMaglevPierKeepsGroundCoverOutOfItsFootingWhileTheGroundUnderTheBeamStaysOpen() {
-        Coords near = BoardBridgeFootingTest.START, far = near.translated(3);
+        Coords near = BridgeScenes.START, far = near.translated(3);
         var joint = BoardGeometry.center(near, 0).lerp(BoardGeometry.center(far, 0), .5f);
         for (boolean toggled : new boolean[] { true, false }) {
-            var scene = BoardBridgeFootingTest.line(megamek.common.board.RailRoute.Kind.MAGLEV, new double[] { 2, 2 },
+            var scene = BridgeScenes.line(megamek.common.board.RailRoute.Kind.MAGLEV, new double[] { 2, 2 },
                   toggled ? java.util.Set.of(0, 1) : java.util.Set.of(), java.util.Set.of());
             for (Coords at : List.of(near, far)) {
                 var obstacles = new BoardObstacles(scene, scene.tile(at));
@@ -95,7 +95,7 @@ class BoardObstaclesTest {
             var along = new Vector3(bank).sub(center).nor();
             var across = new Vector3(-along.y, along.x, 0);
             for (boolean wide : new boolean[] { false, true }) {
-                var scene = BoardBridgeSlopeTest.lowerBank(at, direction, false);
+                var scene = BridgeScenes.lowerBank(at, direction, false);
                 if (wide) {
                     var t = scene.tile(at);
                     int exits = (1 << direction) | (1 << ((direction + 3) % 6));
@@ -106,7 +106,7 @@ class BoardObstaclesTest {
                           t.ultraSublevel(), t.tilesetDecals(), t.tilesetScenery(), t.appearance(), t.cover(), t.barren(),
                           t.deckRoad(), t.deckRoadExits(), t.deckMud(), t.railBed(), t.corridor(),
                           new RailRoute.Corridor(exits, exits, 0));
-                    scene = BoardBridgeMaterialsTest.replace(scene, tile);
+                    scene = BoardScenes.replace(scene, tile);
                 }
                 for (var owner : List.of(at, bankAt)) {
                     var obstacles = new BoardObstacles(scene, scene.tile(owner));
@@ -143,9 +143,9 @@ class BoardObstaclesTest {
     void lowerBankClearanceDoesNotInventARampForNaturalOrHighSpans() {
         var at = new Coords(4, 4);
         var bankAt = at.translated(3);
-        var base = BoardBridgeSlopeTest.lowerBank(at, 3, false);
-        var natural = BoardBridgeTypeTest.typed(base, HexAppearance.NATURAL_BRIDGE);
-        var high = BoardBridgeMaterialsTest.replace(base, BoardBridgeSlopeTest.bridge(at, -1, 3, 9));
+        var base = BridgeScenes.lowerBank(at, 3, false);
+        var natural = BridgeScenes.typed(base, HexAppearance.NATURAL_BRIDGE);
+        var high = BoardScenes.replace(base, BridgeScenes.bridge(at, -1, 3, 9));
         var root = BoardGeometry.center(at, 0).lerp(BoardGeometry.center(bankAt, 0), .8f);
         for (var scene : List.of(natural, high)) {
             assertFalse(new BoardObstacles(scene, scene.tile(bankAt)).obstructs(root, .1f, 1),

@@ -5,14 +5,18 @@ import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import megamek.client.ui.clientGUI.boardview.BoardArtwork;
 import megamek.common.Hex;
 import megamek.common.board.Board;
 import megamek.common.board.BoardSceneryLayouts;
+import megamek.common.board.BoardTreeDistribution;
 import megamek.common.board.Coords;
 import megamek.common.board.TilesetScenery;
 import megamek.common.units.Terrains;
@@ -39,6 +43,9 @@ final class BoardTiles implements AutoCloseable {
     private Rectangle dirty;
     /** A placement edit changes the pose of every saved share, including members outside the dirty rectangle. */
     private final Set<String> dirtyBuildings = new java.util.HashSet<>();
+    /** The search searchAhead started, for {@code aheadBoard}'s first capture. Swing thread only. */
+    private static Board aheadBoard;
+    private static CompletableFuture<Map<Coords, List<BoardScene.Feature>>> ahead;
     /** The boards the tripwire reported, each once. */
     private final Set<Board> warned = Collections.newSetFromMap(new WeakHashMap<>());
 
@@ -152,6 +159,7 @@ final class BoardTiles implements AutoCloseable {
         if (!all && dirty == null) { return tiles; }
         Set<String> buildingReferences = referenceIds(board, board::getHex);
         Rectangle area = all ? new Rectangle(0, 0, width, height) : dirty.intersection(new Rectangle(0, 0, width, height));
+        Map<Coords, List<BoardScene.Feature>> woods = woods(board, area);
         List<BoardScene.Tile> next = tiles.size() == width * height ? new ArrayList<>(tiles)
               : new ArrayList<>(Collections.nCopies(width * height, null));
         for (int x = area.x; x < area.x + area.width; x++) {
@@ -162,7 +170,7 @@ final class BoardTiles implements AutoCloseable {
                 BoardArtwork.HexImage art = artwork.capture(board, coords, hex);
                 BoardScene.Tile previous = next.get(index);
                 BoardScene.Tile tile = BoardScene.captureTile(hex, art, previous, pool, board::getHex,
-                      board::getBuildingAt, buildingReferences);
+                      board::getBuildingAt, buildingReferences, woods.get(coords));
                 next.set(index, tile.equals(previous) ? previous : tile);
                 captured.accept(coords, art);
             }
@@ -193,6 +201,41 @@ final class BoardTiles implements AutoCloseable {
      * converted means a load site skipped the conversion: the tripwire reports it once per board and draws nothing for
      * it; the renderer never decodes legacy scenery itself.
      */
+    /**
+     * Runs {@code board}'s plant searches on the pool with the Swing thread free: a big board's take seconds, and they
+     * draw nothing. Its first capture takes them (woods), once the caller found the result done. Call it on the Swing
+     * thread, which holds the board still until then: no view of it is open yet.
+     */
+    static CompletableFuture<?> searchAhead(Board board) {
+        Rectangle whole = new Rectangle(0, 0, board.getWidth(), board.getHeight());
+        aheadBoard = board;
+        ahead = CompletableFuture.supplyAsync(() -> search(board, whole)).exceptionally(failure -> {
+            LOGGER.warn(failure, "Searching the plants of {} ahead failed: its first capture searches them", board.getBoardName());
+            return Map.of();
+        });
+        return ahead;
+    }
+
+    /** The woods of {@code area}: the search run ahead for this board's first capture, else one on the pool now. */
+    private static Map<Coords, List<BoardScene.Feature>> woods(Board board, Rectangle area) {
+        if (board == aheadBoard) {
+            var searched = ahead.join();
+            aheadBoard = null;
+            ahead = null;
+            return searched;
+        }
+        return search(board, area);
+    }
+
+    private static Map<Coords, List<BoardScene.Feature>> search(Board board, Rectangle area) {
+        List<Coords> hexes = new ArrayList<>(area.width * area.height);
+        for (int x = area.x; x < area.x + area.width; x++) {
+            for (int y = area.y; y < area.y + area.height; y++) { hexes.add(new Coords(x, y)); }
+        }
+        return hexes.parallelStream().collect(Collectors.toConcurrentMap(coords -> coords, coords -> BoardFeatures.woods(
+              BoardSceneryLayouts.withoutTakenTokens(board.getHex(coords)), coords, board::getHex, BoardTreeDistribution.NATURAL)));
+    }
+
     private Hex drawn(Board board, Coords coords) {
         Hex hex = board.getHex(coords);
         Hex drawn = BoardSceneryLayouts.withoutTakenTokens(hex);

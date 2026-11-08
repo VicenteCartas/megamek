@@ -32,7 +32,7 @@ class BoardRoadRoundaboutTest {
                 Coords at = new Coords(column, 4);
                 var members = List.of(at, at.translated(direction), at.translated((direction + 1) % 6));
                 var board = triangle(members);
-                var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                       board.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                       board.containsKey(c) ? board.get(c).getTerrain(Terrains.ROAD).getExits() : 0,
                       0, BoardScene.Surface.GRASS));
@@ -91,7 +91,7 @@ class BoardRoadRoundaboutTest {
     @Test
     void sharedRoundaboutMouthsBlendSmoothlyIntoBothCirculatingLanesInEveryOrientation() {
         for (int direction = 0; direction < 6; direction++) {
-            Coords at = BoardRoadTest.CENTER;
+            Coords at = BoardScenes.CENTER;
             var members = List.of(at, at.translated(direction), at.translated((direction + 1) % 6));
             var board = triangle(members);
             var road = BoardRoad.clearance(at, board.get(at), board::get);
@@ -107,7 +107,7 @@ class BoardRoadRoundaboutTest {
     void everyRoundaboutEntryHasAStraightGiveWayLineAndTriangleFacingApproachingTraffic() {
         for (int exits = 0; exits < 64; exits++) {
             if (Integer.bitCount(exits) >= 5) {
-                var symbols = assertGiveWayMarkings(BoardRoad.clearance(BoardRoadTest.CENTER, exits), 0, 0, 25.5,
+                var symbols = assertGiveWayMarkings(BoardRoad.clearance(BoardScenes.CENTER, exits), 0, 0, 25.5,
                       Integer.bitCount(exits));
                 for (int direction = 0; direction < 6; direction++) {
                     if ((exits & 1 << direction) != 0) { assertRightHandEntry(symbols, 0, 0, direction); }
@@ -115,7 +115,7 @@ class BoardRoadRoundaboutTest {
             }
         }
         for (int direction = 0; direction < 6; direction++) {
-            Coords at = BoardRoadTest.CENTER;
+            Coords at = BoardScenes.CENTER;
             var members = List.of(at, at.translated(direction), at.translated((direction + 1) % 6));
             double cx = (members.stream().mapToDouble(BoardGeometry::centerX).average().orElseThrow()
                   - BoardGeometry.centerX(at)) / BoardGeometry.hexScale();
@@ -142,7 +142,7 @@ class BoardRoadRoundaboutTest {
     @Test
     void singleHexCirculationHasOneCounterclockwiseLaneAndIndependentYJunctionsStaySolid() {
         for (int exits : new int[] { 31, 63 }) {
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             Area paint = road.flowMarkings();
             assertClearLaneCentres(paint, 0, 0, new float[] { 18 });
             assertFalse(paint.contains(25.5, 0), "A single circulating lane has no outer-lane divider");
@@ -163,7 +163,7 @@ class BoardRoadRoundaboutTest {
             }
         }
         for (int exits : new int[] { 21, 42 }) {
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, exits);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, exits);
             assertTrue(road.footprint(0).contains(0, 0));
             assertFalse(road.stopApproaches(exits).isEmpty());
             assertTrue(road.flowMarkings().isEmpty());
@@ -173,7 +173,7 @@ class BoardRoadRoundaboutTest {
     @Test
     void sharedRoundaboutCopiesKeepTheSamePinnedConcreteApproach() {
         for (int orientation = 0; orientation < 6; orientation++) {
-            Coords at = BoardRoadTest.CENTER;
+            Coords at = BoardScenes.CENTER;
             var members = List.of(at, at.translated(orientation), at.translated((orientation + 1) % 6));
             var board = triangle(members);
             Coords member = members.getLast();
@@ -185,7 +185,7 @@ class BoardRoadRoundaboutTest {
             for (int step = -2; step <= 2; step++) {
                 paving.add(receiver.translated((direction + (step < 0 ? 4 : 1)) % 6, Math.abs(step)));
             }
-            var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+            var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                   board.containsKey(c) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                   board.containsKey(c) ? board.get(c).getTerrain(Terrains.ROAD).getExits() : 0, 0,
                   paving.contains(c) ? BoardScene.Surface.CONCRETE : BoardScene.Surface.SAND));
@@ -210,7 +210,7 @@ class BoardRoadRoundaboutTest {
 
     @Test
     void railsGradesBridgesAndLooseSurfacesRetainTheirAuthoredJunctions() {
-        Coords at = BoardRoadTest.CENTER;
+        Coords at = BoardScenes.CENTER;
         var members = List.of(at, at.translated(0), at.translated(1));
         for (String terrain : new String[] { "rail:1:9", "bridge:1:9;bridge_cf:40;bridge_elev:2", "water:1", "road:3:0" }) {
             var board = triangle(members);
@@ -232,10 +232,10 @@ class BoardRoadRoundaboutTest {
     void railsThroughFiveAndSixWayRoadsKeepSolidHubsAndTheirAuthoredCourses() {
         for (int exits : new int[] { 31, 63 }) {
             Hex hex = new Hex(0, "road:1:" + exits + ";rail:1:9", "");
-            var road = BoardRoad.clearance(BoardRoadTest.CENTER, hex, at -> null);
+            var road = BoardRoad.clearance(BoardScenes.CENTER, hex, at -> null);
             assertTrue(road.footprint(0).contains(0, 0), "Straight rails pass through a solid road junction");
             assertTrue(road.flowMarkings().isEmpty(), "Railway hubs never suggest circular traffic over the tracks");
-            assertFalse(road.markings(BoardRoadTest.CENTER, exits).contains(0, 0));
+            assertFalse(road.markings(BoardScenes.CENTER, exits).contains(0, 0));
             assertEquals(9, hex.getTerrain(Terrains.RAIL).getExits(), "Visual layout does not alter the authored railway");
         }
     }

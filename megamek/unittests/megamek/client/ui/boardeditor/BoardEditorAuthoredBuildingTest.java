@@ -63,6 +63,39 @@ class BoardEditorAuthoredBuildingTest {
         return (equalShares ? two.height() > one.height() : two.area() > one.area()) ? second.id() : first.id();
     }
 
+    @Test void utopiaBuildingsHoldTheirAgreedHexesAndHeights() {
+        record Agreed(String name, int hexes, int tallest) { }
+        for (var agreed : java.util.List.of(new Agreed("garden-habitat", 4, 7), new Agreed("fabrication-works", 9, 3), new Agreed("market-pavilion", 5, 3),
+              new Agreed("civic-conservatory", 7, 3), new Agreed("office-tower", 4, 12), new Agreed("habitat2", 4, 6), new Agreed("tower", 7, 15))) {
+            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(14, 14), null);
+            Coords at = new Coords(7, 7);
+            editor.command(new Command(Action.ASSET, "buildings/authored/utopia-" + agreed.name()), null);
+            editor.pointer(at, 0, 0, false); editor.finishStroke();
+            var covered = members(editor.board(), editor.board().getHex(at).getDecorations().getFirst().id());
+            assertEquals(agreed.hexes(), covered.size(), agreed.name());
+            assertEquals(agreed.tallest(), java.util.Collections.max(covered.values()), agreed.name());
+        }
+    }
+
+    @Test void civicBlocksHoldTheirAgreedHexesAndLeaveTheirCourtsEmpty() {
+        record Agreed(String name, int hexes, int tallest, java.util.Set<Coords> empty) { }
+        // Coords are 0-based: 0808 is (7, 7). A court's hexes hold no floors; a member there has no height.
+        for (var agreed : java.util.List.of(new Agreed("industrial-works", 9, 5, java.util.Set.of()), new Agreed("commercial-center", 12, 4, java.util.Set.of()),
+              new Agreed("offices", 7, 7, java.util.Set.of(new Coords(6, 8), new Coords(7, 8))),
+              new Agreed("habitat2", 7, 7, java.util.Set.of(new Coords(7, 7), new Coords(7, 8))),
+              new Agreed("medical-center", 6, 5, java.util.Set.of(new Coords(6, 6), new Coords(8, 6), new Coords(6, 8))))) {
+            var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(14, 14), null);
+            Coords at = new Coords(7, 7);
+            editor.command(new Command(Action.ASSET, "buildings/authored/civic-" + agreed.name()), null);
+            editor.pointer(at, 0, 0, false); editor.finishStroke();
+            var covers = BuildingVolumes.covers(at, editor.board().getHex(at).getDecorations().getFirst(), 14, 14, editor.board()::getHex);
+            var standing = covers.entrySet().stream().filter(e -> e.getValue().height() > 0).map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet());
+            assertEquals(agreed.hexes(), standing.size(), agreed.name());
+            assertEquals(java.util.Set.of(), agreed.empty().stream().filter(standing::contains).collect(java.util.stream.Collectors.toSet()), agreed.name());
+            assertEquals(agreed.tallest(), standing.stream().mapToInt(c -> covers.get(c).height()).max().orElseThrow(), agreed.name());
+        }
+    }
+
     @Test void debugSpecialPlacesAndScalesAnAuthoredBuildingWithSavedMembers(@TempDir Path dir) throws Exception {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(9, 9), null);
         Coords at = new Coords(4, 4);
@@ -187,7 +220,7 @@ class BoardEditorAuthoredBuildingTest {
     @Test void fullTurnsStayUprightAndOrdinaryPropsCanStillTilt() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(16, 16), null);
         Coords at = new Coords(8, 8);
-        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/civic-church"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationX", "360"), null);
         editor.command(new Command(Action.BRUSH_VALUE, "object:rotationY", "-720"), null);
         editor.pointer(at, 0, 0, false); editor.finishStroke();
@@ -382,7 +415,7 @@ class BoardEditorAuthoredBuildingTest {
     @Test void stretchingHeightChangesAllMembersAndDeletingThePlacementClearsOnlyItsBuildingState() {
         var editor = new BoardEditorSession(); editor.open(Board.createEmptyBoard(14, 14), null);
         Coords anchor = new Coords(6, 6);
-        editor.command(new Command(Action.ASSET, "buildings/authored/frontier-church"), null);
+        editor.command(new Command(Action.ASSET, "buildings/authored/civic-church"), null);
         editor.pointer(anchor, 0, 0, false); editor.finishStroke();
         var object = editor.board().getHex(anchor).getDecorations().getFirst();
         var original = members(editor.board(), object.id());

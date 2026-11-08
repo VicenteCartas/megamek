@@ -254,9 +254,9 @@ crust intensity in R with glow in A).
 Metalness is zero and opacity is one. Height, normals and the shader's relief range
 use the same quantized field. The shader samples every material map at the same
 advected/parallax coordinates. Mipmaps and supported anisotropic filtering handle
-distance. `GpuAssets.magma` uploads each set as the four layers of one texture array
-(colour, normal, surface, heat), so it takes one texture unit; `GpuMagmaShader`
-binds it as `u_magmaMaps`. `GpuAssets` owns and disposes the arrays while materials
-borrow them. Missing or partial volcanic sets retain the existing crust artwork or
-lava GIF rendering.
+distance. `GpuAssets.fullSizeMaps` uploads each set's colour to `u_fullSizeColor` and its
+normal, surface and heat to `u_fullSizeData`, with the other full-size maps, so they take
+two texture units; `GpuMagmaShader` tells the program which layers are its set's
+(`u_magmaLayers`). `GpuAssets` owns and disposes the arrays. Every map of
+both sets is required.
 Gradle's existing `stageDataFiles` copies the runtime maps into MegaMek's data folder.

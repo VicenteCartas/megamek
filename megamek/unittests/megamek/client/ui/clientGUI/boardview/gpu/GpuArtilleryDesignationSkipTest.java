@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
@@ -13,7 +13,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.awt.Component;
-import java.io.File;
 import java.util.List;
 import javax.swing.JOptionPane;
 
@@ -24,41 +23,27 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.MegaMekGUI;
 import megamek.client.ui.panels.phaseDisplay.SelectArtyAutoHitHexDisplay;
 import megamek.client.ui.util.MegaMekController;
-import megamek.common.Configuration;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.GameTurnChangeEvent;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 
 /**
  * Done in the phase that designates artillery auto-hit hexes ends it for good, so with none designated it asks first.
  * Its own preference turns it off, apart from the routine "no action this turn" questions.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuArtilleryDesignationSkipTest {
-    private static File originalDataDir;
     private final boolean originalNag = GUIPreferences.getInstance().getNagForNoArtilleryDesignation();
     private GpuBoardFixture board;
     private ClientGUI gui;
     private Client client;
     private SelectArtyAutoHitHexDisplay display;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @BeforeEach
     void startTheDesignationTurn() throws Exception {

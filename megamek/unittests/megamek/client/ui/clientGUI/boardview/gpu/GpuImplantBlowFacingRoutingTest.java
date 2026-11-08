@@ -8,17 +8,17 @@ import static megamek.client.ui.clientGUI.boardview.gpu.GpuBombMineDialogRouting
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBombMineDialogRoutingTest.initials;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBombMineDialogRoutingTest.started;
 import static megamek.client.ui.clientGUI.boardview.gpu.GpuBombMineDialogRoutingTest.values;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.clientFrame;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.labels;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuChoiceRoutingTest.pick;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.ask;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.button;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.components;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.dismiss;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.next;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.present;
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.ask;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.button;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.clientFrame;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.components;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.dismiss;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.labels;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.next;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.pick;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.present;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.routingClient;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,43 +52,29 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogAnswer;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRow;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.Asked;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuDialogFixture.Asked;
 import megamek.client.ui.dialogs.phaseDisplay.BuildingFacingDialog;
 import megamek.client.ui.dialogs.phaseDisplay.CalledBlowDialog;
 import megamek.client.ui.dialogs.phaseDisplay.SuicideImplantsDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.tileset.TilesetManager;
-import megamek.common.Configuration;
 import megamek.common.loaders.MekFileParser;
 import megamek.common.units.Entity;
 import megamek.common.units.Infantry;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * The suicide implants, called blow and building facing dialogs (swing-inventory table 3, R4) asked in the native
  * battle window: each returns what its Swing dialog returns for the same choices, cancelling included, and shows as
  * before while no native window draws dialogs. The test thread plays the GL thread; the Swing dialogs need a display.
  */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuImplantBlowFacingRoutingTest {
     private static final String[] BLOWS = { "No called blow (full body) - To Hit: 7",
           "Aim high (Punch table, +4) - To Hit: 11", "Aim low (Kick table, +4) - To Hit: 11" };
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void swingSuicideImplantsDetonateTheChosenTroopers() throws Exception {
@@ -96,7 +82,7 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = routingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             Entity platoon = platoon();
             Entity squad = unit("Elemental BA [Laser] (Sqd5).blk");
             try {
@@ -158,7 +144,7 @@ class GpuImplantBlowFacingRoutingTest {
         ClientGUI gui = previewingClient();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             JFrame frame = clientFrame(gui);
-            GpuDialogRoutingTest.set(present(gui, fixture.view, fixture.source), "presented", false);
+            GpuDialogFixture.closingWindow(gui, fixture.view, fixture.source);
             try {
                 List<String> blows = new ArrayList<>();
                 assertEquals(List.of(DialogResult.CONFIRMED, 2), onSwing(() -> blow(
@@ -225,7 +211,7 @@ class GpuImplantBlowFacingRoutingTest {
                 // The troopers are picked as the slider's values; each pick moves the slider and its damage line
                 FutureTask<List<Object>> detonated = started(() -> implants(new SuicideImplantsDialog(frame,
                       platoon)));
-                DialogRequest form = GpuDialogRoutingTest.awaitDialog(fixture.source);
+                DialogRequest form = GpuDialogFixture.awaitDialog(fixture.source);
                 assertEquals(DialogKind.FORM, form.kind());
                 assertEquals("Detonate Suicide Implants", form.title());
                 assertEquals("WARNING: This action cannot be undone!\nDamage to all units in hex: 16", form.message());

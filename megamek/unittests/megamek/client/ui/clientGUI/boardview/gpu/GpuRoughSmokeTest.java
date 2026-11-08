@@ -62,7 +62,7 @@ class GpuRoughSmokeTest {
                         // Loading must see the same shader flags as the frame that follows (GpuReviewFrame.prepare).
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, oblique ? "overview-oblique.png" : "overview-top.png"));
                         checkPicking(terrain, scene, new Coords(5, 3), BoardSurface.Finish.ROUGH);
@@ -72,7 +72,7 @@ class GpuRoughSmokeTest {
                     for (int x : new int[] { 2, 5, 8 }) {
                         camera.camera.zoom = .17f;
                         camera.center(BoardGeometry.center(new Coords(x, 3), 0));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, x == 2 ? "boulders.png" : x == 5 ? "dragon-teeth.png" : "felled-woods.png"));
                         if (x == 2) { checkBoulderMaterials(terrain, scene, new Coords(2, 2)); }
@@ -80,7 +80,7 @@ class GpuRoughSmokeTest {
                     var before = terrain.tacticalSurface(new Coords(5, 3));
                     BoardScene edited = scene(2);
                     terrain.update(edited, camera.camera);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, edited, camera);
+                    GpuReviewFrame.settle(terrain, null, edited, camera);
                     assertNotSame(before, terrain.tacticalSurface(new Coords(5, 3)), "Fluff edits replace support geometry");
                     checkPicking(terrain, edited, new Coords(5, 3), BoardSurface.Finish.ROUGH);
                     frame.render(terrain, camera, edited);
@@ -94,7 +94,7 @@ class GpuRoughSmokeTest {
                         if (low) { camera.orbit(-70, 20); }
                         camera.camera.zoom = .17f;
                         camera.center(BoardGeometry.center(new Coords(3, 3), 0));
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, low ? "zero-gravity-low.png" : "zero-gravity.png"));
                     }
@@ -120,8 +120,8 @@ class GpuRoughSmokeTest {
         assertFalse(rock.isEmpty());
         Map<Mesh, float[]> vertices = new IdentityHashMap<>();
         int checked = 0;
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object value : (Array<?>) field(chunk, "terrainRenderables")) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object value : (Array<?>) GpuTestSupport.field(chunk, "terrainRenderables")) {
                 Renderable part = (Renderable) value;
                 Mesh mesh = part.meshPart.mesh;
                 int stride = mesh.getVertexSize() / Float.BYTES;
@@ -143,12 +143,6 @@ class GpuRoughSmokeTest {
             }
         }
         assertTrue(checked > 0, "Check actual uploaded boulder triangles");
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static void checkPicking(GpuTerrain terrain, BoardScene scene, Coords coords, BoardSurface.Finish finish) {

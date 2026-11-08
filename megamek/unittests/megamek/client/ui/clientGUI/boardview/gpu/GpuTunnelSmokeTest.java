@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,8 +30,8 @@ import org.junit.jupiter.api.Test;
 class GpuTunnelSmokeTest {
     @Test
     void bridgeAndGroundPortalsAreInstalledInBothGraphicsModesAndKeptInTacticalView() throws Exception {
-        var quatreBelle = GpuRoadSourceTest.scene("unofficial/Derv_Maps/35x35 Quatre Belle.board");
-        var mines = GpuRoadSourceTest.minesScene();
+        var quatreBelle = BoardScenes.installedScene("unofficial/Derv_Maps/35x35 Quatre Belle.board");
+        var mines = BoardScenes.minesScene();
         var reported = new Coords(3, 8);
         assertEquals(BoardBackdrop.SPACE, quatreBelle.tile(reported).backdrop());
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "tunnels");
@@ -58,11 +58,11 @@ class GpuTunnelSmokeTest {
                         assertEquals(scene == quatreBelle ? BoardTunnel.BRIDGE_ASSET : BoardTunnel.ASSET, closeup.asset());
                         for (boolean columns : new boolean[] { false, true }) {
                             terrain.setColumns(columns);
-                            terrain.setFluffHidden(false);
+                            terrain.setScatterHidden(false);
                             terrain.update(scene);
                             aim(camera, closeup, 0);
                             frame.prepare(terrain, camera, scene);
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             assertEquals(columns, terrain.columns());
                             verifyPortals(terrain, portals);
                             String name = (scene == quatreBelle ? "quatre-belle-0409-" : "mines-")
@@ -74,7 +74,7 @@ class GpuTunnelSmokeTest {
                                 frame.render(terrain, camera, scene);
                                 GpuReviewFrame.save(new File(output, name + "-oblique.png"));
                             }
-                            terrain.setFluffHidden(true);
+                            terrain.setScatterHidden(true);
                             frame.render(terrain, camera, scene);
                             verifyPortals(terrain, portals);
                             assertFalse(terrain.busy(), "The Tactical View retains portals without rebuilding");
@@ -121,7 +121,6 @@ class GpuTunnelSmokeTest {
             assertArrayEquals(portal.transform().val, instance.transform.val, .0001f);
             assertNotNull(instance.getMaterial("tunnel-portal"));
             assertNotNull(instance.getMaterial("tunnel-lining"));
-            assertTrue((boolean) field(match, "tactical"), "The entrance stays with its road in the Tactical View");
         }
     }
 

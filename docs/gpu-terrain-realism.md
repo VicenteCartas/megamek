@@ -219,7 +219,7 @@ Budgets are acceptance rules, not claims of measured speedups:
   normal/height reads, filtering or layer selection.
 
 Shared geometry changes use `BoardSculptTest`, `BoardReliefTest`,
-`BoardSurfaceContactTest`, `BoardPlateauShadingTest`, the road/slope/tunnel
+`BoardSurfaceContactTest`, `BoardCliffTest`, the road/slope/tunnel
 regressions and mixed-LOD checks. Shared shader changes use
 `GpuTerrainContactSmokeTest`, `GpuMaterialLodSmokeTest` and
 `GpuSamplerBudgetSmokeTest`. Add a test only for a newly identified behavioral gap.

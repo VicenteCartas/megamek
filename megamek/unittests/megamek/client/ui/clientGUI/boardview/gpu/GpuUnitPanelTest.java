@@ -834,7 +834,7 @@ class GpuUnitPanelTest {
               new GpuBattleStatus.Snapshot(status.round(), phase, false, status.localPlayerId(), Entity.NONE, List.of(),
                     -1, status.units(), List.of(), false), captured.panels());
         for (int pass = 0; pass < 3; pass++) {
-            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
             validate(hud.stage.getRoot());
             hud.stage.act(0);
         }

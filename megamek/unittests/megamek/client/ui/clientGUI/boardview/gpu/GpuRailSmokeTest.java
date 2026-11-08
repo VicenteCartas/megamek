@@ -153,7 +153,7 @@ class GpuRailSmokeTest {
         assertTrue(RailRoute.onDeck(RailRoute.find(crossing, RailRoute.Kind.MAGLEV)));
         assertFalse(RailRoute.onDeck(RailRoute.find(crossing, RailRoute.Kind.RAIL)));
         assertTrue(crossing.getDecorations().isEmpty(), "Both ways are terrain data");
-        BoardScene scene = GpuLegacyImportSmokeTest.scene(board);
+        BoardScene scene = BoardScenes.scene(board);
         Map<String, BoardScene> scenes = new LinkedHashMap<>();
         Map<String, Map<String, Shot>> shots = new LinkedHashMap<>();
         for (var shot : Map.of("maglev-over-ground-rail", new Shot(centre, 1, 60, .3f),
@@ -378,7 +378,7 @@ class GpuRailSmokeTest {
                             camera.zoom(shot.zoom() / camera.camera.zoom);
                         }
                         camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         frame.render(terrain, camera, scene);
                         GpuReviewFrame.save(new File(output, entry.getKey() + ".png"));
                         assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());

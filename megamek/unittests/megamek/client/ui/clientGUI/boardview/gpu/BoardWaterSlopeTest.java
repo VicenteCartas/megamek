@@ -3,6 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,7 +19,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class BoardWaterSlopeTest {
     @Test
     void boardEdgeCutsCloseToTheDrawnGradedLavaAndWater() {
-        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
+        BoardScene lava = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 1.board"));
         int checked = 0;
         for (BoardScene scene : List.of(lava, BoardWaterfallTest.withWater(lava))) {
             for (var tile : scene.tiles()) {
@@ -59,10 +60,10 @@ class BoardWaterSlopeTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void descendingDomeVentBanksMeetBothEndsOfTheirWalls(TerrainLod lod) {
-        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        BoardScene lava = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
         for (BoardScene scene : List.of(lava, BoardWaterfallTest.withWater(lava))) {
             for (boolean transitions : new boolean[] { false, true }) {
-                BoardSculptTest.withTransitions(transitions, () -> checkDescendingBankContacts(scene, lod));
+                BoardScenes.withTransitions(transitions, () -> checkDescendingBankContacts(scene, lod));
             }
         }
     }
@@ -96,15 +97,15 @@ class BoardWaterSlopeTest {
     void descendingWaterReachesTheCliffFaceAboveItsBed(TerrainLod lod) {
         var original = BoardRelief.tuning();
         try {
-            BoardWetCliffTest.tune(true);
+            BoardScenes.tune(true);
             Coords high = new Coords(3, 3);
             for (int direction = 0; direction < 6; direction++) {
                 Coords low = high.translated(direction);
                 BoardScene scene = scene(Map.of(high, 2, low, 0), Map.of(high, 1, low, 1));
                 assertCliffContact(scene, low, lod);
             }
-            assertCliffContact(GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND), new Coords(9, 9), lod);
-            BoardScene pools = BoardWetCliffTest.mixedDepthScene();
+            assertCliffContact(BoardScenes.mapScene(BoardScene.Surface.SAND), new Coords(9, 9), lod);
+            BoardScene pools = BoardScenes.mixedDepthScene();
             for (var tile : pools.tiles()) {
                 if (tile.liquid().present()) { assertCliffContact(pools, tile.coords(), lod); }
             }
@@ -377,5 +378,47 @@ class BoardWaterSlopeTest {
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @Test
+    void sculptedBedsDescendWithoutFoldingAndMeetBedsOfTheirLevelWithoutAStep() {
+        var random = new java.util.Random(7);
+        var art = new BoardScene.Pixels(new BufferedImage(84, 72, BufferedImage.TYPE_INT_ARGB));
+        for (int trial = 0; trial < 12; trial++) {
+            List<BoardScene.Tile> tiles = new ArrayList<>();
+            for (int x = 0; x < 7; x++) {
+                for (int y = 0; y < 7; y++) {
+                    tiles.add(new BoardScene.Tile(new Coords(x, y), random.nextInt(3) == 0 ? 1 : 0,
+                          random.nextInt(5) == 0 ? -1 : random.nextInt(4), false, 0, BoardScene.Surface.GRASS,
+                          null, List.of(), List.of()));
+                }
+            }
+            BoardScene scene = new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+            for (BoardScene.Tile tile : tiles) {
+                if (!tile.liquid().present()) { continue; }
+                BoardSurface surface = new BoardSurface(scene, tile);
+                for (BoardSurface.Face face : surface.faces) {
+                    if (face.finish() == BoardSurface.Finish.BED) {
+                        Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                        assertTrue(normal.z > 0, "A sculpted bed must never fold over at " + tile.coords());
+                    }
+                }
+                Vector3 center = BoardGeometry.center(tile.coords(), tile.elevation());
+                assertEquals(BoardGeometry.groundZ(tile), surface.height(center.x, center.y), 0.01f,
+                      "A unit at the centre stands on the full-depth bed");
+                for (int edge = 0; edge < 6; edge++) {
+                    BoardScene.Tile other = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(edge)));
+                    if (other == null || !other.liquid().present() || other.elevation() != tile.elevation()) { continue; }
+                    BoardSurface neighbor = new BoardSurface(scene, other);
+                    Vector3 a = BoardGeometry.corner(tile.coords(), 0, edge);
+                    Vector3 b = BoardGeometry.corner(tile.coords(), 0, edge + 1);
+                    for (int sample = 1; sample < 60; sample++) {
+                        Vector3 point = new Vector3(a).lerp(b, sample / 60f);
+                        assertEquals(surface.height(point.x, point.y), neighbor.height(point.x, point.y), 0.01f,
+                              "Beds of one level meet without a step: " + tile.coords() + " edge " + edge);
+                    }
+                }
+            }
+        }
     }
 }

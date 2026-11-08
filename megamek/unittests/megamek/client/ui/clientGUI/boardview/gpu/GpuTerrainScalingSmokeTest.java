@@ -63,7 +63,7 @@ class GpuTerrainScalingSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create(board)) {
             SwingUtilities.invokeAndWait(() -> {
-                try { ((Timer) field(fixture.source, "timer")).stop(); }
+                try { ((Timer) GpuTestSupport.field(fixture.source, "timer")).stop(); }
                 catch (Exception error) { throw new IllegalStateException(error); }
             });
             var config = GpuBoardWindow.configuration(false);
@@ -87,9 +87,9 @@ class GpuTerrainScalingSmokeTest {
                         settle(terrain, camera);
                         System.out.printf("TERRAIN size=%dx%d renderer=%s open=%.3f ms%n", scene.width(), scene.height(),
                               Gdx.gl.glGetString(GL20.GL_RENDERER), (System.nanoTime() - start) / 1e6);
-                        ModelBatch batch = (ModelBatch) field(terrain, "batch");
+                        ModelBatch batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
                         GpuTerrainBatch grouping = (GpuTerrainBatch) batch.getRenderableSorter();
-                        GpuTerrainPages pages = (GpuTerrainPages) field(terrain, "terrainPages");
+                        GpuTerrainPages pages = (GpuTerrainPages) GpuTestSupport.field(terrain, "terrainPages");
                         if (cost) {
                             for (String view : new String[] { "overview", "medium", "close" }) {
                                 if (!view.equals("overview")) {
@@ -191,15 +191,9 @@ class GpuTerrainScalingSmokeTest {
         if (failure.get() != null) { throw new AssertionError("Terrain scaling benchmark", failure.get()); }
     }
 
-    private static Object field(Object owner, String name) throws Exception {
-        Field field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
-    }
-
     private static void toggleProps(GpuTerrain terrain, boolean enabled) {
         try {
-            Object props = field(terrain, "propBatch");
+            Object props = GpuTestSupport.field(terrain, "propBatch");
             var toggle = props.getClass().getDeclaredMethod("setEnabled", boolean.class);
             toggle.setAccessible(true);
             toggle.invoke(props, enabled);
@@ -208,8 +202,8 @@ class GpuTerrainScalingSmokeTest {
 
     /** Diagnostic-only uniform: identical meshes/vertex shaders, with an optional constant-colour fragment path. */
     private static void installCostProbe(GpuTerrain terrain) throws Exception {
-        ModelBatch batch = (ModelBatch) field(terrain, "batch");
-        var config = (DefaultShader.Config) field(batch.getShaderProvider(), "sculptShader");
+        ModelBatch batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
+        var config = (DefaultShader.Config) GpuTestSupport.field(batch.getShaderProvider(), "sculptShader");
         String original = config.fragmentShader;
         config.fragmentShader = original.replaceFirst("void\\s+main\\s*\\(\\s*\\)\\s*\\{",
               "uniform float u_costProbe;\nvoid main() {\n"
@@ -218,7 +212,7 @@ class GpuTerrainScalingSmokeTest {
     }
 
     private static void costProbe(GpuTerrain terrain, boolean flat) throws Exception {
-        ModelBatch batch = (ModelBatch) field(terrain, "batch");
+        ModelBatch batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
         Field shaders = BaseShaderProvider.class.getDeclaredField("shaders");
         shaders.setAccessible(true);
         for (Object value : (Array<?>) shaders.get(batch.getShaderProvider())) {
@@ -274,9 +268,9 @@ class GpuTerrainScalingSmokeTest {
 
     /** Both shader versions render the very same installed meshes, textures, animation time and camera. */
     private static void compareShaders(GpuTerrain terrain, BoardCamera camera, GpuSceneTestOutput target, String view) throws Exception {
-        ModelBatch batch = (ModelBatch) field(terrain, "batch");
+        ModelBatch batch = (ModelBatch) GpuTestSupport.field(terrain, "batch");
         var provider = batch.getShaderProvider();
-        var config = (DefaultShader.Config) field(provider, "sculptShader");
+        var config = (DefaultShader.Config) GpuTestSupport.field(provider, "sculptShader");
         Field shaders = BaseShaderProvider.class.getDeclaredField("shaders");
         shaders.setAccessible(true);
         @SuppressWarnings("unchecked") Array<Shader> cache = (Array<Shader>) shaders.get(provider);
@@ -342,12 +336,12 @@ class GpuTerrainScalingSmokeTest {
 
     private static void reportGeometry(GpuTerrain terrain, BoardCamera camera, String view) throws Exception {
         long[] counts = new long[7];
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            if (!camera.camera.frustum.boundsInFrustum((BoundingBox) field(chunk, "bounds"))) {
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            if (!camera.camera.frustum.boundsInFrustum((BoundingBox) GpuTestSupport.field(chunk, "bounds"))) {
                 continue;
             }
             Map<Mesh, float[]> vertices = new IdentityHashMap<>();
-            for (Object value : (Array<?>) field(chunk, "terrainRenderables")) {
+            for (Object value : (Array<?>) GpuTestSupport.field(chunk, "terrainRenderables")) {
                 Renderable part = (Renderable) value;
                 if (!part.material.has(Attribute.getAttributeType("boardSculpt"))) { continue; }
                 Mesh mesh = part.meshPart.mesh;

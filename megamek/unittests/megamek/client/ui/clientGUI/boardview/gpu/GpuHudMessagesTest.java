@@ -13,11 +13,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.io.File;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import javax.swing.JPanel;
@@ -34,32 +32,18 @@ import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogKind;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow.DialogRequest;
 import megamek.client.ui.clientGUI.boardview.overlay.ChatterBoxOverlay;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
-import megamek.common.Configuration;
 import megamek.common.Player;
 import megamek.common.ResolvedAttack;
 import megamek.common.enums.GamePhase;
 import megamek.common.event.player.GamePlayerChatEvent;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 /** The chat, toast and players services: what they keep of the client's messages and how they send. */
+@ExtendWith(GpuTestSupport.StagedData.class)
 @Timeout(120)
 class GpuHudMessagesTest {
-    private static File originalDataDir;
-
-    /** Earlier test classes can leave the data folder on testresources; the fixture needs the staged data. */
-    @BeforeAll
-    static void useStagedData() {
-        originalDataDir = Configuration.dataDir();
-        Configuration.setDataDir(null);
-    }
-
-    @AfterAll
-    static void restoreDataDir() {
-        Configuration.setDataDir(originalDataDir);
-    }
 
     @Test
     void chatLinesKeepTheSenderAndTurnEveryOtherLineIntoASystemLine() throws Exception {
@@ -101,7 +85,7 @@ class GpuHudMessagesTest {
         when(gui.getMainPanel()).thenReturn(new JPanel());
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             when(client.getGame()).thenReturn(fixture.game);
-            ChatterBoxOverlay overlay = onSwing(() -> {
+            ChatterBoxOverlay overlay = GpuTestSupport.onSwing(() -> {
                 ChatterBoxOverlay board = new ChatterBoxOverlay(gui, fixture.view, null, chatterBox);
                 fixture.view.addOverlay(board);
                 return board;
@@ -121,7 +105,7 @@ class GpuHudMessagesTest {
                       List.of(), "", false, "", null, null, List.of())));
                 SwingUtilities.invokeLater(ask);
                 DialogRequest shown = awaitDialog(fixture.source);
-                assertFalse(onSwing(fixture.source::acceptsInput));
+                assertFalse(GpuTestSupport.onSwing(fixture.source::acceptsInput));
                 fixture.source.chat().send("Holding at the ridge");
                 SwingUtilities.invokeAndWait(() -> { });
                 verify(client).sendChat("Holding at the ridge");
@@ -195,7 +179,7 @@ class GpuHudMessagesTest {
                 toasts.add(ToastLevel.GAMEMASTER, "Unit edited", null);
                 toasts.add(ToastLevel.INFO, "Bridge dismantled", null);
             });
-            List<GpuToasts.Toast> shown = onSwing(() -> fixture.source.toasts().capture().toasts());
+            List<GpuToasts.Toast> shown = GpuTestSupport.onSwing(() -> fixture.source.toasts().capture().toasts());
             assertEquals(List.of(ToastLevel.SUCCESS, ToastLevel.WARNING, ToastLevel.ERROR, ToastLevel.GAMEMASTER,
                   ToastLevel.INFO), shown.stream().map(GpuToasts.Toast::level).toList());
             assertEquals(List.of(3000, 4000, 5000, 4000, 3000),
@@ -216,12 +200,12 @@ class GpuHudMessagesTest {
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             BoardClientState view = spy(fixture.view);
             doReturn(gui).when(view).getClientgui();
-            GpuBoardSource source = onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
+            GpuBoardSource source = GpuTestSupport.onSwing(() -> new GpuBoardSource(view, () -> fixture.panel));
             try {
                 source.toasts().post(ToastLevel.WARNING, "Sensor contact - no visual identification yet");
                 SwingUtilities.invokeAndWait(() -> { });
                 verify(gui).addToast(ToastLevel.WARNING, "Sensor contact - no visual identification yet");
-                assertEquals(List.of(), onSwing(() -> source.toasts().capture().toasts()),
+                assertEquals(List.of(), GpuTestSupport.onSwing(() -> source.toasts().capture().toasts()),
                       "The HUD shows it only once ClientGUI hands it back");
             } finally {
                 SwingUtilities.invokeAndWait(source::close);
@@ -250,7 +234,7 @@ class GpuHudMessagesTest {
                 referee.setSeeAll(true);
                 fixture.game.addPlayer(referee.getId(), referee);
             });
-            GpuPlayers.Snapshot players = onSwing(() -> fixture.source.players().capture());
+            GpuPlayers.Snapshot players = GpuTestSupport.onSwing(() -> fixture.source.players().capture());
             List<GpuPlayers.PlayerRow> rows = players.players();
             assertEquals(List.of("0 GPU review team 1 local", "2 Ally team 1 observer",
                   "3 Princess team 2 done bot singleBlind ignoresDoubleBlind",
@@ -260,7 +244,7 @@ class GpuHudMessagesTest {
                         + (row.ghost() ? " ghost" : "") + (row.gameMaster() ? " gm" : "")
                         + (row.seeAll() ? " seeAll" : "") + (row.singleBlind() ? " singleBlind" : "")
                         + (row.ignoresDoubleBlind() ? " ignoresDoubleBlind" : "")).toList());
-            assertSame(players, onSwing(() -> fixture.source.players().capture()),
+            assertSame(players, GpuTestSupport.onSwing(() -> fixture.source.players().capture()),
                   "Unchanged players keep the instance");
         }
     }
@@ -276,7 +260,7 @@ class GpuHudMessagesTest {
     }
 
     private static List<GpuChat.ChatLine> lines(GpuBoardFixture fixture) throws Exception {
-        return onSwing(() -> fixture.source.chat().capture().lines());
+        return GpuTestSupport.onSwing(() -> fixture.source.chat().capture().lines());
     }
 
     private static void chat(GpuBoardFixture fixture, String message) {
@@ -301,11 +285,5 @@ class GpuHudMessagesTest {
     private static GpuReportLog.CombatEvent shot(int round, ResolvedAttack.Kind kind, boolean hit) {
         return new GpuReportLog.CombatEvent(UUID.randomUUID(), round, GamePhase.FIRING_REPORT, kind, 1, 2, "", "",
               hit, hit ? 5 : 0, List.of(), null, 0);
-    }
-
-    private static <T> T onSwing(Callable<T> action) throws Exception {
-        FutureTask<T> task = new FutureTask<>(action);
-        SwingUtilities.invokeAndWait(task);
-        return task.get();
     }
 }

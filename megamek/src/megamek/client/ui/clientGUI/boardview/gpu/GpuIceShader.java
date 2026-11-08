@@ -44,14 +44,6 @@ final class GpuIceShader extends FloatAttribute {
     /** Land ice on a surface that belongs to another tile, such as a frozen lake's bank below frozen land. */
     static Material land(Material material) { return apply(material, 1); }
 
-    /**
-     * Frozen land's material as the dry border beside it (mode 4) and back (mode 1), whatever surface variant it is: a
-     * stroke of ice on a board finds either beside surfaces the palette's kinds do not pair them with (GpuTerrain).
-     */
-    static Material landOrBorder(Material material) {
-        return mode(material) == 1 ? apply(material, 4) : mode(material) == 4 ? apply(material, 1) : null;
-    }
-
     static Material lake(Material material) { return apply(material, 3); }
 
     static Material waterfall(Material material) { return apply(material, 6); }
@@ -66,9 +58,21 @@ final class GpuIceShader extends FloatAttribute {
         return ice == null ? 0 : (int) ice.value;
     }
 
+    /**
+     * What selects a material's program. Land ice shares one with the dry ground beside it, and black ice with paved ground
+     * beside it, told apart by u_iceMode: a program of its own for each would link the whole ground shader again, 5-10 s on
+     * Iris Xe. Floating slabs and waterfalls draw blended in their own pass, and keep theirs.
+     */
+    static int variant(Material material) {
+        int mode = mode(material);
+        return mode == 4 ? 1 : mode == 5 ? 2 : mode;
+    }
+
     static String prefix(Material material) {
         int mode = mode(material);
-        return mode == 0 ? "" : "#define iceFlag\n#define ICE_MODE " + mode + ".0\n";
+        if (mode == 0) { return ""; }
+        return "#define iceFlag\n" + (floating(material) ? "#define ICE_MODE " + mode + ".0\n"
+              : variant(material) == 1 ? "#define ICE_LAND\n" : "");
     }
 
     private static Material apply(Material material, int mode) {
@@ -102,7 +106,7 @@ final class GpuIceShader extends FloatAttribute {
         });
         shader.register("u_iceCoverage", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().coverage());
+                target.set(id, assets.iceCoverage());
             }
         });
         shader.register("u_iceLevel", new BaseShader.LocalSetter() {
@@ -114,17 +118,6 @@ final class GpuIceShader extends FloatAttribute {
             @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
                 // BoardGeometry.waterZ: open water lies one tile pixel below its hex's level.
                 target.set(id, BoardGeometry.hexScale());
-            }
-        });
-        shader.register("u_iceColor", new BaseShader.LocalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().color());
-            }
-        });
-        // Normal and surface share one array, so ice leaves a texture unit for macOS's 16 (GpuSamplerBudgetSmokeTest).
-        shader.register("u_iceMaps", new BaseShader.LocalSetter() {
-            @Override public void set(BaseShader target, int id, Renderable renderable, Attributes attributes) {
-                target.set(id, assets.ice().maps());
             }
         });
     }

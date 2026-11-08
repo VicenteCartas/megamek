@@ -263,10 +263,21 @@ public final class SingleLane {
      */
     public static boolean bridgeApproach(Hex road, Hex bridge, int direction) {
         int reverse = (direction + 3) % 6;
-        if (HexTile.liquid(road) || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse)
-              || (groundWays(road) & (1 << direction)) == 0) { return false; }
+        if (HexTile.liquid(road) && !(road.containsTerrain(Terrains.ROAD) && groundShown(road))
+              || !bridge.containsTerrainExit(Terrains.BRIDGE, reverse) || (groundWays(road) & (1 << direction)) == 0) {
+            return false;
+        }
         boolean continuation = !HexTile.liquid(bridge) && (groundWays(bridge) & (1 << reverse)) != 0;
-        return HexTile.bridgeApproach(road.getLevel(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+        return HexTile.bridgeApproach(road.floor(), bridge.getLevel(), BridgeSpan.deck(bridge), continuation);
+    }
+
+    /**
+     * Whether what lies on a hex's ground shows (BoardRoad#groundShown): water is a layer over its ground, at any depth;
+     * molten liquid, ice and a bridge over the water hide it.
+     */
+    private static boolean groundShown(Hex hex) {
+        return !HexTile.liquid(hex) || hex.terrainLevel(Terrains.MAGMA) != 2 && !hex.containsTerrain(Terrains.ICE)
+              && !hex.containsTerrain(Terrains.BRIDGE);
     }
 
     private static int groundWays(Hex hex) {

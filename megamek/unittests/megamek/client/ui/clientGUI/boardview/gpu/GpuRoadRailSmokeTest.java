@@ -49,7 +49,7 @@ class GpuRoadRailSmokeTest {
         Files.createDirectories(output.toPath());
         Board board = BoardFile.loadSheet(new File(Configuration.boardsDir(),
               "unofficial/Flynn/34x34 Starleague Depot42 FortifiedIsland.board"), false, true);
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         // The changed verge is hex 2616, whose old span vote and stored deck-road neighbor are both PAVED.
         var tile = scene.tile(new Coords(25, 15));
         var actual = BoardRoad.of(scene, tile);
@@ -88,7 +88,7 @@ class GpuRoadRailSmokeTest {
                     camera.update();
                     frame.prepare(terrain, camera, scene);
                     terrain.update(scene);
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     Files.write(new File(output, "2616-installed-coats.txt").toPath(), installedCoats(terrain, tile.coords()));
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "13-depot42-bank-2619.png"));
@@ -104,20 +104,20 @@ class GpuRoadRailSmokeTest {
     @SuppressWarnings("unchecked")
     private static java.util.List<String> installedCoats(GpuTerrain terrain, Coords at) throws Exception {
         var lines = new ArrayList<String>();
-        for (Object chunk : (java.util.List<?>) field(terrain, "chunks")) {
-            Object tile = ((Map<?, ?>) field(chunk, "tileMeshes")).get(at);
+        for (Object chunk : (java.util.List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            Object tile = ((Map<?, ?>) GpuTestSupport.field(chunk, "tileMeshes")).get(at);
             if (tile == null) { continue; }
             var pages = new java.util.HashSet<Integer>();
-            var draws = GpuTerrainDepth.snapshot((java.util.List<ModelInstance>) field(chunk, "overlays"));
-            for (Object range : (java.util.List<?>) field(tile, "ranges")) {
-                Material material = (Material) field(range, "material");
+            var draws = GpuTerrainDepth.snapshot((java.util.List<ModelInstance>) GpuTestSupport.field(chunk, "overlays"));
+            for (Object range : (java.util.List<?>) GpuTestSupport.field(tile, "ranges")) {
+                Material material = (Material) GpuTestSupport.field(range, "material");
                 var mask = material.get(GpuRoads.Mask.class, GpuRoads.Mask.TYPE);
                 if (mask == null) { continue; }
                 pages.add(mask.textureDescription.texture.getTextureObjectHandle());
-                int start = (int) field(range, "offset"), end = start + (int) field(range, "count");
+                int start = (int) GpuTestSupport.field(range, "offset"), end = start + (int) GpuTestSupport.field(range, "count");
                 boolean found = false;
                 for (var draw : draws) {
-                    if (draw.meshPart.mesh != field(range, "mesh") || draw.meshPart.offset > start
+                    if (draw.meshPart.mesh != GpuTestSupport.field(range, "mesh") || draw.meshPart.offset > start
                           || draw.meshPart.offset + draw.meshPart.size < end) { continue; }
                     assertEquals(GpuRoads.layer(material), GpuRoads.layer(draw.material),
                           "Coats on separate pages retain their ordering in the actual merged draws");
@@ -126,17 +126,11 @@ class GpuRoadRailSmokeTest {
                 assertTrue(found, "Every affected coat belongs to an installed draw");
                 lines.add("lift=" + GpuRoads.layer(material) + " page="
                       + mask.textureDescription.texture.getTextureObjectHandle() + " range="
-                      + field(range, "offset") + "+" + field(range, "count") + " mask=" + mask.data.pixels().hashCode());
+                      + GpuTestSupport.field(range, "offset") + "+" + GpuTestSupport.field(range, "count") + " mask=" + mask.data.pixels().hashCode());
             }
             assertTrue(pages.size() > 1, "The historical junction still exercises overlapping coats on separate pages");
         }
         return lines;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 
     private static void render(boolean beside) throws Exception {
@@ -174,7 +168,7 @@ class GpuRoadRailSmokeTest {
                                 camera.orbit(25 - camera.azimuth(), tilt - camera.tilt());
                                 frame.prepare(terrain, camera, view.scene());
                                 terrain.update(view.scene());
-                                GpuTerrainLodSmokeTest.settle(terrain, null, view.scene(), camera);
+                                GpuReviewFrame.settle(terrain, null, view.scene(), camera);
                                 frame.render(terrain, camera, view.scene());
                                 GpuReviewFrame.save(new File(output, prefix + entry.getKey() + "-" + tilt + ".png"));
                                 assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
@@ -216,7 +210,7 @@ class GpuRoadRailSmokeTest {
             var bits = RailRoute.besideBits(crop::getHex, run, new RailRoute.Member(at, marker));
             bits.forEach((member, value) -> RailRoute.beside(crop.getHex(member.at()), RailRoute.onDeck(member.marker()), value));
         }
-        return new View(GpuLegacyImportSmokeTest.scene(crop), at,
+        return new View(BoardScenes.scene(crop), at,
               hex.getLevel() + (hex.containsTerrain(Terrains.BRIDGE) ? hex.terrainLevel(Terrains.BRIDGE_ELEV) : 0));
     }
 }

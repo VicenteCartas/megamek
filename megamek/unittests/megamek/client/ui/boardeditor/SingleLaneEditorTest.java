@@ -136,10 +136,12 @@ class SingleLaneEditorTest {
         send(session, Action.BRUSH_VALUE, "lanes", "single");
         stroke(session, J, S1, S2, S3);
         inspect(session, J);
+        // Roads connect along their strokes only: its side to the pavement is opened in Edit.
+        send(session, Action.EDGE, "road", "1");
         send(session, Action.TRAFFIC_CONTROL, "road", "signals");
         var snapshot = session.snapshot();
         int exits = snapshot.property("road").exits() & 63;
-        assertEquals(1 << 1, exits & 1 << 1, "The road runs into the pavement north-east, as roads do");
+        assertEquals(1 << 1, exits & 1 << 1, "The road runs into the pavement north-east");
         assertEquals(1 << 1, snapshot.apronSides(), "An apron");
         assertFalse(snapshot.junction().controlled(),
               "Only the exit leaves J: the inspector shows no controls, as the board draws none");
@@ -201,7 +203,7 @@ class SingleLaneEditorTest {
         send(session, Action.BRUSH_VALUE, "lanes", "single");
         stroke(session, J, S1, S2);
         Hex beside = session.board().getHex(south);
-        assertFalse(beside.getTerrain(Terrains.ROAD).hasExitsSpecified(), "The two-lane road's exits still follow its neighbours");
+        assertEquals(1 | 8, beside.getTerrain(Terrains.ROAD).getExits(), "The two-lane road keeps the exits its stroke drew");
         assertFalse(beside.containsTerrainExit(Terrains.ROAD, south.direction(S1)), "It does not join the ramp it borders");
         assertEquals(1 << 5 | 1 << 2, session.board().getHex(S1).getTerrain(Terrains.ROAD).getExits(),
               "The ramp joins J and the next ramp hex alone");
@@ -364,7 +366,9 @@ class SingleLaneEditorTest {
         stroke(session, J, J.translated(2), J.translated(2).translated(2));
         stroke(session, J, J.translated(4), J.translated(4).translated(4));
         inspect(session, J);
+        send(session, Action.EDGE, "road", "0");
         send(session, Action.LANES, "road", "single");
+        assertEquals(1 | 4 | 16, session.board().getHex(J).getTerrain(Terrains.ROAD).getExits(), "A hub: the car park and two lanes");
         assertTrue(single(session, J));
         assertTrue(issuesAt(session, J).isEmpty(), issuesAt(session, J).toString());
     }
@@ -380,6 +384,8 @@ class SingleLaneEditorTest {
         stroke(session, J, J.translated(2), J.translated(2).translated(2));
         stroke(session, J, J.translated(4), J.translated(4).translated(4));
         inspect(session, J);
+        send(session, Action.EDGE, "road", "0");
+        assertTrue(session.board().getHex(J).containsTerrainExit(Terrains.ROAD, 0), "Its side to the car park opened in Edit");
         send(session, Action.RAMP, "road:2", "entrance");
         assertTrue(issuesAt(session, J).isEmpty(), "The car park feeds the exit and takes the entrance's traffic: "
               + issuesAt(session, J));

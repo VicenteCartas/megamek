@@ -44,7 +44,7 @@ class GpuKeyboardSmokeTest {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         try (GpuBoardFixture fixture = GpuBoardFixture.create()) {
             GpuBoardSource source = mock(GpuBoardSource.class);
-            source.uiPreferences = GpuHudInputTest.preferences();
+            source.uiPreferences = GpuHudFixtures.preferences();
             // The view reads the preferences through the accessor; the test rebinds through the field.
             when(source.uiPreferences()).thenAnswer(invocation -> source.uiPreferences);
             when(source.takeFrame()).thenAnswer(invocation -> fixture.source.takeFrame());
@@ -130,7 +130,7 @@ class GpuKeyboardSmokeTest {
                             verify(source, never()).key(KeyEvent.VK_F9, true, 0);
 
                             // Both Shift keys boost WASD and Q/E in 3D, Tactical View and Free Flight.
-                            source.uiPreferences = GpuHudInputTest.preferences();
+                            source.uiPreferences = GpuHudFixtures.preferences();
                             super.render();
                             clearInvocations(source);
                             for (int mode = 0; mode < 3; mode++) {
@@ -235,10 +235,10 @@ class GpuKeyboardSmokeTest {
 
     /** MegaMek's default binds with {@code keys} moved to new keys without modifiers, as Swing captures them. */
     private static GpuBoardSource.UiPreferences rebound(Map<KeyCommandBind, Integer> keys) {
-        GpuBoardSource.UiPreferences defaults = GpuHudInputTest.preferences();
+        GpuBoardSource.UiPreferences defaults = GpuHudFixtures.preferences();
         List<GpuBoardSource.Bind> binds = defaults.binds().stream().map(bind -> keys.containsKey(bind.command())
               ? new GpuBoardSource.Bind(bind.command(), keys.get(bind.command()), 0, bind.text()) : bind).toList();
-        return GpuHudInputTest.with(defaults, Map.of("binds", binds));
+        return GpuHudFixtures.with(defaults, Map.of("binds", binds));
     }
 
     /** The modifier keys the mocked input reports as held, as GLFW does while they are down. */

@@ -44,7 +44,7 @@ class GpuSurfaceScaleSmokeTest {
                 int level = y < 2 ? cliffTop : y < 4 ? 2 : y < 6 ? 1 : 0;
                 board.setHex(new Coords(x, y), new Hex(level, contents, theme));
             }
-            scenes.add(BoardAridSurfaceTest.capture(board));
+            scenes.add(BoardScenes.capture(board));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "surface-scale");
         Files.createDirectories(output.toPath());
@@ -60,7 +60,7 @@ class GpuSurfaceScaleSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     // Inspect the actual surface maps without grass blades hiding their scale. Runtime density is untouched.
                     terrain.setGrass(false);
                     for (int i = 0; i < names.size(); i++) {

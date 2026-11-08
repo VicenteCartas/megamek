@@ -3,12 +3,17 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 /**
  * Screen-pixel budgets for the shared orthographic board, independent of orbit and camera distance. Trees have four
- * levels: the near mesh, two simpler meshes and, below the last threshold, the impostor cards. Buildings and effect
+ * levels: the near mesh, two simpler meshes and, below the last threshold, the impostor. Buildings and effect
  * volumes keep the three-level thresholds.
  */
 final class TreeLod {
     private static final float[] PIXELS = { 80, 48, 24 };
     static final float[] PROPS = { 80, 24 };
+    /**
+     * The longest side, in world units, that counts against {@link #PROPS}: five hexes. A giant's parts are small against a
+     * hex, not against its whole side, so without this the 1,100-unit HPG would keep all its triangles down to 6 pixels a hex.
+     */
+    static final float PROPS_SIDE = 415;
     /** Placed decorative objects whose world-box diagonal is under this many hex widths are small (GpuTerrain.Prop.small). */
     static final float SMALL_OBJECT = .25f;
     /** Small objects hide while a hex is narrower than this on screen, in framebuffer pixels; {@link #level} adds ±10 %. */
@@ -20,7 +25,11 @@ final class TreeLod {
      * pre-pass and saved nothing; this lies near their geometric mean, untuned.
      */
     static final float[] PREPASS_OBJECTS = { 16 };
+    /** Medium quality's relief joins the depth pre-pass while a hex is narrower than this on screen (GpuTerrain.twin). */
+    static final float[] PREPASS_RELIEF = { 96 };
     static final int LEVELS = PIXELS.length + 1;
+    /** Seconds a tree takes to dissolve from one level into the next (GpuTreeInstances.Stand#detail). */
+    static final float DISSOLVE = .25f;
     private static final float HYSTERESIS = 0.1f;
 
     private TreeLod() { }
@@ -40,6 +49,11 @@ final class TreeLod {
             level--;
         }
         return level;
+    }
+
+    /** The level of a building or placed object with this larger side, in world units, at this scale. */
+    static int prop(float side, float pixelsPerUnit, int previous) {
+        return level(PROPS, Math.min(side, PROPS_SIDE) * pixelsPerUnit, previous);
     }
 
     static String asset(String name, int level) {

@@ -38,7 +38,9 @@ import megamek.client.bot.princess.BehaviorSettings;
 import megamek.client.bot.princess.PriorityTargetChoices.Candidate;
 import megamek.client.bot.princess.PriorityTargetChoices.ForceRole;
 import megamek.client.generator.enums.SkillGeneratorMethod;
+import megamek.client.lobby.AlphaStrikeStatsForm;
 import megamek.client.lobby.AutoResolveRun;
+import megamek.client.lobby.BotFacingForm;
 import megamek.client.lobby.BotSetupForm;
 import megamek.client.lobby.BotTargetPicker;
 import megamek.client.lobby.CamoCatalog;
@@ -46,16 +48,19 @@ import megamek.client.lobby.CamoChoice;
 import megamek.client.lobby.GameOptionsForm;
 import megamek.client.lobby.HelpDocument;
 import megamek.client.lobby.IconCatalog;
+import megamek.client.lobby.LanceRoleForm;
 import megamek.client.lobby.LobbyCommands;
 import megamek.client.lobby.LobbyPrompts;
 import megamek.client.lobby.PlanetaryConditionsForm;
 import megamek.client.lobby.PlayerSettingsForm;
 import megamek.client.lobby.PortraitCatalog;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.ui.gdx.UiDialog;
 import megamek.client.ui.gdx.UiSelect;
 import megamek.client.ui.gdx.UiTestStage;
 import megamek.client.ui.gdx.UiTextField;
 import megamek.common.Hex;
+import megamek.common.OffBoardDirection;
 import megamek.common.Player;
 import megamek.common.board.Board;
 import megamek.common.board.Coords;
@@ -67,6 +72,9 @@ import megamek.common.loaders.MapSettings;
 import megamek.common.options.GameOptions;
 import megamek.common.options.IBasicOption;
 import megamek.common.options.OptionsConstants;
+import megamek.common.orders.LanceRole;
+import megamek.common.orders.LanceRoles;
+import megamek.common.orders.UnitOrders;
 import megamek.common.planetaryConditions.Atmosphere;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.planetaryConditions.Weather;
@@ -844,6 +852,108 @@ class LobbyNativeDialogsSmokeTest {
             assertFalse(view.isOpen());
             assertNull(dialogs.autoResolveView());
             assertEquals(List.of("proceed", "report", "closed"), said);
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theFacingCardSetsBothCompassesAndOkSends() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            BotFacingForm form = new BotFacingForm("Atlas AS7-D", UnitOrders.FACING_AUTO, 3);
+            List<String> sent = new ArrayList<>();
+            dialogs.facing(form, (work, then) -> {
+                work.run();
+                then.run();
+            }, () -> sent.add(form.whileMoving() + "/" + form.whenStopped()));
+            ui.draw();
+            assertTrue(find(ui, "facing-stopped-3") instanceof Button stopped && stopped.isChecked(),
+                  "the unit's facing shows chosen");
+            click(ui, find(ui, "facing-moving-2"));
+            assertTrue(((Button) find(ui, "facing-moving-2")).isChecked());
+            assertFalse(((Button) find(ui, "facing-moving-auto")).isChecked(), "one side at a time");
+            click(ui, find(ui, "facing-stopped-auto"));
+            assertTrue(sent.isEmpty(), "nothing is sent before OK");
+            click(ui, find(ui, "facing-ok"));
+            assertEquals(List.of("2/" + UnitOrders.FACING_AUTO), sent);
+            assertFalse(dialogs.isOpen());
+
+            dialogs.facing(form, (work, then) -> work.run(), () -> sent.add("again"));
+            ui.draw();
+            click(ui, find(ui, "facing-cancel"));
+            assertEquals(1, sent.size(), "Cancel sends nothing");
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theLanceRoleCardWaitsForAPlaceRoundTheConvoy() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LanceRoles.ConvoyChoice trucks = new LanceRoles.ConvoyChoice(7, "Trucks", 4, true,
+                  OffBoardDirection.SOUTH);
+            LanceRole shown = LanceRole.defaultEscort(7);
+            LanceRoleForm form = new LanceRoleForm("Alpha", List.of(trucks), OffBoardDirection.NORTH, shown);
+            for (LanceRole.Position position : LanceRole.Position.values()) {
+                if (form.holds(position)) {
+                    form.toggle(position);
+                }
+            }
+            List<LanceRole> sent = new ArrayList<>();
+            dialogs.lanceRole(form, (work, then) -> {
+                work.run();
+                then.run();
+            }, () -> sent.add(form.role()));
+            ui.draw();
+            Button ok = find(ui, "role-ok");
+            assertTrue(ok.isDisabled(), "an escort with no place round the convoy cannot be sent");
+            click(ui, find(ui, "role-escort-lead"));
+            ok = find(ui, "role-ok");
+            assertFalse(ok.isDisabled());
+            click(ui, ok);
+            assertEquals(1, sent.size());
+            assertTrue(sent.getFirst().isEscort());
+            assertEquals(7, sent.getFirst().getConvoyForceId());
+            assertTrue(sent.getFirst().getPositions().contains(LanceRole.Position.LEAD));
+
+            LanceRoleForm convoy = new LanceRoleForm("Bravo", List.of(), OffBoardDirection.NORTH, null);
+            dialogs.lanceRole(convoy, (work, then) -> work.run(), () -> sent.add(convoy.role()));
+            ui.draw();
+            assertNull(ui.stage.getRoot().findActor("role-tab-escort"), "no lance to guard, no Escort tab");
+            click(ui, find(ui, "role-tab-convoy"));
+            assertNotNull(find(ui, "role-convoy-edge"));
+            click(ui, find(ui, "role-ok"));
+            assertTrue(sent.getLast().isConvoy());
+            dialogs.dispose();
+        });
+    }
+
+    @Test
+    void theStatsCardsShowNothingToCopyForNoUnits() {
+        UiTestStage.run(ui -> {
+            LobbyNativeDialogs dialogs = new LobbyNativeDialogs(ui.kit, ui.stage, false);
+            LobbyStatsView.Host host = mock(LobbyStatsView.Host.class);
+            when(host.fonts()).thenReturn(List.of("", "Serif"));
+            when(host.sheetFonts()).thenReturn(new String[] { "Serif", "" });
+            dialogs.alphaStrikeStats(new AlphaStrikeStatsForm(List.of()), host);
+            ui.draw();
+            Button copy = find(ui, "stats-copy-cards");
+            assertTrue(copy.isDisabled(), "no units, nothing to copy");
+            UiSelect sort = find(ui, "stats-sort");
+            assertEquals(0, sort.getSelectedIndex());
+            click(ui, find(ui, "stats-close"));
+            assertFalse(dialogs.isOpen());
+
+            dialogs.sbfStats(new SbfStatsForm(List.of(), new Game()), host);
+            ui.draw();
+            UiSelect header = find(ui, "stats-header-font");
+            assertEquals(1, header.getSelectedIndex(), "the sheet's last header font is chosen");
+            assertTrue(((Button) find(ui, "stats-print")).isDisabled());
+            click(ui, find(ui, "stats-elements"));
+            assertTrue(((Button) find(ui, "stats-elements")).isChecked(), "Show elements turns on");
+            click(ui, find(ui, "stats-close"));
+            verify(host, never()).print(org.mockito.ArgumentMatchers.any(SbfStatsForm.class),
+                  org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
             dialogs.dispose();
         });
     }

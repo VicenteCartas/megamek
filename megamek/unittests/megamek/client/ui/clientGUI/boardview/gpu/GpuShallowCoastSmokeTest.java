@@ -23,7 +23,7 @@ class GpuShallowCoastSmokeTest {
     @Test
     void capturesWaterfallShallowCoast() throws Exception {
         var board = BoardFile.loadSheet(new File("data/boards/unofficial/Lanceman/16x17 Waterfall.board"), false, true);
-        var scene = GpuLegacyImportSmokeTest.scene(board);
+        var scene = BoardScenes.scene(board);
         var output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "shallow-coast");
         Files.createDirectories(output.toPath());
         var failure = new AtomicReference<Throwable>();
@@ -50,7 +50,7 @@ class GpuShallowCoastSmokeTest {
                         camera.update();
                         frame.prepare(terrain, camera, scene);
                         terrain.update(scene, camera.camera);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         terrain.animate(0, List.of());
                         for (int i = 0; i < 4; i++) { frame.render(terrain, camera, scene); }
                         GpuReviewFrame.save(new File(output, "waterfall-" + (oblique ? "oblique" : "top") + ".png"));

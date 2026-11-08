@@ -21,6 +21,73 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardConcreteShoreTest {
+    /** Separated sides run straight as a concrete edge does, where the hexes alone would zigzag. */
+    @Test void aSeparatedPavementSideFitsStraight() {
+        assertStraightCut(11, 3, 8);
+    }
+
+    /** A cut that stops inside the pavement, whose two hands still join beyond it, runs straight to its end. */
+    @Test void aCutStoppingInsideThePavementFitsStraight() {
+        assertStraightCut(7, 1, 7);
+    }
+
+    /** A branch leaves a cut straight through the corner it joins, and runs straight itself to the cut's line. */
+    @Test void aCutStaysStraightThroughABranch() {
+        var board = cutBoard(11);
+        int southEast = 1 << 2, south = 1 << 3;
+        board.getHex(4, 5).setAppearance(java.util.Map.of("pavement", megamek.common.board.HexAppearance.withSeparated(null, southEast | south)));
+        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(board), 1, true, java.util.Set.of());
+        assertStraight(fit, 3, 8);
+        int first = 0, second = 0;
+        while (megamek.common.board.HexTile.edgeDirection(first) != 2) { first++; }
+        while (megamek.common.board.HexTile.edgeDirection(second) != 3) { second++; }
+        var points = new java.util.ArrayList<megamek.common.board.ConcreteFit.Point>();
+        for (int k : new int[] { first, (first + 1) % 6, second, (second + 1) % 6 }) {
+            var point = fit.corner(new Coords(4, 5), k);
+            if (!points.contains(point)) { points.add(point); }
+        }
+        assertEquals(3, points.size());
+        var a = points.get(0);
+        var b = points.get(1);
+        var c = points.get(2);
+        float area = (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+        assertTrue(Math.abs(area) < .5f, "One straight branch: twice its triangle's area is " + area);
+    }
+
+    private static void assertStraightCut(int lastColumn, int from, int to) {
+        var fit = new megamek.common.board.ConcreteFit(12, 10, megamek.common.board.ConcreteFit.cells(cutBoard(lastColumn)), 1, true, java.util.Set.of());
+        assertStraight(fit, from, to);
+    }
+
+    private static megamek.common.board.Board cutBoard(int lastColumn) {
+        var board = megamek.common.board.Board.createEmptyBoard(12, 10);
+        for (int x = 0; x < 12; x++) {
+            for (int y = 0; y < 10; y++) {
+                var hex = new megamek.common.Hex(0, "pavement:1", "");
+                if (y == 4 && x <= lastColumn) {
+                    int sides = 1 << 3 | ((x & 1) == 1 ? 1 << 2 | 1 << 4 : 0);
+                    hex.setAppearance(java.util.Map.of("pavement", megamek.common.board.HexAppearance.withSeparated(null, sides)));
+                }
+                board.setHex(x, y, hex);
+            }
+        }
+        return board;
+    }
+
+    private static void assertStraight(megamek.common.board.ConcreteFit fit, int from, int to) {
+        int south = 0;
+        while (megamek.common.board.HexTile.edgeDirection(south) != 3) { south++; }
+        float low = Float.POSITIVE_INFINITY, high = Float.NEGATIVE_INFINITY;
+        for (int x = from; x <= to; x++) {
+            for (int k : new int[] { south, (south + 1) % 6 }) {
+                float y = fit.corner(new Coords(x, 4), k).y();
+                low = Math.min(low, y);
+                high = Math.max(high, y);
+            }
+        }
+        assertTrue(high - low < .01f, "One straight side: " + low + " to " + high);
+    }
+
     private static final Coords CENTER = new Coords(3, 3);
 
     @ParameterizedTest
@@ -346,7 +413,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void rectanglesKeepTheirWidthWhereTheyMeetTheQuay() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
+        BoardScene scene = BoardScenes.dockScene();
         BoardConcrete coast = BoardConcrete.of(scene);
         Coords tip = new Coords(10, 2);
         for (int y = 2; y <= 5; y++) {
@@ -436,7 +503,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void dockAndQuaySidesExtendToOneLandingCorner() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.dockScene();
+        BoardScene scene = BoardScenes.dockScene();
         Coords pier = new Coords(5, 5), quay = new Coords(8, 9);
         BoardSurface pierSurface = new BoardSurface(scene, scene.tile(pier));
         BoardSurface quaySurface = new BoardSurface(scene, scene.tile(quay));
@@ -510,7 +577,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void concreteAroundAnEnclosedTerrainPatchHasThreeStraightSides() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         Set<Coords> island = new HashSet<>();
         var queue = new ArrayDeque<Coords>();
         queue.add(new Coords(8, 9));
@@ -551,7 +618,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void broadJunctionExtendsItsDiagonalToTheVerticalSide() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         Coords diagonal = new Coords(1, 1), vertical = new Coords(4, 1);
         BoardSurface arm = new BoardSurface(scene, scene.tile(diagonal));
         BoardSurface trunk = new BoardSurface(scene, scene.tile(vertical));
@@ -569,7 +636,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void longDiagonalOnAeroBaseTwoHasNoHexSteps() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(2);
+        BoardScene scene = BoardScenes.pavedMapScene(2);
         Coords first = new Coords(4, 11), last = new Coords(10, 14);
         Vector3 a = moved(new BoardSurface(scene, scene.tile(first)), first, 2);
         Vector3 b = moved(new BoardSurface(scene, scene.tile(last)), last, 0);
@@ -588,7 +655,7 @@ class BoardConcreteShoreTest {
     @Test
     void fittedAeroBasesKeepTerrainCentresAndUnfoldedMeshes() {
         for (int number : new int[] { 1, 2 }) {
-            BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(number);
+            BoardScene scene = BoardScenes.pavedMapScene(number);
             for (BoardScene.Tile tile : scene.tiles()) {
                 BoardSurface surface = new BoardSurface(scene, tile);
                 assertUnfolded(surface, "AeroBase " + number + " " + tile.coords());
@@ -680,7 +747,7 @@ class BoardConcreteShoreTest {
 
     @Test
     void concreteQuayWallsContinueVerticallyToTheBedBesideBuildingsAtEveryDetail() {
-        BoardScene scene = GpuRiverTerrainSmokeTest.quayScene(BoardScene.Surface.CONCRETE);
+        BoardScene scene = BoardScenes.quayScene(BoardScene.Surface.CONCRETE);
         for (TerrainLod lod : TerrainLod.values()) {
             for (int y = 4; y <= 7; y++) {
                 BoardSurface water = new BoardSurface(scene, scene.tile(new Coords(3, y)), lod);
@@ -816,7 +883,7 @@ class BoardConcreteShoreTest {
     }
 
     private static BoardScene aeroBaseAtElevation(int elevation) {
-        BoardScene scene = GpuRiverTerrainSmokeTest.pavedMapScene(1);
+        BoardScene scene = BoardScenes.pavedMapScene(1);
         if (elevation == 0) { return scene; }
         return scene.withTiles(scene.tiles().stream().map(tile -> new BoardScene.Tile(tile.coords(),
               tile.surface() == BoardScene.Surface.CONCRETE ? elevation : tile.elevation(), -1, false, 0,
@@ -922,5 +989,80 @@ class BoardConcreteShoreTest {
             }
         }
         return new BoardScene(0, 7, 7, tiles, List.of(), List.of(), -1, "", List.of());
+    }
+
+    @ParameterizedTest(name = "quay {0}")
+    @ValueSource(strings = { "Templates/SeaPort.board", "Map Set 7/16x17 Seaport.board" })
+    void seaportQuayPanelsStayClosedAndFaceTheWater(String path) throws Exception {
+        BoardScene scene = BoardScenes.capturedScene(path);
+        for (TerrainLod lod : TerrainLod.values()) {
+            Map<BoardScenes.Segment, Integer> joined = new HashMap<>();
+            Map<Coords, List<BoardSurface.Face>> quays = new HashMap<>();
+            for (var tile : scene.tiles()) {
+                var surface = new BoardSurface(scene, tile, lod);
+                BoardScenes.countEdges(joined, surface.faces);
+                var walls = surface.walls(scene, BoardGeometry.floor(scene));
+                BoardScenes.countEdges(joined, walls);
+                if (!tile.liquid().present() && tile.surface() == BoardScene.Surface.CONCRETE) {
+                    for (var face : walls) {
+                        if (face.landEdge() < 0) { continue; }
+                        var water = scene.tile(tile.coords().translated(BoardGeometry.edgeDirection(face.landEdge())));
+                        if (water == null || !water.liquid().present()) { continue; }
+                        for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                            assertTrue(vertex.z >= water.elevation() * BoardGeometry.level() - .001f,
+                                  "Only the basin owns the submerged quay: " + tile.coords() + " beside " + water.coords()
+                                        + ", " + lod + ": " + vertex);
+                        }
+                    }
+                }
+                if (!tile.liquid().present()) { continue; }
+                List<BoardSurface.Face> panels = surface.faces.stream().filter(face -> face.finish() == BoardSurface.Finish.WALL
+                      && face.landEdge() >= 0 && BoardConcrete.concreteBank(scene, tile, face.landEdge())).toList();
+                if (!panels.isEmpty()) {
+                    quays.put(tile.coords(), panels);
+                    BoardScenes.checkSubmergedShading(surface);
+                }
+                Vector3 center = BoardGeometry.center(tile.coords(), 0);
+                for (var face : panels) {
+                    for (var vertex : List.of(face.a(), face.b(), face.c())) {
+                        assertEquals(BoardRelief.Kind.SUBMERGED_CLIFF, surface.relief.shade(vertex).kind(),
+                              "The complete panel keeps underwater shading at " + tile.coords() + ", " + lod);
+                    }
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    Vector3 towardWater = new Vector3(center).sub(face.a());
+                    towardWater.z = 0;
+                    assertTrue(normal.dot(towardWater) > 0,
+                          "Quay panel faces the water at " + tile.coords() + ", " + lod + ": " + face);
+                }
+            }
+            assertFalse(quays.isEmpty());
+            for (var quay : quays.entrySet()) {
+                Map<BoardScenes.Segment, Integer> boundary = new HashMap<>();
+                BoardScenes.countEdges(boundary, quay.getValue());
+                BoardScenes.assertJoined(boundary, joined, "SeaPort quay " + quay.getKey() + ", " + lod);
+            }
+        }
+    }
+
+    @Test
+    void seaportApronFitsBothSides() throws Exception {
+        BoardScene scene = BoardScenes.capturedScene("Map Set 7/16x17 Seaport.board");
+        BoardConcrete shape = BoardConcrete.of(scene);
+        Vector3 a = shape.corner(new Coords(2, 1), 3), b = shape.corner(new Coords(5, 2), 5);
+        Vector3 along = new Vector3(b).sub(a).nor();
+        Vector3 back = shape.corner(new Coords(2, 1), 2);
+        for (int x = 2; x <= 5; x++) {
+            Coords coords = new Coords(x, x / 2);
+            for (int k = 3; k <= 5; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(a);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The northwest quay stays straight beside inland buildings: " + coords + " corner " + k);
+            }
+            for (int k = 0; k <= 2; k++) {
+                Vector3 offset = shape.corner(coords, k).sub(back);
+                assertEquals(0, along.x * offset.y - along.y * offset.x, .003f,
+                      "The inland side stays straight and parallel to the quay: " + coords + " corner " + k);
+            }
+        }
     }
 }

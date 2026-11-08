@@ -32,6 +32,7 @@ import com.badlogic.gdx.graphics.g3d.model.Node;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
@@ -43,18 +44,19 @@ import megamek.common.board.Coords;
 import megamek.common.units.Entity;
 
 /**
- * The Tactical View's unit bases, under and over each meeple, in world space: sized in hex
- * apothems, they zoom with the board and stay inside the unit's hex. The base, drawn before the units: a ring in the
+ * The Tactical View's unit bases, under and over each icon, in world space: sized in hex
+ * apothems, they zoom with the board and stay inside the unit's hex; a multi-hex unit has one oval around its hexes
+ * ({@link UnitFootprint#oval}), with its notches and badges on the rim. The base, drawn before the units: a ring in the
  * side's colour with a glow for the acting unit and the focused enemy, an outer ring that pulses while the unit can
  * act, the facing notch and the thinner twist notch. The badges, drawn after the units: the heat pip, the elevation or
  * altitude, the armour and structure bars with the damage tile, the movement modifier chevrons in the movement type's
  * colour, the two most severe condition icons, the E(C)CM source badge and a wreck's cross. Every value is the client's
  * (the battle status, the E(C)CM record): {@link #spec} maps them, and a unit's models are built again only when its
- * spec changes. Per frame only the transforms follow the animated poses, the notches turn with the animated facing,
- * and the pulse and the zoom fade change material colours. GL thread; owns its models and batch.
+ * spec or its oval changes. Per frame only the transforms follow the animated poses, the notches turn with the animated
+ * facing, and the pulse and the zoom fade change material colours. GL thread; owns its models and batch.
  */
 final class GpuUnitBases implements Disposable {
-    /** The base ring's radius; the HUD anchors a unit's labels at its north point. */
+    /** The base ring's radius on one hex; the HUD anchors a unit's labels at its north point. */
     static final float RING = .80f;
     private static final float RING_WIDTH = .075f;
     private static final float CASING = .04f;
@@ -146,8 +148,8 @@ final class GpuUnitBases implements Disposable {
         }
     }
 
-    /** A unit's two models and what they were built from: the spec, and a multi-hex unit's hexes. */
-    private record Shown(BaseSpec spec, List<Coords> footprint, Model base, Model badges, ModelInstance baseInstance,
+    /** A unit's two models and what they were built from: the spec, its oval in apothems and how a multi-hex unit rested. */
+    private record Shown(BaseSpec spec, UnitFootprint.Oval oval, float rest, Model base, Model badges, ModelInstance baseInstance,
           ModelInstance badgeInstance) { }
 
     private final Skin skin;
@@ -264,6 +266,19 @@ final class GpuUnitBases implements Disposable {
         return unit.id() + ":" + unit.part();
     }
 
+    /** A unit's base ring in world units around its position, as it rests: a circle on one hex, an oval around several. */
+    static UnitFootprint.Oval oval(BoardScene scene, BoardScene.Unit unit) {
+        return oval(unit, UnitFootprint.markedHexes(scene, unit));
+    }
+
+    private static UnitFootprint.Oval oval(BoardScene.Unit unit, List<Coords> hexes) {
+        if (hexes.size() > 1) {
+            return UnitFootprint.oval(unit, hexes);
+        }
+        float radius = RING * BoardGeometry.height() / 2;
+        return new UnitFootprint.Oval(0, 0, radius, radius, 0);
+    }
+
     /**
      * Places a base for every scene unit with a pose, from the frame's status and E(C)CM record. {@code actor} and
      * {@code focus} are the board overlay's acting unit and focused enemy, {@code hoveredUnit} and {@code hovered}
@@ -290,7 +305,7 @@ final class GpuUnitBases implements Disposable {
         Set<String> keys = new java.util.HashSet<>();
         for (BoardScene.Unit unit : scene.units()) {
             UnitFootprint.Pose pose = poses.get(unit);
-            if (pose == null || unit.attachment() != null) { continue; }
+            if (pose == null || unit.attachment() != null || UnitFootprint.markedHexes(scene, unit).isEmpty()) { continue; }
             String key = key(unit);
             keys.add(key);
             var source = sources.get(unit.id());
@@ -298,12 +313,12 @@ final class GpuUnitBases implements Disposable {
                   open != null && source != null && open.source().entityId() == unit.id(), status.links(),
                   badged.contains(key) && unit.part() <= 0);
             if (!statusBadges) { spec = spec.withoutStatus(); }
-            show(unit, pose, spec, 1);
+            show(scene, unit, pose, spec, 1);
         }
         for (var casualty : casualties) {
             if (casualty.pose == null || casualty.unit.attachment() != null) { continue; }
             keys.add(key(casualty.unit));
-            show(casualty.unit, casualty.pose,
+            show(scene, casualty.unit, casualty.pose,
                   spec(null, false, true, Entity.NONE, Entity.NONE, null, false, List.of(), true), casualty.opacity());
         }
         shown.entrySet().removeIf(entry -> {
@@ -313,12 +328,16 @@ final class GpuUnitBases implements Disposable {
         });
     }
 
-    private void show(BoardScene.Unit unit, UnitFootprint.Pose pose, BaseSpec spec, float opacity) {
+    private void show(BoardScene scene, BoardScene.Unit unit, UnitFootprint.Pose pose, BaseSpec spec, float opacity) {
         String key = key(unit);
         Shown entry = shown.get(key);
-        if (entry == null || !entry.spec().equals(spec) || !sameFootprint(entry, unit)) {
+        List<Coords> hexes = UnitFootprint.markedHexes(scene, unit);
+        UnitFootprint.Oval oval = oval(unit, hexes).scaled(2 / BoardGeometry.height());
+        // A circle's notches lie alike at every facing; an oval's rim depends on how the unit rests.
+        float rest = hexes.size() > 1 ? unit.location().facing() : 0;
+        if (entry == null || !entry.spec().equals(spec) || !entry.oval().equals(oval) || entry.rest() != rest) {
             if (entry != null) { dispose(entry); }
-            entry = build(spec, unit);
+            entry = build(spec, oval, rest);
             shown.put(key, entry);
         }
         place(entry, unit, pose);
@@ -346,15 +365,6 @@ final class GpuUnitBases implements Disposable {
               .map(GpuUnitBases::key).collect(Collectors.toSet());
     }
 
-    /** A multi-hex unit's rings lie where its hexes lay when they were built; one hex is always the unit's own. */
-    private static boolean sameFootprint(Shown entry, BoardScene.Unit unit) {
-        return footprint(unit).equals(entry.footprint());
-    }
-
-    private static List<Coords> footprint(BoardScene.Unit unit) {
-        return unit.footprint().size() <= 1 ? List.of() : unit.footprint();
-    }
-
     /** The frame's transforms and opacities: the pose's position, the notches turned with the animated facing. */
     private void place(Shown entry, BoardScene.Unit unit, UnitFootprint.Pose pose) {
         float apothem = BoardGeometry.height() / 2;
@@ -363,14 +373,13 @@ final class GpuUnitBases implements Disposable {
             instance.transform.setToTranslation(position.x, position.y, position.z).scale(apothem, apothem, 1);
         }
         BaseSpec spec = entry.spec();
-        // Facings run clockwise seen from above; rotations about +Z run counterclockwise. Other footprint hexes turn
-        // with the unit as the board overlay's bands do.
+        // Facings run clockwise seen from above; rotations about +Z run counterclockwise. The oval turns with the unit
+        // as the board overlay's bands do.
         float facing = pose.facing();
-        float turn = unit.location().facing() * 60 - facing;
         for (Node node : entry.baseInstance().nodes) {
+            if (node.id.equals("oval")) { node.rotation.set(Vector3.Z, unit.location().facing() * 60 - facing); }
             if (node.id.equals("facing")) { node.rotation.set(Vector3.Z, -facing); }
             if (node.id.equals("twist")) { node.rotation.set(Vector3.Z, -facing - spec.twist() * 60); }
-            if (node.id.startsWith("hex:")) { node.rotation.set(Vector3.Z, turn); }
         }
         entry.baseInstance().calculateTransforms();
         float pulse = READY_LOW + (1 - READY_LOW) * (.5f + .5f * MathUtils.cos(MathUtils.PI2 * clock));
@@ -408,12 +417,14 @@ final class GpuUnitBases implements Disposable {
             batch = new ModelBatch(GpuShaderManager.provider("Unit bases", GpuUnitShader::provider),
                   (sortCamera, renderables) -> { });
         }
-        float reach = BoardGeometry.height();
+        float apothem = BoardGeometry.height() / 2;
         batch.begin(camera);
         for (Shown entry : placed) {
             ModelInstance instance = bases ? entry.baseInstance() : entry.badgeInstance();
             Vector3 at = instance.transform.getTranslation(new Vector3());
-            if (instance.nodes.notEmpty() && camera.frustum.sphereInFrustum(at, reach * 2)) {
+            UnitFootprint.Oval oval = entry.oval();
+            float reach = apothem * (4 + Vector2.len(oval.x(), oval.y()) + oval.major() - RING);
+            if (instance.nodes.notEmpty() && camera.frustum.sphereInFrustum(at, reach)) {
                 batch.render(instance);
             }
         }
@@ -438,48 +449,47 @@ final class GpuUnitBases implements Disposable {
 
     // Building the models, in apothems around the unit, north up (+y).
 
-    private Shown build(BaseSpec spec, BoardScene.Unit unit) {
-        Model base = base(spec, unit);
-        Model badges = badges(spec);
-        return new Shown(spec, footprint(unit), base, badges, new ModelInstance(base), new ModelInstance(badges));
+    private Shown build(BaseSpec spec, UnitFootprint.Oval oval, float rest) {
+        Model base = base(spec, oval, rest);
+        Model badges = badges(spec, oval);
+        return new Shown(spec, oval, rest, base, badges, new ModelInstance(base), new ModelInstance(badges));
     }
 
-    private Model base(BaseSpec spec, BoardScene.Unit unit) {
+    private Model base(BaseSpec spec, UnitFootprint.Oval oval, float rest) {
         Color side = color(spec.look());
         Shapes shapes = new Shapes();
-        // The facing node holds the rings, which a turn leaves alone, and the facing notch.
-        shapes.node("facing");
+        shapes.node("oval");
         if (spec.emphasis() != Emphasis.NONE) {
             Color glow = spec.emphasis() == Emphasis.ACTING ? ACTING_GLOW : FOCUS_GLOW;
-            shapes.softRing(GLOW_PART, false, 0, 0, GLOW, GLOW_WIDTH, glow, .55f);
+            shapes.softRing(GLOW_PART, false, oval, GLOW - RING, GLOW_WIDTH, glow, .55f);
         }
-        ring(shapes, 0, 0, side);
+        shapes.ring(RING_PART, true, oval, 0, RING_WIDTH + 2 * CASING, alpha(INK, .55f));
+        shapes.ring(RING_PART, true, oval, 0, RING_WIDTH, side);
         if (spec.ready()) {
-            shapes.ring(READY_PART, true, 0, 0, READY_RING, READY_WIDTH, alpha(side, .9f));
+            shapes.ring(READY_PART, true, oval, READY_RING - RING, READY_WIDTH, alpha(side, .9f));
         }
+        shapes.node("facing");
         if (spec.facing()) {
+            onRim(shapes, oval, rest * 60);
             notch(shapes, NOTCH_PART, NOTCH_BASE, NOTCH_TIP, NOTCH_HALF, side, true);
         }
         shapes.node("twist");
         if (spec.facing() && spec.twist() != 0) {
+            onRim(shapes, oval, (rest + spec.twist()) * 60);
             notch(shapes, NOTCH_PART, TWIST_BASE, TWIST_TIP, TWIST_HALF, Color.WHITE, false);
-        }
-        // Each other hex of a multi-hex unit gets its ring, turned with the unit about its origin.
-        Coords origin = unit.location().coords();
-        Vector3 centre = BoardGeometry.center(origin, 0);
-        float apothem = BoardGeometry.height() / 2;
-        for (Coords occupied : unit.footprint()) {
-            if (occupied.equals(origin)) { continue; }
-            Vector3 offset = BoardGeometry.center(occupied, 0).sub(centre).scl(1 / apothem);
-            shapes.node("hex:" + occupied.getX() + "," + occupied.getY());
-            ring(shapes, offset.x, offset.y, side);
         }
         return shapes.end();
     }
 
-    private void ring(Shapes shapes, float x, float y, Color side) {
-        shapes.ring(RING_PART, true, x, y, RING, RING_WIDTH + 2 * CASING, alpha(INK, .55f));
-        shapes.ring(RING_PART, true, x, y, RING, RING_WIDTH, side);
+    /**
+     * Moves a notch, drawn at the north of a one-hex ring in a node turned by {@code bearing}, to where {@code oval}'s rim
+     * lies along that bearing.
+     */
+    private static void onRim(Shapes shapes, UnitFootprint.Oval oval, float bearing) {
+        Vector2 rim = oval.rim(bearing);
+        float cos = MathUtils.cosDeg(bearing);
+        float sin = MathUtils.sinDeg(bearing);
+        shapes.shift(rim.x * cos - rim.y * sin, rim.x * sin + rim.y * cos - RING);
     }
 
     /** A notch from {@code from} to its tip at {@code to}, pointing north (the facing), with a dark casing. */
@@ -493,18 +503,24 @@ final class GpuUnitBases implements Disposable {
         shapes.triangle(part, true, -half, from, half, from, 0, to, color);
     }
 
-    private Model badges(BaseSpec spec) {
+    /** The badges north up, each band and column moved out with {@code oval}'s rim. */
+    private Model badges(BaseSpec spec, UnitFootprint.Oval oval) {
         Shapes shapes = new Shapes();
         shapes.node("badges");
         if (spec.destroyed()) {
-            // Two bars corner to corner over the unit, on a dark casing.
+            // Two bars corner to corner over the unit, on a dark casing, turned with its oval and as large against it as on
+            // one hex, so they end inside it.
+            float end = CROSS_END / RING;
+            float stroke = oval.minor() / RING;
             for (float sign : new float[] { 1, -1 }) {
-                shapes.bar(CORE_PART, -CROSS_END, -sign * CROSS_END, CROSS_END, sign * CROSS_END,
-                      CROSS_WIDTH + .05f, alpha(INK, .7f));
-                shapes.bar(CORE_PART, -CROSS_END, -sign * CROSS_END, CROSS_END, sign * CROSS_END, CROSS_WIDTH,
-                      CROSS);
+                Vector2 from = oval.at(-end, -sign * end);
+                Vector2 to = oval.at(end, sign * end);
+                shapes.bar(CORE_PART, from.x, from.y, to.x, to.y, (CROSS_WIDTH + .05f) * stroke, alpha(INK, .7f));
+                shapes.bar(CORE_PART, from.x, from.y, to.x, to.y, CROSS_WIDTH * stroke, CROSS);
             }
         }
+        Vector2 north = oval.rim(0);
+        shapes.shift(north.x, north.y - RING);
         if (spec.heatRgb() != 0) {
             shapes.disc(CORE_PART, -BAND_X, TOP, PIP + .04f, PANEL);
             shapes.disc(CORE_PART, -BAND_X, TOP, PIP, rgb(spec.heatRgb()));
@@ -513,15 +529,21 @@ final class GpuUnitBases implements Disposable {
         if (spec.elevation() != 0) {
             elevation(shapes, spec.elevation(), spec.altitude());
         }
+        Vector2 south = oval.rim(180);
+        shapes.shift(south.x, south.y + RING);
         if (spec.marks().shown()) {
             marks(shapes, spec);
         }
         if (spec.chevrons() >= 0) {
             chevrons(shapes, spec.chevrons(), rgb(spec.moveRgb()));
         }
+        Vector2 west = oval.rim(270);
+        shapes.shift(west.x + RING, west.y);
         for (int index = 0; index < spec.conditions().size(); index++) {
             condition(shapes, spec.conditions().get(index), -COLUMN_X, index == 0 ? COLUMN_Y : -COLUMN_Y);
         }
+        Vector2 east = oval.rim(90);
+        shapes.shift(east.x - RING, east.y);
         if (spec.ecm() != null) {
             ecm(shapes, spec.ecm());
         }
@@ -660,6 +682,7 @@ final class GpuUnitBases implements Disposable {
         private final MeshPartBuilder.VertexInfo vertex = new MeshPartBuilder.VertexInfo();
         private final Texture white = skin.get("white", Texture.class);
         private final BitmapFont font = skin.getFont("default-font");
+        private final Vector2 shift = new Vector2();
 
         Shapes() {
             builder.begin();
@@ -668,6 +691,12 @@ final class GpuUnitBases implements Disposable {
         void node(String id) {
             builder.node().id = id;
             parts.clear();
+            shift.setZero();
+        }
+
+        /** Moves what is drawn from now on in this node. */
+        void shift(float x, float y) {
+            shift.set(x, y);
         }
 
         Model end() {
@@ -687,7 +716,7 @@ final class GpuUnitBases implements Disposable {
         }
 
         private short point(MeshPartBuilder part, float x, float y, Color color, float u, float v) {
-            return part.vertex(vertex.setPos(x, y, 0).setCol(color).setUV(u, v));
+            return part.vertex(vertex.setPos(x + shift.x, y + shift.y, 0).setCol(color).setUV(u, v));
         }
 
         void triangle(String id, boolean depth, float ax, float ay, float bx, float by, float cx, float cy,
@@ -724,27 +753,38 @@ final class GpuUnitBases implements Disposable {
         }
 
         void ring(String id, boolean depth, float x, float y, float radius, float width, Color color) {
-            band(id, depth, x, y, radius - width / 2, radius + width / 2, color, color);
+            ring(id, depth, new UnitFootprint.Oval(x, y, radius, radius, 0), 0, width, color);
         }
 
-        /** A glow: a band fading out to both sides of {@code radius}. */
-        void softRing(String id, boolean depth, float x, float y, float radius, float width, Color color,
+        /** A band of {@code width} round {@code oval}, grown by {@code grow}. */
+        void ring(String id, boolean depth, UnitFootprint.Oval oval, float grow, float width, Color color) {
+            band(id, depth, oval, grow - width / 2, grow + width / 2, color, color);
+        }
+
+        /** A glow: a band fading out to both sides of {@code oval}, grown by {@code grow}. */
+        void softRing(String id, boolean depth, UnitFootprint.Oval oval, float grow, float width, Color color,
               float peak) {
             Color strong = alpha(color, peak);
             Color clear = alpha(color, 0);
-            band(id, depth, x, y, radius - width / 2, radius, clear, strong);
-            band(id, depth, x, y, radius, radius + width / 2, strong, clear);
+            band(id, depth, oval, grow - width / 2, grow, clear, strong);
+            band(id, depth, oval, grow, grow + width / 2, strong, clear);
         }
 
-        private void band(String id, boolean depth, float x, float y, float inner, float outer, Color in, Color out) {
+        private void band(String id, boolean depth, UnitFootprint.Oval oval, float inner, float outer, Color in, Color out) {
             MeshPartBuilder part = part(id, depth, white);
-            for (int i = 0; i < SEGMENTS; i++) {
-                float a = MathUtils.PI2 * i / SEGMENTS;
-                float b = MathUtils.PI2 * (i + 1) / SEGMENTS;
-                short p = point(part, x + MathUtils.cos(a) * inner, y + MathUtils.sin(a) * inner, in, .5f, .5f);
-                short q = point(part, x + MathUtils.cos(a) * outer, y + MathUtils.sin(a) * outer, out, .5f, .5f);
-                short r = point(part, x + MathUtils.cos(b) * outer, y + MathUtils.sin(b) * outer, out, .5f, .5f);
-                short s = point(part, x + MathUtils.cos(b) * inner, y + MathUtils.sin(b) * inner, in, .5f, .5f);
+            // A multi-hex unit's oval, several times a hex's ring, stays as smooth with twice the segments.
+            int segments = oval.major() > 1 ? 2 * SEGMENTS : SEGMENTS;
+            for (int i = 0; i < segments; i++) {
+                float a = MathUtils.PI2 * i / segments;
+                float b = MathUtils.PI2 * (i + 1) / segments;
+                Vector2 innerA = oval.point(a, inner);
+                Vector2 outerA = oval.point(a, outer);
+                Vector2 outerB = oval.point(b, outer);
+                Vector2 innerB = oval.point(b, inner);
+                short p = point(part, innerA.x, innerA.y, in, .5f, .5f);
+                short q = point(part, outerA.x, outerA.y, out, .5f, .5f);
+                short r = point(part, outerB.x, outerB.y, out, .5f, .5f);
+                short s = point(part, innerB.x, innerB.y, in, .5f, .5f);
                 part.triangle(p, q, r);
                 part.triangle(p, r, s);
             }

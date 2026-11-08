@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuCamouflageReview.field;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.field;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -34,6 +34,7 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.Attribute;
+import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
@@ -49,6 +50,7 @@ import megamek.client.ui.clientGUI.CommonMenuBar;
 import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.boardview.BoardFieldOfView;
 import megamek.client.ui.clientGUI.boardview.BoardHexText;
+import megamek.client.ui.clientGUI.boardview.TacticalMark;
 import megamek.client.ui.gdx.DisplayScale;
 import megamek.client.ui.gdx.UiKit;
 import megamek.client.ui.panels.phaseDisplay.MovementDisplay;
@@ -56,7 +58,9 @@ import megamek.client.ui.util.KeyCommandBind;
 import megamek.client.ui.util.PlayerColour;
 import megamek.common.Hex;
 import megamek.common.Player;
+import megamek.common.ResolvedAttack;
 import megamek.common.ToHitData;
+import megamek.common.actions.WeaponAttackAction;
 import megamek.common.board.Board;
 import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
@@ -75,14 +79,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Tactical View on the real capture. T turns every unit into its meeple on its GpuUnitBases
+ * The Tactical View on the real capture. T turns every unit into its icon on its GpuUnitBases
  * base over the ground layer, on the terrain the graphics setting chose, lit by the fixed north-west light without
- * grass; the bases show the side, the facing, the done and destroyed states; units are picked by their meeples; T
+ * grass; the bases show the side, the facing, the done and destroyed states; units are picked by their icons; T
  * again restores the 3D view's models and its exact pose. A second test captures the mock-up battle in the movement and
  * firing phases (b11 tactical mock-ups) for review, a third drives its overlays through the Overlays panel and
- * captures the panel's places. The terrain draws no scatter, grass, placed object, building model or water there, but
- * keeps a woods cover's trees and skin (GpuTerrain#setFluffHidden), in either graphics, and still picks and drapes as
- * before.
+ * captures the panel's places. The terrain draws no scatter or grass there (GpuTerrain#setScatterHidden), in either
+ * graphics, and still picks and drapes as before.
  */
 @Tag("on-demand")
 class GpuTacticalViewSmokeTest {
@@ -117,7 +120,7 @@ class GpuTacticalViewSmokeTest {
           GUIPreferences.SHOW_HEX_TYPES, GUIPreferences.MINI_MAP_ENABLED, GUIPreferences.GPU_CONTACTS_ENABLED);
 
     @Test
-    void turnsTheUnitsIntoMeeplesOnBasesOverTheGroundLayerAndRestoresTheThreeDimensionalView() throws Exception {
+    void turnsTheUnitsIntoIconsOnBasesOverTheGroundLayerAndRestoresTheThreeDimensionalView() throws Exception {
         AtomicReference<Throwable> failure = new AtomicReference<>();
         GUIPreferences preferences = GUIPreferences.getInstance();
         float originalScale = preferences.getBoardUiScale();
@@ -393,7 +396,7 @@ class GpuTacticalViewSmokeTest {
     private static void verify(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
         view.render();
         GpuBoardTestUi.<Slider>tuning(view, "Time of day").setValue(13);
-        // The 3D view in its 3D Models display, which the Tactical View overrides with meeples.
+        // The 3D view in its 3D Models display, which the Tactical View overrides with icons.
         @SuppressWarnings("unchecked")
         var display = (SelectBox<UnitDisplayMode>) field(GpuBoardTestUi.tuning(view), "unitDisplayMode");
         display.setSelected(UnitDisplayMode.MODELS);
@@ -421,30 +424,38 @@ class GpuTacticalViewSmokeTest {
         assertTrue(tilt > 0, "The 3D view starts at an angle");
         capture("tactical-view-3d.png");
 
+        var unitPrograms = (List<?>) field(((ModelBatch) field(view, "unitBatch")).getShaderProvider(), "handles");
+        int linked = unitPrograms.size();
         GpuBoardTestUi.press(KeyCommandBind.TOGGLE_ISO);
         render(view);
         assertTrue(view.boardCamera.tactical(), "T enters the Tactical View");
+        assertEquals(linked, unitPrograms.size(), "The icons' program linked behind the loading stage");
         view.boardCamera.fit(scene);
         render(view);
         assertTrue(view.boardCamera.camera.direction.epsilonEquals(0, 0, -1, .0001f));
         assertTrue(view.boardCamera.camera.up.epsilonEquals(0, 1, 0, .0001f), "North stays up");
         for (BoardScene.Unit unit : scene.units()) {
             assertTrue(MeepleVisual.isMeeple(models.get(unit.id() + ":" + unit.part())),
-                  "The Tactical View shows " + unit.name() + " as its meeple");
+                  "The Tactical View shows " + unit.name() + " as its icon");
+            assertEquals(1, models.get(unit.id() + ":" + unit.part()).getNode(MeepleVisual.ROOT).parts.size,
+                  "An icon is flat, the artwork alone");
         }
         // The fixed light with the sky environment generated for it (GpuAtmosphere#updateLight).
         var lighting = ((GpuAtmosphere) field(view, "atmosphere")).lighting();
         assertEquals(BoardAtmosphere.TACTICAL.direction(), lighting.direction(), "The fixed north-west light");
         assertEquals(BoardAtmosphere.TACTICAL.skySource(), lighting.skySource(), "and its sky");
-        assertFalse(((List<?>) field(field(terrain, "shadowMap"), "shadowModels")).isEmpty(), "The meeples cast shadows");
+        assertTrue(((List<?>) field(field(terrain, "shadowMap"), "shadowModels")).isEmpty(), "The units' icons cast no shadow");
         assertFalse(terrain.columns(), "T leaves the terrain to the graphics setting");
-        assertTrue(terrain.fluffHidden(), "The Tactical View's draw rule");
-        verifyFluffHidden(view, terrain, scene);
+        assertTrue(terrain.scatterHidden(), "The Tactical View's draw rule");
+        verifyScatterHidden(view, terrain, scene);
         verifyBases(view, scene, bases);
         capture("tactical-view-top-enhanced.png");
+        verifyEffectsOverIcons(view, scene);
+        verifyAttackLineOverIcons(view, fixture);
+        verifyMarkerOverIcons(view, fixture);
         graphics(view, BoardGraphics.CLASSIC);
         assertTrue(terrain.columns(), "The Classic graphics build the tileset columns");
-        verifyFluffHidden(view, terrain, scene);
+        verifyScatterHidden(view, terrain, scene);
         capture("tactical-view-top-classic.png");
         verifyFieldOfView(view, scene);
         verifyPicking(view, scene);
@@ -460,19 +471,19 @@ class GpuTacticalViewSmokeTest {
         assertEquals(tilt, view.boardCamera.tilt());
         assertFalse(MeepleVisual.isMeeple(models.get("1:-1")), "The Atlas's model is back");
         assertFalse(terrain.columns());
-        assertFalse(terrain.fluffHidden(), "Leaving the Tactical View shows the fluff again");
+        assertFalse(terrain.scatterHidden(), "Leaving the Tactical View shows the scatter again");
         capture("tactical-view-restored.png");
 
-        // Straight down and zoomed far out, the 3D view still shows its models: only T switches to the meeples.
+        // Straight down and zoomed far out, the 3D view still shows its models: only T switches to the icons.
         view.boardCamera.orbit(0, -BoardCamera.MAX_TILT);
         render(view);
         assertEquals(0, view.boardCamera.tilt());
         view.boardCamera.zoom(20 / view.boardCamera.camera.zoom);
         render(view);
         assertFalse(view.boardCamera.tactical());
-        assertFalse(MeepleVisual.isMeeple(models.get("1:-1")), "No zoom or angle turns the 3D models into meeples");
+        assertFalse(MeepleVisual.isMeeple(models.get("1:-1")), "No zoom or angle turns the 3D models into icons");
         assertFalse(terrain.columns(), "No zoom or angle turns the terrain into tileset columns");
-        assertFalse(terrain.fluffHidden(), "No zoom or angle hides the fluff");
+        assertFalse(terrain.scatterHidden(), "No zoom or angle hides the scatter");
         SwingUtilities.invokeAndWait(() -> {
             assertEquals(OWN, fixture.entity.getPosition());
             assertEquals(0, fixture.entity.getFacing());
@@ -636,7 +647,92 @@ class GpuTacticalViewSmokeTest {
      * (GpuTerrain#builtBridge), stays drawn with the opaque terrain; a click on any hex picks the same hex and floor, and
      * the overlays and labels drape on the same surfaces, as with the fluff shown: the rule hides at draw time only.
      */
-    private static void verifyFluffHidden(GpuBattleView view, GpuTerrain terrain, BoardScene scene) throws Exception {
+    /** A laser's impact shows on the icon it strikes: the scene's effects see the board beneath the icons. */
+    private static void verifyEffectsOverIcons(GpuBattleView view, BoardScene scene) {
+        Vector3 icon = screen(view, ENEMY, new Vector3());
+        Pixmap plain = frame(view, true);
+        assertEquals(0, glowing(plain, icon), "Nothing glows on the icon before the shot");
+        plain.dispose();
+        var playback = (UnitPlayback) field(view, "playback");
+        playback.accept(List.of(UnitPlaybackFixture.attack(unit(scene, OWN), unit(scene, ENEMY), ResolvedAttack.Kind.SHOT, true)),
+              scene, ignored -> false);
+        playback.advance(0, UnitMotion.Speed.NORMAL);
+        int lit = 0;
+        // Inside create() a frame's delta stays 0: the test steps the clock.
+        while (playback.attack() != null) {
+            playback.advance(.05, UnitMotion.Speed.NORMAL);
+            Pixmap shot = frame(view, true);
+            int glow = glowing(shot, icon);
+            if (glow > lit) {
+                lit = glow;
+                capture("tactical-view-shot.png");
+            }
+            shot.dispose();
+        }
+        render(view);
+        assertTrue(lit > 10, "The impact shows on the icon: " + lit);
+    }
+
+    /** A collapse warning on a unit's hex shows, on the unit's ring. */
+    private static void verifyMarkerOverIcons(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
+        Pixmap plain = frame(view, true);
+        var warning = List.of(new TacticalMark.CollapseWarning(ENEMY));
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.view.addMarks(warning);
+            fixture.source.refresh();
+        });
+        Pixmap marked = frame(view, true);
+        capture("tactical-view-marker.png");
+        Vector3 coin = view.boardCamera.camera.project(((GpuMarkers) field(view, "markers")).locatedInstances().values()
+              .iterator().next().transform.getTranslation(new Vector3()));
+        int shown = difference(plain, marked, new Vector3(coin.x, Gdx.graphics.getHeight() - coin.y, 0));
+        plain.dispose();
+        marked.dispose();
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.view.removeMarks(warning);
+            fixture.source.refresh();
+        });
+        render(view);
+        assertTrue(shown > 40, "The warning shows on an occupied hex: " + shown);
+    }
+
+    /** A declared attack's line ends on top of its target's icon. */
+    private static void verifyAttackLineOverIcons(GpuBattleView view, GpuBoardFixture fixture) throws Exception {
+        Pixmap plain = frame(view, true);
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.game.addAction(new WeaponAttackAction(fixture.entity.getId(), 2,
+                  fixture.entity.getEquipmentNum(fixture.entity.getWeaponList().getFirst())));
+            fixture.view.refreshAttacks();
+            fixture.source.refresh();
+        });
+        Pixmap lined = frame(view, true);
+        capture("tactical-view-attack-line.png");
+        int shown = difference(plain, lined, screen(view, ENEMY, new Vector3()));
+        plain.dispose();
+        lined.dispose();
+        SwingUtilities.invokeAndWait(() -> {
+            fixture.game.clearActions();
+            fixture.view.refreshAttacks();
+            fixture.source.refresh();
+        });
+        render(view);
+        assertTrue(shown > 40, "The attack line shows over the icon: " + shown);
+    }
+
+    /** The pixels within 24 of a window point (y down), inside a unit's base, in the fire colours no icon or ground has. */
+    private static int glowing(Pixmap frame, Vector3 point) {
+        int count = 0;
+        for (int dy = -24; dy <= 24; dy++) {
+            for (int dx = -24; dx <= 24; dx++) {
+                int rgba = pixel(frame, point.x + dx, Gdx.graphics.getHeight() - point.y + dy);
+                int red = rgba >>> 24, green = (rgba >>> 16) & 255, blue = (rgba >>> 8) & 255;
+                if (red > green + 60 && red > blue + 60) { count++; }
+            }
+        }
+        return count;
+    }
+
+    private static void verifyScatterHidden(GpuBattleView view, GpuTerrain terrain, BoardScene scene) throws Exception {
         Map<String, Integer> drawn;
         int decks;
         try (var audit = new GpuDrawCallAudit(view)) {
@@ -644,29 +740,27 @@ class GpuTacticalViewSmokeTest {
             drawn = audit.totals();
             decks = audit.draws("opaque", Attribute.getAttributeType("boardBridgeDeck"));
         }
-        for (String source : List.of("grass", "scatter", "water", "props-batched")) {
+        for (String source : List.of("grass", "scatter")) {
             assertEquals(0, drawn.getOrDefault(source, 0), "The Tactical View draws no " + source + ": " + drawn);
         }
         if (!terrain.columns()) {
             assertTrue(decks > 0, "The bridge's deck is drawn with the opaque terrain: " + drawn);
-            // A woods cover keeps its look: its trees and its container yard's rows, under the cover overlay.
             assertTrue(drawn.getOrDefault("instanced-trees", 0) > 0, "The Tactical View draws the woods' trees: " + drawn);
         }
-        assertTrue(drawn.keySet().stream().noneMatch(family -> family.startsWith("water-")), "No water: " + drawn);
         List<Object> hidden = new ArrayList<>(), shown = new ArrayList<>();
-        for (boolean fluff : new boolean[] { true, false }) {
-            terrain.setFluffHidden(fluff);
+        for (boolean clean : new boolean[] { true, false }) {
+            terrain.setScatterHidden(clean);
             for (BoardScene.Tile tile : scene.tiles()) {
                 Vector3 centre = BoardGeometry.center(tile.coords(), 0);
                 var down = new Ray(new Vector3(centre.x, centre.y, 1000), new Vector3(0, 0, -1));
-                List<Object> picks = fluff ? hidden : shown;
+                List<Object> picks = clean ? hidden : shown;
                 picks.add(terrain.selectionHit(scene, down));
                 picks.add(terrain.walkableHit(scene, down));
                 picks.add(terrain.tacticalSurface(tile.coords()));
             }
         }
-        terrain.setFluffHidden(true);
-        assertEquals(shown, hidden, "Hiding the fluff changes no pick and no draped surface");
+        terrain.setScatterHidden(true);
+        assertEquals(shown, hidden, "Hiding the scatter changes no pick and no draped surface");
     }
 
     private static void capture(String name) {
@@ -755,7 +849,7 @@ class GpuTacticalViewSmokeTest {
         return view.screenPosition(coords).add(offset.x / zoom, -offset.y / zoom, 0);
     }
 
-    /** Art pixels of the Classic columns pick their own hex; a click on a meeple picks its unit. */
+    /** Art pixels of the Classic columns pick their own hex; a click on an icon picks its unit. */
     private static void verifyPicking(GpuBattleView view, BoardScene scene) throws Exception {
         for (Coords coords : List.of(BUILDING, BRIDGE, FUEL_TANK)) {
             var art = scene.tile(coords).tileset();
@@ -775,7 +869,7 @@ class GpuTacticalViewSmokeTest {
             assertEquals(coords, pick(view, view.screenPosition(coords)));
         }
         for (Coords coords : List.of(OWN, ENEMY)) {
-            assertEquals(coords, pick(view, view.screenPosition(coords)), "A click on the meeple picks its unit");
+            assertEquals(coords, pick(view, view.screenPosition(coords)), "A click on the icon picks its unit");
         }
     }
 

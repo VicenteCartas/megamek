@@ -140,9 +140,9 @@ class GpuInfantryRoughSmokeTest {
     private static Map<String, Vector3> positions(GpuBattleView view) throws Exception {
         // A replaced board loads behind the loading screen before it can be inspected.
         GpuBoardTestUi.present(view);
-        BoardScene scene = (BoardScene) field(view, "scene");
-        var instances = (Map<?, ?>) field(view, "unitInstances");
-        var models = (GpuUnitModels) field(view, "unitModels");
+        BoardScene scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        var instances = (Map<?, ?>) GpuTestSupport.field(view, "unitInstances");
+        var models = (GpuUnitModels) GpuTestSupport.field(view, "unitModels");
         Map<String, Vector3> result = new LinkedHashMap<>();
         for (var unit : scene.units()) {
             ModelInstance instance = (ModelInstance) instances.get(unit.id() + ":-1");
@@ -160,10 +160,10 @@ class GpuInfantryRoughSmokeTest {
 
     private static void verifyFeet(GpuBattleView view) throws Exception {
         GpuBoardTestUi.present(view);
-        BoardScene scene = (BoardScene) field(view, "scene");
-        var instances = (Map<?, ?>) field(view, "unitInstances");
-        var models = (GpuUnitModels) field(view, "unitModels");
-        var surfaces = (BoardSurface.Cache) field(view, "groundSurfaces");
+        BoardScene scene = (BoardScene) GpuTestSupport.field(view, "scene");
+        var instances = (Map<?, ?>) GpuTestSupport.field(view, "unitInstances");
+        var models = (GpuUnitModels) GpuTestSupport.field(view, "unitModels");
+        var surfaces = (BoardSurface.Cache) GpuTestSupport.field(view, "groundSurfaces");
         for (var unit : scene.units()) {
             if (unit.id() == 1) { continue; }
             ModelInstance instance = (ModelInstance) instances.get(unit.id() + ":-1");
@@ -201,7 +201,7 @@ class GpuInfantryRoughSmokeTest {
 
     /** Fill a narrow plateau with two broad intersecting rocks so there genuinely is no remaining gap. */
     private static void crowdedRocks(GpuBattleView view) throws Exception {
-        BoardScene original = (BoardScene) field(view, "scene");
+        BoardScene original = (BoardScene) GpuTestSupport.field(view, "scene");
         var unit = original.units().stream().filter(value -> value.id() == 2).findFirst().orElseThrow();
         var tiles = original.tiles().stream().map(tile -> {
             if (!tile.coords().equals(unit.location().coords())) { return tile; }
@@ -211,7 +211,7 @@ class GpuInfantryRoughSmokeTest {
                   List.of(), BoardLiquid.NONE, null, true);
         }).toList();
         BoardScene scene = new BoardScene(0, original.width(), original.height(), tiles, List.of(unit), List.of(), -1, "", List.of());
-        var model = ((GpuUnitModels) field(view, "unitModels")).get(unit.model(), unit.id());
+        var model = ((GpuUnitModels) GpuTestSupport.field(view, "unitModels")).get(unit.model(), unit.id());
         var instance = new ModelInstance(model.instance);
         var surfaces = new BoardSurface.Cache();
         var animator = new UnitAnimator(surfaces, () -> scene);
@@ -219,11 +219,5 @@ class GpuInfantryRoughSmokeTest {
         model.place(instance, view.boardCamera.camera, BoardGeometry.center(unit.location().coords(), unit.location().elevation()), 0, unit);
         animator.groundSupports(scene, unit, UnitMotion.Sample.STILL);
         assertTrue(verifyFeet(scene, unit, instance, model, surfaces) > 0, "When no clear spot fits, stand on the rocks");
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

@@ -15,6 +15,15 @@ final class BoardRiver {
     private static final float MAX_GRADIENT = 2.8f;
     /** World units of slack for float rounding in a channel's bound before it may be skipped. */
     private static final float CLEARANCE_MARGIN = .05f;
+    /** Half the width, in hex-scale units, of the strip of land along a separated side, and how far it wanders. */
+    private static final float STRIP = 8, STRIP_WANDER = 1.5f;
+    /**
+     * The shares of a side at a strip's free end: open water from the corner, so no land reaches it, then the round nose,
+     * over about the strip's width.
+     */
+    private static final float STRIP_OPEN = .22f, STRIP_TIP = .2f;
+    /** Width, in hex-scale units, of the rounding where two strips meet at a bend. */
+    private static final float STRIP_ROUND = 8;
     private final BoardScene scene;
     private final float scale = BoardGeometry.hexScale();
     private final float width = BoardGeometry.width(), height = BoardGeometry.height();
@@ -23,7 +32,47 @@ final class BoardRiver {
     private int column = Integer.MIN_VALUE, evenRow, oddRow;
     private final List<Sample> window = new ArrayList<>(25);
 
-    private record Sample(float x, float y, boolean rounded, List<Channel> channels, List<float[]> lakes) { }
+    private record Sample(float x, float y, boolean rounded, List<Channel> channels, List<float[]> lakes, List<Strip> strips) { }
+
+    /**
+     * The strip of land along a separated side, from corner (ax, ay) to corner (bx, by). {@code tipA}, {@code tipB}: open
+     * water passes round that end, where the strip stops short of the corner in a round nose.
+     */
+    private record Strip(float ax, float ay, float bx, float by, boolean tipA, boolean tipB) {
+        float field(float x, float y, float half) {
+            float dx = bx - ax, dy = by - ay;
+            float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
+            float share = share(t);
+            // No land stands on the open stretch, so it is no shore either, not even a zero-width one.
+            return share == 0 ? Float.POSITIVE_INFINITY : length(x - ax - t * dx, y - ay - t * dy) - half * share;
+        }
+
+        /** How much of the strip's land stands at (x, y), a point within {@code reach} of its side; else 1. */
+        float land(float x, float y, float reach) {
+            float dx = bx - ax, dy = by - ay;
+            float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
+            return length(x - ax - t * dx, y - ay - t * dy) > reach ? 1 : share(t);
+        }
+
+        /** The share of a free end's depth at (x, y), a point within {@code reach} of the side: all at the corner, none at the nose. */
+        float openDepth(float x, float y, float reach) {
+            float dx = bx - ax, dy = by - ay;
+            float t = Math.clamp(((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy), 0, 1);
+            if (length(x - ax - t * dx, y - ay - t * dy) > reach) { return 0; }
+            float rise = Math.max(tipA ? 1 - Math.min(t / STRIP_OPEN, 1) : 0, tipB ? 1 - Math.min((1 - t) / STRIP_OPEN, 1) : 0);
+            return rise * rise;
+        }
+
+        /** The share of the strip's width at t along it: none on the open stretch of a free end. */
+        private float share(float t) { return (tipA ? nose(t) : 1) * (tipB ? nose(1 - t) : 1); }
+
+        /** Nothing within {@link #STRIP_OPEN}, then a blunt round end opening to the strip's full width. */
+        private static float nose(float t) {
+            if (t <= STRIP_OPEN) { return 0; }
+            float rest = 1 - Math.min((t - STRIP_OPEN) / STRIP_TIP, 1);
+            return (float) Math.sqrt(1 - rest * rest * rest * rest);
+        }
+    }
 
     /** Endpoint properties belong to a whole channel, not each of its six line segments. */
     private final class Channel {
@@ -164,6 +213,49 @@ final class BoardRiver {
         return result;
     }
 
+    /**
+     * How far (x, y) lies outside the strips of land along separated sides, in world units, negative on one; infinite
+     * where there are none. A coordinate-based query like {@link #field}: both hexes of a side see one strip.
+     */
+    float strips(float x, float y) {
+        window(x, y);
+        float result = Float.POSITIVE_INFINITY, half = Float.NaN;
+        for (Sample sample : window) {
+            for (Strip strip : sample.strips()) {
+                if (Float.isNaN(half)) {
+                    float cell = .3f * BoardRelief.WANDER_CELL * scale;
+                    half = (STRIP + STRIP_WANDER * BoardRelief.gradient(x / cell - 4.3f, y / cell + 5.9f)) * scale;
+                }
+                float field = strip.field(x, y, half);
+                result = result == Float.POSITIVE_INFINITY ? field : BoardRelief.smoothMin(result, field, STRIP_ROUND * scale);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * How much of a strip's land stands at (x, y) on a separated side: nothing on the open stretch past a free end's nose,
+     * rising through the nose to all of it; everywhere else 1.
+     */
+    float stripLand(float x, float y) {
+        window(x, y);
+        float land = 1;
+        for (Sample sample : window) {
+            for (Strip strip : sample.strips()) { land = Math.min(land, strip.land(x, y, .5f * scale)); }
+        }
+        return land;
+    }
+
+    /** How much of its free end's depth the bed keeps at (x, y) on the open stretch of a separated side; elsewhere none. */
+    float stripDepth(float x, float y) {
+        window(x, y);
+        float depth = 0;
+        for (Sample sample : window) {
+            for (Strip strip : sample.strips()) { depth = Math.max(depth, strip.openDepth(x, y, .5f * scale)); }
+        }
+        return depth;
+    }
+
     /** Successive shore samples normally share a search window; resolve its coordinates only when it changes. */
     private void window(float x, float y) {
         int nextColumn = Math.round((x - width / 2) / (.75f * width));
@@ -196,7 +288,30 @@ final class BoardRiver {
         boolean bend = Integer.bitCount(mask) == 2 && Integer.bitCount(starts) == 2
               && (mask & (mask << 3 | mask >> 3) & 63) == 0;
         return new Sample(BoardGeometry.centerX(coords), BoardGeometry.centerY(coords),
-              bend || Integer.bitCount(mask) >= 3 && Integer.bitCount(starts) >= 2, channels(coords), lakes);
+              bend || Integer.bitCount(mask) >= 3 && Integer.bitCount(starts) >= 2, channels(coords), lakes, strips(coords));
+    }
+
+    /** The strips along this hex's separated sides, each owned by one of its two hexes, as a channel's link is. */
+    private List<Strip> strips(Coords coords) {
+        List<Strip> result = new ArrayList<>(0);
+        BoardScene.Tile here = tile(coords);
+        for (int edge = 0; edge < 6; edge++) {
+            int d = BoardGeometry.edgeDirection(edge);
+            Coords other = coords.translated(d);
+            BoardScene.Tile next = scene.tile(other);
+            if (next == null || !water(next) || !here.separated(next, d)
+                  || other.getX() < coords.getX() || other.getX() == coords.getX() && other.getY() < coords.getY()) { continue; }
+            var a = BoardGeometry.corner(coords, 0, edge);
+            var b = BoardGeometry.corner(coords, 0, (edge + 1) % 6);
+            result.add(new Strip(a.x, a.y, b.x, b.y, free(coords, here, next, (edge + 5) % 6), free(coords, here, next, (edge + 1) % 6)));
+        }
+        return result;
+    }
+
+    /** Whether the hex across {@code edge} of {@code coords} holds water that joins both hexes of a separated side. */
+    private boolean free(Coords coords, BoardScene.Tile here, BoardScene.Tile next, int edge) {
+        BoardScene.Tile third = scene.tile(coords.translated(BoardGeometry.edgeDirection(edge)));
+        return third != null && water(third) && here.joins(third) && next.joins(third);
     }
 
     /** Board coordinates are finite floats; double products cannot overflow or underflow like float products. */
@@ -215,7 +330,7 @@ final class BoardRiver {
         for (int d = 0; d < 6; d++) {
             Coords other = coords.translated(d);
             BoardScene.Tile next = tile(other);
-            if (!water(next)) { continue; }
+            if (!linked(coords, d)) { continue; }
             // Each link has one owner and one ordering, including when queried by the other hex.
             if (other.getX() < coords.getX() || other.getX() == coords.getX() && other.getY() < coords.getY()) { continue; }
             boolean broadB = broad(other);
@@ -225,7 +340,7 @@ final class BoardRiver {
             float ty = before == null ? by - ay : (by - BoardGeometry.centerY(before)) / 2;
             float ux = after == null ? bx - ax : (BoardGeometry.centerX(after) - ax) / 2;
             float uy = after == null ? by - ay : (BoardGeometry.centerY(after) - ay) / 2;
-            boolean broad = water(tile(coords.translated((d + 1) % 6))) || water(tile(coords.translated((d + 5) % 6)));
+            boolean broad = linked(coords, (d + 1) % 6) || linked(coords, (d + 5) % 6);
             // Rotate the shared direction at each centre instead of moving the centre itself. The stream then
             // meanders through its hexes, and adjoining links use the same turn at their shared centre.
             float angle = broad ? 0 : meander(ax, ay);
@@ -266,11 +381,18 @@ final class BoardRiver {
         Coords result = null;
         for (int d = 0; d < 6; d++) {
             Coords next = here.translated(d);
-            if (next.equals(from) || !water(tile(next))) { continue; }
+            if (next.equals(from) || !linked(here, d)) { continue; }
             if (result != null) { return null; }
             result = next;
         }
         return result;
+    }
+
+    /** Whether the water at {@code coords} runs on in {@code direction}; beyond the board's edge nothing separates it. */
+    private boolean linked(Coords coords, int direction) {
+        Coords at = coords.translated(direction);
+        BoardScene.Tile here = tile(coords), next = tile(at);
+        return water(next) && (!here.coords().equals(coords) || !next.coords().equals(at) || !here.separated(next, direction));
     }
 
     private static boolean water(BoardScene.Tile tile) {
@@ -286,7 +408,7 @@ final class BoardRiver {
         if (!water(tile(coords))) { return -1; }
         int result = 0;
         for (int d = 0; d < 6; d++) {
-            if (water(tile(coords.translated(d)))) { result |= 1 << d; }
+            if (linked(coords, d)) { result |= 1 << d; }
         }
         return result;
     }

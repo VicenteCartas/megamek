@@ -2,6 +2,8 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -21,6 +23,7 @@ import megamek.common.board.Coords;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardWaterfallTest {
     @ParameterizedTest
@@ -69,10 +72,10 @@ class BoardWaterfallTest {
     @ParameterizedTest
     @EnumSource(TerrainLod.class)
     void domeVentWaterfallWallsAreClosedForLavaAndWater(TerrainLod lod) {
-        BoardScene lava = BoardCliffSeamTest.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
+        BoardScene lava = BoardScenes.scene(new File("data/boards/Map Pack Volcanic/16x17 Dome Vent 2.board"));
         for (BoardScene scene : List.of(lava, withWater(lava))) {
             for (boolean transitions : new boolean[] { false, true }) {
-                BoardSculptTest.withTransitions(transitions, () -> checkDomeVentCliffEnds(scene, lod));
+                BoardScenes.withTransitions(transitions, () -> checkDomeVentCliffEnds(scene, lod));
             }
         }
     }
@@ -388,7 +391,7 @@ class BoardWaterfallTest {
 
     @Test
     void terrainSlopeIncludesWaterDepthWhileSurfaceHeightStaysTheSame() {
-        BoardSculptTest.withTransitions(true, () -> {
+        BoardScenes.withTransitions(true, () -> {
             Coords water = new Coords(3, 3), land = water.translated(0);
             for (int depth : new int[] { 1, 2, 3 }) {
                 BoardScene scene = scene(3, depth);
@@ -424,5 +427,215 @@ class BoardWaterfallTest {
     private static BoardScene.Tile tile(Coords coords, int level, int depth) {
         return new BoardScene.Tile(coords, level, depth, false, 0, BoardScene.Surface.SAND, null, null, List.of(),
               List.of(), depth >= 0 ? BoardLiquid.WATER : BoardLiquid.NONE, null, true);
+    }
+
+    @Test
+    void waterfallsJoinTheUpperAndLowerWaterSurfacesOnlyOnceAndArePickable() {
+        Coords high = new Coords(2, 2);
+        for (int direction = 0; direction < 6; direction++) {
+            Coords low = high.translated(direction);
+            BoardScene scene = BoardScenes.riverScene(Map.of(high, 3, low, 0), false);
+            BoardSurface upper = new BoardSurface(scene, scene.tile(high));
+            BoardSurface lower = new BoardSurface(scene, scene.tile(low));
+            assertEquals(1, upper.waterfalls.size());
+            assertTrue(lower.waterfalls.isEmpty());
+            BoardSurface.Side fall = upper.waterfalls.getFirst();
+            assertEquals(BoardGeometry.waterZ(scene.tile(high)), fall.a().z, 0.001f);
+            assertEquals(BoardGeometry.waterZ(scene.tile(low)), fall.lowA(), 0.001f);
+            Vector3 point = new Vector3(fall.a()).lerp(fall.b(), 0.5f).add(0, 0, -2);
+            Vector3 outward = new Vector3(fall.b()).sub(fall.a()).crs(Vector3.Z).nor();
+            assertEquals(high, BoardGeometry.pick(scene, new Ray(new Vector3(point).mulAdd(outward, 6), outward.scl(-1))));
+        }
+        // Frozen falls keep their curtain and picking: BoardFrozenWaterfallTest.
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = { false, true })
+    void wallsBesideFallsMeetTheGradedBank(boolean frozen) {
+        Coords high = new Coords(2, 2);
+        for (int direction = 0; direction < 6; direction++) {
+            BoardScene scene = BoardScenes.riverScene(Map.of(high, 3, high.translated(direction), 0), frozen);
+            BoardSurface upper = new BoardSurface(scene, scene.tile(high));
+            int edge = upper.waterfalls.getFirst().edge();
+            int checked = 0;
+            for (BoardSurface.Side side : upper.sides(scene, BoardGeometry.floor(scene))) {
+                if (side.edge() != edge) { continue; }
+                Vector3 middle = new Vector3(side.a()).lerp(side.b(), .5f);
+                float bank = Float.NEGATIVE_INFINITY;
+                for (BoardSurface.Face face : upper.faces) {
+                    if (face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.SHORE) {
+                        bank = Math.max(bank, face.height(middle.x, middle.y));
+                    }
+                }
+                if (!Float.isFinite(bank)) { continue; } // The crest's submerged wall has no bank above it.
+                assertEquals(bank, middle.z, .03f,
+                      "The wall beside fall " + direction + " must close at the rendered bank: " + middle);
+                checked++;
+            }
+            assertTrue(checked > 0, "The fixture must contain bank walls beside the fall");
+        }
+    }
+
+    @Test
+    void fallsThatShareACornerTurnItTogetherWithoutAGap() {
+        Coords high = new Coords(3, 3);
+        // One pool falling over two neighbouring edges, then two pools side by side falling into one pool.
+        for (boolean twoPools : List.of(false, true)) {
+            Map<Coords, Integer> levels = new HashMap<>();
+            levels.put(high, 4);
+            if (twoPools) {
+                levels.put(high.translated(1), 4);
+                levels.put(high.translated(2), 1);
+            } else {
+                levels.put(high.translated(2), 1);
+                levels.put(high.translated(3), 1);
+            }
+            BoardScene scene = BoardScenes.riverScene(levels, false);
+            List<BoardSurface> pools = new ArrayList<>(List.of(new BoardSurface(scene, scene.tile(high))));
+            if (twoPools) { pools.add(new BoardSurface(scene, scene.tile(high.translated(1)))); }
+            List<Vector3[][]> sheets = new ArrayList<>();
+            List<BoardSurface> owners = new ArrayList<>();
+            for (BoardSurface pool : pools) {
+                for (BoardSurface.Side fall : pool.waterfalls) {
+                    sheets.add(GpuWaterfall.grid(pool, fall));
+                    owners.add(pool);
+                }
+            }
+            assertEquals(2, sheets.size(), "Two falls meet at the corner");
+            Vector3[] first = null, second = null;
+            for (Vector3[] columnA : List.of(sheets.get(0)[0], sheets.get(0)[sheets.get(0).length - 1])) {
+                for (Vector3[] columnB : List.of(sheets.get(1)[0], sheets.get(1)[sheets.get(1).length - 1])) {
+                    if (columnA[columnA.length - 1].dst(columnB[columnB.length - 1]) < 1) {
+                        first = columnA;
+                        second = columnB;
+                    }
+                }
+            }
+            assertNotNull(first, "The sheets must end at the same corner");
+            for (int row = 0; row < first.length; row++) {
+                assertTrue(first[row].epsilonEquals(second[row], 0.01f),
+                      "Both sheets turn the corner on the same vertices, row " + row + ": " + first[row] + " " + second[row]);
+            }
+            // Where the water leaves the pool, the sheet starts on the pool's own pulled-back edge.
+            Vector3 crest = first[0];
+            for (BoardSurface pool : owners) {
+                assertTrue(pool.water.stream().anyMatch(point -> point.epsilonEquals(crest, 0.01f)),
+                      "Each pool's surface reaches the shared crest corner: " + crest);
+            }
+        }
+    }
+
+    @Test
+    void fallsAlongARowCurveRoundEveryCornerAndMeetWithoutAGap() {
+        // A lake spilling along a whole row of hexes: its edge zigzags, prows and valleys by turns.
+        Map<Coords, Integer> levels = new HashMap<>();
+        for (int x = 1; x <= 7; x++) {
+            levels.put(new Coords(x, 2), 3);
+            levels.put(new Coords(x, 3), 0);
+            levels.put(new Coords(x, 4), 0);
+        }
+        BoardScene scene = BoardScenes.riverScene(levels, false);
+        float floor = BoardGeometry.floor(scene);
+        List<BoardSurface> pools = new ArrayList<>();
+        for (int x = 1; x <= 7; x++) { pools.add(new BoardSurface(scene, scene.tile(new Coords(x, 2)))); }
+        List<Vector3[]> ends = new ArrayList<>();
+        List<Vector3> crestEnds = new ArrayList<>();
+        List<BoardSurface.Side> walls = new ArrayList<>();
+        int joined = 0, falls = 0;
+        for (BoardSurface pool : pools) {
+            for (BoardSurface.Face face : pool.faces) {
+                if (face.finish() == BoardSurface.Finish.BED) {
+                    Vector3 normal = new Vector3(face.b()).sub(face.a()).crs(new Vector3(face.c()).sub(face.a()));
+                    assertTrue(normal.z > 0, "The bed reaching out to a crest never folds at " + pool.tile.coords());
+                }
+            }
+            walls.addAll(pool.sides(scene, floor));
+            for (BoardSurface.Side fall : pool.waterfalls) {
+                BoardSurface.Crest crest = pool.crest(fall);
+                Coords below = pool.tile.coords().translated(BoardGeometry.edgeDirection(fall.edge()));
+                Vector3 a = BoardGeometry.corner(pool.tile.coords(), 0, fall.edge());
+                Vector3 b = BoardGeometry.corner(pool.tile.coords(), 0, fall.edge() + 1);
+                Vector3 outward = new Vector3(b).sub(a).crs(Vector3.Z).nor();
+                for (int k = 0; k <= 24; k++) {
+                    Vector3 point = crest.point(k / 24f);
+                    float out = new Vector3(point).sub(a).dot(outward);
+                    assertTrue(out > -0.01f && out < (BoardSurface.VALLEY + .01f) * BoardGeometry.HEX_SCALE,
+                          "The crest bows out a little over the pool below, never into its own hex: " + out);
+                    Vector3 inward = BoardGeometry.center(below, 0).sub(point.x, point.y, 0).nor().scl(.01f);
+                    assertTrue(BoardGeometry.contains(below, point.x + inward.x, point.y + inward.y),
+                          "The crest stays over the pool it falls into: " + point);
+                }
+                Vector3[][] grid = GpuWaterfall.grid(pool, fall);
+                ends.add(grid[0]);
+                ends.add(grid[grid.length - 1]);
+                crestEnds.add(crest.a());
+                crestEnds.add(crest.b());
+                joined += (pool.fallJoins(fall, true) ? 1 : 0) + (pool.fallJoins(fall, false) ? 1 : 0);
+                falls++;
+            }
+        }
+        assertEquals(13, falls, "The row falls over every edge it shares with the lake below");
+        assertEquals(2 * (falls - 1), joined, "Every corner along the row carries the fall on into the next");
+        for (int i = 0; i < ends.size(); i++) {
+            for (int j = i + 1; j < ends.size(); j++) {
+                if (ends.get(i)[0].dst(ends.get(j)[0]) > 1) { continue; }
+                for (int row = 0; row < ends.get(i).length; row++) {
+                    assertTrue(ends.get(i)[row].epsilonEquals(ends.get(j)[row], 0.01f),
+                          "Neighbouring sheets turn each corner on the same vertices, row " + row);
+                }
+            }
+        }
+        // The walls beneath the crests run on from one fall to the next: every crest end tops one.
+        for (Vector3 end : crestEnds) {
+            long meeting = walls.stream().filter(side -> side.a().dst(end.x, end.y, side.a().z) < 0.01f
+                  || side.b().dst(end.x, end.y, side.b().z) < 0.01f).count();
+            assertTrue(meeting >= 1, "A wall stands under the crest at " + end);
+        }
+    }
+
+    @Test
+    void poolsSharingAnEdgeChurnWithTheSameFallsNearIt() {
+        Map<Coords, Integer> levels = new HashMap<>();
+        for (int x = 1; x <= 7; x++) {
+            levels.put(new Coords(x, 2), 3);
+            levels.put(new Coords(x, 3), 0);
+            levels.put(new Coords(x, 4), 0);
+        }
+        BoardScene scene = BoardScenes.riverScene(levels, false);
+        Map<Coords, BoardSurface> surfaces = new HashMap<>();
+        java.util.function.Function<Coords, BoardSurface> lookup = coords -> {
+            BoardScene.Tile tile = scene.tile(coords);
+            return tile == null || !tile.liquid().present() ? null
+                  : surfaces.computeIfAbsent(coords, key -> new BoardSurface(scene, tile));
+        };
+        Map<Coords, List<GpuWaterShader.Impact>> impacts = new HashMap<>();
+        for (int x = 1; x <= 7; x++) {
+            for (int y = 3; y <= 4; y++) {
+                Coords coords = new Coords(x, y);
+                impacts.put(coords, GpuWaterShader.impacts(scene, scene.tile(coords), lookup));
+            }
+        }
+        assertFalse(impacts.get(new Coords(4, 3)).isEmpty(), "A pool below falls churns");
+        for (var entry : impacts.entrySet()) {
+            for (int direction = 0; direction < 6; direction++) {
+                List<GpuWaterShader.Impact> other = impacts.get(entry.getKey().translated(direction));
+                if (other == null) { continue; }
+                int edge = Math.floorMod(1 - direction, 6);
+                Vector3 a = BoardGeometry.corner(entry.getKey(), 0, edge);
+                Vector3 b = BoardGeometry.corner(entry.getKey(), 0, edge + 1);
+                for (GpuWaterShader.Impact impact : entry.getValue()) {
+                    // The shader's boil reaches at most 2.1 radii from its landing, and behind a curtain a further
+                    // 0.085 hex widths; one that can reach the shared edge churns both sides of it, so no seam shows.
+                    float reach = 2.1f * impact.radius() + .085f * BoardGeometry.WIDTH, nearest = Float.MAX_VALUE;
+                    for (int k = 0; k <= 20; k++) {
+                        Vector3 point = new Vector3(a).lerp(b, k / 20f);
+                        nearest = Math.min(nearest, BoardScenes.distance(point, impact.from(), impact.to()));
+                    }
+                    if (nearest < reach) {
+                        assertTrue(other.contains(impact), "Both pools churn with a landing near their edge");
+                    }
+                }
+            }
+        }
     }
 }

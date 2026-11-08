@@ -58,7 +58,7 @@ class GpuWallSmokeTest {
                         terrain.setColumns(classic);
                         terrain.update(scene);
                         frame.prepare(terrain, camera, scene);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         assertTrue(terrain.ready(scene));
                         terrain.animate(0, List.of(), .2f, center, BoardGeometry.level());
                         for (Coords coords : walls.keySet()) {
@@ -72,10 +72,10 @@ class GpuWallSmokeTest {
                                   "The authored roof caps the wall's complete rules levels");
                             assertNotNull(terrain.selectionHit(scene, ray), "The rendered wall remains selectable");
                         }
-                        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-                            assertTrue(((List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "struts")).isEmpty(),
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            assertTrue(((List<?>) GpuTestSupport.field(chunk, "struts")).isEmpty(),
                                   "A solid wall has no fabricated building floors or interior struts");
-                            assertNull(GpuMixedUnitBenchmarkSmokeTest.field(chunk, "hoverCoords"),
+                            assertNull(GpuTestSupport.field(chunk, "hoverCoords"),
                                   "Ground beside a wall is not an interior floor to cut away");
                         }
                         frame.render(terrain, camera, scene);
@@ -115,7 +115,7 @@ class GpuWallSmokeTest {
                     camera.center(BoardGeometry.center(center.translated(3, 2), 1.5f));
                     camera.camera.zoom = .18f;
                     camera.update();
-                    GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                    GpuReviewFrame.settle(terrain, null, scene, camera);
                     frame.render(terrain, camera, scene);
                     GpuReviewFrame.save(new File(output, "fortress-detail.png"));
                     assertTrue(wallLodCount(terrain, 0) > 0, "Close walls draw the detailed mesh");
@@ -124,7 +124,7 @@ class GpuWallSmokeTest {
                     camera.update();
                     renderReady(frame, terrain, camera, scene);
                     assertTrue(wallLodCount(terrain, 2) > 0, "Distant wall slots reuse the actual simpler LOD1 mesh");
-                    scene = BoardWallHeightTest.mixedScene();
+                    scene = BoardWallTest.mixedScene();
                     terrain.update(scene);
                     camera.setIsometric(true);
                     camera.center(BoardGeometry.center(center, 2));
@@ -195,7 +195,7 @@ class GpuWallSmokeTest {
         renderReady(frame, terrain, camera, scene);
         GpuReviewFrame.save(new File(output, "cf-families-top.png"));
 
-        var assets = (GpuAssets) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "assets");
+        var assets = (GpuAssets) GpuTestSupport.field(terrain, "assets");
         var civilian = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 10));
         var castle = assets.wallLevels(BoardWall.layout("buildings/wall-9", 2, 151));
         assertNotSame(civilian, castle, "The cache distinguishes identical layouts from different families");
@@ -209,10 +209,10 @@ class GpuWallSmokeTest {
         terrain.update(changed);
         renderReady(frame, terrain, camera, changed);
         boolean replaced = false;
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "props")) {
-                if (edited.equals(GpuMixedUnitBenchmarkSmokeTest.field(prop, "coords"))) {
-                    assertSame(civilian.getFirst(), GpuMixedUnitBenchmarkSmokeTest.field(prop, "pickingModel"),
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                if (edited.equals(GpuTestSupport.field(prop, "coords"))) {
+                    assertSame(civilian.getFirst(), GpuTestSupport.field(prop, "pickingModel"),
                           "A CF-only edit replaces the installed draw and picking model");
                     replaced = true;
                 }
@@ -232,7 +232,7 @@ class GpuWallSmokeTest {
           throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
             frame.prepare(terrain, camera, scene);
-            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+            GpuReviewFrame.settle(terrain, null, scene, camera);
             frame.render(terrain, camera, scene);
             if (terrain.ready(scene) && !terrain.busy()) { return; }
         }
@@ -241,19 +241,19 @@ class GpuWallSmokeTest {
 
     private static int wallLodCount(GpuTerrain terrain, int expected) throws Exception {
         int count = 0;
-        for (Object chunk : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(terrain, "chunks")) {
-            for (Object prop : (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(chunk, "props")) {
-                var levels = (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(prop, "levels");
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                var levels = (List<?>) GpuTestSupport.field(prop, "levels");
                 if (levels == null || levels.size() < 3) { continue; }
                 assertEquals(4, levels.size());
                 assertNotSame(levels.get(0), levels.get(1));
                 assertSame(levels.get(1), levels.get(2));
                 assertSame(levels.get(1), levels.get(3));
-                assertSame(levels.getFirst(), GpuMixedUnitBenchmarkSmokeTest.field(prop, "pickingModel"));
+                assertSame(levels.getFirst(), GpuTestSupport.field(prop, "pickingModel"));
                 var near = (Model) levels.get(0);
                 var far = (Model) levels.get(2);
                 assertTrue(indices(far) < indices(near));
-                if ((int) GpuMixedUnitBenchmarkSmokeTest.field(prop, "lod") == expected) { count++; }
+                if ((int) GpuTestSupport.field(prop, "lod") == expected) { count++; }
             }
         }
         return count;

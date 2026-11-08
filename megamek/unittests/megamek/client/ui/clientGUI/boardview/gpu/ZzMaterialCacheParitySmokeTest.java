@@ -66,36 +66,36 @@ class ZzMaterialCacheParitySmokeTest {
         boolean sweep = Boolean.getBoolean("megamek.gpu.cacheSweep");
         boolean zoomIn = Boolean.getBoolean("megamek.gpu.cacheZoomIn");
         float waitSeconds = Float.parseFloat(System.getProperty("megamek.gpu.cacheWaitSeconds", "40"));
-        File output = new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, "material-cache");
+        File output = new File(GpuCalibrationScenes.OUTPUT, "material-cache");
         Files.createDirectories(output.toPath());
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         List<Target> targets = new ArrayList<>();
         if (boards.contains("calibration")) {
-            targets.add(new Target("calibration", GpuDepthPrepassBaselineSmokeTest.scene(
-                  GpuDepthPrepassBaselineSmokeTest.CALIBRATION), List.of(GpuDepthPrepassBaselineSmokeTest.FOOT),
+            targets.add(new Target("calibration", GpuCalibrationScenes.scene(
+                  GpuCalibrationScenes.CALIBRATION), List.of(GpuCalibrationScenes.FOOT),
                   List.of("")));
         }
         File grassFile = new File("data/boards/Beginner Box/16x17 Grassland 1.board");
         if (boards.contains("grass")) {
-            targets.add(new Target("grassland", GpuDepthPrepassBaselineSmokeTest.scene(grassFile),
+            targets.add(new Target("grassland", GpuCalibrationScenes.scene(grassFile),
                   List.of(new Coords(8, 8)), List.of("")));
         }
         if (boards.contains("mines")) {
             // Grass and desert on one board, with water: blended tops and tops beside water (stage 2).
-            targets.add(new Target("mines", GpuDepthPrepassBaselineSmokeTest.scene(
+            targets.add(new Target("mines", GpuCalibrationScenes.scene(
                   new File("data/boards/unofficial/Kajis/16x17 Mines.board")), List.of(new Coords(8, 8)),
                   List.of("")));
         }
         if (boards.contains("city")) {
-            targets.add(new Target("city", GpuDepthPrepassBaselineSmokeTest.scene(
+            targets.add(new Target("city", GpuCalibrationScenes.scene(
                   new File("data/boards/unofficial/VictorMorson/48x48.board")), List.of(new Coords(24, 24)),
                   List.of("")));
         }
         long ocoeeLoad = 0;
         if (boards.contains("ocoee")) {
             long start = System.nanoTime();
-            BoardScene ocoee = GpuDepthPrepassBaselineSmokeTest.scene(
+            BoardScene ocoee = GpuCalibrationScenes.scene(
                   new File("data/boards/unofficial/Lanceman/50x700 Ocoee.board"));
             ocoeeLoad = System.nanoTime() - start;
             targets.add(new Target("ocoee", ocoee, List.of(new Coords(25, 6), new Coords(25, 693)),
@@ -122,8 +122,8 @@ class ZzMaterialCacheParitySmokeTest {
                     }
                     for (Target target : targets) {
                         for (String light : lights.split(",")) {
-                            capture(target, light.equals("rain") ? GpuDepthPrepassBaselineSmokeTest.RAIN
-                                  : GpuDepthPrepassBaselineSmokeTest.NOON, light);
+                            capture(target, light.equals("rain") ? GpuCalibrationScenes.RAIN
+                                  : GpuCalibrationScenes.NOON, light);
                         }
                     }
                     report.append("GL error: ").append(Gdx.gl.glGetError()).append('\n');
@@ -140,7 +140,7 @@ class ZzMaterialCacheParitySmokeTest {
                 try {
                     var camera = new BoardCamera();
                     long start = System.nanoTime();
-                    GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, target.scene());
+                    GpuCalibrationScenes.prepare(terrain, frame, camera, target.scene());
                     report.append(String.format(Locale.ROOT, "%s build ms=%.0f%n", target.name(),
                           (System.nanoTime() - start) / 1e6));
                     if (isolate) {
@@ -157,7 +157,7 @@ class ZzMaterialCacheParitySmokeTest {
                                   + view.name();
                             terrain.setMaterialCache(false);
                             pose(camera, view, focus, 1);
-                            GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                            GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                             int compiles = GpuGlsl.compilesAfterLoading();
                             direct(terrain, frame, camera, scene, new File(output, base + "-direct.png"));
                             double directMs = frameMs(terrain, frame, camera, scene, 10);
@@ -217,7 +217,7 @@ class ZzMaterialCacheParitySmokeTest {
                 terrain.setMaterialCache(true);
                 for (var sweep : List.of(Map.entry("out", steps), Map.entry("in", back))) {
                     pose(camera, new View("crossing", sweep.getValue().get(0) * metre, true, 0, 1), focus, 1);
-                    GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                    GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                     settleCached(terrain, frame, camera, scene);
                     List<Float> zooms = sweep.getValue();
                     for (int i = 0; i < zooms.size(); i++) {
@@ -254,7 +254,7 @@ class ZzMaterialCacheParitySmokeTest {
                     for (int pass = 0; pass < 2; pass++) {
                         terrain.setMaterialCache(pass == 1);
                         pose(camera, new View("sweep", zooms.get(0), top, 0, 1), focus, 1);
-                        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                        GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                         for (int i = 0; i < zooms.size(); i++) {
                             pose(camera, new View("sweep", zooms.get(i), top, 0, 1), focus, 1);
                             terrain.refine(camera.camera);
@@ -309,7 +309,7 @@ class ZzMaterialCacheParitySmokeTest {
                   BoardScene scene, Vector3 focus, File output) throws Exception {
                 terrain.setMaterialCache(true);
                 pose(camera, VIEWS.get(2), focus, 1);
-                GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 settleCached(terrain, frame, camera, scene);
                 pose(camera, VIEWS.get(1), focus, 1);
                 int frames = 0, direct = 0;
@@ -333,7 +333,7 @@ class ZzMaterialCacheParitySmokeTest {
                   BoardScene after, Vector3 focus, File output) throws Exception {
                 terrain.setMaterialCache(true);
                 pose(camera, VIEWS.get(1), focus, 1);
-                GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 settleCached(terrain, frame, camera, scene);
                 terrain.update(after, camera.camera);
                 int frames = 0, direct = 0, rebuilding = 0;
@@ -420,7 +420,7 @@ class ZzMaterialCacheParitySmokeTest {
                         Vector3 tile = new Vector3(focus).mulAdd(right, spanX * ((i + .5f) / k - .5f))
                               .mulAdd(up, spanY * ((j + .5f) / k - .5f));
                         pose(camera, view, tile, k);
-                        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                        GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                         frame.render(terrain, camera, scene);
                         Pixmap pixels = Pixmap.createFromFrameBuffer(0, 0, width, height);
                         try {

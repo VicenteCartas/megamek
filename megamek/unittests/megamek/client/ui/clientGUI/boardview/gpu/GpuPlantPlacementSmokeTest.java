@@ -62,7 +62,7 @@ class GpuPlantPlacementSmokeTest {
                     for (float zoom : new float[] { .08f, 3, 48, .08f }) {
                         camera.camera.zoom = zoom;
                         camera.camera.update();
-                        GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                        GpuReviewFrame.settle(terrain, null, scene, camera);
                         var current = placements(terrain, lods);
                         assertEquals(plants.size(), current.size(), "Supported packed roots must not displace another colony");
                         if (original == null) { original = current; }
@@ -109,7 +109,7 @@ class GpuPlantPlacementSmokeTest {
                             for (float zoom : new float[] { .08f, 1, 3, 12, 48, .08f }) {
                                 camera.camera.zoom = zoom;
                                 camera.camera.update();
-                                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                                GpuReviewFrame.settle(terrain, null, scene, camera);
                                 var current = placements(terrain, lods);
                                 assertTrue(!current.isEmpty(), "The supported plant must remain present");
                                 if (BoardFungus.COVER.contains(asset)) {
@@ -164,21 +164,17 @@ class GpuPlantPlacementSmokeTest {
 
     private static List<String> placements(GpuTerrain terrain, Set<String> lods) throws Exception {
         var result = new ArrayList<String>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-            for (Object prop : (List<?>) field(chunk, "props")) {
-                if (!AT.equals(field(prop, "coords")) || !(boolean) field(prop, "cover")) { continue; }
-                result.add(java.util.Arrays.toString(((ModelInstance) field(prop, "instance")).transform.val));
-                lods.add(String.valueOf(field(chunk, "lod")));
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                // The plant itself: a tree of the stand, not the hex's scatter.
+                if (!AT.equals(GpuTestSupport.field(prop, "coords")) || GpuTestSupport.field(prop, "treeAsset") == null
+                      || (boolean) GpuTestSupport.field(prop, "scatter")) { continue; }
+                result.add(java.util.Arrays.toString(((ModelInstance) GpuTestSupport.field(prop, "instance")).transform.val));
+                lods.add(String.valueOf((Object) GpuTestSupport.field(chunk, "lod")));
             }
-            for (Object emitter : (List<?>) field(chunk, "spores")) { result.add(emitter.toString()); }
+            for (Object emitter : (List<?>) GpuTestSupport.field(chunk, "spores")) { result.add(emitter.toString()); }
         }
         result.sort(String::compareTo);
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        var field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

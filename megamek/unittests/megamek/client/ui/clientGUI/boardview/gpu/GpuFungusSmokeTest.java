@@ -56,7 +56,7 @@ class GpuFungusSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     terrain.update(scene);
                     assertEquals(occupiedHexes, terrain.fungusClouds(), "One cloud per large-mushroom hex");
                     terrain.animate(2, List.of());

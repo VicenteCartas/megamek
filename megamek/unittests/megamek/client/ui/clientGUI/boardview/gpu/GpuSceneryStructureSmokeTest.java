@@ -58,7 +58,7 @@ class GpuSceneryStructureSmokeTest {
                             camera.center(BoardGeometry.center(new Coords(2, 2), 0));
                             camera.camera.zoom = .10f;
                             camera.update();
-                            GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                            GpuReviewFrame.settle(terrain, null, scene, camera);
                             frame.render(terrain, camera, scene);
                             GpuReviewFrame.save(new File(output, samples.get(index).name()
                                   + (oblique ? "-oblique.png" : "-top.png")));

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
 // One optical model for the water surface and everything seen through it. The bed keeps the hue a column of water
 // passes; the surface removes the rest of what the column absorbs and adds its in-scattered light.
-uniform sampler2D u_waterDetail; // RG ripple slope, B foam noise, A caustic network; every channel tiles
+// SURFACE_NOISE
 // GpuOcean's swell, chop and ripple cascades: RG slope, B height in metres, A persistent breaking foam (none on the
 // ripples).
 uniform sampler2D u_waterOcean0;
@@ -58,8 +58,8 @@ vec3 waterTransmission(float palette, float levels) { return waterTransmission(w
 // Two drifting copies of one network; their minimum is a sharp web of focused light that keeps re-forming.
 float waterCaustics(vec2 position) {
     vec2 drift = vec2(0.021, 0.013) * u_rainTime;
-    float first = texture(u_waterDetail, position * 1.35 + drift).a;
-    float second = texture(u_waterDetail, position * 1.1 - drift.yx * 1.3 + 0.41).a;
+    float first = texture(u_surfaceNoise, vec3(position * 1.35 + drift, WATER_DETAIL)).a;
+    float second = texture(u_surfaceNoise, vec3(position * 1.1 - drift.yx * 1.3 + 0.41, WATER_DETAIL)).a;
     return min(first, second);
 }
 

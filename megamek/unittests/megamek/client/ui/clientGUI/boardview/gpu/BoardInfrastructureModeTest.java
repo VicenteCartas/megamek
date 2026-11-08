@@ -81,7 +81,7 @@ class BoardInfrastructureModeTest {
             for (var panel : RoadGradeFixture.Panel.values()) {
                 for (int direction = 0; direction < 6; direction++) {
                     for (int parity = 0; parity < 2; parity++) {
-                        var scene = GpuLegacyImportSmokeTest.scene(RoadGradeFixture.focused(concrete, panel,
+                        var scene = BoardScenes.scene(RoadGradeFixture.focused(concrete, panel,
                               "grade-curve", direction, parity));
                         var tile = scene.tile(RoadGradeFixture.focusedCenter(parity));
                         var source = BoardSurface.columns(scene, tile, TerrainLod.FULL);
@@ -127,7 +127,7 @@ class BoardInfrastructureModeTest {
                 var at = new Coords(2 + parity, 2);
                 var next = at.translated(direction);
                 int exits = 1 << direction;
-                var scene = BoardSurfaceBlendTest.scene(c -> BoardRoadTest.tile(c,
+                var scene = BoardScenes.scene(c -> BoardScenes.tile(c,
                       c.equals(at) ? BoardRoad.Kind.PAVED : BoardRoad.Kind.NONE,
                       c.equals(at) ? exits : 0, c.equals(next) ? 3 : 1, BoardScene.Surface.GRASS));
                 float floor = BoardGeometry.floor(scene), bankTop = BoardGeometry.surfaceZ(scene.tile(next));
@@ -149,7 +149,7 @@ class BoardInfrastructureModeTest {
 
     @Test
     void suppliedEnhancedSurfacesCannotChangeClassicGeometry() throws Exception {
-        var scene = GpuLegacyImportSmokeTest.scene(RoadGradeFixture.focused(false,
+        var scene = BoardScenes.scene(RoadGradeFixture.focused(false,
               RoadGradeFixture.Panel.BESIDE, "grade-high-bank", 1, 1));
         var at = RoadGradeFixture.focusedCenter(1);
         var tile = scene.tile(at);

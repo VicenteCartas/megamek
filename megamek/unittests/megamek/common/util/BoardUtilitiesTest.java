@@ -58,6 +58,18 @@ import org.junit.jupiter.api.Test;
  * @since 9/3/14 1:44 PM
  */
 class BoardUtilitiesTest {
+    /** A flipped sheet's separated sides flip with it, and a pavement's Edges stay. */
+    @Test void flippingABoardFlipsSeparatedSides() {
+        Board board = Board.createEmptyBoard(4, 4);
+        Hex hex = new Hex(0, "pavement:1", "");
+        hex.setAppearance(java.util.Map.of("pavement", HexAppearance.withSeparated(HexAppearance.EDGES_HEX, 1)));
+        board.setHex(1, 1, hex);
+        BoardUtilities.flip(board, false, true);
+        var flipped = board.getHex(1, 2).getAppearance();
+        assertEquals(8, HexAppearance.separated(flipped, "pavement"));
+        assertEquals(HexAppearance.Edges.HEX, HexAppearance.edges(flipped));
+    }
+
 
     /**
      * Moderate rain turns the clear ground ({@link Hex#isClear}), depth-0 water and dirt roads to mud (TO:AR p.57): a

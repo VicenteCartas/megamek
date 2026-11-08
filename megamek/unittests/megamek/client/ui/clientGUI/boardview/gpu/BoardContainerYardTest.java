@@ -181,7 +181,7 @@ class BoardContainerYardTest {
         var text = new ByteArrayOutputStream();
         BoardFile.write(board, text);
         String saved = text.toString(StandardCharsets.UTF_8);
-        assertTrue(saved.contains("\"vegetation\":{\"variant\":\"" + ROWS + "\",\"rotation\":60}"), saved);
+        assertTrue(saved.contains("\"appearance\":{\"variant\":\"" + ROWS + "\",\"rotation\":60}"), saved);
         assertFalse(saved.contains("fluff"), "The .board2 holds the look, not the token");
         assertFalse(saved.contains(BoardTreeDistribution.NO_TREES));
         Board reread = BoardFile.readNative(saved);

@@ -51,6 +51,61 @@ final class KitOutline {
     /** A kit piece: its tags ({@code -link-n-end-ne}...), its corner direction (null for a whole hex), floors and walls. */
     record Piece(String tags, Integer direction, List<List<double[]>> polygons, List<Wall> walls) { }
 
+    /**
+     * How a hex's wall ending at its corner c (between its sides c and c + 1; A across side c, B across c + 1) meets the
+     * wall of another hex that goes on from there, in an inside corner: its own wall square to side c (S0, a corner or
+     * band piece linked across c alone) or to side c + 1 (S1), or the wall closing its link across side c (C0) or c + 1
+     * (C1) above a shorter neighbour ({@link #closed}); then the other wall. Its end is carried on past the corner
+     * and cut on the mitre ({@link #junctionWall}, {@link #partnerNormal}); ConnectedKit finds them from the hexes
+     * around the corner. A hex's own walls meet within its pieces.
+     */
+    enum Junction {
+        /** B's wall square to side AB (a 60-degree notch); A's closing wall along AB. */
+        S0_NOTCH, S0_CAP,
+        /** A's wall square to side AB; B's closing wall along AB. */
+        S1_NOTCH, S1_CAP,
+        /** B's closing wall along AB; B's wall square to side c + 1. */
+        C0_CAP, C0_SQUARE,
+        /** A's closing wall along AB; A's wall square to side c. */
+        C1_CAP, C1_SQUARE
+    }
+
+    /** The wall whose end at corner {@code c} {@code junction} carries on, as its piece lays it. */
+    static Wall junctionWall(Junction junction, int c) {
+        double[] corner = hexCorner(c);
+        return switch (junction.name().substring(0, 2)) {
+            case "S0" -> new Wall(scaled(MIDPOINTS[(c + 1) % 6], NOSE / H), corner, End.CUT, End.OPEN, List.of(), false);
+            case "S1" -> new Wall(corner, scaled(MIDPOINTS[c % 6], NOSE / H), End.OPEN, End.CUT, List.of(), false);
+            case "C0" -> new Wall(corner, hexCorner(c + 5), End.OPEN, End.OPEN, List.of(), false);
+            default -> new Wall(hexCorner(c + 1), corner, End.OPEN, End.OPEN, List.of(), false);
+        };
+    }
+
+    /** The outward normal of the wall that {@code junction}'s end meets at corner {@code c}. */
+    static double[] partnerNormal(Junction junction, int c) {
+        double[] corner = hexCorner(c);
+        double[] e0 = unit(new double[] { MIDPOINTS[c % 6][0] - corner[0], MIDPOINTS[c % 6][1] - corner[1] });
+        double[] e1 = unit(new double[] { MIDPOINTS[(c + 1) % 6][0] - corner[0], MIDPOINTS[(c + 1) % 6][1] - corner[1] });
+        // Along the hexside between A and B, away from this hex.
+        double[] ab = unit(new double[] { -e0[0] - e1[0], -e0[1] - e1[1] });
+        return switch (junction) {
+            // A wall square to a side faces away from that side's middle; a cap faces the hex across it.
+            case S0_NOTCH, S1_NOTCH -> new double[] { -ab[0], -ab[1] };
+            case S0_CAP, C1_CAP -> across(ab, e1);
+            case S1_CAP, C0_CAP -> across(ab, e0);
+            case C1_SQUARE -> new double[] { -e0[0], -e0[1] };
+            case C0_SQUARE -> new double[] { -e1[0], -e1[1] };
+        };
+    }
+
+    /** The unit normal of a hexside along {@code side} on {@code toward}'s side. */
+    private static double[] across(double[] side, double[] toward) {
+        double[] normal = { -side[1], side[0] };
+        return normal[0] * toward[0] + normal[1] * toward[1] >= 0 ? normal : new double[] { -normal[0], -normal[1] };
+    }
+
+    private static double[] scaled(double[] point, double by) { return new double[] { point[0] * by, point[1] * by }; }
+
     static double cross(double[] a, double[] b) { return a[0] * b[1] - a[1] * b[0]; }
 
     /** The outward normal of a wall from p to q: its right. */
@@ -88,15 +143,26 @@ final class KitOutline {
     static double[] hexCorner(int direction) { return HEX[Math.floorMod(1 - direction, 6)]; }
 
     /** The corner piece between a direction and the next one clockwise: the half planes of its two cut lines. */
-    static List<GeneratedMesh.Keep> sector(int direction) {
+    static List<GeneratedMesh.Keep> sector(int direction) { return sector(direction, 0); }
+
+    /**
+     * How far a generated corner piece's own facade goes on past its cut lines, under the next piece's: the turned
+     * pieces' shared edge parts by float rounding, which shows as a line of pixels where it falls on their centres.
+     */
+    static final double SEAM_OVERLAP = .02;
+
+    /** {@link #sector(int)} with its cut lines {@code overlap} further out. */
+    static List<GeneratedMesh.Keep> sector(int direction, double overlap) {
         double[] a = MIDPOINTS[direction], b = MIDPOINTS[(direction + 1) % 6];
-        return List.of((x, y) -> -(a[0] * y - a[1] * x), (x, y) -> -(x * b[1] - y * b[0]));
+        double past = overlap * H;
+        return List.of((x, y) -> past - (a[0] * y - a[1] * x), (x, y) -> past - (x * b[1] - y * b[0]));
     }
 
     static boolean inSector(int direction, double[] point) {
         return sector(direction).stream().allMatch(keep -> keep.at(point[0], point[1]) >= 0);
     }
 
+    /** How far a point is inside the hex: a point test only. As a clip it cuts wrong where the nearest side changes. */
     static double insideHex(double x, double y) {
         double best = Double.POSITIVE_INFINITY;
         for (int i = 0; i < 6; i++) {
@@ -106,8 +172,21 @@ final class KitOutline {
         return best;
     }
 
+    /**
+     * The hex's six sides as half planes: unlike {@link #insideHex}, each linear, so a clip cuts exactly where a side
+     * crosses even when a vertex lies on another side.
+     */
+    static List<GeneratedMesh.Keep> hexSides() {
+        List<GeneratedMesh.Keep> result = new ArrayList<>(6);
+        for (int i = 0; i < 6; i++) {
+            double[] a = HEX[i], b = HEX[(i + 1) % 6];
+            result.add((x, y) -> (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]));
+        }
+        return result;
+    }
+
     /** The mitre at a corner between walls with outward normals n1 and n2: the half plane on {@code inside}'s side. */
-    private static GeneratedMesh.Keep mitre(double[] corner, double[] n1, double[] n2, double[] inside) {
+    static GeneratedMesh.Keep mitre(double[] corner, double[] n1, double[] n2, double[] inside) {
         double[] b = { n1[0] + n2[0], n1[1] + n2[1] };
         double sign = cross(b, new double[] { inside[0] - corner[0], inside[1] - corner[1] }) >= 0 ? 1 : -1;
         return (x, y) -> sign * cross(b, new double[] { x - corner[0], y - corner[1] });
@@ -261,7 +340,7 @@ final class KitOutline {
         int mask = (first ? 1 << direction : 0) | (second ? 1 << (direction + 1) % 6 : 0);
         List<List<double[]>> polygons = new ArrayList<>();
         List<GeneratedMesh.Keep> keeps = new ArrayList<>();
-        keeps.add(KitOutline::insideHex);
+        keeps.addAll(hexSides());
         keeps.addAll(sector(direction));
         for (Cell cell : cells(mask)) {
             var points = clipped(cell.corners(), keeps);
@@ -301,8 +380,58 @@ final class KitOutline {
         return walls;
     }
 
-    /** Close exposed links for a roof without changing its footprint; its deck and rim share the new mitred outline. */
-    static Piece closedRoof(Piece piece, int closed) {
+    /** A piece's links, a direction mask, from its tags ({@code -link-n}...). */
+    static int links(Piece piece) {
+        int links = 0;
+        for (int direction = 0; direction < 6; direction++) {
+            if ((piece.tags() + "-").contains("-link-" + DIRECTIONS[direction] + "-")) { links |= 1 << direction; }
+        }
+        return links;
+    }
+
+    /**
+     * Where a module (one hex's storey) meets its neighbours' across {@code links}, as walls with the module on their
+     * left, clipped to the hex where laid. Angled: each linked hexside. Square: a north or south link's hexside; a
+     * diagonal link's cell is a module of its own between two columns, met along both column edges (one wall for each
+     * side); linked both ways on a side, its two cells meet on the hex's axis.
+     */
+    static List<Wall> joints(boolean square, int links) {
+        List<Wall> result = new ArrayList<>();
+        for (int direction = 0; direction < 6; direction++) {
+            if ((links & 1 << direction) == 0) { continue; }
+            if (!square || direction == 0 || direction == 3) {
+                result.add(joint(hexCorner(direction), hexCorner((direction + 5) % 6)));
+            } else {
+                // The cell's two column edges, this hex's and its neighbour's, each from the hex's axis toward the
+                // hexside: the neighbour's tip of the cell lies in this hex, as this hex's in the neighbour's.
+                double y = direction == 1 || direction == 5 ? H : -H;
+                for (double x : direction < 3 ? new double[] { A, R } : new double[] { -A, -R }) {
+                    bothSides(result, new double[] { x, 0 }, new double[] { x, y });
+                }
+            }
+        }
+        for (int east = 0; square && east < 2; east++) {
+            int north = east == 0 ? 5 : 1, south = east == 0 ? 4 : 2;
+            if ((links & 1 << north) != 0 && (links & 1 << south) != 0) {
+                bothSides(result, new double[] { east == 0 ? -A : A, 0 }, new double[] { east == 0 ? -R : R, 0 });
+            }
+        }
+        return result;
+    }
+
+    private static Wall joint(double[] p, double[] q) { return new Wall(p, q, End.CORNER, End.CORNER, List.of(), false); }
+
+    private static void bothSides(List<Wall> result, double[] a, double[] b) {
+        result.add(joint(a, b));
+        result.add(joint(b, a));
+    }
+
+    /**
+     * Close exposed links without changing the footprint: a roof's above shorter neighbours (its deck and rim share the
+     * new mitred outline), a storey's beside them, each link's wall along the whole hexside, mitred with the piece's
+     * walls it meets.
+     */
+    static Piece closed(Piece piece, int closed) {
         List<Wall> walls = new ArrayList<>(piece.walls());
         for (int direction = 0; direction < 6; direction++) {
             if ((closed & 1 << direction) == 0) { continue; }

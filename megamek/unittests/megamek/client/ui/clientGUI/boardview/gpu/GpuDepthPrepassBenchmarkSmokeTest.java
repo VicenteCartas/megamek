@@ -25,7 +25,7 @@ import com.badlogic.gdx.graphics.g3d.shaders.BaseShader;
 import com.badlogic.gdx.graphics.g3d.utils.BaseShaderProvider;
 import com.badlogic.gdx.graphics.g3d.utils.ShaderProvider;
 import com.badlogic.gdx.utils.Array;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDepthPrepassBaselineSmokeTest.View;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuCalibrationScenes.View;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -57,13 +57,13 @@ class GpuDepthPrepassBenchmarkSmokeTest {
     private static final int ROUNDS = Integer.getInteger("megamek.gpu.prepassRounds", 4), SLOT_FRAMES = 30,
           WARM_FRAMES = 8;
     private static final List<Setting> SETTINGS = chosen("megamek.gpu.prepassSettings", List.of(
-          new Setting("off", NONE, GL20.GL_EQUAL), new Setting("all", ALL, GL20.GL_EQUAL),
-          new Setting("all-lequal", ALL, GL20.GL_LEQUAL),
-          new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+          new Setting("off", NONE, GL20.GL_LEQUAL), new Setting("all", ALL, GL20.GL_LEQUAL),
+          new Setting("all-equal", ALL, GL20.GL_EQUAL),
+          new Setting("trees", EnumSet.of(GpuTerrain.Prepass.FOLIAGE, GpuTerrain.Prepass.IMPOSTORS), GL20.GL_LEQUAL),
           new Setting("trees-cliffs", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_EQUAL),
+                GpuTerrain.Prepass.IMPOSTORS), GL20.GL_LEQUAL),
           new Setting("default", EnumSet.of(GpuTerrain.Prepass.CLIFFS, GpuTerrain.Prepass.FOLIAGE,
-                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_EQUAL),
+                GpuTerrain.Prepass.IMPOSTORS, GpuTerrain.Prepass.OBJECTS), GL20.GL_LEQUAL),
           without(GpuTerrain.Prepass.FOLIAGE), without(GpuTerrain.Prepass.IMPOSTORS)), Setting::name);
 
     /** A measured setting: the categories the pre-pass draws (none: off) and the colour pass's test for their draws. */
@@ -79,18 +79,18 @@ class GpuDepthPrepassBenchmarkSmokeTest {
 
     private static Setting without(GpuTerrain.Prepass category) {
         return new Setting("no-" + category.name().toLowerCase(Locale.ROOT), EnumSet.complementOf(EnumSet.of(category)),
-              GL20.GL_EQUAL);
+              GL20.GL_LEQUAL);
     }
 
     @Test
     void depthPrepassTimings() throws Exception {
-        BoardScene calibration = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.CALIBRATION);
-        BoardScene dome = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.DOME_VENT);
+        BoardScene calibration = GpuCalibrationScenes.scene(GpuCalibrationScenes.CALIBRATION);
+        BoardScene dome = GpuCalibrationScenes.scene(GpuCalibrationScenes.DOME_VENT);
         BoardScene forest = GpuForestBenchmarkSmokeTest.forest();
         List<String> boards = List.of(System.getProperty("megamek.gpu.prepassBoards", "calibration,forest,dome vent,city")
               .split("\s*,\s*"));
-        BoardScene city = boards.contains("city") ? GpuDepthPrepassBaselineSmokeTest.scene(CITY) : null;
-        BoardScene valencia = boards.contains("valencia") ? GpuDepthPrepassBaselineSmokeTest.scene(VALENCIA) : null;
+        BoardScene city = boards.contains("city") ? GpuCalibrationScenes.scene(CITY) : null;
+        BoardScene valencia = boards.contains("valencia") ? GpuCalibrationScenes.scene(VALENCIA) : null;
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         var config = GpuBoardWindow.configuration(false);
@@ -108,29 +108,29 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                           .append(" rounds, each setting twice a round for ").append(SLOT_FRAMES)
                           .append(" frames after ").append(WARM_FRAMES).append(" unmeasured; glFinish every frame\n");
                     if (boards.contains("calibration")) {
-                        measure("calibration", calibration, GpuDepthPrepassBaselineSmokeTest.RAIN, report,
-                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.calibrationViews(),
+                        measure("calibration", calibration, GpuCalibrationScenes.RAIN, report,
+                              chosen("megamek.gpu.prepassViews", GpuCalibrationScenes.calibrationViews(),
                                     View::name));
                     }
                     if (boards.contains("forest")) {
-                        measure("forest", forest, GpuDepthPrepassBaselineSmokeTest.NOON, report,
-                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.forestViews(forest),
+                        measure("forest", forest, GpuCalibrationScenes.NOON, report,
+                              chosen("megamek.gpu.prepassViews", GpuCalibrationScenes.forestViews(forest),
                                     View::name));
                     }
                     if (boards.contains("dome vent")) {
-                        measure("dome vent", dome, GpuDepthPrepassBaselineSmokeTest.NOON, report,
-                              chosen("megamek.gpu.prepassViews", GpuDepthPrepassBaselineSmokeTest.domeViews(dome),
+                        measure("dome vent", dome, GpuCalibrationScenes.NOON, report,
+                              chosen("megamek.gpu.prepassViews", GpuCalibrationScenes.domeViews(dome),
                                     View::name));
                     }
                     if (city != null) {
                         // The 48 by 48 city, where buildings shade most of the frame (step 5's census).
-                        measure("city", city, GpuDepthPrepassBaselineSmokeTest.NOON, report, chosen(
+                        measure("city", city, GpuCalibrationScenes.NOON, report, chosen(
                               "megamek.gpu.prepassViews", List.of(View.fitted("city fitted"),
                                     View.at("city middle", .5f, new Coords(24, 24))), View::name));
                     }
                     if (valencia != null) {
                         // Valencia City's low, spread-out buildings; the middle view at its densest block.
-                        measure("valencia", valencia, GpuDepthPrepassBaselineSmokeTest.NOON, report, chosen(
+                        measure("valencia", valencia, GpuCalibrationScenes.NOON, report, chosen(
                               "megamek.gpu.prepassViews", List.of(View.fitted("valencia fitted"),
                                     View.at("valencia middle", .5f, new Coords(96, 32))), View::name));
                     }
@@ -139,15 +139,15 @@ class GpuDepthPrepassBenchmarkSmokeTest {
                     failure.set(error);
                 } finally {
                     GpuTerrain.depthPrepass = previous;
-                    GpuTerrain.prepassDepthFunction = GL20.GL_EQUAL;
+                    GpuTerrain.prepassDepthFunction = GL20.GL_LEQUAL;
                     BoardCamera.renderScale = 1;
                     Gdx.app.exit();
                 }
             }
         }, config);
         System.out.print(report);
-        Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
-        Files.writeString(new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, "depth-prepass-benchmark.txt").toPath(),
+        Files.createDirectories(GpuCalibrationScenes.OUTPUT.toPath());
+        Files.writeString(new File(GpuCalibrationScenes.OUTPUT, "depth-prepass-benchmark.txt").toPath(),
               report);
         if (failure.get() != null) { throw new AssertionError("Depth pre-pass benchmark", failure.get()); }
     }
@@ -163,16 +163,16 @@ class GpuDepthPrepassBenchmarkSmokeTest {
         try (var timings = new GpuStageTimings()) {
             var camera = new BoardCamera();
             long start = System.nanoTime();
-            GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+            GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
             List<Setting> order = new ArrayList<>(SETTINGS);
             List<Setting> back = new ArrayList<>(SETTINGS);
             Collections.reverse(back);
             order.addAll(back);
             for (View view : views) {
                 GpuTerrain.depthPrepass = ALL;
-                GpuTerrain.prepassDepthFunction = GL20.GL_EQUAL;
-                GpuDepthPrepassBaselineSmokeTest.show(view, scene, camera);
-                GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                GpuTerrain.prepassDepthFunction = GL20.GL_LEQUAL;
+                GpuCalibrationScenes.show(view, scene, camera);
+                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 frame.render(terrain, camera, scene, timings, view.scale(), () -> terrain.render(camera.camera));
                 report.append(String.format(Locale.ROOT, "%s: loaded and settled %.1f s after the build began; %d twin"
                       + " draws a frame%n", view.name(), (System.nanoTime() - start) / 1e9, terrain.prepassDraws()));
@@ -206,8 +206,8 @@ class GpuDepthPrepassBenchmarkSmokeTest {
      * driver's binary sizes (GL_PROGRAM_BINARY_LENGTH, what the program cache keeps; a proxy for their memory).
      */
     static String programs(GpuTerrain terrain) throws ReflectiveOperationException {
-        List<Shader> colour = shaders(((ModelBatch) field(terrain, "batch")).getShaderProvider());
-        Object twinProvider = field(terrain, "prepassShaders");
+        List<Shader> colour = shaders(((ModelBatch) GpuTestSupport.field(terrain, "batch")).getShaderProvider());
+        Object twinProvider = GpuTestSupport.field(terrain, "prepassShaders");
         List<Shader> twins = twinProvider == null ? List.of() : shaders((ShaderProvider) twinProvider);
         return String.format(Locale.ROOT, "%d colour programs, %d of them family programs (%.0f KiB of binaries); %d"
                     + " twins, %d paired with a generic program now (%.0f KiB)", colour.size(),
@@ -234,11 +234,5 @@ class GpuDepthPrepassBenchmarkSmokeTest {
             bytes += GL20C.glGetProgrami(((BaseShader) shader).program.getHandle(), GL41C.GL_PROGRAM_BINARY_LENGTH);
         }
         return bytes / 1024.0;
-    }
-
-    static Object field(Object owner, String name) throws ReflectiveOperationException {
-        Field field = owner.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(owner);
     }
 }

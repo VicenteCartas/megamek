@@ -97,7 +97,7 @@ class GpuFiringIntegrationTest {
         }
         // A second gun at the first target must join that pass, despite arriving after the other targets.
         events.add(combat(source, targets.getFirst(), guns.get(1), true));
-        var scene = UnitPlaybackTest.scene(source, targets.get(0), targets.get(1), targets.get(2), targets.get(3), targets.get(4));
+        var scene = UnitPlaybackFixture.scene(source, targets.get(0), targets.get(1), targets.get(2), targets.get(3), targets.get(4));
         var playback = new UnitPlayback();
         playback.accept(events, scene, ignored -> false);
         playback.advance(0, UnitMotion.Speed.DOUBLE);
@@ -143,7 +143,7 @@ class GpuFiringIntegrationTest {
         var source = unit(9600, new Coords(3, 3), selection);
         var target = unit(9601, new Coords(0, 3), selection);
         var placed = new ModelInstance(model.instance.model);
-        var raw = UnitPlaybackTest.attack(source, target, ResolvedAttack.Kind.SHOT, true);
+        var raw = UnitPlaybackFixture.attack(source, target, ResolvedAttack.Kind.SHOT, true);
         var shot = new UnitAttack(raw);
         shot.seconds = .24f;
         var animator = new UnitAnimator();

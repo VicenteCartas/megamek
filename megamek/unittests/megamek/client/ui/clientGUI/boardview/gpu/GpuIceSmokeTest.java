@@ -112,11 +112,11 @@ class GpuIceSmokeTest {
                     System.out.println("Connected lake ice draw calls: " + iceDraws);
                     if (margins != null) {
                         terrain.update(margins);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, margins, camera);
+                        GpuReviewFrame.settle(terrain, null, margins, camera);
                         frame.render(terrain, camera, margins);
                         verifyIceComposition(pixels, terrain, camera, frame, margins, 3, "lake-margins");
                         terrain.update(detected);
-                        GpuTerrainLodSmokeTest.settle(terrain, null, detected, camera);
+                        GpuReviewFrame.settle(terrain, null, detected, camera);
                     }
                     camera.center(BoardGeometry.center(ROAD, 0));
                     frame.render(terrain, camera, detected);

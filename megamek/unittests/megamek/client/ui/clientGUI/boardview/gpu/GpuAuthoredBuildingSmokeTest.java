@@ -52,8 +52,8 @@ class GpuAuthoredBuildingSmokeTest {
         reviewCivicTower("civic-citadel", 14, List.of(2, 2, 3, 3, 14), 125, .33f);
     }
 
-    @Test void civicHabitatKeepsSixHexesAndNightGlazingAcrossLods() throws Exception {
-        reviewCivicTower("civic-habitat", 12, List.of(1, 1, 12, 12, 12, 12), 125, .34f);
+    @Test void civicHabitatKeepsSteppedFloorsAndNightGlazingAcrossLods() throws Exception {
+        reviewCivicTower("civic-habitat", 12, List.of(1, 1, 2, 2, 2, 3, 3, 3, 12, 12, 12), 120, .44f);
     }
 
     private static void reviewCivicTower(String asset, int height, List<Integer> roofs, float targetZ, float zoom) throws Exception {
@@ -86,16 +86,16 @@ class GpuAuthoredBuildingSmokeTest {
                         var model = assets.authoredBuilding(prepared);
                         for (int lod = 0; lod < 2; lod++) {
                             for (Material material : model.levels().get(lod).materials) {
-                                if (material.has(ColorAttribute.Emissive)) {
+                                if (material.has(ColorAttribute.Emissive) || material.has(GpuModelLight.TYPE)) {
                                     assertFalse(material.has(GpuBuildingPaint.TYPE), "Windows and lamps must not take wall tint");
                                     var light = material.get(GpuModelLight.class, GpuModelLight.TYPE);
-                                    if (material.id.contains("fortress-glass")) {
+                                    if (material.id.contains("glass")) {
                                         assertNotNull(light, "Night-window control must survive hex slicing");
                                         if (material.id.contains("#emission-off")) {
                                             assertEquals(new GpuModelLight(0, 0, 1), light);
                                             dark[lod]++;
                                         } else {
-                                            assertEquals(true, field(light, "nightOnly"));
+                                            assertEquals(true, GpuTestSupport.<Object>field(light, "nightOnly"));
                                             windows[lod]++;
                                         }
                                     } else { lamps[lod]++; }
@@ -126,10 +126,10 @@ class GpuAuthoredBuildingSmokeTest {
                                 camera.center(BoardGeometry.center(at, 0).add(0, 0, view.top() ? 0 : targetZ));
                                 terrain.animate(1, List.of()); frame.render(terrain, camera, scene);
                                 int inspected = 0;
-                                for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                                    for (Object prop : (List<?>) field(chunk, "props")) {
-                                        if (field(prop, "decorationId") == null) { continue; }
-                                        assertEquals(lod, field(prop, "lod")); inspected++;
+                                for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                    for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                        if (GpuTestSupport.field(prop, "decorationId") == null) { continue; }
+                                        assertEquals(lod, GpuTestSupport.<Object>field(prop, "lod")); inspected++;
                                     }
                                 }
                                 assertTrue(inspected > 0);
@@ -152,9 +152,9 @@ class GpuAuthoredBuildingSmokeTest {
                             GpuReviewFrame.save(new File(output, "lod" + lod + "-tint.png"));
                         }
                         int painted = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                painted += assertPaint((ModelInstance) field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                painted += assertPaint((ModelInstance) GpuTestSupport.field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
                             }
                         }
                         assertTrue(painted > 0);
@@ -177,7 +177,7 @@ class GpuAuthoredBuildingSmokeTest {
     @Test void civicAssetsKeepMaterialsAndLightsAcrossSlicedLods() throws Exception {
         File output = new File("build/gpu-board-review/civic-emission");
         Files.createDirectories(output.toPath());
-        var names = List.of("frontier-church", "classic-church", "civic-arena", "neo-futurist-arena");
+        var names = List.of("civic-church", "classic-church", "civic-arena", "neo-futurist-arena");
         var locations = List.of(new Coords(3, 4), new Coords(9, 4), new Coords(3, 11), new Coords(10, 11));
         var editor = new BoardEditorSession();
         editor.open(Board.createEmptyBoard(16, 17), null);
@@ -206,14 +206,17 @@ class GpuAuthoredBuildingSmokeTest {
                         for (int lod = 0; lod < model.levels().size(); lod++) {
                             for (Material material : model.levels().get(lod).materials) {
                                 var light = material.get(ColorAttribute.class, ColorAttribute.Emissive);
-                                if (light == null || light.color.r + light.color.g + light.color.b == 0) { continue; }
+                                var surface = material.get(GpuModelMaterial.class, GpuModelMaterial.TYPE);
+                                // A night light's colour is its finish's glow (RigidGlb.nightEmission).
+                                if ((light == null || light.color.r + light.color.g + light.color.b == 0)
+                                      && (surface == null || surface.glow[0] + surface.glow[1] + surface.glow[2] == 0)) { continue; }
                                 assertFalse(material.id.contains("#paint"), "Tintable walls must remain unlit: " + material.id);
-                                assertTrue(material.id.contains("#emission") || material.id.contains("dome-window"),
+                                assertTrue(material.id.contains("#emission") || material.id.contains("dome-window") || material.id.contains("glass"),
                                       "Only lamps, displays and window maps emit: " + material.id);
                                 if (material.id.contains("glass") || material.id.contains("dome-window")) {
                                     var control = material.get(GpuModelLight.class, GpuModelLight.TYPE);
                                     assertNotNull(control, "Window day/night metadata survives slicing and LODs");
-                                    assertEquals(true, field(control, "nightOnly"));
+                                    assertEquals(true, GpuTestSupport.<Object>field(control, "nightOnly"));
                                 }
                                 illuminated.add(entry.getKey().object().asset() + ":" + lod);
                             }
@@ -229,9 +232,9 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.resize(1200, 900);
                     camera.setIsometric(true);
                     terrain.update(scene);
-                    var localLights = (GpuLavaLighting) field(terrain, "lavaLighting");
+                    var localLights = (GpuLavaLighting) GpuTestSupport.field(terrain, "lavaLighting");
                     @SuppressWarnings("unchecked")
-                    var installedLights = (List<GpuLavaLighting.Source>) field(localLights, "buildings");
+                    var installedLights = (List<GpuLavaLighting.Source>) GpuTestSupport.field(localLights, "buildings");
                     assertEquals(16, installedLights.size(), "Eight fixtures per arena, once each across all slices and LODs");
                     for (int i = 0; i < names.size(); i++) {
                         camera.setIsometric(true);
@@ -293,11 +296,11 @@ class GpuAuthoredBuildingSmokeTest {
                                     terrain.animate(1, List.of());
                                     frame.render(terrain, camera, scene);
                                     int inspected = 0;
-                                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                                        for (Object prop : (List<?>) field(chunk, "props")) {
-                                            if (!(field(prop, "decorationFeature") instanceof BoardScene.Feature feature)
+                                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                            if (!(GpuTestSupport.field(prop, "decorationFeature") instanceof BoardScene.Feature feature)
                                                   || !feature.asset().equals("buildings/authored/" + names.get(i))) { continue; }
-                                            assertEquals(requested, field(prop, "lod"), "Review must draw the requested LOD");
+                                            assertEquals(requested, GpuTestSupport.<Object>field(prop, "lod"), "Review must draw the requested LOD");
                                             inspected++;
                                         }
                                     }
@@ -321,9 +324,9 @@ class GpuAuthoredBuildingSmokeTest {
                             }
                         }
                         int painted = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                painted += assertPaint((ModelInstance) field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                painted += assertPaint((ModelInstance) GpuTestSupport.field(prop, "instance"), GpuColor.linear(Color.valueOf("729bdc")));
                             }
                         }
                         assertTrue(painted > 0, "Civic assets expose marked wall/panel paint regions");
@@ -350,8 +353,7 @@ class GpuAuthoredBuildingSmokeTest {
         var failure = new AtomicReference<Throwable>();
         var config = GpuBoardWindow.configuration(false); config.setWindowedMode(1200, 900);
         config.setInitialVisible(false); config.useVsync(false); config.setForegroundFPS(60);
-        try (var previews = org.mockito.Mockito.mockStatic(GpuEditorTerrainPreviews.class, org.mockito.Mockito.CALLS_REAL_METHODS)) {
-            previews.when(GpuEditorTerrainPreviews::kinds).thenAnswer(ignored -> List.of(source.takeFrame().scene()));
+        try {
             new Lwjgl3Application(new GpuBattleView(source) {
                 final long deadline = System.nanoTime() + 180_000_000_000L;
                 List<BoardScene.Tile> installed;
@@ -365,11 +367,11 @@ class GpuAuthoredBuildingSmokeTest {
                     try {
                         super.render();
                         assertTrue(System.nanoTime() < deadline, "Authored drag must settle at phase " + phase);
-                        var terrain = (GpuTerrain) field(this, "terrain");
+                        var terrain = (GpuTerrain) GpuTestSupport.field(this, "terrain");
                         if (GpuBoardTestUi.loading(this)) { return; }
                         if (phase == 0) {
                             if (terrain.busy()) { return; }
-                            installed = ((BoardScene) field(terrain, "coverScene")).tiles();
+                            installed = ((BoardScene) GpuTestSupport.field(terrain, "coverScene")).tiles();
                             id = installed.stream().flatMap(t -> t.features().stream()).filter(GpuAuthoredBuilding::supports)
                                   .findFirst().orElseThrow().decoration().id();
                             long generation = source.takeFrame().boardGeneration();
@@ -378,26 +380,26 @@ class GpuAuthoredBuildingSmokeTest {
                             phase = 1;
                         } else if (phase == 1) {
                             if (!source.editorAuthoredGesture()) { return; }
-                            assertSame(installed, ((BoardScene) field(terrain, "coverScene")).tiles());
-                            assertSame(installed, field(field(this, "skyVisibility"), "tiles"),
+                            assertSame(installed, ((BoardScene) GpuTestSupport.field(terrain, "coverScene")).tiles());
+                            assertSame(installed, GpuTestSupport.field(GpuTestSupport.field(this, "skyVisibility"), "tiles"),
                                   "Sky occlusion must not search intermediate drag positions");
-                            assertNull(field(terrain, "requested"), "Holding a drag must not queue terrain work");
-                            assertNull(field(terrain, "rebuild"), "Even a paused drag must not start slicing");
+                            assertNull(GpuTestSupport.field(terrain, "requested"), "Holding a drag must not queue terrain work");
+                            assertNull(GpuTestSupport.field(terrain, "rebuild"), "Even a paused drag must not start slicing");
                             int hidden = 0;
-                            for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                                hidden += ((java.util.Set<?>) field(chunk, "hiddenInteriors")).size();
+                            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                hidden += ((java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors")).size();
                             }
                             assertTrue(hidden > 0, "The old grey interiors remain hidden throughout the gesture");
                             if (++held == 30) { source.editorPointer(at, .45, .3, true, id, source.takeFrame().boardGeneration()); }
                             if (held == 90) { source.endEditorStroke(); phase = 2; }
                         } else {
                             if (source.editorAuthoredGesture() || terrain.busy()
-                                  || installed == ((BoardScene) field(terrain, "coverScene")).tiles()) { return; }
+                                  || installed == ((BoardScene) GpuTestSupport.field(terrain, "coverScene")).tiles()) { return; }
                             int floors = 0;
-                            for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                                assertTrue(((java.util.Set<?>) field(chunk, "hiddenInteriors")).isEmpty());
-                                for (Object prop : (List<?>) field(chunk, "props")) {
-                                    if (!Float.isNaN((float) field(prop, "floorZ"))) { floors++; }
+                            for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                                assertTrue(((java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors")).isEmpty());
+                                for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                    if (!Float.isNaN((float) GpuTestSupport.field(prop, "floorZ"))) { floors++; }
                                 }
                             }
                             assertTrue(floors > 0, "Generated floors return at the released placement");
@@ -480,14 +482,14 @@ class GpuAuthoredBuildingSmokeTest {
                 GpuTerrain terrain = new GpuTerrain();
                 try {
                     BoardCamera camera = new BoardCamera(); camera.resize(1200, 900); camera.center(BoardGeometry.center(at, 3));
-                    terrain.update(original); GpuTerrainLodSmokeTest.settle(terrain, null, original, camera);
+                    terrain.update(original); GpuReviewFrame.settle(terrain, null, original, camera);
                     terrain.animate(1, List.of(), .25f, at, 3 * BoardGeometry.level());
                     var models = new java.util.HashSet<com.badlogic.gdx.graphics.g3d.Model>();
                     var materials = new java.util.IdentityHashMap<Material, Material>();
-                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                        for (Object prop : (List<?>) field(chunk, "props")) {
-                            if (field(prop, "decorationId") == null) { continue; }
-                            var installed = (ModelInstance) field(prop, "instance");
+                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                            if (GpuTestSupport.field(prop, "decorationId") == null) { continue; }
+                            var installed = (ModelInstance) GpuTestSupport.field(prop, "instance");
                             models.add(installed.model);
                             for (var material : installed.materials) { materials.put(material, material.copy()); }
                         }
@@ -503,13 +505,13 @@ class GpuAuthoredBuildingSmokeTest {
                         var delta = new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, next.decoration(), 3))
                               .mul(new com.badlogic.gdx.math.Matrix4().scale(unit, unit, unit).mul(GpuAuthoredBuilding.frame(at, start.decoration(), 3)).inv());
                         int shares = 0, painted = 0, fixed = 0;
-                        for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                            var hidden = (java.util.Set<?>) field(chunk, "hiddenInteriors");
-                            for (Object prop : (List<?>) field(chunk, "props")) {
-                                if (!Float.isNaN((float) field(prop, "floorZ"))) {
-                                    assertEquals(pose != original, hidden.contains(field(prop, "coords")),
+                        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                            var hidden = (java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors");
+                            for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                                if (!Float.isNaN((float) GpuTestSupport.field(prop, "floorZ"))) {
+                                    assertEquals(pose != original, hidden.contains(GpuTestSupport.<Object>field(prop, "coords")),
                                           "Moved interiors hide until fresh cuts install");
-                                    assertNull(field(prop, "previewInstance"), "Floors are not transformed on each drag event");
+                                    assertNull(GpuTestSupport.field(prop, "previewInstance"), "Floors are not transformed on each drag event");
                                     var drawn = terrain.getClass().getDeclaredMethod("drawn", prop.getClass(), boolean.class);
                                     drawn.setAccessible(true);
                                     for (boolean shadows : List.of(false, true)) {
@@ -517,9 +519,9 @@ class GpuAuthoredBuildingSmokeTest {
                                               "Stale floors must disappear from both colour and depth/shadow passes");
                                     }
                                 }
-                                if (field(prop, "decorationId") == null) { continue; }
-                                var installed = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
-                                var preview = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "previewInstance");
+                                if (GpuTestSupport.field(prop, "decorationId") == null) { continue; }
+                                var installed = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
+                                var preview = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "previewInstance");
                                 assertNotNull(preview); assertSame(installed.model, preview.model); assertTrue(models.contains(preview.model));
                                 assertArrayEquals(new com.badlogic.gdx.math.Matrix4(delta).mul(installed.transform).val, preview.transform.val, .001f);
                                 painted += assertPaint(preview, tint);
@@ -534,7 +536,7 @@ class GpuAuthoredBuildingSmokeTest {
                                     assertEquals(expected, actual, "Paint leaves each surface's base finish unchanged");
                                     if (!material.has(GpuBuildingPaint.TYPE)) { fixed++; }
                                 }
-                                if (field(prop, "hoverOpaque") instanceof ModelInstance hovered) { assertPaint(hovered, tint); }
+                                if (GpuTestSupport.field(prop, "hoverOpaque") instanceof ModelInstance hovered) { assertPaint(hovered, tint); }
                                 // The side view requests near geometry even when the main view installed a farther LOD.
                                 var level = prop.getClass().getDeclaredMethod("level", int.class, ModelInstance.class);
                                 level.setAccessible(true);
@@ -551,8 +553,8 @@ class GpuAuthoredBuildingSmokeTest {
                         assertEquals(BoardGeometry.centerX(at) + next.decoration().x() * BoardGeometry.width(), shown.anchor().x, .001);
                     }
                     terrain.update(poses.getFirst());
-                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                        assertTrue(((java.util.Set<?>) field(chunk, "hiddenInteriors")).isEmpty(), "Committed interiors reappear");
+                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                        assertTrue(((java.util.Set<?>) GpuTestSupport.field(chunk, "hiddenInteriors")).isEmpty(), "Committed interiors reappear");
                     }
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
@@ -620,10 +622,10 @@ class GpuAuthoredBuildingSmokeTest {
                     camera.center(BoardGeometry.center(arena, 2));
                     frame.render(terrain, camera, scene); GpuReviewFrame.save(new File(output, "arena-edge.png"));
                     int neutral = 0;
-                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                        for (Object prop : (List<?>) field(chunk, "props")) {
-                            if (field(prop, "decorationId") == null) { continue; }
-                            var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                            if (GpuTestSupport.field(prop, "decorationId") == null) { continue; }
+                            var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
                             var cap = instance.getMaterial(AuthoredBoardClip.CAP, false);
                             if (cap != null) {
                                 var colour = cap.get(com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute.class,
@@ -655,7 +657,7 @@ class GpuAuthoredBuildingSmokeTest {
         Coords hpg = new Coords(13, 10), arena = new Coords(28, 10), church = new Coords(28, 17);
         place(editor, hpg, "hpg-headquarters", 0);
         place(editor, arena, "civic-arena", -12);
-        place(editor, church, "frontier-church", 0);
+        place(editor, church, "civic-church", 0);
         editor.board().setDescription("Authored buildings: HPG headquarters, a two-hex frontier church and a compact oval civic arena. "
               + "Structural helpers define the floors; the antenna, church crown and arena scoreboard are decorative. The arena field is open.");
         editor.save(output.toPath().resolve("Authored Buildings.board2"));
@@ -757,7 +759,7 @@ class GpuAuthoredBuildingSmokeTest {
                     terrain.animate(1, List.of(), .25f, hpg, BoardGeometry.level());
                     assertFalse(faded(terrain).isEmpty());
                     for (Object prop : faded(terrain)) {
-                        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) field(prop, "instance");
+                        var instance = (com.badlogic.gdx.graphics.g3d.ModelInstance) GpuTestSupport.field(prop, "instance");
                         var cut = instance.materials.first().get(GpuBuildingCutaway.class, GpuBuildingCutaway.TYPE);
                         assertNotNull(cut);
                         assertEquals(0, cut.floor);
@@ -788,15 +790,15 @@ class GpuAuthoredBuildingSmokeTest {
                     frame.render(terrain, camera, smallScene);
                     GpuReviewFrame.save(new File(output, "small-props.png"));
                     // The displayed frame may enable material flags; settle them as the interactive loading loop does.
-                    GpuTerrainLodSmokeTest.settle(terrain, null, smallScene, camera);
+                    GpuReviewFrame.settle(terrain, null, smallScene, camera);
                     assertTrue(terrain.ready(smallScene), "Picking requires the scene's material configuration to be ready");
                     int selectable = 0;
-                    for (Object chunk : (List<?>) field(terrain, "chunks")) {
-                        for (Object prop : (List<?>) field(chunk, "props")) {
-                            if (field(prop, "decorationId") == null) { continue; }
+                    for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
+                        for (Object prop : (List<?>) GpuTestSupport.field(chunk, "props")) {
+                            if (GpuTestSupport.field(prop, "decorationId") == null) { continue; }
                             selectable++;
-                            assertTrue(((List<?>) field(prop, "supportTriangles")).isEmpty());
-                            assertNotEquals("building", field(prop, "receiver"));
+                            assertTrue(((List<?>) GpuTestSupport.field(prop, "supportTriangles")).isEmpty());
+                            assertNotEquals("building", GpuTestSupport.field(prop, "receiver"));
                         }
                     }
                     assertEquals(2, selectable);
@@ -817,11 +819,6 @@ class GpuAuthoredBuildingSmokeTest {
                         }
                         assertTrue(picked, "Small authored prop remains selectable at " + owner + " in " + shown.bounds());
                     }
-                    terrain.setFluffHidden(true);
-                    for (Coords owner : List.of(new Coords(2, 2), new Coords(4, 2))) {
-                        assertFalse(terrain.editorObjects(owner).getFirst().shown());
-                    }
-                    terrain.setFluffHidden(false);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                 } catch (Throwable error) { failure.set(error); }
                 finally { frame.dispose(); terrain.dispose(); assets.dispose(); Gdx.app.exit(); }
@@ -848,15 +845,7 @@ class GpuAuthoredBuildingSmokeTest {
 
     private static List<Object> faded(GpuTerrain terrain) throws Exception {
         List<Object> result = new java.util.ArrayList<>();
-        for (Object chunk : (List<?>) field(terrain, "chunks")) { result.addAll((java.util.Set<?>) field(chunk, "faded")); }
+        for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) { result.addAll((java.util.Set<?>) GpuTestSupport.field(chunk, "faded")); }
         return result;
-    }
-
-    private static Object field(Object owner, String name) throws Exception {
-        for (Class<?> type = owner.getClass(); type != null; type = type.getSuperclass()) {
-            try { var field = type.getDeclaredField(name); field.setAccessible(true); return field.get(owner); }
-            catch (NoSuchFieldException ignored) { /* The native view extends GpuBattleView. */ }
-        }
-        throw new NoSuchFieldException(name);
     }
 }

@@ -95,15 +95,16 @@ final class MeepleAnimator {
         float height = MathUtils.lerp(standing, 1, crouch);
         float horizontal = unit.part() >= 0 ? 1 : BoardGeometry.unitScale();
         var position = ground.cpy();
-        if (unit.part() < 0 && unit.footprint().size() > 1) {
+        boolean whole = unit.part() < 0 && unit.footprint().size() > 1;
+        if (whole) {
+            // Its image covers the footprint: a DropShip's stitched sections each lie on their hex.
             var layout = UnitFootprint.layout(unit.location().coords(), unit.footprint(), unit.location().facing() * 60);
-            var bounds = UnitBounds.local(instance);
-            horizontal = Math.min(layout.width() / bounds.getWidth(), layout.depth() / bounds.getHeight()) * BoardGeometry.multiHexUnitScale();
+            horizontal = UnitFootprint.imageScale(layout, unit.image());
             position.add(new Vector3(layout.offsetX(), layout.offsetY(), 0).rotate(Vector3.Z, unit.location().facing() * 60 - facing));
         }
         var family = unit.model() == null || unit.model().state() == null ? UnitFamilyScale.DEFAULT
               : unit.model().state().structure().family().forUnit(unit);
-        horizontal *= family.meepleScale();
+        if (!whole) { horizontal *= family.meepleScale(); }
         float vertical = height * BoardGeometry.level() * BoardGeometry.unitHeightScale() / MeepleVisual.HEIGHT
               * family.meepleScale() * meepleHeightScale(unit, family);
         // A fall tips the token over onto the side it fell on, turned only as the posture says (UnitMotion.Posture#turn):

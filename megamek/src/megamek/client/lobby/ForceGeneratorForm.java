@@ -17,6 +17,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ratgenerator.AbstractUnitRecord;
@@ -165,6 +166,11 @@ public final class ForceGeneratorForm {
         this.year = clampYear(year);
         description.setYear(this.year);
         refreshFactions();
+    }
+
+    /** A form whose command is {@code top}, offering no choices: the command's work needs no generator data. */
+    ForceGeneratorForm(ForceDescriptor top) {
+        this.top = top;
     }
 
     private static int clampYear(int year) {
@@ -985,11 +991,28 @@ public final class ForceGeneratorForm {
 
     /** Swaps a ship for another design that does the same job; Swing thread. Whether it changed. */
     public boolean rerollShip(ForceDescriptor ship) {
-        boolean changed = ShipReroller.reroll(ship) != null;
+        return rerollShip(ship, node -> ShipReroller.reroll(node) != null);
+    }
+
+    /** Swaps a ship with {@code reroll}, forgetting the ids of all that was under it before. */
+    boolean rerollShip(ForceDescriptor ship, Predicate<ForceDescriptor> reroll) {
+        // The reroll takes the old fighters off the ship, out of reach once it is done
+        List<ForceDescriptor> before = new ArrayList<>();
+        subtree(ship, before);
+        boolean changed = reroll.test(ship);
         if (changed) {
-            forget(ship);
+            before.forEach(this::forgetOnly);
         }
         return changed;
+    }
+
+    private static void subtree(ForceDescriptor node, List<ForceDescriptor> nodes) {
+        nodes.add(node);
+        for (Object child : node.getAllChildren()) {
+            if (child instanceof ForceDescriptor descriptor) {
+                subtree(descriptor, nodes);
+            }
+        }
     }
 
     /** Whether a node holds a formation the brush could re-roll it as. */
@@ -1077,11 +1100,15 @@ public final class ForceGeneratorForm {
     }
 
     private void forget(ForceDescriptor node) {
+        forgetOnly(node);
+        forgetBelow(node);
+    }
+
+    private void forgetOnly(ForceDescriptor node) {
         String id = ids.remove(node);
         if (id != null) {
             byId.remove(id);
         }
-        forgetBelow(node);
     }
 
     // ---- The formation mix
@@ -1269,15 +1296,27 @@ public final class ForceGeneratorForm {
         if (top == null) {
             return;
         }
-        C3NetworkConfigurator.configure(top, units::contains);
+        C3NetworkConfigurator.configure(top, among(units));
         top.refreshForceStrings();
     }
 
     /** Loads {@code units} into their carriers; after the owners are set, before they are sent. */
     public void loadCarriers(List<Entity> units) {
         if (top != null) {
-            CarrierLoadingConfigurator.configure(top, units::contains);
+            CarrierLoadingConfigurator.configure(top, among(units));
         }
+    }
+
+    /** Whether a unit is one of {@code units}: by identity, as every generated unit has the same id until sent. */
+    static Predicate<Entity> among(List<Entity> units) {
+        Set<Entity> chosen = Collections.newSetFromMap(new IdentityHashMap<>());
+        chosen.addAll(units);
+        return chosen::contains;
+    }
+
+    /** The lift the command's own ships have spare, which a further roll starts from. */
+    public ExistingLift commandLift() {
+        return ExistingLift.of(top);
     }
 
     /** The file name the command exports as, without its extension. */
@@ -1287,13 +1326,14 @@ public final class ForceGeneratorForm {
     }
 
     /**
-     * Writes the whole command to {@code file} as a unit list, through a game of its own so it is not added to the
-     * real one.
+     * Writes the units still included to {@code file} as a unit list, their force strings numbered as the command
+     * stands and their C3 networks wired among themselves, through a game of its own so it is not added to the real
+     * one.
      *
      * @return how many units were written
      */
     public int export(File file, GameOptions options) throws IOException {
-        List<Entity> units = allUnits();
+        List<Entity> units = included();
         if (units.isEmpty() || (top == null)) {
             return 0;
         }
@@ -1309,7 +1349,9 @@ public final class ForceGeneratorForm {
             unit.setId(game.getNextEntityId());
             game.addEntity(unit);
         }
-        C3NetworkConfigurator.configure(top);
+        C3NetworkConfigurator.configure(top, among(units));
+        // Each roll numbered its own force strings; a list read back would merge their duplicate force ids
+        top.refreshForceStrings();
         EntityListFile.saveTo(file, new ArrayList<>(units));
         return units.size();
     }

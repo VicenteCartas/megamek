@@ -213,7 +213,7 @@ final class BoardRoadCut {
     /** Whether a reserved piece leaves the level of the top anywhere. */
     boolean graded() {
         return pieces.stream().anyMatch(piece -> piece.grade().graded()
-              || piece.grade().tile().elevation() * BoardGeometry.level() != level);
+              || BoardRoadGrade.ground(piece.grade().tile()) * BoardGeometry.level() != level);
     }
 
     /** The whole ground the grades reserve, beyond this hex too. */
@@ -367,9 +367,9 @@ final class BoardRoadCut {
      * passes under it. {@code natural} ground is already eased into the roads around ({@code bank}): its top gives way
      * below the road's headroom down to a fill's depth under the road, so none lies hidden just under it, and its slopes
      * and cliffs above the road's surface, so their faces run on beneath its edge; a cliff over the headroom stands over
-     * its verge. A water hex's {@code shore} carries no road of its own: its top gives way only above the road's
-     * surface, as a slope does. Natural ground gives way to a road built in concrete (BoardRoadGrade#poured) as poured
-     * ground does, and its cut faces beside that road go to {@code concrete}.
+     * its verge. A bed is ground like any top. The {@code shore} of a water hex whose ground carries no road (ice, lava or
+     * a deck over it) gives way only above the road's surface, as a slope does. Natural ground gives way to a road built in
+     * concrete (BoardRoadGrade#poured) as poured ground does, and its cut faces beside that road go to {@code concrete}.
      */
     List<BoardSurface.Face> clip(List<BoardSurface.Face> faces, BoardRelief relief, WallBuilder wall,
           WallBuilder concrete, List<BoardSurface.Face> road, BoardRoadBank bank, boolean natural, boolean shore) {
@@ -413,7 +413,8 @@ final class BoardRoadCut {
             // headroom it is reserved.
             float[] under = new float[3], over = new float[3];
             Vector3[] corners = { a, b, c };
-            boolean top = face.finish() == BoardSurface.Finish.TOP && !shore, pouredTop = !natural && top;
+            boolean surfaced = face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.BED;
+            boolean top = surfaced && !shore, pouredTop = !natural && top;
             // Natural slopes are cut just under the road's surface, which covers their cut edge; at the surface itself
             // the board's cut, which has no ground beyond it, and an upright face, which never lies along the road, as a
             // cast step's face standing on the edge under a road's mouth. Poured ground keeps a band beneath the road.
@@ -453,7 +454,7 @@ final class BoardRoadCut {
                       : under[0] + s * (under[1] - under[0]) + t * (under[2] - under[0]) + fill >= 0;
                 return (natural && top && near || above) && !clear;
             };
-            boolean ground = face.finish() == BoardSurface.Finish.TOP || face.finish() == BoardSurface.Finish.WALL
+            boolean ground = surfaced || face.finish() == BoardSurface.Finish.WALL
                   || face.finish() == BoardSurface.Finish.RIM || face.finish() == BoardSurface.Finish.CAP;
             if (!ground) {
                 if (!reserved.at(1 / 3f, 1 / 3f)) { result.add(face); }

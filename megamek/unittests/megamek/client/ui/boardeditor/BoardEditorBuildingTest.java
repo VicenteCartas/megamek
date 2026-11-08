@@ -15,6 +15,7 @@ import megamek.common.board.BoardFile;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.TilesetScenery;
+import megamek.common.units.Terrain;
 import megamek.common.units.Terrains;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -102,7 +103,7 @@ class BoardEditorBuildingTest {
         assertEquals(75, editor.board().getHex(first).getAppearance().get("building").rotation());
         editor.command(new Command(Action.CHOOSE_BRUSH, "building", ""), null);
         editor.pointer(second, 0, 0, false); editor.finishStroke();
-        editor.command(new Command(Action.AUTO_EDGES, "building"), null);
+        editor.command(new Command(Action.EDGE, "building", "3"), null);
         editor.command(new Command(Action.BUILDING_COLOUR, "#72949b"), null);
         for (Coords cell : List.of(first, second)) {
             var design = editor.board().getHex(cell).getAppearance().get("building");
@@ -127,7 +128,7 @@ class BoardEditorBuildingTest {
         editor.command(new Command(Action.CHOOSE_BRUSH, "building", "building/lunar-habitat"), null);
         editor.pointer(first, 0, 0, false);
         editor.finishStroke();
-        editor.command(new Command(Action.AUTO_EDGES, "building"), null);
+        deriveExits(editor, first);
         editor.command(new Command(Action.FOOTPRINT, "square"), null);
         editor.command(new Command(Action.KIT_VARIANT, "parapet"), null);
         editor.pointer(second, 0, 0, false);
@@ -155,10 +156,7 @@ class BoardEditorBuildingTest {
             editor.pointer(first, 0, 0, false);
             editor.pointer(second, 0, 0, true);
             editor.finishStroke();
-            for (Coords at : List.of(first, second)) {
-                editor.command(new Command(Action.SELECT_AT, at.getX() + "," + at.getY(), ""), null);
-                editor.command(new Command(Action.AUTO_EDGES, "building"), null);
-            }
+            for (Coords at : List.of(first, second)) { deriveExits(editor, at); }
             // A deliberately separate neighbouring building must remain separate after loading.
             editor.board().setHex(separate, new Hex(0, "building:1:0;bldg_cf:15;bldg_elev:2;bldg_basement_type:1", ""));
             Map<Coords, Integer> exits = Map.of(first, 1 << direction, second, 1 << ((direction + 3) % 6), separate, 0);
@@ -192,5 +190,12 @@ class BoardEditorBuildingTest {
             editor.save(file);
             assertEquals(models.get(first), TilesetScenery.structureModels(BoardFile.read(file).getHex(first)));
         }
+    }
+
+    /** Gives the building at {@code at} derived exits, as a building of an unconverted legacy file has. */
+    private static void deriveExits(BoardEditorSession editor, Coords at) {
+        Hex hex = editor.board().getHex(at).duplicate();
+        hex.addTerrain(new Terrain(Terrains.BUILDING, hex.terrainLevel(Terrains.BUILDING)));
+        editor.board().setHex(at, hex);
     }
 }

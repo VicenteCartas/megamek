@@ -25,16 +25,16 @@ class GpuLavaLightingTest {
               null, List.of(), List.of(), BoardLiquid.NONE);
         var scene = new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of());
         lights.update(scene, false, 0);
-        assertEquals(List.of(), GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned"), "Daylight switches floodlights off");
+        assertEquals(List.of(), GpuTestSupport.field(lights, "binned"), "Daylight switches floodlights off");
         lights.update(scene, false, .5f);
-        var binned = (List<?>) GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned");
+        var binned = (List<?>) GpuTestSupport.field(lights, "binned");
         assertEquals(1, binned.size(), "Classic mode retains building illumination");
         assertEquals(.9f, ((GpuLavaLighting.Source) binned.getFirst()).power(), .0001f);
-        Object revision = GpuMixedUnitBenchmarkSmokeTest.field(lights, "revision");
+        Object revision = GpuTestSupport.field(lights, "revision");
         lights.setBuildings(List.of(fixture)); lights.update(scene, false, .5f);
-        assertEquals(revision, GpuMixedUnitBenchmarkSmokeTest.field(lights, "revision"), "An idle stadium does not rebin/reupload lights");
+        assertEquals(revision, GpuTestSupport.field(lights, "revision"), "An idle stadium does not rebin/reupload lights");
         lights.setBuildings(List.of()); lights.update(scene, false, 1);
-        assertEquals(List.of(), GpuMixedUnitBenchmarkSmokeTest.field(lights, "binned"), "Removing the geometry removes its illumination");
+        assertEquals(List.of(), GpuTestSupport.field(lights, "binned"), "Removing the geometry removes its illumination");
     }
 
     @Test
@@ -50,12 +50,12 @@ class GpuLavaLightingTest {
               null, List.of(), List.of(), BoardLiquid.NONE);
         lights.update(new BoardScene(0, 1, 1, List.of(tile), List.of(), List.of(), -1, "", List.of()));
 
-        float[] list = (float[]) GpuMixedUnitBenchmarkSmokeTest.field(lights, "list");
-        int columns = (int) GpuMixedUnitBenchmarkSmokeTest.field(lights, "columns");
-        int rows = (int) GpuMixedUnitBenchmarkSmokeTest.field(lights, "rows");
-        float originX = (float) GpuMixedUnitBenchmarkSmokeTest.field(lights, "originX");
-        float originY = (float) GpuMixedUnitBenchmarkSmokeTest.field(lights, "originY");
-        float cell = 1 / (float) GpuMixedUnitBenchmarkSmokeTest.field(lights, "cellsPerUnit");
+        float[] list = (float[]) GpuTestSupport.field(lights, "list");
+        int columns = (int) GpuTestSupport.field(lights, "columns");
+        int rows = (int) GpuTestSupport.field(lights, "rows");
+        float originX = (float) GpuTestSupport.field(lights, "originX");
+        float originY = (float) GpuTestSupport.field(lights, "originY");
+        float cell = 1 / (float) GpuTestSupport.field(lights, "cellsPerUnit");
         float reach = 2 * size, spacing = cell / (SAMPLES - 1);
         int beamCells = 0;
         for (int row = 0; row < rows; row++) {

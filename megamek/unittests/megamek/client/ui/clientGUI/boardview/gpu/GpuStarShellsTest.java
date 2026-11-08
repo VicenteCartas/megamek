@@ -134,7 +134,7 @@ class GpuStarShellsTest {
     }
 
     private static BoardScene scene(BoardScene.StarShell... shells) {
-        BoardScene base = UnitPlaybackTest.scene();
+        BoardScene base = UnitPlaybackFixture.scene();
         return new BoardScene(base.boardId(), base.width(), base.height(), base.tiles(), base.units(),
               base.plannedPath(), base.selectedId(), base.phase(), base.commands(), base.light(), base.firingLines(),
               base.rangeBorders(), base.markers(), base.tactical(), base.rangeLabels(), base.fieldOfView(),

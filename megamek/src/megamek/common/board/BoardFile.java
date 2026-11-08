@@ -44,6 +44,21 @@ public final class BoardFile {
               number(flag, "x", 0), number(flag, "y", 0), number(flag, "scale", 1), number(flag, "rotation", 0));
     }
 
+    private static BoardBillboard billboard(JsonNode object) {
+        if (!object.has("billboard")) { return BoardBillboard.DEFAULT; }
+        JsonNode billboard = object.get("billboard");
+        requireObject(billboard);
+        var fallback = BoardBillboard.DEFAULT;
+        List<String> decals = new ArrayList<>();
+        if (billboard.has("decals")) {
+            require(billboard.get("decals").isArray(), "decals must be an array");
+            billboard.get("decals").forEach(decal -> decals.add(decal.asText()));
+        } else { decals.addAll(fallback.decals()); }
+        return new BoardBillboard(decals, string(billboard, "ratio", fallback.ratio()),
+              number(billboard, "scale", fallback.scale()), bool(billboard, "legs", fallback.legs()),
+              bool(billboard, "lights", fallback.lights()));
+    }
+
     private static final ObjectMapper JSON = new ObjectMapper()
           .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
@@ -215,11 +230,6 @@ public final class BoardFile {
                 hexes[index] = hex;
             }
             Board board = new Board();
-            if (root.has("options")) {
-                JsonNode options = root.get("options");
-                requireObject(options);
-                board.setRoadsAutoExit(bool(options, "exitRoadsToPavement", true));
-            }
             board.setBoardType(BoardType.valueOf(string(root, "boardType", "GROUND")));
             board.setDocumentName(string(root, "name", null));
             board.setDescription(string(root, "description", null));
@@ -316,6 +326,7 @@ public final class BoardFile {
                 var colours = colours(style);
                 Integer rotation = style.has("rotation") ? integer(style, "rotation", 0) : null;
                 double padding = style.path("padding").asDouble();
+                int separated = style.has("separated") ? BoardComponents.directions(style.get("separated"), "separated") : 0;
                 // Two lanes are the default and store none; a single lane's direction needs the single lane.
                 Integer lanes = style.has("lanes") ? integer(style, "lanes", 0) : null;
                 if (lanes != null && lanes == 2) { lanes = null; }
@@ -324,7 +335,7 @@ public final class BoardFile {
                 Long exitFrom = lanes == null && style.has("exitFrom") ? exitApproaches(style.get("exitFrom")) : null;
                 if (exitFrom != null && exitFrom == 0) { exitFrom = null; }
                 // Explicit default values (rotation 0, no colours) are the generic look, which stores no appearance.
-                if (variant == null && asset == null && material == null && control == null && lanes == null
+                if (variant == null && asset == null && material == null && control == null && separated == 0 && lanes == null
                       && exitFrom == null && (rotation == null || rotation == 0) && padding <= 0 && colours.slots().isEmpty()) {
                     return;
                 }
@@ -333,7 +344,7 @@ public final class BoardFile {
                       colours, rotation,
                       style.has("tracks") ? integer(style, "tracks", 0) : null,
                       style.has("beside") ? integer(style, "beside", 0) : null, control, retainedUid(style),
-                      padding <= 0 ? null : padding, lanes, inbound, exitFrom);
+                      padding <= 0 ? null : padding, separated == 0 ? null : separated, lanes, inbound, exitFrom);
                 value.validateOwner(field.getKey());
                 values.put(field.getKey(), value);
             });
@@ -374,7 +385,7 @@ public final class BoardFile {
                             placement.has("offset") ? number(placement, "offset", 0) : null), integer(object, "drawOrder", 0),
                       bool(object, "clipToHex", "decal".equals(kind)), number(object, "rotationX", 0), number(object, "rotationY", 0),
                       string(object, "group", null), bool(object, "bare", false), integer(object, "connections", 0), stretch,
-                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object)));
+                      colours, integer(object, "tracks", 0), bool(object, "pillars", false), retainedUid(object), integer(object, "levels", 0), flag(object), billboard(object)));
             }
             hex.setDecorations(values);
         }
@@ -398,7 +409,6 @@ public final class BoardFile {
         put(root, "description", board.getDescription());
         put(root, "sourceHeader", board.getSourceHeader());
         if (board.getBoardType() != BoardType.GROUND) { root.put("boardType", board.getBoardType().name()); }
-        if (!board.getRoadsAutoExit()) { root.putObject("options").put("exitRoadsToPavement", false); }
         if (!board.getTags().isEmpty()) {
             ArrayNode tags = root.putArray("tags"); board.getTags().stream().sorted().forEach(tags::add);
         }
@@ -479,6 +489,7 @@ public final class BoardFile {
                 if (value.padding() != null) { style.put("padding", value.padding()); }
                 if (value.tracks() != null) { style.put("tracks", value.tracks()); }
                 if (value.beside() != null) { style.put("beside", value.beside()); }
+                if (value.separated() != null) { BoardComponents.putDirections(style.putArray("separated"), value.separated()); }
                 if (value.trafficControl() != null) { style.put("trafficControl", value.trafficControl().name().toLowerCase(java.util.Locale.ROOT)); }
                 if (value.lanes() != null) { style.put("lanes", value.lanes()); }
                 putSides(style, "inbound", value.inbound());
@@ -512,6 +523,13 @@ public final class BoardFile {
                     settings.put("emblem", flag.emblem());
                     settings.put("x", flag.x()); settings.put("y", flag.y());
                     settings.put("scale", flag.scale()); settings.put("rotation", flag.rotation());
+                }
+                if (BoardBillboard.ASSET.equals(value.asset())) {
+                    var billboard = value.billboard();
+                    var settings = object.putObject("billboard");
+                    billboard.decals().forEach(settings.putArray("decals")::add);
+                    settings.put("ratio", billboard.ratio()).put("scale", billboard.scale())
+                          .put("legs", billboard.legs()).put("lights", billboard.lights());
                 }
                 if (value.levels() > 0) { object.put("levels", value.levels()); }
                 if (value.scale() != 1) { object.put("scale", value.scale()); }

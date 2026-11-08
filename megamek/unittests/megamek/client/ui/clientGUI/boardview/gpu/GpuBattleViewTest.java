@@ -1,6 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -134,5 +135,11 @@ class GpuBattleViewTest {
     private static BoardScene.Unit unit(boolean airborne) {
         return new BoardScene.Unit(1, -1, "test", new BoardScene.Waypoint(new Coords(0, 0), 0, 0), null, false, null, 1,
               airborne);
+    }
+
+    @Test
+    void pausingBeforeAMapIsAttachedDoesNotCrash() {
+        var view = new GpuBattleView(null);
+        assertDoesNotThrow(view::pause, "Closing the window during loading must not ask the absent map's editor");
     }
 }

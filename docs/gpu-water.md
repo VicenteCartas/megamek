@@ -50,6 +50,17 @@ actual relief boundary. That boundary is built once and reused for the top;
 using only the moved hex corners can fold the bank beneath adjacent grass.
 These corrections keep the existing shore samples and material/shader paths.
 
+Water standing above paving keeps a vertical concrete wall on that edge, from the paving up to its level
+(`BoardRelief.canal`). A body of water that stands above paving in every hex, its land paving, is a canal
+(`BoardRelief.canalHex`, at most 64 hexes): a channel of one width inside concrete shoulders at the hex's level
+(`BoardSurface.canalField`). Each point belongs to the spoke from the centre to a mouth's middle nearest it in bearing
+and lies in that spoke's straight strip, so strips meet in mitred corners and the next canal meets a mouth at the same
+width; with no mouth it is a hexagonal basin. The lining falls steeply to a level floor (`canalBed`), cast concrete like
+the shoulders (`BoardRelief.lining`), the water a little below the shoulders. Where a deck's road comes down, the ramp's
+footprint is cut straight into the concrete (`cutRamps`, `openRamps`): ground and water inside it give way to a floor
+under the ramp, upright faces join it to the shoulder or, where a bend's channel reaches under the ramp's block, to the
+lining. Water level with paving keeps its quays.
+
 Mouth tangent corrections retain ordinary bends through two bank widths, then
 smoothly limit the excess to one more width. An almost radial mouth tangent can
 otherwise extend a long pointed shelf into the channel below a raised bank.

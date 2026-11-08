@@ -35,7 +35,7 @@ class GpuAridSurfaceSmokeTest {
                 if (x == 5 && y == 2) { cover += ";swamp:1"; }
                 board.setHex(new Coords(x, y), new Hex(x <= 2 ? 3 : 0, cover, theme));
             }
-            scenes.add(BoardAridSurfaceTest.capture(board));
+            scenes.add(BoardScenes.capture(board));
         }
         File output = new File(System.getProperty("megamek.gpu.screenshots", "build/gpu-board-review"), "arid-surfaces");
         Files.createDirectories(output.toPath());
@@ -51,7 +51,7 @@ class GpuAridSurfaceSmokeTest {
                 try {
                     var camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
-                    GpuRiverTerrainSmokeTest.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
+                    BoardScenes.tune(.8f, BoardGeometry.DEFAULT_TRANSITIONS);
                     for (int i = 0; i < themes.size(); i++) {
                         var scene = scenes.get(i);
                         terrain.update(scene);

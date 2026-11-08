@@ -196,8 +196,8 @@ class GpuExplosionSmokeTest {
     private static void verifyDeathPlayback(GpuSceneTestOutput buffer) {
         var effects = new GpuAttackEffects();
         effects.setWind(wind(.4f, 60));
-        var unit = UnitPlaybackTest.unit(1, 0);
-        var attack = new UnitAttack(UnitPlaybackTest.attack(unit, unit, ResolvedAttack.Kind.DEATH, true));
+        var unit = UnitPlaybackFixture.unit(1, 0);
+        var attack = new UnitAttack(UnitPlaybackFixture.attack(unit, unit, ResolvedAttack.Kind.DEATH, true));
         var center = UnitAttack.center(null, unit.location(), new Vector3());
         var camera = new OrthographicCamera(56, 56);
         camera.position.set(center).add(0, 0, 60);

@@ -2,7 +2,6 @@
 package megamek.client.lobby;
 
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -12,14 +11,11 @@ import java.util.function.IntConsumer;
 
 import jakarta.annotation.Nullable;
 import megamek.client.ratgenerator.FactionRecord;
+import megamek.client.ratgenerator.FormationRoll;
 import megamek.client.ratgenerator.FormationType;
 import megamek.client.ratgenerator.GenerationContext;
-import megamek.client.ratgenerator.MissionRole;
 import megamek.client.ratgenerator.ModelRecord;
-import megamek.client.ratgenerator.Parameters;
-import megamek.client.ratgenerator.UnitTable;
 import megamek.common.loaders.MekSummary;
-import megamek.common.units.EntityMovementMode;
 import megamek.common.units.UnitType;
 
 /**
@@ -244,53 +240,19 @@ public final class FormationForm implements RandomArmyForm.Dealer {
             return List.of();
         }
         loader.accept(factions.year());
-        List<Parameters> params = new ArrayList<>();
-        params.add(parameters(record, unitType, EnumSet.noneOf(MissionRole.class)));
-        List<Integer> numUnits = new ArrayList<>();
-        numUnits.add(count);
-        if (extraCount > 0) {
-            if (extra == Extra.OTHER) {
-                params.add(parameters(record, otherType, EnumSet.noneOf(MissionRole.class)));
-                numUnits.add(extraCount);
-            } else if (extra == Extra.MECHANIZED_BA) {
-                // As many of the formation's units as there are battle armor squads carry them, so are omnis
-                numUnits.set(0, Math.min(extraCount, count));
-                if (count > extraCount) {
-                    params.add(params.get(0).copy());
-                    numUnits.add(count - extraCount);
-                }
-                params.get(0).getRoles().add(MissionRole.MECHANIZED_BA);
-            }
-        }
-
-        List<MekSummary> units = new ArrayList<>(formation.generateFormation(params, numUnits, network(), false));
-        if (units.isEmpty() || extraCount == 0) {
-            return units;
-        }
-        if (extra == Extra.MECHANIZED_BA) {
-            // The battle armor do not count for the formation's rules: a formation of their own, else any
-            Parameters ba = parameters(record, UnitType.BATTLE_ARMOR, EnumSet.of(MissionRole.MECHANIZED_BA));
-            List<MekSummary> squads = formation.generateFormation(ba, extraCount, ModelRecord.NETWORK_NONE, true);
-            if (squads.isEmpty()) {
-                squads = UnitTable.findTable(ba).generateUnits(extraCount);
-            }
-            units.addAll(squads);
-        } else if (extra == Extra.AIR_LANCE) {
-            UnitTable fighters = UnitTable.findTable(parameters(record, UnitType.AEROSPACE_FIGHTER,
-                  EnumSet.noneOf(MissionRole.class)));
-            MekSummary first = fighters.generateUnit();
-            if (first != null) {
-                units.add(first);
-                MekSummary second = fighters.generateUnit(unit -> unit.getChassis().equals(first.getChassis()));
-                units.add(Objects.requireNonNullElse(second, first));
-            }
-        }
-        return units;
+        return FormationRoll.generate(formation, request(record, count));
     }
 
-    private Parameters parameters(FactionRecord record, int type, EnumSet<MissionRole> roles) {
-        return new Parameters(record, type, factions.year(), factions.rating(), null, ModelRecord.NETWORK_NONE,
-              EnumSet.noneOf(EntityMovementMode.class), roles, 0, record);
+    /** What the form asks {@link FormationRoll} to build: {@code count} units and the additional ones. */
+    private FormationRoll.Request request(FactionRecord record, int count) {
+        FormationRoll.Extra rollExtra = switch (extra) {
+            case SIMPLE -> FormationRoll.Extra.NONE;
+            case MECHANIZED_BA -> FormationRoll.Extra.MECHANIZED_BA;
+            case AIR_LANCE -> FormationRoll.Extra.AIR_LANCE;
+            case OTHER -> FormationRoll.Extra.OTHER;
+        };
+        return new FormationRoll.Request(record, unitType, factions.year(), factions.rating(), count, rollExtra,
+              otherType, extraCount, network());
     }
 
     @Override

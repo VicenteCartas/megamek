@@ -66,8 +66,8 @@ class GpuColorTextureSmokeTest {
                     }
                     var damage = new GpuGroundDamage();
                     try {
-                        damage.update(BoardSurfaceBlendTest.scene(c ->
-                              BoardSurfaceBlendTest.tile(c, BoardScene.Surface.GRASS, 0, -1, 0)));
+                        damage.update(BoardScenes.scene(c ->
+                              BoardScenes.tile(c, BoardScene.Surface.GRASS, 0, -1, 0)));
                         for (var style : List.of(GpuGroundDamage.Style.LASER, GpuGroundDamage.Style.PPC, GpuGroundDamage.Style.BALLISTIC)) {
                             for (float radius : new float[] { .3f, 10 }) {
                                 var brush = damage.brush(style, radius, 1, 0);

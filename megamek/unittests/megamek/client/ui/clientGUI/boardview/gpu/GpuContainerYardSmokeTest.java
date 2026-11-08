@@ -108,7 +108,7 @@ class GpuContainerYardSmokeTest {
 
     /** Renders until the terrain has no build left, a few frames at least. */
     private static void settle(GpuBattleView view) throws Exception {
-        var terrain = (GpuTerrain) GpuCamouflageReview.field(view, "terrain");
+        var terrain = (GpuTerrain) GpuTestSupport.field(view, "terrain");
         long deadline = System.nanoTime() + 120_000_000_000L;
         for (int frame = 0; frame < 12 || terrain.busy(); frame++) {
             assertTrue(System.nanoTime() < deadline, "The terrain settles");
@@ -154,8 +154,8 @@ class GpuContainerYardSmokeTest {
     private static void views(Board saved, AtomicReference<Throwable> failure) throws Exception {
         try (var fixture = GpuBoardFixture.create(saved)) {
             GpuTacticalViewSmokeTest.run(fixture, failure, 1600, 1000, view -> {
-                var scene = (BoardScene) GpuCamouflageReview.field(view, "scene");
-                var terrain = (GpuTerrain) GpuCamouflageReview.field(view, "terrain");
+                var scene = (BoardScene) GpuTestSupport.field(view, "scene");
+                var terrain = (GpuTerrain) GpuTestSupport.field(view, "terrain");
                 assertTrue(scene.tile(FIRST_CRANE).features().stream().anyMatch(f -> f.asset().equals("scenery/seaport/yard/crane-boom")));
                 view.boardCamera.setIsometric(false);
                 view.boardCamera.fit(scene);
@@ -205,7 +205,7 @@ class GpuContainerYardSmokeTest {
             String name = map.contains("Shipyard") ? "shipyard-entrance" : "arid-portside";
             try (var fixture = GpuBoardFixture.create(sheet)) {
                 GpuTacticalViewSmokeTest.run(fixture, failure, 1600, 1000, view -> {
-                    var scene = (BoardScene) GpuCamouflageReview.field(view, "scene");
+                    var scene = (BoardScene) GpuTestSupport.field(view, "scene");
                     if (name.equals("shipyard-entrance")) {
                         view.boardCamera.setIsometric(true);
                         view.boardCamera.fit(scene);
@@ -241,7 +241,7 @@ class GpuContainerYardSmokeTest {
             String content = Files.readString(file.toPath(), StandardCharsets.ISO_8859_1);
             if (!content.contains("fluff:80:") && !content.contains("fluff:81:")) { continue; }
             Board sheet = BoardFile.loadSheet(file, false, true);
-            BoardScene scene = GpuLegacyImportSmokeTest.scene(sheet);
+            BoardScene scene = BoardScenes.scene(sheet);
             var pinned = BoardConcrete.of(scene).fit().pinned();
             long yards = pinned.stream().filter(at -> BoardSceneryLayouts.skin(sheet.getHex(at)) != null).count();
             if (yards > 0) {

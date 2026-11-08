@@ -283,7 +283,9 @@ final class GpuGroundCover implements Disposable {
         float w = Math.max(0, 1 - u - v);
         float up = normal.set(normals.get(a)).scl(u).mulAdd(normals.get(b), v).mulAdd(normals.get(c), w).nor().z;
         float growth = BoardRelief.smooth((up - .6f) / .35f);
-        if (waterHeights.containsKey(a)) {
+        // A wall is never wet ground (GpuTerrain#sculptVertex): water standing above land leaves its outer slope dry.
+        boolean wall = face.finish() == BoardSurface.Finish.WALL || face.finish() == BoardSurface.Finish.CAP;
+        if (!wall && waterHeights.containsKey(a)) {
             float water = (waterHeights.get(a) * u + waterHeights.get(b) * v + waterHeights.get(c) * w) / (u + v + w);
             // Keep a bare wet toe, then restore the meadow over the exposed shallow bank.
             float above = (z - water) / BoardGeometry.hexScale();
@@ -623,7 +625,7 @@ final class GpuGroundCover implements Disposable {
     private long frame, uploads;
     private int revision = -1, boardId = -1;
     /** Render-owned submission snapshot; installed roots still invalidate a stationary view. */
-    private record View(float[] projectionView, float viewportPixels, List<BoardScene.Tile> candidates,
+    private record View(float[] projectionView, float viewportPixels, BoardQuality quality, List<BoardScene.Tile> candidates,
           Map<Coords, BoardPlants> sources, List<ModelInstance> instances) { }
     private View view;
     /** How long blades take to grow on a hex whose roots arrived while it was already on screen without any. */
@@ -633,8 +635,7 @@ final class GpuGroundCover implements Disposable {
     private final Map<Coords, Long> arrivals = new HashMap<>();
 
     static String vertex(String source) {
-        String meadow = "uniform sampler2D u_rainNoise;\n"
-              + GpuShaderSource.read("terrain-meadow.glsl");
+        String meadow = GpuShaderSource.read("surface-noise.glsl") + GpuShaderSource.read("terrain-meadow.glsl");
         String wind = GpuShaderSource.read("terrain-vegetation-wind.glsl");
         String blade = "#define GRASS_START_PIXELS " + START_PIXELS + "\n#define GRASS_FULL_PIXELS " + FULL_PIXELS
               + "\n#define GRASS_RIM_START " + RIM_START_PIXELS + "\n#define GRASS_RIM_STAND " + RIM_STAND_PIXELS
@@ -690,7 +691,8 @@ final class GpuGroundCover implements Disposable {
         long now = System.nanoTime();
         // A hex that has just grown in needs its full target once more; the last submission had it growing.
         boolean grown = arrivals.values().removeIf(arrived -> now - arrived >= GROWTH_NANOS);
-        if (view != null && !grown && arrivals.isEmpty() && view.viewportPixels() == viewportPixels
+        BoardQuality quality = BoardQuality.current;
+        if (view != null && !grown && arrivals.isEmpty() && view.viewportPixels() == viewportPixels && view.quality() == quality
               && Arrays.equals(view.projectionView(), camera.combined.val) && view.candidates().equals(candidates)) {
             boolean current = true;
             for (var entry : view.sources().entrySet()) {
@@ -729,7 +731,7 @@ final class GpuGroundCover implements Disposable {
             Long arrived = arrivals.get(tile.coords());
             float growth = arrived == null ? 1 : BoardRelief.smooth((now - arrived) / (float) GROWTH_NANOS);
             if (meadow) {
-                chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * density(pixels) * growth));
+                chunk.grass.add(planted.grass(), (int) Math.ceil(ROOTS_PER_HEX * quality.meadowShare * density(pixels) * growth));
                 chunk.rim.add(planted.rim(), (int) Math.ceil(ROOTS_PER_HEX * rimDensity(pixels) * growth));
             } else {
                 chunk.wheat.add(planted.wheat(), (int) Math.ceil(ROOTS_PER_HEX
@@ -765,7 +767,7 @@ final class GpuGroundCover implements Disposable {
                 }
             }
         }
-        view = new View(camera.combined.val.clone(), viewportPixels, List.copyOf(candidates), sources, result);
+        view = new View(camera.combined.val.clone(), viewportPixels, quality, List.copyOf(candidates), sources, result);
         return result;
     }
 

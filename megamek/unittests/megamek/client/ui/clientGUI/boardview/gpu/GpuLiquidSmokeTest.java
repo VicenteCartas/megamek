@@ -110,7 +110,7 @@ class GpuLiquidSmokeTest {
                 camera.fit(scene);
                 terrain.renderShadows(camera.camera, List.of());
                 // Detail refinement and water-page builds must finish before the animation comparison starts.
-                GpuTerrainLodSmokeTest.settle(terrain, null, scene, camera);
+                GpuReviewFrame.settle(terrain, null, scene, camera);
                 List<int[]> before = samples(surface, terrain, camera, scene, true);
                 GpuBoardTestUi.capture(new File(output, "liquids-" + (procedural ? "procedural" : shader ? "shader" : "gif")
                       + "-" + (isometric ? "isometric" : "top") + ".png"));

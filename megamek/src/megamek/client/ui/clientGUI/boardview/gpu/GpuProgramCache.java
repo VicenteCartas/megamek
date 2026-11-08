@@ -73,6 +73,8 @@ final class GpuProgramCache {
     private final Path directory;
     private final String driver;
     private final int[] formats;
+    /** Whether this process prunes the directory: only the game does, not its link helper. */
+    private boolean pruning = true;
     /** Bytes written since the last pruning: a long session, such as live shader editing, prunes again. */
     private final AtomicLong unpruned = new AtomicLong();
     /** Diagnostics: entries loaded into programs, entries stored, and entries discarded as damaged or rejected. */
@@ -90,7 +92,10 @@ final class GpuProgramCache {
      * The cache for the current context's driver, or null when the driver offers no binary format, the property turns
      * it off or the directory cannot be created. Call on a thread whose context is current.
      */
-    static GpuProgramCache open(Path directory) {
+    static GpuProgramCache open(Path directory) { return open(directory, true); }
+
+    /** As {@link #open(Path)}; without {@code pruning} it only adds entries (GpuLinkHelper). */
+    static GpuProgramCache open(Path directory, boolean pruning) {
         if (!Boolean.parseBoolean(System.getProperty(PROPERTY, "true"))) { return null; }
         var capabilities = GL.getCapabilities();
         if (!capabilities.OpenGL41 && !capabilities.GL_ARB_get_program_binary) { return null; }
@@ -105,9 +110,15 @@ final class GpuProgramCache {
         }
         var cache = new GpuProgramCache(directory, GL11.glGetString(GL11.GL_VENDOR) + '\n'
               + GL11.glGetString(GL11.GL_RENDERER) + '\n' + GL11.glGetString(GL11.GL_VERSION) + '\n' + KEY_SALT, formats);
-        cache.prune();
+        cache.pruning = pruning;
+        if (pruning) { cache.prune(); }
         return cache;
     }
+
+    Path directory() { return directory; }
+
+    /** The driver's identity in every key: vendor, renderer, version and the salt. */
+    String driver() { return driver; }
 
     /** Whether a file in {@code folder} has reached {@code cap} bytes; false when it cannot be read. Only reads sizes. */
     static boolean full(Path folder, long cap) {
@@ -184,17 +195,19 @@ final class GpuProgramCache {
         GL41C.glProgramParameteri(program, GL41C.GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL11.GL_TRUE);
     }
 
-    /** Keeps a successfully linked program; a failed write only costs the next run a compile. */
-    void store(int program, String key) {
+    /** Keeps a successfully linked program; a failed write only costs the next run a compile. The bytes kept, else 0. */
+    int store(int program, String key) {
         int length = GL20C.glGetProgrami(program, GL41C.GL_PROGRAM_BINARY_LENGTH);
-        if (length <= 0) { return; }
+        if (length <= 0) { return 0; }
         ByteBuffer data = MemoryUtil.memAlloc(length);
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer written = stack.mallocInt(1), format = stack.mallocInt(1);
             GL41C.glGetProgramBinary(program, written, format, data);
             byte[] bytes = new byte[written.get(0)];
             data.get(0, bytes);
-            if (write(key, format.get(0), bytes)) { stored.incrementAndGet(); }
+            if (!write(key, format.get(0), bytes)) { return 0; }
+            stored.incrementAndGet();
+            return bytes.length;
         } finally {
             MemoryUtil.memFree(data);
         }
@@ -246,10 +259,7 @@ final class GpuProgramCache {
             }
             Files.move(partial, directory.resolve(key + ".bin"), StandardCopyOption.REPLACE_EXISTING,
                   StandardCopyOption.ATOMIC_MOVE);
-            if (unpruned.addAndGet(data.length) > CAPACITY / 4) {
-                unpruned.set(0);
-                prune();
-            }
+            added(data.length);
             return true;
         } catch (IOException failure) {
             LOGGER.debug(failure, "Could not store GPU program binary {}", key);
@@ -259,6 +269,14 @@ final class GpuProgramCache {
                 // Pruned once abandoned.
             }
             return false;
+        }
+    }
+
+    /** Bytes written to the directory, by this process or for it (GpuLinkHelper): a long session prunes again. */
+    void added(long bytes) {
+        if (unpruned.addAndGet(bytes) > CAPACITY / 4 && pruning) {
+            unpruned.set(0);
+            prune();
         }
     }
 

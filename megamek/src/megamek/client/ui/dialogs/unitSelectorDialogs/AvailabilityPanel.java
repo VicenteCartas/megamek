@@ -44,10 +44,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Vector;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -63,13 +60,12 @@ import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 
-import megamek.client.ratgenerator.AvailabilityRating;
 import megamek.client.ratgenerator.FactionRecord;
 import megamek.client.ratgenerator.ModelRecord;
 import megamek.client.ratgenerator.RATGenerator;
+import megamek.client.ratgenerator.UnitAvailability;
 import megamek.client.ui.util.UIUtil;
 import megamek.common.eras.Era;
-import megamek.common.eras.Eras;
 import megamek.common.util.ImageUtil;
 import megamek.logging.MMLogger;
 
@@ -433,7 +429,6 @@ public class AvailabilityPanel {
     }
 
     private final static RATGenerator RAT_GENERATOR = RATGenerator.getInstance();
-    private static volatile Integer[] RG_ERAS;
 
     private final Box mainPanel = Box.createVerticalBox();
     private final JScrollPane scrollPane = new JScrollPane(mainPanel);
@@ -462,86 +457,14 @@ public class AvailabilityPanel {
     }
 
     private void initializePanel() {
-        if (!RAT_GENERATOR.isInitialized()) {
+        UnitAvailability<Era> availability = UnitAvailability.of(RAT_GENERATOR, record);
+        if (availability == null && !RAT_GENERATOR.isInitialized()) {
             return;
-        }
-        if (RG_ERAS == null) {
-            synchronized (AvailabilityPanel.class) {
-                RAT_GENERATOR.getEraSet().forEach(RAT_GENERATOR::loadYear);
-                RG_ERAS = RAT_GENERATOR.getEraSet().toArray(new Integer[0]);
-            }
         }
         DefaultTableModel newGridModel = new DefaultTableModel();
         List<String> finalColumnTitles = new ArrayList<>();
         finalColumnTitles.add("Faction");
-        List<Era> allEras = Eras.getEras();
-        List<Era> erasToDisplay = new ArrayList<>();
-        Map<Era, Map<String, String>> eraFactionAvailabilityCache = new HashMap<>();
-        if (record != null && !allEras.isEmpty()) {
-            boolean[] eraHasDataFlags = new boolean[allEras.size()];
-            for (int i = 0; i < allEras.size(); i++) {
-                Era currentEra = allEras.get(i);
-                boolean currentEraHasAnyData = false;
-                for (String factionName : record.getIncludedFactions()) {
-                    String availabilityTextCheck = "";
-                    List<AvailabilityRating> ratingsForEra = new ArrayList<>();
-                    FactionRecord factionRecord = RAT_GENERATOR.getFaction(factionName);
-                    for (Integer year : RG_ERAS) {
-                        if ((Eras.getEra(year) != currentEra)
-                              || (factionRecord != null && !factionRecord.isActiveInYear(year))) {
-                            continue;
-                        }
-                        // Gate on the year as well as the era. An availability code can name the year a faction
-                        // starts getting the unit, and a Force Generator era can straddle two of the eras shown
-                        // here: the 3060 era runs to 3066, so a unit the Periphery only gets from 3063 was being
-                        // listed under the Clan Invasion, which ends in 3061.
-                        AvailabilityRating modelAvailRecord = RAT_GENERATOR.findModelAvailabilityRecord(
-                              year, record.getKey(), factionName, year);
-                        if (modelAvailRecord != null) {
-                            ratingsForEra.add(modelAvailRecord);
-                        }
-                    }
-                    if (!ratingsForEra.isEmpty()) {
-                        AvailabilityRating mergedAvailability = RAT_GENERATOR.mergeFactionAvailability(
-                              factionName, ratingsForEra);
-                        if (mergedAvailability != null) {
-                            availabilityTextCheck = mergedAvailability.formatAvailability(factionRecord);
-                        }
-                    }
-                    eraFactionAvailabilityCache.computeIfAbsent(currentEra, k -> new HashMap<>())
-                          .put(factionName, availabilityTextCheck);
-                    if (!availabilityTextCheck.isEmpty()) {
-                        currentEraHasAnyData = true;
-                    }
-                }
-                eraHasDataFlags[i] = currentEraHasAnyData;
-            }
-
-            // Find the first era with data, if any
-            int firstEraWithDataIndex = -1;
-            for (int i = 0; i < eraHasDataFlags.length; i++) {
-                if (eraHasDataFlags[i]) {
-                    firstEraWithDataIndex = i;
-                    break;
-                }
-            }
-            // Find the last era with data, if any
-            int lastEraWithDataIndex = -1;
-            if (firstEraWithDataIndex != -1) {
-                for (int i = eraHasDataFlags.length - 1; i >= firstEraWithDataIndex; i--) {
-                    if (eraHasDataFlags[i]) {
-                        lastEraWithDataIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            if (firstEraWithDataIndex != -1 && lastEraWithDataIndex != -1) {
-                for (int i = firstEraWithDataIndex; i <= lastEraWithDataIndex; i++) {
-                    erasToDisplay.add(allEras.get(i));
-                }
-            }
-        }
+        List<Era> erasToDisplay = (availability == null) ? List.of() : availability.eras();
 
         for (Era era : erasToDisplay) {
             String link = String.format("<HTML><A HREF=\"http://www.masterunitlist.info/Era/Details/%s\">%s</A></HTML>",
@@ -550,8 +473,8 @@ public class AvailabilityPanel {
         }
         newGridModel.setColumnIdentifiers(finalColumnTitles.toArray());
 
-        if (record != null) {
-            for (String factionCode : record.getIncludedFactions()) {
+        if (availability != null) {
+            for (String factionCode : availability.factions()) {
                 List<Object> rowData = new ArrayList<>();
                 // Use the full code: a command may have its own icon, and one without inherits its parent's
                 ImageIcon factionIcon = RATGenerator.getFactionLogo(0, factionCode, Color.WHITE);
@@ -561,9 +484,7 @@ public class AvailabilityPanel {
                 rowData.add(new FixedColumnGrid.FactionCellData(factionIcon, factionCode));
 
                 for (Era era : erasToDisplay) {
-                    String availabilityText = eraFactionAvailabilityCache
-                          .getOrDefault(era, Collections.emptyMap())
-                          .getOrDefault(factionCode, "-");
+                    String availabilityText = availability.text(era, factionCode);
                     if (availabilityText.isEmpty()) {
                         availabilityText = "-";
                     }

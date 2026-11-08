@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.GpuDialogRoutingTest.onSwing;
+import static megamek.client.ui.clientGUI.boardview.gpu.GpuTestSupport.onSwing;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -73,7 +73,7 @@ class GpuMenuCoverageSmokeTest {
                 Table root = (Table) menu.actor();
                 harness.window.addActor(root);
                 GpuHud.Inputs inputs = new GpuHud.Inputs(frame(menuBar), GpuHud.HudView.EMPTY, null,
-                      GpuHudInputTest.preferences(), GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
+                      GpuHudFixtures.preferences(), GpuHud.Metrics.of(harness.width(), harness.height()), List.of());
                 state.dialog = GpuHudState.Dialog.MENU;
                 Runnable show = () -> {
                     menu.update(inputs);
@@ -112,7 +112,7 @@ class GpuMenuCoverageSmokeTest {
                   "moveWalk", "dock-mode-walk", "moveJump", "dock-mode-jump", "moveTurn", "dock-turn-left",
                   "moveBackUp", "dock-more", "moveNext", "forces-next", "clear", "dock-more"));
         }
-        try (GpuFiringFixture firing = GpuFireOrdersTest.firing()) {
+        try (GpuFiringFixture firing = GpuFiringFixture.firing()) {
             // The weapons panel picks the weapon (Skip is MegaMek's next weapon), its target, mode and called shot.
             assertReachable("firing", firing.board.source, Map.of(
                   "fireTwist", "dock-twist-left", "fireFire", "dock-main", "fireNext", "forces-next",
@@ -348,7 +348,7 @@ class GpuMenuCoverageSmokeTest {
 
         Display(GamePhase phase, Function<ClientGUI, JComponent> create) throws Exception {
             board = GpuBoardFixture.create();
-            ClientGUI gui = GpuDialogRoutingTest.routingClient();
+            ClientGUI gui = GpuDialogFixture.routingClient();
             Client client = mock(Client.class);
             MegaMekController controller = mock(MegaMekController.class);
             CommonMenuBar menu = mock(CommonMenuBar.class);

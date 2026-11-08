@@ -169,7 +169,7 @@ class GpuDockInspectionSmokeTest {
     private static void show(GpuHud hud, GpuBoardSource.Frame frame) {
         // A second frame settles wrapped labels at their new column widths, as in the live render loop.
         for (int i = 0; i < 2; i++) {
-            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudInputTest.preferences());
+            hud.update(frame, GpuHud.HudView.EMPTY, null, GpuHudFixtures.preferences());
             ScreenUtils.clear(.12f, .16f, .14f, 1, true);
             hud.draw();
         }

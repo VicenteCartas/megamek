@@ -41,7 +41,7 @@ class GpuMaterialCacheSmokeTest {
                 var started = GpuMaterialCache.class.getDeclaredField("prewarmStarted");
                 started.setAccessible(true);
                 started.setLong(cache, System.nanoTime() - 1_000_000_000L);
-                cache.prewarm(camera, true, true, tops, () -> cache.chunk(0, bounds, true, 0));
+                cache.prewarm(camera, true, tops, () -> cache.chunk(0, bounds, true, 0));
                 assertTrue(cache.prewarmed(), "The loading gate opens even though no cache page has been built");
                 assertEquals(0, cache.status().pages().occupied());
                 for (int frame = 0; frame < 100 && !cache.complete(); frame++) {
@@ -302,7 +302,7 @@ class GpuMaterialCacheSmokeTest {
                 cache.rebuilt(bounds, null, 1);
                 cache.allocate(true, false);
                 for (int frame = 0; frame < 100 && !cache.prewarmed(); frame++) {
-                    cache.prewarm(camera, true, true, tops, () -> cache.chunk(0, bounds, true, 0));
+                    cache.prewarm(camera, true, tops, () -> cache.chunk(0, bounds, true, 0));
                 }
                 assertTrue(cache.prewarmed());
                 for (int frame = 0; frame < 3; frame++) {

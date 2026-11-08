@@ -10,6 +10,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -169,12 +172,15 @@ class BoardFoliageTest {
             assertTrue(triangles > 0 && triangles < previous);
             boolean authored = !family.equals("jungle");
             assertTrue(triangles <= (authored ? List.of(24000, 8000, 2200, 12) : List.of(480, 240, 96, 12)).get(lod));
-            assertEquals(0, low, .001f, "All detail levels remain grounded");
-            assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
+            // The impostor's quad lies flat about the crown's middle until the game turns it toward the camera.
+            if (lod < 3) {
+                assertEquals(0, low, .001f, "All mesh levels remain grounded");
+                assertTrue(high > 14 && high <= 19, "LOD changes must preserve the authored low silhouette");
+            }
             if (lod == 0) { assertEquals(18, high - low, .001f); }
-            // Every mesh part binds its source-aligned relief and surface maps; impostors retain their baked atlas.
+            // Every mesh part binds its source-aligned relief and surface maps; impostors their baked colour and shape.
             for (var material : data.materials) {
-                assertEquals(material.id.equals("impostor") ? 1 : 3, material.textures.size);
+                assertEquals(material.id.equals("impostor") ? 2 : 3, material.textures.size);
                 for (var texture : material.textures) {
                     String file = texture.fileName.replace('\\', '/');
                     assertTrue(file.contains("/textures/vegetation/"), file);
@@ -190,28 +196,28 @@ class BoardFoliageTest {
     }
 
     /**
-     * Impostor cards carry their plant's own colours. Decode detail texels before multiplying the mesh's linear
-     * vertex colour, then display-encode the result to compare with the PNG atlas. The estimate weights the near
-     * mesh's faces by the area the three card views show.
+     * Impostor frames carry their plant's own colours: those of its far mesh, which they stand for. Decode detail texels
+     * before multiplying the mesh's linear vertex colour, then display-encode the result to compare with the PNG atlas.
+     * The estimate weights the mesh's faces by the area three views show.
      */
     @Test
     void impostorAtlasesHoldTheirPlantsColours() throws IOException {
         File root = new File(Configuration.dataDir(), "models/board");
         File[] atlases = new File(root, "textures/vegetation/impostors")
-              .listFiles((folder, name) -> name.endsWith(".png"));
+              .listFiles((folder, name) -> name.endsWith(".png") && !name.endsWith("_normal.png") && !name.endsWith("_crown.png"));
         assertTrue(atlases != null && atlases.length > 0);
         float[][] views = { { 0, -.866f, .5f }, { .866f, 0, .5f }, { 0, 0, 1 } };
         for (File atlas : atlases) {
-            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/).
+            // A plant's file lives in vegetation/ unless its family has a folder of its own (fungus/, mars/).
             String name = atlas.getName().replace(".png", "");
             String plant = java.util.stream.Stream.of("vegetation/", "fungus/", "mars/").map(folder -> folder + name)
                   .filter(path -> new File(root, path + ".glb").isFile()).findFirst().orElse("vegetation/" + name);
-            var near = (RigidGlb.Data) RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath())
-                  .getFirst();
+            var levels = RigidGlb.loadLods(RigidGlb.source(root, plant), root.toPath());
+            var far = (RigidGlb.Data) levels.get(levels.size() - 2);
             Map<String, BufferedImage> textures = new HashMap<>();
             Map<String, double[]> cutoutMeans = new HashMap<>();
-            for (var material : near.materials) {
-                var image = near.images.get(material.textures.first().fileName);
+            for (var material : far.materials) {
+                var image = far.images.get(material.textures.first().fileName);
                 byte[] encoded = image.file() != null ? Files.readAllBytes(Path.of(image.file())) : image.encoded();
                 textures.put(material.id, ImageIO.read(new ByteArrayInputStream(encoded)));
                 if (material.id.endsWith("-cutout")) {
@@ -234,8 +240,8 @@ class BoardFoliageTest {
                 }
             }
             Map<String, String> partMaterials = new HashMap<>();
-            partMaterials(near.nodes, partMaterials);
-            var mesh = near.meshes.first();
+            partMaterials(far.nodes, partMaterials);
+            var mesh = far.meshes.first();
             float[] v = mesh.vertices;
             double[] expected = new double[3];
             double weight = 0;
@@ -262,22 +268,48 @@ class BoardFoliageTest {
                     weight += shown;
                 }
             }
-            BufferedImage cards = ImageIO.read(atlas);
+            BufferedImage frames = ImageIO.read(atlas);
+            // The calibrated tint scales each row of frames' pigment (calibrate_impostors.py): the plant's own colours lie
+            // under it.
+            double[][] tint = impostorTint(RigidGlb.source(root, plant).file(), name);
             double[] baked = new double[3];
             int opaque = 0;
-            for (int y = 0; y < cards.getHeight(); y++) {
-                for (int x = 0; x < cards.getWidth(); x++) {
-                    int texel = cards.getRGB(x, y);
+            for (int y = 0; y < frames.getHeight(); y++) {
+                for (int x = 0; x < frames.getWidth(); x++) {
+                    int texel = frames.getRGB(x, y);
                     if (texel >>> 24 < 128) { continue; }
-                    for (int channel = 0; channel < 3; channel++) { baked[channel] += texel >> 16 - 8 * channel & 255; }
+                    double[] row = tint[y * tint.length / frames.getHeight()];
+                    for (int channel = 0; channel < 3; channel++) {
+                        float shown = GpuColor.linear((texel >> 16 - 8 * channel & 255) / 255f);
+                        baked[channel] += 255 * GpuColor.display((float) (shown / row[channel]));
+                    }
                     opaque++;
                 }
             }
             double ratio = luma(baked) / opaque / (luma(expected) / weight);
             // The estimate takes one texel or a cutout's mean per face; the sparse twigs of foliage-barren, whose
             // impostor prepare_tree_lods.py reproduces exactly, estimate at 1.65.
-            assertTrue(ratio > .75 && ratio < 1.7, plant + " impostor lightness against its near mesh: " + ratio);
+            assertTrue(ratio > .75 && ratio < 1.7, plant + " impostor lightness against its far mesh: " + ratio);
         }
+    }
+
+    /**
+     * An impostor atlas's tint per row of frames (linear RGB, then the coverage exponent), as calibrate_impostors.py
+     * records it in the impostor material's extras {@code mmImpostorTint}; else one row of 1.
+     */
+    private static double[][] impostorTint(File glb, String atlas) throws IOException {
+        byte[] data = Files.readAllBytes(glb.toPath());
+        int length = ByteBuffer.wrap(data, 12, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        Map<?, ?> document = new ObjectMapper().readValue(Arrays.copyOfRange(data, 20, 20 + length), Map.class);
+        for (Object material : (List<?>) document.get("materials")) {
+            if (material instanceof Map<?, ?> values && "impostor".equals(values.get("name"))
+                  && values.get("extras") instanceof Map<?, ?> extras && extras.get("mmImpostorTint") instanceof Map<?, ?> tints
+                  && tints.get(atlas) instanceof List<?> rows) {
+                return rows.stream().map(row -> ((List<?>) row).stream().mapToDouble(value -> ((Number) value).doubleValue())
+                      .toArray()).toArray(double[][]::new);
+            }
+        }
+        return new double[][] { { 1, 1, 1, 1 } };
     }
 
     /** Pines' skirts and palms' fronds lost half their outline to decimation at the far levels, and snow with it. */

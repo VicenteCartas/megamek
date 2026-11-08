@@ -1,9 +1,9 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
-import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackTest.attack;
-import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackTest.scene;
-import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackTest.unit;
+import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackFixture.attack;
+import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackFixture.scene;
+import static megamek.client.ui.clientGUI.boardview.gpu.UnitPlaybackFixture.unit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;

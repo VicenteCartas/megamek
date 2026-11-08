@@ -12,7 +12,6 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Mesh;
-import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.VertexAttribute;
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
@@ -44,7 +43,7 @@ class GpuBiomeCoverageSmokeTest {
     }
 
     private static void checkCoverage() throws ReflectiveOperationException {
-        var mask = new GpuBiomeSurface();
+        var mask = new GpuBiomeSurface(new GpuLavaLighting(null));
         var target = GpuHeatGlow.buffer(SIZE, SIZE);
         var mesh = new Mesh(true, 4, 0, VertexAttribute.Position());
         mesh.setVertices(new float[] { -1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0 });
@@ -74,23 +73,18 @@ class GpuBiomeCoverageSmokeTest {
                   BoardScene.Biome.MUD, BoardScene.Biome.TUNDRA)) {
                 for (int mode = 0; mode < 6; mode++) {
                     int fixture = mode;
-                    var scene = BoardSurfaceBlendTest.scene(c -> tile(c, biome, fixture));
+                    var scene = BoardScenes.scene(c -> tile(c, biome, fixture));
                     mask.update(scene);
                     var member = GpuBiomeSurface.class.getDeclaredField("pixels");
                     member.setAccessible(true);
                     int[] packed = ((int[]) member.get(mask)).clone();
                     assertMetadata(scene, packed, fixture);
-                    var original = new Pixmap(scene.width(), scene.height(), Pixmap.Format.RGBA8888);
-                    original.setBlending(Pixmap.Blending.None);
-                    for (int y = 0; y < scene.height(); y++) {
-                        for (int x = 0; x < scene.width(); x++) {
-                            // Clearing only the optimization bit restores the full production stencil, retaining
-                            // identical biome, palette, ice, elevation and reached-quarter inputs.
-                            original.drawPixel(x, y, packed[y * scene.width() + x] & ~UNIFORM_BIT);
-                        }
-                    }
-                    var fullStencil = new Texture(original);
-                    original.dispose();
+                    // Clearing only the optimization bit restores the full production stencil, retaining
+                    // identical biome, palette, ice, elevation and reached-quarter inputs.
+                    int[] stripped = packed.clone();
+                    for (int i = 0; i < stripped.length; i++) { stripped[i] &= ~UNIFORM_BIT; }
+                    var fullStencil = new GpuLavaLighting(null);
+                    fullStencil.setHexes(stripped, scene.width());
                     try {
                         for (float height : new float[] { -.151f, -.15f, 0, .15f, .151f, 1.3f }) {
                             // Whole board includes both column parities, all stencil-cell corners and the edge.
@@ -102,7 +96,8 @@ class GpuBiomeCoverageSmokeTest {
                                     float water = result == 3 ? 0 : -10000;
                                     target.begin();
                                     shader.bind();
-                                    shader.setUniformi("u_biomeHexes", 0);
+                                    shader.setUniformi("u_lavaLights", 0);
+                                    shader.setUniformi("u_hexTable", mask.lights().hexRow(), mask.lights().hexWidth());
                                     shader.setUniformf("u_biomeBoard", (float) scene.width(), (float) scene.height());
                                     shader.setUniformf("u_metre", BoardRelief.metres(1));
                                     shader.setUniformf("u_levelHeight", BoardGeometry.level());
@@ -111,8 +106,8 @@ class GpuBiomeCoverageSmokeTest {
                                     shader.setUniformi("u_result", result);
                                     shader.setUniformf("u_bounds", close ? 82 : -4, close ? -119 : -244,
                                           close ? 12 : 220, close ? 12 : 248);
-                                    float[] expected = sample(shader, mesh, fullStencil);
-                                    float[] actual = sample(shader, mesh, mask.texture());
+                                    float[] expected = sample(shader, mesh, fullStencil.texture());
+                                    float[] actual = sample(shader, mesh, mask.lights().texture());
                                     target.end();
                                     float maximum = 0;
                                     for (int i = 0; i < expected.length; i++) {
@@ -128,7 +123,7 @@ class GpuBiomeCoverageSmokeTest {
                 }
             }
             assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
-        } finally { shader.dispose(); mesh.dispose(); target.dispose(); mask.dispose(); }
+        } finally { shader.dispose(); mesh.dispose(); target.dispose(); mask.lights().dispose(); }
     }
 
     private static float[] sample(ShaderProgram shader, Mesh mesh, Texture map) {

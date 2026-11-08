@@ -48,7 +48,9 @@ final class GpuMaterialMaps {
         /** Linear emission RGB with exposed-melt coverage ({@code texture_coverage}) in A: molten lava. */
         MOLTEN_HEAT,
         /** Heat (emission) in R, crack glow ({@code texture_glow}) in A: solid crust. */
-        CRUST_HEAT
+        CRUST_HEAT,
+        /** The ice sheet's baked floes, as they are in {@code <name>_floes.png}: joints, snow, cracks, shards (terrain-ice.glsl). */
+        FLOES
     }
 
     /** Mud and scorch keep roughness in their normal map's blue channel; their shaders rebuild the normal's Z. */
@@ -275,6 +277,7 @@ final class GpuMaterialMaps {
                   : required(material, material.roughnessMap(), "ORM map");
             case METALLIC_ROUGHNESS -> required(material, finishMap(material), "roughness, metallic or scattering map");
             case MOLTEN_HEAT, CRUST_HEAT -> required(material, material.emission(), "emission map");
+            case FLOES -> material.beside("floes");
         };
     }
 
@@ -299,6 +302,7 @@ final class GpuMaterialMaps {
             }
             case MOLTEN_HEAT -> maps.add(material.extra("coverage"));
             case CRUST_HEAT -> maps.add(material.extra("glow"));
+            case FLOES -> { }
         }
         maps.removeIf(java.util.Objects::isNull);
         return maps;
@@ -523,6 +527,11 @@ final class GpuMaterialMaps {
                         out[at + 1] = (byte) surface.roughness(pixel);
                         out[at + 2] = (byte) (occlusion ? surface.subsurface(pixel) : surface.metallic(pixel));
                         out[at + 3] = (byte) 255;
+                    }
+                }
+                case FLOES -> {
+                    for (int pixel = 0, at = 0; pixel < width * height; pixel++, at += 4) {
+                        for (int channel = 0; channel < 4; channel++) { out[at + channel] = (byte) primary.value(pixel, channel); }
                     }
                 }
                 case MOLTEN_HEAT, CRUST_HEAT -> {

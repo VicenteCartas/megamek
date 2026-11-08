@@ -25,7 +25,7 @@ import com.badlogic.gdx.graphics.PixmapIO;
 import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.utils.BufferUtils;
-import megamek.client.ui.clientGUI.boardview.gpu.GpuDepthPrepassBaselineSmokeTest.View;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuCalibrationScenes.View;
 import megamek.common.board.Coords;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -46,14 +46,14 @@ class GpuAmbientOcclusionSmokeTest {
 
     @Test
     void darkensCreasesAndLeavesTheFrameUnchangedWhenOff() throws Exception {
-        BoardScene calibration = GpuDepthPrepassBaselineSmokeTest.scene(GpuDepthPrepassBaselineSmokeTest.CALIBRATION);
-        BoardScene canyon = GpuDepthPrepassBaselineSmokeTest.scene(new File(BOARDS,
+        BoardScene calibration = GpuCalibrationScenes.scene(GpuCalibrationScenes.CALIBRATION);
+        BoardScene canyon = GpuCalibrationScenes.scene(new File(BOARDS,
               "Map Pack Savannahs/16x17 Box Canyon (Savannah).board"));
-        BoardScene city = GpuDepthPrepassBaselineSmokeTest.scene(new File(BOARDS, "unofficial/VictorMorson/48x48.board"));
+        BoardScene city = GpuCalibrationScenes.scene(new File(BOARDS, "unofficial/VictorMorson/48x48.board"));
         BoardScene forest = GpuForestBenchmarkSmokeTest.forest();
         StringBuilder report = new StringBuilder();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        Files.createDirectories(GpuDepthPrepassBaselineSmokeTest.OUTPUT.toPath());
+        Files.createDirectories(GpuCalibrationScenes.OUTPUT.toPath());
         var config = GpuBoardWindow.configuration(false);
         config.setWindowedMode(1920, 1080);
         new Lwjgl3Application(new ApplicationAdapter() {
@@ -65,13 +65,13 @@ class GpuAmbientOcclusionSmokeTest {
                           .append(Gdx.gl.glGetString(GL20.GL_VERSION)).append("; window ")
                           .append(Gdx.graphics.getBackBufferWidth()).append(" x ")
                           .append(Gdx.graphics.getBackBufferHeight()).append('\n');
-                    check(calibration, List.of(GpuDepthPrepassBaselineSmokeTest.calibrationViews().get(1)), true,
+                    check(calibration, List.of(GpuCalibrationScenes.calibrationViews().get(1)), true,
                           report);
                     Coords canyonCentre = new Coords(canyon.width() / 2, canyon.height() / 2);
                     check(canyon, List.of(View.at("box canyon middle", .5f, canyonCentre)), true, report);
                     check(city, List.of(View.at("48x48 city middle", .5f, new Coords(city.width() / 2,
                           city.height() / 2))), false, report);
-                    check(forest, List.of(GpuDepthPrepassBaselineSmokeTest.forestViews(forest).get(1)), false, report);
+                    check(forest, List.of(GpuCalibrationScenes.forestViews(forest).get(1)), false, report);
                     assertEquals(GL20.GL_NO_ERROR, Gdx.gl.glGetError());
                     assertTrue(FAILURES.isEmpty(), "Ambient occlusion: " + FAILURES);
                 } catch (Throwable error) {
@@ -85,7 +85,7 @@ class GpuAmbientOcclusionSmokeTest {
             }
         }, config);
         System.out.print(report);
-        Files.writeString(new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, "ambient-occlusion.txt").toPath(), report);
+        Files.writeString(new File(GpuCalibrationScenes.OUTPUT, "ambient-occlusion.txt").toPath(), report);
         if (failure.get() != null) { throw new AssertionError("Ambient occlusion", failure.get()); }
     }
 
@@ -93,20 +93,20 @@ class GpuAmbientOcclusionSmokeTest {
     private static void check(BoardScene scene, List<View> views, boolean creases, StringBuilder report)
           throws Exception {
         var terrain = new GpuTerrain();
-        var frame = new GpuReviewFrame(GpuDepthPrepassBaselineSmokeTest.NOON);
+        var frame = new GpuReviewFrame(GpuCalibrationScenes.NOON);
         var camera = new BoardCamera();
         try {
-            GpuDepthPrepassBaselineSmokeTest.prepare(terrain, frame, camera, scene);
+            GpuCalibrationScenes.prepare(terrain, frame, camera, scene);
             for (View view : views) {
                 String name = "ambient-occlusion-" + view.name().replace(' ', '-');
-                GpuDepthPrepassBaselineSmokeTest.show(view, scene, camera);
+                GpuCalibrationScenes.show(view, scene, camera);
                 frame.setAmbientOcclusion(false);
-                byte[] off = draw(terrain, frame, camera, scene, new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT,
+                byte[] off = draw(terrain, frame, camera, scene, new File(GpuCalibrationScenes.OUTPUT,
                       name + "-off.png"));
                 frame.setAmbientOcclusion(true);
-                draw(terrain, frame, camera, scene, new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-on.png"));
+                draw(terrain, frame, camera, scene, new File(GpuCalibrationScenes.OUTPUT, name + "-on.png"));
                 Visibility visibility = Visibility.read(frame.ambientOcclusion());
-                visibility.save(new File(GpuDepthPrepassBaselineSmokeTest.OUTPUT, name + "-visibility.png"));
+                visibility.save(new File(GpuCalibrationScenes.OUTPUT, name + "-visibility.png"));
                 report.append(String.format(Locale.ROOT, "%s: pre-pass twin draws %d; visibility mean %.3f, 1st"
                             + " percentile %.3f%n", view.name(), terrain.prepassDraws(), visibility.mean(),
                       visibility.percentile(.01f)));
@@ -131,7 +131,7 @@ class GpuAmbientOcclusionSmokeTest {
     /** The view settled with the frame's setting (a switch rebuilds the programs), drawn, saved and read back. */
     static byte[] draw(GpuTerrain terrain, GpuReviewFrame frame, BoardCamera camera, BoardScene scene,
           File file) throws InterruptedException {
-        GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+        GpuCalibrationScenes.settle(terrain, frame, camera, scene);
         frame.render(terrain, camera, scene, BoardCamera.renderScale);
         if (file != null) { GpuReviewFrame.save(file); }
         int width = Gdx.graphics.getBackBufferWidth(), height = Gdx.graphics.getBackBufferHeight();
@@ -210,7 +210,7 @@ class GpuAmbientOcclusionSmokeTest {
         try (var timings = new GpuStageTimings()) {
             for (boolean enabled : new boolean[] { false, true, true, false }) {
                 frame.setAmbientOcclusion(enabled);
-                GpuDepthPrepassBaselineSmokeTest.settle(terrain, frame, camera, scene);
+                GpuCalibrationScenes.settle(terrain, frame, camera, scene);
                 GpuAmbientOcclusion occlusion = frame.ambientOcclusion();
                 for (int i = -60; i < 240; i++) {
                     timings.beginFrame(i >= 0);

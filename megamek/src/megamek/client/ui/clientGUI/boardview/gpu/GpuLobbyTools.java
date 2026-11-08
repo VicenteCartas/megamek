@@ -1,7 +1,10 @@
 /* Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later */
 package megamek.client.ui.clientGUI.boardview.gpu;
 
+import java.awt.Font;
 import java.awt.image.BufferedImage;
+import java.awt.print.PrinterException;
+import java.awt.print.PrinterJob;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,6 +14,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -25,6 +29,7 @@ import megamek.client.Client;
 import megamek.client.generator.RandomGenderGenerator;
 import megamek.client.generator.RandomNameGenerator;
 import megamek.client.generator.RandomUnitGenerator;
+import megamek.client.lobby.AlphaStrikeStatsForm;
 import megamek.client.lobby.AssetForm;
 import megamek.client.lobby.AutoResolveRun;
 import megamek.client.lobby.AutoResolveRun.Score;
@@ -49,6 +54,7 @@ import megamek.client.lobby.RatBrowser;
 import megamek.client.lobby.RatGeneratorForm;
 import megamek.client.lobby.ReadyCheck;
 import megamek.client.lobby.RequisitionReadout;
+import megamek.client.lobby.SbfStatsForm;
 import megamek.client.lobby.TrainOrderForm;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.lobby.VictoryConditionsForm;
@@ -64,10 +70,12 @@ import megamek.client.ui.clientGUI.GUIPreferences;
 import megamek.client.ui.clientGUI.UnitRecipients;
 import megamek.client.ui.entityreadout.EntityReadout;
 import megamek.client.ui.panels.phaseDisplay.lobby.LobbyUtility;
-import megamek.client.ui.panels.phaseDisplay.lobby.SwingLobbyPrompts;
+import megamek.client.ui.util.FontHandler;
 import megamek.codeUtilities.MathUtility;
 import megamek.common.Player;
 import megamek.common.Team;
+import megamek.common.alphaStrike.AlphaStrikeElement;
+import megamek.common.alphaStrike.cardDrawer.ASCardPrinter;
 import megamek.common.autoResolve.converter.MMSetupForces;
 import megamek.common.autoResolve.converter.SetupForces;
 import megamek.common.autoResolve.event.AutoResolveConcludedEvent;
@@ -87,6 +95,7 @@ import megamek.common.options.OptionsConstants;
 import megamek.common.planetaryConditions.PlanetaryConditions;
 import megamek.common.preference.ClientPreferences;
 import megamek.common.preference.PreferenceManager;
+import megamek.common.strategicBattleSystems.SBFRecordSheetBook;
 import megamek.common.units.Entity;
 import megamek.common.units.UnitType;
 import megamek.logging.MMLogger;
@@ -104,6 +113,10 @@ final class GpuLobbyTools {
     private static final MMLogger LOGGER = MMLogger.create(GpuLobbyTools.class);
     /** The most units the readout shows at once, as the Swing readouts refuse more. */
     static final int MAX_READOUTS = 10;
+    /** The width of a readout's Alpha Strike card, which fits a dialog.lg dossier. */
+    private static final int AS_CARD_WIDTH = 640;
+    /** How long the lobby must stay still before an open readout reads its units again. */
+    private static final int READOUT_REFRESH_MS = 400;
 
     private final GpuLobbyWindow window;
     private final LobbyAsks asks = new NativeAsks();
@@ -116,6 +129,12 @@ final class GpuLobbyTools {
     private static final int PROBE_ODDS_RUNS = 20;
     private int probeTries;
     private volatile boolean printing;
+    /** The readout of the lobby's units that shows, as the GPU thread made it, and its units' ids; null when none. */
+    private volatile @Nullable LobbyReadoutView liveReadout;
+    private volatile @Nullable List<Integer> liveIds;
+    /** What the open readout of the lobby's units was last read from, so it is read again only once that changes. */
+    private volatile @Nullable List<Shown> liveShown;
+    private @Nullable Timer readoutRefresh;
 
     GpuLobbyTools(GpuLobbyWindow window) {
         this.window = window;
@@ -161,7 +180,7 @@ final class GpuLobbyTools {
 
     // ---- The prompts ----
 
-    /** The native prompts; Damage and the stats stay Swing's. */
+    /** The native prompts. */
     private final class NativeAsks implements LobbyAsks {
         @Override
         public void error(LobbyError error, Object... args) {
@@ -214,12 +233,91 @@ final class GpuLobbyTools {
 
         @Override
         public void showSbfStats(Collection<Force> forces, Game game) {
-            new SwingLobbyPrompts(gui()).showSbfStats(forces, game);
+            SbfStatsForm form = new SbfStatsForm(forces, game);
+            open(dialogs -> dialogs.sbfStats(form, statsHost));
         }
 
         @Override
         public void showAlphaStrikeStats(Collection<Entity> units) {
-            new SwingLobbyPrompts(gui()).showAlphaStrikeStats(units);
+            AlphaStrikeStatsForm form = new AlphaStrikeStatsForm(units);
+            open(dialogs -> dialogs.alphaStrikeStats(form, statsHost));
+        }
+    }
+
+    // ---- The stats cards ----
+
+    private final LobbyStatsView.Host statsHost = new StatsHost();
+    private final List<String> sheetFonts = new ArrayList<>();
+
+    /** The stats cards' saving and printing, each handed over to the Swing thread. */
+    private final class StatsHost implements LobbyStatsView.Host {
+        @Override
+        public void save(AlphaStrikeStatsForm form) {
+            SwingUtilities.invokeLater(() -> window.files().exportStats(form.fileName(), form::save));
+        }
+
+        @Override
+        public void print(List<AlphaStrikeElement> elements) {
+            List<AlphaStrikeElement> cards = List.copyOf(elements);
+            SwingUtilities.invokeLater(() -> {
+                PrinterJob job = PrinterJob.getPrinterJob();
+                job.setPrintable(new ASCardPrinter(cards, gui().getFrame()));
+                if (job.printDialog()) {
+                    printInBackground(job, "Alpha Strike cards");
+                }
+            });
+        }
+
+        @Override
+        public void save(SbfStatsForm form) {
+            SwingUtilities.invokeLater(() -> window.files().exportStats(form.fileName(), form::save));
+        }
+
+        @Override
+        public List<String> fonts() {
+            synchronized (sheetFonts) {
+                if (sheetFonts.isEmpty()) {
+                    sheetFonts.add("");
+                    sheetFonts.addAll(FontHandler.getAvailableNonSymbolFonts());
+                }
+                return List.copyOf(sheetFonts);
+            }
+        }
+
+        @Override
+        public String[] sheetFonts() {
+            GUIPreferences preferences = GUIPreferences.getInstance();
+            return new String[] { preferences.getSbfSheetHeaderFont(), preferences.getSbfSheetValueFont() };
+        }
+
+        @Override
+        public void print(SbfStatsForm form, String headerFont, String valueFont) {
+            SwingUtilities.invokeLater(() -> {
+                GUIPreferences.getInstance().setSbfSheetHeaderFont(headerFont);
+                GUIPreferences.getInstance().setSbfSheetValueFont(valueFont);
+                PrinterJob job = PrinterJob.getPrinterJob();
+                if (job.printDialog()) {
+                    job.setPrintable(new SBFRecordSheetBook(form.formations(), font(headerFont), font(valueFont)));
+                    printInBackground(job, "SBF record sheets");
+                }
+            });
+        }
+
+        private static @Nullable Font font(String name) {
+            return (name == null || name.isBlank()) ? null : Font.decode(name);
+        }
+
+        private void printInBackground(PrinterJob job, String what) {
+            Thread printer = new Thread(() -> {
+                try {
+                    job.print();
+                } catch (PrinterException failure) {
+                    LOGGER.error(failure, "The lobby could not print the {}", what);
+                    message(Messages.getString("Lobby.prompt.message"), String.valueOf(failure.getMessage()));
+                }
+            }, "Lobby stats printer");
+            printer.setDaemon(true);
+            printer.start();
         }
     }
 
@@ -572,8 +670,8 @@ final class GpuLobbyTools {
 
     /**
      * Rolls a force into the force generator's command, as the Swing generator does: described on the Swing thread
-     * from what the chosen player already fields, generated off it, folded in on it; {@code done} hears on the GPU
-     * thread whether it found units.
+     * from what the chosen player already fields and the command's ships have spare, generated off it, folded in on
+     * it; {@code done} hears on the GPU thread whether it found units.
      */
     private void generateForce(ForceGeneratorForm force, @Nullable String chosenName, Consumer<Boolean> done) {
         ForceDescriptor[] rolled = new ForceDescriptor[1];
@@ -587,7 +685,7 @@ final class GpuLobbyTools {
                 }
             }
             options[0] = client().getGame().getOptions();
-            rolled[0] = force.build(ExistingLift.of(owned));
+            rolled[0] = force.build(ExistingLift.of(owned).plus(force.commandLift()));
         }, () -> {
             if (rolled[0] == null) {
                 done.accept(false);
@@ -786,7 +884,79 @@ final class GpuLobbyTools {
         for (Entity unit : units) {
             dossiers.add(dossier(unit));
         }
-        open(dialogs -> dialogs.readout(dossiers).page(page));
+        List<Integer> ids = units.stream().map(Entity::getId).toList();
+        List<Shown> shown = units.stream().map(Shown::of).toList();
+        open(dialogs -> {
+            LobbyReadoutView view = dialogs.readout(dossiers).page(page);
+            liveReadout = view;
+            liveIds = ids;
+            liveShown = shown;
+        });
+    }
+
+    /**
+     * Reads the open readout's units again once the lobby has settled, if a readout of the lobby's units shows, and
+     * hands their fresh dossiers to it.
+     */
+    void refreshReadout() {
+        if (liveIds == null) {
+            return;
+        }
+        if (readoutRefresh == null) {
+            readoutRefresh = new Timer(READOUT_REFRESH_MS, event -> GpuHost.post(this::checkReadout));
+            readoutRefresh.setRepeats(false);
+        }
+        readoutRefresh.restart();
+    }
+
+    /** GPU thread: reads the readout's units again on the Swing thread if it still shows, or forgets it. */
+    private void checkReadout() {
+        LobbyReadoutView view = liveReadout;
+        if (view == null || showingReadout() != view) {
+            liveReadout = null;
+            liveIds = null;
+            liveShown = null;
+            return;
+        }
+        SwingUtilities.invokeLater(() -> updateReadout(view));
+    }
+
+    /** GPU thread: the readout that shows, if any. */
+    private @Nullable LobbyReadoutView showingReadout() {
+        GpuLobbyScreen screen = window.screen();
+        LobbyNativeDialogs dialogs = (screen == null) ? null : screen.nativeDialogs();
+        return (dialogs == null) ? null : dialogs.readoutView();
+    }
+
+    private void updateReadout(LobbyReadoutView view) {
+        List<Integer> ids = liveIds;
+        if (ids == null || window.closing()) {
+            return;
+        }
+        Game game = client().getGame();
+        List<Shown> now = new ArrayList<>();
+        List<Entity> units = new ArrayList<>();
+        for (int id : ids) {
+            Entity unit = game.getEntity(id);
+            if (unit != null && gui().lobbyCommands().canSeeAll(List.of(unit))) {
+                now.add(Shown.of(unit));
+                units.add(unit);
+            }
+        }
+        // Nothing the readout shows has changed: keep its dossiers rather than read them all again
+        if (units.isEmpty() || now.equals(liveShown)) {
+            return;
+        }
+        liveShown = now;
+        List<LobbyReadoutView.Dossier> dossiers = new ArrayList<>();
+        for (Entity unit : units) {
+            dossiers.add(dossier(unit));
+        }
+        GpuHost.post(() -> {
+            if (showingReadout() == view) {
+                view.update(dossiers);
+            }
+        });
     }
 
     /** Swing thread: reads a random army unit's file and opens its dossier over the random army. */
@@ -814,9 +984,40 @@ final class GpuLobbyTools {
               ? Messages.getString("Lobby.readout.lineUnowned", unit.calculateBattleValue(), format(unit.getWeight()))
               : Messages.getString("Lobby.readout.line", unit.calculateBattleValue(), format(unit.getWeight()),
                     owner.getName());
+        ReadoutCalculationReport.AlphaStrike alphaStrike;
+        try {
+            alphaStrike = ReadoutCalculationReport.alphaStrike(unit, AS_CARD_WIDTH);
+        } catch (RuntimeException failure) {
+            LOGGER.warn(failure, "The Alpha Strike card could not be made");
+            alphaStrike = new ReadoutCalculationReport.AlphaStrike(null, List.of());
+        }
         List<List<EntityReadout.Row>> pages = List.of(RequisitionReadout.summary(unit), RequisitionReadout.tro(unit),
-              rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)));
-        return new LobbyReadoutView.Dossier(unit.getShortName(), line, sprite, pages);
+              rows(() -> ReadoutCalculationReport.battleValue(unit)), rows(() -> ReadoutCalculationReport.cost(unit)),
+              alphaStrike.rows());
+        return new LobbyReadoutView.Dossier(unit.getId(), unit.getShortName(), line, sprite, pages,
+              alphaStrike.card(), ReadoutAvailability.later(unit));
+    }
+
+    /**
+     * What a readout of {@code unit} shows it from: the server sends a changed unit as a new one, and its owner and
+     * camouflage show on its line and sprite.
+     */
+    private record Shown(Entity unit, @Nullable String owner, Camouflage camouflage) {
+        static Shown of(Entity unit) {
+            Player owner = unit.getOwner();
+            return new Shown(unit, (owner == null) ? null : owner.getName(), unit.getCamouflageOrElseOwners());
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof Shown shown && shown.unit == unit && Objects.equals(shown.owner, owner)
+                  && Objects.equals(shown.camouflage, camouflage);
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(unit);
+        }
     }
 
     private static List<EntityReadout.Row> rows(java.util.function.Supplier<List<EntityReadout.Row>> report) {
@@ -967,10 +1168,13 @@ final class GpuLobbyTools {
             });
         }
 
-        /** Shows how the battle ended, opening the briefing again when it was closed while the battle was resolved. */
+        /**
+         * Shows how the battle ended, opening the briefing again over whatever shows when it was closed while the
+         * battle was resolved.
+         */
         private void ended(LobbyNativeDialogs dialogs, @Nullable AutoResolveConcludedEvent event) {
             if (view == null || !view.isOpen()) {
-                view = dialogs.autoResolve(false, chatter, this, () -> { });
+                view = dialogs.autoResolveOver(chatter, this);
             }
             if (event == null) {
                 view.failed(AutoResolveRun.failureTitle(), AutoResolveRun.failureText());

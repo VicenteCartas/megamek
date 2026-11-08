@@ -21,8 +21,8 @@ class BoardWetCliffTest {
     void theReferenceBeachTapersIntoTheCliffWithoutAProjectingShelf() {
         var original = BoardRelief.tuning();
         try {
-            tune(true);
-            var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            BoardScenes.tune(true);
+            var scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
             for (TerrainLod lod : TerrainLod.values()) {
                 var surface = new BoardSurface(scene, scene.tile(new Coords(7, 14)), lod);
                 Vector3 end = surface.waterBoundary(3).getFirst();
@@ -43,8 +43,8 @@ class BoardWetCliffTest {
     void parallelShorelineBuildsKeepTheSameWallContact() {
         var original = BoardRelief.tuning();
         try {
-            tune(true);
-            var scene = GpuRiverTerrainSmokeTest.mapScene(BoardScene.Surface.SAND);
+            BoardScenes.tune(true);
+            var scene = BoardScenes.mapScene(BoardScene.Surface.SAND);
             var coords = List.of(new Coords(7, 14), new Coords(8, 14), new Coords(9, 13));
             var expected = coords.stream().map(c -> new BoardSurface(scene, scene.tile(c))).toList();
             // Chunk construction builds these together; shared intersection scratch data used to corrupt the contour.
@@ -63,7 +63,7 @@ class BoardWetCliffTest {
     void cliffClassificationCountsBedDepthAndLeavesClimbableSlopesAlone() {
         var original = BoardRelief.tuning();
         try {
-            tune(true);
+            BoardScenes.tune(true);
             for (int level : new int[] { 1, 2 }) {
                 for (int depth : new int[] { 0, 1, 2 }) {
                     var scene = island(level, depth);
@@ -87,13 +87,13 @@ class BoardWetCliffTest {
     void cliffKeepsMorePlateauAndJoinsTheSubmergedRockWithoutHoles() {
         var original = BoardRelief.tuning();
         try {
-            BoardSculptTest.withTransitions(true, () -> {
+            BoardScenes.withTransitions(true, () -> {
                 var scene = island(2, 1);
                 var cache = new BoardSurface.Cache();
-                tune(false);
+                BoardScenes.tune(false);
                 var beach = cache.get(scene, scene.tile(LAND));
                 float oldArea = area(beach);
-                tune(true);
+                BoardScenes.tune(true);
                 var cliff = cache.get(scene, scene.tile(LAND));
                 assertNotSame(beach, cliff, "Toggling rebuilds support and picking geometry");
                 assertTrue(area(cliff) > oldArea * 1.1f, "Removing the cliff setback recovers usable plateau");
@@ -123,7 +123,7 @@ class BoardWetCliffTest {
                         }
                     }
                 }
-                tune(false);
+                BoardScenes.tune(false);
                 assertEquals(oldArea, area(cache.get(scene, scene.tile(LAND))), .001f,
                       "Disabling the option restores the beach and original plateau");
             });
@@ -132,16 +132,11 @@ class BoardWetCliffTest {
         }
     }
 
-    static void tune(boolean enabled) {
-        var t = BoardRelief.tuning();
-        BoardRelief.tune(new BoardRelief.Tuning(enabled, BoardRelief.DEFAULTS.containmentWalls()));
-    }
-
     @Test
     void aCliffAndSlopeShareTheMouthWhereWaterDepthChanges() {
         var original = BoardRelief.tuning();
         try {
-            tune(true);
+            BoardScenes.tune(true);
             var shallowScene = island(1, 1);
             var deeper = LAND.translated(0);
             var shallower = LAND.translated(1);
@@ -168,22 +163,6 @@ class BoardWetCliffTest {
 
     private static List<Vector3> vertices(BoardSurface.Face face) {
         return List.of(face.a(), face.b(), face.c());
-    }
-
-    /** A low river with abrupt changes of bed depth and bank height, including cliff/slope junctions. */
-    static BoardScene mixedDepthScene() {
-        List<BoardScene.Tile> tiles = new ArrayList<>();
-        for (int x = 0; x < 9; x++) {
-            for (int y = 0; y < 7; y++) {
-                boolean water = x >= 1 && x <= 7 && (y == 3 || y == 4 && x >= 3 && x <= 6);
-                int depth = !water ? -1 : new int[] { 1, 2, 1, 5, 2, 1, 2 }[x - 1];
-                int level = water ? -2 : y < 3 ? x == 4 ? 9 : x == 5 ? -2 : x < 5 ? 1 : 3 : -2;
-                tiles.add(new BoardScene.Tile(new Coords(x, y), level, depth, false, 0, BoardScene.Surface.GRASS, null,
-                      null, List.of(), List.of(), water ? BoardLiquid.WATER : BoardLiquid.NONE,
-                      null, true));
-            }
-        }
-        return new BoardScene(0, 9, 7, tiles, List.of(), List.of(), -1, "", List.of());
     }
 
     private static float area(BoardSurface surface) {

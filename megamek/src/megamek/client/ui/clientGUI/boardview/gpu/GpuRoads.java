@@ -5,6 +5,7 @@ import java.awt.BasicStroke;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Area;
+import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
@@ -33,6 +34,8 @@ import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.utils.FloatArray;
+import com.badlogic.gdx.utils.NumberUtils;
 import megamek.common.board.BoardEditorBlueprint;
 import megamek.common.board.Coords;
 import megamek.common.board.HexAppearance;
@@ -64,21 +67,21 @@ final class GpuRoads {
     static final class Masks {
         private final Map<MaskData, WeakReference<MaskData>> masks = new WeakHashMap<>();
         /**
-         * Recently built masks by everything they depend on ({@link #mask}): a road's mask is wanted by every hex it
-         * drapes over, and an edit rebuilds a whole chunk, most of whose roads it did not touch. Least recently used go
-         * first, past {@link #RECENT_TEXELS} or {@link #RECENT_MASKS} (each key holds its scene's tiles).
+         * Recently built masks by what tells them apart ({@link #mask}): roads alike across a board want the same masks,
+         * and an edit rebuilds a whole chunk, most of whose roads it did not touch. Least recently used go first, past
+         * {@link #RECENT_STORED} values in memory (most masks are compacted) or {@link #RECENT_MASKS}.
          */
         private final LinkedHashMap<Object, MaskData> recent = new LinkedHashMap<>(64, .75f, true);
         private final Map<Object, CompletableFuture<MaskData>> pending = new HashMap<>();
-        private long recentTexels;
-        private static final long RECENT_TEXELS = 16L << 20;
+        private long recentStored;
+        private static final long RECENT_STORED = 16L << 20;
         private static final int RECENT_MASKS = 1024;
         /** Counts {@link #forget}s: a mask built across one is never kept. */
         private int epoch;
 
         /**
          * The mask {@code key} names, built once even when neighbouring terrain workers request it together. Waiters
-         * join outside the lock; the fork-join pool can keep working. The key holds all inputs, so a completed mask is
+         * join outside the lock; the fork-join pool can keep working. The key tells masks apart, so a completed mask is
          * reusable even if its first requester became stale. Each requester still checks its own job before using it.
          */
         MaskData mask(Object key, Supplier<MaskData> build, Runnable check) {
@@ -98,10 +101,10 @@ final class GpuRoads {
                 try {
                     MaskData built = share(build.get());
                     synchronized (this) {
-                        if (epoch == started && recent.putIfAbsent(key, built) == null) { recentTexels += texels(built); }
-                        for (var masks = recent.values().iterator(); (recentTexels > RECENT_TEXELS || recent.size() > RECENT_MASKS)
+                        if (epoch == started && recent.putIfAbsent(key, built) == null) { recentStored += stored(built); }
+                        for (var masks = recent.values().iterator(); (recentStored > RECENT_STORED || recent.size() > RECENT_MASKS)
                               && masks.hasNext(); ) {
-                            recentTexels -= texels(masks.next());
+                            recentStored -= stored(masks.next());
                             masks.remove();
                         }
                     }
@@ -122,11 +125,11 @@ final class GpuRoads {
         synchronized void forget() {
             recent.clear();
             pending.clear();
-            recentTexels = 0;
+            recentStored = 0;
             epoch++;
         }
 
-        private static long texels(MaskData mask) { return (long) mask.pixels().width() * mask.pixels().height(); }
+        private static long stored(MaskData mask) { return mask.pixels().stored(); }
 
         synchronized MaskData share(MaskData mask) {
             WeakReference<MaskData> reference = masks.get(mask);
@@ -852,7 +855,10 @@ final class GpuRoads {
         return result;
     }
 
-    /** Whole terrain triangles carry the splat. Road borders, paint and tyre wear do not split them. */
+    /**
+     * Whole terrain triangles carry the splat. Road borders, paint and tyre wear do not split them. A neighbour's patch gets
+     * none unless one reaches its shape: a whole-hex fan can span the patch's bounds without touching it, and paint nothing.
+     */
     static List<BoardTacticalGeometry.Triangle> drape(BoardScene.Tile tile, BoardSurface surface, Patch patch) {
         List<BoardTacticalGeometry.Triangle> result = new ArrayList<>();
         float scale = BoardGeometry.hexScale();
@@ -860,9 +866,15 @@ final class GpuRoads {
         var bounds = patch.shape().getBounds2D();
         // A neighbour's ground road at another level paints only the road surface it reserves here; a bridge's deck
         // carries its apron onto the bank on purpose.
-        boolean apart = tile.elevation() != surface.tile.elevation() && BoardBridge.feature(tile) == null;
-        // A road through water lies on its bed (BoardRoad#bed); a bridge's apron keeps to the dry bank.
-        boolean bed = surface.tile.liquid().present() && BoardBridge.feature(tile) == null;
+        boolean wet = surface.tile.liquid().present();
+        // Water standing higher than a dry road beside it, over ground at the road's level, keeps its rim from that road.
+        boolean apart = (tile.floor() != surface.tile.floor()
+              || wet != tile.liquid().present() && tile.elevation() != surface.tile.elevation())
+              && BoardBridge.feature(tile) == null;
+        // Under water the ground a road lies on is the bed.
+        boolean bed = wet;
+        boolean reached = tile.coords().equals(surface.tile.coords());
+        float[] outline = null;
         for (var face : surface.coatingFaces()) {
             boolean ground = bed || face.finish() != BoardSurface.Finish.BED && face.finish() != BoardSurface.Finish.SHORE;
             if (!ground || apart && !surface.carries(face, tile)) { continue; }
@@ -876,13 +888,112 @@ final class GpuRoads {
             float maxY = (Math.max(face.a().y, Math.max(face.b().y, face.c().y)) - cy) / scale;
             if (!bounds.intersects(minX, minY, maxX - minX, maxY - minY)) { continue; }
             result.add(lifted(face, patch.lift() * scale));
+            if (!reached) {
+                if (outline == null) { outline = outline(patch.shape()); }
+                reached = reaches(outline, (face.a().x - cx) / scale, (face.a().y - cy) / scale, (face.b().x - cx) / scale,
+                      (face.b().y - cy) / scale, (face.c().x - cx) / scale, (face.c().y - cy) / scale, minX, minY, maxX, maxY);
+            }
         }
-        return result;
+        return reached ? result : List.of();
+    }
+
+    /** A shape's outline as line segments, x1, y1, x2, y2 each, flattened as finely as {@link #sides} walks it. */
+    private static float[] outline(Area shape) {
+        var result = new FloatArray();
+        float[] point = new float[6];
+        float startX = 0, startY = 0, lastX = 0, lastY = 0;
+        for (var path = shape.getPathIterator(null, .25); !path.isDone(); path.next()) {
+            int type = path.currentSegment(point);
+            if (type == java.awt.geom.PathIterator.SEG_MOVETO) {
+                startX = lastX = point[0];
+                startY = lastY = point[1];
+                continue;
+            }
+            float x = type == java.awt.geom.PathIterator.SEG_CLOSE ? startX : point[0];
+            float y = type == java.awt.geom.PathIterator.SEG_CLOSE ? startY : point[1];
+            result.add(lastX, lastY, x, y);
+            lastX = x;
+            lastY = y;
+        }
+        return result.toArray();
+    }
+
+    /**
+     * Whether a counter-clockwise triangle with these bounds touches the region inside {@code outline}: an outline segment
+     * meets it, or none does and its corner a lies inside the region. One pass with no allocation: drape asks per ground face.
+     */
+    private static boolean reaches(float[] outline, float ax, float ay, float bx, float by, float cx, float cy,
+          float minX, float minY, float maxX, float maxY) {
+        boolean inside = false;
+        for (int i = 0; i < outline.length; i += 4) {
+            float x1 = outline[i], y1 = outline[i + 1], x2 = outline[i + 2], y2 = outline[i + 3];
+            if (y1 > ay != y2 > ay && ax < x1 + (ay - y1) / (y2 - y1) * (x2 - x1)) { inside = !inside; }
+            if (x1 < minX && x2 < minX || x1 > maxX && x2 > maxX || y1 < minY && y2 < minY || y1 > maxY && y2 > maxY) { continue; }
+            if ((bx - ax) * (y1 - ay) >= (by - ay) * (x1 - ax) && (cx - bx) * (y1 - by) >= (cy - by) * (x1 - bx)
+                  && (ax - cx) * (y1 - cy) >= (ay - cy) * (x1 - cx)
+                  || Line2D.linesIntersect(x1, y1, x2, y2, ax, ay, bx, by) || Line2D.linesIntersect(x1, y1, x2, y2, bx, by, cx, cy)
+                  || Line2D.linesIntersect(x1, y1, x2, y2, cx, cy, ax, ay)) { return true; }
+        }
+        return inside;
     }
 
     private static BoardTacticalGeometry.Triangle lifted(BoardSurface.Face face, float lift) {
         return new BoardTacticalGeometry.Triangle(new Vector3(face.a()).add(0, 0, lift),
               new Vector3(face.b()).add(0, 0, lift), new Vector3(face.c()).add(0, 0, lift), -1);
+    }
+
+    /** How many points across and down {@link #maskKey} samples a mask at: a constant cost per mask, whatever its size. */
+    private static final int MASK_SAMPLES = 10;
+
+    /**
+     * What tells a patch's mask from every other before it is rendered: its outline, and exactly what {@link #color} gives
+     * over a sparse grid of it. Nothing has to keep track of what a mask reads: roads alike anywhere on the board sample
+     * alike and share one mask (Masks#mask), rendered once, and anything that shows at a point of the grid, the world's
+     * noise in a worn end included, gives a mask of its own.
+     */
+    static Object maskKey(BoardRoad road, Patch patch, int density) {
+        var bounds = patch.shape().getBounds2D();
+        float[] samples = new float[4 * MASK_SAMPLES * MASK_SAMPLES];
+        Color tint = new Color();
+        int i = 0;
+        for (int row = 0; row < MASK_SAMPLES; row++) {
+            float y = (float) (bounds.getMinY() + bounds.getHeight() * (row + .5f) / MASK_SAMPLES);
+            for (int column = 0; column < MASK_SAMPLES; column++) {
+                color(road, patch, (float) (bounds.getMinX() + bounds.getWidth() * (column + .5f) / MASK_SAMPLES), y, tint);
+                samples[i++] = tint.r;
+                samples[i++] = tint.g;
+                samples[i++] = tint.b;
+                samples[i++] = tint.a;
+            }
+        }
+        return new MaskKey(segments(patch), samples, density);
+    }
+
+    /** A mask's inputs by value, hashed once: terrain workers look it up under the masks' lock. */
+    private record MaskKey(Object[] inputs, int hash) {
+        MaskKey(Object... inputs) { this(inputs, Arrays.deepHashCode(inputs)); }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof MaskKey key && hash == key.hash && Arrays.deepEquals(inputs, key.inputs);
+        }
+
+        @Override
+        public int hashCode() { return hash; }
+    }
+
+    /** A patch's outline as it is rasterised: each segment's type and six coordinates. */
+    private static double[] segments(Patch patch) {
+        double[] result = new double[7 * 32], segment = new double[6];
+        int size = 0;
+        for (var path = patch.shape().getPathIterator(null); !path.isDone(); path.next()) {
+            if (size == result.length) { result = Arrays.copyOf(result, 2 * size); }
+            Arrays.fill(segment, 0);
+            result[size++] = path.currentSegment(segment);
+            System.arraycopy(segment, 0, result, size, 6);
+            size += 6;
+        }
+        return Arrays.copyOf(result, size);
     }
 
     /** Shape/coverage data only: repeating albedo, normals and roughness keep their original full resolution. */
@@ -1148,8 +1259,8 @@ final class GpuRoads {
     private static short side(MeshPartBuilder mesh, Vector3 p, Vector3 sample, Vector3 normal, float repeat, Mask mask,
           BoardSurface surface, float coat, boolean tessellated) {
         var tile = surface.tile;
-        float[] vertex = { p.x, p.y, p.z, normal.x, normal.y, normal.z, coat, p.x / repeat, -p.y / repeat,
-              maskU(tile.coords(), mask.data, sample), maskV(tile.coords(), mask.data, sample),
+        float[] vertex = { p.x, p.y, p.z, normal.x, normal.y, normal.z, underWater(coat, p.x, p.y, p.z, surface),
+              p.x / repeat, -p.y / repeat, maskU(tile.coords(), mask.data, sample), maskV(tile.coords(), mask.data, sample),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV };
         if (tessellated) {
             // Flat (no support): it keeps its own positions.
@@ -1181,8 +1292,9 @@ final class GpuRoads {
         // its control points first changes the screen-space split and can expose the ground between the two meshes.
         var tile = surface.tile;
         if (ground != null) { normal = ground.normal; }
-        float[] vertex = { p.x, p.y, ground == null ? p.z : ground.position.z, normal.x, normal.y, normal.z,
-              coat, p.x / repeat, -p.y / repeat,
+        float z = ground == null ? p.z : ground.position.z;
+        float[] vertex = { p.x, p.y, z, normal.x, normal.y, normal.z,
+              underWater(coat, p.x, p.y, z, surface), p.x / repeat, -p.y / repeat,
               maskU(tile.coords(), mask.data, p), maskV(tile.coords(), mask.data, p),
               mask.offsetU, mask.offsetV, mask.scaleU, mask.scaleV };
         if (tessellated) {
@@ -1198,6 +1310,20 @@ final class GpuRoads {
             }
         }
         return mesh.vertex(vertex);
+    }
+
+    /**
+     * A coat's colour at a point of a water hex's ground: its alpha packs the water's palette and the levels over the
+     * point, which tint the coat as they tint the bed (terrain-road.frag). A packed colour keeps only even alpha bytes,
+     * so each palette has 31 steps: tenths of a level up to three, past which the tint hardly changes. They stay linear,
+     * as the mesh interpolates them. A deck's ramp can leave the water it crosses: none lies over it there.
+     */
+    static float underWater(float coat, float x, float y, float z, BoardSurface surface) {
+        var liquid = surface.tile.liquid();
+        if (!liquid.present() || liquid.molten()) { return coat; }
+        float levels = surface.overBank(x, y) ? 0 : (surface.waterHeight(x, y) - z) / BoardGeometry.level();
+        int alpha = 2 * (31 * Math.round(GpuWaterShader.palette(liquid)) + Math.round(Math.clamp(levels, 0, 3) * 10));
+        return NumberUtils.intToFloatColor(NumberUtils.floatToIntColor(coat) & 0x00ffffff | alpha << 24);
     }
 
     /** Where the point {@code p} of the hex at {@code at} lies across {@code mask}: 0 at its left edge, 1 at its right. */

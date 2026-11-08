@@ -39,20 +39,20 @@ class GpuTerrainDetailSmokeTest {
                 GpuReviewFrame frame = new GpuReviewFrame(new BoardAtmosphere.Settings(13, 0, 0,
                       BoardAtmosphere.STANDARD_GROUND_LAYER_HEIGHT, 0, 0));
                 try {
-                    GpuRiverTerrainSmokeTest.tune(.94f, true);
+                    BoardScenes.tune(.94f, true);
                     BoardCamera camera = new BoardCamera();
                     camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
                     for (int depth : new int[] { 0, 1 }) {
-                        BoardScene scene = BoardTerrainDetailTest.shores(depth, false);
-                        capture(scene, "mixed-shores-depth" + depth, BoardTerrainDetailTest.WATER, 0, .24f,
+                        BoardScene scene = BoardScenes.shores(depth, false);
+                        capture(scene, "mixed-shores-depth" + depth, BoardScenes.WATER, 0, .24f,
                               terrain, frame, camera);
                     }
                     for (var family : BoardScene.Surface.values()) {
-                        capture(BoardTerrainDetailTest.rough(family), "rough-" + family.name().toLowerCase(Locale.ROOT),
+                        capture(BoardScenes.rough(family), "rough-" + family.name().toLowerCase(Locale.ROOT),
                               new Coords(2, 2), 1, .34f, terrain, frame, camera);
                         if (family == BoardScene.Surface.SNOW || family == BoardScene.Surface.GRASS || family == BoardScene.Surface.SAND) {
                             for (int elevation : new int[] { -3, -1, 1, 3 }) {
-                                capture(BoardTerrainDetailTest.isolatedRough(family, elevation),
+                                capture(BoardScenes.isolatedRough(family, elevation),
                                       "isolated-" + family.name().toLowerCase(Locale.ROOT) + "-" + elevation,
                                       new Coords(2, 2), Math.max(0, elevation), .17f, terrain, frame, camera);
                             }
