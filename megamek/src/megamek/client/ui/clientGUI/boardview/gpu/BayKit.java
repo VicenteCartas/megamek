@@ -178,9 +178,16 @@ final class BayKit {
         for (var wall : piece.walls()) {
             double outlineScale = piece.direction() == null && !piece.tags().contains("-link-") ? footprintScale : 1;
             List<GeneratedMesh.Keep> keeps = keeps(wall, piece.walls());
+            KitOutline.Wall[] partners = square || piece.direction() == null ? new KitOutline.Wall[2]
+                  : new KitOutline.Wall[] { partner(spec, piece.direction(), wall, true, fitting == null),
+                        partner(spec, piece.direction(), wall, false, fitting == null) };
             double[] goesOn = facade(result, run, wall, keeps, modelled, lod, top ? ROOF_INSET : 0, ground, outlineScale,
-                  facet(spec, wall), joints, cap, chamfer, cut, piece.walls());
+                  facet(spec, wall), joints, cap, chamfer, cut, piece.walls(), partners);
             if (ground && spec.sidewalk() != null) { sidewalk(result, spec.sidewalk(), wall, keeps, goesOn[0], goesOn[1]); }
+        }
+        // A storey's only: on a roof the slit between the parapets shows the deck, and a face there stood up past them.
+        if (!square && !cap && !top && piece.direction() != null && piece.walls().isEmpty()) {
+            closeJunction(result, run, piece.direction(), modelled, lod, ground);
         }
         List<KitOutline.Wall> edges = new ArrayList<>(piece.walls());
         if (seamed) {
@@ -211,6 +218,9 @@ final class BayKit {
         return piece.direction() != null
               ? result.clipped(KitOutline.sector(piece.direction(), KitOutline.SEAM_OVERLAP)) : result;
     }
+
+    /** How far past a wall's end its keep stands at the least (see {@link #facade}). */
+    private static final double END_CLEAR = .001;
 
     /** The dark of a module's inside, as vertex colour on the building body. */
     private static final float DARK = .17f;
@@ -250,7 +260,8 @@ final class BayKit {
      */
     private static double[] facade(GeneratedMesh result, Run run, KitOutline.Wall wall, List<GeneratedMesh.Keep> wallKeeps,
           List<ModelData> modelled, int lod, double inset, boolean ground, double outlineScale, boolean facet,
-          List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, List<KitOutline.Wall> walls) {
+          List<KitOutline.Wall> joints, boolean cap, double chamfer, List<GeneratedMesh.Keep> cut, List<KitOutline.Wall> walls,
+          KitOutline.Wall[] partners) {
         double length = wall.length();
         double[] p = wall.p(), u = KitOutline.direction(wall);
         List<GeneratedMesh.Keep> keeps = new ArrayList<>(wallKeeps);
@@ -281,7 +292,7 @@ final class BayKit {
         List<Placed> beyond = new ArrayList<>();
         List<Placed> placements = new ArrayList<>(facet && run.round() != null
               ? List.of(new Placed(-before, run.round().piece(), (length + before + after) / run.round().length()))
-              : layout(run, wall, length, before, after, ground, outlineScale, pads[0], pads[1], laps, beyond));
+              : layout(run, wall, length, before, after, ground, outlineScale, pads[0], pads[1], laps, beyond, partners));
         if (!cap && pads[0] > 0) { placements.add(new Placed(0, run.joints().start(), 1)); }
         if (!cap && pads[1] > 0) { placements.add(new Placed(length - pads[1], run.joints().end(), 1)); }
         var laid = new GeneratedMesh();
@@ -290,8 +301,10 @@ final class BayKit {
         lay(past, beyond, wall, inset, modelled, lod);
         laid.add(past.clipped(cut));
         if (run.planar() != null) { run.planar().forEach((material, repeat) -> planar(laid, material, wall, repeat)); }
-        // An end bay's lap stays clear of the end's keep: its end face never lies on the clip.
-        double keepBefore = Math.max(before, 2 * laps[0]), keepAfter = Math.max(after, 2 * laps[1]);
+        // An end bay's lap stays clear of the end's keep, and every end's keep a hair past it: a bay's end face never lies
+        // on the clip, which cut holes in an awning's end cap at a joint.
+        double keepBefore = Math.max(before, Math.max(2 * laps[0], END_CLEAR)),
+              keepAfter = Math.max(after, Math.max(2 * laps[1], END_CLEAR));
         keeps.add((x, y) -> (x - p[0]) * u[0] + (y - p[1]) * u[1] + keepBefore);
         keeps.add((x, y) -> length + keepAfter - (x - p[0]) * u[0] - (y - p[1]) * u[1]);
         result.add(laid.clipped(keeps));
@@ -335,6 +348,51 @@ final class BayKit {
         if (right[0] * face[0] + right[1] * face[1] < 0) { from = inner; to = outer; }
         result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
               darkVertex(from, high, face));
+    }
+
+    /**
+     * An Angled corner whose sides both link: the neighbours across them, when they do not link each other, each end a
+     * wall at this corner square to its link (as for a wall going straight on across the side), so the two meet at 60
+     * degrees with their bays' recesses open into this hex. A dark face across the corner, from hexside to hexside at
+     * the bays' deepest recess, closes that slit; where the neighbours link each other it stands hidden inside.
+     */
+    private static void closeJunction(GeneratedMesh result, Run run, int direction, List<ModelData> modelled, int lod,
+          boolean ground) {
+        // A side's length of this run's bays (their module inside, +y): how deep and high they stand at their ends, where
+        // the neighbours' walls end.
+        var sample = new KitOutline.Wall(new double[] { 0, 0 }, new double[] { R, 0 }, KitOutline.End.OPEN, KitOutline.End.OPEN,
+              List.of(), false);
+        var laid = new GeneratedMesh();
+        lay(laid, layout(run, sample, R, 0, 0, ground, 1, 0, 0, new double[2], new ArrayList<>(), new KitOutline.Wall[2]), sample,
+              0, modelled, lod);
+        double deepest = 0, low = Double.MAX_VALUE, high = -Double.MAX_VALUE;
+        for (FloatArray part : laid.parts.values()) {
+            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) {
+                if (part.items[at] > .5 && part.items[at] < R - .5) { continue; }
+                deepest = Math.max(deepest, part.items[at + 1]);
+                low = Math.min(low, part.items[at + 2]);
+                high = Math.max(high, part.items[at + 2]);
+            }
+        }
+        if (deepest <= 0 || low >= high) { return; }
+        double[] c = KitOutline.hexCorner(direction), a = along(c, KitOutline.MIDPOINTS[direction], deepest),
+              b = along(c, KitOutline.MIDPOINTS[(direction + 1) % 6], deepest);
+        // A little past each hexside, behind that neighbour's bays.
+        double width = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        double[] from = along(b, a, width + .05), to = along(a, b, width + .05);
+        double[] face = normal(from, to);
+        if (face[0] * (c[0] - a[0]) + face[1] * (c[1] - a[1]) < 0) {
+            double[] swap = from; from = to; to = swap;
+            face = normal(from, to);
+        }
+        result.quad(GeneratedMesh.BUILDING_BODY, darkVertex(from, low, face), darkVertex(to, low, face), darkVertex(to, high, face),
+              darkVertex(from, high, face));
+    }
+
+    /** The point {@code distance} from {@code p} towards {@code q}. */
+    private static double[] along(double[] p, double[] q, double distance) {
+        double length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        return new double[] { p[0] + (q[0] - p[0]) * distance / length, p[1] + (q[1] - p[1]) * distance / length };
     }
 
     private static float[] darkVertex(double[] p, double z, double[] normal) {
@@ -446,10 +504,12 @@ final class BayKit {
     /**
      * The pieces {@code run} lays along a wall {@code length} long, going on {@code before} and {@code after} it, its bays
      * kept {@code startPad} and {@code endPad} off its ends for its joints and its end bays going on {@code laps} past
-     * them; the bays beyond its ends go into {@code beyond}.
+     * them; the bays beyond its ends go into {@code beyond}: those the walls going straight on there lay ({@code
+     * partners}, before and after), else the next of its own.
      */
     private static List<Placed> layout(Run run, KitOutline.Wall wall, double length, double before, double after,
-          boolean ground, double outlineScale, double startPad, double endPad, double[] laps, List<Placed> beyond) {
+          boolean ground, double outlineScale, double startPad, double endPad, double[] laps, List<Placed> beyond,
+          KitOutline.Wall[] partners) {
         List<Placed> result = new ArrayList<>();
         if (run.under() != null && length + before + after > 1e-6) {
             result.add(new Placed(-before, run.under().piece(), (length + before + after) / run.under().length()));
@@ -461,28 +521,79 @@ final class BayKit {
         double usable = length - 2 * run.margin() - startPad - endPad;
         // A wall no longer than its margins holds no bay.
         if (run.bays() == null || run.bays().isEmpty() || usable <= 1e-6) { return result; }
-        // Padding changes the space for panels, retaining the unpadded facade proportions.
-        double nominal = (length - startPad - endPad) / outlineScale - 2 * run.margin();
-        int fullCount = Math.max(1, (int) Math.rint(nominal / run.bay()));
-        double scale = nominal / (fullCount * run.bay());
-        int count = Math.max(1, (int) Math.ceil(usable / (run.bay() * scale) - 1e-6));
-        Set<Integer> doors = ground && run.door() != null ? doors(wall, count) : Set.of();
-        // A wall's bays are chosen by where it stands, the same in every piece that holds it.
-        double[] p = wall.p(), q = wall.q();
-        long seed = Math.floorMod((long) Math.rint((p[0] + q[0]) / 2 * 7 + (p[1] + q[1]) / 2 * 13), 997);
-        java.util.function.IntFunction<String> pick = index -> run.bays().get((int) Math.floorMod(seed + index * 5L,
-              (long) run.bays().size()));
+        double scale = scale(run, length, startPad, endPad, outlineScale);
+        int count = count(run, usable, scale);
         for (int index = 0; index < count; index++) {
             double start = run.margin() + startPad + index * run.bay() * scale, width = run.bay() * scale;
             if (run.margin() == 0 && index == 0) { start -= laps[0]; width += laps[0]; }
             if (run.margin() == 0 && index == count - 1) { width += laps[1]; }
-            result.add(new Placed(start, doors.contains(index) ? run.door() : pick.apply(index), width / run.bay()));
+            result.add(new Placed(start, bay(run, wall, index, count, ground), width / run.bay()));
         }
         if (run.margin() == 0) {
-            if (before > 0) { beyond.add(new Placed(startPad - run.bay() * scale, pick.apply(-1), scale)); }
-            if (after > 0) { beyond.add(new Placed(length - endPad, pick.apply(count), scale)); }
+            // Past a cut the next piece lays the wall's own bays on; beyond a slanted cut each piece shows a part of them.
+            if (before > 0 && partners[0] != null) {
+                double other = scale(run, partners[0].length(), 0, 0, 1);
+                int last = count(run, partners[0].length(), other);
+                beyond.add(new Placed(startPad - run.bay() * other, bay(run, partners[0], last - 1, last, ground), other));
+            } else if (before > 0) {
+                beyond.add(new Placed(startPad - run.bay() * scale, bay(run, wall, -1, count, ground), scale));
+            }
+            if (after > 0 && partners[1] != null) {
+                double other = scale(run, partners[1].length(), 0, 0, 1);
+                beyond.add(new Placed(length - endPad, bay(run, partners[1], 0, count(run, partners[1].length(), other), ground),
+                      other));
+            } else if (after > 0) {
+                beyond.add(new Placed(length - endPad, bay(run, wall, count, count, ground), scale));
+            }
         }
         return result;
+    }
+
+    /** How much {@code run}'s bays stretch to fill a wall: padding changes the room, keeping the unpadded proportions. */
+    private static double scale(Run run, double length, double startPad, double endPad, double outlineScale) {
+        double nominal = (length - startPad - endPad) / outlineScale - 2 * run.margin();
+        return nominal / (Math.max(1, (int) Math.rint(nominal / run.bay())) * run.bay());
+    }
+
+    /** How many of {@code run}'s bays, stretched by {@code scale}, fill {@code usable}. */
+    private static int count(Run run, double usable, double scale) {
+        return Math.max(1, (int) Math.ceil(usable / (run.bay() * scale) - 1e-6));
+    }
+
+    /** {@code run}'s bay {@code index} of {@code count} along {@code wall}: a door, or chosen by where the wall stands. */
+    private static String bay(Run run, KitOutline.Wall wall, int index, int count, boolean ground) {
+        if (ground && run.door() != null && doors(wall, count).contains(index)) { return run.door(); }
+        // The same in every piece that holds the wall.
+        double[] p = wall.p(), q = wall.q();
+        long seed = Math.floorMod((long) Math.rint((p[0] + q[0]) / 2 * 7 + (p[1] + q[1]) / 2 * 13), 997);
+        return run.bays().get((int) Math.floorMod(seed + index * 5L, (long) run.bays().size()));
+    }
+
+    /**
+     * The wall going straight on past {@code wall}'s cut start or end, in the next Angled corner piece whose other side is
+     * linked or not as that needs, as its piece lays it (turned pieces: in their own frame); null past any other end.
+     */
+    private static KitOutline.Wall partner(Spec spec, int direction, KitOutline.Wall wall, boolean start, boolean turned) {
+        if ((start ? wall.start() : wall.end()) != KitOutline.End.CUT) { return null; }
+        double[] at = start ? wall.p() : wall.q(), u = KitOutline.direction(wall);
+        int next = (direction + (start ? 1 : 5)) % 6;
+        for (int variant = 0; variant < 4; variant++) {
+            List<KitOutline.Wall> walls = corner(spec, next, variant).walls();
+            for (int index = 0; index < walls.size(); index++) {
+                var other = walls.get(index);
+                double[] v = KitOutline.direction(other);
+                if (KitOutline.close(start ? other.q() : other.p(), at) && u[0] * v[0] + u[1] * v[1] > 1 - 1e-9) {
+                    return turned ? corner(spec, 0, variant).walls().get(index) : other;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The Angled corner piece {@code direction}, linked across its first side ({@code variant} bit 0) and second (bit 1). */
+    private static KitOutline.Piece corner(Spec spec, int direction, int variant) {
+        return KitOutline.rounded(KitOutline.angled("", direction, (variant & 1) != 0, (variant & 2) != 0), spec.cornerRadius(),
+              Math.max(1, spec.cornerSegments()));
     }
 
     /** Whole {@code stretch}es from {@code start} to {@code end}, each stretched a little to fit. */
