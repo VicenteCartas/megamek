@@ -157,7 +157,11 @@ final class GeneratedMesh {
             if (board == null) {
                 throw new IllegalArgumentException("A building kit's pieces use library materials only, not " + nodePart.materialId);
             }
-            var target = parts.computeIfAbsent(board, ignored -> new FloatArray());
+            // Keyed by the GLB's material, its board material and finish (authored_examples#material_id): each finish draws apart.
+            if (!boardName(nodePart.materialId).equals(board)) {
+                throw new IllegalArgumentException("Piece material " + nodePart.materialId + " is not named after its board material " + board);
+            }
+            var target = parts.computeIfAbsent(nodePart.materialId, ignored -> new FloatArray());
             for (short index : meshParts.get(nodePart.meshPartId).indices) {
                 int at = Short.toUnsignedInt(index) * RigidGlb.STRIDE;
                 float[] vertex = Arrays.copyOfRange(mesh.vertices, at, at + RigidGlb.STRIDE);
@@ -437,8 +441,8 @@ final class GeneratedMesh {
         data.meshes.add(mesh);
     }
 
-    /** The board material a part's key names ({@link #BOARD_UV}). */
-    private static String boardName(String key) {
+    /** The board material a part's key names: its key up to a finish or {@link #BOARD_UV}. */
+    static String boardName(String key) {
         int suffix = key.indexOf('#');
         return suffix < 0 ? key : key.substring(0, suffix);
     }

@@ -4,8 +4,6 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,31 +110,22 @@ final class GeneratedKit {
             }
             var generated = GeneratedMesh.kit(kit + "-lod" + lod, nodes, boardUVs);
             var source = (RigidGlb.Data) modelled.get(lod);
-            // What the pieces GLB says of a board material holds wherever the kit draws it, as one material.
-            Map<String, String> said = new HashMap<>();
+            // Each piece material keeps its finish and alpha mode, as an authored GLB's do: the kit draws it under the
+            // same id (GeneratedMesh#piece), a cutout alpha tested rather than blended as its board material's .tres says.
             source.surfaces.forEach((id, surface) -> {
-                String board = surface.board();
-                if (board == null) { return; }
-                String other = said.putIfAbsent(board, id);
-                if (other != null && !agree(source, other, id)) {
-                    throw new IllegalArgumentException("Materials " + other + " and " + id + " are both " + board
-                          + " but differ in building tint or emission: a kit draws them as one");
+                if (surface.board() == null || !generated.surfaces.containsKey(id)) { return; }
+                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(id); }
+                if (source.emissions.containsKey(id)) { generated.emissions.put(id, source.emissions.get(id)); }
+                if (source.ownGlows.containsKey(id)) { RigidGlb.ownGlow(generated, id, source.ownGlows.get(id)); }
+                if (source.alphaTests.containsKey(id)) {
+                    generated.alphaTests.put(id, source.alphaTests.get(id));
+                    generated.blends.remove(id);
                 }
-                if (source.buildingPaint.contains(id)) { generated.buildingPaint.add(board); }
-                generated.emissions.put(board, source.emissions.get(id));
-                if (source.ownGlows.containsKey(id) && generated.surfaces.containsKey(board)) {
-                    RigidGlb.ownGlow(generated, board, source.ownGlows.get(id));
-                }
+                if (source.fades.contains(id)) { generated.fades.add(id); }
             });
             result.add(generated);
         }
         return result;
-    }
-
-    private static boolean agree(RigidGlb.Data source, String a, String b) {
-        return source.buildingPaint.contains(a) == source.buildingPaint.contains(b)
-              && source.emissions.get(a) == source.emissions.get(b)
-              && Arrays.equals(source.ownGlows.get(a), source.ownGlows.get(b));
     }
 
     /** A modelled piece of the kit's pieces GLB at {@code lod}, {@link GeneratedMesh#piece}. */
