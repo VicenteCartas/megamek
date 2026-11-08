@@ -246,7 +246,7 @@ vec2 receiverPlane(vec3 shadowUv, vec3 light, float metre, out float depthPerUni
 // a block (half a texel of the receiver's plane above: its drift in full, the plane's clamp bounding the rest), the
 // centre and its four edges lit: lit, the corners, a fifth of the widest tent's weight, unseen. Against the lowest, all
 // nine shadowed: every texel any tent reads is shadowed, the umbra, exactly.
-float contactShadow(vec3 shadowUv, vec2 slope, float metre, float depthPerUnit, float texel, float narrowest) {
+float contactShadow(vec3 shadowUv, vec2 slope, float depthPerUnit, float texel, float narrowest) {
     float size = shadowMapSize(), spacing = 2.0 / size;
     vec2 drift = abs(shadowPlaneDrift), bent = abs(slope - shadowPlaneDrift);
     float bound = .5 * (drift.x + drift.y) / size + min(.5 * (bent.x + bent.y) / size, 2.0 * shadowPlaneLimit);
@@ -256,19 +256,21 @@ float contactShadow(vec3 shadowUv, vec2 slope, float metre, float depthPerUnit, 
     if (lit <= 1e-4 && shadowCross(shadowUv, slope, middle, spacing, -bound)
           + shadowCorners(shadowUv, slope, middle, spacing, -bound) <= 1e-4) return shadowVisibility(0.0);
     // Contact hardening: a bank's rim casts a crisp edge and a tower a soft one. What casts the shadow is found by
-    // comparisons alone, without a second sampler: those five blocks at the receiver's own depth, and again 3 m, 15 m
-    // and 60 m nearer the sun; a blocker still found there stands farther away, as a tower's does under a low sun.
-    // None at its own depth: the crispest.
+    // comparisons alone, without a second sampler: those five blocks at the receiver's own depth, and again nearer the
+    // sun; a blocker still found there stands farther away. None at its own depth: the crispest. The probes scale with
+    // the map: reach is the distance whose penumbra fills the widest tent, so they look as far as the tent can show,
+    // a few hexes up close and many from afar, as a long shadow under a low sun needs. At a fifth, two fifths and all
+    // of it (the last only past a blocker at the second), they place the caster in one of four bands.
     float blocked = 5.0 - shadowCross(shadowUv, slope, middle, spacing, 0.0);
     // Half the penumbra in texels, as the tent's half width: from the narrowest to the widest.
     float halfWidth = narrowest;
     if (blocked > 1e-4) {
-        float beyondNear = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -3.0 * metre * depthPerUnit);
-        float beyondFar = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -15.0 * metre * depthPerUnit);
-        float beyondFarthest = beyondFar > 1e-4
-              ? 5.0 - shadowCross(shadowUv, slope, middle, spacing, -60.0 * metre * depthPerUnit) : 0.0;
-        float caster = (1.5 + 5.5 * beyondNear / blocked + 23.0 * beyondFar / blocked + 60.0 * beyondFarthest / blocked)
-              * metre;
+        float reach = 5.0 * texel / SUN_DIAMETER, depth = reach * depthPerUnit;
+        float beyondNear = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -.2 * depth);
+        float beyondFar = 5.0 - shadowCross(shadowUv, slope, middle, spacing, -.4 * depth);
+        float beyondReach = beyondFar > 1e-4 ? 5.0 - shadowCross(shadowUv, slope, middle, spacing, -depth) : 0.0;
+        // The bands' middles: a tenth, three and seven tenths of the reach, and the reach itself.
+        float caster = reach * (.1 + (.2 * beyondNear + .4 * beyondFar + .3 * beyondReach) / blocked);
         halfWidth = clamp(.5 * SUN_DIAMETER * caster / texel + .5, narrowest, 3.0);
     }
     return shadowVisibility(shadowTent(shadowUv, slope, halfWidth, true));
@@ -297,7 +299,7 @@ float sculptShadow(vec3 normal, vec3 light, float metre, float lift, bool receiv
     return shadowVisibility(textureLod(u_shadowTexture, shadowUv, 0.0));
 #else
     // From one texel: the map resolves no finer.
-    return contactShadow(shadowUv, slope, metre, depthPerUnit, texel, 1.0);
+    return contactShadow(shadowUv, slope, depthPerUnit, texel, 1.0);
 #endif
 #else
     return 1.0;
