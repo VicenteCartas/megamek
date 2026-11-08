@@ -91,6 +91,8 @@ final class GpuTerrainShadows implements Disposable {
     private boolean shadowBoardWide;
     private boolean shadowDirty;
     private long revision;
+    /** The revision whose map the coarser levels hold (GpuShadowLight#levels); -1 for none. */
+    private long levelsRevision = -1;
 
     long revision() { return revision; }
     // Frames since a camera refinement last replaced a chunk the cached shadow has not redrawn; -1 when none.
@@ -187,6 +189,16 @@ final class GpuTerrainShadows implements Disposable {
         if (shadow == null || !bound) {
             return;
         }
+        draw(view, units, casterBounds, directLight);
+        // High's widest penumbrae read the map's coarser levels (contactShadow): written once a revision, from the map
+        // as this frame left it, whether drawn, copied from a cache or restored around moved units.
+        if (!BoardQuality.current.cheaperShading && !shadowEmpty && levelsRevision != revision) {
+            shadow.levels();
+            levelsRevision = revision;
+        }
+    }
+
+    private void draw(Camera view, List<ModelInstance> units, BoundingBox casterBounds, boolean directLight) {
         followScene();
         // Refinement has settled: the refined chunks cast their own shadow (replaceDetail).
         if (refinedShadowFrames >= 0 && ++refinedShadowFrames > GpuMeshPage.SETTLE_FRAMES) {

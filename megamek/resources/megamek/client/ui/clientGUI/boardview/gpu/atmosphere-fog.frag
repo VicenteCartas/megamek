@@ -41,7 +41,8 @@ float sunlight(vec3 position) {
             // measures (GpuShadowLight.SlabCamera: height across the casters' slab).
             float depthPerUnit = .5 * abs(dot(vec3(u_geometryProjection[0][2], u_geometryProjection[1][2],
                   u_geometryProjection[2][2]), u_sunDirection));
-            light *= mix(1.0, texture(u_geometryShadow, vec3(uv.xy, uv.z - GEOMETRY_SHADOW_BIAS * depthPerUnit)),
+            // The finest level: the map's coarser ones serve only wide penumbrae (GpuShadowLight#levels).
+            light *= mix(1.0, textureLod(u_geometryShadow, vec3(uv.xy, uv.z - GEOMETRY_SHADOW_BIAS * depthPerUnit), 0.0),
                   u_shadowStrength);
         }
     }

@@ -186,7 +186,7 @@ float modelVisibility(vec3 geometric, bool transmits) {
     // Derivatives above remain defined across the light horizon. A face turned from the sun takes no direct light
     // unless it transmits it (shadeSurface): it needs no comparisons.
     if (!transmits && dot(geometric, light) <= 0.0) return 1.0;
-    return contactShadow(shadowUv, slope, depthPerUnit, texel, 1.5);
+    return contactShadow(shadowUv, slope, depthPerUnit, 1.5);
 #else
     return surfaceVisibility();
 #endif

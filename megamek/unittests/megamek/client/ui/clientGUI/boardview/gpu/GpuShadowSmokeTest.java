@@ -420,8 +420,13 @@ class GpuShadowSmokeTest {
         assertEquals(GL30.GL_COMPARE_REF_TO_TEXTURE, value.get(0));
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_COMPARE_FUNC, value);
         assertEquals(GL20.GL_LEQUAL, value.get(0));
+        // Lookups name their level: the finest compares bilinearly, the coarser ones (GpuShadowLight.levels) as well.
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MIN_FILTER, value);
-        assertEquals(GL20.GL_LINEAR, value.get(0));
+        assertEquals(GL20.GL_LINEAR_MIPMAP_NEAREST, value.get(0));
+        Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_BASE_LEVEL, value);
+        assertEquals(0, value.get(0));
+        Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAX_LEVEL, value);
+        assertEquals(GpuShadowLight.LEVELS, value.get(0));
         Gdx.gl.glGetTexParameteriv(GL20.GL_TEXTURE_2D, GL20.GL_TEXTURE_MAG_FILTER, value);
         assertEquals(GL20.GL_LINEAR, value.get(0));
         assertEquals(GL30.GL_DEPTH_COMPONENT16, org.lwjgl.opengl.GL11.glGetTexLevelParameteri(
