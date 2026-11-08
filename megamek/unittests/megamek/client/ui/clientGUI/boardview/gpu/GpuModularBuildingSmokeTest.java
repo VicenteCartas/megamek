@@ -353,7 +353,7 @@ class GpuModularBuildingSmokeTest {
     }
 
     static void checkInteriorCache(GpuTerrain terrain, boolean visible) throws Exception {
-        int interiors = 0;
+        int interiors = 0, floors = 0;
         for (Object chunk : (List<?>) GpuTestSupport.field(terrain, "chunks")) {
             var renderables = new com.badlogic.gdx.utils.Array<com.badlogic.gdx.graphics.g3d.Renderable>();
             ((com.badlogic.gdx.graphics.g3d.RenderableProvider) GpuTestSupport.field(chunk, "solidProps"))
@@ -363,16 +363,18 @@ class GpuModularBuildingSmokeTest {
             }
             for (var part : renderables) {
                 if (part.material.id.equals("struts")) { interiors++; }
+                if (part.material.id.equals("floors")) { floors++; }
             }
             for (String field : List.of("sharedShadows", "shadowPropRenderables")) {
                 for (Object value : (com.badlogic.gdx.utils.Array<?>) GpuTestSupport.field(chunk, field)) {
                     var part = (com.badlogic.gdx.graphics.g3d.Renderable) value;
-                    assertFalse(part.material.id.equals("struts"),
-                          "Cutaway struts must not cast exterior shadows; solid floors are structural geometry");
+                    assertFalse(part.material.id.equals("struts") || part.material.id.equals("floors"),
+                          "Interiors never cast exterior shadows: the opaque shell does");
                 }
             }
         }
         assertEquals(visible, interiors > 0, "Cutaway struts are submitted only while an occupied shell is faded");
+        assertEquals(visible, floors > 0, "A closed building submits none of its floors");
     }
 
     private static void checkPicking(GpuTerrain terrain, BoardScene scene) {

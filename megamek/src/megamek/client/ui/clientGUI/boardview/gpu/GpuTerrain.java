@@ -2073,11 +2073,7 @@ final class GpuTerrain implements Disposable {
                 if (prop.building != null) { shared.add(prop.instance); }
             }
             sharedShadows.clear();
-            List<ModelInstance> shadowed = new ArrayList<>(shared);
-            for (Prop prop : cutaways) {
-                if (!Float.isNaN(prop.floorZ) && sharedInteriors.contains(prop.instance.model)) { shadowed.add(prop.instance); }
-            }
-            sharedShadows.addAll(GpuTerrainDepth.snapshot(shadowed));
+            sharedShadows.addAll(GpuTerrainDepth.snapshot(shared));
             opaqueMaterials(sharedShadows);
             for (Renderable part : sharedShadows) { part.material.remove(GpuBuildingCutaway.TYPE); }
             for (Prop prop : faded) {
@@ -2184,7 +2180,12 @@ final class GpuTerrain implements Disposable {
             return faded.stream().anyMatch(prop -> Float.isNaN(prop.floorZ) && prop.coords.equals(coords));
         }
 
+        /**
+         * Whether an interior floor draws: only while its building is faded (an occupant or a floor hover), and under a
+         * hover alone only the hovered floor. A closed building draws none of its floors, in any pass.
+         */
         private boolean interiorFloorVisible(Prop floor) {
+            if (!interiorVisible(floor.coords)) { return false; }
             boolean hoverOnly = cutaways.stream().anyMatch(prop -> prop.coords.equals(floor.coords) && prop.hoverOpaque != null);
             return !hoverOnly || Math.abs(floor.floorZ - hoverFloor) < .05f * BoardGeometry.hexScale();
         }
@@ -2215,7 +2216,7 @@ final class GpuTerrain implements Disposable {
                     if (prop.decorationFeature != null || prop.translucent) { continue; }
                     if (omitFaded && prop.building == null && prop.hoverOpaque != null) { builder.add(prop.hoverOpaque); }
                     if (prop.building == null && !sharedInteriors.contains(prop.instance.model)
-                          && (Float.isNaN(prop.floorZ) || interiorFloorVisible(prop))
+                          && (Float.isNaN(prop.floorZ) || omitFaded && interiorFloorVisible(prop))
                           && (!omitFaded || !faded.contains(prop))) {
                         builder.add(prop.instance());
                     }
@@ -7741,7 +7742,7 @@ final class GpuTerrain implements Disposable {
     /** A previewed chunk draws its props one by one, so the replaced pieces never show under their ghosts. */
     private void renderRetainedProps(Chunk chunk, ModelBatch target, Environment lighting, boolean shadows) {
         for (Prop prop : chunk.cutaways) {
-            if (!drawn(prop, shadows) || !Float.isNaN(prop.floorZ) && !chunk.interiorFloorVisible(prop)) { continue; }
+            if (!drawn(prop, shadows) || !Float.isNaN(prop.floorZ) && (shadows || !chunk.interiorFloorVisible(prop))) { continue; }
             if (shadows || !chunk.faded.contains(prop)) { target.render(prop.instance(), lighting); }
             else if (prop.hoverOpaque != null) { target.render(prop.hoverOpaque, lighting); }
         }
