@@ -80,7 +80,7 @@ class GpuOrchardSmokeTest {
                                 for (var material : model.materials) {
                                     var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                     assertNotNull(map);
-                                    // The impostor cards have their own rendered atlas.
+                                    // The impostor has its own rendered atlas.
                                     if (material.id.equals("impostor")) { continue; }
                                     maps.putIfAbsent(material.id, map.textureDescription.texture);
                                     assertSame(maps.get(material.id), map.textureDescription.texture,

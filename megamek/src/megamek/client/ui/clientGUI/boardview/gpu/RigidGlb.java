@@ -587,7 +587,7 @@ final class RigidGlb {
         return convert(file, file.nameWithoutExtension(), asset, source.getSceneModels().get(asset.scene()).getNodeModels(), false);
     }
 
-    /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor cards. */
+    /** Levels a file may hold: the near mesh, two simpler meshes and a plant's impostor. */
     static final int LEVELS = 4;
 
     /** One file per component, identity groups named <component>-lodN. Missing levels reuse the preceding data. */

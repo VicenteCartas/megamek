@@ -106,8 +106,11 @@ class BoardMarsCoralTest {
                 }
                 assertTrue(triangles > 0 && triangles < previous, name + " must simplify at every LOD");
                 previous = triangles;
-                assertEquals(0, low, .001f, name + " roots stay grounded");
-                assertEquals(30, high, .001f, name + " keeps its height");
+                // The impostor's quad lies flat about the coral's middle until the game turns it toward the camera.
+                if (level != levels.getLast()) {
+                    assertEquals(0, low, .001f, name + " roots stay grounded");
+                    assertEquals(30, high, .001f, name + " keeps its height");
+                }
                 // Mineral coral uses solid foliage lighting; the farthest level is the baked impostor.
                 for (var material : level.materials) {
                     assertTrue(List.of("coral", "impostor").contains(material.id), name + ": " + material.id);

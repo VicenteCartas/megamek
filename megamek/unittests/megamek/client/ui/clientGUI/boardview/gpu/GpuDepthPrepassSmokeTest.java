@@ -135,7 +135,7 @@ class GpuDepthPrepassSmokeTest {
                           EnumSet.of(GpuTerrain.Prepass.RELIEF, GpuTerrain.Prepass.CLIFFS), true);
                     List<View> forestViews = new ArrayList<>(GpuCalibrationScenes.forestViews(forest));
                     forestViews.add(forestViews.get(1).flying());
-                    // Far enough that the trees stand as impostor cards (TreeLod): no other view reaches them.
+                    // Far enough that the trees stand as impostors (TreeLod): no other view reaches them.
                     Coords centre = new Coords(forest.width() / 2, forest.height() / 2);
                     forestViews.add(View.at("forest impostors", 8, centre));
                     check("forest", forest, GpuCalibrationScenes.NOON, forestViews, report, EnumSet.of(

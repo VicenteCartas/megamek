@@ -1275,7 +1275,7 @@ final class GpuTerrain implements Disposable {
     private boolean scatterHidden;
     /**
      * What the depth pre-pass draws (renderPrepass): ground relief and solid plant parts with an empty fragment stage,
-     * cutout leaves and impostor cards with their own alpha test. Native measurements take one category at a time.
+     * cutout leaves and impostors with their own alpha test. Native measurements take one category at a time.
      */
     /**
      * OBJECTS: building shells' opaque model surfaces (model.frag, GpuModelMaterial.occluder), whose draw order leaves
@@ -1284,7 +1284,7 @@ final class GpuTerrain implements Disposable {
     enum Prepass { RELIEF, CLIFFS, FOLIAGE, IMPOSTORS, OBJECTS }
 
     /**
-     * The categories the depth pre-pass draws: the trees' leaves and impostor cards, whose cutouts hide the most shading,
+     * The categories the depth pre-pass draws: the trees' leaves and impostors, whose cutouts hide the most shading,
      * the relief of cliff-heavy chunks, whose walls hide ground behind them, and building shells, which hide each
      * other, the trees and the ground (not while a hex is under TreeLod.PREPASS_OBJECTS pixels).
      * {@code -Dmegamek.gpu.depthPrepass=false} turns it off; {@code =all} adds the other chunks' relief, for measurements
@@ -1747,7 +1747,10 @@ final class GpuTerrain implements Disposable {
         public Foliage copy() { return new Foliage(value); }
     }
 
-    /** Marks impostor cards: their atlases place each texel's surface, so it is lit and shadowed there (terrain-foliage.frag). */
+    /**
+     * Marks tree impostors: a quad turned toward the camera that shows its plant's frames, whose atlases place each texel's
+     * surface, so it is lit and shadowed there (impostor-sample.glsl, terrain-foliage.frag).
+     */
     private static final class Impostor extends FloatAttribute {
         static final long TYPE = register("boardImpostor");
 
@@ -1756,6 +1759,9 @@ final class GpuTerrain implements Disposable {
         @Override
         public Impostor copy() { return new Impostor(); }
     }
+
+    /** Whether a material is a tree impostor's (Impostor), which its passes' programs draw differently. */
+    static boolean impostor(Attributes material) { return material.has(Impostor.TYPE); }
 
     /** Plant material roles are authored in the GLB, so new plant assets need no editor-specific ID mapping. */
     static boolean foliageModel(Model model) {
@@ -1777,7 +1783,7 @@ final class GpuTerrain implements Disposable {
                 material.set(new Foliage(material.id.equals("fungus") || material.id.equals("mycelium") ? 3
                       : material.id.equals("snow") || material.id.equals("canopy-snow-cutout") ? 2 : solid ? 0 : 1));
             }
-            // The impostor cards are cutouts: their texels outside the plant discard in every pass, shadows included.
+            // The impostor's frames are cutouts: their texels outside the plant discard in every pass, shadows included.
             // They draw as opaque (unblended, sorted with the solid trees), so they too hide the ground beneath first.
             if (material.id.equals("impostor") && !material.has(Impostor.TYPE)) {
                 if (!material.has(FloatAttribute.AlphaTest)) {

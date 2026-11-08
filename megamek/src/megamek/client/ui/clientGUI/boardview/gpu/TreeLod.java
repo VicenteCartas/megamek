@@ -3,7 +3,7 @@ package megamek.client.ui.clientGUI.boardview.gpu;
 
 /**
  * Screen-pixel budgets for the shared orthographic board, independent of orbit and camera distance. Trees have four
- * levels: the near mesh, two simpler meshes and, below the last threshold, the impostor cards. Buildings and effect
+ * levels: the near mesh, two simpler meshes and, below the last threshold, the impostor. Buildings and effect
  * volumes keep the three-level thresholds.
  */
 final class TreeLod {

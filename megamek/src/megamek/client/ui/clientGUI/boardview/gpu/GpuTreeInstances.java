@@ -211,6 +211,14 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         /** The species with trees dissolving between levels. */
         private final Map<String, Dissolve> dissolves = new HashMap<>();
         private float pixelsPerUnit, now, duration, settles;
+        /**
+         * For tools that compare detail levels in the board's own frame (GpuImpostorCalibrationSmokeTest): every tree
+         * at this level, none at {@link TreeLod#LEVELS}; -1, the game's, lets each choose. The shadow map keeps the level
+         * its texel chooses (GpuTerrain#renderDepth), as it does when a tree changes level in the game.
+         */
+        static int forced = -1;
+        /** The forced level the last split took, so that a change, or its end, splits again. */
+        private int splitForced = -1;
         /** Each tree's level in a split, reused. */
         private int[] own = new int[0];
 
@@ -263,7 +271,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         float detail(float pixelsPerUnit, float now, float duration) {
             // The same scale with every species split and nothing dissolving changes nothing: a still perspective view
             // asks every frame.
-            boolean unchanged = pixelsPerUnit == this.pixelsPerUnit && dissolves.isEmpty() && levels.size() == trees.size();
+            boolean unchanged = forced == splitForced && pixelsPerUnit == this.pixelsPerUnit && dissolves.isEmpty()
+                  && levels.size() == trees.size();
+            splitForced = forced;
             this.pixelsPerUnit = pixelsPerUnit;
             this.now = now;
             this.duration = duration;
@@ -280,6 +290,13 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         }
 
         private FloatArray[] split(String species) {
+            if (forced == TreeLod.LEVELS) {
+                FloatArray[] none = new FloatArray[TreeLod.LEVELS];
+                Arrays.setAll(none, lod -> new FloatArray(1));
+                starts.remove(species);
+                levels.put(species, none);
+                return none;
+            }
             FloatArray sizes = diameters.get(species), all = trees.get(species);
             int[] previous = starts.get(species);
             // New or changed trees start from the nearest level, as a new chunk's did, and dissolve from none.
@@ -289,7 +306,7 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             if (own.length < sizes.size) { own = new int[sizes.size]; }
             for (int i = 0, was = 0; i < sizes.size; i++) {
                 while (previous != null && was < TreeLod.LEVELS - 1 && i >= previous[was + 1]) { was++; }
-                own[i] = holds(dissolve, i) ? was : TreeLod.level(sizes.get(i) * pixelsPerUnit, was);
+                own[i] = forced >= 0 ? forced : holds(dissolve, i) ? was : TreeLod.level(sizes.get(i) * pixelsPerUnit, was);
             }
             // A larger tree never takes a coarser level than a smaller one: the others give way to the trees that hold.
             for (int i = 0, floor = 0; dissolve != null && i < sizes.size; i++) {
@@ -675,12 +692,14 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     static String vertex(String source) {
         source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
-              "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#ifdef impostorFlag\n"
-                    + "v_impostorDepth = instanceTurn(a_normal * instanceScale()) / instanceScale().x;\n#endif\n"
+              "#ifdef impostorFlag\nvec4 pos = vec4(impostorPosition(a_position), 1.0);\n#else\n"
+                    + "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#endif\n"
                     + "#ifdef treeDissolveFlag\nv_treeDissolve = a_instance1.w;\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
-        return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");
+        // An impostor's quad faces the camera; its texels carry their own normals (impostor-sample.glsl).
+        return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);",
+              "\n#ifdef impostorFlag\nvec3 normal = impostorToward();\n#else\nvec3 normal = instanceNormal(a_normal);\n#endif\n");
     }
 
     /**
@@ -702,6 +721,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                 boolean instanced = instanced(renderable);
                 DepthShader.Config chosen = instanced ? trees : plain;
                 boolean cutaway = renderable.material.has(GpuBuildingCutaway.TYPE);
+                // A tree impostor's quad turns toward the light and shows its frames (impostor-sample.glsl).
+                boolean impostor = instanced && GpuTerrain.impostor(renderable.material);
                 String vertex = instanced ? trees.vertexShader : plainVertex;
                 String fragment = plainFragment;
                 if (cutaway) {
@@ -709,12 +730,12 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     fragment = "in float v_buildingHeight;\n" + GpuBuildingCutaway.depthFragment(fragment, "v_buildingHeight");
                 }
                 DepthShader result = new DepthShader(renderable, chosen, GpuGlsl.compile("GPU shadow depth",
-                      DepthShader.createPrefix(renderable, chosen),
+                      DepthShader.createPrefix(renderable, chosen) + (impostor ? "#define impostorFlag\n" : ""),
                       vertex, fragment)) {
                     @Override
                     public boolean canRender(Renderable other) {
                         return instanced(other) == instanced && other.material.has(GpuBuildingCutaway.TYPE) == cutaway
-                              && super.canRender(other);
+                              && (instanced && GpuTerrain.impostor(other.material)) == impostor && super.canRender(other);
                     }
                 };
                 GpuBuildingCutaway.register(result);
@@ -725,9 +746,10 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     }
 
     private static String depthVertex(String source) {
-        source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\nuniform mat4 u_projViewTrans;\n" + MAIN);
+        source = insert(source, MAIN, "uniform mat4 u_projViewTrans;\n" + GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         return insert(source, "vec4 pos = u_projViewWorldTrans * vec4(a_position, 1.0);",
-              "vec4 pos = u_projViewTrans * vec4(instancePosition(a_position), 1.0);");
+              "\n#ifdef impostorFlag\nvec4 pos = u_projViewTrans * vec4(impostorPosition(a_position), 1.0);\n#else\n"
+                    + "vec4 pos = u_projViewTrans * vec4(instancePosition(a_position), 1.0);\n#endif\n");
     }
 
     private static String insert(String source, String anchor, String replacement) {

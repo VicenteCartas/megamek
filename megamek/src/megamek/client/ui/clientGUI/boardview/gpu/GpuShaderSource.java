@@ -97,6 +97,8 @@ final class GpuShaderSource {
         String file = switch (marker) {
             case "COLOR_SPACE" -> "color-space.glsl";
             case "CUTOUT_FADE" -> "cutout-fade.glsl";
+            case "IMPOSTOR_FRAMES" -> "impostor-frames.glsl";
+            case "IMPOSTOR_SAMPLE" -> "impostor-sample.glsl";
             case "SCENE_RADIANCE" -> "scene-radiance.glsl";
             case "OVERLAY_CONTRAST" -> "overlay-contrast.glsl";
             case "LIGHT_MODEL" -> "light-model.glsl";

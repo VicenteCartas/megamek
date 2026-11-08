@@ -79,7 +79,7 @@ class GpuShrubSmokeTest {
                             for (var material : model.materials) {
                                 var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                 assertNotNull(map);
-                                // The impostor cards carry their own rendered atlas.
+                                // The impostor carries its own rendered atlas.
                                 if (material.id.equals("impostor")) { continue; }
                                 Texture atlas = atlases.computeIfAbsent(material.id, ignored -> map.textureDescription.texture);
                                 assertSame(atlas, map.textureDescription.texture, "Every LOD shares its material maps");

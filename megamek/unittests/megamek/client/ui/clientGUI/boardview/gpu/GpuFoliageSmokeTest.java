@@ -52,7 +52,7 @@ class GpuFoliageSmokeTest {
                             for (var material : model.materials) {
                                 var map = material.get(TextureAttribute.class, TextureAttribute.Diffuse);
                                 assertNotNull(map, name + ": " + material.id);
-                                // The impostor cards carry their own rendered atlas, not a shared detail map.
+                                // The impostor carries its own rendered atlas, not a shared detail map.
                                 if (material.id.equals("impostor")) { continue; }
                                 if (material.id.endsWith("-cutout")) {
                                     assertEquals(512, map.textureDescription.texture.getWidth());

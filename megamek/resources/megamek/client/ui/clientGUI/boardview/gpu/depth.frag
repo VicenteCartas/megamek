@@ -23,9 +23,19 @@ uniform float u_alphaTest;
 #ifdef PackedDepthFlag
 in HIGH float v_depth;
 #endif //PackedDepthFlag
+#ifdef impostorFlag
+// IMPOSTOR_SAMPLE
+#endif
 
 void main() {
-	#ifdef blendedTextureFlag
+	#if defined(blendedTextureFlag) && defined(impostorFlag)
+		// A tree impostor's texels come from the frame each pixel shows (impostor-sample.glsl).
+		vec2 gradX, gradY;
+		vec3 frameView;
+		vec2 uv = impostorUV(gradX, gradY, frameView);
+		if (textureGrad(u_diffuseTexture, uv, gradX, gradY).a < u_alphaTest)
+			discard;
+	#elif defined(blendedTextureFlag)
 		if (texture(u_diffuseTexture, v_texCoords0).a < u_alphaTest)
 			discard;
 	#endif // blendedTextureFlag

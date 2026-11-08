@@ -72,14 +72,7 @@ flat in float v_treeDissolve;
 uniform float u_treeClock;
 #endif
 #ifdef impostorFlag
-// The direction an impostor card's renders looked from, per tree and card width, and the tree's horizontal over its
-// vertical scale (tree-instances.glsl).
-in vec3 v_impostorDepth;
-in float v_impostorAspect;
-#endif
-#if defined(impostorFlag) && defined(normalTextureFlag) && defined(ambientTextureFlag)
-// External pilot: these existing bindings hold represented geometry and resolved material data.
-#define impostorMaterialFlag
+// IMPOSTOR_SAMPLE
 #endif
 
 // CUTOUT_FADE
@@ -91,44 +84,39 @@ void main() {
     vec3 crownNormal = frontFacing ? face : -face;
     // Hoist derivative work before any alpha discard or mapped/proxy branch.
     vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
+#ifdef impostorFlag
+    // An impostor's texels come from the frame each pixel shows: its own coordinate and gradients (impostor-sample.glsl).
+    vec2 du, dv;
+    vec3 frameView;
+    vec2 uv = impostorUV(du, dv, frameView);
+#else
+    vec2 uv = v_diffuseUV;
 #ifdef normalTextureFlag
     vec2 du = dFdx(v_diffuseUV), dv = dFdy(v_diffuseUV);
 #endif
+#endif
     surfaceVariance = normalVariance(dFdx(baseNormal), dFdy(baseNormal));
     vec4 diffuse = vec4(1.0);
-#ifdef diffuseTextureFlag
+#if defined(diffuseTextureFlag) && defined(impostorFlag)
+    diffuse = textureGrad(u_diffuseTexture, uv, du, dv);
+#elif defined(diffuseTextureFlag)
     diffuse = texture(u_diffuseTexture, v_diffuseUV);
 #endif
     // How much of the surface is leaves, which scatter light around, rather than bark, cactus or snow.
     float leaves = abs(u_foliage - 1.0) < .5 ? 1.0 : 0.0;
 #ifdef impostorFlag
-    // An impostor card's colour describes the surface its texels show (prepare_tree_lods.py): red, their mean
-    // occlusion; green, the share of them that is bark, cactus or snow; blue and alpha, the mean roughness and scatter
-    // of the rest, its leaves.
-#ifndef impostorMaterialFlag
+    // An impostor's colour describes the surface its texels show (prepare_tree_lods.py): red, their mean occlusion;
+    // green, the share of them that is bark, cactus or snow; blue and alpha, the mean roughness and scatter of the rest,
+    // its leaves.
     leaves = 1.0 - v_color.g;
 #ifdef normalTextureFlag
-    // Its normal atlas, in the frame the bake used: x along u, y across it about z, the direction the render looked from.
-    // RGB, the normal of the surface the texel shows; alpha, how far that surface stands out of the card along z, in
-    // panel sides (a third of the texture's width) about .5. The frame is built in the plant's own axes, turned as the
-    // tree stands: world vectors with its vertical scale undone, so the bake's angles hold; the normal then takes the
-    // inverse scale, as the mesh's do (instanceNormal).
-    vec4 card = textureGrad(u_normalTexture, v_diffuseUV, du, dv);
-    float cardDeterminant = du.x * dv.y - du.y * dv.x;
-    vec3 alongU = abs(cardDeterminant) > 1e-10 ? (dx * dv.y - dy * du.y) / cardDeterminant : vec3(0.0);
-    vec3 alongV = abs(cardDeterminant) > 1e-10 ? (dy * du.x - dx * dv.x) / cardDeterminant : vec3(0.0);
-    vec3 unscaled = vec3(1.0, 1.0, v_impostorAspect);
-    vec3 cardZ = normalize(v_impostorDepth * unscaled);
-    vec3 cardX = alongU * unscaled - cardZ * dot(cardZ, alongU * unscaled);
-    cardX = dot(cardX, cardX) > 1e-20 ? normalize(cardX) : vec3(1.0, 0.0, 0.0);
-    vec3 cardY = cross(cardZ, cardX);
-    if (dot(cardY, alongV * unscaled) < 0.0) cardY = -cardY;
-    vec3 cardShape = (card.rgb * 255.0 - 128.0) / 127.0;
-    vec3 cardNormal = normalize((cardX * cardShape.x + cardY * cardShape.y + cardZ * cardShape.z) * unscaled);
-    // Its shadow is looked up there (surface-lighting.glsl). A panel side in world units: u spans three, along the
-    // horizontal scale.
-    impostorSurface = length(alongU) / 3.0 * v_impostorDepth * (card.a * 2.0 - 1.0);
-#endif
+    // Its normal atlas: RGB, the normal of the surface the texel shows, in the plant's unscaled axes; alpha, that
+    // surface's depth along the frame's view, in sphere diameters about .5. The normal stands as the tree does
+    // (impostorNormal); the shadow is looked up at that surface (surface-lighting.glsl).
+    vec4 shape = textureGrad(u_normalTexture, uv, du, dv);
+    vec3 frameNormal = impostorNormal((shape.rgb * 255.0 - 128.0) / 127.0);
+    // The quad's point lies off the frame's plane by its own offset along the frame's view, unless the frame is the view.
+    impostorSurface = impostorPlaced(frameView * ((shape.a * 2.0 - 1.0) * v_impostorFrame.z - dot(v_impostorPoint, frameView)));
 #endif
 #elif defined(colorFlag)
     diffuse *= v_color;
@@ -141,15 +129,9 @@ void main() {
 #else
     float opacity = 1.0;
 #endif
-#ifdef impostorMaterialFlag
-    // Numeric AO / dry roughness / effective transmission / snow fraction; same cutout footprint.
-    vec4 cardSurface = texture(u_ambientTexture, v_diffuseUV);
-#endif
 #ifdef lightingFlag
     vec3 surface = vec3(1.0, .58, .35);
-#ifdef impostorMaterialFlag
-    surface = cardSurface.rgb;
-#elif defined(impostorFlag)
+#if defined(impostorFlag)
     surface = v_color.rba;
 #elif defined(ambientTextureFlag)
     surface = texture(u_ambientTexture, v_diffuseUV).rgb;
@@ -161,7 +143,7 @@ void main() {
     // Alpha-tested texels own no color or depth. Keep texture/receiver derivatives above this cutoff;
     // normal detail uses the captured gradients, and single-level shadow/cloud reads use explicit LOD.
 #ifdef cutoutFadeFlag
-    if (opacity <= cutoutFadeCut(v_alphaTest, v_diffuseUV)) discard;
+    if (opacity <= cutoutFadeCut(v_alphaTest, uv)) discard;
 #elif defined(blendedFlag) && defined(alphaTestFlag)
     if (opacity <= v_alphaTest) discard;
 #endif
@@ -181,18 +163,11 @@ void main() {
     // Derive the frame from the authored UVs, so mapped ribs follow bent stems and rotated instances.
     // Mip filtering removes subpixel normal detail without adding a mesh level or draw pass.
     float determinant = du.x * dv.y - du.y * dv.x;
-#ifdef impostorMaterialFlag
-    // Source geometry is always present; u_normalMaps controls microscopic detail, which this pilot omits.
-    vec4 cardNormal = textureGrad(u_normalTexture, v_diffuseUV, du, dv);
-    leaves = cardNormal.a;
-    vec3 cardScale = abs(baseNormal.z) > .5 ? vec3(1.0, 1.0, v_impostorAspect)
-          : vec3(1.0, v_impostorAspect, 1.0);
-    mat3 cardFrame = mat3(1.0);
-    bool cardFrameValid = false;
-    bool normalEnabled = true;
-#elif defined(impostorFlag)
-    // A card's normals are its plant's shape, not optional detail: decoded above.
-    face = cardNormal;
+#if defined(impostorFlag)
+    // An impostor's normals are its plant's shape, not optional detail: decoded above. A texel's normal facing away
+    // turns toward the viewer below, as a leaf card's does (proxy): the far mesh's leaves seen from behind.
+    face = frameNormal;
+    baseNormal = frameNormal;
     bool normalEnabled = false;
 #else
     bool normalEnabled = u_normalMaps > .5;
@@ -205,22 +180,8 @@ void main() {
             tangent = normalize(tangent);
             vec3 perpendicular = cross(face, tangent);
             bitangent = dot(perpendicular, bitangent) < 0.0 ? -perpendicular : perpendicular;
-#ifdef impostorMaterialFlag
-            // Filtered source normals shorten before any instance transform; aspect is not roughness.
-            vec3 detail = (cardNormal.rgb * 255.0 - 128.0) / 127.0;
-            // Inverse transpose for actual independent horizontal/vertical instance scales.
-            detail *= cardScale;
-            cardFrame = mat3(tangent, bitangent, face);
-            // Opposing shape normals can cancel in a filtered footprint. Keep the finite carrier fallback.
-            if (dot(detail, detail) > 1e-10) {
-                face = normalize(tangent * detail.x + bitangent * detail.y + face * detail.z);
-                baseNormal = face;
-                cardFrameValid = true;
-            }
-#else
             vec3 detail = (textureGrad(u_normalTexture, v_diffuseUV, du, dv).rgb * 255.0 - 128.0) / 127.0;
             face = normalize(tangent * detail.x + bitangent * detail.y + face * detail.z);
-#endif
         }
     }
 #endif
@@ -241,9 +202,6 @@ void main() {
     vec3 albedo = diffuse.rgb;
     // Snow pigment is authored in the texture and model; keep its material response below.
     float snow = abs(u_foliage - 2.0) < .5 ? 1.0 : 0.0;
-#ifdef impostorMaterialFlag
-    snow = cardSurface.a;
-#endif
     albedo = wetAlbedo(albedo, u_wetness * (1.0 - snow) * .2);
     albedo = materialReflectance(albedo);
     // Godot's emission: the map times its tint, plus the constant glow.
@@ -262,12 +220,9 @@ void main() {
     // Fungal tissue breathes: its glow swells and fades slowly across a colony.
     if (u_foliage > 2.5) emission *= .94 + .06 * sin(u_rainTime * .65 + dot(v_cloudPosition.xy, vec2(.073, .051)));
 #ifdef lightingFlag
-    // A plant material of the GLB's own and an impostor card (its plant's baked bark and leaves) take their role's
+    // A plant material of the GLB's own and an impostor (its plant's baked bark and leaves) take their role's
     // response. Leaves pass their scattering through as thin tissue (below); solid bodies wrap it past the terminator.
     float roughness = mix(mix(.90, .95, snow), surface.g, leaves), metallic = 0.0, scatter = surface.b, wrap = 0.0;
-#ifdef impostorMaterialFlag
-    roughness = surface.g;
-#endif
 #if defined(modelSurfaceFlag) && !defined(impostorFlag)
     // A board material's finish, as its .tres gives it.
     if (u_modelBoard > .5) {
@@ -284,32 +239,21 @@ void main() {
     roughness = clamp(roughness, MIN_ROUGHNESS, 1.0);
     metallic = clamp(metallic, 0.0, 1.0);
     scatter = clamp(scatter, 0.0, 1.0);
-#ifndef impostorMaterialFlag
     // A branch card or impostor carries its crown's envelope normal, about which the leaves it stands for face every
     // way: widen the authored lobe by that spread, as specular antialiasing widens it by a pixel's normal variance.
-    // Real leaf geometry and the pilot's baked source normals keep their authored roughness.
+    // Real leaf geometry keeps its authored roughness.
     if (proxy) roughness = sqrt(sqrt(min(pow(roughness, 4.0) + CROWN_NORMAL_VARIANCE, 1.0)));
-#endif
     float film = (1.0 - snow) * u_wetness * .15;
     vec3 view = -viewDirection();
     // Both real surfaces and proxies use their own visible material frame for every repaired lobe.
     face = shadingNormal(face, geometric, view);
-#ifdef impostorMaterialFlag
-    // Diagnostic only: the recorded affine fit is not an accepted self-shadow solution (especially pine).
-    float selfVisibility = v_color.a;
-    if (cardFrameValid) {
-        vec3 localLight = normalize((transpose(cardFrame) * light) * cardScale);
-        selfVisibility = clamp(v_color.a + dot(v_color.rgb * 2.0 - 1.0, localLight), 0.0, 1.0);
-    }
-    visibility *= selfVisibility;
-#endif
     // Bark and snow scatter a broad reflection, as does a crown's card (widened above); real leaves keep their
     // authored lobe. Rain smooths bark and leaves; separately marked snow keeps its dry response like the ground.
     Surface plant = opaqueSurface(albedo, face, geometric, roughness, film, visibility);
     metallicShare(plant, metallic);
     plant.scatter = wrap;
-#if defined(impostorFlag) && !defined(impostorMaterialFlag)
-    // A card's leaves face every way about its crown: each side takes the light that reaches it.
+#ifdef impostorFlag
+    // An impostor's leaves face every way about its crown: each side takes the light that reaches it.
     plant.geometric = face;
 #endif
 #if defined(normalTextureFlag) && !defined(ambientTextureFlag) && !defined(impostorFlag)
@@ -317,11 +261,7 @@ void main() {
     // dielectric light model.
     plant.visibility = surfaceVisibility();
 #else
-#ifdef impostorMaterialFlag
-    float transmitted = scatter;
-#else
     float transmitted = leaves * scatter;
-#endif
     // Actual thin tissue reflects on the visible side and transmits from the opposite side (thinTransmission).
     // Canopy occlusion attenuates the incoming sky alone; the leaf cavity map (detail) also its reflection.
     plant.back = thinTransmission(albedo, transmitted);
