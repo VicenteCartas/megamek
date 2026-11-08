@@ -46,20 +46,37 @@ vec3 impostorToward() {
     return normalize(cross(right, up));
 }
 
+// The camera's direction with the tree's turn undone (instanceTurn).
+vec3 impostorTowardUnturned() {
+    vec3 toward = impostorToward();
+    return vec3(a_instance1.x * toward.x + a_instance1.y * toward.y, a_instance1.x * toward.y - a_instance1.y * toward.x,
+          toward.z);
+}
+
 // An impostor quad's corner turned toward the camera (prepare_tree_lods.py stores the quad as a square: x and y its
 // corner's offsets across it, z the height of its centre on the plant's axis). The view is taken into the plant's
 // unscaled axes (the turn undone, then the scale), where the frames were rendered; the corner then stands in the plane
 // across that view and is placed as the tree stands. Viewing the scaled tree along a direction shows what viewing the
 // unscaled one along that unscaled view does, so each frame's image lines up with the quad.
 vec3 impostorPosition(vec3 corner) {
-    vec3 toward = impostorToward();
     vec3 scale = instanceScale();
-    vec3 view = normalize(vec3(a_instance1.x * toward.x + a_instance1.y * toward.y,
-          a_instance1.x * toward.y - a_instance1.y * toward.x, toward.z) / scale);
+    vec3 view = normalize(impostorTowardUnturned() / scale);
     float azimuth = atan(view.y, view.x), elevation = asin(clamp(view.z, -1.0, 1.0));
     v_impostorPoint = impostorRight(azimuth) * corner.x + impostorUp(azimuth, elevation) * corner.y;
     v_impostorFrame = vec3(impostorPlace(view), abs(corner.x));
     v_impostorTree = vec4(a_instance1.xy, a_instance0.w, a_instance1.z);
     return instanceTurn((vec3(0.0, 0.0, corner.z) + v_impostorPoint) * scale) + a_instance0.xyz;
+}
+
+// The clip depth for an impostor corner at `clip`: the depth of the front of the sphere that holds the plant, scaled as
+// the tree stands, toward the camera, alike at every corner. Every texel's surface lies at or behind it, while the quad
+// still shows where it stands (terrain-foliage.frag's conservative depth).
+float impostorFrontZ(vec3 corner, vec4 clip) {
+    // Scaled as the tree stands, the sphere reaches its radius times this far toward the camera.
+    float reach = length(impostorTowardUnturned() * instanceScale());
+    vec3 front = instancePosition(vec3(0.0, 0.0, corner.z)) + impostorToward() * abs(corner.x) * reach;
+    vec4 frontClip = u_projViewTrans * vec4(front, 1.0);
+    // Never before the near plane, which would clip the whole quad.
+    return frontClip.w > 0.0 ? max(frontClip.z / frontClip.w, -1.0) * clip.w : -clip.w;
 }
 #endif

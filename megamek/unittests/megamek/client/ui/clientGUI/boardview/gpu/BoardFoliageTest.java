@@ -269,17 +269,19 @@ class BoardFoliageTest {
                 }
             }
             BufferedImage frames = ImageIO.read(atlas);
-            // The calibrated tint scales the frames' pigment (calibrate_impostors.py): the plant's own colours lie under it.
-            double[] tint = impostorTint(RigidGlb.source(root, plant).file(), name);
+            // The calibrated tint scales each row of frames' pigment (calibrate_impostors.py): the plant's own colours lie
+            // under it.
+            double[][] tint = impostorTint(RigidGlb.source(root, plant).file(), name);
             double[] baked = new double[3];
             int opaque = 0;
             for (int y = 0; y < frames.getHeight(); y++) {
                 for (int x = 0; x < frames.getWidth(); x++) {
                     int texel = frames.getRGB(x, y);
                     if (texel >>> 24 < 128) { continue; }
+                    double[] row = tint[y * tint.length / frames.getHeight()];
                     for (int channel = 0; channel < 3; channel++) {
                         float shown = GpuColor.linear((texel >> 16 - 8 * channel & 255) / 255f);
-                        baked[channel] += 255 * GpuColor.display((float) (shown / tint[channel]));
+                        baked[channel] += 255 * GpuColor.display((float) (shown / row[channel]));
                     }
                     opaque++;
                 }
@@ -292,21 +294,22 @@ class BoardFoliageTest {
     }
 
     /**
-     * An impostor atlas's tint (linear RGB), as calibrate_impostors.py records it in the impostor material's extras
-     * {@code mmImpostorTint}; else 1.
+     * An impostor atlas's tint per row of frames (linear RGB, then the coverage exponent), as calibrate_impostors.py
+     * records it in the impostor material's extras {@code mmImpostorTint}; else one row of 1.
      */
-    private static double[] impostorTint(File glb, String atlas) throws IOException {
+    private static double[][] impostorTint(File glb, String atlas) throws IOException {
         byte[] data = Files.readAllBytes(glb.toPath());
         int length = ByteBuffer.wrap(data, 12, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
         Map<?, ?> document = new ObjectMapper().readValue(Arrays.copyOfRange(data, 20, 20 + length), Map.class);
         for (Object material : (List<?>) document.get("materials")) {
             if (material instanceof Map<?, ?> values && "impostor".equals(values.get("name"))
                   && values.get("extras") instanceof Map<?, ?> extras && extras.get("mmImpostorTint") instanceof Map<?, ?> tints
-                  && tints.get(atlas) instanceof List<?> tint) {
-                return tint.stream().mapToDouble(value -> ((Number) value).doubleValue()).toArray();
+                  && tints.get(atlas) instanceof List<?> rows) {
+                return rows.stream().map(row -> ((List<?>) row).stream().mapToDouble(value -> ((Number) value).doubleValue())
+                      .toArray()).toArray(double[][]::new);
             }
         }
-        return new double[] { 1, 1, 1 };
+        return new double[][] { { 1, 1, 1, 1 } };
     }
 
     /** Pines' skirts and palms' fronds lost half their outline to decimation at the far levels, and snow with it. */

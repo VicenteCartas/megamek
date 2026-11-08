@@ -1,6 +1,7 @@
 // Copyright (C) 2026 The MegaMek Team. SPDX-License-Identifier: GPL-3.0-or-later
-// A tree impostor's quad, in its fragment stages (terrain-foliage.frag, depth.frag): each pixel shows one of the four
-// frames about the view, so the plant looks as its far mesh does from that side (tree-instances.glsl turns the quad).
+// A tree impostor's quad, in its fragment stages (terrain-foliage.frag, shadow-depth.frag): each pixel shows one of the
+// four frames about the view, so the plant looks as its far mesh does from that side (tree-instances.glsl turns the
+// quad).
 // IMPOSTOR_FRAMES
 // The alpha test's inputs: the pixel's point on the quad in the plant's unscaled axes about the impostor's centre, and
 // the view's place among the frames (column, row) with the sphere's radius. Invariant where they are computed, so a
@@ -20,6 +21,13 @@ flat in vec4 v_impostorTree;
 vec3 impostorPlaced(vec3 v) {
     v *= vec3(abs(v_impostorTree.z), v_impostorTree.z, v_impostorTree.w);
     return vec3(v_impostorTree.x * v.x - v_impostorTree.y * v.y, v_impostorTree.y * v.x + v_impostorTree.x * v.y, v.z);
+}
+
+// From the quad's point to the surface its texel shows, in world units, as the tree stands: `along` is the texel's
+// depth along the frame's view as its normal atlas's alpha stores it, in sphere diameters about .5. The quad's point
+// lies off the frame's plane by its own offset along the frame's view, unless the frame is the view.
+vec3 impostorOffset(vec3 frameView, float along) {
+    return impostorPlaced(frameView * ((along * 2.0 - 1.0) * v_impostorFrame.z - dot(v_impostorPoint, frameView)));
 }
 
 // A normal in the plant's unscaled axes, as the tree stands: the inverse scale, then the turn (instanceNormal).

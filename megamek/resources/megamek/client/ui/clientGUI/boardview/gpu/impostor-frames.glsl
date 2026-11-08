@@ -5,8 +5,9 @@
 // the plant toward the camera, its right and up axes span the image.
 const float IMPOSTOR_AZIMUTHS = 8.0;
 const float IMPOSTOR_ROWS = 4.0;
-// 10, 35.26 (the board's isometric view), 60 and 85 degrees above the horizon, in radians.
-const vec4 IMPOSTOR_ELEVATIONS = vec4(.17453293, .61540585, 1.04719755, 1.48352986);
+// 10, 35.26 (the board's isometric view), 60 and 90 degrees above the horizon, in radians: the top row looks straight
+// down, as the board's top view does (its azimuths are turns of that one view), so no side of an upright part shows.
+const vec4 IMPOSTOR_ELEVATIONS = vec4(.17453293, .61540585, 1.04719755, 1.57079633);
 const float IMPOSTOR_TURN = 6.28318531;
 
 vec3 impostorView(float azimuth, float elevation) {

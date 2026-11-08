@@ -697,6 +697,9 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
                     + "#ifdef treeDissolveFlag\nv_treeDissolve = a_instance1.w;\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
+        // An impostor's quad stands where it shows, at the depth of its plant's front (tree-instances.glsl).
+        source = insert(source, "gl_Position = u_projViewTrans * pos;",
+              "gl_Position = u_projViewTrans * pos;\n#ifdef impostorFlag\ngl_Position.z = impostorFrontZ(a_position, gl_Position);\n#endif\n");
         // An impostor's quad faces the camera; its texels carry their own normals (impostor-sample.glsl).
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);",
               "\n#ifdef impostorFlag\nvec3 normal = impostorToward();\n#else\nvec3 normal = instanceNormal(a_normal);\n#endif\n");

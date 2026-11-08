@@ -73,6 +73,12 @@ uniform float u_treeClock;
 #endif
 #ifdef impostorFlag
 // IMPOSTOR_SAMPLE
+uniform mat4 u_projViewTrans;
+#if __VERSION__ >= 420
+// The depth it writes is never nearer than its quad's, the front of the plant's sphere (impostorFrontZ,
+// tree-instances.glsl): the depth test still runs before this stage. Below GLSL 4.20 writing it turns that test off.
+layout(depth_greater) out float gl_FragDepth;
+#endif
 #endif
 
 // CUTOUT_FADE
@@ -109,14 +115,28 @@ void main() {
     // green, the share of them that is bark, cactus or snow; blue and alpha, the mean roughness and scatter of the rest,
     // its leaves.
     leaves = 1.0 - v_color.g;
+    float coherence = 1.0;
 #ifdef normalTextureFlag
-    // Its normal atlas: RGB, the normal of the surface the texel shows, in the plant's unscaled axes; alpha, that
-    // surface's depth along the frame's view, in sphere diameters about .5. The normal stands as the tree does
-    // (impostorNormal); the shadow is looked up at that surface (surface-lighting.glsl).
+    // Its normal atlas: RGB, the mean normal of the surfaces the texel shows, in the plant's unscaled axes, as short as
+    // they face different ways (a thin branch's sides; coarser mip levels add the pixel's own spread); alpha, their
+    // depth along the frame's view, in sphere diameters about .5. The normal stands as the tree does (impostorNormal);
+    // the shadow is looked up at that surface (surface-lighting.glsl).
     vec4 shape = textureGrad(u_normalTexture, uv, du, dv);
-    vec3 frameNormal = impostorNormal((shape.rgb * 255.0 - 128.0) / 127.0);
-    // The quad's point lies off the frame's plane by its own offset along the frame's view, unless the frame is the view.
-    impostorSurface = impostorPlaced(frameView * ((shape.a * 2.0 - 1.0) * v_impostorFrame.z - dot(v_impostorPoint, frameView)));
+    vec3 meanNormal = (shape.rgb * 255.0 - 128.0) / 127.0;
+    coherence = clamp(length(meanNormal), 0.0, 1.0);
+    vec3 frameNormal = impostorNormal(meanNormal);
+    impostorSurface = impostorOffset(frameView, shape.a);
+    // The texel's depth is that surface's, not its quad's, in this program and its depth twin alike: what stands in front
+    // of or behind the plant (a fungus's haze, the screen-space occlusion) composites as against the mesh.
+    vec4 surfaceClip = u_projViewTrans * vec4(v_cloudPosition + impostorSurface, 1.0);
+    float surfaceDepth = surfaceClip.z / surfaceClip.w * .5 + .5;
+#ifndef depthPrepassFlag
+    // A hair nearer than the twin's: two programs may round the same sum apart, and this pass tests less-or-equal.
+    surfaceDepth -= 1.0 / 1048576.0;
+#endif
+    // Never nearer than the quad, as its conservative depth promises.
+    impostorDepth = max(surfaceDepth, gl_FragCoord.z);
+    gl_FragDepth = impostorDepth;
 #endif
 #elif defined(colorFlag)
     diffuse *= v_color;
@@ -255,6 +275,12 @@ void main() {
 #ifdef impostorFlag
     // An impostor's leaves face every way about its crown: each side takes the light that reaches it.
     plant.geometric = face;
+    // Surfaces that face several ways in one texel take the sun as they do on average, as the mesh's pixels, each one of
+    // them, do; not as one surface facing their mean way. For a cosine-weighted spread of normals (a branch's sides, a
+    // crown), a wrap of .76 with the sun scaled by their coherence matches that average lit from ahead, beside and
+    // behind; the wrap fades out toward a texel of one smooth surface (coherence from .8 to 1).
+    plant.scatter = .76 * clamp((1.0 - coherence) * 5.0, 0.0, 1.0);
+    plant.visibility *= coherence;
 #endif
 #if defined(normalTextureFlag) && !defined(ambientTextureFlag) && !defined(impostorFlag)
     // Opaque cactus skin has a broad waxy highlight under the coarse shadow filter, using the terrain's existing

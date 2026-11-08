@@ -171,7 +171,8 @@ final class GpuTerrain implements Disposable {
      * The terrain's shader ladder. With {@code depthOnly} it builds each program's depth twin instead: the same prefix,
      * vertex stage and setters, and a fragment stage that writes depth alone, after a cutout's alpha test, which it repeats
      * exactly (terrain-foliage.frag's depthPrepassFlag). Every vertex stage declares gl_Position invariant, and a cutout's
-     * also the inputs of its alpha test, so a program and its twin cover the same pixels at the same depth.
+     * also the inputs of its alpha test, so a program and its twin cover the same pixels at the same depth (a tree
+     * impostor writes its texels' surface depth, the colour program a hair nearer: terrain-foliage.frag).
      */
     private final class TerrainShaders extends DefaultShaderProvider {
         private final boolean depthOnly;
@@ -673,9 +674,11 @@ final class GpuTerrain implements Disposable {
                         context.setDepthMask(false);
                     }
                     // A draw the depth pre-pass drew keeps that depth: it shades only where its own depth won, writing none.
+                    // A tree impostor writes its own, a hair nearer than its twin's (terrain-foliage.frag), so the frame
+                    // ends with the depths it has without the pre-pass.
                     if (prepassed && twin(this, attributes) != null) {
                         context.setDepthTest(prepassDepthFunction);
-                        context.setDepthMask(false);
+                        context.setDepthMask(impostor(attributes));
                     }
                 }
 

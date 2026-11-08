@@ -22,6 +22,7 @@ import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.g3d.Material;
+import com.badlogic.gdx.graphics.g3d.ModelInstance;
 import com.badlogic.gdx.graphics.g3d.attributes.FloatAttribute;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
@@ -33,18 +34,26 @@ import org.junit.jupiter.api.Test;
 /**
  * Where the game switches a plant to its impostor (TreeLod's smallest threshold), the impostor looks as the far mesh it
  * replaces: in the board's own frame (lit, shadowed and composited, every plant alone in its hex), at 8, 13 and 17 h,
- * from above and from the isometric view, it covers the pixels the far mesh covers and is as bright, on average over
- * those views. With {@code -Dmegamek.gpu.impostorCalibration=FILE} it writes instead, for each plant file, the
- * impostor's alpha cutoff at which the two cover the same (a winter form shares its plant file's), and for each
- * impostor the ratio of the far mesh's colour to its own, which mm-data's tools/calibrate_impostors.py writes into the
- * GLBs and their atlases.
+ * seen from each height of the impostor's rows of frames (impostor-frames.glsl: 10, 35.26, 60 and 90 degrees above the
+ * horizon, in the plant's unscaled axes: a view counts for the rows it shows, by their shares), it covers the pixels
+ * the far mesh covers and is as bright. With
+ * {@code -Dmegamek.gpu.impostorCalibration=FILE} it writes instead, for each plant file, the alpha cutoff at which its
+ * impostors cover what their far meshes cover over all those views, and for each impostor and row of frames the cutoff
+ * at which that row alone would, and the ratio of the far mesh's colour to its own; mm-data's
+ * tools/calibrate_impostors.py writes them into the GLBs and atlases.
  */
 @Tag("on-demand")
 class GpuImpostorCalibrationSmokeTest {
     private static final float SWITCH = 24;
-    private static final int SPACING = 3, ROW = 12, CROP = 48;
+    private static final int SPACING = 3, ROW = 12, CROP = 48, ROWS = 4;
     private static final float[] HOURS = { 8, 13, 17 };
-    private static final String[] VIEWS = { "top", "iso" };
+    /** Each view: the camera's tilt from straight down and its bearing; about each row's height for an unstretched plant. */
+    private record View(float tilt, float bearing) { }
+    private static final List<View> VIEWS = List.of(new View(80, 45), new View(80, 135),
+          new View(BoardCamera.ISOMETRIC_TILT, 45), new View(BoardCamera.ISOMETRIC_TILT, 135),
+          new View(30, 45), new View(30, 135), new View(0, 0));
+    /** The rows' heights above the horizon, in degrees (impostor-frames.glsl). */
+    private static final float[] ELEVATIONS = { 10, 35.26f, 60, 90 };
     /** The cutoffs the calibration tries; coverage falls as the cutoff rises. */
     private static final float[] CUTOFFS = { .1f, .2f, .3f, .4f, .5f, .6f, .7f };
 
@@ -71,19 +80,21 @@ class GpuImpostorCalibrationSmokeTest {
         assertNull(failure.get(), () -> String.valueOf(failure.get()));
     }
 
-    /** A plant's place in the scene, and the sums over the views that compare its far mesh and impostor. */
+    /** A plant's place in the scene, and per row of frames the sums over the views that compare its two levels. */
     private static final class Plant {
         final String name;
         final File file;
         Vector3 centre;
         float diameter;
-        double coverage;
-        int views;
+        /** Its horizontal and vertical scales, which turn a view's height in the board into one in its own axes. */
+        float across, upward;
         /** Its impostor material's alpha test, on the models the terrains share. */
         FloatAttribute impostor;
-        /** The far mesh's and the impostor's linear RGB summed over the pixels both cover, in every view. */
-        final double[] mesh = new double[3], card = new double[3];
-        final double[] swept = new double[CUTOFFS.length];
+        /** Per row: the log coverage ratios, the views' shares and the far mesh's pixels, summed by share. */
+        final double[] coverage = new double[ROWS], views = new double[ROWS], pixels = new double[ROWS];
+        /** The far mesh's and the impostor's linear RGB summed over the pixels both cover, per row. */
+        final double[][] mesh = new double[ROWS][3], card = new double[ROWS][3];
+        final double[][] swept = new double[ROWS][CUTOFFS.length];
 
         Plant(String name, File file) {
             this.name = name;
@@ -111,14 +122,17 @@ class GpuImpostorCalibrationSmokeTest {
                     for (Plant plant : plants) { plant.impostor.value = CUTOFFS[step]; }
                     GpuTerrain trial = terrain(owner, scene, frame);
                     try {
+                        // At every hour, as the check below: a plant's contrast against its own shadow moves its coverage.
                         for (float hour : HOURS) {
                             frame.configure(settings(hour));
-                            for (String view : VIEWS) {
+                            for (View view : VIEWS) {
                                 for (Plant plant : plants) {
                                     BoardCamera camera = camera(scene, plant, view);
                                     int[] reference = crop(trial, frame, camera, scene, TreeLod.LEVELS);
-                                    plant.swept[step] += Math.log(Math.max(covered(crop(trial, frame, camera, scene, 3), reference), 1)
+                                    double log = Math.log(Math.max(covered(crop(trial, frame, camera, scene, 3), reference), 1)
                                           / (double) Math.max(covered(crop(trial, frame, camera, scene, 2), reference), 1));
+                                    double[] shares = shares(plant, view);
+                                    for (int row = 0; row < ROWS; row++) { plant.swept[row][step] += shares[row] * log; }
                                 }
                             }
                         }
@@ -126,11 +140,13 @@ class GpuImpostorCalibrationSmokeTest {
                         trial.dispose();
                     }
                 }
-                // One cutoff per file: its forms share the material.
+                // One cutoff per file, over all its forms and rows: they share the material.
                 Map<File, double[]> curves = new LinkedHashMap<>();
                 for (Plant plant : plants) {
                     double[] curve = curves.computeIfAbsent(plant.file, file -> new double[CUTOFFS.length]);
-                    for (int step = 0; step < CUTOFFS.length; step++) { curve[step] += plant.swept[step]; }
+                    for (double[] row : plant.swept) {
+                        for (int step = 0; step < CUTOFFS.length; step++) { curve[step] += row[step]; }
+                    }
                 }
                 curves.forEach((file, curve) -> cutoffs.put(file, fit(curve)));
                 for (Plant plant : plants) { plant.impostor.value = cutoffs.get(plant.file); }
@@ -139,11 +155,11 @@ class GpuImpostorCalibrationSmokeTest {
             GpuTerrain terrain = calibrated != null ? calibrated : owner;
             for (float hour : HOURS) {
                 frame.configure(settings(hour));
-                for (String view : VIEWS) {
+                for (View view : VIEWS) {
                     for (Plant plant : plants) {
                         BoardCamera camera = camera(scene, plant, view);
-                        compare(plant, crop(terrain, frame, camera, scene, 2), crop(terrain, frame, camera, scene, 3),
-                              crop(terrain, frame, camera, scene, TreeLod.LEVELS));
+                        compare(plant, shares(plant, view), crop(terrain, frame, camera, scene, 2),
+                              crop(terrain, frame, camera, scene, 3), crop(terrain, frame, camera, scene, TreeLod.LEVELS));
                     }
                 }
             }
@@ -160,52 +176,93 @@ class GpuImpostorCalibrationSmokeTest {
     /**
      * One view: the pixels the far mesh and the impostor cover (differ from the frame without them, whose shadow map
      * still holds the plant at its own level, as the game's does when it switches), and their colours where both cover,
-     * in linear RGB.
+     * in linear RGB, pooled per row by the view's shares of the rows: a view where both show only a few pixels weighs
+     * as little.
      */
-    private static void compare(Plant plant, int[] far, int[] impostor, int[] reference) {
+    private static void compare(Plant plant, double[] shares, int[] far, int[] impostor, int[] reference) {
         int farCovers = covered(far, reference);
         if (farCovers == 0) { return; }
-        plant.coverage += Math.log(Math.max(covered(impostor, reference), 1) / (double) farCovers);
-        plant.views++;
-        // Pooled over every view: a view where both show only a few pixels weighs as little.
+        double log = Math.log(Math.max(covered(impostor, reference), 1) / (double) farCovers);
+        for (int row = 0; row < ROWS; row++) {
+            plant.coverage[row] += shares[row] * log;
+            plant.views[row] += shares[row];
+            plant.pixels[row] += shares[row] * farCovers;
+        }
         for (int i = 0; i < reference.length; i++) {
             if (!differs(far[i], reference[i]) || !differs(impostor[i], reference[i])) { continue; }
             for (int c = 0; c < 3; c++) {
-                plant.mesh[c] += GpuColor.linear((far[i] >> 16 - 8 * c & 255) / 255f);
-                plant.card[c] += GpuColor.linear((impostor[i] >> 16 - 8 * c & 255) / 255f);
+                float mesh = GpuColor.linear((far[i] >> 16 - 8 * c & 255) / 255f);
+                float card = GpuColor.linear((impostor[i] >> 16 - 8 * c & 255) / 255f);
+                for (int row = 0; row < ROWS; row++) {
+                    plant.mesh[row][c] += shares[row] * mesh;
+                    plant.card[row][c] += shares[row] * card;
+                }
             }
         }
     }
 
-    private static void report(List<Plant> plants, Map<File, Float> cutoffs, String target) {
-        List<String> errors = new ArrayList<>();
-        for (Plant plant : plants) {
-            assertTrue(plant.views > 0 && luma(plant.mesh) > 0, plant.name + " shows in no view");
-            double coverage = Math.exp(plant.coverage / plant.views), brightness = luma(plant.card) / luma(plant.mesh);
-            System.out.printf(Locale.ROOT, "Impostor %s: covers %.2f of its far mesh, %.2f as bright%n", plant.name, coverage, brightness);
-            // A winter form shares its plant file's cutoff, so the two forms' coverages can only meet about it.
-            if (coverage < .8 || coverage > 1.25 || brightness < .88 || brightness > 1.12) {
-                errors.add(String.format(Locale.ROOT, "%s impostor covers %.2f of its far mesh and is %.2f as bright", plant.name,
-                      coverage, brightness));
+    /**
+     * The rows a view shows of a plant and their shares, as impostor-frames.glsl's impostorPlace finds them: the view's
+     * height in the plant's unscaled axes, between the two rows about it.
+     */
+    private static double[] shares(Plant plant, View view) {
+        double tilt = Math.toRadians(view.tilt());
+        double height = Math.toDegrees(Math.atan2(Math.cos(tilt) / plant.upward, Math.sin(tilt) / plant.across));
+        double[] shares = new double[ROWS];
+        if (height <= ELEVATIONS[0]) {
+            shares[0] = 1;
+            return shares;
+        }
+        for (int row = 1; row < ROWS; row++) {
+            if (height <= ELEVATIONS[row]) {
+                double share = (height - ELEVATIONS[row - 1]) / (ELEVATIONS[row] - ELEVATIONS[row - 1]);
+                shares[row - 1] = 1 - share;
+                shares[row] = share;
+                return shares;
             }
+        }
+        shares[ROWS - 1] = 1;
+        return shares;
+    }
+
+    private static void report(List<Plant> plants, Map<File, Float> cutoffs, String target) {
+        List<String> errors = new ArrayList<>(), fitted = new ArrayList<>(), rows = new ArrayList<>();
+        for (Plant plant : plants) {
+            List<String> values = new ArrayList<>();
+            for (int row = 0; row < ROWS; row++) {
+                // A row the board's views barely reach (a plant stretched upright shows its lowest row little) keeps its fit.
+                if (plant.views[row] < .5 || luma(plant.mesh[row]) <= 0) {
+                    values.add("[1, 1, 1, 0]");
+                    continue;
+                }
+                double coverage = Math.exp(plant.coverage[row] / plant.views[row]);
+                double brightness = luma(plant.card[row]) / luma(plant.mesh[row]);
+                System.out.printf(Locale.ROOT, "Impostor %s row %d: covers %.2f of its far mesh, %.2f as bright%n", plant.name, row,
+                      coverage, brightness);
+                // A row whose far mesh shows a dozen pixels or fewer per view (a cactus from above) moves by a pixel's share.
+                boolean measurable = plant.pixels[row] / plant.views[row] > 12;
+                if (measurable && (coverage < .85 || coverage > 1.18) || brightness < .9 || brightness > 1.1) {
+                    errors.add(String.format(Locale.ROOT, "%s impostor's row %d covers %.2f of its far mesh and is %.2f as bright",
+                          plant.name, row, coverage, brightness));
+                }
+                double[] ratio = new double[3];
+                // A channel the impostor never shows stays as it is.
+                for (int c = 0; c < 3; c++) { ratio[c] = plant.card[row][c] > 0 ? plant.mesh[row][c] / plant.card[row][c] : 1; }
+                values.add(String.format(Locale.ROOT, "[%.4f, %.4f, %.4f, %.3f]", ratio[0], ratio[1], ratio[2],
+                      target == null ? 0 : fit(plant.swept[row])));
+            }
+            rows.add(String.format("\"%s\": [%s]", plant.name, String.join(", ", values)));
         }
         if (target == null) {
             assertTrue(errors.isEmpty(), String.join("\n", errors));
             return;
         }
-        // Each plant file's cutoff, and each impostor's colour ratio (its far mesh's to its own, linear RGB) by plant.
+        // Each plant file's cutoff; per impostor and row, the colour ratio (far mesh to impostor) and the row's cutoff.
         File root = new File(Configuration.dataDir(), "models/board");
-        List<String> fitted = new ArrayList<>(), colours = new ArrayList<>();
         cutoffs.forEach((file, cutoff) -> fitted.add(String.format(Locale.ROOT, "\"%s\": %.3f",
               root.toPath().relativize(file.toPath()).toString().replace('\\', '/').replace(".glb", ""), cutoff)));
-        for (Plant plant : plants) {
-            double[] ratio = new double[3];
-            // A channel the impostor never shows stays as it is.
-            for (int c = 0; c < 3; c++) { ratio[c] = plant.card[c] > 0 ? plant.mesh[c] / plant.card[c] : 1; }
-            colours.add(String.format(Locale.ROOT, "\"%s\": [%.4f, %.4f, %.4f]", plant.name, ratio[0], ratio[1], ratio[2]));
-        }
-        String json = String.format("{\"cutoffs\": {%n  %s},%n\"colours\": {%n  %s}}%n", String.join(String.format(",%n  "), fitted),
-              String.join(String.format(",%n  "), colours));
+        String json = String.format("{\"cutoffs\": {%n  %s},%n\"rows\": {%n  %s}}%n", String.join(String.format(",%n  "), fitted),
+              String.join(String.format(",%n  "), rows));
         try {
             Files.writeString(new File(target).toPath(), json);
         } catch (IOException error) {
@@ -305,6 +362,9 @@ class GpuImpostorCalibrationSmokeTest {
                 if (plant == null) { continue; }
                 plant.centre = ((BoundingBox) field(prop, "bounds")).getCenter(new Vector3());
                 plant.diameter = (float) field(prop, "treeDiameter");
+                Vector3 scale = ((ModelInstance) field(prop, "instance")).transform.getScale(new Vector3());
+                plant.across = Math.abs(scale.x);
+                plant.upward = scale.z;
             }
         }
         for (Plant plant : plants) { assertTrue(plant.centre != null, plant.name + " was not placed"); }
@@ -323,13 +383,13 @@ class GpuImpostorCalibrationSmokeTest {
         throw new NoSuchFieldException(name);
     }
 
-    /** The plant at the switch's size in the middle of the window, from above or from the isometric view. */
-    private static BoardCamera camera(BoardScene scene, Plant plant, String view) {
+    /** The plant at the switch's size in the middle of the window, seen from the view's tilt and bearing. */
+    private static BoardCamera camera(BoardScene scene, Plant plant, View view) {
         var camera = new BoardCamera();
         camera.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         camera.fit(scene);
-        camera.setIsometric(view.equals("iso"));
-        if (!view.equals("iso")) { camera.tilt(0); }
+        camera.setIsometric(false);
+        camera.orbit(view.bearing(), view.tilt());
         camera.camera.zoom = plant.diameter * BoardCamera.scenePixelScale() / SWITCH;
         camera.center(plant.centre);
         camera.update();
