@@ -315,9 +315,39 @@ final class ConnectedKit {
      * the lower top where their vertical spans overlap, else the whole {@code height}.
      */
     static int arm(BoardScene.Tile tile, int height, BoardScene.Tile neighbor, int neighborHeight) {
-        int top = neighbor.elevation() - tile.elevation() + neighborHeight;
         // No overlapping vertical span means a terrain step separates the structures; do not invent a bridge.
-        return top > 0 && neighbor.elevation() < tile.elevation() + height ? Math.min(height, top) : height;
+        return overlaps(tile, height, neighbor, neighborHeight)
+              ? Math.min(height, neighbor.elevation() - tile.elevation() + neighborHeight) : height;
+    }
+
+    private static boolean overlaps(BoardScene.Tile tile, int height, BoardScene.Tile neighbor, int neighborHeight) {
+        return neighbor.elevation() - tile.elevation() + neighborHeight > 0 && neighbor.elevation() < tile.elevation() + height;
+    }
+
+    /**
+     * Whether the inside of the structure of {@code tile}, {@code height} levels high, shows from outside: it, or a
+     * neighbour it connects with, connects across a hexside where nothing connects back over its span ({@link #reach}),
+     * such as a missing or collapsed neighbour, and stands open there.
+     */
+    static boolean open(BoardScene scene, BoardScene.Tile tile, int height) {
+        if (openEnd(scene, tile, height)) { return true; }
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.cover().exits() & 1 << direction) == 0 || !back(scene, tile, direction)) { continue; }
+            var neighbor = scene.neighbor(tile, direction);
+            if (openEnd(scene, neighbor, Math.max(1, neighbor.cover().height()))) { return true; }
+        }
+        return false;
+    }
+
+    private static boolean openEnd(BoardScene scene, BoardScene.Tile tile, int height) {
+        for (int direction = 0; direction < 6; direction++) {
+            if ((tile.cover().exits() & 1 << direction) == 0) { continue; }
+            var neighbor = scene.neighbor(tile, direction);
+            if (!back(scene, tile, direction) || !overlaps(tile, height, neighbor, Math.max(1, neighbor.cover().height()))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

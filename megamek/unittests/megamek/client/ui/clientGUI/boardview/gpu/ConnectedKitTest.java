@@ -176,6 +176,27 @@ class ConnectedKitTest {
         assertArrayEquals(new int[] { 1, 3, 0, 3, 0, 0 }, ConnectedKit.reach(scene, scene.tile(tall), 3));
     }
 
+    @Test
+    void aBuildingStandsOpenWhereItConnectsToNothingAsAfterACollapse() {
+        Hex[] hexes = new Hex[7 * 7];
+        for (int i = 0; i < hexes.length; i++) { hexes[i] = new Hex(0); }
+        // A row of three running south, whose north end still connects north where nothing stands.
+        Coords end = new Coords(3, 2), next = end.translated(3), last = next.translated(3);
+        structure(hexes, end, Terrains.BUILDING, (1 << 0) | (1 << 3), 2);
+        structure(hexes, next, Terrains.BUILDING, (1 << 0) | (1 << 3), 2);
+        structure(hexes, last, Terrains.BUILDING, 1, 2);
+        var scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertTrue(ConnectedKit.open(scene, scene.tile(end), 2), "Its north end is open");
+        assertTrue(ConnectedKit.open(scene, scene.tile(next), 2), "The inside of the hex it joins shows through that end");
+        assertFalse(ConnectedKit.open(scene, scene.tile(last), 2), "Two hexes in, the inside is out of sight");
+        hexes[end.getY() * 7 + end.getX()].getTerrain(Terrains.BUILDING).setExits(1 << 3);
+        scene = new BoardScene(0, 7, 7, BoardTiles.captureAll(new Board(7, 7, hexes)), List.of(), List.of(),
+              Entity.NONE, "", List.of());
+        assertFalse(ConnectedKit.open(scene, scene.tile(end), 2), "Closed at its end, the row is closed");
+        assertFalse(ConnectedKit.open(scene, scene.tile(next), 2));
+    }
+
     private static void structure(Hex[] hexes, Coords coords, int terrain, int exits, int height) {
         Hex hex = hexes[coords.getY() * 7 + coords.getX()];
         hex.addTerrain(new Terrain(terrain, 1, true, exits));

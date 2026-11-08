@@ -1513,6 +1513,8 @@ final class GpuTerrain implements Disposable {
         private final boolean industrial;
         /** Cosmetic cover, including instanced fungi; excluded from wireframe fill and lines. */
         private boolean scatter;
+        /** An interior floor of a structure that stands open ({@link ConnectedKit#open}): it draws without an occupant. */
+        private boolean openShell;
         /** A placed object under a quarter hex, which zoomed-out views skip ({@link GpuTerrain#drawn}). */
         private boolean small;
         /**
@@ -2175,13 +2177,16 @@ final class GpuTerrain implements Disposable {
         }
 
         /**
-         * Whether an interior floor draws: only while its building is faded (an occupant or a floor hover), and under a
-         * hover alone only the hovered floor. A closed building draws none of its floors, in any pass.
+         * Whether an interior floor draws: while its building is faded (an occupant or a floor hover), under a hover
+         * alone only the hovered floor; in a building that stands open (a missing or collapsed end) always, under a hover
+         * alone the hovered floor and those below it. A closed building draws none of its floors otherwise. Never in the
+         * shadow pass: the shell casts the building's shadow.
          */
         private boolean interiorFloorVisible(Prop floor) {
-            if (!interiorVisible(floor.coords)) { return false; }
+            if (!interiorVisible(floor.coords)) { return floor.openShell; }
             boolean hoverOnly = cutaways.stream().anyMatch(prop -> prop.coords.equals(floor.coords) && prop.hoverOpaque != null);
-            return !hoverOnly || Math.abs(floor.floorZ - hoverFloor) < .05f * BoardGeometry.hexScale();
+            return !hoverOnly || Math.abs(floor.floorZ - hoverFloor) < .05f * BoardGeometry.hexScale()
+                  || floor.openShell && floor.floorZ < hoverFloor;
         }
 
         private static void opaqueMaterials(Array<Renderable> renderables) {
@@ -4722,6 +4727,7 @@ final class GpuTerrain implements Disposable {
                 ModelInstance struts = new ModelInstance(interior, "struts");
                 struts.transform.set(instance.transform);
                 if (struts.nodes.first().parts.notEmpty()) { chunk.struts.add(new InteriorStruts(tile.coords(), struts)); }
+                boolean open = building != null && ConnectedKit.open(scene, tile, Math.round(feature.height()));
                 // Each floor borrows its existing mesh range but owns its opacity and opaque/transparent pass choice.
                 for (int level = 0; level < floors; level++) {
                     ModelInstance floorInstance = new ModelInstance(interior, "floors");
@@ -4735,6 +4741,7 @@ final class GpuTerrain implements Disposable {
                     BoundingBox floorBounds = floorInstance.calculateBoundingBox(new BoundingBox()).mul(floorInstance.transform);
                     Prop floorProp = new Prop(tile.coords(), floorInstance, floorBounds, null, false, null, true, floorBounds.max.z);
                     floorProp.infrastructure = prop.infrastructure;
+                    floorProp.openShell = open;
                     chunk.props.add(floorProp);
                 }
             }
@@ -5148,6 +5155,7 @@ final class GpuTerrain implements Disposable {
                               prop.treeAsset, prop.hardSurface, prop.building, prop.structure, prop.floorZ, prop.industrial);
                         copy.scatter = prop.scatter;
                         copy.infrastructure = prop.infrastructure;
+                        copy.openShell = prop.openShell;
                         copy.small = prop.small;
                         copy.decorationId = prop.decorationId;
                         copy.decorationOwner = prop.decorationOwner; copy.supportTriangles = prop.supportTriangles;
