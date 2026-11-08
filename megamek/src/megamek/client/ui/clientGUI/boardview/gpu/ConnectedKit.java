@@ -338,11 +338,10 @@ final class ConnectedKit {
 
     /**
      * Per level from the ground (storeys, then the roof) and board corner d (between directions d and d + 1), at level *
-     * 6 + d: a mask of the {@link KitOutline.Junction}s where this hex's walls end at that corner on another wall, or
-     * {@link #CORNER_NOTCH} where it is linked both ways and its neighbours' walls end there in a notch, from {@code
-     * reach} and {@link #corners}. {@code capped}: pieces stand by the ground's connections, caps closing the
+     * 6 + d: a mask of the {@link KitOutline.Junction}s where this hex's walls end at that corner on another wall, from
+     * {@code reach} and {@link #corners}. {@code capped}: pieces stand by the ground's connections, caps closing the
      * links exposed above (as {@link #placements} chooses them); the hexes around are taken to be capped alike. A roof's
-     * walls go on round a notch, or close it, where both neighbours' roofs stand level with its own.
+     * walls go on round a notch where both neighbours' roofs stand level with its own.
      */
     static int[] junctions(int height, int[] reach, int[] corners, boolean capped) {
         int[] result = new int[(height + 1) * 6];
@@ -359,9 +358,7 @@ final class ConnectedKit {
         return result;
     }
 
-    /** In {@link #junctions}: linked both ways at the corner, where the two neighbours' walls meet in a notch. */
-    static final int CORNER_NOTCH = 1 << KitOutline.Junction.values().length;
-    private static final int NOTCHES = bit(KitOutline.Junction.S0_NOTCH) | bit(KitOutline.Junction.S1_NOTCH) | CORNER_NOTCH;
+    private static final int NOTCHES = bit(KitOutline.Junction.S0_NOTCH) | bit(KitOutline.Junction.S1_NOTCH);
 
     private static int junction(int level, int corner, int[] reach, int[] corners, boolean capped) {
         int a = corner, b = (corner + 1) % 6;
@@ -372,8 +369,6 @@ final class ConnectedKit {
         // of its own meet within its piece.
         boolean p0 = capped ? g0 : l0, p1 = capped ? g1 : l1;
         boolean s0 = p0 && !p1, s1 = p1 && !p0, c0 = capped && g0 && !l0, c1 = capped && g1 && !l1;
-        // Linked both ways, between two neighbours standing here that do not link each other: their walls' notch.
-        if (p0 && p1 && l0 && l1 && corners[a] > level && corners[b] > level && !(capped ? gab : lab)) { return CORNER_NOTCH; }
         if (count(s0, s1, c0, c1) != 1) { return 0; }
         // The one other wall ending here, in A or B where they stand at this level and join this hex's building.
         boolean pab = capped ? gab : lab, capAB = capped && gab && !lab;

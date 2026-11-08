@@ -13,7 +13,6 @@ import com.badlogic.gdx.utils.GdxNativesLoader;
 import megamek.common.board.HexAppearance;
 import megamek.common.board.TilesetScenery;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -96,18 +95,6 @@ class ConnectedKitFootprintTest {
         List<Integer> notched = placed.stream().filter(piece -> piece.node().endsWith("-notch-32")).map(ConnectedKit.Placement::level).toList();
         assertEquals(southEastTop == 2 ? List.of(0, 1, 2) : List.of(0, 1), notched.stream().sorted().toList());
         assertEquals(notched.size(), placed.stream().filter(piece -> piece.node().contains("-notch-")).count());
-    }
-
-    @Test
-    void whereModulesPartAtJointsTheCornerHexClosesTheNotch() {
-        // Linked south and south-west, both neighbours as tall and not linked to each other: their walls end in their
-        // joints' grooves at its corner 3, which it closes with its capped twin, storeys and roof.
-        var kit = GpuBuilding.kit("buildings/frontier/frontier");
-        int[] reach = { 0, 0, 0, 2, 2, 0 }, corners = { 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 0 };
-        var placed = ConnectedKit.placements(kit, 0, GpuBuilding.select(kit.roles(), 2, 0), reach, 0, false,
-              ConnectedKit.junctions(2, reach, corners, true));
-        assertEquals(List.of(0, 1, 2), placed.stream().filter(piece -> piece.node().endsWith("-notch-8"))
-              .map(ConnectedKit.Placement::level).sorted().toList());
     }
 
     @ParameterizedTest

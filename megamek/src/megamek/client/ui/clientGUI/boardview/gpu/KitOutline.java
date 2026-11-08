@@ -142,38 +142,6 @@ final class KitOutline {
         return new Piece(piece.tags(), piece.direction(), piece.polygons(), walls);
     }
 
-    /**
-     * {@code piece}, a corner piece linked both ways, at a notch in a kit whose modules part at their joints: the
-     * neighbours' walls end there in their joints' grooves, {@code depth} along each hexside from the corner, and the
-     * piece closes its corner between them with a facet (ROUND ends: the kit's corner facet piece), its floor cut there.
-     * Its joints then start at the grooves ({@link #capJoints}).
-     */
-    static Piece capped(Piece piece, double depth) {
-        double[] p0 = capPoint(piece.direction(), piece.direction(), depth), p1 = capPoint(piece.direction(), piece.direction() + 1, depth);
-        double[] chord = { p0[0] - p1[0], p0[1] - p1[1] };
-        List<GeneratedMesh.Keep> inside = List.of((x, y) -> cross(chord, new double[] { x - p1[0], y - p1[1] }));
-        List<List<double[]>> polygons = piece.polygons().stream().map(polygon -> clipped(polygon, inside))
-              .filter(polygon -> !polygon.isEmpty()).toList();
-        List<Wall> walls = new ArrayList<>(piece.walls());
-        walls.add(new Wall(p1, p0, End.ROUND, End.ROUND, List.of(), false));
-        return new Piece(piece.tags(), piece.direction(), polygons, walls);
-    }
-
-    /** {@code joints} starting or ending at hex corner {@code corner}, kept from {@code depth} along them ({@link #capped}). */
-    static List<Wall> capJoints(List<Wall> joints, int corner, double depth) {
-        double[] at = hexCorner(corner);
-        return joints.stream().map(joint -> close(joint.p(), at) ? new Wall(lerp(joint.p(), joint.q(), depth / joint.length()),
-              joint.q(), joint.start(), joint.end(), joint.keeps(), joint.front())
-              : close(joint.q(), at) ? new Wall(joint.p(), lerp(joint.q(), joint.p(), depth / joint.length()), joint.start(),
-                    joint.end(), joint.keeps(), joint.front()) : joint).toList();
-    }
-
-    /** The point {@code depth} from hex corner {@code corner} along its side {@code side} (corner or corner + 1). */
-    private static double[] capPoint(int corner, int side, double depth) {
-        double[] at = hexCorner(corner), u = unit(new double[] { MIDPOINTS[side % 6][0] - at[0], MIDPOINTS[side % 6][1] - at[1] });
-        return new double[] { at[0] + u[0] * depth, at[1] + u[1] * depth };
-    }
-
     /** The unit normal of a hexside along {@code side} on {@code toward}'s side. */
     private static double[] across(double[] side, double[] toward) {
         double[] normal = { -side[1], side[0] };

@@ -169,14 +169,6 @@ final class BayKit {
             result.put("-notch-" + notch, module(spec, modelled, role, KitOutline.notched(piece, notch), 0, lod, square,
                   footprintScale, fitting, layout, halfLength));
         }
-        // Where modules part at their joints, the neighbours' walls end in their grooves at a notch; the corner piece
-        // linked both ways closes its corner between them ({@link KitOutline#capped}).
-        double groove = spec.modules().values().stream().flatMap(List::stream).filter(run -> run.joints() != null)
-              .mapToDouble(run -> run.joints().length()).max().orElse(0);
-        if (jointed && !square && piece.direction() != null && piece.walls().isEmpty() && KitOutline.links(piece) != 0) {
-            result.put("-notch-" + (1 << piece.direction()), module(spec, modelled, role, KitOutline.capped(piece, groove), 0, lod,
-                  square, footprintScale, fitting, layout, halfLength, groove));
-        }
         // A storey's other junctions at the corner, held by its corner piece linked both ways (ConnectedKit places them).
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
@@ -217,20 +209,12 @@ final class BayKit {
      */
     private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
           int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength) {
-        return module(spec, modelled, role, piece, closed, lod, square, footprintScale, fitting, layout, halfLength, 0);
-    }
-
-    /** {@code capped}: at a notch, how far the piece's joints keep off its corner ({@link KitOutline#capped}); 0, none. */
-    private static GeneratedMesh module(Spec spec, List<ModelData> modelled, String role, KitOutline.Piece piece, int closed,
-          int lod, boolean square, float footprintScale, HabitatKit.Fitting fitting, HabitatKit.Layout layout, double halfLength,
-          double capped) {
         boolean ground = role.startsWith("base"), top = role.startsWith("roof"), cap = piece.tags().endsWith("-cap");
         List<Run> runs = spec.modules().get(role);
         Run run = runs.get(Math.min(lod, runs.size() - 1));
         boolean seamed = top && run.seam() != null;
         List<KitOutline.Wall> joints = cap || run.joints() == null && !seamed ? List.of()
               : KitOutline.joints(square, KitOutline.links(piece) & ~closed);
-        if (capped > 0) { joints = KitOutline.capJoints(joints, piece.direction(), capped); }
         // How far a wall goes on along a joint that continues it: its joint's bevel, or the roof's off its seam.
         double chamfer = seamed ? spec.roof().inset() : run.joints() != null ? run.joints().length() : 0;
         var result = new GeneratedMesh();
@@ -308,7 +292,7 @@ final class BayKit {
     /**
      * Lays {@code run} along {@code wall}, {@code inset} inside its line: a cut, corner, round or notch end goes on
      * {@link KitOutline#EXTEND} past (the piece's cut or the wall's mitre trims it), an open or joint end stops square.
-     * Where its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty; none on a facet)
+     * Where its module ends ({@link #meet}) it stops, its joint pieces there (a cap's room left empty)
      * and a seamed roof's edge mitred to the joint; where a joint continues it, it goes on {@code chamfer}, unmitred. At
      * the piece's {@code cut} or an open end (the next hex's wall goes on) its end bays go on a hair under the next
      * piece's, the bays beyond a cut stopping exactly on it; a mitred corner is closed ({@link #closeMitre}), a notch's by
@@ -337,7 +321,7 @@ final class BayKit {
                 laps[k] = KitOutline.SEAM_OVERLAP / 2;
             }
             if (meets[k].kind() == Meeting.CONTINUES) { keeps.removeIf(keep -> Math.abs(keep.at(point[0], point[1])) < 1e-6); }
-            if (meets[k].kind() == Meeting.ENDS && run.joints() != null && !facet) { pads[k] = run.joints().length(); }
+            if (meets[k].kind() == Meeting.ENDS && run.joints() != null) { pads[k] = run.joints().length(); }
             if (meets[k].kind() == Meeting.ENDS && run.seam() != null && meets[k].joint() != null) {
                 var joint = meets[k].joint();
                 keeps.add(KitOutline.mitre(point, normal(p, wall.q()), normal(joint.p(), joint.q()), k == 0 ? wall.q() : p));
@@ -470,9 +454,7 @@ final class BayKit {
             }
             reach[k] = EXTEND;
             keeps.add(KitOutline.mitre(point, n, m, start ? q : p));
-            // A wall ending in its joint piece there keeps the seam off that piece's bevel; a facet's meets it on the mitre.
-            boolean facet = (KitOutline.close(next.p(), point) ? next.start() : next.end()) == KitOutline.End.ROUND;
-            if (wall && turn > 1e-6 && !facet) {
+            if (wall && turn > 1e-6) {
                 keeps.add((x, y) -> -((x - p[0]) * n[0] + (y - p[1]) * n[1]) - ((x - at[0]) * m[0] + (y - at[1]) * m[1]) - chamfer);
             }
         }
