@@ -214,12 +214,18 @@ final class BayKit {
     /** The dark of a module's inside, as vertex colour on the building body. */
     private static final float DARK = .17f;
 
-    /** A dark upward polygon at {@code z}. */
+    /**
+     * A glass roof's underlay: near black. The sun reaches it through the glass 0.3 above (a model's contact shadow
+     * leaves so near a caster out), and at {@link #DARK} it showed as a grey roof.
+     */
+    private static final float UNDERLAY = .03f;
+
+    /** A glass roof's dark underlay, an upward polygon at {@code z}. */
     private static void dark(GeneratedMesh result, List<double[]> polygon, double z) {
         var dark = new GeneratedMesh();
         flat(dark, GeneratedMesh.BUILDING_BODY, polygon, z, 18, null);
         dark.parts.values().forEach(part -> {
-            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) { part.items[at + 6] = part.items[at + 7] = part.items[at + 8] = DARK; }
+            for (int at = 0; at < part.size; at += RigidGlb.STRIDE) { part.items[at + 6] = part.items[at + 7] = part.items[at + 8] = UNDERLAY; }
         });
         result.add(dark);
     }
