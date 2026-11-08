@@ -150,16 +150,9 @@ final class GpuBuildingInterior {
     static Area keepClear(Area floor, List<float[]> faces) {
         Path2D.Float cuts = new Path2D.Float();
         boolean any = false;
-        float[] point = new float[6];
-        float firstX = 0, firstY = 0, lastX = 0, lastY = 0;
-        for (var path = floor.getPathIterator(null); !path.isDone(); path.next()) {
-            int kind = path.currentSegment(point);
-            if (kind == PathIterator.SEG_MOVETO) { firstX = lastX = point[0]; firstY = lastY = point[1]; continue; }
-            float ax = lastX, ay = lastY, bx = kind == PathIterator.SEG_CLOSE ? firstX : point[0];
-            float by = kind == PathIterator.SEG_CLOSE ? firstY : point[1];
-            lastX = bx; lastY = by;
+        for (float[] edge : edges(floor)) {
+            float ax = edge[0], ay = edge[1], bx = edge[2], by = edge[3];
             float length = (float) Math.hypot(bx - ax, by - ay);
-            if (length < .001f) { continue; }
             // Along the edge (u) and into the floor (n).
             float ux = (bx - ax) / length, uy = (by - ay) / length, nx = -uy, ny = ux;
             if (!floor.contains((ax + bx) / 2 + nx * .01f, (ay + by) / 2 + ny * .01f)) { nx = -nx; ny = -ny; }
@@ -188,6 +181,34 @@ final class GpuBuildingInterior {
         if (!any) { return floor; }
         Area result = new Area(floor);
         result.subtract(new Area(cuts));
+        return result;
+    }
+
+    /**
+     * {@code area}'s outline as segments {x1, y1, x2, y2}: the pieces of a straight run (within a thousandth of a unit)
+     * as one, so a wall along it is cut away once, not once per piece.
+     */
+    private static List<float[]> edges(Area area) {
+        List<float[]> result = new ArrayList<>();
+        float[] point = new float[6], run = null;
+        float firstX = 0, firstY = 0, lastX = 0, lastY = 0;
+        for (var path = area.getPathIterator(null); !path.isDone(); path.next()) {
+            int kind = path.currentSegment(point);
+            if (kind == PathIterator.SEG_MOVETO) { firstX = lastX = point[0]; firstY = lastY = point[1]; run = null; continue; }
+            float ax = lastX, ay = lastY, bx = kind == PathIterator.SEG_CLOSE ? firstX : point[0];
+            float by = kind == PathIterator.SEG_CLOSE ? firstY : point[1];
+            lastX = bx; lastY = by;
+            if (Math.hypot(bx - ax, by - ay) < .001f) { continue; }
+            if (run != null) {
+                double dx = run[2] - run[0], dy = run[3] - run[1];
+                if (dx * (bx - ax) + dy * (by - ay) > 0 && Math.abs(dx * (by - run[1]) - dy * (bx - run[0])) < .001 * Math.hypot(dx, dy)) {
+                    run[2] = bx; run[3] = by;
+                    continue;
+                }
+            }
+            run = new float[] { ax, ay, bx, by };
+            result.add(run);
+        }
         return result;
     }
 
