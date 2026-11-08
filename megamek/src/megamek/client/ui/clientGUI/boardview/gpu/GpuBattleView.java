@@ -975,6 +975,8 @@ class GpuBattleView extends ApplicationAdapter {
               || !boardCamera.camera.frustum.boundsInFrustum(unitBounds.get(instance)));
         float seeThrough = tuning.seeThrough();
         boolean wireframeView = tuning.wireframe() && GpuWireframe.supported();
+        // Trees dissolve between detail levels, except in the wireframe view, whose depth fill and lines cannot.
+        terrain.treeDissolves = !wireframeView;
         // The units' poses and anchors and the camera are final for this frame. The tuning model follows the camera,
         // which can leave Free Flight by itself (its keys, the Tactical View).
         renderStage("board-space HUD");

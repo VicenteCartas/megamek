@@ -28,6 +28,8 @@ final class TreeLod {
     /** Medium quality's relief joins the depth pre-pass while a hex is narrower than this on screen (GpuTerrain.twin). */
     static final float[] PREPASS_RELIEF = { 96 };
     static final int LEVELS = PIXELS.length + 1;
+    /** Seconds a tree takes to dissolve from one level into the next (GpuTreeInstances.Stand#detail). */
+    static final float DISSOLVE = .25f;
     private static final float HYSTERESIS = 0.1f;
 
     private TreeLod() { }

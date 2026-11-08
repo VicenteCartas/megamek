@@ -10,6 +10,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -25,6 +27,7 @@ import com.badlogic.gdx.graphics.g3d.model.data.ModelNode;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.math.collision.BoundingBox;
 import com.badlogic.gdx.utils.GdxNativesLoader;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import megamek.common.Configuration;
 import megamek.common.Hex;
 import megamek.common.board.Coords;
@@ -265,13 +268,19 @@ class BoardFoliageTest {
                 }
             }
             BufferedImage cards = ImageIO.read(atlas);
+            // The bake's tint calibrates the cards' shading against the far mesh's: the plant's own colours lie under it.
+            double[][] tint = impostorTint(RigidGlb.source(root, plant).file(), name);
             double[] baked = new double[3];
             int opaque = 0;
             for (int y = 0; y < cards.getHeight(); y++) {
                 for (int x = 0; x < cards.getWidth(); x++) {
                     int texel = cards.getRGB(x, y);
                     if (texel >>> 24 < 128) { continue; }
-                    for (int channel = 0; channel < 3; channel++) { baked[channel] += texel >> 16 - 8 * channel & 255; }
+                    double[] face = tint[Math.min(2, x * 3 / cards.getWidth())];
+                    for (int channel = 0; channel < 3; channel++) {
+                        float shown = GpuColor.linear((texel >> 16 - 8 * channel & 255) / 255f);
+                        baked[channel] += 255 * GpuColor.display((float) (shown / face[channel]));
+                    }
                     opaque++;
                 }
             }
@@ -280,6 +289,29 @@ class BoardFoliageTest {
             // impostor prepare_tree_lods.py reproduces exactly, estimate at 1.65.
             assertTrue(ratio > .75 && ratio < 1.7, plant + " impostor lightness against its far mesh: " + ratio);
         }
+    }
+
+    /**
+     * An impostor atlas's colour tint per card face (front, side, cap; linear factors), as the bake applied it: the
+     * impostor material's extras {@code mmImpostorTint} for this atlas (mm-data/tools/prepare_tree_lods.py); else 1.
+     */
+    private static double[][] impostorTint(File glb, String atlas) throws IOException {
+        byte[] data = Files.readAllBytes(glb.toPath());
+        int length = ByteBuffer.wrap(data, 12, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        Map<?, ?> document = new ObjectMapper().readValue(Arrays.copyOfRange(data, 20, 20 + length), Map.class);
+        double[][] tint = { { 1, 1, 1 }, { 1, 1, 1 }, { 1, 1, 1 } };
+        for (Object material : (List<?>) document.get("materials")) {
+            if (material instanceof Map<?, ?> values && "impostor".equals(values.get("name"))
+                  && values.get("extras") instanceof Map<?, ?> extras && extras.get("mmImpostorTint") instanceof Map<?, ?> tints
+                  && tints.get(atlas) instanceof List<?> faces) {
+                for (int face = 0; face < 3; face++) {
+                    for (int channel = 0; channel < 3; channel++) {
+                        tint[face][channel] = ((Number) ((List<?>) faces.get(face)).get(channel)).doubleValue();
+                    }
+                }
+            }
+        }
+        return tint;
     }
 
     /** Pines' skirts and palms' fronds lost half their outline to decimation at the far levels, and snow with it. */

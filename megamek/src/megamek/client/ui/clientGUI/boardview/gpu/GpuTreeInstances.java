@@ -2,6 +2,7 @@
 package megamek.client.ui.clientGUI.boardview.gpu;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -62,10 +63,13 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
     enum Pass { COLOUR, DEPTH, SHADOW, FADE }
 
     /**
-     * Floats per tree: x, y, z and the horizontal scale; the cosine and sine of its turn, its vertical scale, and 1 for
-     * a mirror image (its model's y axis reversed before the turn, tree-instances.glsl), else 0.
+     * Floats per tree: x, y, z and the horizontal scale, negative for a mirror image (its model's y axis reversed before
+     * the turn, tree-instances.glsl); the cosine and sine of its turn, its vertical scale, and its dissolve: 0 at rest,
+     * else when a tree began dissolving from one detail level into another, positive at the level it takes and negative
+     * at the one it leaves ({@link Stand#detail}).
      */
     static final int STRIDE = 8;
+    private static final int DISSOLVE = 7;
     private static final String MAIN = "void main() {";
 
     /** One model or module part: an instanced copy of its mesh, a renderable per part and the instance buffer. */
@@ -204,7 +208,23 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         private final Map<String, int[]> starts = new HashMap<>();
         /** Each species' trees at each detail level: copies of its runs, new only where a run changed. */
         private final Map<String, FloatArray[]> levels = new HashMap<>();
-        private float pixelsPerUnit;
+        /** The species with trees dissolving between levels. */
+        private final Map<String, Dissolve> dissolves = new HashMap<>();
+        private float pixelsPerUnit, now, duration, settles;
+        /** Each tree's level in a split, reused. */
+        private int[] own = new int[0];
+
+        /** A species' trees between two levels: the level each leaves (-1: none) and when it began to (clock seconds). */
+        private static final class Dissolve {
+            final int[] leaving;
+            final float[] began;
+
+            Dissolve(int trees) {
+                leaving = new int[trees];
+                Arrays.fill(leaving, -1);
+                began = new float[trees];
+            }
+        }
 
         /**
          * A tree's transform is a translation, a turn about z and a scale that is equal along x and y; {@code diameter}
@@ -229,15 +249,24 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
             diameters.clear();
             starts.clear();
             levels.clear();
+            dissolves.clear();
         }
 
         /**
          * Each tree at the level its own diameter asks at this scale ({@link TreeLod#level}), past each threshold's
          * hysteresis from its level at the last scale. A larger tree never takes a coarser level than a smaller one.
+         * A tree that changes level dissolves from one into the other over {@code duration} seconds of the clock
+         * ({@code now}, positive): it draws at both, which keep complementary pixels (terrain-foliage.frag), and holds
+         * the level it takes until the dissolve ends. Returns when the last dissolve ends, 0 if none: a call from then
+         * on drops the levels they left. With {@code duration} 0 trees switch at once, and dissolves end.
          */
-        void detail(float pixelsPerUnit) {
+        float detail(float pixelsPerUnit, float now, float duration) {
             this.pixelsPerUnit = pixelsPerUnit;
+            this.now = now;
+            this.duration = duration;
+            settles = 0;
             for (String species : trees.keySet()) { split(species); }
+            return settles;
         }
 
         /** A species' trees at each detail level at the last scale. */
@@ -249,29 +278,82 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         private FloatArray[] split(String species) {
             FloatArray sizes = diameters.get(species), all = trees.get(species);
             int[] previous = starts.get(species);
-            // New or changed trees start from the nearest level, as a new chunk's did.
+            // New or changed trees start from the nearest level, as a new chunk's did, and dissolve from none.
             if (previous != null && previous[TreeLod.LEVELS] != sizes.size) { previous = null; }
-            int[] next = new int[TreeLod.LEVELS + 1];
-            int level = 0, was = 0;
-            for (int i = 0; i < sizes.size; i++) {
+            if (previous == null) { dissolves.remove(species); }
+            Dissolve dissolve = dissolves.get(species);
+            if (own.length < sizes.size) { own = new int[sizes.size]; }
+            for (int i = 0, was = 0; i < sizes.size; i++) {
                 while (previous != null && was < TreeLod.LEVELS - 1 && i >= previous[was + 1]) { was++; }
-                int own = Math.max(level, TreeLod.level(sizes.get(i) * pixelsPerUnit, was));
-                while (level < own) { next[++level] = i; }
+                own[i] = holds(dissolve, i) ? was : TreeLod.level(sizes.get(i) * pixelsPerUnit, was);
+            }
+            // A larger tree never takes a coarser level than a smaller one: the others give way to the trees that hold.
+            for (int i = 0, floor = 0; dissolve != null && i < sizes.size; i++) {
+                if (holds(dissolve, i)) { floor = own[i]; } else { own[i] = Math.max(own[i], floor); }
+            }
+            for (int i = sizes.size - 1, ceiling = TreeLod.LEVELS - 1; dissolve != null && i >= 0; i--) {
+                if (holds(dissolve, i)) { ceiling = own[i]; } else { own[i] = Math.min(own[i], ceiling); }
+            }
+            int[] next = new int[TreeLod.LEVELS + 1];
+            int level = 0;
+            for (int i = 0; i < sizes.size; i++) {
+                while (level < own[i]) { next[++level] = i; }
             }
             while (level < TreeLod.LEVELS) { next[++level] = sizes.size; }
+            // The levels whose runs a dissolve that begins or ends changes, as bits.
+            int changed = 0;
+            for (int i = 0, was = 0, is = 0; previous != null && i < sizes.size; i++) {
+                while (was < TreeLod.LEVELS - 1 && i >= previous[was + 1]) { was++; }
+                while (is < TreeLod.LEVELS - 1 && i >= next[is + 1]) { is++; }
+                int leaving = dissolve == null ? -1 : dissolve.leaving[i];
+                boolean begins = was != is && duration > 0 && now > 0;
+                if (!begins && (leaving < 0 || holds(dissolve, i))) { continue; }
+                changed |= 1 << is | (leaving >= 0 ? 1 << leaving : 0);
+                if (begins) {
+                    if (dissolve == null) { dissolves.put(species, dissolve = new Dissolve(sizes.size)); }
+                    dissolve.began[i] = now;
+                    dissolve.leaving[i] = was;
+                    changed |= 1 << was;
+                } else {
+                    dissolve.leaving[i] = -1;
+                }
+            }
+            boolean dissolving = false;
+            for (int i = 0; dissolve != null && i < sizes.size; i++) {
+                if (dissolve.leaving[i] < 0) { continue; }
+                dissolving = true;
+                settles = Math.max(settles, dissolve.began[i] + duration);
+            }
+            if (!dissolving) { dissolves.remove(species); }
             FloatArray[] old = levels.get(species), result = new FloatArray[TreeLod.LEVELS];
             for (int lod = 0; lod < TreeLod.LEVELS; lod++) {
-                if (old != null && previous != null && previous[lod] == next[lod] && previous[lod + 1] == next[lod + 1]) {
+                if (old != null && previous != null && (changed & 1 << lod) == 0 && previous[lod] == next[lod]
+                      && previous[lod + 1] == next[lod + 1]) {
                     result[lod] = old[lod];
                     continue;
                 }
                 int count = (next[lod + 1] - next[lod]) * STRIDE;
-                result[lod] = new FloatArray(Math.max(count, 1));
-                result[lod].addAll(all, next[lod] * STRIDE, count);
+                FloatArray run = new FloatArray(Math.max(count, 1));
+                run.addAll(all, next[lod] * STRIDE, count);
+                // A dissolving tree draws at the level it takes from when it began, and at the one it leaves until it ends.
+                for (int i = next[lod]; dissolving && i < next[lod + 1]; i++) {
+                    if (dissolve.leaving[i] >= 0) { run.items[(i - next[lod]) * STRIDE + DISSOLVE] = dissolve.began[i]; }
+                }
+                for (int i = 0; dissolving && i < sizes.size; i++) {
+                    if (dissolve.leaving[i] != lod) { continue; }
+                    run.addAll(all, i * STRIDE, STRIDE);
+                    run.items[run.size - STRIDE + DISSOLVE] = -dissolve.began[i];
+                }
+                result[lod] = run;
             }
             starts.put(species, next);
             levels.put(species, result);
             return result;
+        }
+
+        /** Whether a species' tree is dissolving: it holds its level until the dissolve ends. */
+        private boolean holds(Dissolve dissolve, int tree) {
+            return dissolve != null && dissolve.leaving[tree] >= 0 && now - dissolve.began[tree] < duration;
         }
     }
 
@@ -510,14 +592,14 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
 
     /**
      * The x column gives the turn and the horizontal scale; a mirror image's y column is the turned y axis reversed,
-     * which the last float flags.
+     * which the scale's sign carries.
      */
     private static void append(FloatArray data, Matrix4 transform) {
         float[] m = transform.val;
         float horizontal = (float) Math.hypot(m[Matrix4.M00], m[Matrix4.M10]);
         // Two four-float adds: the varargs addAll would allocate an array per instance, every pass.
-        data.add(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], horizontal);
-        data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], mirrored(transform) ? 1 : 0);
+        data.add(m[Matrix4.M03], m[Matrix4.M13], m[Matrix4.M23], mirrored(transform) ? -horizontal : horizontal);
+        data.add(m[Matrix4.M00] / horizontal, m[Matrix4.M10] / horizontal, m[Matrix4.M22], 0);
     }
 
     /** Evict buffers for retired building interiors/modules at the scene commit boundary. */
@@ -590,7 +672,8 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
         source = insert(source, MAIN, GpuShaderSource.read("tree-instances.glsl") + "\n" + MAIN);
         source = insert(source, "vec4 pos = u_worldTrans * vec4(a_position, 1.0);",
               "vec4 pos = vec4(instancePosition(a_position), 1.0);\n#ifdef impostorFlag\n"
-                    + "v_impostorDepth = instanceTurn(a_normal * instanceScale()) / a_instance0.w;\n#endif\n");
+                    + "v_impostorDepth = instanceTurn(a_normal * instanceScale()) / instanceScale().x;\n#endif\n"
+                    + "#ifdef treeDissolveFlag\nv_treeDissolve = a_instance1.w;\n#endif\n");
         // A recolourable model's placement passes its colours in the instance data instead of the uniform.
         source = insert(source, "slotColour(a_color.rgb, a_colourSlot, u_slotColours)", "slotColour(a_color.rgb, a_colourSlot, a_instance2)");
         return insert(source, "vec3 normal = normalize(u_normalMatrix * a_normal);", "vec3 normal = instanceNormal(a_normal);");

@@ -308,6 +308,8 @@ final class GpuTerrain implements Disposable {
                   + (renderable.material.has(GpuRoads.Maps.TYPE) ? "#define roadMapsFlag\n" : "")
                   + (renderable.material.has(Impostor.TYPE) && GpuTreeInstances.instanced(renderable)
                         ? "#define impostorFlag\n" : "")
+                  + (chosen == instancedFoliageShader
+                        ? "#define treeDissolveFlag\n#define TREE_DISSOLVE " + TreeLod.DISSOLVE + "\n" : "")
                   // Only sculpted ground has the biome stage; the marker still keeps the environments' programs apart. A
                   // fill draws without an environment and always has it: a field's ground is in its pages, and on a board
                   // without biomes the stage finds no cover.
@@ -355,10 +357,11 @@ final class GpuTerrain implements Disposable {
                 shaderName += " wall";
             }
             if (depthOnly) {
-                // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define);
-                // a solid surface's twin has an empty fragment stage.
-                fragment = renderable.material.has(FloatAttribute.AlphaTest) ? "#define depthPrepassFlag\n" + fragment
-                      : depthFragment;
+                // A cutout's twin returns after its alpha test (GpuGlsl.source moves the version line above the define),
+                // an instanced tree's after its dissolve too, solid parts included; another solid surface's twin has an
+                // empty fragment stage.
+                fragment = renderable.material.has(FloatAttribute.AlphaTest) || chosen == instancedFoliageShader
+                      ? "#define depthPrepassFlag\n" + fragment : depthFragment;
                 shaderName += " depth twin";
             }
             // Sculpted relief draws tessellated where the context offers it (GpuTessellation), and its twin alike.
@@ -407,6 +410,7 @@ final class GpuTerrain implements Disposable {
                 private final int waterDriftUniform = register("u_waterDrift");
                 private final int waterStormUniform = register("u_waterStorm");
                 private final int vegetationPhaseUniform = register("u_vegetationPhase");
+                private final int treeClockUniform = register("u_treeClock");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
                 private final int coverShareUniform = register("u_coverShare");
@@ -542,6 +546,7 @@ final class GpuTerrain implements Disposable {
                     set(waterDriftUniform, ocean.drift());
                     set(waterStormUniform, ocean.gain());
                     set(vegetationPhaseUniform, vegetationPhase);
+                    set(treeClockUniform, clock);
                     set(metreUniform, BoardRelief.detailMetres(1));
                     set(coverHexWidthUniform, BoardGeometry.width());
                     set(coverShareUniform, BoardQuality.current.meadowShare, BoardQuality.current.cropShare);
@@ -1034,8 +1039,8 @@ final class GpuTerrain implements Disposable {
         if (blend != null && blend.blended || material.has(DepthTestAttribute.Type)
               || material.has(GpuSurfaceScars.Marking.TYPE) || material.has(GpuBuildingCutaway.TYPE)
               || material.has(GpuTilesetTerrain.Grading.TYPE)) { return null; }
-        // terrain-foliage.frag discards by the alpha test alone, which a cutout's twin repeats. Plants are GLB models
-        // too (GpuModelMaterial), so they are told apart first.
+        // terrain-foliage.frag discards by the alpha test, and an instanced tree by its dissolve, which their twins
+        // repeat. Plants are GLB models too (GpuModelMaterial), so they are told apart first.
         if (material.has(Foliage.TYPE)) { return material.has(Impostor.TYPE) ? Prepass.IMPOSTORS : Prepass.FOLIAGE; }
         // model.frag discards only under an alpha test: an opaque shell's empty twin repeats its coverage. Other objects
         // select the same programs, so the flag decides each draw (GpuModelMaterial.occluder).
@@ -1215,6 +1220,13 @@ final class GpuTerrain implements Disposable {
     private BoardScene.Light light;
     private BoardAtmosphere.Lighting atmosphere;
     private float clock;
+    /**
+     * Trees dissolve between detail levels (Stand#detail): set by the live view, whose clock runs every frame. Captures
+     * and previews, whose clock stands still between frames, switch at once.
+     */
+    boolean treeDissolves;
+    /** When the last tree dissolve ends (Stand#detail), 0 if none. */
+    private float treesSettle;
     private long shadingPass;
     private float vegetationPhase;
     /** Render-owned flow time, advanced only by animate: gravity changes speed without restarting the pattern. */
@@ -9159,9 +9171,15 @@ final class GpuTerrain implements Disposable {
         boolean perspective = camera.projection.val[Matrix4.M33] == 0;
         float pixelsPerUnit = perspective ? Float.NaN : BoardCamera.pixelsPerUnit(camera);
         if (pixelsPerUnit == detailPixelsPerUnit) {
+            // The trees drop the levels they dissolved from once the last dissolve has ended.
+            if (treesSettle > 0 && (clock >= treesSettle || !treeDissolves)) {
+                treesSettle = 0;
+                for (Chunk chunk : chunks) { detailTrees(chunk, pixelsPerUnit); }
+            }
             return;
         }
         detailPixelsPerUnit = pixelsPerUnit;
+        treesSettle = 0;
         // Small placed objects hide while a hex is under TreeLod.SMALL_OBJECTS pixels; perspective views keep them, like
         // grass. A crossing alone does not redraw the shadow map: the objects and their shadows are at most a few
         // pixels, and a forced redraw would drop the cached board-wide shadow on every zoom-out.
@@ -9200,11 +9218,18 @@ final class GpuTerrain implements Disposable {
                 scarSurfaceRevision++;
                 chunk.cacheDecorations();
             }
-            // Each tree takes the level its own size asks (Stand.detail). The shadow map chooses its own levels from its
-            // texel (renderDepth).
-            chunk.stand.detail(pixelsPerUnit);
-            chunk.scatterStand.detail(pixelsPerUnit);
+            detailTrees(chunk, pixelsPerUnit);
         }
+    }
+
+    /**
+     * Each tree takes the level its own size asks, dissolving into it in a live view (Stand#detail). The shadow map
+     * chooses its own levels from its texel (renderDepth).
+     */
+    private void detailTrees(Chunk chunk, float pixelsPerUnit) {
+        float dissolve = treeDissolves ? TreeLod.DISSOLVE : 0;
+        treesSettle = Math.max(treesSettle, Math.max(chunk.stand.detail(pixelsPerUnit, clock, dissolve),
+              chunk.scatterStand.detail(pixelsPerUnit, clock, dissolve)));
     }
 
     /** Whether the board has water, where a falling unit splashes (GpuWaterImpacts). */
