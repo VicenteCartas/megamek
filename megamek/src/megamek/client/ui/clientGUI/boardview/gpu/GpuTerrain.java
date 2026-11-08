@@ -411,6 +411,7 @@ final class GpuTerrain implements Disposable {
                 private final int waterStormUniform = register("u_waterStorm");
                 private final int vegetationPhaseUniform = register("u_vegetationPhase");
                 private final int treeClockUniform = register("u_treeClock");
+                private final int mirroredUniform = register("u_mirrored");
                 private final int metreUniform = register("u_worldMetre");
                 private final int coverPixelsUniform = register("u_coverPixels");
                 private final int coverShareUniform = register("u_coverShare");
@@ -717,6 +718,8 @@ final class GpuTerrain implements Disposable {
                         detailPosition.set(part.meshPart.center).mul(part.worldTransform);
                         setDetailUniforms();
                     }
+                    // A mirror image drawn as it is (not instanced) reverses its winding: its visible faces are back faces.
+                    if (has(mirroredUniform)) { set(mirroredUniform, part.worldTransform.det3x3() < 0 ? 1f : 0f); }
                     if (tessellated) { GpuTessellation.render(part, () -> super.render(part, attributes)); }
                     else { super.render(part, attributes); }
                 }

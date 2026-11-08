@@ -57,6 +57,9 @@ coverageIn float v_alphaTest;
 uniform float u_foliage; // 0 solid, 1 canopy, 2 snow, 3 fungal tissue
 uniform float u_metre; // world units per metre
 uniform float u_foliageProxy; // Exact authored branch-card roles, not all thin tissue.
+// 1 for a mirror image drawn as it is, whose reversed winding turns its visible faces into back faces (GpuTerrain);
+// an instanced one's batch flips the front face instead.
+uniform float u_mirrored;
 // How far a crown's leaf normals spread about its envelope normal, as the GGX alpha^2 it adds (twice the projected
 // normal variance, as antialiasedRoughness adds it). Leaves facing every way over the outward hemisphere are the
 // cosine-weighted facet distribution, which is GGX at alpha^2 = 1 (projected variance 1/2).
@@ -84,7 +87,8 @@ in float v_impostorAspect;
 void main() {
     vec3 baseNormal = normalize(v_normal);
     vec3 face = baseNormal;
-    vec3 crownNormal = gl_FrontFacing ? face : -face;
+    bool frontFacing = gl_FrontFacing != (u_mirrored > .5);
+    vec3 crownNormal = frontFacing ? face : -face;
     // Hoist derivative work before any alpha discard or mapped/proxy branch.
     vec3 dx = dFdx(v_cloudPosition), dy = dFdy(v_cloudPosition);
 #ifdef normalTextureFlag
@@ -225,7 +229,7 @@ void main() {
 #else
     bool proxy = u_foliageProxy > .5;
 #endif
-    if (!proxy && !gl_FrontFacing) face = -face;
+    if (!proxy && !frontFacing) face = -face;
 #ifdef lightingFlag
     vec3 geometric = visibleFace(dx, dy, -viewDirection());
     if (proxy) {

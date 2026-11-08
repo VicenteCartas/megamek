@@ -4,11 +4,13 @@ layout(location = 0) out vec4 fragColor;
 in vec3 v_normal;
 uniform float u_metre;
 uniform float u_normalMaps;
+// 1 for a mirror image drawn as it is (a placed geyser), whose reversed winding turns its visible faces into back faces.
+uniform float u_mirrored;
 // magma-flow-functions
 void main() {
     vec3 geometric = visibleFace(dFdx(v_cloudPosition), dFdy(v_cloudPosition), -viewDirection());
     vec3 face = normalize(v_normal);
-    if (!gl_FrontFacing) face = -face;
+    if (gl_FrontFacing == (u_mirrored > .5)) face = -face;
     vec3 position = v_cloudPosition / u_metre;
     vec3 eye = -viewDirection();
     vec2 current = vec2(0.0);

@@ -261,10 +261,14 @@ final class GpuTreeInstances implements RenderableProvider, Disposable {
          * on drops the levels they left. With {@code duration} 0 trees switch at once, and dissolves end.
          */
         float detail(float pixelsPerUnit, float now, float duration) {
+            // The same scale with every species split and nothing dissolving changes nothing: a still perspective view
+            // asks every frame.
+            boolean unchanged = pixelsPerUnit == this.pixelsPerUnit && dissolves.isEmpty() && levels.size() == trees.size();
             this.pixelsPerUnit = pixelsPerUnit;
             this.now = now;
             this.duration = duration;
             settles = 0;
+            if (unchanged) { return 0; }
             for (String species : trees.keySet()) { split(species); }
             return settles;
         }
