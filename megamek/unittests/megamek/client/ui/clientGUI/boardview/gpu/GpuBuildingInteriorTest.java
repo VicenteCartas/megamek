@@ -106,6 +106,22 @@ class GpuBuildingInteriorTest {
         assertFalse(footprint.contains(35, 5));
     }
 
+    @Test
+    void floorsKeepClearOfWallFacesButReachAnOpenEnd() {
+        // A room whose walls stand on three sides; its north end stands open.
+        List<Vector3> walls = new ArrayList<>();
+        wall(walls, -12, -25, 12, -25);
+        wall(walls, 12, -25, 12, 25);
+        wall(walls, -12, 25, -12, -25);
+        var floor = GpuBuildingInterior.keepClear(new java.awt.geom.Area(new java.awt.geom.Rectangle2D.Float(-12, -25, 24, 50)),
+              GpuBuildingInterior.faces(walls, 18));
+        assertTrue(floor.contains(0, 0));
+        assertFalse(floor.contains(11.9, 0), "A floor edge on a wall's face flickers through it");
+        assertFalse(floor.contains(0, -24.9));
+        assertTrue(floor.contains(11.7, 0));
+        assertTrue(floor.contains(0, 24.9), "The open end keeps its floor to the edge");
+    }
+
     private static void rectangle(List<Vector3> triangles, float x1, float y1, float x2, float y2) {
         wall(triangles, x1, y1, x2, y1);
         wall(triangles, x2, y1, x2, y2);

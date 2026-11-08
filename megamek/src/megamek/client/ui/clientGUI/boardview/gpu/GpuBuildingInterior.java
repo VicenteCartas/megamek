@@ -27,6 +27,10 @@ import com.badlogic.gdx.math.collision.BoundingBox;
 final class GpuBuildingInterior {
     private static final float SPACING = 22;
     private static final float STRUT_WIDTH = 1.6f;
+    /** A floor slab's depth below its walking surface. */
+    static final float SLAB = 1.2f;
+    /** How far a floor's edge stays from a wall face beside its slab, beyond depth-buffer precision. */
+    static final float CLEARANCE = .2f;
     private static final long ATTRIBUTES = VertexAttributes.Usage.Position | VertexAttributes.Usage.Normal;
 
     private GpuBuildingInterior() { }
@@ -76,6 +80,116 @@ final class GpuBuildingInterior {
         Area result = new Area();
         contours.forEach(result::add);
         return result;
+    }
+
+    /**
+     * The wall faces beside a floor slab topped at {@code top}: where {@code shell} crosses the slab at five heights
+     * through its depth, as segments {x1, y1, x2, y2} with the face's front to their right, each once and a straight run
+     * of them as one.
+     */
+    static List<float[]> faces(List<Vector3> shell, float top) {
+        Map<Point, Set<Point>> segments = new LinkedHashMap<>();
+        for (int step = 0; step <= 4; step++) {
+            float z = top - .01f - step * (SLAB - .02f) / 4;
+            for (int i = 0; i < shell.size(); i += 3) {
+                List<Point> crossings = new ArrayList<>(2);
+                for (int side = 0; side < 3; side++) {
+                    Vector3 a = shell.get(i + side), b = shell.get(i + (side + 1) % 3);
+                    if ((a.z > z) != (b.z > z)) { crossings.add(Point.at(a, b, z)); }
+                }
+                if (crossings.size() != 2 || crossings.get(0).equals(crossings.get(1))) { continue; }
+                Point a = crossings.get(0), b = crossings.get(1);
+                Vector3 p = shell.get(i), q = shell.get(i + 1), r = shell.get(i + 2);
+                float normalX = (q.y - p.y) * (r.z - p.z) - (q.z - p.z) * (r.y - p.y);
+                float normalY = (q.z - p.z) * (r.x - p.x) - (q.x - p.x) * (r.z - p.z);
+                // Its right-hand side, (dy, -dx), faces the way the triangle does.
+                if ((b.y - a.y) * normalX - (b.x - a.x) * normalY < 0) { Point swap = a; a = b; b = swap; }
+                segments.computeIfAbsent(a, ignored -> new LinkedHashSet<>()).add(b);
+            }
+        }
+        List<float[]> result = new ArrayList<>();
+        for (Point start : segments.keySet()) {
+            for (Point next : List.copyOf(segments.get(start))) {
+                if (!segments.get(start).remove(next)) { continue; }
+                Point end = next;
+                // On while the only way on is straight ahead, within the weld tolerance.
+                while (segments.containsKey(end) && segments.get(end).size() == 1) {
+                    Point after = segments.get(end).iterator().next();
+                    double dx = end.x - start.x, dy = end.y - start.y, ax = after.x - end.x, ay = after.y - end.y;
+                    if (dx * ax + dy * ay <= 0 || Math.abs(dx * ay - dy * ax) > 2 * Math.hypot(dx, dy)) { break; }
+                    segments.get(end).remove(after);
+                    end = after;
+                }
+                result.add(new float[] { start.x / 1000f, start.y / 1000f, end.x / 1000f, end.y / 1000f });
+            }
+        }
+        return result;
+    }
+
+    /**
+     * {@code floor} with each stretch of its edge that an outward face ({@link #faces}) comes within {@link #CLEARANCE}
+     * of cut back to that clearance, so the edge never lies on a wall's outside and flickers through it, at an open end
+     * either. A face turned towards the floor hides the slab's edge, which faces away. The outline keeps its shape: a
+     * cut adds a few corners. A wall further inside meets the floor at a line, which does not flicker.
+     */
+    static Area keepClear(Area floor, List<float[]> faces) {
+        Path2D.Float cuts = new Path2D.Float();
+        boolean any = false;
+        float[] point = new float[6];
+        float firstX = 0, firstY = 0, lastX = 0, lastY = 0;
+        for (var path = floor.getPathIterator(null); !path.isDone(); path.next()) {
+            int kind = path.currentSegment(point);
+            if (kind == PathIterator.SEG_MOVETO) { firstX = lastX = point[0]; firstY = lastY = point[1]; continue; }
+            float ax = lastX, ay = lastY, bx = kind == PathIterator.SEG_CLOSE ? firstX : point[0];
+            float by = kind == PathIterator.SEG_CLOSE ? firstY : point[1];
+            lastX = bx; lastY = by;
+            float length = (float) Math.hypot(bx - ax, by - ay);
+            if (length < .001f) { continue; }
+            // Along the edge (u) and into the floor (n).
+            float ux = (bx - ax) / length, uy = (by - ay) / length, nx = -uy, ny = ux;
+            if (!floor.contains((ax + bx) / 2 + nx * .01f, (ay + by) / 2 + ny * .01f)) { nx = -nx; ny = -ny; }
+            float minX = Math.min(ax, bx) - CLEARANCE, maxX = Math.max(ax, bx) + CLEARANCE;
+            float minY = Math.min(ay, by) - CLEARANCE, maxY = Math.max(ay, by) + CLEARANCE;
+            for (float[] face : faces) {
+                if (Math.max(face[0], face[2]) < minX || Math.min(face[0], face[2]) > maxX
+                      || Math.max(face[1], face[3]) < minY || Math.min(face[1], face[3]) > maxY
+                      || (face[3] - face[1]) * nx - (face[2] - face[0]) * ny >= 0) { continue; }
+                // The face in the edge's frame, kept to its stretch and to the band within the clearance of it.
+                float s0 = (face[0] - ax) * ux + (face[1] - ay) * uy, t0 = (face[0] - ax) * nx + (face[1] - ay) * ny;
+                float s1 = (face[2] - ax) * ux + (face[3] - ay) * uy, t1 = (face[2] - ax) * nx + (face[3] - ay) * ny;
+                float[] clipped = clip(s0, t0, s1, t1, -CLEARANCE, length + CLEARANCE, -CLEARANCE, CLEARANCE);
+                if (clipped == null) { continue; }
+                float from = Math.max(0, Math.min(clipped[0], clipped[2]) - CLEARANCE);
+                float to = Math.min(length, Math.max(clipped[0], clipped[2]) + CLEARANCE);
+                float depth = CLEARANCE + Math.max(clipped[1], clipped[3]);
+                cuts.moveTo(ax + ux * from - nx * .01f, ay + uy * from - ny * .01f);
+                cuts.lineTo(ax + ux * to - nx * .01f, ay + uy * to - ny * .01f);
+                cuts.lineTo(ax + ux * to + nx * depth, ay + uy * to + ny * depth);
+                cuts.lineTo(ax + ux * from + nx * depth, ay + uy * from + ny * depth);
+                cuts.closePath();
+                any = true;
+            }
+        }
+        if (!any) { return floor; }
+        Area result = new Area(floor);
+        result.subtract(new Area(cuts));
+        return result;
+    }
+
+    /** The part of the segment (s0, t0)-(s1, t1) inside the box [sMin, sMax] x (tMin, tMax), or null (Liang-Barsky). */
+    private static float[] clip(float s0, float t0, float s1, float t1, float sMin, float sMax, float tMin, float tMax) {
+        float ds = s1 - s0, dt = t1 - t0, enter = 0, leave = 1;
+        float[] p = { -ds, ds, -dt, dt }, q = { s0 - sMin, sMax - s0, t0 - tMin, tMax - t0 };
+        for (int i = 0; i < 4; i++) {
+            if (p[i] == 0) {
+                if (q[i] <= 0) { return null; }
+            } else {
+                float r = q[i] / p[i];
+                if (p[i] < 0) { enter = Math.max(enter, r); } else { leave = Math.min(leave, r); }
+            }
+        }
+        if (enter > leave) { return null; }
+        return new float[] { s0 + enter * ds, t0 + enter * dt, s0 + leave * ds, t0 + leave * dt };
     }
 
     static Area area(List<Vector3> triangles) {
@@ -191,7 +305,7 @@ final class GpuBuildingInterior {
 
     /** A floor's walking surface stays at its gameplay level; the slab extends below it and closes at its outline. */
     static void floor(MeshPartBuilder floors, List<Vector3> triangles, float z) {
-        float bottom = z - 1.2f;
+        float bottom = z - SLAB;
         for (int index = 0; index < triangles.size(); index += 3) {
             Vector3 a = triangles.get(index), b = triangles.get(index + 1), c = triangles.get(index + 2);
             floors.triangle(vertex(a, z, 1), vertex(b, z, 1), vertex(c, z, 1));
