@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.graphics.Texture;
@@ -63,10 +64,12 @@ import megamek.client.lobby.RequisitionRecord;
 import megamek.client.lobby.RequisitionRow;
 import megamek.client.lobby.RequisitionSearch;
 import megamek.client.lobby.RequisitionSkills;
+import megamek.client.lobby.RequisitionSort;
 import megamek.client.lobby.RequisitionVisit;
 import megamek.client.ui.Messages;
 import megamek.client.ui.design.DesignTokens;
 import megamek.client.ui.entityreadout.EntityReadout;
+import megamek.client.ui.gdx.TableSort;
 import megamek.client.ui.gdx.UiArcDiagram;
 import megamek.client.ui.gdx.UiButton;
 import megamek.client.ui.gdx.UiFilterChip;
@@ -75,6 +78,8 @@ import megamek.client.ui.gdx.UiOptionBar;
 import megamek.client.ui.gdx.UiReveal;
 import megamek.client.ui.gdx.UiSegmented;
 import megamek.client.ui.gdx.UiSelect;
+import megamek.client.ui.gdx.UiSortControl;
+import megamek.client.ui.gdx.UiSortHeader;
 import megamek.client.ui.gdx.UiStepChart;
 import megamek.client.ui.gdx.UiStepper;
 import megamek.client.ui.gdx.UiTabs;
@@ -193,6 +198,8 @@ final class LobbyRequisitionPanel {
         }
     };
     private final Label count;
+    /** The results' order, from above them; their column headers show and set the same order. */
+    private final UiSortControl<RequisitionSort> sortControl;
     private final UiSegmented valueToggle;
     private final UiVirtualList<RequisitionRow> list;
     /** The widths of the results' columns ({@link RequisitionRow.Column}) and of their value, the same in every row. */
@@ -242,6 +249,8 @@ final class LobbyRequisitionPanel {
     private boolean dossierOpen;
     private @Nullable MekSummary picked;
     private boolean showPv;
+    /** The results' order for this session: by name until the Commander picks another. */
+    private TableSort<RequisitionSort> sort = RequisitionSort.BY_NAME;
     private RequisitionVisit visit;
     private List<LobbyUnit> added = List.of();
     private int ownerId = -1;
@@ -330,8 +339,15 @@ final class LobbyRequisitionPanel {
               Messages.getString("Lobby.requisition.pv"));
         kit.tip(valueToggle, true).getActor().setText(Messages.getString("Lobby.requisition.valueTip"));
         UiKit.onChange(valueToggle, this::valueToggled);
+        sortControl = kit.sortControl(Messages.getString("Lobby.requisition.sort"),
+              Messages.getString("Lobby.requisition.sort.ascending"),
+              Messages.getString("Lobby.requisition.sort.descending"), sortKeys(),
+              key -> Messages.getString(key.messageKey()), sort);
+        sortControl.setName("lobby-requisition-sort");
+        sortControl.onSort(this::sortBy);
         Table status = new Table();
         status.add(count).left().growX().minWidth(0);
+        status.add(sortControl).right().padRight(space("md"));
         status.add(valueToggle).right();
         body.add(status).growX().pad(space("sm"), space("md"), space("xs"), space("md")).row();
 
@@ -372,6 +388,7 @@ final class LobbyRequisitionPanel {
         resultsHeader = new ColumnsRow(true);
         resultsHeader.pad(space("xs"), space("md"), space("xs"), space("md"));
         resultsHeader.setName("lobby-requisition-columns");
+        resultsHeader.showSort(sort);
         Table resultsSide = new Table();
         resultsSide.add(resultsHeader).growX().minWidth(0).row();
         resultsSide.add(resultsStack).grow().minWidth(0).minHeight(0);
@@ -442,9 +459,52 @@ final class LobbyRequisitionPanel {
 
     private void valueToggled() {
         showPv = valueToggle.getSelectedIndex() == 1;
-        resultsHeader.value.setText(Messages.getString(showPv ? "Lobby.requisition.pv" : "Lobby.requisition.bv"));
+        resultsHeader.valueHeader.setText(Messages.getString(showPv ? "Lobby.requisition.pv"
+              : "Lobby.requisition.bv"));
+        // A sort by the value follows the value shown, in the same direction
+        TableSort<RequisitionSort> next = sort.key().isValue() ? sort.withKey(RequisitionSort.value(showPv)) : sort;
+        sortControl.keys(sortKeys(), next);
         list.rebind();
         showDossier();
+        if (!next.equals(sort)) {
+            sortBy(next);
+        }
+    }
+
+    /** The keys the results sort by, in the sort control's order: the value is the one the results show. */
+    private List<RequisitionSort> sortKeys() {
+        return List.of(RequisitionSort.NAME, RequisitionSort.value(showPv), RequisitionSort.TONS,
+              RequisitionSort.YEAR, RequisitionSort.MOVE, RequisitionSort.ARMOR, RequisitionSort.ROLE,
+              RequisitionSort.LEVEL, RequisitionSort.TYPE);
+    }
+
+    /** Orders the results by {@code next}, from the sort control or a column's header, and shows it on both. */
+    private void sortBy(TableSort<RequisitionSort> next) {
+        sort = next;
+        sortControl.sort(next);
+        resultsHeader.showSort(next);
+        runSearch();
+    }
+
+    /** The results' order, for tests. */
+    TableSort<RequisitionSort> sort() {
+        return sort;
+    }
+
+    /** The sort control over the results, for tests. */
+    UiSortControl<RequisitionSort> sortControl() {
+        return sortControl;
+    }
+
+    /** The BV / PV toggle, for tests. */
+    UiSegmented valueToggle() {
+        return valueToggle;
+    }
+
+    /** The column header that sorts by {@code key}, or null when no column shows it, for tests. */
+    @Nullable
+    UiSortHeader sortHeader(RequisitionSort key) {
+        return resultsHeader.header(key);
     }
 
     /** The view's body, which the centre shows under its header with Back. */
@@ -606,7 +666,7 @@ final class LobbyRequisitionPanel {
     // ---- Searching ----
 
     private RequisitionSearch.Query query() {
-        return new RequisitionSearch.Query(requisition.rules(), category, filters, search.getText());
+        return new RequisitionSearch.Query(requisition.rules(), category, filters, search.getText(), sort);
     }
 
     private void runSearch() {
@@ -2048,7 +2108,10 @@ final class LobbyRequisitionPanel {
 
     // ---- Rows ----
 
-    /** The widths of the results' columns: the widest text each can hold, or its name over it. */
+    /**
+     * The widths of the results' columns: the widest text each can hold, or its sortable name over it with room for
+     * the sort arrow, so the columns stand still whichever one sorts.
+     */
     private float[] columnWidths() {
         RequisitionRow.Column[] columns = RequisitionRow.Column.values();
         float[] widths = new float[columns.length];
@@ -2066,8 +2129,7 @@ final class LobbyRequisitionPanel {
                 }
                 case LEVEL -> samples.addAll(Arrays.asList(TechConstants.T_SIMPLE_NAMES));
             }
-            float widest = kit.roleTypeLabel("overline", Messages.getString(column.messageKey()), "text.muted")
-                  .getPrefWidth();
+            float widest = kit.sortHeader(Messages.getString(column.messageKey()), Align.left).getPrefWidth();
             Label measure = kit.typeLabel("", COLUMN_TYPE, "text.secondary");
             for (String sample : samples) {
                 measure.setText(sample);
@@ -2078,11 +2140,18 @@ final class LobbyRequisitionPanel {
         return widths;
     }
 
-    /** The value's width: a five-figure Battle Value, so the columns before it stand still from row to row. */
+    /**
+     * The value's width: a five-figure Battle Value, or the sortable BV or PV over it with its arrow, so the columns
+     * before it stand still from row to row.
+     */
     private float valueWidth() {
         Label measure = kit.typeLabel(NumberFormat.getIntegerInstance().format(88888), "body.strong",
               "text.primary");
-        return (float) Math.ceil(measure.getPrefWidth());
+        float widest = measure.getPrefWidth();
+        for (String key : List.of("Lobby.requisition.bv", "Lobby.requisition.pv")) {
+            widest = Math.max(widest, kit.sortHeader(Messages.getString(key), Align.right).getPrefWidth());
+        }
+        return (float) Math.ceil(widest);
     }
 
     /** The type of the results' columns. */
@@ -2092,12 +2161,21 @@ final class LobbyRequisitionPanel {
      * A row of the results' layout: the sprite, the name over its details, the columns and the value, each column the
      * same width in every row, so they line up; as the row narrows the last columns go first
      * ({@link RequisitionLayout#columns}), the name keeping {@link RequisitionLayout#NAME_MIN}. The header over the
-     * results is one, with the columns' names.
+     * results is one, with the names of the name, the columns and the value as sortable headers.
      */
     private class ColumnsRow extends Table {
-        final Label[] columns = new Label[RequisitionRow.Column.values().length];
-        private final List<Cell<Label>> columnCells = new ArrayList<>();
+        private static final int COLUMNS = RequisitionRow.Column.values().length;
+        /** A row's columns; the header has none. */
+        final Label[] columns = new Label[COLUMNS];
+        /** The header's columns; a row has none. */
+        private final UiSortHeader[] headers = new UiSortHeader[COLUMNS];
+        private final Actor[] columnActors = new Actor[COLUMNS];
+        private final List<Cell<Actor>> columnCells = new ArrayList<>();
+        /** A row's value; the header has none. */
         final Label value;
+        /** The header's name and value; a row has neither. */
+        final UiSortHeader nameHeader;
+        final UiSortHeader valueHeader;
         private final boolean header;
         private int shownColumns = -1;
         private float scrollStrip = -1;
@@ -2107,24 +2185,78 @@ final class LobbyRequisitionPanel {
             float spriteSize = size("control.md");
             pad(0, space("md"), 0, space("md"));
             if (header) {
+                nameHeader = sortHeader("Lobby.requisition.sort.name", Align.left, () -> RequisitionSort.NAME);
                 add().width(spriteSize).padRight(space("sm"));
-                add().growX().minWidth(0);
+                add(nameHeader).expandX().left().minWidth(0);
             } else {
+                nameHeader = null;
                 add(sprite()).size(spriteSize).padRight(space("sm"));
                 add(lines()).growX().minWidth(0);
             }
             for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
-                Label label = header ? kit.roleTypeLabel("overline", Messages.getString(column.messageKey()),
-                      "text.muted") : kit.typeLabel("", COLUMN_TYPE, "text.secondary");
-                label.setEllipsis(true);
-                columns[column.ordinal()] = label;
-                columnCells.add(add(label).left().minWidth(0));
+                Actor actor;
+                if (header) {
+                    RequisitionSort key = RequisitionSort.of(column);
+                    UiSortHeader sortable = sortHeader(column.messageKey(), Align.left, () -> key);
+                    headers[column.ordinal()] = sortable;
+                    actor = sortable;
+                } else {
+                    Label label = kit.typeLabel("", COLUMN_TYPE, "text.secondary");
+                    label.setEllipsis(true);
+                    columns[column.ordinal()] = label;
+                    actor = label;
+                }
+                columnActors[column.ordinal()] = actor;
+                columnCells.add(add(actor).left().minWidth(0));
             }
-            value = header ? kit.roleTypeLabel("overline", Messages.getString("Lobby.requisition.bv"), "text.muted")
-                  : kit.typeLabel("", "body.strong", "text.primary");
-            value.setAlignment(Align.right);
-            add(value).width(valueWidth).right().padLeft(COLUMN_GAP);
+            if (header) {
+                value = null;
+                valueHeader = sortHeader("Lobby.requisition.bv", Align.right, () -> RequisitionSort.value(showPv));
+                add(valueHeader).width(valueWidth).right().padLeft(COLUMN_GAP);
+            } else {
+                valueHeader = null;
+                value = kit.typeLabel("", "body.strong", "text.primary");
+                value.setAlignment(Align.right);
+                add(value).width(valueWidth).right().padLeft(COLUMN_GAP);
+            }
             showColumns(0);
+        }
+
+        /** A sortable header named by {@code messageKey}, whose click sorts by {@code key} or flips its direction. */
+        private UiSortHeader sortHeader(String messageKey, int align, Supplier<RequisitionSort> key) {
+            UiSortHeader sortable = kit.sortHeader(Messages.getString(messageKey), align);
+            UiKit.onChange(sortable, () -> sortBy(sort.click(key.get())));
+            return sortable;
+        }
+
+        /** Shows {@code shown} on the header: the arrow on the column it sorts by, if one shows it. */
+        void showSort(TableSort<RequisitionSort> shown) {
+            for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
+                headers[column.ordinal()].direction(arrow(shown, RequisitionSort.of(column)));
+            }
+            nameHeader.direction(arrow(shown, RequisitionSort.NAME));
+            valueHeader.direction(arrow(shown, RequisitionSort.value(showPv)));
+        }
+
+        private static TableSort.Direction arrow(TableSort<RequisitionSort> shown, RequisitionSort key) {
+            return (shown.key() == key) ? shown.direction() : null;
+        }
+
+        /** The header that sorts by {@code key}, or null when none shows: a column taken out of the row has none. */
+        @Nullable
+        UiSortHeader header(RequisitionSort key) {
+            if (key == RequisitionSort.NAME) {
+                return nameHeader;
+            }
+            if (key == RequisitionSort.value(showPv)) {
+                return valueHeader;
+            }
+            for (RequisitionRow.Column column : RequisitionRow.Column.values()) {
+                if ((RequisitionSort.of(column) == key) && (column.ordinal() < shownColumns)) {
+                    return headers[column.ordinal()];
+                }
+            }
+            return null;
         }
 
         Actor sprite() {
@@ -2143,7 +2275,7 @@ final class LobbyRequisitionPanel {
             shownColumns = count;
             for (int i = 0; i < columnCells.size(); i++) {
                 boolean shown = i < count;
-                columns[i].setVisible(shown);
+                columnActors[i].setVisible(shown);
                 columnCells.get(i).width(shown ? columnWidths[i] : 0).padLeft(shown ? COLUMN_GAP : 0);
             }
             invalidate();

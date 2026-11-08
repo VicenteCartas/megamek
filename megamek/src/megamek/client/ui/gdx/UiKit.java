@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.Function;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
@@ -1264,6 +1265,23 @@ public final class UiKit {
     /** An inline token select: text with a dotted underline, for a value inside a sentence or a dense row. */
     public UiSelect tokenSelectInline(String... items) {
         return new UiSelect(this, UiSelect.Kind.INLINE, items);
+    }
+
+    /**
+     * A sort control over a list: the caption, an inline select of {@code keys} by their {@code names} and a direction
+     * button whose tooltip reads {@code ascending} or {@code descending}; it shows {@code initial} first.
+     */
+    public <K extends TableSort.Key> UiSortControl<K> sortControl(String caption, String ascending, String descending,
+          List<K> keys, Function<K, String> names, TableSort<K> initial) {
+        return new UiSortControl<>(this, caption, ascending, descending, keys, names, initial);
+    }
+
+    /**
+     * A sortable column's title, {@code text} as an overline, its arrow following the name, or leading it with
+     * {@link Align#right} for a column of numbers.
+     */
+    public UiSortHeader sortHeader(String text, int align) {
+        return new UiSortHeader(this, text, align);
     }
 
     /** A token popup list on its own, as a gallery shows it; a select makes its own. */
