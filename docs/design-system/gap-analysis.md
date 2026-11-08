@@ -1514,7 +1514,8 @@ work for Swing, and item 11 is under investigation.
          odds cancels the simulation; closing while resolving reopens the card with the result. The dead Swing
          battlefield commands (`SwingLobbyServices.battlefieldCommand`, `runAutoResolve`) and the Swing
          `VictoryConditionsDialog` are removed; the Swing auto-resolve dialogs stay for MekHQ. The lobby now opens
-         no Swing dialog except the startup-failure message. Checks: `AutoResolveRunTest`, the smoke test's
+         no Swing dialog except Client Settings (`CommonSettingsDialog`, below) and the startup-failure message.
+         Checks: `AutoResolveRunTest`, the smoke test's
          auto-resolve briefing. Live: `lobby+resolve` (with the odds; `+click=autoresolve-proceed,autoresolve-report`
          goes on through the battle and its report) and `lobby+resolve=quick` (without them).
        - Done: help documents and the battle report read a chapter at a time (`LobbyDocumentView` over the
@@ -1528,9 +1529,19 @@ work for Swing, and item 11 is under investigation.
          Fixed on the way: the report's `acar.short_range` key and its `&ensp;` indents. Checks: `HelpDocumentTest`,
          `MapSetupHelpTest` and the smoke test's document and nag. Live: `lobby+princesshelp` (with
          `+click=document-chapter-1`), `lobby+maphelp`, the auto-resolve report above.
-       - The unit dialogs still in Swing, from the lobby and the board:
-         - the unit damage editor (`UnitEditorDialog`) on the board; the lobby's is native;
-         - the SBF and Alpha Strike stats dialogs on the board (the lobby's are native, see below);
+       - Done: the Game Master's board damage editor is native. In a running game, Edit damage on a unit opens the
+         lobby's damage card over the battle (`GpuBoardWindow.editDamage`, `LobbyNativeDialogs.gameMasterDamage`)
+         with the Swing editor's in-play tools: edits commit through the server, temporary skill and target
+         modifiers, ejection settings, equipment settings, a bot unit's forced withdrawal order, owner change, and
+         Explode, Withdraw and Destroy (with eject crew), each confirmed. The toolkit-free `GameMasterUnitTools`
+         builds the server commands. The Swing `UnitEditorDialog` stays only for MekHQ and MegaMekLab; the board no
+         longer opens it. Checks: `GameMasterUnitToolsTest`,
+         `BattleDamageCardSmokeTest`. The SBF and Alpha Strike stats dialogs are gone (the lobby's are native, see
+         below); nothing on the board opened them.
+       - Still Swing from the lobby: Client Settings (the gear in the top bar opens `CommonSettingsDialog`, about
+         4,900 lines; its port is several PRs).
+       - Stays Swing: the startup-failure message falls back to a Swing dialog only when the OpenGL window never
+         opened or there is no start screen to return to (MekHQ); when the start screen returns it is native.
        - The board's remaining Swing dialogs: the `SWING_DIALOGS` allowlist (R6/U2) and the map editor's Client
          Settings and About. The "Save First?" question when leaving a battle is native since #39.
        - Done: the portrait chooser is native (`LobbyPortraitView`). It shares its search, category tree and

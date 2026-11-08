@@ -53,6 +53,8 @@ import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Graphics;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window;
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3WindowAdapter;
 import jakarta.annotation.Nullable;
+import megamek.client.lobby.GameMasterUnitTools;
+import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.boardeditor.BoardEditorSession;
 import megamek.client.ui.clientGUI.AbstractClientGUI;
@@ -195,8 +197,6 @@ public final class GpuBoardWindow {
           megamek.client.ui.dialogs.BuildingEditDialog.class,
           // U2, GM editors: hex
           megamek.client.ui.dialogs.HexEditDialog.class,
-          // U2, GM editors: unit
-          megamek.client.ui.dialogs.UnitEditorDialog.class,
           // U2, GM tools: the command form of the Commands menu (kick, game master commands)
           megamek.client.ui.dialogs.ClientCommandDialog.class,
           // U2, GM editors: player setup
@@ -1405,6 +1405,39 @@ public final class GpuBoardWindow {
     public static boolean drawsDialogsFor(ClientGUI gui) {
         GpuBoardWindow window = active;
         return window != null && window.gui == gui && window.presented;
+    }
+
+    /**
+     * EDT: shows the Game Master's damage card of {@code entity} over this client's native window, which takes no
+     * board input while it shows; its edits and server acts go through {@code host} on the Swing thread. False,
+     * showing nothing, when no native window of this client asks its prompts.
+     *
+     * @param closed runs on the Swing thread once the card has closed, however it closed
+     */
+    public static boolean editDamage(ClientGUI gui, Entity entity, GameMasterUnitTools.Host host, Runnable closed) {
+        GpuBoardWindow window = active;
+        if (!SwingUtilities.isEventDispatchThread() || window == null || window.gui != gui || !window.asksPrompts()
+              || !(entity.getGame() instanceof megamek.common.game.Game game)) {
+            return false;
+        }
+        UnitDamageForm form = UnitDamageForm.of(entity, UnitDamageForm.Options.inPlay(game));
+        window.focus(false);
+        GpuHost.post(() -> {
+            GpuBattleView battle = window.battleView;
+            LobbyNativeDialogs cards = battle == null ? null : battle.cards();
+            if (cards == null) {
+                SwingUtilities.invokeLater(closed);
+                return;
+            }
+            cards.gameMasterDamage(form, (work, then) -> SwingUtilities.invokeLater(() -> {
+                try {
+                    work.run();
+                } finally {
+                    GpuHost.post(then);
+                }
+            }), host, () -> SwingUtilities.invokeLater(closed));
+        });
+        return true;
     }
 
     /** The board's one HTML-to-text rule, for prompt texts that Swing renders as HTML. */

@@ -37,6 +37,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -47,6 +48,8 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.ScrollPane;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Align;
+import jakarta.annotation.Nullable;
+import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.lobby.UnitDamageForm;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.gpu.GpuPaperdoll.Cell;
@@ -112,11 +115,48 @@ final class LobbyDamageView {
     private String hovered = "";
     /** The level last rolled, or null when nothing was rolled since the dialog opened or the unit was restored. */
     private PreExistingDamageLevel rolled;
+    /** The Game Master's in-play tools and how the card reaches the server, or null in the lobby. */
+    private final @Nullable GameMasterUnitTools tools;
+    private final @Nullable Battle battle;
+    private final LobbyPromptViews.Edt edt;
+    private final Runnable close;
+
+    /**
+     * How the battle's card asks before a server act and reaches the server; the asks run on the GPU thread, the
+     * host on the Swing thread.
+     */
+    interface Battle {
+        /** Asks {@code text}; {@code yes} runs once OK closed it, {@code no} when it closes otherwise. */
+        void confirm(String title, String text, Runnable yes, Runnable no);
+
+        /**
+         * Asks {@code text} with a box under it, enabled only when {@code checkable}; {@code yes} hears whether it was
+         * checked once Yes closed it.
+         */
+        void confirm(String title, String text, String check, String checkTip, boolean checkable,
+              Consumer<Boolean> yes);
+
+        GameMasterUnitTools.Host host();
+    }
 
     LobbyDamageView(UiKit kit, UiDialog dialog, UnitDamageForm form, GpuPaperdolls paperdolls,
           LobbyPromptViews.Edt edt, Runnable applied, Runnable close) {
+        this(kit, dialog, form, paperdolls, edt, applied, close, null);
+    }
+
+    /**
+     * The card; with a {@code battle} and the form's {@link UnitDamageForm#gameMaster() tools}, the Game Master's in a
+     * running game: OK sends the edits to the server, the whole unit's values end with the Game Master's section,
+     * explosive equipment has an Explode button and the footer can withdraw or destroy the unit.
+     */
+    LobbyDamageView(UiKit kit, UiDialog dialog, UnitDamageForm form, GpuPaperdolls paperdolls,
+          LobbyPromptViews.Edt edt, Runnable applied, Runnable close, @Nullable Battle battle) {
         this.kit = kit;
         this.form = form;
+        this.edt = edt;
+        this.close = close;
+        this.tools = battle == null ? null : form.gameMaster();
+        this.battle = tools == null ? null : battle;
         places = form.places();
         String family = GpuPaperdolls.family(form.entity());
         geometry = family.isEmpty() ? null : paperdolls.doll(family, GpuPaperdolls.ARMOR, Set.of());
@@ -238,8 +278,20 @@ final class LobbyDamageView {
         });
         repair.setName("damage-repair");
         repair.setDisabled(!damage);
+        if (tools != null) {
+            UiButton withdraw = dialog.tool(Messages.getString("UnitEditorDialog.withdrawUnit"), this::withdraw);
+            withdraw.setName("damage-withdraw");
+            kit.tip(withdraw, true).getActor().setText(Messages.getString("UnitEditorDialog.withdrawUnit.tooltip"));
+            UiButton destroy = dialog.tool(Messages.getString("UnitEditorDialog.destroyUnit"), this::destroy);
+            destroy.setName("damage-destroy");
+            kit.tip(destroy, true).getActor().setText(Messages.getString("UnitEditorDialog.destroyUnit.tooltip"));
+        }
         dialog.primary(Messages.getString("Ok.text"), () -> edt.edt(() -> {
-            form.apply();
+            if (tools != null) {
+                tools.commit(battle.host());
+            } else {
+                form.apply();
+            }
             applied.run();
         }, close)).setName("damage-ok");
         dialog.cancelButton(Messages.getString("Cancel.text")).setName("damage-cancel");
@@ -410,6 +462,153 @@ final class LobbyDamageView {
                 row(deployment.get(index), "status-deploy-" + index, false, true);
             }
         }
+        if (chosen == null && tools != null) {
+            gameMasterSection(rows == 0);
+        }
+    }
+
+    /**
+     * The Game Master's section of the whole unit's values in play: the unit's owner, a bot's Forced Withdrawal
+     * order, the crew's temporary modifiers with how long they last, the target modifier, and the ejection settings.
+     */
+    private void gameMasterSection(boolean first) {
+        List<String> owners = tools.ownerNames();
+        List<String> orders = tools.orderNames();
+        List<GameMasterUnitTools.Modifier> modifiers = tools.modifiers();
+        List<GameMasterUnitTools.Setting> ejection = tools.ejection();
+        if (owners.isEmpty() && orders.isEmpty() && modifiers.isEmpty() && ejection.isEmpty()) {
+            return;
+        }
+        Label caption = kit.typeLabel(Messages.getString("Lobby.gm"), "body.strong", "text.primary");
+        caption.setName("damage-gm");
+        values.add(caption).left().padTop(first ? 0 : space("xl")).row();
+        float gap = space("sm");
+        if (!owners.isEmpty()) {
+            UiStepper owner = kit.selector(owners, tools.owner());
+            owner.setName("damage-owner");
+            UiKit.onChange(owner, () -> reassign(owner));
+            values.add(line(label("UnitEditorDialog.owner"), owner)).growX().padTop(gap).row();
+        }
+        if (!orders.isEmpty()) {
+            UiStepper order = kit.selector(orders, tools.order());
+            order.setName("damage-order");
+            UiKit.onChange(order, () -> tools.order(order.value()));
+            kit.tip(order, true).getActor().setText(Messages.getString("UnitEditorDialog.forcedWithdrawal.tooltip"));
+            values.add(line(label("UnitEditorDialog.forcedWithdrawal"), order)).growX().padTop(gap).row();
+        }
+        for (int index = 0; index < modifiers.size(); index++) {
+            modifierRows(modifiers.get(index), "damage-modifier-" + index);
+        }
+        if (!ejection.isEmpty()) {
+            Label header = label("UnitEditorDialog.ejection");
+            kit.tip(header, true).getActor().setText(Messages.getString("UnitEditorDialog.ejection.tooltip"));
+            values.add(header).left().growX().padTop(space("md")).row();
+            for (int index = 0; index < ejection.size(); index++) {
+                GameMasterUnitTools.Setting setting = ejection.get(index);
+                Label label = kit.typeLabel(setting.label(), "small", "text.secondary");
+                label.setEllipsis(true);
+                UiChoice toggle = kit.toggleSwitch("", setting.on());
+                toggle.setName("damage-eject-" + index);
+                kit.tip(toggle, true).getActor().setText(setting.tip());
+                UiKit.onChange(toggle, () -> setting.on(toggle.isChecked()));
+                values.add(line(label, toggle)).growX().padLeft(space("lg")).padTop(space("xxs")).row();
+            }
+        }
+    }
+
+    /** A modifier's row, and under it how long it lasts, or what the unit earned for the target modifier. */
+    private void modifierRows(GameMasterUnitTools.Modifier modifier, String name) {
+        UiStepper delta = kit.stepper(modifier.value(), modifier.min(), modifier.max());
+        delta.setName(name);
+        kit.tip(delta, true).getActor().setText(modifier.tip());
+        UiKit.onChange(delta, () -> modifier.value(delta.value()));
+        Label label = kit.typeLabel(modifier.label(), "body", "text.secondary");
+        label.setEllipsis(true);
+        values.add(line(label, delta)).growX().padTop(space("sm")).row();
+        if (!modifier.timed()) {
+            if (modifier.note() != null) {
+                Label note = kit.typeLabel(modifier.note(), "small", "text.muted");
+                note.setWrap(true);
+                values.add(note).growX().left().padLeft(space("lg")).padTop(space("xxs")).row();
+            }
+            return;
+        }
+        UiStepper rounds = kit.stepper(modifier.rounds(), 1, GameMasterUnitTools.MAX_MODIFIER_ROUNDS);
+        rounds.setName(name + "-rounds");
+        kit.tip(rounds, true).getActor().setText(Messages.getString("UnitEditorDialog.skillModifier.rounds.tooltip"));
+        UiKit.onChange(rounds, () -> modifier.rounds(rounds.value()));
+        UiChoice permanent = kit.check(Messages.getString("UnitEditorDialog.skillModifier.permanent"),
+              modifier.permanent());
+        permanent.setName(name + "-permanent");
+        kit.tip(permanent, true).getActor().setText(
+              Messages.getString("UnitEditorDialog.skillModifier.permanent.tooltip"));
+        UiKit.onChange(permanent, () -> {
+            modifier.permanent(permanent.isChecked());
+            lasting(rounds, modifier.permanent());
+        });
+        lasting(rounds, modifier.permanent());
+        Table duration = new Table();
+        duration.add(kit.typeLabel(Messages.getString("UnitEditorDialog.skillModifier.forLabel"), "small",
+              "text.secondary")).padRight(space("xs"));
+        duration.add(rounds);
+        duration.add(kit.typeLabel(Messages.getString("UnitEditorDialog.skillModifier.roundsLabel"), "small",
+              "text.secondary")).padLeft(space("xs")).padRight(space("lg"));
+        duration.add(permanent);
+        values.add(duration).right().padTop(space("xxs")).row();
+    }
+
+    /** A permanent modifier's rounds take no steps; otherwise they step within their bounds. */
+    private static void lasting(UiStepper rounds, boolean permanent) {
+        if (permanent) {
+            rounds.down().setDisabled(true);
+            rounds.up().setDisabled(true);
+        } else {
+            rounds.value(rounds.value());
+        }
+    }
+
+    private Label label(String key) {
+        Label label = kit.typeLabel(Messages.getString(key), "body", "text.secondary");
+        label.setEllipsis(true);
+        return label;
+    }
+
+    /**
+     * The owner picked: asks first, then hands the unit over and closes the card without its other edits, as the
+     * Swing editor does; asked no, the owner goes back.
+     */
+    private void reassign(UiStepper owner) {
+        int picked = owner.value();
+        var command = tools.changeOwnerCommand(picked);
+        if (command.isEmpty()) {
+            return;
+        }
+        battle.confirm(Messages.getString("Gamemaster.Traitor.confirm"), tools.ownerConfirmation(picked),
+              () -> send(command.get()), () -> owner.value(tools.owner()));
+    }
+
+    /** Asks first, then has the server explode the equipment and closes the card without its other edits. */
+    private void explode(int number) {
+        battle.confirm(Messages.getString("UnitEditorDialog.explode"), tools.explodeConfirmation(number),
+              () -> send(tools.explodeCommand(number)), () -> { });
+    }
+
+    private void withdraw() {
+        battle.confirm(Messages.getString("UnitEditorDialog.withdrawUnit"), tools.withdrawConfirmation(),
+              () -> send(tools.withdrawCommand()), () -> { });
+    }
+
+    private void destroy() {
+        battle.confirm(Messages.getString("UnitEditorDialog.destroyUnit"), tools.destroyConfirmation(),
+              Messages.getString("UnitEditorDialog.destroyUnit.eject"),
+              Messages.getString("UnitEditorDialog.destroyUnit.eject.tooltip"), tools.canEjectCrew(),
+              eject -> send(tools.destroyCommand(eject)));
+    }
+
+    /** Sends a server act on the Swing thread, then closes the card: the act ends the edit. */
+    private void send(String command) {
+        GameMasterUnitTools.Host host = battle.host();
+        edt.edt(() -> host.sendChat(command), close);
     }
 
     /**
@@ -432,9 +631,18 @@ final class LobbyDamageView {
             UiHealthBar bar = bar(value, name);
             bar.disabled(value.locked() || !editable);
             values.add(bar).growX().padTop(space("xxs")).row();
-            return true;
+        } else {
+            values.add(line(label, control(value, name, editable))).growX().padTop(gap).row();
         }
-        values.add(line(label, control(value, name, editable))).growX().padTop(gap).row();
+        if (tools != null && value.explosive() >= 0) {
+            int number = value.explosive();
+            UiButton explode = kit.button("button-quiet" + UiTheme.COMPACT, null,
+                  Messages.getString("UnitEditorDialog.explode"), null);
+            explode.setName("damage-explode-" + number);
+            kit.tip(explode, true).getActor().setText(Messages.getString("UnitEditorDialog.explode.tooltip"));
+            UiKit.onChange(explode, () -> explode(number));
+            values.add(explode).right().padTop(space("xxs")).row();
+        }
         List<UnitDamageForm.Value> flags = value.flags();
         for (int flag = 0; flag < flags.size(); flag++) {
             // a weapon's state sits under its hit boxes, indented as part of it

@@ -62,8 +62,10 @@ import megamek.client.bot.princess.ArtilleryCommandAndControl.ArtilleryOrder;
 import megamek.client.bot.princess.ArtilleryCommandAndControl.SpecialAmmo;
 import megamek.client.bot.princess.ChatCommands;
 import megamek.client.event.BoardViewEvent;
+import megamek.client.lobby.GameMasterUnitTools;
 import megamek.client.ui.Messages;
 import megamek.client.ui.clientGUI.boardview.BoardClientState;
+import megamek.client.ui.clientGUI.boardview.gpu.GpuBoardWindow;
 import megamek.client.ui.clientGUI.boardview.overlay.ToastLevel;
 import megamek.client.ui.dialogs.BotCommands.BotMoveOrderDialog;
 import megamek.client.ui.dialogs.BotCommands.BotOrderFacingDialog;
@@ -73,7 +75,6 @@ import megamek.client.ui.dialogs.BuildingEditDialog;
 import megamek.client.ui.dialogs.HexEditDialog;
 import megamek.client.ui.dialogs.NoteDialog;
 import megamek.client.ui.dialogs.TurretFacingDialog;
-import megamek.client.ui.dialogs.UnitEditorDialog;
 import megamek.client.ui.entityreadout.LiveReadoutDialog;
 import megamek.client.ui.enums.DialogResult;
 import megamek.client.ui.panels.phaseDisplay.ActionPhaseDisplay;
@@ -861,18 +862,29 @@ public class MapMenu extends JPopupMenu {
     JMenuItem createUnitEditorMenuItem(Entity entity) {
         JMenuItem item = new JMenuItem(entity.getDisplayName());
         item.addActionListener(evt -> {
-            // This menu item is only built for a gamemaster, so the dialog offers the full editing tools directly.
-            // The dialog commits its edits to the server itself, so there is nothing to send here when it closes.
-            UnitEditorDialog med = new UnitEditorDialog(gui.getFrame(),
-                  entity,
-                  true,
-                  client);
             gui.getBoardState().setShouldIgnoreKeys(true);
-            med.setVisible(true);
-            med.dispose();
-            gui.getBoardState().setShouldIgnoreKeys(false);
+            if (!GpuBoardWindow.editDamage(gui, entity, damageHost(),
+                  () -> gui.getBoardState().setShouldIgnoreKeys(false))) {
+                logger.warn("No battle window to edit the damage of {}", entity.getDisplayName());
+                gui.getBoardState().setShouldIgnoreKeys(false);
+            }
         });
         return item;
+    }
+
+    /** How the native damage card reaches the server: through this client, as the Swing editor does. */
+    private GameMasterUnitTools.Host damageHost() {
+        return new GameMasterUnitTools.Host() {
+            @Override
+            public void sendDamageEdit(DamageEditSpec spec) {
+                client.sendDamageEdit(spec);
+            }
+
+            @Override
+            public void sendChat(String command) {
+                client.sendChat(command);
+            }
+        };
     }
 
     private boolean hasContextHex() {
