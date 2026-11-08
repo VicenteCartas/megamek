@@ -170,6 +170,28 @@ vec3 rubyTransport(vec3 pigment, vec3 normal, vec3 view, float roughness) {
 }
 #endif
 
+uniform float u_metre; // world units per metre (modelVisibility)
+
+// The sun's shadow on a model's face (geometric: its unmapped normal; transmits: it scatters or passes light, which
+// reaches it from behind too). At High it takes the terrain's lookup and contact-hardened tent (shadowLookup,
+// contactShadow) on the receiver's plane, so a building's or a unit's shadow on another model softens with the distance
+// between them; at Medium the fixed tent (surfaceVisibility). Its narrowest is that fixed tent's: narrower, a model's
+// straight edges show the map's texel steps.
+float modelVisibility(vec3 geometric, bool transmits) {
+#if defined(shadowMapFlag) && !defined(mediumQualityFlag)
+    vec3 light = sunDirection();
+    float texel = shadowTexel(), depthPerUnit;
+    vec3 shadowUv = shadowLookup(v_cloudPosition, geometric, light, texel);
+    vec2 slope = receiverPlane(shadowUv, light, u_metre, depthPerUnit);
+    // Derivatives above remain defined across the light horizon. A face turned from the sun takes no direct light
+    // unless it transmits it (shadeSurface): it needs no comparisons.
+    if (!transmits && dot(geometric, light) <= 0.0) return 1.0;
+    return contactShadow(shadowUv, slope, u_metre, depthPerUnit, texel, 1.5);
+#else
+    return surfaceVisibility();
+#endif
+}
+
 vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 view) {
     albedo = materialReflectance(albedo);
     float roughness = .85, metallic = 0.0, scatter = 0.0;
@@ -191,7 +213,11 @@ vec3 modelSurface(vec3 albedo, vec3 emission, vec3 normal, vec3 geometric, vec3 
     scatter = clamp(scatter, 0.0, 1.0);
     // Finish any scar normal before repairing the shared reflection frame.
     normal = shadingNormal(normal, geometric, view);
-    Surface surface = opaqueSurface(albedo, normal, geometric, roughness, 0.0, surfaceVisibility());
+    bool transmits = scatter > 0.0;
+#ifdef modelRubyFlag
+    transmits = true;
+#endif
+    Surface surface = opaqueSurface(albedo, normal, geometric, roughness, 0.0, modelVisibility(geometric, transmits));
     metallicShare(surface, metallic);
     surface.scatter = scatter;
 #ifdef modelRubyFlag

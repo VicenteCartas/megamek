@@ -218,6 +218,12 @@ final class GpuEnvironmentLighting extends Attribute implements Disposable {
                 target.set(id, SOURCE_RADIUS_SINE);
             }
         });
+        // World units per metre: a model's contact-hardened sun shadow measures its penumbra in metres (model-surface.glsl).
+        shader.register("u_metre", new BaseShader.GlobalSetter() {
+            @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
+                target.set(id, BoardRelief.metres(1));
+            }
+        });
         shader.register("u_environmentLut", new BaseShader.LocalSetter() {
             @Override public void set(BaseShader target, int id, Renderable part, Attributes attributes) {
                 var light = attributes.get(GpuEnvironmentLighting.class, TYPE);
